@@ -26,7 +26,7 @@ requests and as `?token=` only for the SSE `EventSource` (which cannot set heade
 | `GET` | `/api/health` | Public, host-checked: `{ok:true, service:"comfyrizz-local"}` |
 | `GET` | `/api/package/:id` | `{package, revision}` |
 | `PATCH` | `/api/package/:id` | `{baseRevision, package}`; mismatch → `409 {currentRevision}`; invalid → `422 {details}` |
-| `POST` | `/api/agent` | C5 agent slice: `{brief, provider?, model?, sessionId?}`. Runs `runCpuSlice` (scripted offline, OpenCode Go when `provider` is set), validates and returns `{package, revision, timeline, generatedAssets, routes, pendingGpu, svgAssets, live, fallback, provider, model}` |
+| `POST` | `/api/agent` | C5 agent slice: `{brief, provider?, model?, sessionId?}`. Runs `runCpuSlice` (scripted offline, the live model when `provider` is set), validates and returns `{package, revision, timeline, generatedAssets, routes, pendingGpu, svgAssets, live, fallback, provider, model}` |
 | `POST` | `/api/render` | `{packageId, baseRevision}`, or a C1-style `{package}` draft; returns `video/mp4` |
 | `POST` | `/api/run` | C6 backend run: `{backendId, jobs, budgetUnits, approved?, comfyuiUrl?}`. Returns the estimate + `planHash`; a Colab run without approval returns `approvalRequired:true` and starts nothing |
 | `GET` | `/api/run` | C6 run status: active run, `spentEstimate`, approvals and run list |
@@ -55,6 +55,22 @@ acceptable and the deterministic plan was used instead. Live SVG markup is opt-i
 `COMFYRIZZ_LIVE_SVG=1`; by default SVG assets come from the deterministic A5 stub so a live run
 stays within the client timeout.
 
+### C8: a second provider and the edit loop
+
+`/api/agent` accepts any of the three presets (`opencode-go`, `openrouter`, `custom`). The
+`custom` preset can be pointed at a local OpenAI-compatible server without editing code:
+`COMFYRIZZ_CUSTOM_BASE_URL=http://127.0.0.1:8000/v1` (the optional key stays in
+`COMFYRIZZ_CUSTOM_API_KEY`). The web shell's **LLM** picker selects the provider for a brief.
+
+`apps/server/test/c8-live-mp4.test.mjs` is the end-to-end acceptance: a brief through a second
+OpenAI-compatible provider (`custom`, a loopback fake replaying the agent's calls over the real
+SSE transport) builds a valid `comfyrizz.package/v1`, the M2 edit loop changes a headline and a
+chart value (a stale `PATCH` gets `409`), and `/api/render` renders the edited revision to a real
+H.264 1920×1080 MP4 whose `nb_frames` matches the compiled timeline. No network and no key.
+
+`apps/web/scripts/live-brief-to-mp4.mjs` runs the same flow against a live provider and writes the
+MP4 to a temp dir before ffprobe; it skips cleanly when the chosen provider has no key.
+
 The web shell persists an edit with a base revision before rendering, so a stale `PATCH` gets a
 conflict instead of silently overwriting an accepted edit. A render records the revision it used
 in the response headers (`x-comfyrizz-revision`) together with the timeline hash and frame count.
@@ -72,8 +88,8 @@ in the response headers (`x-comfyrizz-revision`) together with the timeline hash
 ## Verify
 
 ```bash
-npm test          # 10 tests: host/token/origin, revisions/conflict, invalid package,
-                  # render + SSE, replay, traversal
+npm test          # 3 test files: host/token/origin, revisions/conflict, invalid package,
+                  # render + SSE, replay, traversal; plus the C5/C8 agent end-to-end renders
 ```
 
 Real end-to-end check (2026-10-17): built web served by this server, opened with the fragment

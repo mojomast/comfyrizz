@@ -11,7 +11,12 @@
       <header id="topbar">
         <div class="brand"><span class="mark">◑</span><span>Comfyrizz</span><small>CPU slice</small></div>
         <label class="picker">LLM
-          <select id="llm"><option value="none">local · not configured</option></select>
+          <select id="llm">
+            <option value="none">local · scripted</option>
+            <option value="opencode-go">OpenCode Go · DeepSeek</option>
+            <option value="custom">Custom · OpenAI-compatible</option>
+            <option value="openrouter">OpenRouter</option>
+          </select>
         </label>
         <label class="picker">Backend
           <select id="backend">

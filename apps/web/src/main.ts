@@ -332,14 +332,16 @@ async function exportMp4(): Promise<void> {
 async function runBrief(brief: string): Promise<void> {
   const composer = $<HTMLButtonElement>('composer-send');
   if (composer) composer.disabled = true;
+  const provider = $<HTMLSelectElement>('llm').value;
+  const useProvider = provider && provider !== 'none';
   state.messages.push({ role: 'assistant', text: 'Building a CPU package from that brief: router → SVG assets → timeline → Player. GPU needs stay pending.' });
   renderMessages();
-  logActivity('Agent brief sent to /api/agent');
+  logActivity(`Agent brief sent to /api/agent (${useProvider ? provider : 'scripted model'})`);
   try {
     const response = await apiFetch('/api/agent', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ brief }),
+      body: JSON.stringify({ brief, ...(useProvider ? { provider } : {}) }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
@@ -352,7 +354,7 @@ async function runBrief(brief: string): Promise<void> {
     renderAssets();
     updatePreview(pkg, timeline, generatedAssets);
     state.dirty = false;
-    $('draft').textContent = `agent package · ${body.svgAssets.length} SVG assets${body.live ? ' · live model' : ' · scripted model'}`;
+    $('draft').textContent = `agent package · ${body.svgAssets.length} SVG assets${body.live ? ` · live ${body.provider ?? 'model'}` : ' · scripted model'}`;
     const pending = Array.isArray(body.pendingGpu) && body.pendingGpu.length > 0 ? ` ${body.pendingGpu.length} GPU need(s) are pending spend approval; procedural fallbacks are active.` : '';
     state.messages.push({ role: 'assistant', text: `Built **${pkg.title}** with ${body.svgAssets.length} SVG assets and ${Object.keys(body.generatedAssets ?? {}).length} inlined vectors.${pending}` });
     logActivity(`Agent finished: ${pkg.id} rev ${body.revision}, ${body.svgAssets.length} SVG assets`);

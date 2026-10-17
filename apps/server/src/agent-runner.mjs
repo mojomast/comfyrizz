@@ -42,7 +42,7 @@ function createLlmSvgGenerator(model, sessionId) {
   };
 }
 
-export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOString() } = {}) {
+export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOString(), providers = {} } = {}) {
   const packagesDir = join(runtimeDir, 'packages');
   const assetsDir = join(packagesDir, 'assets');
   return async function runCpuAgent({ brief, provider, model: modelName, sessionId = 'cpu-slice', onEvent } = {}) {
@@ -59,7 +59,10 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     if (provider) {
       const { resolveProvider } = await import('../../../packages/llm/dist/src/index.js');
       const { createOpenAICompatibleModel } = await import('../../../packages/llm/dist/src/index.js');
-      resolved = resolveProvider(provider, modelName ? { model: modelName } : {});
+      // `custom` is the bring-your-own OpenAI-compatible preset (spec 5.4); a local
+      // base URL can be supplied by the server process or by a test.
+      const override = providers[provider] ?? {};
+      resolved = resolveProvider(provider, { ...override, ...(modelName ? { model: modelName } : {}) });
       agentModel = createOpenAICompatibleModel(resolved);
       live = true;
     }

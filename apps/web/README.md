@@ -38,9 +38,11 @@ revision, and listens to `/api/events` for Activity entries. C2 also adds strict
 
 ## C5 agent slice (chat brief → package → Player → MP4)
 
-The composer now posts the brief to `POST /api/agent` on the C2 server. The server runs
-`packages/agent` (`runCpuSlice`) with a scripted model when no provider is set, or the live
-OpenCode Go model when `{ provider: 'opencode-go' }` is passed. The router sends icons, diagrams,
+The composer now posts the brief to `POST /api/agent` on the C2 server. The top-bar **LLM**
+picker chooses the provider: `local · scripted` (offline), `opencode-go`, `custom`
+(OpenAI-compatible) or `openrouter`. The server runs `packages/agent` (`runCpuSlice`) with a
+scripted model when no provider is set, or the selected live model otherwise. The router sends
+icons, diagrams,
 patterns and vector-anim needs to `assets.generate_svg` (A5 stub offline, the model live) and
 leaves FLUX/LTX needs as `status: 'pending'` with a procedural fallback, so nothing GPU-bound is
 submitted. The returned package validates against `comfyrizz.package/v1`, the server compiles the
@@ -70,6 +72,19 @@ network call without a key, and it reads the server token from `apps/server/.run
 ```bash
 COMFYRIZZ_PORT=4320 node apps/server/src/index.mjs &   # or npm start in apps/server
 node apps/web/scripts/live-agent.mjs
+```
+
+### Live brief → edit → MP4 check (C8)
+
+`apps/web/scripts/live-brief-to-mp4.mjs` runs the full C8 loop against a running server: a live
+brief builds the package, the M2 edit loop changes a headline and the first chart value with a
+base revision, and `/api/render` exports the edited revision to an MP4 on disk, which `ffprobe`
+reports. Pick the provider with `COMFYRIZZ_PROVIDER` (`opencode-go`, `openrouter` or `custom`); it
+skips cleanly when the chosen provider has no key. For a local OpenAI-compatible endpoint, also
+set `COMFYRIZZ_CUSTOM_BASE_URL` on the server process.
+
+```bash
+COMFYRIZZ_PROVIDER=opencode-go node apps/web/scripts/live-brief-to-mp4.mjs
 ```
 
 **Verified (2026-10-17):** one live DeepSeek v4.1 run through `/api/agent` returned a model-built

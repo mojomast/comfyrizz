@@ -17,7 +17,19 @@ const token = process.env.COMFYRIZZ_TOKEN ?? randomBytes(32).toString('hex');
 writeFileSync(tokenPath, `${token}\n`);
 chmodSync(tokenPath, 0o600);
 
-const app = createApp({ root: repoRoot, token, runtimeDir, agentRunner: createCpuAgentRunner({ runtimeDir }) });
+const app = createApp({
+  root: repoRoot,
+  token,
+  runtimeDir,
+  agentRunner: createCpuAgentRunner({
+    runtimeDir,
+    // The custom preset (spec 5.4) can be pointed at a local OpenAI-compatible
+    // server without editing the preset list. The key stays in COMFYRIZZ_CUSTOM_API_KEY.
+    ...(process.env.COMFYRIZZ_CUSTOM_BASE_URL
+      ? { providers: { custom: { baseUrl: process.env.COMFYRIZZ_CUSTOM_BASE_URL } } }
+      : {}),
+  }),
+});
 const seedPath = join(repoRoot, 'examples', 'launch-demo', 'package.json');
 if (existsSync(seedPath)) app.store.seed(JSON.parse(readFileSync(seedPath, 'utf8')));
 
