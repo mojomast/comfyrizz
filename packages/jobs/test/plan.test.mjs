@@ -23,6 +23,7 @@ import {
   isFrameCountValid,
 } from "../src/index.mjs";
 import { validatePackage } from "../../schema/src/index.mjs";
+import { applyManifestToPackage, dimsForMegapixels, mediaFor } from "../src/index.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (rel) => JSON.parse(readFileSync(join(here, "fixtures", rel), "utf8"));
@@ -497,4 +498,94 @@ test("stills resolve to the Klein 16 px lattice, and plates and their first fram
   const upscale = doc.jobs.find((j) => j.id === "a_plate1.upscale");
   assert.deepEqual(upscale.dims, { width: 1920, height: 1080 });
   assert.deepEqual(upscale.crop, { top: 36, bottom: 36, left: 0, right: 0 });
+});
+
+// --- GPU test 3, N4: the geometry of the file, not of the plan ----------------------------------
+
+test("dimsForMegapixels states what a reference/edit graph will produce", () => {
+  // GPU test 3 measured 1360x768 for a 1.0 MP reference edit while the plan said 1920x1080 (format)
+  const dims = dimsForMegapixels(1366, 768, 1.0);
+  assert.equal(dims.width % 16, 0, `${dims.width} is on the still lattice`);
+  assert.equal(dims.height % 16, 0, `${dims.height} is on the still lattice`);
+  assert.ok(Math.abs((dims.width * dims.height) / 1e6 - 1) < 0.05, `${dims.width}x${dims.height} is about 1 MP`);
+  assert.ok(Math.abs(dims.width / dims.height - 1366 / 768) < 0.05, "the reference's aspect is kept");
+  assert.equal(dimsForMegapixels(0, 768, 1.0), null, "no reference size, no estimate");
+  assert.equal(dimsForMegapixels(1366, 768, 0), null, "no budget, no estimate");
+});
+
+test("a reference/edit job plans the reference-based size, not the package format (N4)", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_ref = {
+    ...pkg.assets.a_cutout,
+    gen: {
+      generator: "flux3-klein",
+      workflow: "workflows/flux3_klein_ref_edit.api.json",
+      workflow_sha256: "0".repeat(64),
+      inputs: { prompt: "turn the reference into a product shot", reference: "a_plate1_still", megapixels: 1.0 },
+    },
+  };
+  const doc = planJobs(pkg);
+  const ref = doc.jobs.find((j) => j.id === "a_ref.still");
+  assert.equal(ref.dimsSource, "reference-megapixels");
+  assert.deepEqual(ref.referenceDims, { width: 960, height: 576 }, "the reference's planned size");
+  assert.equal(ref.megapixels, 1.0);
+  assert.ok(Math.abs((ref.dims.width * ref.dims.height) / 1e6 - 1) < 0.05, JSON.stringify(ref.dims));
+  assert.notDeepEqual(ref.dims, { width: 1920, height: 1080 }, "the package format is not the output size");
+  assert.deepEqual(checkJobsDoc(doc), [], "the plan fields stay schema-valid");
+});
+
+test("a reference the plan cannot size warns instead of claiming the format (N4)", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_ref2 = {
+    ...pkg.assets.a_cutout,
+    gen: {
+      generator: "flux3-klein",
+      workflow: "workflows/flux3_klein_ref_edit.api.json",
+      workflow_sha256: "0".repeat(64),
+      inputs: { prompt: "product shot", reference: "assets/photo.png", megapixels: 1.0 },
+    },
+  };
+  const doc = planJobs(pkg);
+  const ref = doc.jobs.find((j) => j.id === "a_ref2.still");
+  assert.equal(ref.dimsSource, undefined);
+  assert.deepEqual(doc.warnings.map((w) => w.code), ["PLAN_REFERENCE_SIZE_UNKNOWN"]);
+  assert.match(doc.warnings[0].message, /the runner measures the real file/);
+  assert.deepEqual(checkJobsDoc(doc), []);
+});
+
+test("media geometry follows the file the run produced, with the plan as fallback (N4)", () => {
+  const still = { kind: "still", dims: { width: 1920, height: 1080 } };
+  assert.deepEqual(mediaFor(still, false, { measured: { width: 1360, height: 768, source: "header" } }), {
+    width: 1360,
+    height: 768,
+    alpha: false,
+  });
+  assert.deepEqual(mediaFor(still, false, null), { width: 1920, height: 1080, alpha: false });
+  const plate = { kind: "plate", dims: { width: 960, height: 576 }, fps: 24, frames: 97 };
+  assert.deepEqual(
+    mediaFor(plate, null, { measured: { width: 960, height: 576, fps: 24, frames: 49, durationSeconds: 2.042, source: "ffprobe" } }),
+    { width: 960, height: 576, fps: 24, frames: 49, durationSeconds: 2.042, audio: "muted" },
+  );
+});
+
+test("apply writes the measured geometry into the package (N4)", () => {
+  const pkg = fixture("package-pending.json");
+  const doc = planJobs(pkg);
+  const manifest = {
+    v: 1,
+    jobs: [
+      {
+        job: "a_plate1_still.still",
+        status: "succeeded",
+        job_id: "job-1",
+        attempt_id: "attempt-1",
+        outputs: [{ file: "out/assets/a_plate1_still.png", sha256: "0".repeat(64), bytes: 1024, measured: { width: 1360, height: 768, source: "header" } }],
+      },
+    ],
+  };
+  const applied = applyManifestToPackage(pkg, { manifest, jobsDoc: doc });
+  const asset = applied.package.assets.a_plate1_still;
+  assert.equal(asset.status, "ready");
+  assert.deepEqual(asset.media, { width: 1360, height: 768, alpha: false }, "the file's geometry, not the plan's");
+  assert.equal(applied.applied.length, 1);
 });

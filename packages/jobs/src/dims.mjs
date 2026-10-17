@@ -53,3 +53,20 @@ export function isFrameCountValid(value, modulus = FRAME_MODULUS) {
 export function resolveFramesFromSeconds(seconds, fps, modulus = FRAME_MODULUS) {
   return resolveFrames(Math.ceil(seconds * fps), modulus);
 }
+
+/**
+ * The geometry a reference/edit graph produces: it takes its size from the reference image at a
+ * megapixel budget, not from the package format (GPU test 3, N4 — the plan said 1920x1080 while the
+ * graph returned 1360x768 for a 1.0 MP reference-edit). Aspect preserving, rounded onto the lattice
+ * the graph rounds to. Pure, so the plan can state a number and the i2v aspect check can compare
+ * like with like; the file the run produced is still measured and wins at apply time.
+ */
+export function dimsForMegapixels(referenceWidth, referenceHeight, megapixels, multiple = DIM_MULTIPLE) {
+  const w = Number(referenceWidth);
+  const h = Number(referenceHeight);
+  const target = Number(megapixels);
+  if (!(w > 0) || !(h > 0) || !(target > 0)) return null;
+  const scale = Math.sqrt((target * 1e6) / (w * h));
+  const dims = resolveDimensions(w * scale, h * scale, multiple);
+  return { ...dims, megapixels: target, reference: { width: w, height: h } };
+}

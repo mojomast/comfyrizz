@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { pathProblem } from "../../schema/src/semantic.mjs";
 import { applyPromptDefaults } from "./defaults.mjs";
-import { resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
+import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
 
 export const JOBS_VERSION = 1;
 export const BATCH_ORDER = ["stills", "plates", "upscales", "audio"];
@@ -158,6 +158,33 @@ function resolveFileInput({ param, value, assetId, pkg, kinds, errors }) {
       "so there is nothing to upload and the graph would be handed a value LoadImage cannot load",
   );
   return null;
+}
+
+/**
+ * The dims a reference/edit job will really produce, or null when the asset is not reference-sized.
+ *
+ * `megapixels` is the graph's own budget parameter (ReferenceMultiLatent in the Klein ref-edit graph
+ * carries `resolution.megapixels`), and it sizes the output from the reference image: the plan has to
+ * say the same kind of number instead of the package format (GPU test 3, N4). The reference is
+ * resolved from the asset it names — another asset's planned size, or that asset's own inputs.
+ */
+function referenceSizedDims({ params, kind, assets, kinds, format, multiple, referenceMultiple }) {
+  if (kind !== "still") return null;
+  const megapixels = Number(params.megapixels);
+  if (!(megapixels > 0)) return null;
+  const referenceId = typeof params.reference === "string" ? params.reference : typeof params.image === "string" ? params.image : null;
+  // The reference's size is known only when this same plan generates it: then its own inputs resolved
+  // on its own lattice are what it will be planned at (order-independent, since it is the same rule
+  // its job uses). A file the package ships has a size this plan cannot read, and inventing the
+  // format for it is exactly the N4 mistake - the caller is told instead.
+  const generated = referenceId && kinds.has(referenceId) && kinds.get(referenceId) === "still";
+  if (!generated) return null;
+  const referenceInputs = assets[referenceId]?.gen?.inputs || {};
+  const refWidth = Number(referenceInputs.width ?? format.width);
+  const refHeight = Number(referenceInputs.height ?? format.height);
+  if (!(refWidth > 0) || !(refHeight > 0)) return null;
+  const planned = resolveDimensions(refWidth, refHeight, referenceMultiple ?? multiple);
+  return dimsForMegapixels(planned.width, planned.height, megapixels, multiple);
 }
 
 /** Attach the resolved file inputs to a job, and record the job that produces each one. */
@@ -344,9 +371,37 @@ export function planJobs(pkg, opts = {}) {
         width: Number(params.width ?? format.width ?? 1024),
         height: Number(params.height ?? format.height ?? 1024),
       };
-      const dims = resolveDimensions(requested.width, requested.height, latticeFor(assetId));
+      // A reference/edit graph sizes its output from the reference image at the megapixel budget, so
+      // the package format is not what comes out (GPU test 3, N4: plan 1920x1080, file 1360x768 at
+      // 1.0 MP). When the asset asks for megapixels, the plan states that estimate; the runner
+      // measures the file it actually downloaded and apply prefers that.
+      const sized = referenceSizedDims({
+        params,
+        kind,
+        assets,
+        kinds,
+        format,
+        multiple: latticeFor(assetId),
+        referenceMultiple: typeof params.reference === "string" ? latticeFor(params.reference) : undefined,
+      });
+      const dims = sized ?? resolveDimensions(requested.width, requested.height, latticeFor(assetId));
       job.dims = { width: dims.width, height: dims.height };
       job.dimsAdjusted = dims.adjusted;
+      if (sized) {
+        job.dimsSource = "reference-megapixels";
+        job.referenceDims = sized.reference;
+        job.megapixels = sized.megapixels;
+      } else if (Number(params.megapixels) > 0) {
+        // a megapixel-sized graph whose reference this plan does not generate: the output size is not
+        // the package format, and only the file the run produces can say what it is (N4)
+        warnings.push({
+          asset: assetId,
+          code: "PLAN_REFERENCE_SIZE_UNKNOWN",
+          message:
+            `${assetId} is sized from its reference at ${params.megapixels} MP, so dims ${job.dims.width}x${job.dims.height} ` +
+            "is the package format and not the size this job will produce; the runner measures the real file (GPU test 3, N4)",
+        });
+      }
       // A still only sends width/height to the workflow when the package asked for them: some
       // graphs (reference/edit conditioning) take their geometry from the reference image, and
       // inventing a width there would be a parameter the workflow cannot accept.

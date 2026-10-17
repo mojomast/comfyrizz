@@ -14,14 +14,30 @@ import { isAbsolute, join } from "node:path";
 
 const GENERATED_LICENSE = { id: "CC0-1.0" };
 
-/** Map a job kind onto the package's asset kinds and the media it implies. */
-export function mediaFor(job, cutout) {
+/** Map a job kind onto the package's asset kinds and the media it implies.
+ *
+ * The geometry comes from the file the run actually produced where the runner measured it, and from
+ * the plan only as a fallback: a reference-edit graph sizes its output from the reference image's
+ * megapixels (1360x768 at 1.0 MP in GPU test 3), so the package format the plan guessed was wrong
+ * in `media` and the renderer would lay out against the wrong shape (N4).
+ */
+export function mediaFor(job, cutout, output = null) {
   if (!job) return undefined;
+  const measured = output?.measured || {};
+  const width = measured.width ?? job.dims?.width;
+  const height = measured.height ?? job.dims?.height;
   if (job.kind === "still") {
-    return { width: job.dims?.width, height: job.dims?.height, alpha: cutout === true };
+    return { width, height, alpha: cutout === true };
   }
   if (job.kind === "plate" || job.kind === "upscale") {
-    return { width: job.dims?.width, height: job.dims?.height, fps: job.fps, frames: job.frames, audio: "muted" };
+    return {
+      width,
+      height,
+      fps: measured.fps ?? job.fps,
+      frames: measured.frames ?? job.frames,
+      ...(measured.durationSeconds === undefined ? {} : { durationSeconds: measured.durationSeconds }),
+      audio: "muted",
+    };
   }
   if (job.kind === "audio") return { audio: "present" };
   return undefined;
@@ -82,7 +98,7 @@ export function applyManifestToPackage(pkg, { manifest, jobsDoc, outDir, backend
       license: asset.license || { ...GENERATED_LICENSE },
       redistributable: asset.redistributable ?? true,
       gen: provenance,
-      ...(mediaFor(job, job?.cutout ?? asset.cutout) ? { media: mediaFor(job, job?.cutout ?? asset.cutout) } : {}),
+      ...(mediaFor(job, job?.cutout ?? asset.cutout, output) ? { media: mediaFor(job, job?.cutout ?? asset.cutout, output) } : {}),
     };
     if (asset.cutout === true || job?.cutout === true) next.cutout = true;
 

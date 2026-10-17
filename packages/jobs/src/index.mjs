@@ -21,6 +21,7 @@ export {
 export {
   resolveDimension,
   resolveDimensions,
+  dimsForMegapixels,
   resolveFrames,
   resolveFramesFromSeconds,
   isDimensionValid,
