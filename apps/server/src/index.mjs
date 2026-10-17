@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp } from './app.mjs';
+import { createCpuAgentRunner } from './agent-runner.mjs';
 import { repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 
 const port = Number(process.env.COMFYRIZZ_PORT ?? 4319);
@@ -16,7 +17,7 @@ const token = process.env.COMFYRIZZ_TOKEN ?? randomBytes(32).toString('hex');
 writeFileSync(tokenPath, `${token}\n`);
 chmodSync(tokenPath, 0o600);
 
-const app = createApp({ root: repoRoot, token, runtimeDir });
+const app = createApp({ root: repoRoot, token, runtimeDir, agentRunner: createCpuAgentRunner({ runtimeDir }) });
 const seedPath = join(repoRoot, 'examples', 'launch-demo', 'package.json');
 if (existsSync(seedPath)) app.store.seed(JSON.parse(readFileSync(seedPath, 'utf8')));
 

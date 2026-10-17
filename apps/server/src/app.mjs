@@ -4,6 +4,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
+import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
@@ -64,6 +65,7 @@ export function createApp({
   runtimeDir = join(root, 'apps', 'server', '.runtime'),
   webDist = join(root, 'apps', 'web', 'dist'),
   render = defaultRenderPackage,
+  agentRunner = null,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
@@ -181,6 +183,43 @@ export function createApp({
         }
       }
       return sendJson(response, 405, { error: 'method not allowed' });
+    }
+
+    if (url.pathname === '/api/agent' && request.method === 'POST') {
+      if (!agentRunner) return sendJson(response, 503, { error: 'agent runner not configured' });
+      const body = await readJson(request);
+      events.publish({ type: 'agent.started', brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });
+      try {
+        const result = await agentRunner({
+          brief: body.brief,
+          provider: body.provider,
+          model: body.model,
+          sessionId: body.sessionId,
+          runtimeDir,
+          onEvent: event => events.publish({ type: 'agent.event', event }),
+        });
+        const saved = store.write(result.package);
+        const timeline = compileTimeline(saved);
+        events.publish({ type: 'agent.finished', packageId: saved.id, revision: saved.revision, svgAssets: result.svgAssets?.length ?? 0, live: Boolean(result.live) });
+        return sendJson(response, 200, {
+          package: saved,
+          revision: saved.revision,
+          timeline,
+          generatedAssets: result.generatedAssets ?? {},
+          routes: result.routes ?? [],
+          pendingGpu: result.pendingGpu ?? [],
+          svgAssets: result.svgAssets ?? [],
+          live: Boolean(result.live),
+          provider: result.provider ?? null,
+          model: result.model ?? null,
+        });
+      } catch (error) {
+        events.publish({ type: 'agent.failed', message: error.message });
+        return sendJson(response, error.status ?? 500, {
+          error: error.message,
+          ...(Array.isArray(error.errors) ? { details: error.errors } : {}),
+        });
+      }
     }
 
     if (url.pathname === '/api/render' && request.method === 'POST') {

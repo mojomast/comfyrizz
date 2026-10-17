@@ -5,9 +5,9 @@
   "type": "module",
   "description": "Comfyrizz local server (C2): loopback HTTP, token, package revisions, CPU render, SSE",
   "scripts": {
-    "start": "npm --prefix ../../packages/planner run build && npm --prefix ../web run build && node src/index.mjs",
-    "dev": "npm --prefix ../../packages/planner run build && node --watch src/index.mjs",
-    "pretest": "npm --prefix ../../packages/planner run build",
+    "start": "npm --prefix ../../packages/vector run build && npm --prefix ../../packages/planner run build && npm --prefix ../../packages/llm run build && npm --prefix ../../packages/agent run build && npm --prefix ../web run build && node src/index.mjs",
+    "dev": "npm --prefix ../../packages/vector run build && npm --prefix ../../packages/planner run build && npm --prefix ../../packages/llm run build && npm --prefix ../../packages/agent run build && node --watch src/index.mjs",
+    "pretest": "npm --prefix ../../packages/vector run build && npm --prefix ../../packages/planner run build && npm --prefix ../../packages/llm run build && npm --prefix ../../packages/agent run build",
     "test": "node --test test/*.test.mjs"
   },
   "engines": { "node": ">=20" },

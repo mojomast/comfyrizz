@@ -65,12 +65,12 @@ test('tools: propose + edit package, SVG result, planned FLUX job', async () => 
   assert.equal(proposed.package.title, 'Orbit');
   assert.equal(proposed.package.scenes[0].layout, 'title');
   const edited = await tools['storyboard.edit'].run({ scene_id: 's1', patch: { copy: { headline: 'Meet Orbit' }, preferredFrames: 150 } }) as any;
-  assert.equal(edited.revision, 1);
+  assert.equal(edited.revision, 2);
   assert.equal(edited.package.scenes[0].copy.headline, 'Meet Orbit');
   assert.equal(edited.package.scenes[0].preferredFrames, 150);
 
   const svg = await tools['assets.generate_svg'].run({ scene_id: 's1', kind: 'icon', intent: 'rocket', palette: ['#6d8cff'] }) as any;
-  assert.equal(svg.asset.generator, 'llm-svg');
+  assert.equal(svg.asset.gen.generator, 'llm-svg');
   assert.equal(svg.asset.license.id, 'CC0-1.0');
   assert.equal(svg.pipeline.repairs, 1);
   assert.equal(svg.asset.bytes, Buffer.byteLength(SVG));
@@ -136,4 +136,31 @@ test('agent stops after the repair limit and the step cap', async () => {
   const loop = new ScriptedModel(step => [{ type: 'tool_call', id: `c${step}`, name: 'assets.route', args: { scene_id: 's', need: 'icon' } }, { type: 'done' }]);
   const capped = await runAgent({ model: loop, brief: 'icon', tools, maxSteps: 2 });
   assert.equal(capped.stopped, 'max_steps');
+});
+
+test('runCpuSlice builds a six-scene package with four SVG assets and one GPU plan', async () => {
+  const { runCpuSlice } = await import('../src/cpu-slice.js');
+  const slice = await runCpuSlice({
+    brief: 'A calm launch video with an icon, a diagram, a pattern and animated bars, plus a nebula illustration.',
+    now: () => '2026-10-18T00:00:00.000Z',
+    generateSvg: intent => ({
+      svg: SVG,
+      attempts: 1,
+      repairs: 0,
+      sanitizerVersion: '1.0.0',
+      renderCheck: { ok: true, version: '1.0.0', width: 512, height: 512, opaqueFraction: 0.6, outOfPaletteFraction: 0 },
+    }),
+  });
+  assert.equal(slice.live, false);
+  assert.equal(slice.svgAssets.length, 4);
+  assert.equal(slice.pendingGpu.length, 1);
+  assert.ok(slice.routes.some(route => route.tool === 'assets.generate_svg'));
+  assert.ok(slice.routes.some(route => route.tool === 'assets.generate_image'));
+  assert.equal(slice.package.scenes.length, 6);
+  assert.equal(slice.package.revision, 6);
+  assert.equal(slice.package.createdAt, '2026-10-18T00:00:00.000Z');
+  assert.ok(slice.package.scenes.every((scene: any) => scene.background?.procedural));
+  const withForeground = slice.package.scenes.filter((scene: any) => (scene.foreground ?? []).length > 0);
+  assert.equal(withForeground.length, 4);
+  assert.ok(Object.values(slice.package.assets).some((asset: any) => asset.status === 'pending' && asset.gen?.generator === 'flux3-klein'));
 });

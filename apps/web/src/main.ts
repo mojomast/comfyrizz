@@ -5,6 +5,7 @@ import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
 import { mountPreview, updatePreview } from './preview';
+import type { InlineAsset } from '../../renderer/src/components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -34,8 +35,9 @@ function md(value: string): string {
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
 }
 
-const pkg = structuredClone(pkgJson) as unknown as PackageV1;
-const timeline = structuredClone(timelineJson) as unknown as Timeline;
+let pkg = structuredClone(pkgJson) as unknown as PackageV1;
+let timeline = structuredClone(timelineJson) as unknown as Timeline;
+let generatedAssets: Record<string, InlineAsset> | undefined;
 const state = {
   dirty: false,
   messages: [
@@ -83,7 +85,7 @@ function markDirty(reason: string): void {
   state.dirty = true;
   $('draft').textContent = `draft · ${reason} · recompiled on export`;
   syncTimeline();
-  updatePreview(pkg, timeline);
+  updatePreview(pkg, timeline, generatedAssets);
 }
 
 function renderStoryboard(): void {
@@ -216,6 +218,43 @@ async function exportMp4(): Promise<void> {
   }
 }
 
+async function runBrief(brief: string): Promise<void> {
+  const composer = $<HTMLButtonElement>('composer-send');
+  if (composer) composer.disabled = true;
+  state.messages.push({ role: 'assistant', text: 'Building a CPU package from that brief: router → SVG assets → timeline → Player. GPU needs stay pending.' });
+  renderMessages();
+  logActivity('Agent brief sent to /api/agent');
+  try {
+    const response = await apiFetch('/api/agent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ brief }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+    pkg = body.package as PackageV1;
+    timeline = body.timeline as Timeline;
+    generatedAssets = body.generatedAssets as Record<string, InlineAsset>;
+    scrub.max = String(timeline.durationInFrames - 1);
+    renderStoryboard();
+    renderPalette();
+    renderAssets();
+    updatePreview(pkg, timeline, generatedAssets);
+    state.dirty = false;
+    $('draft').textContent = `agent package · ${body.svgAssets.length} SVG assets${body.live ? ' · live model' : ' · scripted model'}`;
+    const pending = Array.isArray(body.pendingGpu) && body.pendingGpu.length > 0 ? ` ${body.pendingGpu.length} GPU need(s) are pending spend approval; procedural fallbacks are active.` : '';
+    state.messages.push({ role: 'assistant', text: `Built **${pkg.title}** with ${body.svgAssets.length} SVG assets and ${Object.keys(body.generatedAssets ?? {}).length} inlined vectors.${pending}` });
+    logActivity(`Agent finished: ${pkg.id} rev ${body.revision}, ${body.svgAssets.length} SVG assets`);
+  } catch (error) {
+    state.messages.push({ role: 'assistant', text: `Agent request failed: ${(error as Error).message}` });
+    logActivity(`Agent failed: ${(error as Error).message}`);
+  } finally {
+    if (composer) composer.disabled = false;
+    renderMessages();
+    $('messages').scrollTop = $('messages').scrollHeight;
+  }
+}
+
 function init(): void {
   renderMessages();
   renderStoryboard();
@@ -272,13 +311,10 @@ function init(): void {
     const text = prompt.value.trim();
     if (!text) return;
     state.messages.push({ role: 'user', text });
-    state.messages.push({
-      role: 'assistant',
-      text: 'The **C1 shell** has no agent yet, so I cannot apply that request. Inline storyboard edits above already change the Player; C3 adds the chat → package tool loop. Nothing was sent to a network.',
-    });
-    prompt.value = '';
     renderMessages();
     $('messages').scrollTop = $('messages').scrollHeight;
+    prompt.value = '';
+    void runBrief(text);
   });
 }
 

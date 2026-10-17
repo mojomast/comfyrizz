@@ -24,6 +24,25 @@ before(async () => {
       writeFileSync(output, bytes);
       return { output, bytes: bytes.length, frames: 42, hash: 'deadbeef' };
     },
+    agentRunner: async ({ brief }) => {
+      if (!brief) {
+        const error = new Error('brief is required');
+        error.status = 400;
+        throw error;
+      }
+      const pkg = structuredClone(seed);
+      pkg.id = 'pkg_agenttest0001';
+      pkg.revision = 1;
+      pkg.title = `Agent: ${brief.slice(0, 40)}`;
+      return {
+        package: pkg,
+        generatedAssets: { a_icon_check: { kind: 'svg', svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#6d8cff"/></svg>' } },
+        routes: [{ tool: 'assets.generate_svg' }],
+        pendingGpu: [],
+        svgAssets: ['a_icon_check'],
+        live: false,
+      };
+    },
   });
   app.store.seed(JSON.parse(JSON.stringify(seed)));
   server = createServer(app.handler);
@@ -162,6 +181,22 @@ test('SSE replays from Last-Event-ID', async () => {
   });
   assert.match(text, /event: test\.two/);
   assert.match(text, new RegExp(`id: ${last}`));
+});
+
+test('POST /api/agent runs the runner, validates and compiles the package', async () => {
+  const response = await request({ method: 'POST', path: '/api/agent', body: { brief: 'a calm agent desktop' } });
+  assert.equal(response.status, 200);
+  assert.equal(response.json.package.id, 'pkg_agenttest0001');
+  assert.ok(response.json.timeline.durationInFrames > 0);
+  assert.deepEqual(response.json.svgAssets, ['a_icon_check']);
+  assert.ok(response.json.generatedAssets.a_icon_check.svg.includes('<svg'));
+  assert.equal(response.json.live, false);
+  const reread = await request({ path: '/api/package/pkg_agenttest0001' });
+  assert.equal(reread.status, 200);
+  assert.equal(reread.json.package.title, 'Agent: a calm agent desktop');
+  assert.equal((await request({ method: 'POST', path: '/api/agent', body: {} })).status, 400);
+  const eventTypes = app.events.replay(0).map(event => event.type);
+  assert.ok(eventTypes.includes('agent.started') && eventTypes.includes('agent.finished'));
 });
 
 test('static path traversal is rejected', async () => {

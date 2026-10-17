@@ -1,7 +1,22 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import { GENERATED_ASSETS } from './generated-assets';
+
+/** SVG markup resolved at render time for agent-built packages (C5). */
+export interface InlineAsset {
+  kind: string;
+  svg: string;
+  width?: number;
+  height?: number;
+  sanitizerVersion?: string;
+}
+
+const GeneratedAssetsContext = createContext<Record<string, InlineAsset>>(GENERATED_ASSETS as unknown as Record<string, InlineAsset>);
+
+export function GeneratedAssetsProvider({ assets, children }: { assets: Record<string, InlineAsset>; children: React.ReactNode }) {
+  return <GeneratedAssetsContext.Provider value={assets}>{children}</GeneratedAssetsContext.Provider>;
+}
 import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, fontFamily, palette } from './theme';
 
 /* ------------------------------------------------------------------ *
@@ -123,7 +138,8 @@ function Background({ scene, pkg }: { scene: Scene; pkg: PackageV1 }) {
  * ------------------------------------------------------------------ */
 
 function VectorAsset({ assetId, frame, animation }: { assetId: string; frame: number; animation?: string }) {
-  const asset = GENERATED_ASSETS[assetId];
+  const assets = useContext(GeneratedAssetsContext);
+  const asset = assets[assetId];
   if (!asset) return null;
   const local = reveal(frame, 4, 20);
   const scale = animation === 'zoom-in' ? emphasis(frame, 6) : 1;

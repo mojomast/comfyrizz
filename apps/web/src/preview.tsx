@@ -4,15 +4,16 @@ import { Player, type PlayerRef } from '@remotion/player';
 import type { PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import { TimelinePlayer } from '../../renderer/src/player';
+import type { InlineAsset } from '../../renderer/src/components';
 
 let root: Root | null = null;
 let ready: ((player: PlayerRef) => void) | null = null;
 
-const Preview = ({ pkg, timeline }: { pkg: PackageV1; timeline: Timeline }) => (
+const Preview = ({ pkg, timeline, generatedAssets }: { pkg: PackageV1; timeline: Timeline; generatedAssets?: Record<string, InlineAsset> }) => (
   <Player
     // TimelinePlayer is the same composition the MP4 renderer uses.
     component={TimelinePlayer as unknown as React.ComponentType<Record<string, unknown>>}
-    inputProps={{ pkg, timeline }}
+    inputProps={{ pkg, timeline, ...(generatedAssets ? { generatedAssets } : {}) }}
     durationInFrames={timeline.durationInFrames}
     compositionWidth={timeline.width}
     compositionHeight={timeline.height}
@@ -35,12 +36,13 @@ export function mountPreview(
   pkg: PackageV1,
   timeline: Timeline,
   onReady: (player: PlayerRef) => void,
+  generatedAssets?: Record<string, InlineAsset>,
 ): void {
   ready = onReady;
   root = createRoot(container);
-  root.render(<Preview pkg={pkg} timeline={timeline} />);
+  root.render(<Preview pkg={pkg} timeline={timeline} generatedAssets={generatedAssets} />);
 }
 
-export function updatePreview(pkg: PackageV1, timeline: Timeline): void {
-  root?.render(<Preview pkg={pkg} timeline={timeline} />);
+export function updatePreview(pkg: PackageV1, timeline: Timeline, generatedAssets?: Record<string, InlineAsset>): void {
+  root?.render(<Preview pkg={pkg} timeline={timeline} generatedAssets={generatedAssets} />);
 }

@@ -3,7 +3,7 @@ import { TransitionSeries, linearTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline, TimelineCaption } from '../../../packages/planner/dist/src/index.js';
-import { SceneView } from './components';
+import { GeneratedAssetsProvider, SceneView, type InlineAsset } from './components';
 import { CaptionOverlay } from './captions';
 
 /**
@@ -16,11 +16,13 @@ export function TimelinePlayer({
   timeline,
   scenes,
   captions,
+  generatedAssets,
 }: {
   pkg: PackageV1;
   timeline: Timeline;
   scenes?: Scene[];
   captions?: TimelineCaption[];
+  generatedAssets?: Record<string, InlineAsset>;
 }) {
   const list = (scenes ?? timeline.scenes) as unknown as Array<
     Scene & { durationInFrames: number; transitionOutFrames: number }
@@ -43,12 +45,13 @@ export function TimelinePlayer({
       );
     }
   });
-  return (
+  const series = (
     <>
       <TransitionSeries>{children}</TransitionSeries>
       {captions && <CaptionOverlay captions={captions} />}
     </>
   );
+  return generatedAssets ? <GeneratedAssetsProvider assets={generatedAssets}>{series}</GeneratedAssetsProvider> : series;
 }
 
 export function sceneById(timeline: Timeline, sceneId: string): Scene | undefined {
