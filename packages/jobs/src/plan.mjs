@@ -8,6 +8,7 @@
 // (workflow sha, resolved inputs, model revision, seed, dims, frames).
 import { createHash } from "node:crypto";
 import { pathProblem } from "../../schema/src/semantic.mjs";
+import { applyPromptDefaults } from "./defaults.mjs";
 import { resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
 
 export const JOBS_VERSION = 1;
@@ -269,6 +270,17 @@ export function planJobs(pkg, opts = {}) {
     }
 
     const params = { ...inputs };
+    // Prompt defaults first, so the plate's upscale stage (which copies these params) inherits the
+    // same guards, and so the guard is part of the cache key rather than a VM-side edit.
+    if (kind === "still" || kind === "plate") {
+      const applied = applyPromptDefaults(params, {
+        kind,
+        asset: assetId,
+        textAllowed: inputs.text === true || inputs.allowText === true,
+        hasSourceImage: typeof inputs.image === "string" && inputs.image !== "",
+      });
+      warnings.push(...applied.warnings);
+    }
     const job = {
       id: `${assetId}.${kind}`,
       kind,

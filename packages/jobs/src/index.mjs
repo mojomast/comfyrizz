@@ -11,6 +11,14 @@ export {
 } from "./plan.mjs";
 export { applyManifestToPackage, mediaFor } from "./apply.mjs";
 export {
+  TEXT_GUARD,
+  TEXT_GUARD_SATISFIED,
+  MOTION_GUARD,
+  CAMERA_MENTIONED,
+  UNRELIABLE_MOTION,
+  applyPromptDefaults,
+} from "./defaults.mjs";
+export {
   resolveDimension,
   resolveDimensions,
   resolveFrames,
