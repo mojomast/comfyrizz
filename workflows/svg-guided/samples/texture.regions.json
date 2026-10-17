@@ -1,0 +1,14 @@
+{
+  "id": "sample_texture",
+  "role": "texture",
+  "intent": "a fine dotted surface used behind interface diagrams",
+  "palette": ["#0d0f14", "#1b2440", "#6d8cff", "#e6e8ee"],
+  "depth_order": "far to near, matching the palette order",
+  "regions": { "pattern": "#6d8cff" },
+  "text_safe_regions": ["full frame (used as a background behind copy)"],
+  "template": { "style": "technical", "lighting": "ambient", "material": "paper" },
+  "sweep_params": {
+    "still": { "width": 1024, "height": 1024, "steps": 16 },
+    "plate": { "width": 512, "height": 512, "frames": 97, "fps": 24 }
+  }
+}

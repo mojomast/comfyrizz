@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>texture sample: a seamless dotted surface, no focal point</title>
+  <defs>
+    <pattern id="dots" x="0" y="0" width="64" height="64" patternUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="64" height="64" fill="#141821"/>
+      <circle cx="16" cy="16" r="7" fill="#6d8cff"/>
+      <circle cx="48" cy="48" r="4" fill="#1b2440"/>
+    </pattern>
+  </defs>
+  <rect id="layer-ground" x="0" y="0" width="1024" height="1024" fill="#0d0f14"/>
+  <rect id="layer-vignette" x="0" y="0" width="1024" height="1024" fill="#1b2440" opacity="0.25"/>
+  <rect id="layer-pattern" x="0" y="0" width="1024" height="1024" fill="url(#dots)"/>
+  <rect id="text-safe" x="0" y="0" width="1024" height="1024" fill="#0d0f14" opacity="0"/>
+</svg>

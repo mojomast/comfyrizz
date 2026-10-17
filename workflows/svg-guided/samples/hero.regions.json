@@ -1,0 +1,17 @@
+{
+  "id": "sample_hero",
+  "role": "hero-subject",
+  "intent": "a small lit figure standing in drifting violet haze",
+  "palette": ["#0d0f14", "#1b2440", "#6d8cff", "#e6e8ee"],
+  "depth_order": "far to near, matching the palette order",
+  "regions": {
+    "subject": "#e6e8ee",
+    "glow": "#6d8cff"
+  },
+  "text_safe_regions": ["top-left quadrant (empty dark ground)"],
+  "template": { "style": "cinematic", "lighting": "dramatic", "material": "matte" },
+  "sweep_params": {
+    "still": { "width": 960, "height": 544, "steps": 16 },
+    "plate": { "width": 960, "height": 544, "frames": 97, "fps": 24 }
+  }
+}

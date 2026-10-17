@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">
+  <title>background-plate sample: layered atmospheric depth, no focal subject</title>
+  <defs>
+    <linearGradient id="haze" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#1b2440"/>
+      <stop offset="1" stop-color="#0d0f14"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.62" cy="0.55" r="0.5">
+      <stop offset="0" stop-color="#a9c1ff" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#6d8cff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect id="layer-far" x="0" y="0" width="1600" height="900" fill="#0d0f14"/>
+  <rect id="layer-mid" x="0" y="240" width="1600" height="660" fill="url(#haze)"/>
+  <ellipse id="layer-near" cx="620" cy="470" rx="620" ry="300" fill="url(#core)"/>
+  <circle id="layer-accent" cx="1180" cy="330" r="90" fill="#e6e8ee"/>
+  <rect id="text-safe" x="80" y="620" width="700" height="200" fill="#0d0f14" opacity="0"/>
+</svg>

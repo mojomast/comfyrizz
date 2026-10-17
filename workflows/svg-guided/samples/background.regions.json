@@ -1,0 +1,37 @@
+{
+  "id": "sample_background",
+  "role": "background-plate",
+  "intent": "a soft blue nebula drifting behind an empty stretch of dark sky",
+  "palette": [
+    "#0d0f14",
+    "#1b2440",
+    "#6d8cff",
+    "#e6e8ee"
+  ],
+  "depth_order": "far to near, matching the palette order",
+  "regions": {
+    "accent": "#e6e8ee"
+  },
+  "text_safe_regions": [
+    "lower band (empty dark ground)"
+  ],
+  "template": {
+    "style": "organic",
+    "lighting": "soft",
+    "material": "matte"
+  },
+  "sweep_params": {
+    "still": {
+      "width": 960,
+      "height": 544,
+      "steps": 16
+    },
+    "plate": {
+      "width": 960,
+      "height": 544,
+      "frames": 121,
+      "fps": 24
+    }
+  },
+  "region_note": "only flat, opaque layers are declared as regions: a gradient core has no single colour to match (v0 contract, see workflows/svg-guided/README.md)"
+}
