@@ -86,7 +86,12 @@ def classify_submit_error(exc: BaseException, idempotency_key: str | None = None
 
 
 def load_params_map(workflow_path: Path) -> dict[str, list[str]]:
-    """``<workflow>.api.json`` -> sibling ``<workflow>.api.params.json`` (optional)."""
+    """``<workflow>.api.json`` -> sibling ``<workflow>.api.params.json`` (optional).
+
+    Each entry maps a parameter name to ``[node_id, field]`` or to a list of such pairs when
+    one value belongs in more than one node (LTX-2.5 keeps the frame count on both the video
+    and the audio latent).
+    """
     workflow_path = Path(workflow_path)
     candidates = [
         workflow_path.with_suffix(".params.json"),
@@ -116,9 +121,12 @@ def inject_params(graph: dict[str, Any], mapping: dict[str, list[str]], params: 
         target = mapping.get(name)
         if not target:
             continue
-        node_id, field_name = target[0], target[1]
-        node = graph.setdefault(node_id, {"inputs": {}})
-        node.setdefault("inputs", {})[field_name] = value
+        # one target ([node, field]) or several ([[node, field], ...]) - the LTX audio latent
+        # needs the same frame count as the video latent
+        targets = target if isinstance(target[0], (list, tuple)) else [target]
+        for node_id, field_name in targets:
+            node = graph.setdefault(str(node_id), {"inputs": {}})
+            node.setdefault("inputs", {})[str(field_name)] = value
     return graph
 
 

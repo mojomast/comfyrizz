@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "generator": "ltx25",
+  "kind": "plate",
+  "note": "Text-to-video (no first frame): same geometry rules as i2v, minus LoadImage.",
+  "map": {
+    "prompt": ["5", "text"],
+    "width": ["8", "width"],
+    "height": ["8", "height"],
+    "frames": [["8", "length"], ["9", "frames_number"]],
+    "fps": ["7", "frame_rate"],
+    "seed": ["11", "noise_seed"],
+    "stage2_seed": ["23", "noise_seed"]
+  }
+}

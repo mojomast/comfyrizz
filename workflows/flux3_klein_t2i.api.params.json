@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "generator": "flux3-klein",
+  "kind": "still",
+  "note": "Maps a jobs.json parameter to [node_id, field] inside that node's inputs. The runner refuses to run a job whose parameter has no mapping (a plate rendered without its prompt is worse than a failed job).",
+  "map": {
+    "prompt": ["4", "text"],
+    "width": ["6", "width"],
+    "height": ["6", "height"],
+    "seed": ["7", "seed"],
+    "steps": ["7", "steps"]
+  }
+}

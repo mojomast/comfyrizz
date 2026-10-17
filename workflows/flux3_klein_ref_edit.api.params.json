@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "generator": "flux3-klein",
+  "kind": "still",
+  "note": "Reference/edit conditioning: LoadImage(10) is reference image 0, ReferenceMultiLatent(12) holds the reference budget. Bounding boxes belong in the prompt (model card).",
+  "map": {
+    "prompt": ["4", "text"],
+    "image": ["10", "image"],
+    "reference": ["10", "image"],
+    "megapixels": ["12", "resolution.megapixels"],
+    "seed": ["7", "seed"],
+    "steps": ["7", "steps"],
+    "denoise": ["7", "denoise"]
+  }
+}
