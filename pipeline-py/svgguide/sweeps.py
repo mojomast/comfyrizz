@@ -2,8 +2,9 @@
 
 The spec is data, not code: seeds, a denoise grid, the reference weights per approach and the
 prompt templates, plus what to measure. `estimate_units` uses the same reserve formula constants
-as `packages/backends/src/budget.mjs` (SPEC.md 6.6) and labels the result an estimate, because a
-placeholder minute-per-job is exactly that until the M3 spike measures real times.
+as `packages/backends/src/budget.mjs` (SPEC.md 6.6). The minutes per job are *measured*: the Google
+Colab GPU test 3 run (docs/GPU_TEST_3.md) rendered exactly these shapes, and the estimate labels
+itself an estimate because a session's cost is account-level and never exact.
 """
 
 from __future__ import annotations
@@ -18,10 +19,30 @@ from .workflows import SWEEP_AXES, check_sweep_axes
 #: Kept in step with packages/backends/src/budget.mjs.
 RATE_PER_HOUR_DEFAULT = 8.9
 COLLECT_AND_STOP_RESERVE_MINUTES = 6
-BOOTSTRAP_OVERHEAD_MINUTES = 5
+#: Google Colab GPU test 3 measured 218.5 s of setup (clone 1.7 + requirements/proxy/SDK 193.5 +
+#: 60.0 GB of model downloads 193.5 in parallel + the text-encoder merge 22.2), plus ComfyUI ready
+#: in 14 s: four minutes, rounded up. Same figure as packages/backends.
+BOOTSTRAP_OVERHEAD_MINUTES = 4
 
-#: Placeholder GPU minutes per approach until the M3 spike measures the real ones.
-APPROACH_MINUTES = {"img2img": 0.5, "ref_edit": 0.5, "ltx_i2v": 1.5}
+#: Measured wall minutes per approach (Google Colab GPU test 3, docs/GPU_TEST_3.md). The shapes
+#: are the sweep's own: img2img at 1280x720 / 16 steps measured 2.5 s, and ltx_i2v at 1024x576 /
+#: 97 frames measured 13.3-17.0 s. Rounded up, so the admission check stays conservative.
+APPROACH_MINUTES = {"img2img": 0.05, "ltx_i2v": 0.3}
+
+#: The same run measured the reference edit against its own axis: 2.5 s at 0.5 reference
+#: megapixels, 5.6 s at 1.0, 8.5 s at 1.5. So the estimate follows the axis instead of charging
+#: the 1.5 MP price for a 0.5 MP job (the GPU test 2 sweep priced every edit the same, which is
+#: the same mistake as an axis that reaches no node).
+REFERENCE_EDIT_MINUTES = {0.5: 0.05, 1.0: 0.1, 1.5: 0.15}
+
+
+def minutes_for(approach: str, reference_megapixels: float | None = None) -> float:
+    """Measured minutes for one sweep job of this exact shape."""
+    if approach == "ref_edit":
+        if reference_megapixels is None:
+            return max(REFERENCE_EDIT_MINUTES.values())
+        return REFERENCE_EDIT_MINUTES.get(float(reference_megapixels), max(REFERENCE_EDIT_MINUTES.values()))
+    return APPROACH_MINUTES.get(approach, 1.0)
 
 #: The geometry each approach runs at, from the GPU test 2 measurements (docs/GPU_TEST_2.md).
 #: The img2img/edit stills ran at 1280x720; the i2v plates at 1024x576, which is the aspect an
@@ -62,12 +83,13 @@ def build_sweep_spec(
     """
     if not scenes:
         raise ValueError("a sweep needs at least one scene")
+    known = ("img2img", "ref_edit", "ltx_i2v")
     jobs = []
     checked: set[str] = set()
     for scene in scenes:
         for approach in approaches:
-            if approach not in APPROACH_MINUTES:
-                raise ValueError(f"unknown approach {approach!r}; expected {', '.join(APPROACH_MINUTES)}")
+            if approach not in known:
+                raise ValueError(f"unknown approach {approach!r}; expected {', '.join(known)}")
             problems = check_sweep_axes(approach) if approach not in checked else []
             if problems:
                 raise ValueError(f"{approach} sweep axes do not reach a node: " + "; ".join(problems))
@@ -102,7 +124,7 @@ def build_sweep_spec(
                                 "height": height,
                                 "guide": scene.get("guide"),
                                 "caption_template": scene.get("template_id"),
-                                "minutes_estimate": APPROACH_MINUTES[approach],
+                                "minutes_estimate": minutes_for(approach, budget),
                             }
                         )
     spec = {
@@ -138,7 +160,11 @@ def estimate_units(spec: dict[str, Any], *, rate_per_hour: float = RATE_PER_HOUR
         "units": round(units, 3),
         "next_job_upper_units": round((max([float(job.get("minutes_estimate") or 0) for job in jobs] or [0])) * 1.35 / 60 * rate_per_hour, 3),
         "label": "estimate",
-        "basis": "placeholder minutes per approach until the M3 spike measures real times; the metadata notes exactly this",
+        "basis": (
+            "measured wall minutes per approach from the Google Colab GPU test 3 run (docs/GPU_TEST_3.md: "
+            "img2img 2.5 s, ref_edit 2.5/5.6/8.5 s at 0.5/1.0/1.5 reference megapixels, ltx_i2v 13.3-17.0 s), "
+            "each rounded up; overhead measured at 218.5 s of setup"
+        ),
         "reserve_formula": "gpu + bootstrap overhead + collect-and-stop reserve <= project budget (SPEC.md 6.6)",
     }
 

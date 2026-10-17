@@ -1,7 +1,7 @@
 {
   "v": 1,
   "purpose": "E2 SVG-guided GPU sweep: which guidance setting wins per layout role",
-  "generated_at": "2026-10-17T17:45:47+00:00",
+  "generated_at": "2026-10-17T19:13:48+00:00",
   "templates_version": "0.1.0",
   "rate_per_hour": 8.9,
   "rubric": {
@@ -51,7 +51,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.img2img.s42.d0.5",
@@ -65,7 +65,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.img2img.s42.d0.65",
@@ -79,7 +79,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.img2img.s42.d0.85",
@@ -93,7 +93,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.img2img.s43.d0.35",
@@ -107,7 +107,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.img2img.s43.d0.5",
@@ -121,7 +121,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.img2img.s43.d0.65",
@@ -135,7 +135,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.img2img.s43.d0.85",
@@ -149,7 +149,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.ref_edit.s42.mp0.5",
@@ -163,7 +163,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.ref_edit.s42.mp1.0",
@@ -177,7 +177,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.1
     },
     {
       "id": "sample_background.ref_edit.s42.mp1.5",
@@ -191,7 +191,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.15
     },
     {
       "id": "sample_background.ref_edit.s43.mp0.5",
@@ -205,7 +205,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_background.ref_edit.s43.mp1.0",
@@ -219,7 +219,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.1
     },
     {
       "id": "sample_background.ref_edit.s43.mp1.5",
@@ -233,7 +233,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.15
     },
     {
       "id": "sample_background.ltx_i2v.s42",
@@ -247,7 +247,7 @@
       "height": 576,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 1.5
+      "minutes_estimate": 0.3
     },
     {
       "id": "sample_background.ltx_i2v.s43",
@@ -261,7 +261,7 @@
       "height": 576,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_background/raster.png",
       "caption_template": "background-plate/organic+soft+matte",
-      "minutes_estimate": 1.5
+      "minutes_estimate": 0.3
     },
     {
       "id": "sample_hero.img2img.s42.d0.35",
@@ -275,7 +275,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.img2img.s42.d0.5",
@@ -289,7 +289,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.img2img.s42.d0.65",
@@ -303,7 +303,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.img2img.s42.d0.85",
@@ -317,7 +317,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.img2img.s43.d0.35",
@@ -331,7 +331,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.img2img.s43.d0.5",
@@ -345,7 +345,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.img2img.s43.d0.65",
@@ -359,7 +359,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.img2img.s43.d0.85",
@@ -373,7 +373,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.ref_edit.s42.mp0.5",
@@ -387,7 +387,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.ref_edit.s42.mp1.0",
@@ -401,7 +401,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.1
     },
     {
       "id": "sample_hero.ref_edit.s42.mp1.5",
@@ -415,7 +415,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.15
     },
     {
       "id": "sample_hero.ref_edit.s43.mp0.5",
@@ -429,7 +429,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_hero.ref_edit.s43.mp1.0",
@@ -443,7 +443,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.1
     },
     {
       "id": "sample_hero.ref_edit.s43.mp1.5",
@@ -457,7 +457,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.15
     },
     {
       "id": "sample_hero.ltx_i2v.s42",
@@ -471,7 +471,7 @@
       "height": 576,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 1.5
+      "minutes_estimate": 0.3
     },
     {
       "id": "sample_hero.ltx_i2v.s43",
@@ -485,7 +485,7 @@
       "height": 576,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_hero/raster.png",
       "caption_template": "hero-subject/cinematic+dramatic+matte",
-      "minutes_estimate": 1.5
+      "minutes_estimate": 0.3
     },
     {
       "id": "sample_texture.img2img.s42.d0.35",
@@ -499,7 +499,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.img2img.s42.d0.5",
@@ -513,7 +513,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.img2img.s42.d0.65",
@@ -527,7 +527,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.img2img.s42.d0.85",
@@ -541,7 +541,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.img2img.s43.d0.35",
@@ -555,7 +555,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.img2img.s43.d0.5",
@@ -569,7 +569,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.img2img.s43.d0.65",
@@ -583,7 +583,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.img2img.s43.d0.85",
@@ -597,7 +597,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.ref_edit.s42.mp0.5",
@@ -611,7 +611,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.ref_edit.s42.mp1.0",
@@ -625,7 +625,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.1
     },
     {
       "id": "sample_texture.ref_edit.s42.mp1.5",
@@ -639,7 +639,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.15
     },
     {
       "id": "sample_texture.ref_edit.s43.mp0.5",
@@ -653,7 +653,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.05
     },
     {
       "id": "sample_texture.ref_edit.s43.mp1.0",
@@ -667,7 +667,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.1
     },
     {
       "id": "sample_texture.ref_edit.s43.mp1.5",
@@ -681,7 +681,7 @@
       "height": 720,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 0.5
+      "minutes_estimate": 0.15
     },
     {
       "id": "sample_texture.ltx_i2v.s42",
@@ -695,7 +695,7 @@
       "height": 576,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 1.5
+      "minutes_estimate": 0.3
     },
     {
       "id": "sample_texture.ltx_i2v.s43",
@@ -709,20 +709,20 @@
       "height": 576,
       "guide": "/home/box/comfyrizz/workflows/svg-guided/samples/out/sample_texture/raster.png",
       "caption_template": "texture/technical+ambient+paper",
-      "minutes_estimate": 1.5
+      "minutes_estimate": 0.3
     }
   ],
   "human_gate": "Kyle approves the session and the unit budget before any of this runs (SPEC.md 6.6)",
   "estimate": {
     "jobs": 48,
-    "gpu_minutes": 30.0,
-    "overhead_minutes": 5,
+    "gpu_minutes": 4.8,
+    "overhead_minutes": 4,
     "collect_and_stop_reserve_minutes": 6,
-    "total_minutes": 41.0,
-    "units": 6.082,
-    "next_job_upper_units": 0.3,
+    "total_minutes": 14.8,
+    "units": 2.195,
+    "next_job_upper_units": 0.06,
     "label": "estimate",
-    "basis": "placeholder minutes per approach until the M3 spike measures real times; the metadata notes exactly this",
+    "basis": "measured wall minutes per approach from the Google Colab GPU test 3 run (docs/GPU_TEST_3.md: img2img 2.5 s, ref_edit 2.5/5.6/8.5 s at 0.5/1.0/1.5 reference megapixels, ltx_i2v 13.3-17.0 s), each rounded up; overhead measured at 218.5 s of setup",
     "reserve_formula": "gpu + bootstrap overhead + collect-and-stop reserve <= project budget (SPEC.md 6.6)"
   }
 }

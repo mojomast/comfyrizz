@@ -160,6 +160,11 @@ test("happy path: preflight, allocate, bootstrap, health, run, verified stop", a
     commands.join("\n"),
   );
   assert.ok(commands.some((line) => line.includes("upload -s comfyrizz-demo0001") && line.includes("/content/comfyrizz/.hf-token")));
+  // H7: the model pin goes with the token, so the VM downloads pinned revisions
+  assert.ok(
+    commands.some((line) => line.includes("upload -s comfyrizz-demo0001") && line.includes("/content/comfyrizz/models.lock.json")),
+    "bootstrap.py reads the lock; the lock has to be on the VM",
+  );
 
   // the token itself is never an argument, never in the CLI environment, never in a log
   for (const entry of readLog(fake.logPath)) {

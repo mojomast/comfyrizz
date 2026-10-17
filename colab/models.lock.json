@@ -1,0 +1,118 @@
+{
+  "v": 1,
+  "purpose": "The exact model files a Comfyrizz Google Colab session downloads and where each one lands in ComfyUI/models. `colab/bootstrap.py` reads this file: one pin, no second list to drift.",
+  "pinBasis": "Revisions were resolved from the Hugging Face API after the Google Colab GPU test 3 run (docs/GPU_TEST_3.md) and every file size matches the bytes that run downloaded (`ls -l` in test/gpu3/logs/setup.log), so the pin describes the files the measurements were taken on. The run itself did not record a revision: `authoringNotes` says what that costs.",
+  "authoringNotes": [
+    "Gated repos: the Hugging Face tree API masks LFS oids (sha256) and the pointer files need an authenticated call, so no per-file sha256 is recorded here. Sizes are the cross-check that does not need a token.",
+    "The GPU test 3 setup cloned ComfyUI `master` (recorded below) instead of passing --comfyui-ref; pinning it is the fix, and the ref belongs here when the next run is set up.",
+    "Re-resolving a revision after a repo update would silently move the pin: change it only with a new GPU run that recorded the sizes."
+  ],
+  "hosts": {
+    "klein": {
+      "repo": "black-forest-labs/flux-3-image-klein",
+      "revision": "337337621b8526e120f2275d250242f4a6bedd75",
+      "revisionLastModified": "2026-10-16T04:58:03.000Z",
+      "gated": "auto",
+      "localDir": "/content/hf/klein",
+      "measuredSeconds": 121.1
+    },
+    "ltx": {
+      "repo": "Lightricks/LTX-2.5",
+      "revision": "49b093a39c19169a8a81721dcc541e07e945232f",
+      "revisionLastModified": "2026-10-11T07:00:53.000Z",
+      "gated": "auto",
+      "localDir": "/content/hf/ltx",
+      "measuredSeconds": 166.5
+    }
+  },
+  "files": [
+    {
+      "host": "klein",
+      "path": "model.safetensors",
+      "bytes": 11097404512,
+      "target": "diffusion_models/flux-3-image-klein-bf16.safetensors"
+    },
+    {
+      "host": "klein",
+      "path": "ae.safetensors",
+      "bytes": 336211292,
+      "target": "vae/flux2-vae.safetensors"
+    },
+    {
+      "host": "klein",
+      "path": "text_encoder/model-00001-of-00002.safetensors",
+      "bytes": 4967229296,
+      "mergedInto": "klein-text-encoder"
+    },
+    {
+      "host": "klein",
+      "path": "text_encoder/model-00002-of-00002.safetensors",
+      "bytes": 3908490048,
+      "mergedInto": "klein-text-encoder"
+    },
+    {
+      "host": "ltx",
+      "path": "diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "bytes": 21504034224,
+      "target": "diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
+    },
+    {
+      "host": "ltx",
+      "path": "text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "bytes": 15372969374,
+      "target": "text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"
+    },
+    {
+      "host": "ltx",
+      "path": "vae/ltx-2.5-video-vae-bf16.safetensors",
+      "bytes": 1472223346,
+      "target": "vae/ltx-2.5-video-vae-bf16.safetensors"
+    },
+    {
+      "host": "ltx",
+      "path": "vae/ltx-2.5-audio-vae-bf16.safetensors",
+      "bytes": 364866540,
+      "target": "vae/ltx-2.5-audio-vae-bf16.safetensors"
+    },
+    {
+      "host": "ltx",
+      "path": "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+      "bytes": 995778752,
+      "target": "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+    }
+  ],
+  "merge": [
+    {
+      "id": "klein-text-encoder",
+      "shards": [
+        "text_encoder/model-00001-of-00002.safetensors",
+        "text_encoder/model-00002-of-00002.safetensors"
+      ],
+      "host": "klein",
+      "target": "text_encoders/qwen3vl_4b_bf16.safetensors",
+      "bytes": 8875719384,
+      "operation": "safetensors load_file/save_file, shards deleted after"
+    }
+  ],
+  "comfyui": {
+    "repo": "https://github.com/comfyanonymous/ComfyUI.git",
+    "revision": "ce1e922",
+    "revisionDate": "Sat Oct 17 08:49:59 2026 -0700",
+    "note": "GPU test 3 cloned master; colab/bootstrap.py takes --comfyui-ref and scripts/setup-local-comfy.sh pins v0.41.3 for the local BYO path."
+  },
+  "packages": {
+    "comfy-api-proxy": "0.1.6",
+    "comfy-sdk": "0.5.0",
+    "comfy-kitchen": "0.2.38",
+    "comfyui_frontend_package": "1.55.17",
+    "jsonschema": "4.25.1"
+  },
+  "measured": {
+    "run": "Google Colab GPU test 3 (comfyrizz-gpu3, G4)",
+    "date": "2026-10-17",
+    "doc": "docs/GPU_TEST_3.md",
+    "totalBytes": 60019207384,
+    "downloadSeconds": 193.5,
+    "note": "60.0 GB downloaded in 193.5 s (parallel, about 310 MB/s) with the requirements install running at the same time; the text-encoder merge took 22.2 s and setup 218.5 s in total."
+  }
+}

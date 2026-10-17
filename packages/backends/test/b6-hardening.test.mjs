@@ -219,8 +219,12 @@ test("the reserve formula refuses mid-package, and the budget is never exceeded"
   const doc = plan(dir);
   const fake = installFakeColab(dir, { state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
   stageVmOutput(fake, doc, dir, { complete: false });
-  // enough for the stills batch (≈1.09 units) but not for the plate batch on top of it
-  const backend = colabBackendFor({ dir, fake, budgetUnits: 1.15 });
+  // H7 made the per-job minutes measured instead of placeholders (still 0.15, plate 0.5), so the
+  // split budget is smaller than it used to be: admitting the stills batch needs 0.95 units
+  // (its 0.06 upper bound plus the 0.89 collect-and-stop reserve), and the plate batch on top of
+  // that needs 1.05 (committed 0.06 + its 0.10 upper bound + the reserve). 1.00 admits the first
+  // and refuses the second.
+  const backend = colabBackendFor({ dir, fake, budgetUnits: 1.0 });
   await backend.ensureUp({ approved: true });
 
   const run = await backend.run(join(dir, "jobs.json"));

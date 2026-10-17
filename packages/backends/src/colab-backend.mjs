@@ -46,10 +46,39 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..");
 
-/** Per-job GPU minutes before M3 measures real times. Labelled where it is used. */
-export const PLACEHOLDER_JOB_MINUTES = { still: 0.5, plate: 1.5, upscale: 1.0, audio: 0.05 };
-/** Measured Oct 16: create 4 s + clone/requirements 28.5 s + ComfyUI ready 16 s ≈ 5 min (§6.7.2). */
-export const BOOTSTRAP_OVERHEAD_MINUTES = 5;
+/**
+ * Measured wall minutes per job kind (SPEC.md 6.6).
+ *
+ * The estimate is a *session* estimate: Google Colab bills the runtime, not the GPU, so these are
+ * wall-clock minutes through the runner, and the numbers come from the runs that measured them
+ * (docs/GPU_TEST_3.md, docs/GPU_TEST_2.md):
+ *
+ *   | kind    | measured                                                              | here  |
+ *   |---------|-----------------------------------------------------------------------|-------|
+ *   | still   | Klein t2i 1344x768/1024², 16 steps: 1.5-3.0 s (12 jobs); 5.5-5.6 s as a |
+ *   |         | reference edit; 6-8.5 s for the strongest E2 edit; 6-7 s through the   | 0.15  |
+ *   |         | runner on the VM (run1b)                                              |       |
+ *   | plate   | LTX-2.5 two-stage i2v/t2v 1024x576, 97 frames: 13.3-17.0 s; 26.7 s     |       |
+ *   |         | (t2v, longest); 33.0 s for 241 frames (a 10 s clip); 13-28 s through   | 0.5   |
+ *   |         | the runner                                                            |       |
+ *   | upscale | the same graph with the x2 latent upscaler on: 24.2 s at 1536x832      | 0.5   |
+ *   |         | (GPU test 2)                                                          |       |
+ *   | audio   | Kokoro on CPU: 8.3 s for 7 scenes = 1.2 s per narration (GPU test 2)   | 0.05  |
+ *
+ * Every number is rounded up from its worst measurement, so the admission check stays on the
+ * conservative side. The GPU test 3 window itself cost 1.90 account units (380.38 -> 378.48) over
+ * 14 minutes = 8.14 units/h against the 8.9 units/h this backend assumes: the rate is already the
+ * pessimistic one, and it is what makes "before M3" estimates honest.
+ */
+export const MEASURED_JOB_MINUTES = { still: 0.15, plate: 0.5, upscale: 0.5, audio: 0.05 };
+
+/**
+ * Measured Google Colab GPU test 3: clone 1.7 s + requirements/proxy/SDK 193.5 s + model
+ * downloads 193.5 s (parallel, 60.0 GB) + the text-encoder merge 22.2 s = 218.5 s (3.6 min), plus
+ * ComfyUI ready in 14 s and the proxy in 6 s. GPU test 2 measured 215 s. Four minutes is the
+ * rounded-up figure; the cached wheelhouse (H-fix5) can only shorten the requirements step.
+ */
+export const BOOTSTRAP_OVERHEAD_MINUTES = 4;
 
 export function createColabBackend({
   cli = null,
@@ -64,6 +93,7 @@ export function createColabBackend({
   reserveMinutes = COLLECT_AND_STOP_RESERVE_MINUTES,
   warnFraction = WARN_FRACTION,
   bootstrapScript = join(REPO, "colab", "bootstrap.py"),
+  modelsLock = join(REPO, "colab", "models.lock.json"),
   healthScript = join(REPO, "colab", "health.py"),
   runJobsScript = join(REPO, "colab", "run_jobs.py"),
   reconcileScript = join(REPO, "colab", "reconcile.py"),
@@ -158,12 +188,18 @@ export function createColabBackend({
 
   function estimateJobs(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
-    const gpuMinutes = list.reduce((total, job) => total + (PLACEHOLDER_JOB_MINUTES[job.kind] ?? 1), 0);
+    const minutesFor = (job) => MEASURED_JOB_MINUTES[job.kind] ?? 1;
+    const gpuMinutes = list.reduce((total, job) => total + minutesFor(job), 0);
+    const slowest = list.reduce((worst, job) => Math.max(worst, minutesFor(job)), 0);
     return {
       gpuMinutes: Number(gpuMinutes.toFixed(2)),
       overheadMinutes: BOOTSTRAP_OVERHEAD_MINUTES,
       units: unitsForMinutes(gpuMinutes + BOOTSTRAP_OVERHEAD_MINUTES, ratePerHour),
-      basis: "placeholder minutes per job kind until the M3 spike measures real times",
+      basis:
+        "measured wall minutes per job kind (Google Colab GPU test 3, docs/GPU_TEST_3.md; GPU test 2 " +
+        "for the upscale and audio shapes), overhead measured at 218.5 s of setup",
+      perKind: { ...MEASURED_JOB_MINUTES },
+      slowestJobMinutes: slowest,
     };
   }
 
@@ -343,6 +379,14 @@ export function createColabBackend({
         wallMs: 120000,
       });
       if (upload.code !== 0) throw new ColabCliError(`uploading the token file failed (exit ${upload.code})`);
+      // H7: the model pin goes with it. bootstrap.py reads the lock instead of carrying its own
+      // file list, so a bootstrapped VM downloads the revisions the timings were measured on.
+      const lockUpload = await step(argvUpload({ session, localPath: modelsLock, remotePath: `${REMOTE_ROOT}/models.lock.json` }), {
+        label: "upload-lock",
+        wallMs: 120000,
+      });
+      if (lockUpload.code !== 0) throw new ColabCliError(`uploading colab/models.lock.json failed (exit ${lockUpload.code})`);
+      emit(onEvent, { type: "models_lock", path: modelsLock, revisions: lockRevisions(modelsLock) });
       const result = await step(argvExec({ session, file: bootstrapScript, timeout }), { label: "bootstrap", wallMs: (timeout + 60) * 1000 });
       emit(onEvent, { type: "bootstrap", code: result.code, lost: isLost(result), token: hfTokenPlan({ localTokenPath: hfTokenPath }) });
       if (isLost(result)) return { lost: true, note: "the bootstrap exec did not report; reconcile before assuming the VM is ready" };
@@ -593,6 +637,16 @@ export function createColabBackend({
 
   state.runId = null;
   return backend;
+}
+
+/** The revisions the model pin records, for the run log (a session should say what it downloaded). */
+export function lockRevisions(lockPath) {
+  try {
+    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    return Object.fromEntries(Object.entries(lock.hosts || {}).map(([name, host]) => [name, host.revision || null]));
+  } catch (error) {
+    throw new ColabCliError(`the model lock at ${lockPath} is unreadable: ${error?.message || error}`);
+  }
 }
 
 export function isLost(result) {
