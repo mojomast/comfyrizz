@@ -474,7 +474,7 @@ class Runner:
             upload=self.upload_input,
         )
 
-        if outcome.kind == "refused" and self.job_labels_enabled() and classify_metadata_refusal(outcome):
+        if outcome.kind == "refused" and self.config.job_labels == "auto" and classify_metadata_refusal(outcome):
             # one contract, chosen by the server: ask for labels, and if it says no, ask again
             # without them. A refusal means nothing was accepted, so this cannot double-bill.
             self._note_labels_unsupported(job, outcome)
@@ -665,6 +665,71 @@ class Runner:
         return manifest
 
 
+    def adopt(self, job_id: str, server_job_id: str) -> dict[str, Any]:
+        """Give an unresolved attempt the job id you found on the server, then poll it.
+
+        This is the supported way out of ``submission_unknown`` (GPU test 2, issue 8): the attempt
+        record says the submit was ambiguous, ``colab``/the server console says a job exists, and the
+        user — not the runner — decides they are the same piece of work. Nothing is submitted.
+        """
+        self.load_jobs()
+        ensure_dir(self.config.out_dir)
+        job = self._jobs_by_id().get(job_id)
+        if job is None:
+            raise ValueError(f"{job_id} is not in this plan")
+        attempt = self.attempts.unresolved_for_job(job_id)
+        if attempt is None:
+            raise ValueError(f"{job_id} has no unresolved attempt to adopt; run --reconcile to see its state")
+        self.progress.emit("adopt", job=job_id, attempt=attempt.attempt_id, value=server_job_id)
+        attempt = self.attempts.update(
+            attempt,
+            state="submitted",
+            job_id=server_job_id,
+            submitted_at=attempt.submitted_at or now_iso(),
+            error=None,
+            events=[*(attempt.events or []), {"at": now_iso(), "event": "adopted_by_user", "job_id": server_job_id}],
+        )
+        self.results[job_id] = self._poll_attempt(job, attempt, timeout=self.config.reconcile_timeout, collecting=True)
+        for other in self.jobs_doc["jobs"]:
+            self.results.setdefault(other["id"], self._result(other, "pending", reason="no attempt record: this job never started"))
+        manifest = self._write_manifest(notes=[f"{job_id} adopted server job {server_job_id} by hand"])
+        success, why = manifest_decides_success(manifest, self.jobs_doc)
+        self.progress.emit("adopt_done", job=job_id, value={"status": self.results[job_id]["status"], "success": success})
+        return manifest
+
+    def clear(self, job_id: str, reason: str | None = None) -> dict[str, Any]:
+        """Close an unresolved attempt as failed, so the job can be retried deliberately.
+
+        The other half of the ``submission_unknown`` story: if no job exists on the server, the user
+        says so and the runner records *their* reason on the attempt instead of quietly resubmitting.
+        Nothing is submitted here either; the next run picks the job up because it is failed.
+        """
+        self.load_jobs()
+        ensure_dir(self.config.out_dir)
+        job = self._jobs_by_id().get(job_id)
+        if job is None:
+            raise ValueError(f"{job_id} is not in this plan")
+        attempt = self.attempts.unresolved_for_job(job_id)
+        if attempt is None:
+            raise ValueError(f"{job_id} has no unresolved attempt to clear")
+        attempt = self.attempts.update(
+            attempt,
+            state="failed",
+            error={
+                "code": "cleared_by_user",
+                "message": reason or "the user confirmed no job for this attempt exists on the server",
+            },
+            events=[*(attempt.events or []), {"at": now_iso(), "event": "cleared_by_user", "reason": reason}],
+        )
+        self.progress.emit("cleared", job=job_id, attempt=attempt.attempt_id, value=attempt.error["code"])
+        self.results[job_id] = self._result(job, "failed", attempt, error=attempt.error, reason="cleared by hand")
+        for other in self.jobs_doc["jobs"]:
+            self.results.setdefault(other["id"], self._result(other, "pending", reason="no attempt record: this job never started"))
+        manifest = self._write_manifest(notes=[f"{job_id} cleared by hand: {attempt.error['message']}"])
+        self.progress.emit("clear_done", job=job_id, value={"status": "failed"})
+        return manifest
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="comfyrizz_pipeline.runner", description="run jobs.json against Comfy (SPEC.md 6.4)")
     parser.add_argument("--jobs", required=True, help="path to jobs.json")
@@ -676,6 +741,27 @@ def main(argv: list[str] | None = None) -> int:
         help="where input files are uploaded (default <base-url>/upload/image; COMFY_UPLOAD_URL overrides)",
     )
     parser.add_argument("--no-uploads", action="store_true", help="refuse jobs that need an input file uploaded")
+    parser.add_argument(
+        "--job-labels",
+        dest="job_labels",
+        action="store_true",
+        default=None,
+        help="always send job labels (metadata); the default 'auto' drops them if the server refuses",
+    )
+    parser.add_argument("--no-job-labels", dest="job_labels", action="store_false", help="never send job labels")
+    parser.add_argument(
+        "--adopt",
+        default=None,
+        metavar="JOB=SERVER_JOB_ID",
+        help="attach a job id you found on the server to an unresolved attempt and poll it (never submits)",
+    )
+    parser.add_argument(
+        "--clear",
+        default=None,
+        metavar="JOB",
+        help="close an unresolved attempt as failed with --reason, so the job can be retried (never submits)",
+    )
+    parser.add_argument("--reason", default=None, help="why a --clear is right (recorded on the attempt)")
 
     parser.add_argument("--reconcile", action="store_true", help="poll known job ids instead of running")
     parser.add_argument("--poll-interval", type=float, default=0.25)
@@ -701,10 +787,20 @@ def main(argv: list[str] | None = None) -> int:
         batch=args.batch,
         upload_url=args.upload_url,
         uploads_enabled=not args.no_uploads,
+        job_labels="auto" if args.job_labels is None else args.job_labels,
     )
     runner = Runner(config)
     try:
-        manifest = runner.reconcile() if args.reconcile else runner.run()
+        if args.adopt:
+            job_id, _, server_job_id = args.adopt.partition("=")
+            if not server_job_id:
+                print("error: --adopt wants JOB=SERVER_JOB_ID", file=sys.stderr)
+                return 2
+            manifest = runner.adopt(job_id, server_job_id)
+        elif args.clear:
+            manifest = runner.clear(args.clear, args.reason)
+        else:
+            manifest = runner.reconcile() if args.reconcile else runner.run()
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

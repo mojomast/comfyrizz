@@ -131,6 +131,11 @@ class SubmitOutcome:
     def submitted(self) -> bool:
         return self.kind == "submitted"
 
+    @property
+    def refused(self) -> bool:
+        """A clean local/server refusal: nothing was accepted, so nothing is ambiguous."""
+        return self.kind == "refused"
+
 
 def classify_submit_error(exc: BaseException, idempotency_key: str | None = None) -> SubmitOutcome:
     code = getattr(exc, "code", None)

@@ -102,6 +102,7 @@ class FakeComfyState:
         node_types: list[str] | None = None,
         model_files: list[str] | None = None,
         upload_status: int = 200,
+        reject_metadata: bool = False,
     ):
         self.outputs = outputs
         self.output_kind = output_kind
@@ -121,6 +122,9 @@ class FakeComfyState:
         self.uploads: dict[str, dict[str, Any]] = {}
         #: what /upload/image answers: 200, or a status a server without the route would send
         self.upload_status = upload_status
+        #: comfy-api-proxy behaviour: it refuses the SDK's metadata object (GPU test 2, issue 1)
+        self.reject_metadata = reject_metadata
+        self.metadata_rejections = 0
         self.jobs: dict[str, dict[str, Any]] = {}
         self.idempotency_seen: dict[str, str] = {}
         self.log: list[dict[str, Any]] = []
@@ -167,6 +171,14 @@ class FakeComfyState:
     def submitted_input(self, node_id: str, field: str = "image") -> list[Any]:
         """What each submitted graph had at ``node_id.inputs[field]`` (e.g. the LoadImage name)."""
         return [graph.get(str(node_id), {}).get("inputs", {}).get(field) for graph in self.submitted_workflows()]
+
+    def submitted_metadata(self) -> list[Any]:
+        """The ``metadata`` of every submitted job body, in submission order (None when omitted)."""
+        return [
+            (entry.get("body") or {}).get("metadata")
+            for entry in self.requests("POST", "/api/v2/jobs")
+            if not entry["path"].endswith("/cancel")
+        ]
 
     def configure(self, **kwargs: Any) -> None:
         for key, value in kwargs.items():
@@ -365,6 +377,21 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path == "/api/v2/jobs":
             key = self.headers.get("Idempotency-Key")
+            metadata = body.get("metadata")
+            if state.reject_metadata and isinstance(metadata, dict):
+                # comfy-api-proxy's own words from the GPU test 2 run: the only accepted form is no
+                # metadata at all, because the SDK cannot send the string the proxy wants
+                state.metadata_rejections += 1
+                self._send_json(
+                    {
+                        "error": {
+                            "code": "invalid_request",
+                            "message": "'metadata' must be a string (opaque label)",
+                        }
+                    },
+                    status=422,
+                )
+                return
             if key and key in state.idempotency_seen:
                 self._send_json(
                     {"error": {"code": "idempotency_key_reuse", "message": "this Idempotency-Key was already used"}},
@@ -499,12 +526,19 @@ class FakeComfy:
     def submitted_workflows(self) -> list[dict[str, Any]]:
         return self.state.submitted_workflows()
 
+    def submitted_metadata(self) -> list[Any]:
+        return self.state.submitted_metadata()
+
     def submitted_input(self, node_id: str, field: str = "image") -> list[Any]:
         return self.state.submitted_input(node_id, field)
 
     @property
     def uploads(self) -> dict[str, Any]:
         return self.state.uploads
+
+    @property
+    def metadata_rejections(self) -> int:
+        return self.state.metadata_rejections
 
     @property
     def jobs(self) -> dict[str, Any]:
