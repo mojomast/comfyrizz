@@ -9,6 +9,7 @@ export {
   BATCH_ORDER,
   DIM_MULTIPLE_BY_KIND,
 } from "./plan.mjs";
+export { applyManifestToPackage, mediaFor } from "./apply.mjs";
 export {
   resolveDimension,
   resolveDimensions,

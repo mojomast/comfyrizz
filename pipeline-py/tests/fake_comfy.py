@@ -47,6 +47,8 @@ class FakeComfyState:
         finish_after: float = 0.0,
         drop_first_response: bool = False,
         fail_on_submit: int | None = None,
+        fail_labels: list[str] | None = None,
+        request_log: str | None = None,
         progress_steps: int = 3,
         node_types: list[str] | None = None,
         model_files: list[str] | None = None,
@@ -58,6 +60,10 @@ class FakeComfyState:
         self.finish_after = finish_after
         self.drop_first_response = drop_first_response
         self.fail_on_submit = fail_on_submit
+        #: job labels (metadata.comfyrizz_job) that should end as `failed` — one injected failure
+        self.fail_labels = fail_labels or []
+        #: optional JSONL file of {method, path, label} for cross-process assertions
+        self.request_log = request_log
         self.progress_steps = progress_steps
         self.node_types = node_types or ["CheckpointLoaderSimple", "KSampler", "LoadImage", "SaveImage", "LTXVScheduler"]
         self.model_files = model_files or ["flux-3-image-klein.safetensors", "ltx-2.5-22b-distilled.safetensors"]
@@ -115,10 +121,12 @@ class FakeComfyState:
                         "url_expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3600)),
                     }
                 )
+            metadata = body.get("metadata") or {}
             self.jobs[job_id] = {
                 "id": job_id,
                 "status": "queued",
                 "create_time": time.time(),
+                "label": metadata.get("comfyrizz_job"),
                 "outputs": outputs,
                 "metadata": (body.get("metadata") or {}),
                 "idempotency_key": idempotency_key,
@@ -136,7 +144,7 @@ class FakeComfyState:
             job["status"] = "running"
             job["progress"] = {"value": 0.01, "nodes_done": 1, "nodes_total": 31}
             return job
-        if self.fail and elapsed >= self.finish_after:
+        if (self.fail or job.get("label") in self.fail_labels) and elapsed >= self.finish_after:
             job["status"] = "failed"
             job["completed_at"] = time.time()
             job["error"] = {
@@ -202,6 +210,10 @@ class _Handler(BaseHTTPRequestHandler):
             return {"_raw": raw.decode("utf-8", "replace")}
 
     def _record(self, method: str, path: str, body: dict[str, Any] | None = None, status: int | None = None) -> None:
+        if self.state.request_log:
+            label = ((body or {}).get("metadata") or {}).get("comfyrizz_job")
+            with open(self.state.request_log, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"method": method, "path": path, "label": label, "at": time.time()}) + "\n")
         self.state.log.append(
             {
                 "method": method,
@@ -343,10 +355,11 @@ class _Handler(BaseHTTPRequestHandler):
 class FakeComfy:
     """Context manager around the fake server: ``with FakeComfy() as fake: fake.base_url``."""
 
-    def __init__(self, **kwargs: Any):
+    def __init__(self, port: int = 0, **kwargs: Any):
         self.state = FakeComfyState(**kwargs)
         handler = type("BoundHandler", (_Handler,), {"state": self.state})
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        # port 0 = allocate one; an explicit port is what the BYO backend's proxyCommand needs
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", int(port)), handler)
         self.httpd.daemon_threads = True
         self.state.origin = self.base_url
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)

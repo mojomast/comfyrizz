@@ -3,6 +3,8 @@
 // ComfyUI it did not start: the cost is the user's own and invisible to us, so `describe()`
 // says `external-unknown` rather than pretending.
 import { createServer } from "node:net";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -10,6 +12,9 @@ import { ColabCliError } from "./cli.mjs";
 import { sleep } from "./cli.mjs";
 
 export const PROXY_BIN = "comfy-api-proxy";
+
+/** pipeline-py lives next to packages/ in this repository; the runner is imported from there. */
+const PIPELINE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "pipeline-py");
 
 export async function findFreePort(host = "127.0.0.1") {
   return new Promise((resolve, reject) => {
@@ -31,6 +36,7 @@ export function createByoBackend({
   proxyCommand = null,
   pythonBin = process.env.COMFYRIZZ_PYTHON || "python3",
   runnerCommand = null,
+  runnerCwd = PIPELINE_DIR,
   outDir = null,
   jobsFile = null,
   requiredNodes = [],
@@ -153,7 +159,13 @@ export function createByoBackend({
         "--base-url",
         v2(),
       ];
-      const child = spawn(command[0], args, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(command[0], args, {
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+        cwd: runnerCwd,
+        // the runner is an uninstalled package: it is imported from its own directory
+        env: { ...process.env, PYTHONPATH: [runnerCwd, process.env.PYTHONPATH].filter(Boolean).join(":") },
+      });
       let buffer = "";
       const handle = (chunk) => {
         buffer += chunk.toString("utf8");
@@ -186,6 +198,8 @@ export function createByoBackend({
       const child = spawn(command[0], [...command.slice(1), "--jobs", jobsFile, "--out", outDir || join(process.cwd(), "out"), "--reconcile", "--base-url", v2()], {
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
+        cwd: runnerCwd,
+        env: { ...process.env, PYTHONPATH: [runnerCwd, process.env.PYTHONPATH].filter(Boolean).join(":") },
       });
       await new Promise((resolve) => child.on("close", resolve));
       const manifestPath = join(outDir || join(process.cwd(), "out"), "manifest.json");
