@@ -216,8 +216,14 @@ class Runner:
         return data
 
     def _deployment_key(self) -> str:
-        """Which deployment root an upload endpoint belongs to (the cache is per-deployment)."""
-        base = self.config.base_url or os.environ.get("COMFY_BASE_URL") or "default"
+        """Which deployment an upload endpoint or a note belongs to (both caches are per-deployment).
+
+        The server the runner is actually talking to decides this, not just the config field: a
+        caller that hands the runner a client (the tests, and any embedder) still gets per-deployment
+        caches, and a note recorded against one Google Colab VM is never carried into another
+        (GPU test 3, N5).
+        """
+        base = self.config.base_url or getattr(self.client, "base_url", None) or os.environ.get("COMFY_BASE_URL") or "default"
         return str(base).rstrip("/")
 
     def _remembered_upload_urls(self) -> list[str]:
@@ -298,6 +304,7 @@ class Runner:
                     "upload": "the endpoint the upload itself accepted, after the deployment root (the v2 proxy) refused it",
                 }.get(str(resolved.get("chosen_by")), "ComfyUI's own origin")
                 self.upload_note = f"input files were uploaded to {url} ({why}), not to {default}"
+                self._remember_note("upload", self.upload_note)
         return url
 
     def upload_input(self, path: Path) -> dict[str, Any]:
@@ -345,11 +352,47 @@ class Runner:
         return entry
 
     # -- manifest ------------------------------------------------------------------
+    def _notes_path(self) -> Path:
+        return self.config.out_dir / "cache" / "notes.json"
+
+    def _notes_load(self) -> dict[str, Any]:
+        path = self._notes_path()
+        if not path.is_file():
+            return {"v": 1, "deployments": {}}
+        data = read_json(path)
+        data.setdefault("deployments", {})
+        return data
+
+    def _remember_note(self, kind: str, text: str) -> None:
+        """Keep a deployment-level note, so a later all-cached run still explains its files.
+
+        GPU test 3, N5: the label-refusal note lived only in this process, and the next run - which
+        submits nothing and copies cached files - rewrote the manifest without it, so the reason those
+        files carry no labels vanished from the record. The store is per deployment (like the upload
+        cache), so a fresh Google Colab VM cannot inherit another deployment's note.
+        """
+        data = self._notes_load()
+        entry = data["deployments"].setdefault(self._deployment_key(), {})
+        entry[kind] = text
+        entry["at"] = now_iso()
+        write_json_atomic(self._notes_path(), data)
+
+    def _carried_over_notes(self) -> list[str]:
+        """Notes from an earlier run against this deployment, for kinds this run did not observe."""
+        entry = self._notes_load()["deployments"].get(self._deployment_key()) or {}
+        carried: list[str] = []
+        if not self.label_note and entry.get("label"):
+            carried.append(f"{entry['label']} (recorded in an earlier run against this deployment, whose files this run reused)")
+        if not self.upload_note and entry.get("upload"):
+            carried.append(f"{entry['upload']} (recorded in an earlier run against this deployment, whose files this run reused)")
+        return carried
+
     def _write_manifest(self, notes: list[str] | None = None) -> dict[str, Any]:
         if self.label_note:
             notes = [*(notes or []), self.label_note]
         if self.upload_note:
             notes = [*(notes or []), self.upload_note]
+        notes = [*(notes or []), *self._carried_over_notes()]
         manifest = build_manifest(
             run_id=self.run_id,
             jobs_doc=self.jobs_doc,
@@ -530,6 +573,7 @@ class Runner:
             "the run continued without metadata, so a lost submit cannot be recovered from its label"
         )
         self.progress.emit("metadata_unsupported", job=job["id"], attempt=None, value=self.label_note)
+        self._remember_note("label", self.label_note)
 
     def _submit_job(self, job: dict[str, Any], *, file_inputs: dict[str, Path] | None = None) -> dict[str, Any]:
         params = dict(job.get("params") or {})

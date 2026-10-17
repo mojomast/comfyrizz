@@ -101,6 +101,29 @@ def test_a_server_that_refuses_labels_gets_a_second_submit_without_them(tmp_path
     assert runner.job_labels_enabled() is False
 
 
+def test_the_labels_note_survives_an_all_cached_rerun(tmp_path: Path, servers):
+    """GPU test 3, N5: the second run submits nothing, and it rewrote the manifest without the note."""
+    fake = servers(reject_metadata=True)
+    work = workdir(tmp_path)
+    first = runner_for(work, fake).run()
+    note = next(n for n in first["notes"] if "job labels" in n)
+
+    second = runner_for(work, fake).run()
+    assert second["counts"] == {"cached": 5}, second["counts"]
+    assert fake.metadata_rejections == 1, "a cached run asks the server for nothing"
+    carried = [n for n in second["notes"] if "job labels" in n]
+    assert len(carried) == 1, second["notes"]
+    assert carried[0].startswith(note), "the same note, not a paraphrase"
+    assert "earlier run against this deployment" in carried[0], "and it says where it comes from"
+    # the store is keyed by deployment: a fresh Google Colab VM cannot inherit another server's note
+    store = json.loads((work / "out" / "cache" / "notes.json").read_text(encoding="utf-8"))
+    assert list(store["deployments"]) == [fake.base_url], store
+    other = servers(reject_metadata=True)
+    third = runner_for(work, other).run()
+    assert third["counts"] == {"cached": 5}, third["counts"]
+    assert not [n for n in third.get("notes", []) if "earlier run" in n], third.get("notes")
+
+
 def test_labels_can_be_forced_on_or_off(tmp_path: Path, servers):
     fake = servers()
     work = workdir(tmp_path)
