@@ -13,6 +13,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderPackageIncremental } from './render-incremental.mjs';
 import { findLayoutOverlaps } from '../src/layout-model.js';
+import { collectMediaDims } from '../src/media-dims.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const rendererDir = join(here, '..');
@@ -23,8 +24,9 @@ const exampleName = basename(exampleDir);
 const timeline = JSON.parse(readFileSync(join(exampleDir, 'timeline.json'), 'utf8'));
 
 // Layout gate: refuse to export a scene where a foreground card would cover
-// text (see test/layout.test.mjs).
-const layoutOverlaps = findLayoutOverlaps(JSON.parse(readFileSync(join(exampleDir, 'package.json'), 'utf8')));
+// text (see test/layout.test.mjs). Real probed sizes (A8) beat declared ones.
+const pkg = JSON.parse(readFileSync(join(exampleDir, 'package.json'), 'utf8'));
+const layoutOverlaps = findLayoutOverlaps(pkg, { mediaDims: collectMediaDims(pkg, exampleDir) });
 if (layoutOverlaps.length > 0) {
   const detail = layoutOverlaps.map(item => `${item.scene}/${item.asset}`).join(', ');
   throw new Error(`layout check failed (text/asset overlap): ${detail}`);

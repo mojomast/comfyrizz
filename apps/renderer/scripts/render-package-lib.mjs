@@ -9,6 +9,7 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
+import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '..', '..', '..');
@@ -103,14 +104,17 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   const timeline = compileTimeline(pkg, narrationOptions(packageDir));
   const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
   const missingMedia = missingMediaFiles(pkg, packageDir);
+  const mediaDims = collectMediaDims(pkg, packageDir);
+  const dimProblems = dimMismatches(pkg, mediaDims);
   const mediaPath = join(packageDir, 'media.json');
   const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
   const propsPath = `${outputPath.replace(/\.(mp4|png|jpg)$/, '')}.props.json`;
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}) }));
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
   onLog(`inlined ${Object.keys(generatedAssets).length} generated asset(s)`);
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
   if (timeline.provisional) onLog('warning: narration is not measured; timeline is provisional and must not be exported as final');
   for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
+  for (const item of dimProblems) onLog(`warning: declared ${item.declared.width}x${item.declared.height} for ${item.id} (${item.file}) but the file is ${item.real.width}x${item.real.height}; using the real size`);
 
   let resolvedPublicDir = publicDir;
   let cleanupDir = null;
@@ -162,6 +166,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
     package: pkg,
     ...(still ? { still: true } : {}),
     ...(missingMedia.length > 0 ? { missingMedia } : {}),
+    ...(dimProblems.length > 0 ? { dimProblems } : {}),
     ...(media ? { media } : {}),
   };
 }

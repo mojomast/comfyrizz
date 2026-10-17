@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 import { AbsoluteFill, Img, Loop, OffthreadVideo, interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Asset, ForegroundItem, PackageV1 } from '../../../packages/schema/types';
 import { fontFamily, palette, textColors } from './theme';
@@ -16,12 +16,28 @@ export { isRenderableMedia, resolveSceneMedia } from './media-model.js';
 const MissingMediaContext = createContext<Set<string>>(new Set());
 
 export function MissingMediaProvider({ files, children }: { files?: string[]; children: React.ReactNode }) {
-  const value = new Set(files ?? []);
+  // Memoised so a per-frame parent render does not hand every media node a new
+  // Set (which would re-render each video fill every frame and stall seeks).
+  const value = useMemo(() => new Set(files ?? []), [files]);
   return <MissingMediaContext.Provider value={value}>{children}</MissingMediaContext.Provider>;
 }
 
 export function useMissingMedia(): Set<string> {
   return useContext(MissingMediaContext);
+}
+
+/** Probed real file sizes (A8), keyed by package-relative file. */
+export type MediaDimsMap = Record<string, { width: number; height: number }>;
+
+const MediaDimsContext = createContext<MediaDimsMap>({});
+
+export function MediaDimsProvider({ dims, children }: { dims?: MediaDimsMap; children: React.ReactNode }) {
+  const value = useMemo(() => dims ?? {}, [dims]);
+  return <MediaDimsContext.Provider value={value}>{children}</MediaDimsContext.Provider>;
+}
+
+export function useMediaDims(): MediaDimsMap {
+  return useContext(MediaDimsContext);
 }
 
 /** Labelled stand-in drawn when a declared media file is not in this clone. */
@@ -91,7 +107,8 @@ export function MediaFill({
     return <MissingMediaPlaceholder assetId={assetId} asset={asset} pkg={pkg} />;
   }
   const src = staticFile(asset.file ?? '');
-  const style: React.CSSProperties = { width: '100%', height: '100%', objectFit: fit };
+  // Cover/contain is centred so a wrong declared size can crop, never stretch.
+  const style: React.CSSProperties = { width: '100%', height: '100%', objectFit: fit, objectPosition: 'center' };
   if (asset.kind === 'image') return <Img src={src} style={style} onError={() => setFailed(true)} />;
   const sourceFrames = asset.media?.frames ?? 97;
   const sourceFps = asset.media?.fps ?? 24;
@@ -130,8 +147,11 @@ function panelAnimation(frame: number, anim: ForegroundItem['anim']): { opacity:
 export function MediaPanel({ asset, assetId, item, pkg, sceneFrames }: { asset: Asset; assetId?: string; item: ForegroundItem; pkg: PackageV1; sceneFrames: number }) {
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
+  const mediaDims = useMediaDims();
+  const real = typeof asset.file === 'string' ? mediaDims[asset.file] : undefined;
+  const aspect = real?.width && real?.height ? real.width / real.height : 16 / 9;
   const w = (item.w ?? 0.4) * width;
-  const h = item.h !== undefined ? item.h * height : (w * 9) / 16;
+  const h = item.h !== undefined ? item.h * height : w / aspect;
   const anim = panelAnimation(frame, item.anim);
   return (
     <div

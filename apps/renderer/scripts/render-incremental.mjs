@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
+import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 
 /** Bump when a renderer change can alter rendered frames. */
 export const RENDERER_VERSION = 3;
@@ -87,7 +88,7 @@ export function mergeScenes(pkg, timeline) {
  * Split a compiled timeline into per-scene frame segments with a content hash.
  * Pure: no rendering, so tests can assert reuse decisions without a browser.
  */
-export function planSegments(pkg, timeline, { generatedAssets = {}, media, compositionId = 'PackageDemo', missingMedia = [] } = {}) {
+export function planSegments(pkg, timeline, { generatedAssets = {}, media, compositionId = 'PackageDemo', missingMedia = [], mediaDims = {} } = {}) {
   const segments = [];
   const renderScenes = mergeScenes(pkg, timeline);
   for (let index = 0; index < renderScenes.length; index += 1) {
@@ -124,6 +125,7 @@ export function planSegments(pkg, timeline, { generatedAssets = {}, media, compo
       captions,
       media: mediaInputs,
       missing: missingMedia.map(item => item.file),
+      dims: mediaDims,
     };
     const key = createHash('sha256').update(canonicalJson(keyInput)).digest('hex').slice(0, 32);
     segments.push({ index, sceneId: scene.id, start, end, frames, key });
@@ -156,6 +158,8 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   const timeline = existsSync(timelinePath) ? JSON.parse(readFileSync(timelinePath, 'utf8')) : compileTimeline(pkg);
   const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
   const missingMedia = missingMediaFiles(pkg, packageDir);
+  const mediaDims = collectMediaDims(pkg, packageDir);
+  const dimProblems = dimMismatches(pkg, mediaDims);
   const scenes = mergeScenes(pkg, timeline);
   const mediaPath = join(packageDir, 'media.json');
   const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
@@ -165,11 +169,12 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   const cache = cacheDir ?? join(rendererDir, '.cache', pkg.id);
   mkdirSync(cache, { recursive: true });
   const propsPath = join(cache, 'props.json');
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}) }));
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
   for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
+  for (const item of dimProblems) onLog(`warning: declared ${item.declared.width}x${item.declared.height} for ${item.id} (${item.file}) but the file is ${item.real.width}x${item.real.height}; using the real size`);
 
-  const segments = planSegments(pkg, timeline, { generatedAssets, media, compositionId, missingMedia });
+  const segments = planSegments(pkg, timeline, { generatedAssets, media, compositionId, missingMedia, mediaDims });
   const rendered = [];
   const reused = [];
 

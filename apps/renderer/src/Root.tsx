@@ -7,6 +7,7 @@ import narratedTimelineJson from '../../../examples/narrated-demo/timeline.json'
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import { TimelinePlayer, sceneById } from './player';
+import type { MediaDimsMap } from './media';
 import { narrationAudio } from './audio-model';
 import type { InlineAsset } from './components';
 import type { MediaSidecar } from './media';
@@ -16,7 +17,7 @@ const timeline = timelineJson as unknown as Timeline;
 const narratedPkg = narratedPkgJson as unknown as PackageV1;
 const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
-type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[] };
+type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[]; mediaDims?: MediaDimsMap };
 
 /** Audio that disappears instead of crashing when its file is not in this clone. */
 function SafeAudio({ file }: { file: string }) {
@@ -34,6 +35,7 @@ function LaunchDemo(props: Partial<DemoProps>) {
       generatedAssets={props.generatedAssets}
       media={props.media}
       missingMedia={props.missingMedia}
+      mediaDims={props.mediaDims}
     />
   );
 }
@@ -52,7 +54,7 @@ function NarratedDemo() {
  * plays the package's measured narration and, when the timeline has measured
  * (non-estimated) captions, burns them in (N7).
  */
-function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, generatedAssets, media, missingMedia }: Partial<DemoProps>) {
+function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, generatedAssets, media, missingMedia, mediaDims }: Partial<DemoProps>) {
   const resolvedPkg = demoPkg ?? pkg;
   const resolvedTimeline = demoTimeline ?? timeline;
   const audio = narrationAudio(resolvedPkg);
@@ -67,6 +69,7 @@ function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, generatedAssets, me
         generatedAssets={generatedAssets}
         media={media}
         missingMedia={missingMedia}
+        mediaDims={mediaDims}
         {...(captions ? { captions } : {})}
       />
     </>

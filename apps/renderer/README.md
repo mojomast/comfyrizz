@@ -174,6 +174,18 @@ runs the renderer + planner suites, exports `examples/launch-demo` and asserts
 the ffprobe frame count equals the committed timeline, then removes the
 worktree.
 
+### Real media size beats declared size (A8)
+
+GPU test 3 showed a manifest can declare the wrong size (reference-edit stills
+sized to the package format, a 960x544 plate returned 960x512). `src/media-dims.js`
+now reads PNG/JPEG/GIF headers (and ffprobe for video) when the export builds
+the props, passes the real sizes as `mediaDims`, and logs one warning per asset
+where the declared and real sizes differ. `MediaPanel` derives the panel height
+from the real aspect ratio and `MediaFill` uses `object-fit: cover` centred, so a
+wrong declared size crops instead of stretching; `findLayoutOverlaps` takes the
+same `mediaDims` so the text/asset gate uses the real box. A missing file (clean
+clone) falls back to the declared size with no warning.
+
 `render:package` renders each scene as its own content-addressed segment under
 `apps/renderer/.cache/<pkg.id>/`, so an unchanged scene is reused and a one-scene
 edit only re-renders the affected segment (plus the fade before it).
@@ -192,7 +204,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 
 | Check | Result |
 |---|---|
-| `npm test` | 53/53 pass (incl. P-fix3 freshness, N7/N8 narration, P-fix4 missing-media placeholder) |
+| `npm test` | 58/58 pass (incl. P-fix3 freshness, N7/N8 narration, P-fix4 missing-media placeholder, A8 real-dims) |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `a5cd2d9b…3447` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
@@ -208,6 +220,8 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 | Wind showcase (A7) | `examples/showcase-gpu3` incremental, 1920×1080 30/1 H.264 + AAC, **1092 frames**, 36.400 s, hash `fb4792fb…9184`, 6 segments, 9 captions; CPU 132.7 s |
 | Layout overlap gate (A6) | `findLayoutOverlaps` clean for all six bundled packages; `layout.test.mjs` 5/5 |
 | Missing media (P-fix4) | `showcase-gpu3` still rendered through `renderPackage` with `assets/` + `audio/` removed: labelled placeholder, silent, committed captions, `missing-media.test.mjs` 2/2 + 2 `media.test.mjs` unit cases |
+| Real media dims (A8) | `media-dims.test.mjs` 5/5: PNG/JPEG/GIF header reads, a 960x512 video plate and a 1024x1024 still declared 1920x1080 cover-fit centred with a uniform scale (no stretch), mismatch warnings, `foregroundBox` from the real aspect |
+| A8 gpu3 re-render | `examples/showcase-gpu3` incremental after A8: 1920x1080 30/1 H.264 + AAC, **1092 frames**, 36.496 s, hash `fb4792fb…9184`, 6 rendered; no declared/real mismatch; CPU 141.0 s |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is
 reproducible with `npm run render:example`.

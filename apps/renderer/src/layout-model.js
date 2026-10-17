@@ -44,12 +44,16 @@ export function textZones(scene) {
 }
 
 /**
- * Aspect ratio (width / height) of a foreground asset. Prefers the SVG
- * render-check raster size, then media metadata, and defaults to 16:9.
+ * Aspect ratio (width / height) of a foreground asset. Prefers the probed real
+ * size (A8), then the SVG render-check raster size, then media metadata, and
+ * defaults to 16:9.
  * @param {any} asset
+ * @param {Record<string, {width:number,height:number}>} [dims] probed file sizes, keyed by package-relative file
  * @returns {number}
  */
-export function assetAspect(asset) {
+export function assetAspect(asset, dims) {
+  const real = typeof asset?.file === 'string' ? dims?.[asset.file] : undefined;
+  if (real?.width && real?.height) return real.width / real.height;
   const rc = asset?.gen?.render_check;
   if (rc?.width && rc?.height) return rc.width / rc.height;
   const media = asset?.media;
@@ -73,14 +77,16 @@ export function isDrawnForeground(asset) {
 
 /**
  * Normalized box a foreground item occupies. The renderer centers the item on
- * (x, y) and sets width = w; height follows the asset aspect ratio.
+ * (x, y) and sets width = w; height follows the asset aspect ratio (probed real
+ * size when available, so a wrong declared size cannot stretch the panel).
  * @param {any} item
  * @param {any} asset
+ * @param {Record<string, {width:number,height:number}>} [dims]
  * @returns {Box}
  */
-export function foregroundBox(item, asset) {
+export function foregroundBox(item, asset, dims) {
   const w = item?.w ?? 0.4;
-  const h = (w * W) / (assetAspect(asset) * H);
+  const h = (w * W) / (assetAspect(asset, dims) * H);
   const cx = item?.x ?? 0.5;
   const cy = item?.y ?? 0.5;
   return { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 };
@@ -107,17 +113,17 @@ function sceneEntries(pkg) {
  * Find text/asset overlaps across a package. Only drawn foreground assets are
  * considered.
  * @param {any} pkg
- * @param {{margin?:number}} [options]
+ * @param {{margin?:number, mediaDims?:Record<string, {width:number,height:number}>}} [options]
  * @returns {{scene:string,asset:string,text:Box,box:Box}[]}
  */
-export function findLayoutOverlaps(pkg, { margin = 0.005 } = {}) {
+export function findLayoutOverlaps(pkg, { margin = 0.005, mediaDims } = {}) {
   const overlaps = [];
   for (const [sceneId, scene] of sceneEntries(pkg)) {
     const zones = textZones(scene);
     for (const item of scene?.foreground ?? []) {
       const asset = pkg?.assets?.[item.asset];
       if (!isDrawnForeground(asset)) continue;
-      const box = foregroundBox(item, asset);
+      const box = foregroundBox(item, asset, mediaDims);
       for (const zone of zones) {
         if (intersects(box, zone, margin)) {
           overlaps.push({ scene: sceneId, asset: item.asset, text: zone, box });
