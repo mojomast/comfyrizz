@@ -6,6 +6,8 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
     "jsx": "react-jsx",
+    "allowJs": true,
+    "checkJs": false,
     "noEmit": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
