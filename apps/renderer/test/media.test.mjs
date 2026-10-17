@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isMediaKind, normalizeScrim, resolveSceneMedia } from '../src/media-model.ts';
-import { contrastText, textColors } from '../src/theme-model.ts';
+import { isMediaKind, normalizeScrim, resolveSceneMedia } from '../src/media-model.js';
+import { contrastText, textColors } from '../src/theme-model.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');

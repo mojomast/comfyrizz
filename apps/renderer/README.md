@@ -46,7 +46,8 @@ Raster/video assets can fill the frame or sit in a framed panel:
 The proposed field names above are Hermes's H-fix1 (`packages/schema`). Until
 that lands, the renderer falls back to an `examples/<name>/media.json` sidecar
 (`scrim`, `skipLayout`, `lowerThird`); the resolution logic lives in
-`src/media-model.ts` and is unit-tested.
+`src/media-model.js` and is unit-tested on plain Node 20 (`npm test`, no type
+stripper).
 
 ## Determinism
 

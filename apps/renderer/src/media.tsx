@@ -3,8 +3,8 @@ import { AbsoluteFill, Img, Loop, OffthreadVideo, interpolate, staticFile, useCu
 import type { Asset, ForegroundItem, PackageV1 } from '../../../packages/schema/types';
 import { fontFamily, textColors } from './theme';
 
-export type { MediaSidecar, LowerThirdContent, ResolvedSceneMedia } from './media-model';
-export { resolveSceneMedia } from './media-model';
+export type { MediaSidecar, LowerThirdContent, ResolvedSceneMedia } from './media-model.js';
+export { resolveSceneMedia } from './media-model.js';
 
 /** A raster/video asset stretched over the frame, looped to fill the scene. */
 export function MediaFill({

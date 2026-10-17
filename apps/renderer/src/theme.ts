@@ -1,7 +1,7 @@
 import { staticFile } from 'remotion';
 import { loadFont } from '@remotion/fonts';
 import type { Scene } from '../../../packages/schema/types';
-import { DEFAULT_PALETTE, color, palette, textColors } from './theme-model';
+import { DEFAULT_PALETTE, color, palette, textColors } from './theme-model.js';
 
 export { DEFAULT_PALETTE, color, palette, textColors };
 
