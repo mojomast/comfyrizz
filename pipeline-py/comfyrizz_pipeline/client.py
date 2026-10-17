@@ -33,6 +33,10 @@ from .atomic import sha256_file
 #: Parameters the planner sets that are job controls, not node inputs.
 CONTROL_PARAMS = {"upscale", "cutout", "frames_seconds"}
 
+#: Local failures that mean no request was ever made (a missing workflow, an unreadable file).
+#: They are clean refusals, never `submission_unknown`: nothing can have reached the server.
+FILE_FAILURES = (FileNotFoundError, NotADirectoryError, IsADirectoryError, PermissionError)
+
 #: Transport failures after which the request definitely never reached the server.
 NEVER_REACHED = (httpx.ConnectError, httpx.ConnectTimeout)
 #: Transport failures that leave "did the server see it?" unanswered.
@@ -71,6 +75,9 @@ def classify_submit_error(exc: BaseException, idempotency_key: str | None = None
     }
     if code == "idempotency_key_reuse":
         return SubmitOutcome("duplicate_key", idempotency_key=idempotency_key, error=payload)
+    if isinstance(exc, FILE_FAILURES):
+        payload["code"] = "workflow_unreadable"
+        return SubmitOutcome("refused", idempotency_key=idempotency_key, error=payload)
     if isinstance(exc, NEVER_REACHED):
         payload["code"] = "connect_failed"
         return SubmitOutcome("refused", idempotency_key=idempotency_key, error=payload)

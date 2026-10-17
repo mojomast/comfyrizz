@@ -37,6 +37,7 @@ export function createByoBackend({
   pythonBin = process.env.COMFYRIZZ_PYTHON || "python3",
   runnerCommand = null,
   runnerCwd = PIPELINE_DIR,
+  runnerTimeoutSeconds = 1800,
   outDir = null,
   jobsFile = null,
   requiredNodes = [],
@@ -46,7 +47,11 @@ export function createByoBackend({
 } = {}) {
   if (!comfyuiUrl) throw new Error("createByoBackend needs the user's ComfyUI URL");
   const state = { proxy: null, port, startedByUs: false, submittedJobs: new Set(), startedAtMs: null, cancelCalls: [] };
-  const v2 = () => `http://${host}:${state.port}/api/v2`;
+  // Two different URLs, deliberately: `rootUrl()` is the deployment root the SDK wants in
+  // COMFY_BASE_URL (it appends /api/v2 itself), `v2()` is the versioned surface our own HTTP
+  // checks talk to.
+  const rootUrl = () => `http://${host}:${state.port}`;
+  const v2 = () => `${rootUrl()}/api/v2`;
 
   async function fetchJson(url, init) {
     const response = await fetch(url, init);
@@ -85,6 +90,7 @@ export function createByoBackend({
         [proxyBin, "--comfyui", comfyuiUrl, "--port", String(state.port)];
       const child = spawn(command[0], command.slice(1), { shell: false, stdio: ["ignore", "pipe", "pipe"] });
       state.proxy = child;
+      state.proxyPid = child.pid;
       state.startedByUs = true;
       state.startedAtMs = now();
       child.on("error", () => {
@@ -156,8 +162,12 @@ export function createByoBackend({
         runOut,
         "--progress-log",
         join(runOut, "progress.jsonl"),
+        "--timeout",
+        String(runnerTimeoutSeconds),
+        "--poll-interval",
+        "0.05",
         "--base-url",
-        v2(),
+        rootUrl(),
       ];
       const child = spawn(command[0], args, {
         shell: false,
@@ -195,7 +205,7 @@ export function createByoBackend({
 
     async reconcile(runId) {
       const command = runnerCommand || [pythonBin, "-m", "comfyrizz_pipeline.runner"];
-      const child = spawn(command[0], [...command.slice(1), "--jobs", jobsFile, "--out", outDir || join(process.cwd(), "out"), "--reconcile", "--base-url", v2()], {
+      const child = spawn(command[0], [...command.slice(1), "--jobs", jobsFile, "--out", outDir || join(process.cwd(), "out"), "--reconcile", "--base-url", rootUrl()], {
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
         cwd: runnerCwd,
@@ -247,7 +257,14 @@ export function createByoBackend({
     },
 
     inspect() {
-      return { port: state.port, startedByUs: state.startedByUs, v2: v2(), submitted: [...state.submittedJobs], cancelCalls: state.cancelCalls };
+      return {
+        port: state.port,
+        startedByUs: state.startedByUs,
+        proxyPid: state.proxyPid,
+        v2: v2(),
+        submitted: [...state.submittedJobs],
+        cancelCalls: state.cancelCalls,
+      };
     },
   };
 

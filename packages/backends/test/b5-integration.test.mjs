@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -31,12 +31,34 @@ const WORKFLOW_SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789
 const LTX_SHA = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
 
 const children = [];
+const backends = [];
 test.after(() => {
-  for (const child of children) child.kill("SIGKILL");
+  for (const backend of backends) {
+    try {
+      const pid = backend.inspect?.().proxyPid;
+      if (pid) process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+  for (const child of children) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
 });
 
+/** Register a backend so its locally started proxy is killed when the test ends. */
+function registerBackend(backend) {
+  backends.push(backend);
+  return backend;
+}
+
 function startFake({ port = 0, failLabels = null, requestLog = null } = {}) {
-  const args = [FAKE_SERVER, "--port", String(port)];
+  // a bounded lifetime: even if a test dies mid-flight, the server exits on its own
+  const args = [FAKE_SERVER, "--port", String(port), "--lifetime-seconds", "120"];
   if (failLabels) args.push("--fail-labels", failLabels);
   if (requestLog) args.push("--request-log", requestLog);
   const child = spawn(PYTHON, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -55,12 +77,17 @@ function startFake({ port = 0, failLabels = null, requestLog = null } = {}) {
           port: resolvedPort,
           url: `http://127.0.0.1:${resolvedPort}`,
           requestLog,
-          posts: () => readRequests(requestLog).filter((entry) => entry.method === "POST" && entry.path === "/api/v2/jobs"),
+          posts: () => postsIn(requestLog),
         });
       }
     });
     child.on("error", reject);
   });
+}
+
+/** POSTs that reached a fake v2 server, in order, with the job label they carried. */
+function postsIn(file) {
+  return readRequests(file).filter((entry) => entry.method === "POST" && entry.path === "/api/v2/jobs");
 }
 
 function readRequests(file) {
@@ -127,6 +154,10 @@ function buildFixture(dir) {
   ];
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify(pkg, null, 2));
+  // A real bundle carries its workflows next to jobs.json; the runner resolves relative
+  // workflow paths against the jobs file's directory.
+  const workflows = join(dir, "workflows");
+  if (!existsSync(workflows)) symlinkSync(join(REPO, "workflows"), workflows);
   return pkg;
 }
 
@@ -138,17 +169,31 @@ function planWithPackage(pkg, dir) {
   return jobsDoc;
 }
 
-function backendFor({ workspace, jobsDoc, fake, comfyuiUrl, runnerOut }) {
+/**
+ * The backend starts the local proxy itself, so the fake that *receives the submissions* is the
+ * one proxyCommand spawns - which is where the request log and any injected failure belong.
+ */
+function backendFor({ workspace, jobsDoc, comfyuiUrl, runnerOut, proxyLog = null, proxyArgs = [] }) {
+  const proxyCommand = (port) => [
+    PYTHON,
+    FAKE_SERVER,
+    "--port",
+    String(port),
+    "--lifetime-seconds",
+    "120",
+    ...(proxyLog ? ["--request-log", proxyLog] : []),
+    ...proxyArgs,
+  ];
   return createByoBackend({
     comfyuiUrl,
-    proxyCommand: (port) => [PYTHON, FAKE_SERVER, "--port", String(port)],
+    proxyCommand,
     pythonBin: PYTHON,
     outDir: runnerOut,
     jobsFile: join(workspace, "jobs.json"),
     requiredNodes: ["KSampler"],
-    healthTimeoutMs: 8000,
+    healthTimeoutMs: 5000,
+    runnerTimeoutSeconds: 20,
     jobsDoc,
-    fake,
   });
 }
 
@@ -171,8 +216,7 @@ test("package -> jobs.json -> pipeline-py -> BYO backend -> package with provena
   // 2. the fake Comfy v2 stands in for ComfyUI and for the local proxy
   const requestLog = join(workspace, "requests.jsonl");
   const comfyui = await startFake();
-  const proxy = await startFake({ requestLog });
-  const backend = backendFor({ workspace, jobsDoc, fake: proxy, comfyuiUrl: comfyui.url, runnerOut: outDir });
+  const backend = registerBackend(backendFor({ workspace, jobsDoc, comfyuiUrl: comfyui.url, runnerOut: outDir, proxyLog: requestLog }));
 
   const up = await backend.ensureUp({});
   assert.equal(up.state, "started");
@@ -182,14 +226,18 @@ test("package -> jobs.json -> pipeline-py -> BYO backend -> package with provena
   // 3. the real runner executes the plan against the v2 surface
   const events = [];
   const run = await backend.run(join(workspace, "jobs.json"), (event) => events.push(event));
-  assert.equal(run.manifest.complete, true, JSON.stringify(run.manifest?.counts));
+  assert.equal(
+    run.manifest.complete,
+    true,
+    JSON.stringify((run.manifest?.jobs || []).map((entry) => `${entry.job}:${entry.status}:${entry.error?.code || entry.reason || ""}`)),
+  );
   assert.deepEqual(run.manifest.counts, { succeeded: 3 });
 
   const collected = await backend.collect(run.manifest, join(workspace, "collected"));
   assert.deepEqual(collected.problems, []);
 
   // every job was submitted exactly once, stills before plates
-  const posts = proxy.posts();
+  const posts = postsIn(requestLog);
   assert.deepEqual(posts.map((entry) => entry.label), ["a_b5_still.still", "a_b5_plate.plate", "a_b5_plate2.plate"]);
   assert.equal(posts.length, 3);
 
@@ -241,7 +289,7 @@ test("package -> jobs.json -> pipeline-py -> BYO backend -> package with provena
 
   // 6. an unchanged job is served from cache: a second run submits nothing
   const second = await backend.run(join(workspace, "jobs.json"), () => {});
-  assert.equal(proxy.posts().length, 3, "the cache must prevent a second submission");
+  assert.equal(postsIn(requestLog).length, 3, "the cache must prevent a second submission");
   assert.deepEqual(second.manifest.counts, { cached: 3 });
 
   const teardown = await backend.teardown("done");
@@ -261,8 +309,16 @@ test("one injected job failure: partial results kept, dependents skipped, only t
 
   // the plate fails on the server, the other two jobs succeed independently
   const failingLog = join(workspace, "failing.jsonl");
-  const failing = await startFake({ failLabels: "a_b5_plate.plate", requestLog: failingLog });
-  const backendA = backendFor({ workspace, jobsDoc, fake: failing, comfyuiUrl: comfyui.url, runnerOut: outDir });
+  const backendA = registerBackend(
+    backendFor({
+      workspace,
+      jobsDoc,
+      comfyuiUrl: comfyui.url,
+      runnerOut: outDir,
+      proxyLog: failingLog,
+      proxyArgs: ["--fail-labels", "a_b5_plate.plate"],
+    }),
+  );
   await backendA.ensureUp({});
   const first = await backendA.run(join(workspace, "jobs.json"), () => {});
 
@@ -272,7 +328,7 @@ test("one injected job failure: partial results kept, dependents skipped, only t
   assert.equal(byJob["a_b5_plate.plate"].error.code, "node_execution_error");
   assert.equal(byJob["a_b5_still.still"].status, "succeeded");
   assert.equal(byJob["a_b5_plate2.plate"].status, "succeeded");
-  assert.equal(failing.posts().length, 3);
+  assert.equal(postsIn(failingLog).length, 3);
   assert.ok(existsSync(join(outDir, byJob["a_b5_still.still"].outputs[0].relative)), "an earlier output was discarded");
   assert.ok(existsSync(join(outDir, byJob["a_b5_plate2.plate"].outputs[0].relative)));
 
@@ -285,14 +341,13 @@ test("one injected job failure: partial results kept, dependents skipped, only t
 
   // a healthy server sees only the retry: the two good jobs come back from cache
   const retryLog = join(workspace, "retry.jsonl");
-  const healthy = await startFake({ requestLog: retryLog });
-  const backendB = backendFor({ workspace, jobsDoc, fake: healthy, comfyuiUrl: comfyui.url, runnerOut: outDir });
+  const backendB = registerBackend(backendFor({ workspace, jobsDoc, comfyuiUrl: comfyui.url, runnerOut: outDir, proxyLog: retryLog }));
   await backendB.ensureUp({});
   const second = await backendB.run(join(workspace, "jobs.json"), () => {});
 
   assert.equal(second.manifest.complete, true, JSON.stringify(second.manifest.counts));
   assert.deepEqual(second.manifest.counts, { succeeded: 1, cached: 2 });
-  assert.deepEqual(healthy.posts().map((entry) => entry.label), ["a_b5_plate.plate"], "only the failed job was resubmitted");
+  assert.deepEqual(postsIn(retryLog).map((entry) => entry.label), ["a_b5_plate.plate"], "only the failed job was resubmitted");
   const retried = second.manifest.jobs.find((entry) => entry.job === "a_b5_plate.plate");
   assert.equal(retried.status, "succeeded");
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -28,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--never-finish", action="store_true")
     parser.add_argument("--drop-first-response", action="store_true")
     parser.add_argument("--request-log", default=None, help="append one JSON line per request")
+    parser.add_argument("--lifetime-seconds", type=float, default=300.0, help="exit after this long, so a test can never leak a server")
     args = parser.parse_args(argv)
 
     fake = FakeComfy(
@@ -41,6 +43,10 @@ def main(argv: list[str] | None = None) -> int:
         request_log=args.request_log,
     )
     fake.state.origin = f"http://127.0.0.1:{args.port}" if args.port else fake.base_url
+    lifetime = float(args.lifetime_seconds)
+    if lifetime > 0:
+        # hard bound: a killed test can never leave this process behind
+        threading.Timer(lifetime, lambda: fake.__exit__(None, None, None)).start()
     with fake:
         print(f"listening on {fake.base_url.rsplit(':', 1)[1]}", flush=True)
         try:
