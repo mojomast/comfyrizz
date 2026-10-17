@@ -121,6 +121,7 @@ class FakeComfyState:
         upload_status: int = 200,
         reject_metadata: bool = False,
         bytes_kind: str | None = None,
+        image_size: tuple[int, int] = (1024, 576),
     ):
         self.outputs = outputs
         self.output_kind = output_kind
@@ -145,6 +146,8 @@ class FakeComfyState:
         #: real magic bytes for the *content* when a test needs the runner's sniffer (N3);
         #: None keeps the arbitrary bytes the rest of the suite uses
         self.bytes_kind = bytes_kind
+        #: the size a served PNG declares in its IHDR (N4: the runner measures the file it got)
+        self.image_size = image_size
         self.metadata_rejections = 0
         self.jobs: dict[str, dict[str, Any]] = {}
         self.idempotency_seen: dict[str, str] = {}
@@ -280,7 +283,15 @@ class FakeComfyState:
         as ``image``), so the two tests that care about that pass ``bytes_kind``.
         """
         if self.bytes_kind == "image":
-            return b"\x89PNG\r\n\x1a\n" + b"comfyrizz-fake-frame" * 8
+            # a real PNG IHDR, so the runner's header reader sees the size it reports (N4)
+            width, height = self.image_size
+            ihdr = (
+                b"\x00\x00\x00\rIHDR"
+                + width.to_bytes(4, "big")
+                + height.to_bytes(4, "big")
+                + b"\x08\x02\x00\x00\x00"
+            )
+            return b"\x89PNG\r\n\x1a\n" + ihdr + b"comfyrizz-fake-frame" * 8
         if self.bytes_kind == "video":
             return b"\x00\x00\x00\x18ftypmp42" + b"comfyrizz-fake-video" * 8
         if self.bytes_kind == "audio":

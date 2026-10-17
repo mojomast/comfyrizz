@@ -29,7 +29,15 @@ from typing import Any
 
 from .atomic import canonical_hash, ensure_dir, read_json, sha256_file, write_json_atomic
 from .attempts import Attempt, AttemptStore, attempts_jsonl, now_iso
-from .client import ComfyClient, UploadError, classify_metadata_refusal, load_file_params, upload_route_url
+from .client import (
+    ComfyClient,
+    UploadError,
+    classify_metadata_refusal,
+    load_file_params,
+    measure,
+    sniff_kind,
+    upload_route_url,
+)
 from .manifest import build_manifest, manifest_decides_success, read_manifest, write_manifest
 from .progress import stdout_writer
 from .schema import validate_jobs
@@ -696,16 +704,23 @@ class Runner:
 
             cached = self.cache_lookup(job)
             if cached:
-                outputs = [
-                    {
-                        "file": str(self.config.out_dir / cached["file"]),
-                        "relative": cached["file"],
-                        "sha256": cached["sha256"],
-                        "bytes": (self.config.out_dir / cached["file"]).stat().st_size,
-                        "kind": job.get("outputKind"),
-                        "from_cache": True,
-                    }
-                ]
+                path = self.config.out_dir / cached["file"]
+                # the file is on disk, so measure it and label it from its bytes again: a cache hit
+                # must not hand the manifest a plan-level kind or dimension (N3, N4)
+                sniffed = sniff_kind(path)
+                output: dict[str, Any] = {
+                    "file": str(path),
+                    "relative": cached["file"],
+                    "sha256": cached["sha256"],
+                    "bytes": path.stat().st_size,
+                    "kind": sniffed or job.get("outputKind"),
+                    "kindSource": "bytes" if sniffed else "server",
+                    "from_cache": True,
+                }
+                measured = measure(path, output["kind"])
+                if measured:
+                    output["measured"] = measured
+                outputs = [output]
                 self.results[job["id"]] = self._result(job, "cached", outputs=outputs, reason=f"cache hit from attempt {cached['attempt_id']}")
                 self.progress.emit("cache_hit", job=job["id"], value=cached["file"])
                 self._write_manifest()

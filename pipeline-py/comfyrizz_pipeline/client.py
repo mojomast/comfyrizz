@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -61,6 +63,107 @@ CONTROL_PARAMS = {"upscale", "cutout", "frames_seconds", "text", "allowText"}
 #: Local failures that mean no request was ever made (a missing workflow, an unreadable file).
 #: They are clean refusals, never `submission_unknown`: nothing can have reached the server.
 FILE_FAILURES = (FileNotFoundError, NotADirectoryError, IsADirectoryError, PermissionError)
+
+#: Image containers whose size is in the header. Cheap and dependency-free, because the manifest's
+#: media dims have to be the file's and not the plan's: a reference-edit graph sizes its output from
+#: the reference image's megapixels, so the plan's format size was wrong (GPU test 3, N4).
+_PNG_SIG = b"\x89PNG\r\n\x1a\n"
+_JPEG_SOF = set(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
+
+
+def image_size(path: Path) -> tuple[int, int] | None:
+    """``(width, height)`` from an image header, or None when this is not an image we can read."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(32)
+            if head.startswith(_PNG_SIG) and head[12:16] == b"IHDR" and len(head) >= 24:
+                return (int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big"))
+            if head[:4] == b"GIF8":
+                return (int.from_bytes(head[6:8], "little"), int.from_bytes(head[8:10], "little"))
+            if head[:2] == b"BM":
+                return (int.from_bytes(head[18:22], "little"), int.from_bytes(head[22:26], "little"))
+            if head[:4] == b"RIFF" and head[8:12] == b"WEBP" and head[12:16] == b"VP8X":
+                return (
+                    int.from_bytes(head[24:27], "little") + 1,
+                    int.from_bytes(head[27:30], "little") + 1,
+                )
+            if not head.startswith(b"\xff\xd8"):
+                return None
+            # JPEG: walk the segments to the frame header (a JPEG's size is not at a fixed offset)
+            handle.seek(2)
+            for _ in range(128):
+                marker = handle.read(2)
+                if len(marker) < 2 or marker[0] != 0xFF:
+                    return None
+                if marker[1] == 0x01 or 0xD0 <= marker[1] <= 0xD7 or marker[1] == 0xFF:
+                    continue
+                body = handle.read(2)
+                if len(body) < 2:
+                    return None
+                size = int.from_bytes(body, "big")
+                if marker[1] in _JPEG_SOF:
+                    frame = handle.read(5)
+                    if len(frame) < 5:
+                        return None
+                    return (int.from_bytes(frame[3:5], "big"), int.from_bytes(frame[1:3], "big"))
+                if size < 2:
+                    return None
+                handle.seek(size - 2, 1)
+    except OSError:
+        return None
+    return None
+
+
+def video_size(path: Path) -> dict[str, Any] | None:
+    """Ask ffprobe for the real geometry (Google Colab has it). None when absent or unreadable."""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                ffprobe, "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height,r_frame_rate,nb_frames,duration",
+                "-of", "json", str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return None
+        streams = (json.loads(proc.stdout) or {}).get("streams") or []
+        if not streams:
+            return None
+        stream = streams[0]
+        measured: dict[str, Any] = {}
+        for key in ("width", "height"):
+            if str(stream.get(key, "")).isdigit():
+                measured[key] = int(stream[key])
+        rate = str(stream.get("r_frame_rate") or "")
+        if "/" in rate:
+            num, _, den = rate.partition("/")
+            if float(den or 0) > 0:
+                measured["fps"] = round(float(num) / float(den), 3)
+        if str(stream.get("nb_frames", "")).isdigit():
+            measured["frames"] = int(stream["nb_frames"])
+        if stream.get("duration"):
+            measured["durationSeconds"] = round(float(stream["duration"]), 3)
+        return measured or None
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError):
+        return None
+
+
+def measure(path: Path, kind: str | None) -> dict[str, Any] | None:
+    """The real geometry of a downloaded file, and where the number came from."""
+    if kind == "image":
+        size = image_size(path)
+        return {"width": size[0], "height": size[1], "source": "header"} if size else None
+    if kind == "video":
+        size = video_size(path)
+        return {**size, "source": "ffprobe"} if size else None
+    return None
 
 #: Transport failures after which the request definitely never reached the server.
 NEVER_REACHED = (httpx.ConnectError, httpx.ConnectTimeout)
@@ -806,4 +909,9 @@ class ComfyClient:
         }
         if reported and sniffed and reported != sniffed:
             record["reportedKind"] = reported
+        # the file's own geometry, not the plan's (N4): a reference-edit graph sizes its output from
+        # the reference's megapixels, so the plan's format size is not evidence about the file
+        measured = measure(dest, record["kind"])
+        if measured:
+            record["measured"] = measured
         return record
