@@ -35,7 +35,7 @@
         {
           "asset": "a_icon_check",
           "x": 0.5,
-          "y": 0.79,
+          "y": 0.86,
           "w": 0.07,
           "anim": "fade-in"
         }
@@ -66,9 +66,9 @@
       "foreground": [
         {
           "asset": "a_diagram_flow",
-          "x": 0.72,
+          "x": 0.79,
           "y": 0.5,
-          "w": 0.46,
+          "w": 0.4,
           "anim": "slide-in"
         }
       ],
@@ -101,7 +101,7 @@
         {
           "asset": "a_icon_check",
           "x": 0.13,
-          "y": 0.2,
+          "y": 0.12,
           "w": 0.06,
           "anim": "zoom-in"
         }
@@ -163,9 +163,9 @@
       "foreground": [
         {
           "asset": "a_pattern_dots",
-          "x": 0.83,
+          "x": 0.86,
           "y": 0.5,
-          "w": 0.3,
+          "w": 0.24,
           "anim": "parallax-in"
         }
       ],
@@ -201,8 +201,8 @@
         {
           "asset": "a_anim_bars",
           "x": 0.5,
-          "y": 0.72,
-          "w": 0.34,
+          "y": 0.86,
+          "w": 0.24,
           "anim": "slide-in"
         }
       ],
@@ -221,6 +221,6 @@
   "provisional": false,
   "warnings": [],
   "proposals": [],
-  "sourceHash": "67339eaa7559254511c695a41b0a91c26b7139299c9022eb00091cbc028d154c",
-  "hash": "fb41de79272f5599acb0218ca6fa70c911986e67cce1d0bddccce3827aead571"
+  "sourceHash": "9fa32fc7c29265e1e9d02270e4f8b97c8936e2472570f0387c3d5dfa57e40158",
+  "hash": "ceb20281e39468d502e60e47f01ae1ffca4e5c4162738ad514eed74362782c11"
 }

@@ -58,9 +58,9 @@
       "foreground": [
         {
           "asset": "a_iso_solar",
-          "x": 0.75,
+          "x": 0.79,
           "y": 0.5,
-          "w": 0.44,
+          "w": 0.4,
           "anim": "slide-in"
         }
       ],
@@ -143,9 +143,9 @@
       "foreground": [
         {
           "asset": "a_battery",
-          "x": 0.75,
+          "x": 0.79,
           "y": 0.5,
-          "w": 0.44,
+          "w": 0.4,
           "anim": "slide-in"
         }
       ],
@@ -201,9 +201,9 @@
       "foreground": [
         {
           "asset": "a_mascot",
-          "x": 0.84,
-          "y": 0.5,
-          "w": 0.26,
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.2,
           "anim": "fade-in"
         }
       ],
@@ -380,6 +380,6 @@
   "provisional": false,
   "warnings": [],
   "proposals": [],
-  "sourceHash": "622f4d0e4f15269ed40cde33ae01a5c000355d08ba6384ec7743e4acf1582219",
-  "hash": "4eb25379fdbae1cd824fdc422bb947dd424ea40078385047664c95e0a22ca0b7"
+  "sourceHash": "e47fea845386660baabb81a7b78dce3afa664cb36618cfb9e75a364d2f834eef",
+  "hash": "ea9055fa0bbe884b1dd3c7adf911416bb91dbec0708732ed4f0ed5fbf5b68d63"
 }

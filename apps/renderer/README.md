@@ -76,6 +76,8 @@ npm install                     # local to apps/renderer; no lockfile committed
 npm test                        # schema/timeline/asset/network/media/layout/incremental checks
 npm run build:assets            # sanitize + render-check the 4 SVG assets
 npm run compile:example -- --example examples/data-story   # package.json -> timeline.json (A2 compiler)
+npm run recompile:timeline -- --example examples/showcase-gpu2  # recompile a committed timeline (P-fix3)
+npm run recompile:timeline -- --all                            # recompile every bundled example
 npm run still                   # 15 stills (5 layouts x frame 0/mid/last)
 npm run still:example -- --example examples/data-story     # one midpoint still per scene
 npm run render:example          # CPU MP4 + ffprobe gate (silent example)
@@ -87,6 +89,23 @@ npm run layout:check            # text/asset overlap unit tests (A6)
 
 `render:example` and `still` use `/usr/bin/google-chrome` by default; override
 with `REMOTION_BROWSER=/path/to/chrome`.
+
+## Timeline freshness (P-fix3)
+
+A committed `examples/*/timeline.json` must equal a fresh compile of its
+`package.json` (with the measured chunks in `audio/durations.json` when the
+example is narrated). `test/timeline-freshness.test.mjs` enforces this for every
+bundled example and names the stale one. Recompile a stale timeline without
+re-synthesizing audio:
+
+```bash
+npm run recompile:timeline -- --example examples/showcase-gpu2
+npm run recompile:timeline -- --all
+```
+
+`render:narrated` and `packages/tts/scripts/narrate.mjs` write the timeline with
+measured narration; this script is the offline equivalent and also refreshes
+`narration-report.json`'s `timelineHash`.
 
 ## Bundled examples (A6)
 
@@ -119,14 +138,14 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 
 | Check | Result |
 |---|---|
-| `npm test` | 31/31 pass |
+| `npm test` | 38/38 pass (incl. P-fix3 freshness for all 6 bundled examples) |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
-| `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `fb41de79…d571` |
+| `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `ceb20281…2c11` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
 | MP4 export | 1920×1080, H.264 High, 30/1 fps, **1095 frames**, 36.500 s, no audio (voice off), 2.63 MB |
 | CPU render time | **78.7 s** for 36.5 s of video (~2.2× realtime, concurrency 2, Node 22.23.3, `/usr/bin/google-chrome`) |
 | ffprobe | `codec_name=h264`, `nb_frames=1095`, `r_frame_rate=30/1`, `pix_fmt=yuvj420p`; audio stream count 0 |
-| Narrated export (A4) | 1312 frames, 43.733 s, H.264 + AAC 48 kHz stereo, 14 captions, hash `4943e204…19c9`; CPU 96.4 s |
+| Narrated export (A4) | 1312 frames, 43.733 s, H.264 + AAC 48 kHz stereo, 14 captions, hash `0c05e157…1956`; CPU 96.4 s |
 | Showcase export (P-fix1) | `examples/showcase-gpu2` via `PackageDemo`, 1920×1080 H.264, 1110 frames, 37.000 s, 21.8 MB, 7 scenes + 12 captions; no custom composition, no `node_modules` symlink. Frame correlation vs the retired `Showcase.tsx` render: title 0.99, flow 0.92, stat 0.93, chart 0.99, outro 0.98 |
 | Data story (A6) | 1920×1080 30/1 H.264, **1320 frames**, 44.000 s, 4.4 MB, hash `da7e9c5e…a1a4`, 7 segments; CPU 125.5 s |
 | Product explainer (A6) | 1920×1080 30/1 H.264 + AAC, **1349 frames**, 44.967 s, 5.8 MB, hash `9273c779…1c85`, 7 segments, 8 captions; CPU 124.9 s |

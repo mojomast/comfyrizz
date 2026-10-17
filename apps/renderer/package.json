@@ -8,6 +8,7 @@
   "scripts": {
     "build:assets": "node scripts/build-assets.mjs",
     "compile:example": "node scripts/compile-example.mjs",
+    "recompile:timeline": "node scripts/recompile-example-timeline.mjs",
     "studio": "remotion studio src/index.ts",
     "still": "node scripts/still-all.mjs",
     "still:example": "node scripts/still-example.mjs",
