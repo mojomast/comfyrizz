@@ -273,7 +273,9 @@ test("package -> jobs.json -> pipeline-py -> BYO backend -> package with provena
   assert.equal(still.gen.generator, "flux3-klein");
   assert.equal(still.gen.backend, "byo-comfyui");
   assert.ok(still.gen.job_id && still.gen.attempt_id);
-  assert.deepEqual({ width: still.media.width, height: still.media.height }, { width: 960, height: 544 });
+  // 960x576: the still is this plate's first frame, so it is planned on the plate's 64 lattice
+  // (N9 - a 960x544 plate would come back 960x512 from the two-stage graph)
+  assert.deepEqual({ width: still.media.width, height: still.media.height }, { width: 960, height: 576 });
 
   const plate = updated.assets.a_b5_plate;
   assert.equal(plate.status, "ready");
