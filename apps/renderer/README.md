@@ -64,8 +64,10 @@ with `REMOTION_BROWSER=/path/to/chrome`.
 | `npm test` | 5/5 pass |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `fb41de79…d571` |
-| Stills | 15/15 rendered (5 layouts × frame 0/mid/last) |
-| MP4 export | see `examples/launch-demo/out/render-report.json`; filled after the first CPU render |
+| Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
+| MP4 export | 1920×1080, H.264 High, 30/1 fps, **1095 frames**, 36.500 s, no audio (voice off), 2.63 MB |
+| CPU render time | **78.7 s** for 36.5 s of video (~2.2× realtime, concurrency 2, Node 22.23.3, `/usr/bin/google-chrome`) |
+| ffprobe | `codec_name=h264`, `nb_frames=1095`, `r_frame_rate=30/1`, `pix_fmt=yuvj420p`; audio stream count 0 |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is
 reproducible with `npm run render:example`.

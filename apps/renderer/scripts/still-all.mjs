@@ -27,11 +27,19 @@ for (const layout of layouts) {
   const frames = [0, Math.floor(last / 2), last];
   for (const frame of frames) {
     const output = join(outDir, `${layout}-${frame}.png`);
-    const result = spawnSync(
+    let result = spawnSync(
       'npx',
       ['remotion', 'still', 'src/index.ts', id, output, `--frame=${frame}`, `--browser-executable=${browser}`],
       { cwd: rendererDir, stdio: 'inherit' },
     );
+    if (result.status !== 0) {
+      process.stderr.write(`still retry: ${id} frame ${frame}\n`);
+      result = spawnSync(
+        'npx',
+        ['remotion', 'still', 'src/index.ts', id, output, `--frame=${frame}`, `--browser-executable=${browser}`],
+        { cwd: rendererDir, stdio: 'inherit' },
+      );
+    }
     if (result.status !== 0) {
       failures += 1;
       process.stderr.write(`still failed: ${id} frame ${frame}\n`);

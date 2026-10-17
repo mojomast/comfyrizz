@@ -28,7 +28,7 @@ const renderSeconds = (Date.now() - started) / 1000;
 
 const probe = spawnSync(
   'ffprobe',
-  ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,r_frame_rate,nb_frames', '-show_entries', 'format=duration', '-of', 'json', output],
+  ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,pix_fmt,width,height,r_frame_rate,nb_frames', '-show_entries', 'format=duration,size', '-of', 'json', output],
   { encoding: 'utf8' },
 );
 if (probe.status !== 0) throw new Error(`ffprobe failed: ${probe.stderr}`);
@@ -42,6 +42,7 @@ const checks = [
   ['height', Number(stream.height), timeline.height],
   ['fps', stream.r_frame_rate, `${timeline.fps}/1`],
   ['frames', Number(stream.nb_frames), timeline.durationInFrames],
+  ['codec', stream.codec_name, 'h264'],
 ];
 const failures = checks.filter(([, actual, expected]) => actual !== expected);
 for (const [name, actual, expected] of checks) {
@@ -54,14 +55,19 @@ const report = {
   width: Number(stream.width),
   height: Number(stream.height),
   fps: stream.r_frame_rate,
+  codec: stream.codec_name,
+  pixelFormat: stream.pix_fmt,
+  bytes: Number(info.format?.size ?? 0),
   frames: Number(stream.nb_frames),
   durationSeconds: Number(info.format?.duration ?? 0),
   timelineHash: timeline.hash,
   audioStreams: audioStreams.map(item => item.codec_name),
+  audioExpected: false,
   checkedAt: new Date().toISOString(),
 };
 writeFileSync(join(exampleDir, 'out', 'render-report.json'), `${JSON.stringify(report, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
+if (audioStreams.length !== 0) failures.push(['audio', audioStreams.length, 0]);
 if (failures.length > 0) throw new Error(`ffprobe checks failed: ${failures.map(([name]) => name).join(', ')}`);
 process.stdout.write(`export ok in ${renderSeconds.toFixed(1)}s\n`);
