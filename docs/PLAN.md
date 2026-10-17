@@ -104,6 +104,32 @@ Schema impact (B1, Hermes): asset `kind` adds `svg` (and `vector-anim` for keyfr
 
 Jobs impact (B2, Hermes): `packages/jobs/` batches every FLUX still in a package into one ordered batch before plates; optional `cutout: true` per image job producing an alpha PNG (workflow TBD in M3).
 
+## Workstream E (experimental): SVG-guided generation
+
+Goal: precise composition (from agent-written SVG) with model-quality pixels. The agent writes SVG for a scene's layout role (hero subject, background, texture), it is rasterised on CPU, turned into guidance inputs, and fed to FLUX 3 Klein (stills) and LTX-2.5 (motion). Spec §6.11.
+
+Approaches to spec and test (each is a separate ComfyUI API workflow + `params.json`):
+1. **img2img / denoise sweep**: rasterised SVG (optionally blurred/noised) as the init latent; denoise 0.35 → 0.85 in steps.
+2. **Klein reference / edit conditioning**: the rasterised SVG as one of Klein's reference images (model card: up to 10 references, bounding boxes in the prompt **[verified, model card]**). Exact ComfyUI node path **[unverified]**: check in M3.
+3. **ControlNet-style (canny / depth / lineart from the SVG)**: **only if compatible ControlNet or control-LoRA weights for FLUX 3 Klein exist** with a licence we can use. Not assumed; E1 records what exists (with source links) or marks it "none found". No substituting another model's ControlNet silently.
+4. **LTX-2.5 i2v from the SVG-guided still** as first frame (optionally SVG-derived last frame for motion targets).
+
+Prompt-template library (`workflows/templates/`): per layout role (hero subject, background plate, texture, icon-illustration) × style × lighting × material, with text-safe regions and the palette injected; versioned and stored with each generated asset (`gen.template_id`, `gen.template_version`).
+
+Evaluation rubric (`pipeline-py/eval/`): **layout fidelity** (edge-map IoU / chamfer distance between SVG edges and output edges; mask IoU for subject regions; palette ΔE) vs **aesthetic/prompt quality** (CLIP score against the caption; optional aesthetic predictor, licence checked), plus a human 1–5 rating sheet. Output: a CSV + contact sheet per sweep so Kyle can pick defaults.
+
+**E1. CPU prep (Hermes, after B1; no GPU)** (`workflows/svg-guided/`, `pipeline-py/svgguide/`, `pipeline-py/eval/`)
+- SVG → raster (resvg, via Pi's `packages/vector` sanitizer when available, or the same allow-list in Python) → control maps on CPU (canny/lineart with OpenCV, a flat "depth" from SVG layer order/z, region masks from SVG ids).
+- ComfyUI API workflow JSON drafts for approaches 1, 2 and 4 (and 3 only if weights exist) with `params.json`, validated structurally (node graph well-formed, inputs wired) without a GPU; a sweep spec `sweeps/e2.json` (seeds, denoise grid, reference weights, templates) with a unit estimate using the reserve formula.
+- Prompt-template library v0 + renderer of templates → full Klein captions (same expansion rules as §6.4; LLM expansion stubbed).
+- Evaluation scripts runnable on CPU against fixture images (edge IoU, palette ΔE; CLIP score optional/CPU-slow is fine).
+- Research note `workflows/svg-guided/README.md`: what Klein's model card says about references/editing, whether any Klein ControlNet exists (links), LTX first/last-frame conditioning support, all marked [verified]/[unverified].
+- Accept: `pytest` green on CPU; 3 sample scenes (hero, background, texture) each produce raster + control maps + filled workflow JSON + caption; sweep spec with a unit estimate; no Google Colab calls.
+
+**E2. GPU sweep (Kyle-gated; waits for HF token + explicit approval of session and unit budget)**: run `sweeps/e2.json` on one approved Google Colab G4 session inside the M3 spike if possible (same bootstrap, watchdog armed), collect outputs + metrics, contact sheets, pick defaults per layout role, and write results into the spec. Not started by any agent until Kyle approves on record.
+
+Cut order: E is experimental and is cut before any core feature; if it wins, the router (C3) uses SVG-guided FLUX for hero/background roles.
+
 ## Workstream C: frontend, server and agent (unassigned; next free agent, queued)
 
 **C1. Web shell port** (`apps/web/`): lift from `/home/box/orbitdesktop/apps/grokbots/index.html` (copy, don't edit): chat layout/CSS, `md()`/`esc()`, composer, cards, Activity panel, context meter; React island with the Remotion Player; storyboard card with inline edits (headline, chart values, palette). Accept: M2 check.
@@ -137,3 +163,5 @@ The original group board (THE INSANE ASSYLYM) is at Orbit's 100-entry cap, so a 
 | B3 Backends: Google Colab lifecycle + BYO ComfyUI | hermes | `t_395e787180e447f1` |
 | C1–C3 Web shell + server + LLM agent/router (queued) | unassigned | `t_d1dfd1f883de4f03` |
 | D Kyle-gated: HF licences/token, GPU spike approval | kyle | `t_dddec6e24e254b75` |
+| E1 SVG-guided generation: CPU prep (experimental) | hermes | `t_5f7f30a026174551` |
+| E2 SVG-guided GPU sweep (Kyle-gated) | kyle | `t_28128f96b4974069` |
