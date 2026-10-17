@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { createColabBackend } from "../src/colab-backend.mjs";
-import { readLog, installFakeColab, makeCli, readState } from "./helpers.mjs";
+import { readLog, installFakeColab, makeCli, readState, settleScratchProcesses } from "./helpers.mjs";
 
 const ASSET_BYTES = "COMFYRIZZ-FAKE-PLATE-BYTES-0123456789";
 const HF_TOKEN = "hf_FAKETOKENVALUE0123456789ABCDEF";
@@ -18,21 +18,13 @@ const HF_TOKEN = "hf_FAKETOKENVALUE0123456789ABCDEF";
 //: reaps, so the file checks for survivors itself (B6 acceptance: no leftover process)
 const scratchRoots = [];
 
-test.after(() => {
-  const listing = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" }).stdout.split("\n");
-  const ours = listing.filter((line) => scratchRoots.some((root) => line.includes(root)));
-  for (const line of ours) {
-    try {
-      process.kill(Number(line.trim().split(/\s+/)[0]), "SIGKILL");
-    } catch {
-      /* already gone */
-    }
-  }
-  assert.deepEqual(
-    ours.map((line) => line.trim().slice(0, 120)),
-    [],
-    "a test left a process behind: arm the watchdog with a short deadline and stop the session",
-  );
+test.after(async () => {
+  // H10: the watchdogs are detached and armed for 0.02 minutes, and one test deliberately leaves one
+  // armed (an unconfirmed stop is when it has to stay). Give them their deadline to fire and exit
+  // before calling anything a survivor - a fixed check decided this by timing and failed on Node 22,
+  // where the file finishes well inside the 1.2 s deadline.
+  const ours = await settleScratchProcesses(scratchRoots);
+  assert.deepEqual(ours, [], "a test left a process behind past its own deadline: arm the watchdog with a short deadline and stop the session");
 });
 
 function workspace() {

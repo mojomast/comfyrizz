@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createColabBackend } from "../src/colab-backend.mjs";
 import { createByoBackend } from "../src/byo-backend.mjs";
+import { settleScratchProcesses } from "./helpers.mjs";
 import { installFakeColab, makeCli, readLog, readState, writeState } from "./helpers.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -397,12 +398,11 @@ test("no test process is left behind by the hardening cases", async () => {
       /* already gone */
     }
   }
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 750));
-  const listing = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" }).stdout.split("\n");
   // scoped to *this* file's scratch directories: other files' fake servers are legitimately alive
   // while the suite runs, and each of those files asserts its own cleanup (colab-backend.test.mjs
-  // reaps any watchdog it armed). A survivor here is a process nothing would ever stop.
-  const ours = listing.filter((line) => scratchRoots.some((root) => line.includes(root)));
-  assert.deepEqual(ours.map((line) => line.trim().slice(0, 120)), []);
+  // reaps any watchdog it armed). A survivor here is a process nothing would ever stop - but a
+  // detached watchdog has a deadline to reach first, so wait for it (H10).
+  const ours = await settleScratchProcesses(scratchRoots);
+  assert.deepEqual(ours, []);
   assert.ok(scratchRoots.length > 0);
 });

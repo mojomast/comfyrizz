@@ -1,4 +1,5 @@
 // Shared test wiring: install the fake `colab` executable, drive its state file, read its log.
+import { spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,4 +58,36 @@ export function invokedCommands(logPath) {
 
 export function argvOf(logPath, command) {
   return readLog(logPath).filter((entry) => entry.argv[0] === command).map((entry) => entry.argv);
+}
+
+/**
+ * The processes still alive under one of `roots`, after giving the ones that are *supposed* to exit a
+ * chance to do it (H10).
+ *
+ * A detached stop-only watchdog is armed with a short deadline (0.02 minutes in these tests) and one
+ * test deliberately leaves one armed, because an unconfirmed stop is exactly when it has to stay. It
+ * fires at its deadline, writes its exit file and exits — so a fixed sleep decides the outcome by
+ * timing: on Node 22 the test file finishes well inside the watchdog's 1.2 s deadline and the check
+ * failed on a runtime that is *faster*. This waits (bounded) for them to reach that deadline instead,
+ * kills whatever is left, and returns it: a watchdog alive after its own deadline is the leak.
+ */
+export async function settleScratchProcesses(roots, { settleMs = 12000, stepMs = 250 } = {}) {
+  const survivors = () => {
+    const listing = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" }).stdout.split("\n");
+    return listing.filter((line) => roots.some((root) => line.includes(root)));
+  };
+  const deadline = Date.now() + settleMs;
+  let ours = survivors();
+  while (ours.length && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+    ours = survivors();
+  }
+  for (const line of ours) {
+    try {
+      process.kill(Number(line.trim().split(/\s+/)[0]), "SIGKILL");
+    } catch {
+      /* already gone between the listing and the kill */
+    }
+  }
+  return ours.map((line) => line.trim().slice(0, 120));
 }
