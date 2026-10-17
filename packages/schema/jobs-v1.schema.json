@@ -57,6 +57,15 @@
               "height": { "type": "integer", "minimum": 1, "maximum": 32768 }
             }
           },
+          "stage1Dims": {
+            "type": "object",
+            "required": ["width", "height"],
+            "description": "The size the two-stage LTX graph renders stage 1 at: half of dims, which the latent upsampler then doubles back to dims. The params map derives the same number with a {mul: 0.5} target, and GPU test 2 issues 3 and 4 are what happens when the two disagree.",
+            "properties": {
+              "width": { "type": "number", "minimum": 1, "maximum": 32768 },
+              "height": { "type": "number", "minimum": 1, "maximum": 32768 }
+            }
+          },
           "frames": { "type": "integer", "minimum": 1, "maximum": 1000000 },
           "fps": { "type": "number", "minimum": 1, "maximum": 240 },
           "seed": { "type": ["integer", "null"], "minimum": 0, "maximum": 4294967295 },
@@ -91,6 +100,19 @@
         "properties": {
           "asset": { "type": "string" },
           "reason": { "type": "string" }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Things the plan did on purpose that a reader should know about, e.g. an i2v source whose aspect does not match its plate, allowed because the caller asked for it.",
+      "items": {
+        "type": "object",
+        "required": ["asset", "code", "message"],
+        "properties": {
+          "asset": { "type": "string" },
+          "code": { "type": "string", "pattern": "^PLAN_[A-Z0-9_]+$" },
+          "message": { "type": "string", "minLength": 1 }
         }
       }
     }

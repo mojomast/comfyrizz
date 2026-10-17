@@ -17,6 +17,7 @@ import pytest
 
 from eval.metrics import chamfer_distance, delta_e, edge_iou, evaluate, mask_iou, palette_delta_e
 from svgguide import (
+    APPROACH_GEOMETRY,
     CONTROLNET_STATUS,
     LAYOUT_ROLES,
     RASTER_BACKEND,
@@ -84,6 +85,63 @@ def test_rasterise_produces_a_png_and_an_rgba_buffer():
     assert rgba[..., 3].min() == 255, "the sample scenes are fully opaque"
     assert len(np.unique(rgba[..., :3].reshape(-1, 3), axis=0)) > 3, "the raster is not a flat fill"
     assert RASTER_BACKEND.startswith("resvg-js")
+
+
+@needs_resvg
+def test_a_16_9_scene_rasterises_onto_the_lattice_at_its_own_aspect():
+    """GPU test 2, issue 6: 960x540 is not a multiple of 16, so the model pads or crops it."""
+    png, rgba_raw, meta = rasterize((SAMPLES_DIR / "hero.svg").read_text(encoding="utf-8"), width=960)
+    assert meta["requested"] == {"width": 960, "height": 540}, "the SVG's own 16:9 aspect"
+    assert (meta["width"], meta["height"]) == (1024, 576), "snapped to the 16:9 lattice size"
+    assert meta["aspectAdjusted"] is True
+    assert meta["width"] % 16 == 0 and meta["height"] % 16 == 0
+    assert meta["width"] / meta["height"] == pytest.approx(16 / 9, abs=0.001)
+    width, height = int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")
+    assert (width, height) == (1024, 576), "the PNG really is the snapped size"
+    assert len(rgba_raw) == width * height * 4, "the control maps are computed from the same buffer"
+
+
+def test_raster_size_snapping_lands_on_the_lattice_without_changing_the_aspect():
+    """GPU test 2, issue 6: 960x540 is not a multiple of 16, so the model pads or crops it."""
+    from svgguide.raster import fit_box, snap_size
+
+    assert snap_size(960, 540) == (1024, 576), "the 16:9 lattice size at this width, aspect exact"
+    assert snap_size(480, 270) == (512, 288), "and one step down the same scale"
+    assert snap_size(960, 960) == (960, 960), "already on the lattice"
+    assert snap_size(1024, 576) == (1024, 576)
+    assert snap_size(1, 1) == (16, 16)
+    assert snap_size(960, 540, 0) == (960, 540), "0 disables the snap (a diagnostic raster)"
+    # a 16:9 lattice size needs a width that is a multiple of 256 (w * 9/16 has to land on a multiple
+    # of 16), so some requests have an exact twin and others take the round-to-nearest fallback
+    exact_twins = {480: (512, 288), 960: (1024, 576), 1280: (1280, 720)}
+    for width, expected in exact_twins.items():
+        assert snap_size(width, round(width * 9 / 16)) == expected
+        assert expected[1] / expected[0] == pytest.approx(9 / 16, rel=1e-9), "an exact twin keeps the shape"
+    fallbacks = {320: (320, 176), 640: (640, 368), 1920: (1920, 1088)}
+    for width, expected in fallbacks.items():
+        snapped = snap_size(width, round(width * 9 / 16))
+        assert snapped == expected
+        assert snapped[0] % 16 == 0 and snapped[1] % 16 == 0
+        assert abs(snapped[1] - round(width * 9 / 16)) <= 8, "a fallback moves the height by at most half a step"
+
+    # a size with no lattice twin nearby keeps the width and rounds the height to the nearest step;
+    # the painting is then stretched to the box rather than letterboxed (a transparent band is a hole
+    # in a guide image, and the model reads it as "nothing here")
+    stretched = fit_box(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900"><rect/></svg>',
+        320,
+        176,
+    )
+    assert 'width="320"' in stretched and 'height="176"' in stretched
+    assert 'preserveAspectRatio="none"' in stretched
+
+    exact = fit_box(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900"><rect/></svg>',
+        1024,
+        576,
+    )
+    assert 'preserveAspectRatio' not in exact, "an exact aspect needs no stretch"
+    assert 'width="1024"' in exact and 'height="576"' in exact
 
 
 @needs_resvg
@@ -212,6 +270,19 @@ def test_the_sweep_spec_covers_every_scene_and_labels_its_estimate():
     assert "Kyle" in spec["human_gate"], "the sweep never runs without Kyle's approval"
     assert spec["rubric"]["layout_fidelity"]
     assert estimate_units(spec) == estimate
+
+
+def test_the_sweep_spec_carries_the_geometry_every_approach_runs_at():
+    """GPU test 2, issue 6 plus the i2v aspect note: lattice sizes, and plates at the output aspect."""
+    spec = build_sweep_spec([{"id": "sample_hero", "role": "hero-subject", "guide": "raster.png"}])
+    geometry = {(job["approach"], job["width"], job["height"]) for job in spec["jobs"]}
+    assert geometry == {("img2img", 1280, 720), ("ref_edit", 1280, 720), ("ltx_i2v", 1024, 576)}
+    for _approach, width, height in geometry:
+        assert width % 16 == 0 and height % 16 == 0, "every swept size is a multiple of 16"
+    # the i2v first frame is 16:9 at the plate's own size, so nothing is centre-cropped away
+    i2v = next(job for job in spec["jobs"] if job["approach"] == "ltx_i2v")
+    assert (i2v["width"], i2v["height"]) == APPROACH_GEOMETRY["ltx_i2v"]
+    assert i2v["width"] / i2v["height"] == pytest.approx(16 / 9, abs=0.001)
 
 
 def test_the_sweep_spec_refuses_an_unknown_approach():

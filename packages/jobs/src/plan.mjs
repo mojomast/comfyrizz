@@ -162,6 +162,38 @@ function withFileInputs(job, params, assetId, ctx) {
   return entries;
 }
 
+/** How much of an aspect mismatch is rounding noise rather than a different shape. */
+const ASPECT_TOLERANCE = 0.01;
+
+/**
+ * An i2v source has to be at its plate's aspect (GPU test 2: "a 1:1 mascot fed to 16:9 i2v was
+ * centre-cropped, cutting off the head"). The graph's ImageScale centre-crops whatever it gets, so
+ * a source of the wrong shape loses content silently - the plan refuses instead, and a caller that
+ * really wants the crop has to say so (`{ allowAspectMismatch: true }`), which the plan then records.
+ */
+function checkSourceAspect({ pkg, plateAssetId, sourceId, dims, format, kinds, errors, allowed, warnings }) {
+  if (!sourceId || !kinds.has(sourceId) || kinds.get(sourceId) !== "still") return;
+  const inputs = (pkg.assets?.[sourceId]?.gen?.inputs) || {};
+  const source = resolveDimensions(
+    Number(inputs.width ?? format.width ?? 1024),
+    Number(inputs.height ?? format.height ?? 1024),
+    DIM_MULTIPLE_BY_KIND.still,
+  );
+  const plateAspect = dims.width / dims.height;
+  const sourceAspect = source.width / source.height;
+  if (Math.abs(plateAspect - sourceAspect) / plateAspect <= ASPECT_TOLERANCE) return;
+  const message =
+    `assets.${plateAssetId}: its first frame ${sourceId} is planned at ${source.width}x${source.height} ` +
+    `(aspect ${sourceAspect.toFixed(3)}) but this plate renders at ${dims.width}x${dims.height} (aspect ${plateAspect.toFixed(3)}). ` +
+    "An i2v source of a different shape is centre-cropped, which cuts content off (GPU test 2); generate it at the " +
+    `plate's aspect (e.g. width ${dims.width}, height ${dims.height})`;
+  if (allowed) {
+    warnings.push({ asset: plateAssetId, code: "PLAN_SOURCE_ASPECT_MISMATCH", message: `${message} - allowed by the caller` });
+    return;
+  }
+  errors.push(message);
+}
+
 /**
  * Plan the generation jobs for a package.
  *
@@ -179,6 +211,8 @@ export function planJobs(pkg, opts = {}) {
   const format = pkg.format || {};
   const only = opts.assets ? new Set(opts.assets) : null;
   const skipped = [];
+  //: things the plan did on purpose that a reader should know about (an allowed aspect mismatch)
+  const warnings = [];
 
   const orderedAssets = Object.keys(assets)
     .filter((id) => (only ? only.has(id) : true))
@@ -276,6 +310,12 @@ export function planJobs(pkg, opts = {}) {
       const frames = resolveFrames(requestedFrames);
       job.dims = { width: dims.width, height: dims.height };
       job.dimsAdjusted = dims.adjusted;
+      // The two-stage LTX graph renders stage 1 at *half* the planned size and the latent upsampler
+      // doubles it back, so `dims` is the final frame and this is the lattice the graph's own
+      // EmptyLTXVLatentVideo (node 8) and i2v image scale (31) take. Recorded here because it is the
+      // number the params map derives with {mul: 0.5} - the plan and the graph have to agree on it
+      // (GPU test 2, issues 3 and 4: a planned 960x544 used to come back 1920x1088).
+      job.stage1Dims = { width: dims.width / 2, height: dims.height / 2 };
       job.fps = Number(params.fps ?? 24);
       job.frames = frames;
       job.framesAdjusted = frames !== requestedFrames;
@@ -285,6 +325,7 @@ export function planJobs(pkg, opts = {}) {
       params.fps = job.fps;
       job.inputAsset = typeof params.image === "string" ? params.image : null;
       job.output = `out/intermediates/${assetId}.plate.mp4`;
+      checkSourceAspect({ pkg, plateAssetId: assetId, sourceId: job.inputAsset, dims, format, kinds, errors, allowed: opts.allowAspectMismatch === true, warnings });
 
       if (params.upscale) {
         // A plate that will be upscaled is an intermediate; the upscale job owns the asset file.
@@ -328,6 +369,8 @@ export function planJobs(pkg, opts = {}) {
         }
         up.frames = frames;
         up.fps = job.fps;
+        // the finals pass renders stage 1 at half the upscale target and the same upsampler doubles it
+        up.stage1Dims = { width: up.dims.width / 2, height: up.dims.height / 2 };
         // the upscale pass reuses the plate's graph, so it needs the same start image: resolving
         // it here keeps the finals stage from being handed an asset id where a filename belongs
         withFileInputs(up, up.params, assetId, { pkg, kinds, errors });
@@ -404,6 +447,7 @@ export function planJobs(pkg, opts = {}) {
     batches,
     jobs,
     skipped,
+    warnings,
   };
   doc.hash = sha256Hex(canonical({ ...doc, hash: undefined }));
   return doc;
@@ -441,8 +485,23 @@ export function checkJobsDoc(doc) {
         problems.push(`${job.id}: fileInputs ${entry.param} is produced by ${entry.job}, which is not in this document`);
       }
     }
+    if (job.stage1Dims && job.dims) {
+      // the plan states both sizes, so a plan whose stage-1 lattice is not half its output size is
+      // a document that disagrees with the params map that renders it (GPU test 2, issue 3)
+      const expected = { width: job.dims.width / 2, height: job.dims.height / 2 };
+      if (Math.abs(job.stage1Dims.width - expected.width) > 0.5 || Math.abs(job.stage1Dims.height - expected.height) > 0.5) {
+        problems.push(
+          `${job.id}: stage1Dims ${job.stage1Dims.width}x${job.stage1Dims.height} is not half of dims ${job.dims.width}x${job.dims.height}`,
+        );
+      }
+    }
     for (const dep of job.deps || []) {
       if (!(doc.jobs || []).some((other) => other.id === dep)) problems.push(`${job.id}: dependency ${dep} is not in this document`);
+    }
+  }
+  for (const warning of doc.warnings || []) {
+    if (typeof warning?.code !== "string" || !/^PLAN_[A-Z0-9_]+$/.test(warning.code) || !warning.message) {
+      problems.push(`plan warning ${JSON.stringify(warning)} needs a PLAN_* code and a message`);
     }
   }
   return problems;

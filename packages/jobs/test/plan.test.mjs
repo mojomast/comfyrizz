@@ -180,6 +180,52 @@ test("checkJobsDoc catches a malformed file input", () => {
   assert.ok(problems.some((p) => /produced by a_ghost.still, which is not in this document/.test(p)), problems.join("\n"));
 });
 
+test("plate jobs record the stage-1 lattice the two-stage graph actually renders", () => {
+  const doc = planJobs(fixture("package-pending.json"));
+  const byId = Object.fromEntries(doc.jobs.map((j) => [j.id, j]));
+  const plate = byId["a_plate1.plate"];
+  // dims is the finished frame; stage 1 is half of it, which the x2 latent upsampler doubles back
+  assert.deepEqual(plate.dims, { width: 960, height: 544 });
+  assert.deepEqual(plate.stage1Dims, { width: 480, height: 272 });
+  assert.deepEqual(byId["a_plate1.upscale"].stage1Dims, { width: 960, height: 540 }, "half of the 1920x1080 finals frame");
+  assert.equal(byId["a_plate1_still.still"].stage1Dims, undefined, "a still is one pass, no lattice");
+  assert.deepEqual(checkJobsDoc(doc), []);
+
+  const broken = JSON.parse(JSON.stringify(doc));
+  broken.jobs.find((j) => j.id === "a_plate1.plate").stage1Dims = { width: 960, height: 544 };
+  assert.ok(checkJobsDoc(broken).some((p) => /stage1Dims 960x544 is not half of dims 960x544/.test(p)));
+});
+
+test("an i2v source at a different aspect than its plate is refused, naming both", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_plate1_still.gen.inputs.width = 1024;
+  pkg.assets.a_plate1_still.gen.inputs.height = 1024;
+  assert.throws(() => planJobs(pkg), /first frame a_plate1_still is planned at 1024x1024 \(aspect 1\.000\) but this plate renders at 960x544/);
+  assert.throws(() => planJobs(pkg), /generate it at the plate's aspect/);
+
+  // a source within 1% of the plate's aspect is rounding noise, not a different shape
+  const close = fixture("package-pending.json");
+  close.assets.a_plate1_still.gen.inputs.width = 960;
+  close.assets.a_plate1_still.gen.inputs.height = 540;
+  assert.deepEqual(planJobs(close).warnings, []);
+
+  // and a caller who really wants the centre-crop can say so: the plan then records it
+  const allowed = planJobs(pkg, { allowAspectMismatch: true });
+  assert.deepEqual(allowed.warnings.map((w) => w.code), ["PLAN_SOURCE_ASPECT_MISMATCH"]);
+  assert.match(allowed.warnings[0].message, /allowed by the caller/);
+  assert.deepEqual(checkJobsDoc(allowed), []);
+});
+
+test("a t2v plate with no source still is not aspect-checked", () => {
+  const pkg = fixture("package-pending.json");
+  delete pkg.assets.a_plate1.gen.inputs.image;
+  const doc = planJobs(pkg);
+  const plate = doc.jobs.find((j) => j.id === "a_plate1.plate");
+  assert.equal(plate.inputAsset, null);
+  assert.deepEqual(plate.fileInputs, undefined);
+  assert.deepEqual(doc.warnings, []);
+});
+
 test("jobs carry resolved dimensions, frames, crop and the cache key", () => {
   const doc = planJobs(fixture("package-pending.json"));
   const byId = Object.fromEntries(doc.jobs.map((j) => [j.id, j]));

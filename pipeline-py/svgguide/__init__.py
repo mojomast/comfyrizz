@@ -17,7 +17,7 @@ from .controlmaps import (
     write_gray_png,
 )
 from .raster import RASTER_BACKEND, RasterError, rasterize, sanitize_svg
-from .sweeps import build_sweep_spec, estimate_units, write_sweep_spec
+from .sweeps import APPROACH_GEOMETRY, build_sweep_spec, estimate_units, write_sweep_spec
 from .templates import TEMPLATES_VERSION, LAYOUT_ROLES, render_caption
 from .workflows import APPROACHES, CONTROLNET_STATUS, build_approach, write_approach
 

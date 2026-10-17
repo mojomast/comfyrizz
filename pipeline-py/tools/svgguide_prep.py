@@ -31,7 +31,7 @@ from svgguide.controlmaps import (  # noqa: E402
 )
 from svgguide.paths import SAMPLES_DIR, SWEEPS_DIR  # noqa: E402
 from svgguide.raster import rasterize, sanitize_svg  # noqa: E402
-from svgguide.sweeps import build_sweep_spec, write_sweep_spec  # noqa: E402
+from svgguide.sweeps import APPROACH_GEOMETRY, build_sweep_spec, write_sweep_spec  # noqa: E402
 from svgguide.templates import caption_provenance, render_caption  # noqa: E402
 from svgguide.workflows import CONTROLNET_STATUS, build_approach, write_approach  # noqa: E402
 
@@ -88,11 +88,15 @@ def prepare_scene(region_path: Path, out_dir: Path, *, width: int = 960) -> dict
     except ValueError:
         # an output directory outside the repository (tests): keep an absolute path
         guide_image = raster_path.as_posix()
+    # The drafts carry the geometry the sweep actually runs (GPU test 2): a multiple of 16 raster
+    # for every approach, and the plate at the output aspect an i2v first frame has to be at.
+    i2i_width, i2i_height = APPROACH_GEOMETRY["img2img"]
+    plate_width, plate_height = APPROACH_GEOMETRY["ltx_i2v"]
     documents = {}
     for approach, params in (
-        ("img2img", {"image": guide_image, "prompt": caption.text, "width": round_down_to(still.get("width", 960), 8), "height": round_down_to(still.get("height", 544), 8), "seed": 42, "steps": int(still.get("steps", 16)), "denoise": 0.5}),
+        ("img2img", {"image": guide_image, "prompt": caption.text, "width": round_down_to(i2i_width, 8), "height": round_down_to(i2i_height, 8), "seed": 42, "steps": int(still.get("steps", 16)), "denoise": 0.5}),
         ("ref_edit", {"reference": guide_image, "prompt": caption.text, "megapixels": 1.0, "seed": 42, "steps": int(still.get("steps", 16)), "denoise": 1.0}),
-        ("ltx_i2v", {"image": guide_image, "prompt": caption.text, "width": round_down_to(plate.get("width", 960), 32), "height": round_down_to(plate.get("height", 544), 32), "frames": int(plate.get("frames", 97)), "fps": int(plate.get("fps", 24)), "seed": 42, "stage2_seed": 43}),
+        ("ltx_i2v", {"image": guide_image, "prompt": caption.text, "width": round_down_to(plate_width, 32), "height": round_down_to(plate_height, 32), "frames": int(plate.get("frames", 97)), "fps": int(plate.get("fps", 24)), "seed": 42, "stage2_seed": 43}),
     ):
         draft = build_approach(approach, params=params)
         documents[approach] = write_approach(draft, scene_out / "workflows")
@@ -102,7 +106,15 @@ def prepare_scene(region_path: Path, out_dir: Path, *, width: int = 960) -> dict
         "role": scene["role"],
         "svg": str(svg_path),
         "sanitizer_removed": removed,
-        "raster": {"file": str(raster_path), "width": meta["width"], "height": height, "renderer": meta["renderer"]},
+        "raster": {
+            "file": str(raster_path),
+            "width": meta["width"],
+            "height": height,
+            "renderer": meta["renderer"],
+            "requested": meta.get("requested"),
+            "aspectAdjusted": meta.get("aspectAdjusted"),
+            "multiple": 16,
+        },
         "maps": map_files,
         "caption": {"text": caption.text, "template_id": caption.template_id, "template_version": caption.template_version, "provenance": caption_provenance(caption)},
         "workflows": documents,

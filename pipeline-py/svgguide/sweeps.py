@@ -21,6 +21,17 @@ BOOTSTRAP_OVERHEAD_MINUTES = 5
 #: Placeholder GPU minutes per approach until the M3 spike measures the real ones.
 APPROACH_MINUTES = {"img2img": 0.5, "ref_edit": 0.5, "ltx_i2v": 1.5}
 
+#: The geometry each approach runs at, from the GPU test 2 measurements (docs/GPU_TEST_2.md).
+#: The img2img/edit stills ran at 1280x720; the i2v plates at 1024x576, which is the aspect an
+#: i2v source has to be *at* - a 1:1 source fed to a 16:9 plate was centre-cropped on the GPU test
+#: and cut the subject's head off. One 16:9 source per scene serves both, and every dimension here
+#: is a multiple of 16 so the model pads or crops nothing (GPU test 2, issues 6 and the i2v note).
+APPROACH_GEOMETRY: dict[str, tuple[int, int]] = {
+    "img2img": (1280, 720),
+    "ref_edit": (1280, 720),
+    "ltx_i2v": (1024, 576),
+}
+
 #: The rubric the contact sheets are scored against (PLAN.md E1).
 RUBRIC = {
     "layout_fidelity": ["edge_iou", "chamfer_distance", "mask_iou", "palette_delta_e"],
@@ -49,6 +60,7 @@ def build_sweep_spec(
                 raise ValueError(f"unknown approach {approach!r}; expected {', '.join(APPROACH_MINUTES)}")
             denominators = denoise_grid if approach == "img2img" else (None,)
             weights = reference_weights if approach == "ref_edit" else (None,)
+            width, height = APPROACH_GEOMETRY[approach]
             for seed in seeds:
                 for denoise in denominators:
                     for weight in weights:
@@ -63,6 +75,8 @@ def build_sweep_spec(
                                 "seed": seed,
                                 "denoise": denoise,
                                 "reference_weight": weight,
+                                "width": width,
+                                "height": height,
                                 "guide": scene.get("guide"),
                                 "caption_template": scene.get("template_id"),
                                 "minutes_estimate": APPROACH_MINUTES[approach],

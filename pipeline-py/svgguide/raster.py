@@ -116,6 +116,11 @@ FORBIDDEN_PATTERNS = (
     (re.compile(r"<!DOCTYPE[^>]*SYSTEM", re.I), "external DTD"),
 )
 VIEWBOX_RE = re.compile(r'viewBox\s*=\s*"([^"]+)"')
+#: the root element's own pixel size and aspect rule: resvg fits to width and takes the height here
+WIDTH_ATTR_RE = re.compile(r'(<svg\b[^>]*?)\swidth\s*=\s*"[^"]*"')
+HEIGHT_ATTR_RE = re.compile(r'(<svg\b[^>]*?)\sheight\s*=\s*"[^"]*"')
+ROOT_SVG_RE = re.compile(r"<svg\b((?:[^>\"']|\"[^\"]*\"|'[^']*')*)>", re.I)
+PRESERVE_AR_RE = re.compile(r'preserveAspectRatio\s*=\s*"[^"]*"')
 TAG_RE = re.compile(r"<\s*/?\s*([A-Za-z][A-Za-z0-9:_-]*)")
 ATTR_RE = re.compile(r'([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*"([^"]*)"')
 EXTERNAL_HREF_RE = re.compile(r'(?:xlink:)?href\s*=\s*"(?!#)([^"]*)"', re.I)
@@ -170,13 +175,83 @@ def viewbox(text: str) -> tuple[float, float, float, float]:
     return parts[0], parts[1], parts[2], parts[3]
 
 
+def fit_box(text: str, width: int, height: int) -> str:
+    """Give the root ``<svg>`` the requested pixel box.
+
+    resvg fits to the requested width and takes the height from the SVG's own declared box, so the
+    requested size has to be expressed *inside* the SVG. When the box's aspect differs from the
+    request (a snap that could not find an exact lattice size) the painting is stretched with
+    ``preserveAspectRatio="none"`` rather than letterboxed: a transparent band is a hole in a guide
+    image, and the model would read it as "nothing here".
+    """
+    minx, miny, box_w, box_h = viewbox(text)
+    text = _with_size_attrs(text, width, height)
+    if abs(box_w / box_h - width / height) < 1e-6:
+        return PRESERVE_AR_RE.sub("", text, count=1)
+    if PRESERVE_AR_RE.search(text):
+        return PRESERVE_AR_RE.sub('preserveAspectRatio="none"', text, count=1)
+    return ROOT_SVG_RE.sub(lambda match: f'<svg preserveAspectRatio="none"{match.group(1)}>', text, count=1)
+
+
+def _with_size_attrs(text: str, width: int, height: int) -> str:
+    """Set the root <svg> width/height attributes to the requested pixel size."""
+    text = WIDTH_ATTR_RE.sub(lambda m: f'{m.group(1)} width="{int(width)}"', text, count=1)
+    text = HEIGHT_ATTR_RE.sub(lambda m: f'{m.group(1)} height="{int(height)}"', text, count=1)
+    if WIDTH_ATTR_RE.search(text) and HEIGHT_ATTR_RE.search(text):
+        return text
+    # no attributes to replace: add them to the root element so resvg sees the requested box
+    return ROOT_SVG_RE.sub(lambda match: f'<svg width="{int(width)}" height="{int(height)}"{match.group(1)}>', text, count=1)
+
+
+def snap_size(width: int, height: int, multiple: int = 16, *, tolerance: float = 0.01, search: int = 5) -> tuple[int, int]:
+    """Choose the model-friendly size closest to a request (GPU test 2, issue 6).
+
+    A raster the model later pads or crops is a silent lie about the composition, so both dimensions
+    have to land on ``multiple``. The search prefers a size whose aspect is *exactly* the SVG's: for a
+    16:9 scene at 960 that is 1024x576 - also the size the GPU test 2 findings recommend - which is
+    strictly better than 960x544's 0.7% stretch. When no lattice size within the tolerance is nearby
+    (a tiny diagnostic raster, say), the caller's width is kept and the height rounds up, and
+    ``fit_box`` expresses that as a stretch rather than a transparent band.
+
+    Up and outward, never down: the caller asked for at least this much (only the no-twin fallback may
+    round the height to the *nearest* step), and a raster one pixel short of the lattice is the subtle
+    version of the bug this prevents.
+    """
+    if not multiple or multiple <= 1:
+        return max(1, int(width)), max(1, int(height))
+    step = int(multiple)
+    requested_w = max(1, int(width))
+    requested_h = max(1, int(height))
+    aspect = requested_h / requested_w
+    start = -(-requested_w // step) * step
+    for index in range(search + 1):
+        candidate_w = start + index * step
+        candidate_h = round(candidate_w * aspect)
+        if candidate_h > 0 and candidate_h % step == 0 and abs(candidate_h / candidate_w - aspect) <= tolerance * aspect:
+            return candidate_w, candidate_h
+    # no lattice twin nearby: keep the requested width, round the height to the nearest step, ties up
+    nearest = int(step * ((2 * requested_h + step) // (2 * step)))
+    return start, max(step, nearest)
+
+
 def rasterize(
-    svg: str | Path, *, width: int, height: int | None = None, node: str | None = None
+    svg: str | Path,
+    *,
+    width: int,
+    height: int | None = None,
+    node: str | None = None,
+    multiple: int = 16,
 ) -> tuple[bytes, bytes, dict]:
     """Rasterise an SVG on CPU.
 
     Returns ``(png_bytes, rgba_raw)``: the PNG is for a human/contact sheet, the raw RGBA buffer
     is what the control maps are computed from (no image library needed).
+
+    **Sizes have to be model-friendly** (GPU test 2, issue 6: "E2 sample rasters are 960x540, which
+    is not a multiple of 16. Klein pads or crops them; use 960x544 or 1024x576"). ``snap_size`` picks
+    the lattice size whose aspect matches the SVG, so a 16:9 scene asked for at width 960 comes out
+    1024x576 - the same aspect, and the same geometry as the plate it guides. Pass ``multiple=0`` for
+    the raw aspect (a diagnostic raster).
     """
     text = svg.read_text(encoding="utf-8") if isinstance(svg, Path) else str(svg)
     clean, removed = sanitize_svg(text)
@@ -188,6 +263,9 @@ def rasterize(
     if height is None:
         _, _, box_w, box_h = viewbox(clean)
         height = max(1, round(width * box_h / box_w))
+    requested = {"width": int(width), "height": int(height)}
+    width, height = snap_size(int(width), int(height), multiple)
+    clean = fit_box(clean, width, height)
     payload = json.dumps({"svg": clean, "width": int(width), "height": int(height)})
     result = subprocess.run(
         [node_bin, str(RESVG_SHIM), str(RESVG_INDEX)],
@@ -204,4 +282,6 @@ def rasterize(
         output = json.loads(result.stdout)
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
         raise RasterError(f"resvg shim returned nothing readable: {result.stdout[:200]}") from exc
+    output["requested"] = requested
+    output["aspectAdjusted"] = requested["width"] != int(output["width"]) or requested["height"] != int(output["height"])
     return Path(output["png"]).read_bytes(), Path(output["rgba"]).read_bytes(), output

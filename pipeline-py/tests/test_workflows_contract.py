@@ -18,7 +18,7 @@ import pytest
 from comfyrizz_pipeline.client import CONTROL_PARAMS, inject_params, load_params_map
 from comfyrizz_pipeline.schema import validate_jobs, validate_package
 
-from conftest import REPO_ROOT
+from conftest import FIXTURES, REPO_ROOT
 
 WORKFLOWS = REPO_ROOT / "workflows"
 PACKAGE = REPO_ROOT / "pipeline-py" / "tests" / "fixtures" / "package-gpu1-workflows.json"
@@ -142,6 +142,32 @@ def test_every_planned_job_injects_into_its_real_workflow(tmp_path: Path):
                     f"{job['id']}: {name} did not reach {node_id}.{field}"
                 )
     assert injected_total == len(doc["jobs"]) >= 5
+
+
+def test_the_two_stage_maps_render_half_the_planned_size():
+    """GPU test 2, issues 3 and 4: the graph's stage 1 is half the finished frame, and the i2v
+    image scale is wired to the same value, so a planned size comes back as the planned size."""
+    planned = {"width": 960, "height": 544, "frames": 97, "fps": 24, "prompt": "x", "seed": 42, "stage2_seed": 43}
+    for name, nodes in (("ltx25_i2v_2stage", ["8", "31"]), ("ltx25_t2v_2stage", ["8"])):
+        graph_path = WORKFLOWS / f"{name}.api.json"
+        graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        inject_params(graph, load_params_map(graph_path), dict(planned))
+        for node in nodes:
+            assert graph[node]["inputs"]["width"] == 480, f"{name}: node {node} renders stage 1"
+            assert graph[node]["inputs"]["height"] == 272, f"{name}: node {node} renders stage 1"
+        assert graph["8"]["inputs"]["length"] == 97, f"{name}: no temporal upsampling, frames unchanged"
+
+    # the committed fixture plan states the same lattice, so the plan and the map cannot drift apart
+    doc = json.loads((FIXTURES / "jobs.json").read_text(encoding="utf-8"))
+    job = next(entry for entry in doc["jobs"] if entry["kind"] == "plate")
+    assert job["stage1Dims"] == {"width": job["dims"]["width"] / 2, "height": job["dims"]["height"] / 2}
+    # the fixture graph is a stand-in with its own node numbering; the real graph's map is what the
+    # runner injects, so feed it this plan's params and read the stage-1 latent back
+    graph_path = WORKFLOWS / "ltx25_i2v_2stage.api.json"
+    graph = json.loads(graph_path.read_text(encoding="utf-8"))
+    inject_params(graph, load_params_map(graph_path), dict(job["params"]))
+    assert graph["8"]["inputs"]["width"] == job["stage1Dims"]["width"]
+    assert graph["8"]["inputs"]["height"] == job["stage1Dims"]["height"]
 
 
 def test_a_parameter_with_no_mapping_is_refused_naming_it():

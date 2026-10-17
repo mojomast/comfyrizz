@@ -116,6 +116,10 @@
         "height": 544
       },
       "dimsAdjusted": false,
+      "stage1Dims": {
+        "width": 480,
+        "height": 272
+      },
       "fps": 24,
       "frames": 97,
       "framesAdjusted": true,
@@ -186,6 +190,10 @@
       },
       "frames": 97,
       "fps": 24,
+      "stage1Dims": {
+        "width": 960,
+        "height": 540
+      },
       "fileInputs": [
         {
           "param": "image",
@@ -226,5 +234,6 @@
       "reason": "llm-svg is CPU work (A5 sanitize + render-check), not a Comfy job"
     }
   ],
-  "hash": "c8e06b19b85b08d487b68249eb2f81e1763e661bba5d56877850fca75e498766"
+  "warnings": [],
+  "hash": "769ce1ecc07584d453ff00008aa045ba778131395f4925bc5bcd3e4fd4c74b36"
 }
