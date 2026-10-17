@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 1095,
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 150,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Open-source AI motion graphics",
+        "headline": "Comfyrizz",
+        "sub": "One package, five layouts, CPU render."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_icon_check",
+          "x": 0.5,
+          "y": 0.79,
+          "w": 0.07,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_hero",
+      "layout": "hero",
+      "variant": "split",
+      "from": 135,
+      "durationInFrames": 240,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Generated-first assets",
+        "sub": "Icons, diagrams and pattern backgrounds are SVG written as code.",
+        "body": "The agent sanitizes and render-checks every SVG on CPU, repairs it at most twice, then hands the vector straight to Remotion."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 3
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_diagram_flow",
+          "x": 0.72,
+          "y": 0.5,
+          "w": 0.46,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_stat",
+      "layout": "stat",
+      "from": 360,
+      "durationInFrames": 180,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "CPU time for a 40 s launch video",
+        "sub": "Measured on the box, no GPU and no network.",
+        "body": "6 min"
+      },
+      "data": {
+        "dataset": "d_minutes",
+        "display": "number"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "gradient",
+          "seed": 5
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_icon_check",
+          "x": 0.13,
+          "y": 0.2,
+          "w": 0.06,
+          "anim": "zoom-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "from": 525,
+      "durationInFrames": 240,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Where the launch minutes went",
+        "sub": "Shorter is better.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "data": {
+        "dataset": "d_minutes",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 17
+        }
+      },
+      "foreground": [],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_list",
+      "layout": "list",
+      "variant": "bullets",
+      "from": 750,
+      "durationInFrames": 210,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "What the CPU slice does",
+        "items": [
+          "Compiles the timeline in integer frames",
+          "Sanitizes and render-checks every SVG",
+          "Paints procedural backgrounds with no plate",
+          "Shows a red fail state instead of clipping copy"
+        ]
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 2
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_pattern_dots",
+          "x": 0.83,
+          "y": 0.5,
+          "w": 0.3,
+          "anim": "parallax-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "from": 945,
+      "durationInFrames": 150,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 0,
+      "copy": {
+        "headline": "Ready to render",
+        "sub": "Local, deterministic and free.",
+        "cta": "github.example/comfyrizz"
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 23,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_anim_bars",
+          "x": 0.5,
+          "y": 0.72,
+          "w": 0.34,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    }
+  ],
+  "captions": [],
+  "plates": [],
+  "target": {
+    "requested": null,
+    "actual": 1095,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [],
+  "proposals": [],
+  "sourceHash": "67339eaa7559254511c695a41b0a91c26b7139299c9022eb00091cbc028d154c",
+  "hash": "fb41de79272f5599acb0218ca6fa70c911986e67cce1d0bddccce3827aead571"
+}

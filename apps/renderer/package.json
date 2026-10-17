@@ -1,0 +1,31 @@
+{
+  "name": "@comfyrizz/renderer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Comfyrizz Remotion renderer: 5 layouts driven by package.json + timeline.json (spec 6.3, 6.9). Owner: Pi (WS-A).",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build:assets": "node scripts/build-assets.mjs",
+    "compile:example": "node scripts/compile-example.mjs",
+    "studio": "remotion studio src/index.ts",
+    "still": "node scripts/still-all.mjs",
+    "render:example": "node scripts/render-example.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.536",
+    "@remotion/fonts": "4.0.536",
+    "@remotion/transitions": "4.0.536",
+    "d3-scale": "4.0.2",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "remotion": "4.0.536"
+  },
+  "devDependencies": {
+    "@types/d3-scale": "4.0.9",
+    "@types/react": "19.1.9",
+    "@types/react-dom": "19.1.7",
+    "typescript": "5.6.3"
+  }
+}
