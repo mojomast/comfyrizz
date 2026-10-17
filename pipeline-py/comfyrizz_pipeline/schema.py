@@ -684,6 +684,21 @@ def validate_jobs(doc: Any) -> list[dict[str, Any]]:
                             "message": f"file input {entry.get('param')} is produced by {entry.get('job')}, which is not in this document",
                         }
                     )
+            stage1 = job.get("stage1Dims")
+            dims = job.get("dims")
+            if _is_obj(stage1) and _is_obj(dims) and _is_number(dims.get("width")) and _is_number(dims.get("height")):
+                expected = (dims["width"] / 2, dims["height"] / 2)
+                actual = (stage1.get("width"), stage1.get("height"))
+                if not all(_is_number(value) for value in actual) or any(
+                    abs(float(value) - want) > 0.5 for value, want in zip(actual, expected)
+                ):
+                    problems.append(
+                        {
+                            "code": "JOBS_SEMANTIC",
+                            "path": f"/jobs/{i}/stage1Dims",
+                            "message": f"stage1Dims {actual[0]}x{actual[1]} is not half of dims {dims['width']}x{dims['height']}",
+                        }
+                    )
     return problems
 
 

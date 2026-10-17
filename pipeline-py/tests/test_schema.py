@@ -133,3 +133,62 @@ def test_validator_does_not_depend_on_network():
     # jsonschema must resolve the local $refs from the file itself
     result = S.validate_package(load(VALID[0]))
     assert result["schemaOk"], result["errors"]
+
+
+# ------------------------------------------------------------------ the validate CLI (H-fix3)
+def test_the_validate_cli_knows_a_plan_from_a_package(tmp_path):
+    """GPU test 2, issue 7: a plan must not be reported as a package missing `scenes`."""
+    import subprocess
+    import sys
+
+    from conftest import FIXTURES, REPO_ROOT
+
+    cli = [sys.executable, "-m", "comfyrizz_pipeline.validate"]
+    env = {"PYTHONPATH": str(REPO_ROOT / "pipeline-py"), "PATH": "/usr/bin:/bin:/usr/local/bin"}
+    plan = FIXTURES / "jobs.json"
+    package = REPO_ROOT / "packages" / "schema" / "fixtures" / "valid" / "spec-6.3-example.json"
+
+    detected = subprocess.run([*cli, "--json", str(plan)], capture_output=True, text=True, env=env, check=False)
+    assert detected.returncode == 0, detected.stdout + detected.stderr
+    report = json.loads(detected.stdout)
+    assert report["kind"] == "jobs" and report["detected"] is True and report["errors"] == []
+
+    forced = subprocess.run([*cli, "--json", "--jobs", str(plan)], capture_output=True, text=True, env=env, check=False)
+    assert json.loads(forced.stdout)["detected"] is False
+
+    as_package = subprocess.run([*cli, "--json", "--package", str(plan)], capture_output=True, text=True, env=env, check=False)
+    assert as_package.returncode == 1
+    assert any("scenes" in error["message"] for error in json.loads(as_package.stdout)["errors"])
+
+    still_a_package = subprocess.run([*cli, "--json", str(package)], capture_output=True, text=True, env=env, check=False)
+    assert json.loads(still_a_package.stdout)["kind"] == "package"
+
+    human = subprocess.run([*cli, str(plan)], capture_output=True, text=True, env=env, check=False)
+    assert "jobs.json (jobs)" in human.stdout
+
+
+def test_the_validate_cli_names_a_broken_plan(tmp_path):
+    import subprocess
+    import sys
+
+    from conftest import FIXTURES, REPO_ROOT
+
+    doc = json.loads((FIXTURES / "jobs.json").read_text())
+    doc["jobs"][0]["stage1Dims"] = {"width": 999, "height": 999}
+    doc["jobs"][1]["deps"] = ["a_ghost.still"]
+    broken = tmp_path / "jobs.json"
+    broken.write_text(json.dumps(doc))
+    env = {"PYTHONPATH": str(REPO_ROOT / "pipeline-py"), "PATH": "/usr/bin:/bin:/usr/local/bin"}
+    result = subprocess.run(
+        [sys.executable, "-m", "comfyrizz_pipeline.validate", "--json", str(broken)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == 1
+    report = json.loads(result.stdout)
+    assert report["kind"] == "jobs" and report["valid"] is False
+    problems = " ".join(error["message"] for error in report["errors"])
+    assert "a_ghost.still" in problems
+    assert "stage1Dims" in problems

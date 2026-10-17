@@ -74,6 +74,38 @@ export function parse(text) {
   return JSON.parse(text, (key, value) => value);
 }
 
+// ------------------------------------------------------------------- jobs/v1 documents
+
+export const JOBS_SCHEMA_PATH = join(here, "..", "jobs-v1.schema.json");
+
+let cachedJobsValidator = null;
+
+/**
+ * Structural validation of a ``comfyrizz.jobs/v1`` plan. The semantic half lives in
+ * ``packages/jobs`` (``checkJobsDoc``), because that is where the planner that must satisfy it lives;
+ * the CLI runs both, which is exactly the gate the runner applies before submitting anything.
+ */
+export function validateJobsDoc(doc) {
+  if (!cachedJobsValidator) {
+    const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true, validateFormats: true });
+    addFormats(ajv);
+    cachedJobsValidator = ajv.compile(JSON.parse(readFileSync(JOBS_SCHEMA_PATH, "utf8")));
+  }
+  const ok = cachedJobsValidator(doc);
+  if (ok) return [];
+  return (cachedJobsValidator.errors || []).map((err) => ({
+    source: "schema",
+    code: `JOBS_${String(err.keyword || "unknown").toUpperCase()}`,
+    path: err.instancePath || "",
+    message: `${err.message}${err.params && Object.keys(err.params).length ? ` ${JSON.stringify(err.params)}` : ""}`,
+  }));
+}
+
+/** True for a document that is a plan rather than a package (the CLI auto-detects this). */
+export function looksLikeAPlan(doc) {
+  return Boolean(doc) && typeof doc === "object" && !Array.isArray(doc) && "jobs" in doc && !("scenes" in doc);
+}
+
 export {
   semanticCheck,
   applyDefaults,
