@@ -164,13 +164,18 @@ export function planJobs(pkg, opts = {}) {
     };
 
     if (kind === "still") {
-      const width = Number(params.width ?? format.width ?? 1024);
-      const height = Number(params.height ?? format.height ?? 1024);
-      const dims = resolveDimensions(width, height, DIM_MULTIPLE_BY_KIND.still);
+      const requested = {
+        width: Number(params.width ?? format.width ?? 1024),
+        height: Number(params.height ?? format.height ?? 1024),
+      };
+      const dims = resolveDimensions(requested.width, requested.height, DIM_MULTIPLE_BY_KIND.still);
       job.dims = { width: dims.width, height: dims.height };
       job.dimsAdjusted = dims.adjusted;
-      params.width = dims.width;
-      params.height = dims.height;
+      // A still only sends width/height to the workflow when the package asked for them: some
+      // graphs (reference/edit conditioning) take their geometry from the reference image, and
+      // inventing a width there would be a parameter the workflow cannot accept.
+      if (params.width !== undefined) params.width = dims.width;
+      if (params.height !== undefined) params.height = dims.height;
       if (params.cutout === true || asset.cutout === true) job.cutout = true;
       params.cutout = job.cutout === true;
     } else if (kind === "plate") {

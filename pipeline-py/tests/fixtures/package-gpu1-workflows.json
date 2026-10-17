@@ -1,0 +1,97 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 2,
+  "id": "pkg_gpu1maps00001",
+  "title": "GPU test 1 workflow contract",
+  "format": { "width": 1920, "height": 1080, "fps": 30 },
+  "duration": { "mode": "target", "targetFrames": 300 },
+  "theme": { "font": "Inter", "logo_asset": "a_ref" },
+  "scenes": [
+    {
+      "id": "s1",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 300,
+      "copy": { "headline": "Workflow contract", "sub": "Every param maps to a real node input" },
+      "background": { "asset": "a_plate1", "fit": "cover", "loop": true },
+      "foreground": [{ "asset": "a_ref", "x": 0.7, "y": 0.5, "w": 0.3, "anim": "fade-in" }],
+      "transitionOut": { "type": "fade", "frames": 15 }
+    }
+  ],
+  "assets": {
+    "a_still": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "workflow_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "model": "flux-3-image-klein",
+        "caption": "A wide abstract nebula, violet filaments, dark space top left.",
+        "inputs": { "prompt": "A wide abstract nebula, violet filaments, dark space top left.", "width": 960, "height": 544, "seed": 42, "steps": 16 }
+      }
+    },
+    "a_i2i": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_img2img.api.json",
+        "workflow_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "model": "flux-3-image-klein",
+        "caption": "Same nebula, warmer and denser.",
+        "inputs": { "prompt": "Same nebula, warmer and denser.", "image": "a_still", "width": 1344, "height": 768, "seed": 7, "steps": 16, "denoise": 0.6 }
+      }
+    },
+    "a_ref": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_ref_edit.api.json",
+        "workflow_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "model": "flux-3-image-klein",
+        "caption": "Turn the reference into a product shot with the subject at x=0.35, y=0.5.",
+        "inputs": { "prompt": "Turn the reference into a product shot with the subject at x=0.35, y=0.5.", "reference": "a_still", "megapixels": 1.0, "seed": 11, "steps": 16, "denoise": 1.0 }
+      }
+    },
+    "a_plate1": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "ltx25",
+        "workflow": "workflows/ltx25_i2v_2stage.api.json",
+        "workflow_sha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "model": "ltx-2.5-22b-distilled",
+        "inputs": {
+          "prompt": "slow drift through a soft blue nebula",
+          "image": "a_still",
+          "width": 960,
+          "height": 544,
+          "frames": 100,
+          "fps": 24,
+          "seed": 42,
+          "stage2_seed": 43
+        }
+      }
+    },
+    "a_plate2": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "ltx25",
+        "workflow": "workflows/ltx25_t2v_2stage.api.json",
+        "workflow_sha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "model": "ltx-2.5-22b-distilled",
+        "inputs": { "prompt": "endless violet fog, no camera move", "width": 960, "height": 544, "frames": 97, "fps": 24, "seed": 7 }
+      }
+    }
+  },
+  "compliance": { "open_weights_only": true, "backends_used": ["colab:G4"] }
+}
