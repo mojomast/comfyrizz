@@ -25,17 +25,28 @@ def _as_bool(array: np.ndarray) -> np.ndarray:
     return data > 0.02
 
 
+def _grow(mask: np.ndarray, pixels: int) -> np.ndarray:
+    grown = mask.copy()
+    for _ in range(int(pixels)):
+        grown = grown | np.roll(grown, 1, 0) | np.roll(grown, -1, 0) | np.roll(grown, 1, 1) | np.roll(grown, -1, 1)
+    return grown
+
+
 def edge_iou(reference: np.ndarray, candidate: np.ndarray, *, tolerance: int = 0) -> float:
-    """IoU of two edge maps. `tolerance` grows the reference by that many pixels (dilate)."""
+    """IoU of two edge maps.
+
+    `tolerance` dilates *both* maps by that many pixels: it measures agreement when the two are
+    allowed to be off by that much, which is the question an SVG-guided comparison actually asks
+    (a one-pixel offset is not a composition error). Symmetric on purpose — growing only one map
+    would punish and reward the same mistake.
+    """
     reference_bool = _as_bool(reference)
     candidate_bool = _as_bool(candidate)
     if reference_bool.shape != candidate_bool.shape:
         raise ValueError(f"shape mismatch: {reference_bool.shape} vs {candidate_bool.shape}")
     if tolerance > 0:
-        grown = reference_bool.copy()
-        for _ in range(int(tolerance)):
-            grown = grown | np.roll(grown, 1, 0) | np.roll(grown, -1, 0) | np.roll(grown, 1, 1) | np.roll(grown, -1, 1)
-        reference_bool = grown
+        reference_bool = _grow(reference_bool, tolerance)
+        candidate_bool = _grow(candidate_bool, tolerance)
     union = np.logical_or(reference_bool, candidate_bool).sum()
     if union == 0:
         return 1.0

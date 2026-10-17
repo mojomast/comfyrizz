@@ -8,11 +8,13 @@ and captions for the M3/E2 GPU sweep that Kyle approves separately.
 
 from .controlmaps import (
     CONTROL_MAP_KINDS,
+    coverage,
     canny_edges,
     depth_from_layers,
     lineart,
     load_rgba,
     region_mask,
+    write_gray_png,
 )
 from .raster import RASTER_BACKEND, RasterError, rasterize, sanitize_svg
 from .sweeps import build_sweep_spec, estimate_units, write_sweep_spec
@@ -33,11 +35,13 @@ __all__ = [
     "depth_from_layers",
     "estimate_units",
     "lineart",
+    "coverage",
     "load_rgba",
     "rasterize",
     "region_mask",
     "render_caption",
     "sanitize_svg",
     "write_approach",
+    "write_gray_png",
     "write_sweep_spec",
 ]

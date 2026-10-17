@@ -113,8 +113,12 @@ def depth_from_layers(rgba: np.ndarray, palette: list[str], *, background_index:
     return scaled.astype(np.float32)
 
 
-def region_mask(rgba: np.ndarray, colour: str, *, tolerance: int = 24) -> np.ndarray:
-    """Boolean mask of the pixels matching a declared region colour."""
+def region_mask(rgba: np.ndarray, colour: str, *, tolerance: int = 10) -> np.ndarray:
+    """Boolean mask of the pixels matching a declared region colour.
+
+    The tolerance is deliberately tight: a flat SVG fill matches exactly, while an anti-aliased
+    edge pixel is far away in RGB. A loose tolerance starts claiming background pixels.
+    """
     target = np.array(hex_to_rgb(colour), dtype=np.int16)
     difference = np.abs(rgba[..., :3].astype(np.int16) - target).sum(axis=2)
     return difference <= tolerance

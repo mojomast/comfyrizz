@@ -83,7 +83,11 @@ def prepare_scene(region_path: Path, out_dir: Path, *, width: int = 960) -> dict
 
     still = scene.get("sweep_params", {}).get("still", {})
     plate = scene.get("sweep_params", {}).get("plate", {})
-    guide_image = str(raster_path.relative_to(Path(__file__).resolve().parents[2]))
+    try:
+        guide_image = raster_path.relative_to(Path(__file__).resolve().parents[2]).as_posix()
+    except ValueError:
+        # an output directory outside the repository (tests): keep an absolute path
+        guide_image = raster_path.as_posix()
     documents = {}
     for approach, params in (
         ("img2img", {"image": guide_image, "prompt": caption.text, "width": round_down_to(still.get("width", 960), 8), "height": round_down_to(still.get("height", 544), 8), "seed": 42, "steps": int(still.get("steps", 16)), "denoise": 0.5}),

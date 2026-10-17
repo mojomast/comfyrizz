@@ -110,6 +110,7 @@ FORBIDDEN_PATTERNS = (
     (re.compile(r"<\s*iframe", re.I), "iframe element"),
     (re.compile(r"\son[a-z]+\s*=", re.I), "event handler attribute"),
     (re.compile(r"javascript:", re.I), "javascript: URL"),
+    (re.compile(r"<style[^>]*>[\s\S]*?</style[^>]*>", re.I), "style block"),
     (re.compile(r"@import", re.I), "@import rule"),
     (re.compile(r"<!ENTITY", re.I), "entity declaration"),
     (re.compile(r"<!DOCTYPE[^>]*SYSTEM", re.I), "external DTD"),
