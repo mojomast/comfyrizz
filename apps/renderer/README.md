@@ -148,6 +148,32 @@ Git (`.gitignore`) and come from the GPU test session; the committed
 `package.json`, recompiled `timeline.json` and `narration-report.json` are the
 source of truth and are checked by the freshness guard above.
 
+### Media in a clean clone (P-fix4)
+
+The GPU showcases are reproducible from the committed manifests alone. When a
+declared media file is not in the clone (the usual case for a fresh checkout),
+`renderPackage`/`renderPackageIncremental` list it with `missingMediaFiles()`
+and pass the file list to the composition as `missingMedia`. The renderer then:
+
+- draws a labelled **`media not in this clone`** placeholder (palette gradient +
+  the asset id, generator and workflow) wherever the background or a foreground
+  panel would have used the file, instead of asking Remotion for a 404;
+- renders **silent** with the **committed captions** when the narration file is
+  absent (`SafeAudio` drops missing audio instead of crashing Studio);
+- logs **one warning per missing asset** and never crashes.
+
+`npm run still`, `render:package` and the incremental export all share this
+path, so opening a clean clone in Remotion Studio or exporting it works with no
+network and no GPU. Re-running the export after the media is present picks up
+the real files automatically.
+
+`node scripts/clean-clone-check.mjs` verifies this end to end: it makes a
+throwaway `git worktree` of `HEAD`, links the main tree's `node_modules` (the
+repo has no `pnpm-lock.yaml`), builds `packages/planner` + `packages/vector`,
+runs the renderer + planner suites, exports `examples/launch-demo` and asserts
+the ffprobe frame count equals the committed timeline, then removes the
+worktree.
+
 `render:package` renders each scene as its own content-addressed segment under
 `apps/renderer/.cache/<pkg.id>/`, so an unchanged scene is reused and a one-scene
 edit only re-renders the affected segment (plus the fade before it).
@@ -166,7 +192,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 
 | Check | Result |
 |---|---|
-| `npm test` | 49/49 pass (incl. P-fix3 freshness for all 7 bundled examples + report fallback) |
+| `npm test` | 53/53 pass (incl. P-fix3 freshness, N7/N8 narration, P-fix4 missing-media placeholder) |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `a5cd2d9b…3447` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
@@ -181,6 +207,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 | Product explainer (A6) | 1920×1080 30/1 H.264 + AAC, **1349 frames**, 44.967 s, 5.8 MB, hash `08dfa492…e831`, 7 segments, 8 captions; CPU 124.9 s |
 | Wind showcase (A7) | `examples/showcase-gpu3` incremental, 1920×1080 30/1 H.264 + AAC, **1092 frames**, 36.400 s, hash `fb4792fb…9184`, 6 segments, 9 captions; CPU 132.7 s |
 | Layout overlap gate (A6) | `findLayoutOverlaps` clean for all six bundled packages; `layout.test.mjs` 5/5 |
+| Missing media (P-fix4) | `showcase-gpu3` still rendered through `renderPackage` with `assets/` + `audio/` removed: labelled placeholder, silent, committed captions, `missing-media.test.mjs` 2/2 + 2 `media.test.mjs` unit cases |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is
 reproducible with `npm run render:example`.

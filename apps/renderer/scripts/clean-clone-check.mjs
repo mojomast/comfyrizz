@@ -65,7 +65,8 @@ try {
   process.stdout.write('built packages/planner + packages/vector\n');
 
   // Renderer + planner suites from the clean worktree.
-  const rendererTests = run('node', ['--test', 'apps/renderer/test'], { cwd: worktree, echo: false });
+  const rendererTestFiles = readdirSync(join(worktree, 'apps/renderer/test')).filter(name => name.endsWith('.test.mjs')).sort().map(name => `apps/renderer/test/${name}`);
+  const rendererTests = run('node', ['--test', ...rendererTestFiles], { cwd: worktree, echo: false });
   process.stdout.write(`renderer tests:\n${rendererTests.stdout.split('\n').filter(line => /^# (tests|pass|fail)/.test(line)).join('\n')}\n`);
   const plannerTests = run('npm', ['--prefix', 'packages/planner', 'test'], { cwd: worktree, echo: false });
   process.stdout.write(`planner tests:\n${plannerTests.stdout.split('\n').filter(line => /^# (tests|pass|fail)/.test(line)).join('\n')}\n`);
