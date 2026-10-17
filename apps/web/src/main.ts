@@ -61,6 +61,17 @@ const runState = {
   spend: null as null | { planHash: string; backendId: string; estimate: Record<string, unknown>; budget: Record<string, unknown>; jobs: number },
 };
 
+type ExportRefusal = { assetId: string; file?: string; licenseId?: string; reason?: string };
+const exportState = {
+  running: false,
+  exportId: null as string | null,
+  log: [] as string[],
+  files: [] as Array<{ name: string; bytes: number }>,
+  refused: [] as ExportRefusal[],
+  complete: null as boolean | null,
+  label: '',
+};
+
 function logActivity(text: string): void {
   state.activity.unshift({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), text });
   renderActivity();
@@ -265,6 +276,70 @@ function renderRunPanel(): void {
   host.innerHTML = `<div class="run-head"><b>${esc(runState.active.runId)}</b><span class="chip">${esc(runState.active.status)}</span></div>${rows}`;
 }
 
+/** C10: the export bundle lives next to the run panel; progress arrives over SSE. */
+function renderExportPanel(): void {
+  const host = $('export-panel');
+  if (!host) return;
+  const log = exportState.log.slice(-6).map(line => `<div class="event">${esc(line)}</div>`).join('');
+  const files = exportState.files.length
+    ? `<div class="export-files">${exportState.files.map(file => `<div class="event"><b>${esc(file.name)}</b> ${file.bytes ? `${(file.bytes / 1e6).toFixed(2)} MB` : ''}</div>`).join('')}</div>`
+    : '';
+  const refused = exportState.refused.length
+    ? `<div class="export-refused">${exportState.refused.map(item => `<div class="event">refused <b>${esc(item.assetId)}</b>${item.licenseId ? ` · ${esc(item.licenseId)}` : ''} — ${esc(item.reason ?? 'not redistributable')}</div>`).join('')}</div>`
+    : '';
+  host.innerHTML = `<div class="export-head"><button id="export-bundle"${exportState.running ? ' disabled' : ''}>${exportState.running ? 'Exporting…' : 'Export bundle'}</button><span class="hint" id="export-state">${esc(exportState.label || 'video · captions · credits · zip')}</span></div>${log}${files}${refused}`;
+  $('export-bundle').addEventListener('click', () => void exportBundle());
+}
+
+async function exportBundle(): Promise<void> {
+  if (exportState.running) return;
+  exportState.running = true;
+  exportState.files = [];
+  exportState.refused = [];
+  exportState.complete = null;
+  exportState.log = [];
+  exportState.label = 'rendering or reusing the final MP4…';
+  renderExportPanel();
+  logActivity('Export bundle started: video + captions + credits + package.zip');
+  try {
+    let body: Record<string, unknown> = { package: pkg };
+    if (token) {
+      // Persist with a base revision, then export that exact revision (like Export MP4).
+      const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }),
+      });
+      const savedBody = await saved.json().catch(() => ({}));
+      if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
+      pkg.revision = savedBody.revision;
+      body = { packageId: pkg.id, baseRevision: savedBody.revision };
+      logActivity(`Saved revision ${savedBody.revision} before export bundle`);
+    }
+    const response = await apiFetch('/api/export', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = (await response.json().catch(() => ({}))) as Record<string, any>;
+    if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+    exportState.exportId = result.exportId ?? null;
+    exportState.files = Array.isArray(result.files) ? result.files : [];
+    exportState.refused = Array.isArray(result.excluded) ? result.excluded : [];
+    exportState.complete = result.complete === true;
+    exportState.label = `${result.frames ?? '?'} frames · ${result.captions ?? 0} captions · ${result.complete ? 'complete archive' : 'incomplete archive'}`;
+    state.dirty = false;
+    $('draft').textContent = `exported bundle · ${result.dir ?? 'out/export'}`;
+    logActivity(`Export bundle finished: ${exportState.files.length} files${result.complete ? '' : `, ${exportState.refused.length} asset(s) refused`}`);
+  } catch (error) {
+    exportState.label = `export failed: ${(error as Error).message}`;
+    logActivity(`Export bundle failed: ${(error as Error).message}`);
+  } finally {
+    exportState.running = false;
+    renderExportPanel();
+  }
+}
+
 function renderSpendCard(): void {
   const host = $('spend-card');
   const spend = runState.spend;
@@ -465,6 +540,7 @@ function init(): void {
   renderPalette();
   renderAssets();
   renderRunPanel();
+  renderExportPanel();
   renderSpendCard();
   void loadProviders();
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: 'Loaded examples/launch-demo package + compiled timeline' }];
@@ -510,6 +586,35 @@ function init(): void {
     stream.addEventListener('render.failed', event => {
       const data = JSON.parse((event as MessageEvent).data) as { message: string };
       logActivity(`Render failed: ${data.message}`);
+    });
+    stream.addEventListener('export.started', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { exportId: string };
+      exportState.running = true;
+      exportState.exportId = data.exportId;
+      exportState.log = [];
+      exportState.label = 'server is building the bundle…';
+      renderExportPanel();
+    });
+    stream.addEventListener('export.log', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { line: string };
+      exportState.log.push(data.line);
+      if (exportState.log.length > 40) exportState.log.shift();
+      renderExportPanel();
+    });
+    stream.addEventListener('export.finished', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { exportId: string; files: string[]; captions: number; complete: boolean; excluded?: ExportRefusal[] };
+      exportState.running = false;
+      exportState.label = `${data.captions ?? 0} captions · ${data.complete ? 'complete archive' : 'incomplete archive'}`;
+      if (exportState.files.length === 0 && Array.isArray(data.files)) exportState.files = data.files.map(name => ({ name, bytes: 0 }));
+      if (exportState.refused.length === 0 && Array.isArray(data.excluded)) exportState.refused = data.excluded;
+      renderExportPanel();
+    });
+    stream.addEventListener('export.failed', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { message: string };
+      exportState.running = false;
+      exportState.label = `export failed: ${data.message}`;
+      renderExportPanel();
+      logActivity(`Export bundle failed: ${data.message}`);
     });
     stream.addEventListener('run.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { runId: string; backendId: string };

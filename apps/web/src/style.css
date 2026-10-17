@@ -131,6 +131,13 @@ main {
 #run-panel { padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; }
 .run-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .run-head .chip { margin-left: auto; }
+/* C10: export bundle panel */
+#export-panel { padding: 0 16px 10px; display: flex; flex-direction: column; gap: 8px; }
+#export-panel:empty { display: none; }
+.export-head { display: flex; align-items: center; gap: 8px; }
+.export-head .hint { margin-left: auto; text-align: right; }
+.export-files .event { border-left-color: #2d5a4a; }
+.export-refused .event { border-left-color: #5a4a1a; color: var(--warn); }
 #spend-card:empty { display: none; }
 .spend-card { margin: 12px 16px; border: 1px solid #4a3a1a; background: #1a1408; border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 .spend-card b { color: var(--warn); }

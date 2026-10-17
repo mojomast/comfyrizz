@@ -29,6 +29,7 @@ requests and as `?token=` only for the SSE `EventSource` (which cannot set heade
 | `PATCH` | `/api/package/:id` | `{baseRevision, package}`; mismatch → `409 {currentRevision}`; invalid → `422 {details}` |
 | `POST` | `/api/agent` | C5 agent slice: `{brief, provider?, model?, sessionId?}`. Runs `runCpuSlice` (scripted offline, the live model when `provider` is set), validates and returns `{package, revision, timeline, generatedAssets, routes, pendingGpu, svgAssets, live, fallback, provider, model}` |
 | `POST` | `/api/render` | `{packageId, baseRevision}`, or a C1-style `{package}` draft; returns `video/mp4` |
+| `POST` | `/api/export` | C10 bundle: `{packageId, baseRevision, force?}` or `{package}` draft. Renders (or reuses) the MP4 and writes `out/export/<package-id>/{video.mp4,captions.srt,captions.vtt,CREDITS.md,package.zip}`; `package.zip` ships only assets the v0.1 rights policy allows and lists every refusal with its licence reason |
 | `POST` | `/api/run` | C6 backend run: `{backendId, jobs, budgetUnits, approved?, comfyuiUrl?}`. Returns the estimate + `planHash`; a Colab run without approval returns `approvalRequired:true` and starts nothing |
 | `GET` | `/api/run` | C6 run status: active run, `spentEstimate`, approvals and run list |
 | `POST` | `/api/run/approve` | `{planHash}`; approves exactly that plan (hardware + budget), so a changed plan needs a new card |
@@ -39,6 +40,12 @@ Render events: `render.started`, `render.log`, `render.finished`, `render.failed
 `package.updated`. The route is synchronous (the HTTP response is the MP4); SSE carries the same
 lifecycle for the Activity panel and for future async progress. Only one CPU render runs at a
 time; a second request gets `409 render busy`.
+
+Export events (C10): `export.started`, `export.log` (one line per render/log step), `export.finished`
+(`dir`, `files`, `frames`, `captions`, `complete`, `excluded`) and `export.failed`. `POST /api/export`
+is synchronous like `/api/render`; the SSE events drive the run panel's progress. Only one export
+runs at a time. An export is *reused* (no re-render) when `out/export/<id>/video.mp4` already exists
+and `force` is not set, so a second click is instant.
 
 Run events (C6): `run.approval_required`, `run.approved`, `run.refused`, `run.started`,
 `run.event` (one `ensure_up` / `health` / `collected` / `teardown` / `error` payload each),
@@ -76,6 +83,25 @@ The web shell persists an edit with a base revision before rendering, so a stale
 conflict instead of silently overwriting an accepted edit. A render records the revision it used
 in the response headers (`x-comfyrizz-revision`) together with the timeline hash and frame count.
 
+### C10: export bundle
+
+`POST /api/export` compiles the same timeline the Player shows, renders (or reuses) the final MP4,
+and writes a redistribution-ready directory under `out/export/<package-id>/`:
+
+| File | Source |
+| --- | --- |
+| `video.mp4` | the CPU render, or an existing file when `force` is not set |
+| `captions.srt` / `captions.vtt` | `packages/tts` `captionsToSrt`/`captionsToVtt` over the player's own cues (measured narration when `audio/durations.json` is present) |
+| `CREDITS.md` | `packages/sources` `buildCredits`, including a "Not redistributable" section with each refusal's licence and source URL |
+| `package.zip` | `packages/sources` `buildPackageZip`: package + timeline + workflows + credits + only assets the v0.1 rights policy allows; NC/ND/SA/unknown and byte-less assets are listed in `manifest.json` with a reason |
+
+The example seed copies `examples/launch-demo/assets` into `<runtime>/packages/assets` so the
+seeded demo can render and export its SVG vectors. `apps/server/test/export.test.mjs` is the e2e
+acceptance: it renders `examples/launch-demo` on the real CPU path and asserts ffprobe frames ==
+compiled timeline and SRT/VTT cue counts == timeline captions, a second call reuses the MP4, and a
+package with a `CC-BY-NC-4.0` asset has it refused from `package.zip` with its licence reason in
+`CREDITS.md`.
+
 ## Security checks
 
 - Host must be `127.0.0.1`, `localhost` or `[::1]` (any port) — DNS-rebinding hosts get `403`.
@@ -89,8 +115,9 @@ in the response headers (`x-comfyrizz-revision`) together with the timeline hash
 ## Verify
 
 ```bash
-npm test          # 3 test files: host/token/origin, revisions/conflict, invalid package,
-                  # render + SSE, replay, traversal; plus the C5/C8 agent end-to-end renders
+npm test          # host/token/origin, revisions/conflict, invalid package, render + SSE, replay,
+                  # traversal, the C5/C8 agent end-to-end renders and the C10 export-bundle e2e
+                  # (29 tests; real CPU render, ~2 min)
 ```
 
 Real end-to-end check (2026-10-17): built web served by this server, opened with the fragment

@@ -122,6 +122,16 @@ fake backend, and a real headless-Chrome check (fake backend injected into `crea
 the card → Start → `done` flow with the lifecycle rows and the spend meter at `4.29 GPU units
 (est.)`. No Google Colab runtime and no ComfyUI URL are contacted.
 
+## C10 export bundle
+
+The Run panel gained an **Export bundle** button next to the backend run. It persists the draft
+with a base revision, then posts `POST /api/export`; progress is read from the existing
+`/api/events` SSE stream (`export.started` / `export.log` / `export.finished` / `export.failed`).
+When the bundle is done the panel lists the five files (`video.mp4`, `captions.srt`,
+`captions.vtt`, `CREDITS.md`, `package.zip`) with sizes, and any asset the v0.1 rights policy
+refused is shown with its licence id and reason. The bundle lands in
+`apps/server/.runtime/out/export/<package-id>/`. **Export MP4** stays as the single-file download.
+
 ## M2 evidence (2026-10-17)
 
 Real headless Chrome against `http://127.0.0.1:4174/`:
