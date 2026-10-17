@@ -118,6 +118,8 @@ function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media
       <>
         <MediaFill
           asset={backgroundAsset}
+          assetId={resolved.backgroundId}
+          pkg={pkg}
           sceneFrames={durationInFrames}
           fit={background?.fit ?? 'cover'}
           loop={background?.loop ?? true}
@@ -167,7 +169,7 @@ function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame
         const asset = pkg.assets?.[item.asset];
         if (asset && asset.kind !== 'svg' && asset.kind !== 'vector-anim') {
           if (!isRenderableMedia(asset)) return null;
-          return <MediaPanel key={`${item.asset}-${index}`} asset={asset} item={item} sceneFrames={durationInFrames} />;
+          return <MediaPanel key={`${item.asset}-${index}`} asset={asset} assetId={item.asset} item={item} pkg={pkg} sceneFrames={durationInFrames} />;
         }
         return (
           <div

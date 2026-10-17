@@ -8,6 +8,7 @@ import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline, TimelineCaption } from '../../../packages/planner/dist/src/index.js';
 import { GeneratedAssetsProvider, SceneView, type InlineAsset } from './components';
 import type { MediaSidecar } from './media';
+import { MissingMediaProvider } from './media';
 import { CaptionOverlay } from './captions';
 
 /**
@@ -24,6 +25,7 @@ export function TimelinePlayer({
   captions,
   generatedAssets,
   media,
+  missingMedia,
 }: {
   pkg: PackageV1;
   timeline: Timeline;
@@ -31,6 +33,7 @@ export function TimelinePlayer({
   captions?: TimelineCaption[];
   generatedAssets?: Record<string, InlineAsset>;
   media?: MediaSidecar;
+  missingMedia?: string[];
 }) {
   const list = (scenes ?? timeline.scenes) as unknown as Array<
     Scene & { durationInFrames: number; transitionOutFrames: number }
@@ -59,7 +62,13 @@ export function TimelinePlayer({
       {captions && <CaptionOverlay captions={captions} />}
     </>
   );
-  return generatedAssets ? <GeneratedAssetsProvider assets={generatedAssets}>{series}</GeneratedAssetsProvider> : series;
+  return generatedAssets ? (
+    <GeneratedAssetsProvider assets={generatedAssets}>
+      <MissingMediaProvider files={missingMedia}>{series}</MissingMediaProvider>
+    </GeneratedAssetsProvider>
+  ) : (
+    <MissingMediaProvider files={missingMedia}>{series}</MissingMediaProvider>
+  );
 }
 
 export function sceneById(timeline: Timeline, sceneId: string): Scene | undefined {

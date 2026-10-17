@@ -1,14 +1,72 @@
-import React from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import { AbsoluteFill, Img, Loop, OffthreadVideo, interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Asset, ForegroundItem, PackageV1 } from '../../../packages/schema/types';
-import { fontFamily, textColors } from './theme';
+import { fontFamily, palette, textColors } from './theme';
+import { isMissingMedia } from './media-model.js';
 
 export type { MediaSidecar, LowerThirdContent, ResolvedSceneMedia } from './media-model.js';
 export { isRenderableMedia, resolveSceneMedia } from './media-model.js';
 
+/**
+ * Files the current render knows are absent (P-fix4). A clean clone of the GPU
+ * examples has no assets/*.mp4|png or audio/*.wav, so renderPackage passes the
+ * missing list down and every media node draws a placeholder instead of asking
+ * Remotion for a file that is not in this clone.
+ */
+const MissingMediaContext = createContext<Set<string>>(new Set());
+
+export function MissingMediaProvider({ files, children }: { files?: string[]; children: React.ReactNode }) {
+  const value = new Set(files ?? []);
+  return <MissingMediaContext.Provider value={value}>{children}</MissingMediaContext.Provider>;
+}
+
+export function useMissingMedia(): Set<string> {
+  return useContext(MissingMediaContext);
+}
+
+/** Labelled stand-in drawn when a declared media file is not in this clone. */
+export function MissingMediaPlaceholder({ assetId, asset, pkg, style }: { assetId?: string; asset?: Asset; pkg: PackageV1; style?: React.CSSProperties }) {
+  const colors = palette(pkg);
+  const text = textColors(pkg);
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 12,
+        padding: 28,
+        textAlign: 'center',
+        fontFamily: fontFamily(),
+        color: text.primary,
+        background: `linear-gradient(135deg, ${colors[1]}, ${colors[0]})`,
+        boxShadow: 'inset 0 0 0 3px rgba(255,255,255,0.16)',
+        ...style,
+      }}
+    >
+      <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase' }}>media not in this clone</div>
+      <div style={{ fontSize: 22, opacity: 0.75 }}>
+        {assetId ?? asset?.kind ?? 'asset'}
+        {asset?.file ? ` · ${asset.file}` : ''}
+      </div>
+      {asset?.gen?.generator ? (
+        <div style={{ fontSize: 17, opacity: 0.55 }}>
+          {asset.gen.generator}
+          {asset.gen.workflow ? ` · ${asset.gen.workflow}` : ''}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** A raster/video asset stretched over the frame, looped to fill the scene. */
 export function MediaFill({
   asset,
+  assetId,
+  pkg,
   sceneFrames,
   fit = 'cover',
   loop = true,
@@ -17,6 +75,8 @@ export function MediaFill({
   trim,
 }: {
   asset: Asset;
+  assetId?: string;
+  pkg: PackageV1;
   sceneFrames: number;
   fit?: 'cover' | 'contain';
   loop?: boolean;
@@ -25,9 +85,14 @@ export function MediaFill({
   trim?: { startSeconds: number; endSeconds?: number };
 }) {
   const { fps } = useVideoConfig();
+  const missing = useMissingMedia();
+  const [failed, setFailed] = useState(false);
+  if (failed || isMissingMedia(asset, missing)) {
+    return <MissingMediaPlaceholder assetId={assetId} asset={asset} pkg={pkg} />;
+  }
   const src = staticFile(asset.file ?? '');
   const style: React.CSSProperties = { width: '100%', height: '100%', objectFit: fit };
-  if (asset.kind === 'image') return <Img src={src} style={style} />;
+  if (asset.kind === 'image') return <Img src={src} style={style} onError={() => setFailed(true)} />;
   const sourceFrames = asset.media?.frames ?? 97;
   const sourceFps = asset.media?.fps ?? 24;
   const clipFrames = Math.max(1, Math.round((sourceFrames / sourceFps) * fps));
@@ -39,6 +104,7 @@ export function MediaFill({
       src={src}
       muted={muted}
       playbackRate={rate}
+      onError={() => setFailed(true)}
       style={style}
       {...(trim ? { startFrom: Math.round(trim.startSeconds * fps) } : {})}
       {...(trim?.endSeconds !== undefined ? { endAt: Math.round(trim.endSeconds * fps) } : {})}
@@ -61,7 +127,7 @@ function panelAnimation(frame: number, anim: ForegroundItem['anim']): { opacity:
 }
 
 /** A framed raster/video panel positioned from the foreground item. */
-export function MediaPanel({ asset, item, sceneFrames }: { asset: Asset; item: ForegroundItem; sceneFrames: number }) {
+export function MediaPanel({ asset, assetId, item, pkg, sceneFrames }: { asset: Asset; assetId?: string; item: ForegroundItem; pkg: PackageV1; sceneFrames: number }) {
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
   const w = (item.w ?? 0.4) * width;
@@ -83,7 +149,7 @@ export function MediaPanel({ asset, item, sceneFrames }: { asset: Asset; item: F
         boxShadow: '0 30px 80px rgba(0,0,0,0.45), 0 0 0 2px rgba(255,255,255,0.08)',
       }}
     >
-      <MediaFill asset={asset} sceneFrames={sceneFrames} />
+      <MediaFill asset={asset} assetId={assetId} pkg={pkg} sceneFrames={sceneFrames} />
     </div>
   );
 }

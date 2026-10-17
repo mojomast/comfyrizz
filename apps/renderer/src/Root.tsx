@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Audio, Composition, staticFile } from 'remotion';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
@@ -16,7 +16,14 @@ const timeline = timelineJson as unknown as Timeline;
 const narratedPkg = narratedPkgJson as unknown as PackageV1;
 const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
-type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar };
+type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[] };
+
+/** Audio that disappears instead of crashing when its file is not in this clone. */
+function SafeAudio({ file }: { file: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return <Audio src={staticFile(file)} onError={() => setFailed(true)} />;
+}
 
 function LaunchDemo(props: Partial<DemoProps>) {
   return (
@@ -26,6 +33,7 @@ function LaunchDemo(props: Partial<DemoProps>) {
       {...(props.scenes ? { scenes: props.scenes } : {})}
       generatedAssets={props.generatedAssets}
       media={props.media}
+      missingMedia={props.missingMedia}
     />
   );
 }
@@ -33,7 +41,7 @@ function LaunchDemo(props: Partial<DemoProps>) {
 function NarratedDemo() {
   return (
     <>
-      <Audio src={staticFile('narration.norm.wav')} />
+      <SafeAudio file="narration.norm.wav" />
       <TimelinePlayer pkg={narratedPkg} timeline={narratedTimeline} captions={narratedTimeline.captions} />
     </>
   );
@@ -44,19 +52,21 @@ function NarratedDemo() {
  * plays the package's measured narration and, when the timeline has measured
  * (non-estimated) captions, burns them in (N7).
  */
-function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, generatedAssets, media }: Partial<DemoProps>) {
+function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, generatedAssets, media, missingMedia }: Partial<DemoProps>) {
   const resolvedPkg = demoPkg ?? pkg;
   const resolvedTimeline = demoTimeline ?? timeline;
   const audio = narrationAudio(resolvedPkg);
+  const audioMissing = audio ? new Set(missingMedia ?? []).has(audio.file) : false;
   const captions = (resolvedTimeline.captions ?? []).some(cue => !cue.estimated) ? resolvedTimeline.captions : undefined;
   return (
     <>
-      {audio ? <Audio src={staticFile(audio.file)} /> : null}
+      {audio && !audioMissing ? <Audio src={staticFile(audio.file)} /> : null}
       <TimelinePlayer
         pkg={resolvedPkg}
         timeline={resolvedTimeline}
         generatedAssets={generatedAssets}
         media={media}
+        missingMedia={missingMedia}
         {...(captions ? { captions } : {})}
       />
     </>

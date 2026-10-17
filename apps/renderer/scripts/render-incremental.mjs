@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
-import { inlineGeneratedAssets, preparePublicDir, rendererDir } from './render-package-lib.mjs';
+import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
 
 /** Bump when a renderer change can alter rendered frames. */
 export const RENDERER_VERSION = 3;
@@ -87,7 +87,7 @@ export function mergeScenes(pkg, timeline) {
  * Split a compiled timeline into per-scene frame segments with a content hash.
  * Pure: no rendering, so tests can assert reuse decisions without a browser.
  */
-export function planSegments(pkg, timeline, { generatedAssets = {}, media, compositionId = 'PackageDemo' } = {}) {
+export function planSegments(pkg, timeline, { generatedAssets = {}, media, compositionId = 'PackageDemo', missingMedia = [] } = {}) {
   const segments = [];
   const renderScenes = mergeScenes(pkg, timeline);
   for (let index = 0; index < renderScenes.length; index += 1) {
@@ -123,6 +123,7 @@ export function planSegments(pkg, timeline, { generatedAssets = {}, media, compo
       assets,
       captions,
       media: mediaInputs,
+      missing: missingMedia.map(item => item.file),
     };
     const key = createHash('sha256').update(canonicalJson(keyInput)).digest('hex').slice(0, 32);
     segments.push({ index, sceneId: scene.id, start, end, frames, key });
@@ -154,6 +155,7 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   const timelinePath = join(packageDir, 'timeline.json');
   const timeline = existsSync(timelinePath) ? JSON.parse(readFileSync(timelinePath, 'utf8')) : compileTimeline(pkg);
   const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
+  const missingMedia = missingMediaFiles(pkg, packageDir);
   const scenes = mergeScenes(pkg, timeline);
   const mediaPath = join(packageDir, 'media.json');
   const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
@@ -163,10 +165,11 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   const cache = cacheDir ?? join(rendererDir, '.cache', pkg.id);
   mkdirSync(cache, { recursive: true });
   const propsPath = join(cache, 'props.json');
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, ...(media ? { media } : {}) }));
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}) }));
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
+  for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
 
-  const segments = planSegments(pkg, timeline, { generatedAssets, media, compositionId });
+  const segments = planSegments(pkg, timeline, { generatedAssets, media, compositionId, missingMedia });
   const rendered = [];
   const reused = [];
 
@@ -222,15 +225,22 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   const silentPath = join(cache, 'silent.mp4');
   if (audioAsset) {
     const audioPath = join(packageDir, audioAsset.file);
-    if (!existsSync(audioPath)) throw new Error(`audio asset ${audioAsset.file} is missing`);
-    rmSync(outputPath, { force: true });
-    const mux = spawnSync(
-      'ffmpeg',
-      ['-y', '-hide_banner', '-nostats', '-i', silentPath, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', outputPath],
-      { encoding: 'utf8' },
-    );
-    if (mux.status !== 0) throw new Error(`audio mux failed: ${mux.stderr}`);
-    audio = { file: audioAsset.file, codec: 'aac' };
+    if (!existsSync(audioPath)) {
+      // P-fix4: a clean clone has no narration file. Export silent with the
+      // committed captions instead of crashing.
+      onLog(`warning: media not in this clone: ${audioAsset.file}; exporting silent`);
+      copyFileSync(silentPath, outputPath);
+      audio = null;
+    } else {
+      rmSync(outputPath, { force: true });
+      const mux = spawnSync(
+        'ffmpeg',
+        ['-y', '-hide_banner', '-nostats', '-i', silentPath, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', outputPath],
+        { encoding: 'utf8' },
+      );
+      if (mux.status !== 0) throw new Error(`audio mux failed: ${mux.stderr}`);
+      audio = { file: audioAsset.file, codec: 'aac' };
+    }
   } else {
     copyFileSync(silentPath, outputPath);
   }

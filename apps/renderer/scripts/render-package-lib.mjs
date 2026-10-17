@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
+import { listMediaFiles } from '../src/media-model.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '..', '..', '..');
@@ -70,6 +71,16 @@ export function narrationOptions(packageDir) {
   };
 }
 
+/**
+ * P-fix4: image/video/audio files a package declares but this clone does not
+ * have. The GPU examples gitignore assets/*.mp4|png and audio/*.wav, so a clean
+ * clone must draw a labelled placeholder for each instead of crashing. Returns
+ * the declaration order so warnings read like the manifest.
+ */
+export function missingMediaFiles(pkg, packageDir) {
+  return listMediaFiles(pkg).filter(item => !existsSync(join(packageDir, item.file)));
+}
+
 /** Copy fonts + the package's asset folders into a throwaway Remotion public dir. */
 export function preparePublicDir(pkg, packageDir) {
   const temp = mkdtempSync(join(tmpdir(), 'comfyrizz-public-'));
@@ -81,7 +92,7 @@ export function preparePublicDir(pkg, packageDir) {
   return temp;
 }
 
-export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo' } = {}) {
+export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0 } = {}) {
   const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
   const validation = validatePackage(pkg);
   if (!validation.valid) {
@@ -91,13 +102,15 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   const packageDir = dirname(packagePath);
   const timeline = compileTimeline(pkg, narrationOptions(packageDir));
   const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
+  const missingMedia = missingMediaFiles(pkg, packageDir);
   const mediaPath = join(packageDir, 'media.json');
   const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
-  const propsPath = outputPath.replace(/\.mp4$/, '.props.json');
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(media ? { media } : {}) }));
+  const propsPath = `${outputPath.replace(/\.(mp4|png|jpg)$/, '')}.props.json`;
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}) }));
   onLog(`inlined ${Object.keys(generatedAssets).length} generated asset(s)`);
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
   if (timeline.provisional) onLog('warning: narration is not measured; timeline is provisional and must not be exported as final');
+  for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
 
   let resolvedPublicDir = publicDir;
   let cleanupDir = null;
@@ -115,14 +128,23 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   try {
     render = spawnSync(
       'npx',
-      [
-        'remotion', 'render', 'src/index.ts', compositionId, outputPath,
-        `--props=${propsPath}`,
-        `--public-dir=${resolvedPublicDir}`,
-        '--browser-executable=/usr/bin/google-chrome',
-        '--concurrency=2',
-        '--log=error',
-      ],
+      still
+        ? [
+            'remotion', 'still', 'src/index.ts', compositionId, outputPath,
+            `--props=${propsPath}`,
+            `--public-dir=${resolvedPublicDir}`,
+            `--frame=${frame}`,
+            '--browser-executable=/usr/bin/google-chrome',
+            '--log=error',
+          ]
+        : [
+            'remotion', 'render', 'src/index.ts', compositionId, outputPath,
+            `--props=${propsPath}`,
+            `--public-dir=${resolvedPublicDir}`,
+            '--browser-executable=/usr/bin/google-chrome',
+            '--concurrency=2',
+            '--log=error',
+          ],
       { cwd: rendererDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
     );
   } finally {
@@ -133,11 +155,13 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   }
   return {
     output: outputPath,
-    frames: timeline.durationInFrames,
+    frames: still ? 1 : timeline.durationInFrames,
     hash: timeline.hash,
     bytes: statSync(outputPath).size,
     timeline,
     package: pkg,
+    ...(still ? { still: true } : {}),
+    ...(missingMedia.length > 0 ? { missingMedia } : {}),
     ...(media ? { media } : {}),
   };
 }

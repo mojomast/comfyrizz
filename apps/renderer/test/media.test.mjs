@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isMediaKind, isRenderableMedia, normalizeScrim, resolveSceneMedia } from '../src/media-model.js';
+import { isMediaKind, isMissingMedia, isRenderableMedia, listMediaFiles, normalizeScrim, resolveSceneMedia } from '../src/media-model.js';
 import { contrastText, textColors } from '../src/theme-model.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -23,6 +23,7 @@ test('an image background resolves to its asset with a zero default scrim', () =
   const resolved = resolveSceneMedia(scene, pkg);
   assert.equal(resolved.background.kind, 'image');
   assert.equal(resolved.background.file, 'assets/a_img.png');
+  assert.equal(resolved.backgroundId, 'a_img');
   assert.equal(resolved.scrim, 0);
   assert.equal(resolved.mediaOnly, false);
   assert.equal(resolved.lowerThird, undefined);
@@ -101,6 +102,35 @@ test('a pending GPU slot is not renderable until it has a file', () => {
   assert.equal(isRenderableMedia({ kind: 'image', status: 'ready', file: 'assets/a.png' }), true);
   assert.equal(isRenderableMedia({ kind: 'video', status: 'ready', file: 'assets/a.mp4' }), true);
   assert.equal(isRenderableMedia({ kind: 'svg', status: 'ready', file: 'assets/a.svg' }), false);
+});
+
+test('listMediaFiles lists image/video/audio in declaration order (P-fix4)', () => {
+  const pkg = {
+    assets: {
+      a_svg: { kind: 'svg', status: 'ready', file: 'assets/a.svg' },
+      a_img: { kind: 'image', status: 'ready', file: 'assets/a.png' },
+      a_vid: { kind: 'video', status: 'ready', file: 'assets/a.mp4' },
+      a_voice: { kind: 'audio', status: 'ready', file: 'audio/a.wav' },
+      a_pending: { kind: 'image', status: 'pending' },
+    },
+    scenes: [],
+  };
+  assert.deepEqual(listMediaFiles(pkg), [
+    { id: 'a_img', file: 'assets/a.png', kind: 'image' },
+    { id: 'a_vid', file: 'assets/a.mp4', kind: 'video' },
+    { id: 'a_voice', file: 'audio/a.wav', kind: 'audio' },
+  ]);
+});
+
+test('isMissingMedia matches a declared-but-absent file only (P-fix4)', () => {
+  const absent = { id: 'a_vid', kind: 'video', status: 'ready', file: 'assets/a.mp4' };
+  const present = { id: 'a_svg', kind: 'svg', status: 'ready', file: 'assets/a.svg' };
+  assert.equal(isMissingMedia(absent, ['assets/a.mp4']), true);
+  assert.equal(isMissingMedia(absent, new Set(['assets/a.mp4'])), true);
+  assert.equal(isMissingMedia(absent, ['assets/other.mp4']), false);
+  assert.equal(isMissingMedia(present, ['assets/a.mp4']), false);
+  assert.equal(isMissingMedia(undefined, ['assets/a.mp4']), false);
+  assert.equal(isMissingMedia({ kind: 'video', file: '' }, ['']), false, 'an empty file is not a match');
 });
 
 test('the showcase package resolves every scene media case through the sidecar', () => {

@@ -18,6 +18,7 @@
  *
  * @typedef {Object} ResolvedSceneMedia
  * @property {Asset} [background]
+ * @property {string} [backgroundId]
  * @property {number} scrim
  * @property {boolean} mediaOnly
  * @property {LowerThirdContent} [lowerThird]
@@ -52,6 +53,37 @@ export function isRenderableMedia(asset) {
 }
 
 /**
+ * Every image/video/audio file the package declares, in declaration order.
+ * Packages that gitignore their media (the GPU examples) leave these files out
+ * of a clean clone, so callers match them against what actually exists.
+ * @param {PackageV1} pkg
+ * @returns {Array<{ id: string, file: string, kind: string }>}
+ */
+export function listMediaFiles(pkg) {
+  const files = [];
+  for (const [id, asset] of Object.entries(pkg?.assets ?? {})) {
+    if (!isMediaKind(asset?.kind) && asset?.kind !== 'audio') continue;
+    if (typeof asset?.file !== 'string' || asset.file.length === 0) continue;
+    files.push({ id, file: asset.file, kind: asset.kind });
+  }
+  return files;
+}
+
+/**
+ * True when the asset points at a file the caller has declared missing
+ * (P-fix4). The renderer then draws a labelled placeholder instead of asking
+ * Remotion for a file that is not in this clone.
+ * @param {Asset} [asset]
+ * @param {Set<string> | string[]} [missing]
+ * @returns {boolean}
+ */
+export function isMissingMedia(asset, missing) {
+  if (!asset || typeof asset.file !== 'string' || asset.file.length === 0) return false;
+  const set = missing instanceof Set ? missing : new Set(missing ?? []);
+  return set.has(asset.file);
+}
+
+/**
  * @param {Scene} scene
  * @param {PackageV1} pkg
  * @param {MediaSidecar} [media]
@@ -67,7 +99,7 @@ export function resolveSceneMedia(scene, pkg, media) {
   const mediaOnly = withMedia.media_only === true || withMedia.mediaOnly === true || media?.skipLayout?.includes(scene.id) === true;
   const lowerThird = withMedia.lower_third ?? withMedia.lowerThird ?? media?.lowerThird?.[scene.id];
   return {
-    ...(background ? { background } : {}),
+    ...(background ? { background, backgroundId: backgroundId } : {}),
     scrim,
     mediaOnly,
     ...(lowerThird ? { lowerThird } : {}),
