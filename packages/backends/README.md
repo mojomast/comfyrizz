@@ -1,5 +1,9 @@
 # @comfyrizz/backends — Google Colab lifecycle + BYO ComfyUI
 
+Local setup for the BYO backend: [`BYO-COMFYUI.md`](BYO-COMFYUI.md) +
+`scripts/setup-local-comfy.sh` (ComfyUI at the 0.41 ref, the two model repos, the links the graphs
+require, the runner's deps; `--dry-run` prints the plan and runs nothing).
+
 Owner: **Hermes** (WS-B, B3). The two backends of SPEC.md §6.5, behind one `Backend` interface
 (`src/index.mjs` documents it as a JSDoc typedef; there is no build step).
 
