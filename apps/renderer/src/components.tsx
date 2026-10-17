@@ -263,7 +263,7 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
   return (
     <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary, justifyContent: 'center', alignItems: 'center', padding: SAFE_AREA.y, textAlign: 'center' }}>
       <Background scene={scene} pkg={pkg} media={media} />
-      <div style={{ position: 'relative', zIndex: 3, display: 'flex', flexDirection: 'column', gap: 26, alignItems: 'center' }}>
+      <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', gap: 26, alignItems: 'center' }}>
         <Kicker text={copy.kicker} />
         <div style={{ fontSize: outro ? TYPE_SCALE.headlineLg : TYPE_SCALE.headlineXl, fontWeight: 800, letterSpacing: -2, opacity: headline.opacity, transform: `translateY(${headline.translateY}px)` }}>
           {copy.headline}
@@ -305,7 +305,7 @@ function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
       <div
         style={{
           position: 'relative',
-          zIndex: 3,
+          zIndex: 7,
           display: 'flex',
           width: '100%',
           height: '100%',
@@ -343,7 +343,7 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
   return (
     <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
-      <div style={{ position: 'relative', zIndex: 3, display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%', padding: `0 ${SAFE_AREA.x}px`, gap: 18 }}>
+      <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%', padding: `0 ${SAFE_AREA.x}px`, gap: 18 }}>
         <Kicker text={copy.headline} />
         <div style={{ fontSize: TYPE_SCALE.stat, fontWeight: 800, letterSpacing: -6, lineHeight: 1, color: colors[2], transform: `scale(${number})`, transformOrigin: 'left center' }}>
           {value}
@@ -371,7 +371,7 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
   return (
     <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
-      <div style={{ position: 'relative', zIndex: 3, display: 'flex', flexDirection: 'column', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, gap: 22 }}>
+      <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, gap: 22 }}>
         <div style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800 }}>{copy.headline}</div>
         {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.muted }}>{copy.sub}</div> : null}
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ marginTop: 12 }}>
@@ -408,7 +408,7 @@ function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
   return (
     <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
-      <div style={{ position: 'relative', zIndex: 3, width: '100%', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, display: 'flex', flexDirection: 'column', gap: 30 }}>
+      <div style={{ position: 'relative', zIndex: 7, width: '100%', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, display: 'flex', flexDirection: 'column', gap: 30 }}>
         <div style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800, maxWidth: 1100 }}>{copy.headline}</div>
         {quote ? (
           <div style={{ fontSize: 52, lineHeight: 1.25, maxWidth: 1300 }}>

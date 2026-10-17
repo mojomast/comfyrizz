@@ -22,7 +22,7 @@ import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/s
 import { inlineGeneratedAssets, preparePublicDir, rendererDir } from './render-package-lib.mjs';
 
 /** Bump when a renderer change can alter rendered frames. */
-export const RENDERER_VERSION = 2;
+export const RENDERER_VERSION = 3;
 
 const BROWSER = process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome';
 

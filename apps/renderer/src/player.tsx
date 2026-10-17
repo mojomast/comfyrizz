@@ -1,6 +1,9 @@
 import React from 'react';
-import { TransitionSeries, linearTiming } from '@remotion/transitions';
-import { fade } from '@remotion/transitions/fade';
+import {
+  TransitionSeries,
+  linearTiming,
+} from '@remotion/transitions';
+import { slide } from '@remotion/transitions/slide';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline, TimelineCaption } from '../../../packages/planner/dist/src/index.js';
 import { GeneratedAssetsProvider, SceneView, type InlineAsset } from './components';
@@ -10,7 +13,9 @@ import { CaptionOverlay } from './captions';
 /**
  * Composes the compiled timeline. Each scene is a TransitionSeries sequence; the
  * transition after it uses exactly the compiled `transitionOutFrames`, so the
- * composition duration equals timeline.durationInFrames.
+ * composition duration equals timeline.durationInFrames. Transitions push the
+ * scenes past each other (U1) instead of cross-fading them: a fade left the
+ * outgoing headline ghosted over the incoming one.
  */
 export function TimelinePlayer({
   pkg,
@@ -42,7 +47,7 @@ export function TimelinePlayer({
       children.push(
         <TransitionSeries.Transition
           key={`${scene.id}-transition`}
-          presentation={fade()}
+          presentation={slide({ direction: 'from-right' })}
           timing={linearTiming({ durationInFrames: transition })}
         />,
       );
