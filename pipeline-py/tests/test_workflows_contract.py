@@ -72,16 +72,23 @@ def test_every_mapped_target_exists_in_the_graph(graph_path: Path):
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
     mapping = load_params_map(graph_path)
     assert mapping, f"{graph_path.name} maps nothing"
-    for name, target in mapping.items():
-        targets = target if isinstance(target[0], (list, tuple)) else [target]
+    for name, targets in mapping.items():
         for pair in targets:
-            assert len(pair) == 2, f"{graph_path.name}: {name} -> {pair} is not [node_id, field]"
+            assert 2 <= len(pair) <= 3, f"{graph_path.name}: {name} -> {pair} is not [node_id, field] or [node_id, field, options]"
             node_id, field = str(pair[0]), str(pair[1])
             assert node_id in graph, f"{graph_path.name}: {name} points at missing node {node_id}"
             assert field in graph[node_id].get("inputs", {}), (
                 f"{graph_path.name}: {name} points at {node_id}.{field}, which is not an input of "
                 f"{graph_node_class(graph, node_id)}"
             )
+            if len(pair) == 3:
+                options = pair[2]
+                assert isinstance(options, dict) and set(options) <= {"mul"}, (
+                    f"{graph_path.name}: {name} -> {node_id}.{field} options {options!r} are not a known transform"
+                )
+                assert isinstance(graph[node_id]["inputs"][field], (int, float)) or options.get("mul") == 1, (
+                    f"{graph_path.name}: {name} scales {node_id}.{field}, whose default is not a number"
+                )
 
 
 def graph_node_class(graph: dict, node_id: str) -> str:
@@ -122,12 +129,16 @@ def test_every_planned_job_injects_into_its_real_workflow(tmp_path: Path):
         # raises ValueError naming any parameter with no mapping: that is the contract
         inject_params(graph, mapping, job.get("params", {}))
         injected_total += 1
-        for name, target in mapping.items():
+        for name, targets in mapping.items():
             if name not in (job.get("params") or {}):
                 continue
-            targets = target if isinstance(target[0], (list, tuple)) else [target]
-            for node_id, field in targets:
-                assert graph[str(node_id)]["inputs"][str(field)] == job["params"][name], (
+            for pair in targets:
+                node_id, field = str(pair[0]), str(pair[1])
+                options = pair[2] if len(pair) > 2 else None
+                value = job["params"][name]
+                if options and "mul" in options:
+                    value = int(round(value * options["mul"]))
+                assert graph[node_id]["inputs"][field] == value, (
                     f"{job['id']}: {name} did not reach {node_id}.{field}"
                 )
     assert injected_total == len(doc["jobs"]) >= 5

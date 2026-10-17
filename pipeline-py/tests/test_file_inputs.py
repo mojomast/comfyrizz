@@ -116,20 +116,21 @@ def jobs_doc(jobs: list[dict]) -> dict:
     }
 
 
-def workspace(tmp_path: Path, doc: dict | None = None, *, declare_files: bool = True) -> Path:
+def workspace(tmp_path: Path, doc: dict | None = None) -> Path:
     """A plan directory: jobs.json + workflows/.
 
-    ``i2v_declared`` is the fixture i2v graph with the params map the runner requires: it declares
-    ``"files": ["image"]``. Turning that off is how the "graph takes a file but does not say so"
-    case is built.
+    Two copies of the fixture i2v graph stand in for the real one: ``i2v_declared`` declares
+    ``"files": ["image"]`` (what the runner requires of a graph with a LoadImage), and
+    ``i2v_undeclared`` is the same map without that declaration, which is the mistake the
+    "graph takes a file but does not say so" case is about.
     """
     workflows = tmp_path / "workflows"
     shutil.copytree(FIXTURES / "workflows", workflows)
-    shutil.copy(workflows / "ltx25_i2v.api.json", workflows / "i2v_declared.api.json")
     mapping = json.loads((workflows / "ltx25_i2v.api.params.json").read_text(encoding="utf-8"))
-    if declare_files:
-        mapping["files"] = ["image"]
-    (workflows / "i2v_declared.api.params.json").write_text(json.dumps(mapping, indent=2), encoding="utf-8")
+    undeclared = {key: value for key, value in mapping.items() if key != "files"}
+    for name, params in (("i2v_declared", {**mapping, "files": ["image"]}), ("i2v_undeclared", undeclared)):
+        shutil.copy(workflows / "ltx25_i2v.api.json", workflows / f"{name}.api.json")
+        (workflows / f"{name}.api.params.json").write_text(json.dumps(params, indent=2), encoding="utf-8")
     (tmp_path / "jobs.json").write_text(json.dumps(doc if doc is not None else jobs_doc([still_job(), plate_job()]), indent=2), encoding="utf-8")
     return tmp_path
 
@@ -176,8 +177,8 @@ def test_the_fixture_document_is_valid_and_declares_the_upload():
 def test_the_declared_graph_says_which_parameters_are_files(tmp_path: Path):
     work = workspace(tmp_path)
     assert load_file_params(work / "workflows" / "i2v_declared.api.json") == ["image"]
-    # the plain fixture graph declares nothing, which is the mistake this test set can make
-    assert load_file_params(work / "workflows" / "ltx25_i2v.api.json") == []
+    # the same map without the declaration: the runner refuses instead of passing a path through
+    assert load_file_params(work / "workflows" / "i2v_undeclared.api.json") == []
 
 
 # ------------------------------------------------------------------------- the upload path
@@ -269,7 +270,7 @@ def test_a_missing_input_file_fails_the_job_without_submitting(tmp_path: Path, s
 
 def test_a_graph_that_takes_a_file_without_declaring_it_is_refused(tmp_path: Path, servers):
     fake = servers()
-    work = workspace(tmp_path, jobs_doc([still_job(), plate_job(workflow="workflows/ltx25_i2v.api.json")]), declare_files=False)
+    work = workspace(tmp_path, jobs_doc([still_job(), plate_job(workflow="workflows/i2v_undeclared.api.json")]))
     manifest = runner_for(work, fake).run()
 
     refused = result_for(manifest, "a_plate.plate")

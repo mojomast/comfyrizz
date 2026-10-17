@@ -93,15 +93,91 @@ test("all FLUX stills are batched before any plate, then upscales, then audio", 
   assert.equal(BATCH_ORDER.join(","), "stills,plates,upscales,audio");
 });
 
-test("the plate depends on its still and the upscale depends on the plate", () => {
+test("the plate depends on its still and the upscale depends on the plate and its start image", () => {
   const doc = planJobs(fixture("package-pending.json"));
   const byId = Object.fromEntries(doc.jobs.map((j) => [j.id, j]));
   assert.deepEqual(byId["a_plate1.plate"].deps, ["a_plate1_still.still"]);
-  assert.deepEqual(byId["a_plate1.upscale"].deps, ["a_plate1.plate"]);
+  // the finals pass reuses the plate's graph, so it needs the same uploaded start image and
+  // names its producer as well as the plate itself
+  assert.deepEqual(byId["a_plate1.upscale"].deps, ["a_plate1.plate", "a_plate1_still.still"]);
   assert.equal(byId["a_plate1.upscale"].source, "out/intermediates/a_plate1.plate.mp4");
   assert.equal(byId["a_plate1.plate"].output, "out/intermediates/a_plate1.plate.mp4");
   assert.equal(byId["a_plate1.upscale"].output, "assets/a_plate1.mp4");
   assert.equal(byId["a_narr.audio"].output, "assets/a_narr.wav");
+});
+
+test("an image parameter becomes an upload instruction, not an asset id", () => {
+  const doc = planJobs(fixture("package-pending.json"));
+  const byId = Object.fromEntries(doc.jobs.map((j) => [j.id, j]));
+  // from: job - the i2v plate starts from the still this same plan generates
+  assert.deepEqual(byId["a_plate1.plate"].fileInputs, [
+    { param: "image", from: "job", job: "a_plate1_still.still", path: "assets/a_plate1_still.png" },
+  ]);
+  assert.deepEqual(byId["a_plate1.upscale"].fileInputs, byId["a_plate1.plate"].fileInputs);
+  // a still with no image/reference parameter carries none, so nothing is uploaded for it
+  assert.equal(byId["a_plate1_still.still"].fileInputs, undefined);
+  assert.equal(byId["a_narr.audio"].fileInputs, undefined);
+});
+
+test("a reference parameter resolves to the generated still too", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_plate1_still.status = "pending";
+  pkg.assets.a_ref = {
+    kind: "image",
+    origin: "generated",
+    status: "pending",
+    license: { id: "CC0-1.0" },
+    model_license: { id: "flux-3-image-klein-nc" },
+    gen: {
+      generator: "flux3-klein",
+      workflow: "workflows/flux3_klein_ref_edit.api.json",
+      workflow_sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      model: "flux-3-image-klein",
+      inputs: { reference: "a_plate1_still", prompt: "keep the layout, restyle it", seed: 9, steps: 16, megapixels: 1 },
+    },
+  };
+  const byId = Object.fromEntries(planJobs(pkg).jobs.map((j) => [j.id, j]));
+  assert.deepEqual(byId["a_ref.still"].fileInputs, [
+    { param: "reference", from: "job", job: "a_plate1_still.still", path: "assets/a_plate1_still.png" },
+  ]);
+  assert.deepEqual(byId["a_ref.still"].deps, ["a_plate1_still.still"]);
+});
+
+test("a file parameter that is neither an asset nor a path is refused, naming it", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_plate1.gen.inputs.image = "the fox picture";
+  assert.throws(() => planJobs(pkg), /neither.*asset|not an asset in this package/s);
+  assert.throws(() => planJobs(pkg), /a_plate1/);
+});
+
+test("a file parameter pointing at an asset with no job and no file is refused", () => {
+  const pkg = fixture("package-pending.json");
+  delete pkg.assets.a_plate1_still.status; // still pending: it has a job, so planning is fine
+  pkg.assets.a_stock = { kind: "image", origin: "stock", status: "ready", file: "assets/a_stock.jpg", license: { id: "CC-BY-4.0" }, sha256: "a".repeat(64) };
+  pkg.assets.a_plate1.gen.inputs.image = "a_stock";
+  const job = planJobs(pkg).jobs.find((j) => j.id === "a_plate1.plate");
+  assert.deepEqual(job.fileInputs, [{ param: "image", from: "package", path: "assets/a_stock.jpg" }]);
+
+  const broken = fixture("package-pending.json");
+  broken.assets.a_stock = { kind: "image", origin: "stock", status: "candidate", license: { id: "CC-BY-4.0" } };
+  broken.assets.a_plate1.gen.inputs.image = "a_stock";
+  assert.throws(() => planJobs(broken), /carries no\s+`file`/s);
+});
+
+test("checkJobsDoc catches a malformed file input", () => {
+  const doc = planJobs(fixture("package-pending.json"));
+  assert.deepEqual(checkJobsDoc(doc), []);
+  const broken = JSON.parse(JSON.stringify(doc));
+  const plate = broken.jobs.find((j) => j.id === "a_plate1.plate");
+  plate.fileInputs[0].from = "cloud";
+  plate.fileInputs.push({ param: "image", from: "package", path: "/etc/passwd" });
+  plate.fileInputs.push({ param: "shrug", from: "package", path: "assets/whatever.png" });
+  plate.fileInputs.push({ param: "image", from: "job", job: "a_ghost.still", path: "assets/a_ghost.png" });
+  const problems = checkJobsDoc(broken);
+  assert.ok(problems.some((p) => /from "cloud" must be job or package/.test(p)), problems.join("\n"));
+  assert.ok(problems.some((p) => /fileInputs image path absolute path/.test(p)), problems.join("\n"));
+  assert.ok(problems.some((p) => /fileInputs param "shrug"/.test(p)), problems.join("\n"));
+  assert.ok(problems.some((p) => /produced by a_ghost.still, which is not in this document/.test(p)), problems.join("\n"));
 });
 
 test("jobs carry resolved dimensions, frames, crop and the cache key", () => {

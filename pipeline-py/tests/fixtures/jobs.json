@@ -130,6 +130,14 @@
         "upscale": "x2+crop",
         "seed": 42
       },
+      "fileInputs": [
+        {
+          "param": "image",
+          "from": "job",
+          "job": "a_plate1_still.still",
+          "path": "assets/a_plate1_still.png"
+        }
+      ],
       "seed": 42
     },
     {
@@ -146,7 +154,8 @@
       "model": "ltx-2.5-22b-distilled",
       "modelRevision": null,
       "deps": [
-        "a_plate1.plate"
+        "a_plate1.plate",
+        "a_plate1_still.still"
       ],
       "output": "assets/a_plate1.mp4",
       "outputKind": "video",
@@ -177,6 +186,14 @@
       },
       "frames": 97,
       "fps": 24,
+      "fileInputs": [
+        {
+          "param": "image",
+          "from": "job",
+          "job": "a_plate1_still.still",
+          "path": "assets/a_plate1_still.png"
+        }
+      ],
       "cacheKey": "cb763cb995ce14816abc30827223941f3dc3eddc160040223b1acdeb3d9c07a6"
     },
     {
@@ -209,5 +226,5 @@
       "reason": "llm-svg is CPU work (A5 sanitize + render-check), not a Comfy job"
     }
   ],
-  "hash": "06698d08fd94eaaba6b39a70beae20c295d247ac048c622584925ff4c462eefc"
+  "hash": "c8e06b19b85b08d487b68249eb2f81e1763e661bba5d56877850fca75e498766"
 }

@@ -1,6 +1,7 @@
 {
   "v": 1,
   "generator": "ltx25",
+  "files": ["image"],
   "map": {
     "width": ["5", "width"],
     "height": ["5", "height"],

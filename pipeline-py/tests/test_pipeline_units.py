@@ -176,7 +176,8 @@ def test_jobs_document_validation(repo_root: Path):
 # --------------------------------------------------------------------------- client
 def test_params_are_injected_and_an_unmapped_param_is_an_error():
     mapping = load_params_map(FIXTURES / "workflows" / "ltx25_i2v.api.json")
-    assert mapping["width"] == ["5", "width"]
+    # a map entry is a list of targets, each [node_id, field] or [node_id, field, options]
+    assert mapping["width"] == [["5", "width"]]
     graph = json.loads((FIXTURES / "workflows" / "ltx25_i2v.api.json").read_text())
     inject_params(graph, mapping, {"width": 960, "frames": 97, "upscale": "x2+crop"})
     assert graph["5"]["inputs"]["width"] == 960
@@ -184,6 +185,16 @@ def test_params_are_injected_and_an_unmapped_param_is_an_error():
     with pytest.raises(ValueError) as excinfo:
         inject_params(graph, mapping, {"prompt": "x", "brand_new_param": 1})
     assert "brand_new_param" in str(excinfo.value)
+
+
+def test_a_target_option_scales_one_planned_value_for_one_node():
+    """The LTX two-stage geometry: the plan's size, halved into the stage-1 latent."""
+    graph = {"8": {"class_type": "EmptyLTXVLatentVideo", "inputs": {"width": 960, "height": 544}}}
+    inject_params(graph, {"width": [["8", "width", {"mul": 0.5}]]}, {"width": 960})
+    assert graph["8"]["inputs"]["width"] == 480
+    # no option: the planned value lands unchanged
+    inject_params(graph, {"height": [["8", "height"]]}, {"height": 544})
+    assert graph["8"]["inputs"]["height"] == 544
 
 
 def test_submit_errors_are_classified_the_way_the_recovery_rules_need():
