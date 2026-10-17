@@ -11,7 +11,7 @@ export const FONT_FAMILY = 'Inter';
 // Awaited by Remotion's delayRender before any measurement or still is taken.
 void loadFont({
   family: FONT_FAMILY,
-  url: staticFile('fonts/Inter-VariableFont_opsz,wght.ttf'),
+  url: staticFile('fonts/Inter-Variable.ttf'),
   weight: '100 900',
   style: 'normal',
   display: 'block',

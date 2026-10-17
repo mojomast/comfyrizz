@@ -29,7 +29,7 @@ zero baseline), `List` (bullets/quote). Registered compositions:
 Each frame is a pure function of `(package, timeline, local frame)`. There is no
 CSS time animation, no `Date.now()`, no `fetch`, no LLM and no network at render
 time; the only external file is the pinned local Inter font
-(`public/fonts/Inter-VariableFont_opsz,wght.ttf`, OFL-1.1, license alongside).
+(`public/fonts/Inter-Variable.ttf`, OFL-1.1, license alongside).
 Fonts are loaded with `@remotion/fonts` `loadFont`, which blocks the render with
 `delayRender` until the FontFace is ready.
 

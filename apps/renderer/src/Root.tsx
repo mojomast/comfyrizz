@@ -13,8 +13,10 @@ const timeline = timelineJson as unknown as Timeline;
 const narratedPkg = narratedPkgJson as unknown as PackageV1;
 const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
-function LaunchDemo() {
-  return <TimelinePlayer pkg={pkg} timeline={timeline} />;
+type DemoProps = { pkg: PackageV1; timeline: Timeline };
+
+function LaunchDemo(props: Partial<DemoProps>) {
+  return <TimelinePlayer pkg={props.pkg ?? pkg} timeline={props.timeline ?? timeline} />;
 }
 
 function NarratedDemo() {
@@ -45,6 +47,7 @@ export function RemotionRoot() {
       <Composition
         id="LaunchDemo"
         component={LaunchDemo}
+        defaultProps={{ pkg, timeline }}
         durationInFrames={timeline.durationInFrames}
         fps={timeline.fps}
         width={timeline.width}
