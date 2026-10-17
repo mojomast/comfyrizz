@@ -491,13 +491,37 @@ class ComfyClient:
         return snapshot
 
     def list_jobs(self, metadata: dict[str, str] | None = None) -> list[dict[str, Any]]:
-        """Best-effort. SPEC.md 5.1 notes job labels do not work on the proxy."""
+        """Best-effort job list, always as plain dicts. SPEC.md 5.1 notes job labels do not work on the proxy.
+
+        ``Comfy.list_jobs`` yields :class:`comfy_sdk.jobs.JobSummary` objects (not dicts, and not a
+        page), so each item is normalised here: the recovery path treats a list item as a mapping
+        (``item["id"]``) and a raw ``JobSummary`` has no ``.get``. Only the id and the labels are
+        lifted out — that is all the caller needs to adopt a job it already created.
+        """
         try:
             page = self.client.list_jobs(metadata=metadata) if metadata else self.client.list_jobs()
+            if isinstance(page, dict):  # a host that answers with one page instead of an iterator
+                page = page.get("jobs", page)
+            items = list(page or [])
         except Exception:  # noqa: BLE001 - labels are a recovery nicety, not a requirement
             return []
-        items = page.get("jobs", page) if isinstance(page, dict) else page
-        return list(items or [])
+        jobs: list[dict[str, Any]] = []
+        for item in items:
+            if isinstance(item, dict):
+                jobs.append(dict(item))
+                continue
+            job_id = getattr(item, "id", None)
+            if not isinstance(job_id, str):
+                continue
+            record: dict[str, Any] = {"id": job_id}
+            labels = getattr(item, "metadata", None)
+            if isinstance(labels, dict):
+                record["metadata"] = dict(labels)
+            status = getattr(item, "status", None)
+            if isinstance(status, str):
+                record["status"] = status
+            jobs.append(record)
+        return jobs
 
     def download(self, output: dict[str, Any], dest: Path) -> dict[str, Any]:
         dest = Path(dest)
