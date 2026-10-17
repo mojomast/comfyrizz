@@ -168,6 +168,11 @@ export function createByoBackend({
         "0.05",
         "--base-url",
         rootUrl(),
+        // The v2 proxy does not forward ComfyUI's native upload route (GPU test 3: five jobs
+        // failed with `upload_unsupported`), so the backend declares the user's own ComfyUI
+        // origin here rather than making a run depend on remembering a flag.
+        "--comfyui-url",
+        allowRelative(comfyuiUrl),
       ];
       const child = spawn(command[0], args, {
         shell: false,

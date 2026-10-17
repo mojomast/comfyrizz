@@ -31,11 +31,18 @@ cd /path/to/comfyrizz/pipeline-py
 # 5. plan and run a package
 node packages/jobs/bin/plan-jobs.mjs examples/launch-demo/package.json --out out/jobs.json
 .venv/bin/python -m comfyrizz_pipeline.runner --jobs out/jobs.json --out out \
-  --base-url http://127.0.0.1:8189
+  --base-url http://127.0.0.1:8189 --comfyui-url http://127.0.0.1:8188
 ```
 
 `--base-url` is a **deployment root**: the SDK appends `/api/v2` itself. For a plain ComfyUI with no
 proxy, `http://127.0.0.1:8188` is the root.
+
+`--comfyui-url` is ComfyUI itself, and it is not optional in spirit: the proxy serves the v2 API but
+does **not** forward ComfyUI's native `/upload/image`, so a job whose graph has a `LoadImage` (i2v,
+img2img, reference edit) fails with `upload_unsupported` if the uploads go to 8189. That is the GPU
+test 3 finding (5 of 10 jobs), and the runner now falls back to the declared 8189→8188 pairing on its
+own — but declaring the origin is the reliable form. Bound to 0.0.0.0 or another machine? Give the
+URL it is reachable at.
 
 The script is idempotent enough to re-run: it re-checks-out the ref instead of cloning again, and the
 model cache (`~/comfyrizz-models` by default) is the source the ComfyUI `models/` tree links into, so

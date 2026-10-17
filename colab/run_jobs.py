@@ -8,6 +8,7 @@ Progress is the runner's own JSON-lines output, which the backend parses out of 
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import zipfile
@@ -15,7 +16,41 @@ from pathlib import Path
 
 REMOTE_ROOT = Path("/content/comfyrizz")
 BUNDLE = REMOTE_ROOT / "jobs.zip"
+#: The runner talks to the v2 proxy (SPEC.md 5.1) but ComfyUI's own upload route is *not*
+#: forwarded by it (GPU test 3: five jobs failed with `upload_unsupported`). So the two ports
+#: are named separately here, exactly as `bootstrap.py` starts them, and ComfyUI's origin is
+#: declared to the runner — the VM's uploads must not depend on a flag somebody remembers.
 PROXY_URL = "http://127.0.0.1:8189"
+COMFY_PORT = int(os.environ.get("COMFYRIZZ_COMFY_PORT") or 8188)
+COMFYUI_URL = f"http://127.0.0.1:{COMFY_PORT}"
+
+
+def runner_command(jobs_file: Path, out_dir: Path, batch: str = "") -> list[str]:
+    """The argv the VM's runner is started with (one place, so a test can read it).
+
+    `--base-url` is the v2 proxy (jobs, results, assets) and `--comfyui-url` is ComfyUI itself
+    (input files): the proxy does not forward `/upload/image`, which is what failed 5 of 10 jobs
+    on the GPU test 3 run before somebody added the flag by hand.
+    """
+    command = [
+        sys.executable,
+        "-m",
+        "comfyrizz_pipeline.runner",
+        "--jobs",
+        str(jobs_file),
+        "--out",
+        str(out_dir),
+        "--progress-log",
+        str(Path(out_dir) / "progress.jsonl"),
+        "--base-url",
+        PROXY_URL,
+        "--comfyui-url",
+        COMFYUI_URL,
+    ]
+    if batch:
+        # the backend admits and collects one batch at a time (reserve formula, SPEC 6.6)
+        command += ["--batch", batch]
+    return command
 
 
 def main() -> int:
@@ -34,22 +69,8 @@ def main() -> int:
 
     selector = REMOTE_ROOT / "batch.txt"
     batch = selector.read_text(encoding="utf-8").strip() if selector.is_file() else ""
-    command = [
-        sys.executable,
-        "-m",
-        "comfyrizz_pipeline.runner",
-        "--jobs",
-        str(jobs_file),
-        "--out",
-        str(REMOTE_ROOT / "out"),
-        "--progress-log",
-        str(REMOTE_ROOT / "out" / "progress.jsonl"),
-        "--base-url",
-        PROXY_URL,
-    ]
+    command = runner_command(jobs_file, REMOTE_ROOT / "out", batch)
     if batch:
-        # the backend admits and collects one batch at a time (reserve formula, SPEC 6.6)
-        command += ["--batch", batch]
         print(f"$ batch selector: {batch}", flush=True)
     print(f"$ {' '.join(command)}", flush=True)
     process = subprocess.Popen(command, cwd=str(workdir), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

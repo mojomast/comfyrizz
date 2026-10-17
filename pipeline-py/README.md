@@ -164,15 +164,34 @@ Two halves, one contract:
    file-valued parameter the map does not declare is *refused* (`upload_not_declared`) before
    anything is uploaded or submitted; without that check the graph would fail late, on the GPU.
 
-The runner uploads each file to `<deployment root>/upload/image` (override with `--upload-url` or
-`COMFY_UPLOAD_URL`; **[unverified against a real `comfy-api-proxy`: the GPU test runs used the SDK
-path]**, so pointing this at ComfyUI itself is the fallback), then injects the returned name into
-the mapped node input. A few properties worth keeping:
+The runner uploads each file to **ComfyUI's own `/upload/image`**, then injects the returned name
+into the mapped node input. The deployment root is *not* that endpoint: with the v2 proxy in front
+(`comfy-api-proxy` on 8189) the native route is not forwarded, which is what failed 5 of 10 jobs
+with `upload_unsupported` on the GPU test 3 run — the run only finished because somebody added
+`--upload-url http://127.0.0.1:8188/upload/image` by hand. So the endpoint is now resolved in a
+declared order, and the one that took the bytes is what gets recorded (progress event
+`upload_endpoint`, a manifest note when it is not the root, and the cache):
+
+1. `--upload-url` / `COMFY_UPLOAD_URL` — an *instruction*: the only endpoint tried, never quietly
+   bypassed by a fallback;
+2. what this deployment last saw take an upload (the runner's own `out/cache/uploads.json`), so the
+   discovery below is paid once per deployment, not once per run;
+3. `--comfyui-url` / `COMFYUI_URL` — where the deployment says ComfyUI is. `colab/run_jobs.py` and
+   the BYO backend (`packages/backends`) both pass it, so the standard deployments never guess;
+4. the deployment root itself (correct when the root *is* ComfyUI — `scripts/setup-local-comfy.sh`
+   without the proxy);
+5. ComfyUI behind the declared port pairing (`COMFYRIZZ_PROXY_PORT`, default 8189 →
+   `COMFYRIZZ_COMFY_PORT`, default 8188), so a forgotten flag does not fail work on a billed VM.
+
+A `404`/`405` on one endpoint means "no ComfyUI upload route here" and the next candidate is tried;
+every endpoint tried, with the code each answered, is in the failure message when none of them
+works. A few properties worth keeping:
 
 - the upload is content-addressed (`<stem>_<sha8><suffix>`) and cached in
-  `out/cache/uploads.json` **keyed by (deployment root, sha256)**: a retry or a re-run that resubmits
+  `out/cache/uploads.json` **keyed by (endpoint, sha256)**: a retry or a re-run that resubmits
   a job does not upload the same bytes twice, and a *different* server (a fresh Google Colab VM with
-  an empty input directory) always gets them again;
+  an empty input directory) always gets them again. The same file also remembers which endpoint took
+  the last upload for this deployment root;
 - a missing input file or an upload that fails is a clean refusal with no attempt record
   (`input_file_missing`, `upload_unsupported`, `upload_failed`, `upload_disabled`) — nothing was
   submitted, so nothing is ambiguous;

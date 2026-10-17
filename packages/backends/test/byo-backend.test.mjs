@@ -49,6 +49,7 @@ function workspace() {
       'import { mkdirSync, writeFileSync } from "node:fs";',
       'import { join } from "node:path";',
       'const out = process.argv[process.argv.indexOf("--out") + 1];',
+      `writeFileSync(${JSON.stringify(join(dir, "runner-argv.json"))}, JSON.stringify(process.argv.slice(2)));`,
       'mkdirSync(join(out, "assets"), { recursive: true });',
       'writeFileSync(join(out, "assets/a.png"), "BYO-BYTES");',
       'console.log(JSON.stringify({ v: 1, attempt: "att_1", job: "a.still", seq: 1, event: "submitted", value: "job_777" }));',
@@ -133,6 +134,12 @@ test("run drives pipeline-py at the local proxy, and cancels only its own job", 
   assert.equal(run.exitCodeDecidesNothing, true, "the manifest decides, not the exit code");
   assert.deepEqual(events.map((e) => e.event), ["submitted"]);
   assert.equal(backend.inspect().submitted.includes("job_777"), true);
+
+  // H-fix6: the v2 proxy does not forward ComfyUI's upload route, so the run must declare the
+  // user's own ComfyUI origin rather than depending on somebody remembering a flag
+  const argv = JSON.parse(readFileSync(join(ws.dir, "runner-argv.json"), "utf8"));
+  assert.equal(argv[argv.indexOf("--comfyui-url") + 1], comfyui.url);
+  assert.match(argv[argv.indexOf("--base-url") + 1], /^http:\/\/127\.0\.0\.1:\d+$/, "jobs still run through the local proxy");
 
   const own = await backend.cancelOwnJob("job_777");
   assert.equal(own.cancelled, true);

@@ -29,7 +29,7 @@ from typing import Any
 
 from .atomic import canonical_hash, ensure_dir, read_json, sha256_file, write_json_atomic
 from .attempts import Attempt, AttemptStore, attempts_jsonl, now_iso
-from .client import ComfyClient, UploadError, classify_metadata_refusal, load_file_params
+from .client import ComfyClient, UploadError, classify_metadata_refusal, load_file_params, upload_route_url
 from .manifest import build_manifest, manifest_decides_success, read_manifest, write_manifest
 from .progress import stdout_writer
 from .schema import validate_jobs
@@ -64,6 +64,10 @@ class RunnerConfig:
     #: upload endpoint override; default is ``<base_url>/upload/image`` (a proxy that does not
     #: forward ComfyUI's native routes can be bypassed by pointing this at ComfyUI itself)
     upload_url: str | None = None
+    #: where the deployment says ComfyUI itself is (`--comfyui-url`/`COMFYUI_URL`); uploads go
+    #: here first when set, and it is *not* an instruction like `upload_url` — the runner still
+    #: falls back to the deployment root and to the declared port pairing (H-fix6, GPU test 3)
+    comfyui_url: str | None = None
     uploads_enabled: bool = True
     #: Job labels (`metadata`): `"auto"` sends them and drops them for the rest of the run if the
     #: server refuses them (comfy-api-proxy does: GPU test 2, issue 1); True/False force one way.
@@ -88,6 +92,10 @@ class Runner:
             base_url=config.base_url,
             timeout=config.submit_timeout,
             upload_url=config.upload_url or os.environ.get("COMFY_UPLOAD_URL"),
+            comfyui_url=config.comfyui_url or os.environ.get("COMFYUI_URL"),
+            # what this deployment last saw take an upload: a proxy root that already answered
+            # 404 is not re-tried on every run (H-fix6)
+            preferred_upload_urls=self._remembered_upload_urls(),
         )
         self.progress = progress or stdout_writer(config.progress_path, echo=config.echo_progress)
         self.jobs_doc: dict[str, Any] = {}
@@ -99,6 +107,11 @@ class Runner:
         #: job labels state: None until the server says something, then True/False
         self.labels_ok: bool | None = None
         self.label_note: str | None = None
+        #: where uploads actually went, once the first one is resolved (H-fix6); recorded in the
+        #: manifest when it is not simply `<base-url>/upload/image`, so a run says which server
+        #: took the inputs instead of leaving it to be inferred from the bytes
+        self.upload_note: str | None = None
+        self._upload_endpoint_reported = False
         self.run_id = config.run_id or f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
         # the run directory is named after the run id, so keep the two in step
         self.config.run_id = self.run_id
@@ -185,10 +198,26 @@ class Runner:
     def _upload_cache_load(self) -> dict[str, Any]:
         path = self._upload_cache_path()
         if not path.is_file():
-            return {"v": 1, "entries": {}}
+            return {"v": 1, "entries": {}, "endpoints": {}}
         data = read_json(path)
         data.setdefault("entries", {})
+        data.setdefault("endpoints", {})
         return data
+
+    def _deployment_key(self) -> str:
+        """Which deployment root an upload endpoint belongs to (the cache is per-deployment)."""
+        base = self.config.base_url or os.environ.get("COMFY_BASE_URL") or "default"
+        return str(base).rstrip("/")
+
+    def _remembered_upload_urls(self) -> list[str]:
+        """The endpoint that last took an upload for this deployment, as an ordered hint (H-fix6).
+
+        The v2 proxy root does not serve ComfyUI's upload route, so an un-flagged run has to try
+        the root and fall through to ComfyUI. Remembering the winner in the runner's own cache
+        means that discovery is paid once per deployment, not once per run.
+        """
+        remembered = self._upload_cache_load().get("endpoints", {}).get(self._deployment_key())
+        return [remembered] if isinstance(remembered, str) and remembered else []
 
     def file_input_paths(self, job: dict[str, Any]) -> tuple[dict[str, Path], dict[str, Any] | None]:
         """Resolve a job's declared file inputs to files on disk.
@@ -232,23 +261,56 @@ class Runner:
             paths[param] = resolved
         return paths, None
 
+    def _report_upload_endpoint(self) -> str:
+        """Record which server the inputs go to, and why — once, after the first upload (H-fix6).
+
+        Reported *after* the bytes have landed rather than before, because until an upload has
+        been answered the endpoint is only a guess (the ordering in ``upload_endpoints``). This
+        way the progress line, the manifest note and the upload cache all name the server that
+        actually has the file.
+        """
+        resolved = self.client.resolve_upload()
+        url = resolved["url"]
+        if not self._upload_endpoint_reported:
+            self._upload_endpoint_reported = True
+            self.progress.emit(
+                "upload_endpoint",
+                job=None,
+                value={"url": url, "chosen_by": resolved.get("chosen_by"), "candidates": resolved.get("candidates")},
+            )
+            default = upload_route_url(self.config.base_url) if self.config.base_url else None
+            if default and url != default:
+                why = {
+                    "explicit": "--upload-url/COMFY_UPLOAD_URL",
+                    "remembered": "the endpoint that took this deployment's last upload",
+                    "declared": "the declared ComfyUI origin (--comfyui-url/COMFYUI_URL)",
+                    "upload": "the endpoint the upload itself accepted, after the deployment root (the v2 proxy) refused it",
+                }.get(str(resolved.get("chosen_by")), "ComfyUI's own origin")
+                self.upload_note = f"input files were uploaded to {url} ({why}), not to {default}"
+        return url
+
     def upload_input(self, path: Path) -> dict[str, Any]:
-        """Upload once per (deployment root, content) and reuse the server's name after that.
+        """Upload once per (endpoint, content) and reuse the server's name after that.
 
         The name the server returns is content-addressed by us (``<stem>_<sha8><suffix>``) and
         cached in ``out/cache/uploads.json``. That cache is what makes a reconcile-after-lost-exec
         cheap *and* correct: the file is already in that server's input directory, so a re-polled
         job and a retried job both name the same file.
+
+        The entry's ``url`` is the endpoint that really took the bytes, which is what keeps a
+        cached name from being handed to a *different* server (a fresh Google Colab VM with an
+        empty input directory always gets the file again).
         """
         path = Path(path)
         if not self.config.uploads_enabled:
             raise UploadError("upload_disabled", f"uploads are disabled and {path.name} is needed as an input")
         digest = sha256_file(path)
-        url = self.client.upload_url
+        url = self.client.upload_url  # the current guess; corrected below by the upload itself
         entry = self._uploads.get(digest) or self._upload_cache_load()["entries"].get(digest)
         if entry and entry.get("url") == url:
             self._uploads[digest] = entry
             self.progress.emit("upload_cached", job=None, value=entry["name"])
+            self._report_upload_endpoint()
             return entry
 
         name = f"{path.stem}_{digest[:8]}{path.suffix}"
@@ -258,21 +320,25 @@ class Runner:
             "reference": uploaded["reference"],
             "sha256": digest,
             "bytes": uploaded["bytes"],
-            "url": url,
+            "url": uploaded["url"],
             "file": str(path),
             "at": now_iso(),
         }
         self._uploads[digest] = entry
         data = self._upload_cache_load()
         data["entries"][digest] = entry
+        data["endpoints"][self._deployment_key()] = entry["url"]
         write_json_atomic(self._upload_cache_path(), data)
         self.progress.emit("upload_done", value={"name": entry["name"], "bytes": entry["bytes"], "file": str(path)})
+        self._report_upload_endpoint()
         return entry
 
     # -- manifest ------------------------------------------------------------------
     def _write_manifest(self, notes: list[str] | None = None) -> dict[str, Any]:
         if self.label_note:
             notes = [*(notes or []), self.label_note]
+        if self.upload_note:
+            notes = [*(notes or []), self.upload_note]
         manifest = build_manifest(
             run_id=self.run_id,
             jobs_doc=self.jobs_doc,
@@ -738,7 +804,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--upload-url",
         default=None,
-        help="where input files are uploaded (default <base-url>/upload/image; COMFY_UPLOAD_URL overrides)",
+        help="where input files are uploaded (an instruction: the only endpoint tried; COMFY_UPLOAD_URL overrides)",
+    )
+    parser.add_argument(
+        "--comfyui-url",
+        default=None,
+        help="ComfyUI's own origin, which serves the upload route the v2 proxy does not (COMFYUI_URL overrides)",
     )
     parser.add_argument("--no-uploads", action="store_true", help="refuse jobs that need an input file uploaded")
     parser.add_argument(
@@ -786,6 +857,7 @@ def main(argv: list[str] | None = None) -> int:
         echo_progress=not args.quiet,
         batch=args.batch,
         upload_url=args.upload_url,
+        comfyui_url=args.comfyui_url,
         uploads_enabled=not args.no_uploads,
         job_labels="auto" if args.job_labels is None else args.job_labels,
     )

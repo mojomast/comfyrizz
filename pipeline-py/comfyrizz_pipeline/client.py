@@ -27,6 +27,14 @@ input directory*, not an asset id and not a local path. Sending the bare value i
    in as ``file_inputs``; this module uploads them to ``/upload/image`` and injects the name the
    server returns.
 
+**Which server that route lives on (H-fix6, from the GPU test 3 findings).** ``/upload/image`` is a
+*ComfyUI* route: the v2 proxy in front of it serves ``/api/v2`` and does not forward it, so pointing
+an upload at the deployment root failed **5 of 10 jobs** with ``upload_unsupported`` on the GPU test
+3 run. ``upload_endpoints`` therefore states the order (explicit, remembered, declared, root,
+declared port pairing), ``resolve_upload`` records which one was used and how it was chosen, and
+``upload_file`` walks the candidates — a 404/405 means "not this server" and the next one is tried,
+with every endpoint tried named in the failure when none of them works.
+
 Uploads are therefore one HTTP call per *file*, not per node, and the content-addressed name the
 caller caches means a retry after a lost exec does not upload twice.
 """
@@ -38,6 +46,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -66,6 +75,127 @@ AMBIGUOUS = (
 #: The ComfyUI route that puts a file in the server's own input directory. It is the one a
 #: graph's `LoadImage` can name; the v2 asset API takes asset ids, which `LoadImage` cannot use.
 UPLOAD_ROUTE = "/upload/image"
+
+#: The deployment's own port pairing (H-fix6, GPU test 3): the runner talks to the v2 proxy on
+#: 8189 and ComfyUI itself listens on 8188. This is a *declared* pairing — `colab/bootstrap.py`
+#: (PROXY_PORT/COMFY_PORT) and `scripts/setup-local-comfy.sh` both spell it out and both read
+#: these same overrides — not a guess about an arbitrary server.
+PROXY_PORT_DEFAULT = 8189
+COMFY_PORT_DEFAULT = 8188
+PROXY_PORT_ENV = "COMFYRIZZ_PROXY_PORT"
+COMFY_PORT_ENV = "COMFYRIZZ_COMFY_PORT"
+#: Where a deployment can state ComfyUI's own origin outright (`--comfyui-url`/`COMFYUI_URL`).
+COMFYUI_URL_ENV = "COMFYUI_URL"
+#: What `COMFY_BASE_URL` is called when a caller only knows the deployment root by env.
+BASE_URL_ENV = "COMFY_BASE_URL"
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+def _port_env(name: str, default: int) -> int:
+    """An int from the environment, falling back to the deployment default rather than raising.
+
+    A typo in `COMFYRIZZ_COMFY_PORT` must not take a run down: the pairing rule simply does not
+    apply, and the endpoint is then whatever the caller said or the deployment root.
+    """
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return default
+    return value if 0 < value < 65536 else default
+
+
+def split_origin(url: str) -> tuple[str, str, int]:
+    """``(scheme, host, port)`` for a URL, with the scheme's default port when none is spelled."""
+    text = str(url).strip()
+    parts = urlsplit(text if "//" in text else f"//{text}")
+    if not parts.hostname:
+        raise ValueError(f"{url!r} has no host")
+    port = parts.port
+    if port is None:
+        port = 443 if (parts.scheme or "http").lower() == "https" else 80
+    return (parts.scheme or "http").lower(), parts.hostname.lower(), port
+
+
+def comfyui_origin_for(base_url: str | None) -> str | None:
+    """ComfyUI's own origin behind a v2 proxy, or ``None`` when the base is not that proxy.
+
+    Only the declared pairing qualifies: a loopback deployment root on the deployment's proxy
+    port (8189 by default) with ComfyUI on a different port (8188). Anything else — a forwarded
+    port, a LAN host, a root that already *is* ComfyUI — returns ``None``, because pointing an
+    upload at some other port on somebody's host is not this module's call to make.
+    """
+    if not base_url:
+        return None
+    try:
+        scheme, host, port = split_origin(base_url)
+    except ValueError:
+        return None
+    if host not in _LOOPBACK_HOSTS:
+        return None
+    proxy_port = _port_env(PROXY_PORT_ENV, PROXY_PORT_DEFAULT)
+    comfy_port = _port_env(COMFY_PORT_ENV, COMFY_PORT_DEFAULT)
+    if port != proxy_port or comfy_port == port:
+        return None
+    return f"{scheme}://{host}:{comfy_port}"
+
+
+def upload_route_url(url: str) -> str:
+    """A bare origin (``http://host:8188``) becomes ComfyUI's upload route; a full route is kept."""
+    text = str(url).strip().rstrip("/")
+    if not text:
+        return text
+    try:
+        _, _, _ = split_origin(text)
+    except ValueError:
+        return text
+    path = urlsplit(text).path
+    return text + UPLOAD_ROUTE if path in ("", "/") else text
+
+
+def upload_endpoints(
+    base_url: str | None = None,
+    *,
+    explicit: str | None = None,
+    preferred: list[str] | None = None,
+    declared: str | None = None,
+    extra: list[str] | None = None,
+) -> list[str]:
+    """Every endpoint an upload may legitimately go to, best first (H-fix6).
+
+    - ``explicit`` (`--upload-url`/`COMFY_UPLOAD_URL`) is an *instruction*: it is the only
+      candidate, and a failure against it is reported as itself, never papered over by a fallback;
+    - ``preferred`` is what this deployment last saw take an upload (the runner's own cache), so
+      a fixed run does not re-try the endpoint that already refused;
+    - ``declared`` (`--comfyui-url`/`COMFYUI_URL`) is where the deployment says ComfyUI is;
+    - the deployment root itself — the pre-H-fix6 default, which is right when the root *is*
+      ComfyUI (`scripts/setup-local-comfy.sh` without the proxy) and wrong when it is the v2
+      proxy, which is exactly what cost five jobs on the GPU test 3 run;
+    - ComfyUI behind the declared port pairing, so a forgotten flag does not fail on the GPU.
+    """
+    if explicit:
+        return [upload_route_url(explicit)]
+    endpoints: list[str] = []
+
+    def add(url: str | None) -> None:
+        if not url:
+            return
+        route = upload_route_url(url)
+        if route and route not in endpoints:
+            endpoints.append(route)
+
+    for url in preferred or []:
+        add(url)
+    add(declared)
+    base = base_url or os.environ.get(BASE_URL_ENV)
+    add(base)
+    add(comfyui_origin_for(base))
+    for url in extra or []:
+        add(url)
+    return endpoints
 
 
 class UploadError(RuntimeError):
@@ -280,11 +410,20 @@ class ComfyClient:
         timeout: float = 30.0,
         client: Any = None,
         upload_url: str | None = None,
+        comfyui_url: str | None = None,
+        preferred_upload_urls: list[str] | None = None,
+        upload_candidates: list[str] | None = None,
     ):
         self.base_url = base_url
         self.timeout = timeout
         self._client = client
         self._upload_url = upload_url
+        self._comfyui_url = comfyui_url
+        self._preferred = list(preferred_upload_urls or [])
+        self._extra_candidates = list(upload_candidates or [])
+        #: the endpoint resolution, computed once: two jobs must not disagree about where
+        #: uploads go (the runner keys its upload cache on it)
+        self._resolved: dict[str, Any] | None = None
 
     @property
     def client(self) -> Any:  # noqa: D401 - see the class docstring
@@ -304,23 +443,71 @@ class ComfyClient:
         return self._client
 
     @property
-    def upload_url(self) -> str:
-        """Where files are uploaded: ``<deployment root>/upload/image``.
+    def upload_endpoints(self) -> list[str]:
+        """Every endpoint this client may upload to, best first (H-fix6)."""
+        return upload_endpoints(
+            self.base_url or os.environ.get(BASE_URL_ENV),
+            explicit=self._upload_url,
+            preferred=self._preferred,
+            declared=self._comfyui_url or os.environ.get(COMFYUI_URL_ENV),
+            extra=self._extra_candidates,
+        )
 
-        ``COMFY_UPLOAD_URL`` (or ``--upload-url``) overrides it, which is how a user points the
-        uploads straight at ComfyUI's own port when the proxy in front of it does not forward
-        the native ComfyUI routes. **[unverified against a real comfy-api-proxy: the GPU test 1/2
-        runs used the SDK path, not a proxy]**
+    def resolve_upload(self) -> dict[str, Any]:
+        """Decide where uploads go, once, and say why — never silently and never by guessing.
+
+        No probe: the upload *is* the probe. The candidates are tried in order and the first one
+        that returns a name wins, so the only assumption is the one the GPU test 3 run actually
+        demonstrated — a 404 on `POST /upload/image` means "this server has no ComfyUI upload
+        route", and the endpoint behind the declared pairing is the next thing to try. Asking a
+        proxy about some *other* ComfyUI route would be assuming a behaviour nobody has
+        measured; a 404'd upload costs one loopback round trip and nothing is submitted.
+
+        Once an upload has landed, the record is *corrected* to the endpoint that really took
+        the bytes (`upload_file`), so the manifest, the progress log and the runner's upload
+        cache all name the server the inputs are on, not the one they were guessed to be on.
+
+        The result is cached, because the runner keys its upload cache on the endpoint.
         """
-        if self._upload_url:
-            return self._upload_url
-        base = self.base_url or os.environ.get("COMFY_BASE_URL")
-        if not base:
+        if self._resolved is not None:
+            return self._resolved
+        candidates = self.upload_endpoints
+        if not candidates:
             raise UploadError(
                 "upload_url_unknown",
-                f"no deployment root to upload to: set --base-url, {UPLOAD_ROUTE}'s full URL via --upload-url, or COMFY_BASE_URL",
+                f"no endpoint to upload to: set --base-url, {UPLOAD_ROUTE}'s full URL via --upload-url, "
+                f"ComfyUI's own origin via --comfyui-url (or {COMFYUI_URL_ENV}), or {BASE_URL_ENV}",
             )
-        return base.rstrip("/") + UPLOAD_ROUTE
+        declared = bool(self._comfyui_url or os.environ.get(COMFYUI_URL_ENV))
+        if self._upload_url:
+            chosen_by = "explicit"
+        elif self._preferred and candidates[0] == upload_route_url(self._preferred[0]):
+            chosen_by = "remembered"
+        elif declared:
+            chosen_by = "declared"
+        elif len(candidates) > 1:
+            chosen_by = "first_candidate"
+        else:
+            chosen_by = "only_candidate"
+        self._resolved = {"url": candidates[0], "candidates": candidates, "chosen_by": chosen_by}
+        return self._resolved
+
+    @property
+    def upload_url(self) -> str:
+        """The endpoint uploads go to — `<deployment root>/upload/image` by default.
+
+        `--upload-url`/`COMFY_UPLOAD_URL` states it outright and is then the only endpoint used.
+        Without one, the order is: ComfyUI's declared origin (`--comfyui-url`/`COMFYUI_URL`), the
+        deployment root, then ComfyUI behind the deployment's declared port pairing. That last
+        step is what the GPU test 3 run needed by hand: the root was the v2 proxy on 8189, which
+        does not serve ComfyUI's native upload route.
+        """
+        return self.resolve_upload()["url"]
+
+    def upload_summary(self) -> dict[str, Any]:
+        """What a caller (the runner's manifest, a log line) should record about the endpoint."""
+        resolved = self.resolve_upload()
+        return dict(resolved)
 
     def close(self) -> None:
         if self._client is not None:
@@ -328,55 +515,90 @@ class ComfyClient:
 
     # -- uploads -------------------------------------------------------------------
     def upload_file(self, path: Path, *, name: str | None = None, timeout: float | None = None) -> dict[str, Any]:
-        """Upload one local file to the server's input directory; return its server-side name.
+        """Upload one local file to ComfyUI's input directory; return its server-side name.
 
         The name comes back from the server and is what a ``LoadImage`` node must be given. A
-        server without the route (a proxy that only serves v2) is reported as
-        ``upload_unsupported`` rather than as a mystery job failure later.
+        server without the route is reported as ``upload_unsupported``, after every legitimate
+        endpoint has been tried: a proxy that only serves v2 (8189) is exactly the GPU test 3
+        failure, and it has a right answer — ComfyUI itself (8188) — so the refusal carries the
+        list of endpoints tried and the flag that fixes it.
         """
         path = Path(path)
         if not path.is_file():
             raise UploadError("input_file_missing", f"{path} is not a file")
+        resolved = self.resolve_upload()
+        tried: list[str] = []
+        failures: list[UploadError] = []
+        for url in [resolved["url"], *[c for c in resolved["candidates"] if c != resolved["url"]]]:
+            try:
+                uploaded = self._post_upload(url, path, name=name, timeout=timeout)
+            except UploadError as exc:
+                failures.append(exc)
+                tried.append(f"{url} -> {exc.code}")
+                # 404/405 says "this server has no ComfyUI upload route"; a connect refusal says
+                # "nothing is listening". Both mean *this* endpoint is the wrong one, and a
+                # different candidate may be the right one. Anything else is a real answer.
+                if exc.code not in ("upload_unsupported", "upload_unreachable"):
+                    raise
+                continue
+            if url != resolved["url"]:
+                # the upload, not the ordering, decided: remember it for the rest of the run so
+                # the cache, the progress log and the manifest name the server that has the file
+                resolved["url"] = url
+                resolved["chosen_by"] = "upload"
+            return uploaded
+        if len(failures) == 1:
+            raise failures[0]
+        raise UploadError(
+            "upload_unsupported",
+            f"{path.name}: none of the {len(failures)} endpoint(s) tried serves ComfyUI's native "
+            f"{UPLOAD_ROUTE} route ({'; '.join(tried)}). Uploads are ComfyUI-native and the v2 proxy does not "
+            f"forward them. Point --upload-url (or {COMFYUI_URL_ENV}) at ComfyUI itself — on the Google Colab "
+            f"deployment that is http://127.0.0.1:{_port_env(COMFY_PORT_ENV, COMFY_PORT_DEFAULT)}",
+        )
+
+    def _post_upload(self, url: str, path: Path, *, name: str | None = None, timeout: float | None = None) -> dict[str, Any]:
+        """One upload attempt against one endpoint. Raises `UploadError`; never retries by itself."""
         filename = name or path.name
         content_type = _content_type(path)
         try:
             with httpx.Client(timeout=timeout or max(self.timeout, 60.0)) as client:
                 with path.open("rb") as handle:
                     response = client.post(
-                        self.upload_url,
+                        url,
                         files={"image": (filename, handle, content_type)},
                         data={"type": "input", "overwrite": "true", "subfolder": ""},
                     )
         except NEVER_REACHED as exc:
-            raise UploadError("upload_unreachable", f"{self.upload_url} refused the upload: {exc}") from exc
+            raise UploadError("upload_unreachable", f"{url} refused the upload: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise UploadError("upload_failed", f"uploading {path.name} failed: {type(exc).__name__}: {exc}") from exc
+            raise UploadError("upload_failed", f"uploading {path.name} to {url} failed: {type(exc).__name__}: {exc}") from exc
 
         if response.status_code in (404, 405):
             raise UploadError(
                 "upload_unsupported",
-                f"{self.upload_url} answered {response.status_code}: this server does not expose the ComfyUI "
+                f"{url} answered {response.status_code}: this server does not expose the ComfyUI "
                 "upload route, so a workflow that needs an input file cannot run. Point --upload-url at ComfyUI itself.",
             )
         if response.status_code >= 400:
-            raise UploadError("upload_failed", f"{self.upload_url} answered {response.status_code}: {response.text[:300]}")
+            raise UploadError("upload_failed", f"{url} answered {response.status_code}: {response.text[:300]}")
         try:
             payload = response.json()
         except ValueError as exc:
-            raise UploadError("upload_failed", f"{self.upload_url} did not return JSON: {response.text[:200]}") from exc
-        name = payload.get("name")
-        if not isinstance(name, str) or not name:
-            raise UploadError("upload_failed", f"{self.upload_url} returned no name: {json.dumps(payload)[:200]}")
+            raise UploadError("upload_failed", f"{url} did not return JSON: {response.text[:200]}") from exc
+        uploaded_name = payload.get("name")
+        if not isinstance(uploaded_name, str) or not uploaded_name:
+            raise UploadError("upload_failed", f"{url} returned no name: {json.dumps(payload)[:200]}")
         subfolder = str(payload.get("subfolder") or "").strip("/")
         return {
-            "name": name,
+            "name": uploaded_name,
             # what goes into the graph: ComfyUI resolves "subfolder/name"
-            "reference": f"{subfolder}/{name}" if subfolder else name,
+            "reference": f"{subfolder}/{uploaded_name}" if subfolder else uploaded_name,
             "subfolder": subfolder,
             "type": payload.get("type") or "input",
             "bytes": path.stat().st_size,
             "sha256": sha256_file(path),
-            "url": self.upload_url,
+            "url": url,
         }
 
     # -- workflows -----------------------------------------------------------------
