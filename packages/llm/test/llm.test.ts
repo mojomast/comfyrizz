@@ -21,6 +21,17 @@ function sse(events: unknown[]): Response {
   }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
+/** Some OpenAI-compatible gateways frame SSE with CRLF; the reader must split on both. */
+function sseCrlf(events: unknown[]): Response {
+  const text = events.map(event => `data: ${JSON.stringify(event)}\r\n\r\n`).join('') + 'data: [DONE]\r\n\r\n';
+  return new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
 function config(fetchImpl: typeof fetch, overrides: Record<string, unknown> = {}) {
   return {
     name: 'custom',
@@ -101,6 +112,18 @@ test('assembles fragmented tool arguments and emits only a complete call', async
     { type: 'tool_call', id: 'call_1', name: 'ping', args: { value: 'pong' } },
   ]);
   assert.ok(chunks.some(chunk => chunk.type === 'usage' && chunk.input === 5));
+});
+
+test('CRLF-framed SSE parses every event instead of one bad_stream_json blob', async () => {
+  const fetchImpl = (async () => sseCrlf([
+    { choices: [{ delta: { reasoning_content: 'thinking' }, finish_reason: null }] },
+    { choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] },
+    { choices: [], usage: { prompt_tokens: 3, completion_tokens: 1 } },
+  ])) as typeof fetch;
+  const chunks = await collect(createOpenAICompatibleModel(config(fetchImpl)));
+  assert.equal(chunks.filter(chunk => chunk.type === 'error').length, 0);
+  assert.deepEqual(chunks.filter(chunk => chunk.type === 'text'), [{ type: 'text', delta: 'ok' }]);
+  assert.ok(chunks.some(chunk => chunk.type === 'usage' && chunk.input === 3));
 });
 
 test('maps dotted app tool names to the provider-safe pattern and back', async () => {

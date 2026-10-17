@@ -26,6 +26,7 @@ requests and as `?token=` only for the SSE `EventSource` (which cannot set heade
 | `GET` | `/api/health` | Public, host-checked: `{ok:true, service:"comfyrizz-local"}` |
 | `GET` | `/api/package/:id` | `{package, revision}` |
 | `PATCH` | `/api/package/:id` | `{baseRevision, package}`; mismatch → `409 {currentRevision}`; invalid → `422 {details}` |
+| `POST` | `/api/agent` | C5 agent slice: `{brief, provider?, model?, sessionId?}`. Runs `runCpuSlice` (scripted offline, OpenCode Go when `provider` is set), validates and returns `{package, revision, timeline, generatedAssets, routes, pendingGpu, svgAssets, live, fallback, provider, model}` |
 | `POST` | `/api/render` | `{packageId, baseRevision}`, or a C1-style `{package}` draft; returns `video/mp4` |
 | `POST` | `/api/run` | C6 backend run: `{backendId, jobs, budgetUnits, approved?, comfyuiUrl?}`. Returns the estimate + `planHash`; a Colab run without approval returns `approvalRequired:true` and starts nothing |
 | `GET` | `/api/run` | C6 run status: active run, `spentEstimate`, approvals and run list |
@@ -47,6 +48,12 @@ reported as `stopped` or `stop_unconfirmed`; the spend figure is always labelled
 
 The server takes a `backendFactory(backendId, opts)` so tests run the full lifecycle against a
 fake (see `test/run.test.mjs`); the default factory lazily loads `packages/backends`.
+
+The C5 agent runner (`src/agent-runner.mjs`) caps the live tool loop at 16 steps, normalizes the
+model's scenes into the package shape, and reports `fallback: true` when a live package was not
+acceptable and the deterministic plan was used instead. Live SVG markup is opt-in via
+`COMFYRIZZ_LIVE_SVG=1`; by default SVG assets come from the deterministic A5 stub so a live run
+stays within the client timeout.
 
 The web shell persists an edit with a base revision before rendering, so a stale `PATCH` gets a
 conflict instead of silently overwriting an accepted edit. A render records the revision it used

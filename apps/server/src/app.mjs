@@ -230,6 +230,7 @@ export function createApp({
           pendingGpu: result.pendingGpu ?? [],
           svgAssets: result.svgAssets ?? [],
           live: Boolean(result.live),
+          fallback: Boolean(result.fallback),
           provider: result.provider ?? null,
           model: result.model ?? null,
         });

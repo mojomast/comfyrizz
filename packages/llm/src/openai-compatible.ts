@@ -146,7 +146,10 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
           .filter(line => line.startsWith('data:'))
           .map(line => line.slice(5).trimStart())
           .join('\n');
-        if (!data || data === '[DONE]') return out;
+        if (!data || data === '[DONE]') {
+          if (data === '[DONE]') done = true;
+          return out;
+        }
         let payload: any;
         try {
           payload = JSON.parse(data);
@@ -180,15 +183,18 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
         const { value, done: streamDone } = await reader.read();
         if (streamDone) break;
         buffer += decoder.decode(value, { stream: true });
-        let boundary = buffer.indexOf('\n\n');
-        while (boundary >= 0) {
-          const block = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
+        // Split on either LF or CRLF event boundaries: some OpenAI-compatible
+        // gateways frame with \r\n\r\n, which a bare indexOf('\n\n') misses and
+        // then joins every event into one invalid JSON blob (bad_stream_json).
+        let boundary = buffer.match(/\r?\n\r?\n/);
+        while (boundary && boundary.index !== undefined) {
+          const block = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary[0].length);
           for (const chunk of consume(block)) {
             if (chunk.type === 'usage') sawUsage = true;
             yield chunk;
           }
-          boundary = buffer.indexOf('\n\n');
+          boundary = buffer.match(/\r?\n\r?\n/);
         }
       }
       if (buffer.trim()) {

@@ -24,6 +24,7 @@ if (!token) {
   }
 }
 
+const startedAt = Date.now();
 const response = await fetch(`${base}/api/agent`, {
   method: 'POST',
   headers: { 'content-type': 'application/json', 'x-comfyrizz-token': token, origin: base },
@@ -35,8 +36,8 @@ if (!response.ok) {
   if (Array.isArray(body.details)) for (const detail of body.details.slice(0, 8)) console.error(`  - ${detail.path ?? detail.instancePath}: ${detail.message}`);
   process.exit(1);
 }
-console.log(`live ok: ${body.package.id} rev ${body.revision}`);
-console.log(`  provider=${body.provider} model=${body.model} live=${body.live}`);
+console.log(`live ok: ${body.package.id} rev ${body.revision} in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+console.log(`  provider=${body.provider} model=${body.model} live=${body.live} fallback=${body.fallback}`);
 console.log(`  title=${body.package.title}`);
 console.log(`  svg assets=${body.svgAssets.length} pending gpu=${body.pendingGpu.length}`);
 console.log(`  timeline=${body.timeline.durationInFrames} frames @ ${body.timeline.fps}fps`);

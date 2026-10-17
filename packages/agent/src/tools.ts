@@ -50,7 +50,11 @@ const sceneSchema = z.object({
   id: z.string().min(1),
   layout: z.enum(['title', 'hero', 'stat', 'chart', 'list']).optional(),
   preferredFrames: z.number().int().positive().optional(),
-  copy: z.record(z.unknown()).optional(),
+  // DeepSeek often sends `copy` as a plain headline string; accept it and lift it
+  // to `{ headline }` so a common model shape is not a repair-loop failure.
+  copy: z
+    .preprocess(value => (typeof value === 'string' ? { headline: value } : value), z.record(z.unknown()))
+    .optional(),
   narration: z.string().optional(),
 }).passthrough();
 
@@ -121,6 +125,128 @@ function baseParameters(properties: Record<string, unknown>, required: string[])
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
+const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list'] as const;
+type SceneLayout = (typeof SCENE_LAYOUTS)[number];
+const SCENE_KEYS = new Set([
+  'id', 'layout', 'variant', 'preferredFrames', 'copy', 'data', 'background', 'foreground',
+  'media_only', 'lower_third', 'transitionOut', 'narration', 'narration_asset',
+  'narration_duration_frames', 'locked', 'notes',
+]);
+const COPY_KEYS = new Set(['headline', 'kicker', 'sub', 'body', 'quote', 'attribution', 'footnote', 'cta', 'items']);
+const COPY_LIMITS: Record<SceneLayout, Record<string, number>> = {
+  title: { headline: 48, sub: 90 },
+  hero: { headline: 64, sub: 120, body: 240 },
+  stat: { headline: 48, sub: 90, body: 40 },
+  chart: { headline: 64, sub: 120, footnote: 120 },
+  list: { headline: 64, quote: 200, attribution: 80 },
+};
+const LAYOUT_VARIANTS: Record<SceneLayout, string[]> = {
+  title: ['centered', 'outro'],
+  hero: ['full-bleed', 'split'],
+  stat: [],
+  chart: ['bar'],
+  list: ['bullets', 'quote'],
+};
+const BACKGROUND_PATTERNS = ['gradient', 'grid', 'dots', 'grain', 'mesh'];
+const DEFAULT_SCENE_FRAMES: Record<SceneLayout, number> = { title: 150, hero: 210, stat: 180, chart: 210, list: 180 };
+const SCENE_ID_RE = /^s[A-Za-z0-9_-]{0,63}$/;
+
+function clampText(value: unknown, max: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  if (!text) return undefined;
+  return text.length > max ? `${text.slice(0, Math.max(1, max - 1)).trimEnd()}\u2026` : text;
+}
+
+/** The live model often sends `role`/`title` and no `layout`; infer one. */
+function inferSceneLayout(scene: Record<string, any>): SceneLayout {
+  const hint = `${scene.layout ?? ''} ${scene.role ?? ''} ${scene.id ?? ''} ${scene.title ?? ''}`.toLowerCase();
+  if (/outro|intro|title|cover|opening|closing|hook/.test(hint)) return 'title';
+  if (/stat|metric|kpi|number|figure|score/.test(hint)) return 'stat';
+  if (/chart|graph|bar|data|plot|trend/.test(hint)) return 'chart';
+  if (/list|bullet|steps|feature|checklist|points/.test(hint)) return 'list';
+  return 'hero';
+}
+
+/**
+ * Coerce a model-authored scene into the published package shape: a valid
+ * layout, readable copy, a real dataset reference, a known variant/background,
+ * and only schema-known keys. Assets that do not exist yet are dropped.
+ */
+function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>): Record<string, any> {
+  const source: Record<string, any> = { ...raw };
+  const rawId = typeof source.id === 'string' ? source.id : '';
+  const id = SCENE_ID_RE.test(rawId) ? rawId : `s_${hashId('', rawId || fallbackTitle).slice(0, 12)}`;
+  const layout: SceneLayout = (SCENE_LAYOUTS as readonly string[]).includes(source.layout) ? source.layout : inferSceneLayout(source);
+
+  const copy: Record<string, any> = typeof source.copy === 'string'
+    ? { headline: source.copy }
+    : source.copy && typeof source.copy === 'object' ? { ...source.copy } : {};
+  if (!copy.headline && typeof source.title === 'string') copy.headline = source.title;
+  if (!copy.headline && typeof source.headline === 'string') copy.headline = source.headline;
+  for (const key of Object.keys(copy)) if (!COPY_KEYS.has(key)) delete copy[key];
+
+  let finalLayout: SceneLayout = layout;
+  let data = source.data && typeof source.data === 'object' ? { ...source.data } : undefined;
+  if (data && (typeof data.dataset !== 'string' || !datasetIds.has(data.dataset))) data = undefined;
+  if (['stat', 'chart'].includes(finalLayout) && !data) finalLayout = Array.isArray(copy.items) && copy.items.length >= 2 ? 'list' : 'hero';
+  if (data) {
+    for (const key of Object.keys(data)) if (key !== 'dataset' && key !== 'display') delete data[key];
+    if (finalLayout === 'stat' && data.display === undefined) data.display = 'number';
+    if (finalLayout === 'chart' && data.display === undefined) data.display = 'bar';
+  }
+
+  const limits = COPY_LIMITS[finalLayout];
+  for (const [key, max] of Object.entries(limits)) if (copy[key] !== undefined) copy[key] = clampText(copy[key], max);
+  if (Array.isArray(copy.items)) copy.items = copy.items.map(item => clampText(item, 72)).filter(Boolean).slice(0, 6);
+  if (!copy.headline) copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline);
+
+  let variant = source.variant;
+  const allowedVariants = LAYOUT_VARIANTS[finalLayout];
+  if (typeof variant !== 'string' || (allowedVariants.length > 0 && !allowedVariants.includes(variant))) variant = undefined;
+  if (finalLayout === 'list' && variant === 'bullets' && (!Array.isArray(copy.items) || copy.items.length < 2)) variant = undefined;
+  if (finalLayout === 'list' && variant === 'quote' && !copy.quote) variant = undefined;
+
+  let background = source.background && typeof source.background === 'object' ? { ...source.background } : undefined;
+  if (background) {
+    // Accept a bare `{ pattern }` shape as procedural.
+    if (background.procedural === undefined && typeof background.pattern === 'string') background = { procedural: { pattern: background.pattern } };
+    const procedural = background.procedural && typeof background.procedural === 'object' ? { ...background.procedural } : undefined;
+    if (procedural) {
+      if (!BACKGROUND_PATTERNS.includes(procedural.pattern)) procedural.pattern = 'gradient';
+      if (procedural.seed !== undefined && !Number.isInteger(procedural.seed)) delete procedural.seed;
+      if (Array.isArray(procedural.palette)) procedural.palette = procedural.palette.filter((c: unknown) => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c)).slice(0, 8);
+    }
+    const asset = typeof background.asset === 'string' && assetIds.has(background.asset) ? background.asset : undefined;
+    if (procedural) background = { procedural };
+    else if (asset) background = { asset };
+    else background = undefined;
+  }
+
+  const foreground = Array.isArray(source.foreground)
+    ? source.foreground.filter((item: any) => item && typeof item === 'object' && typeof item.asset === 'string' && assetIds.has(item.asset)).slice(0, 12)
+    : [];
+
+  const scene: Record<string, any> = { id, layout: finalLayout };
+  if (variant) scene.variant = variant;
+  // A live model usually omits preferredFrames; fall back to a readable length
+  // instead of the planner's bare minimum so the package is a usable video.
+  scene.preferredFrames = Number.isInteger(source.preferredFrames) && source.preferredFrames > 0 ? source.preferredFrames : DEFAULT_SCENE_FRAMES[finalLayout];
+  if (Object.keys(copy).length > 0) scene.copy = copy;
+  if (data) scene.data = data;
+  if (background) scene.background = background;
+  scene.foreground = foreground;
+  if (source.media_only === true) scene.media_only = true;
+  if (source.lower_third && typeof source.lower_third === 'object' && typeof source.lower_third.text === 'string') {
+    scene.lower_third = { ...(typeof source.lower_third.kicker === 'string' ? { kicker: source.lower_third.kicker } : {}), text: source.lower_third.text };
+  }
+  if (source.transitionOut && typeof source.transitionOut === 'object' && typeof source.transitionOut.type === 'string') scene.transitionOut = source.transitionOut;
+  const narration = clampText(source.narration, 600);
+  if (narration) scene.narration = narration;
+  if (typeof source.notes === 'string') scene.notes = clampText(source.notes, 512);
+  return scene;
+}
+
 /**
  * Tools the model may call. Approval-requiring tools (spend, stock attach,
  * uploads) return a card request and never perform the action here.
@@ -138,8 +264,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const rawTitle = args.title ?? args.brief.slice(0, 90);
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45).trimEnd()}…` : rawTitle;
     const id = hashId('pkg', args.brief);
+    const datasetIds = new Set(Object.keys(args.datasets ?? {}));
     const scenes = args.scenes?.length
-      ? args.scenes
+      ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set()))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }];
     state.package = {
       $schema: 'https://comfyrizz.example/schema/package-v1.json',
@@ -164,17 +291,20 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
 
   const edit = (args: z.infer<typeof editSchema>) => {
     if (!state.package) throw new Error('no package draft; call storyboard.propose first');
-    const scenes: any[] = Array.isArray(state.package.scenes) ? state.package.scenes : [];
+    const draft = state.package;
+    const scenes: any[] = Array.isArray(draft.scenes) ? draft.scenes : [];
     const index = scenes.findIndex(scene => scene?.id === args.scene_id);
     if (index < 0) throw new Error(`scene ${args.scene_id} not found`);
     const current = scenes[index] ?? {};
     const patch = args.patch as Record<string, any>;
-    const nextScenes = scenes.map((scene, sceneIndex) => sceneIndex === index ? {
+    const datasetIds = new Set(Object.keys(draft.datasets ?? {}));
+    const assetIds = new Set(Object.keys(draft.assets ?? {}));
+    const nextScenes = scenes.map((scene, sceneIndex) => sceneIndex === index ? normalizeScene({
       ...current,
       ...patch,
       ...(patch.copy ? { copy: { ...(current.copy ?? {}), ...patch.copy } } : {}),
-    } : scene);
-    state.package = { ...state.package, scenes: nextScenes, revision: Number(state.package.revision ?? 0) + 1 };
+    }, draft.title, datasetIds, assetIds) : scene);
+    state.package = { ...draft, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
     return { package: state.package, revision: state.package.revision, scene_id: args.scene_id };
   };

@@ -83,6 +83,17 @@ test('zod rejects malformed tool arguments before execution', () => {
   assert.equal(generateSvgSchema.safeParse({ scene_id: 's', kind: 'icon', intent: 'rocket', palette: ['#6d8cff'] }).success, true);
 });
 
+test('a plain string copy is lifted to a headline object (DeepSeek shape)', () => {
+  const parsed = proposeSchema.parse({
+    brief: 'Orbit launch',
+    scenes: [{ id: 's_title', layout: 'title', copy: 'Meet Orbit' }],
+  });
+  assert.deepEqual(parsed.scenes?.[0].copy, { headline: 'Meet Orbit' });
+  // Objects still pass through unchanged.
+  const kept = proposeSchema.parse({ brief: 'x', scenes: [{ id: 's', copy: { headline: 'A', items: ['one', 'two'] } }] });
+  assert.deepEqual(kept.scenes?.[0].copy, { headline: 'A', items: ['one', 'two'] });
+});
+
 test('tools: propose + edit package, SVG result, planned FLUX job', async () => {
   const tools = createToolset({
     generateSvg: intent => ({ svg: SVG, attempts: 2, repairs: 1, sanitizerVersion: '1.0.0' }),

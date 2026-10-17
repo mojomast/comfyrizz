@@ -47,26 +47,41 @@ submitted. The returned package validates against `comfyrizz.package/v1`, the se
 timeline and returns `{ package, timeline, generatedAssets, routes, pendingGpu }`; the shell swaps
 it into the Player and the storyboard. **Export MP4** then renders that package on CPU.
 
-The agent runner lives in `apps/server/src/agent-runner.mjs`. If a live model stalls, stops early
-or invents fields the v1 schema rejects, the runner falls back to the deterministic plan (still
-using the live SVG generator) and validates before returning.
+The agent runner lives in `apps/server/src/agent-runner.mjs`. It passes `maxSteps: 16` so a live
+model cannot stream tool calls indefinitely. If a live model stalls, stops early or invents fields
+the v1 schema rejects, the runner falls back to the deterministic plan (still using the live SVG
+generator) and validates before returning; the response reports `fallback: true` when that happens.
+
+`storyboard.propose`/`storyboard.edit` normalize each model-authored scene into the published
+package shape: `role`/`title` scenes get a real `layout`, a string `copy` becomes `{ headline }`,
+copy is clamped to the layout limits, `stat`/`chart` scenes without a known dataset are downgraded,
+variant/background values are checked, unknown keys are dropped, and a missing `preferredFrames`
+falls back to a readable per-layout length. The live model sends this shape, which is why the loop
+now lands a valid package instead of tripping the schema.
 
 ### Live OpenCode Go check
 
 `apps/web/scripts/live-agent.mjs` posts one brief with `provider: 'opencode-go'` and prints the
-package id, provider/model, SVG asset count and timeline length. It exits `0` with a `skip:` line
-when `OPENCODE_GO_API_KEY`/`OPENCODE_API_KEY` is unset, so it never makes a network call without a
-key, and it reads the server token from `apps/server/.runtime/server-token` (never printed).
+package id, provider/model, `live`/`fallback`, SVG asset count and timeline length. It exits `0`
+with a `skip:` line when `OPENCODE_GO_API_KEY`/`OPENCODE_API_KEY` is unset, so it never makes a
+network call without a key, and it reads the server token from `apps/server/.runtime/server-token`
+(never printed).
 
 ```bash
 COMFYRIZZ_PORT=4320 node apps/server/src/index.mjs &   # or npm start in apps/server
 node apps/web/scripts/live-agent.mjs
 ```
 
-**Known limitation (2026-10-17):** the live DeepSeek/OpenCode Go path was not yet green — a run
-ended with `agent did not produce a package draft` while the offline scripted run and the stub
-e2e (valid package + ffprobe-checked MP4) both pass. The runner keeps the deterministic fallback
-so the slice still completes; the live-model tool loop is the open item.
+**Verified (2026-10-17):** one live DeepSeek v4.1 run through `/api/agent` returned a model-built
+package with `live=true fallback=false`, 7 SVG assets, 1 pending-GPU still and a 900-frame timeline
+in ~37 s. A reproducible offline transcript (`apps/server/test/live-loop.test.mjs`) replays
+DeepSeek's stream shape (reasoning deltas, fragmented tool-call names/arguments, a malformed call,
+a text-only turn) and asserts the loop yields a valid `comfyrizz.package/v1`.
+
+Live SVG *markup* is opt-in via `COMFYRIZZ_LIVE_SVG=1`. By default the SVG assets come from the
+deterministic A5 stub even on a live run: each live SVG is a full reasoning stream (~60 s each),
+which pushed one live run past the client's 300 s headers timeout. The live model still builds the
+package draft (the C5-live goal); `COMFYRIZZ_LIVE_SVG=1` restores model-written markup.
 
 ## C6 backend run (spend card + run panel)
 

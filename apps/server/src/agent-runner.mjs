@@ -68,8 +68,12 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       writeFileSync(join(assetsDir, `${assetId}.svg`), svg);
       return `assets/${assetId}.svg`;
     };
+    // The live model builds the package draft (the C5-live goal). Live SVG markup
+    // is opt-in: each live SVG is a full reasoning stream and one run can take
+    // minutes, so the default keeps SVG on the deterministic A5 stub.
+    const liveSvg = live && process.env.COMFYRIZZ_LIVE_SVG === '1';
     const generateSvg = async intent => {
-      const llmGenerator = live ? createLlmSvgGenerator(agentModel, `${sessionId}-svg`) : null;
+      const llmGenerator = liveSvg ? createLlmSvgGenerator(agentModel, `${sessionId}-svg`) : null;
       let result;
       let source = 'stub';
       if (llmGenerator) {
@@ -113,16 +117,21 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         persistSvg,
         sessionId,
         now,
+        // The deterministic script needs 12 steps; a live model gets the same
+        // bound so one run cannot stream tool calls indefinitely.
+        maxSteps: 16,
         ...(onEvent ? { onEvent } : {}),
       });
     const acceptable = candidate =>
       candidate.svgAssets.length >= 4 && candidate.pendingGpu.length >= 1 && validatePackage(candidate.package).valid;
     let slice = await runOnce(agentModel);
+    let fallback = false;
     // A live model can stall, stop early, or invent fields the v1 schema rejects.
     // Fall back to the deterministic plan (still using the live SVG generator)
     // so the CPU slice always completes with a valid package.
     if (agentModel && !acceptable(slice)) {
       slice = await runOnce(null);
+      fallback = true;
     }
     const validation = validatePackage(slice.package);
     if (!validation.valid) {
@@ -134,6 +143,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     return {
       ok: slice.ok,
       live,
+      fallback,
       provider: resolved?.name ?? 'scripted',
       model: resolved?.model ?? 'scripted',
       package: slice.package,
