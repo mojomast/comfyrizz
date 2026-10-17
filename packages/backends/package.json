@@ -1,0 +1,19 @@
+{
+  "name": "@comfyrizz/backends",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Comfyrizz backends: verified Google Colab lifecycle + BYO ComfyUI URL (WS-B, owner Hermes)",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./colab": "./src/colab-backend.mjs",
+    "./byo": "./src/byo-backend.mjs",
+    "./plan": "./src/colab-plan.mjs",
+    "./budget": "./src/budget.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
