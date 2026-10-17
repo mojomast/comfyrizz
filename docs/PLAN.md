@@ -73,8 +73,8 @@ Rule kept from the spec: GPU work starts only after the CPU product exists, and 
 
 **B2. `pipeline-py` runner** (`pipeline-py/`; spec §6.4)
 - `comfy-sdk` runner: reads `jobs.json`, submits API-format workflows to `COMFY_BASE_URL`, JSON-lines progress (`{"v":1,"attempt":…,"job":…,"seq":…,"event":…}`), atomic `attempts/<id>.json` written *before* submit and updated with `job_id` immediately, states incl. `submission_unknown` (never auto-resubmitted), atomic `out/manifest.json` (tmp + rename) that alone decides success, reconcile mode (poll known job ids), hash cache key, `health.py`.
-- `packages/jobs/` (TS): package → ordered, hashed `jobs.json` (still → plate → upscale), LTX dims multiple of 32, frames 8n+1.
-- Accept: pytest against a **local fake Comfy v2 server** (no GPU, no network): success path writes manifest; killed-mid-run leaves attempt records and reconcile polls instead of resubmitting; `submission_unknown` is surfaced, not retried; jobs planner unit tests (8n+1, ×32).
+- `packages/jobs/` (TS): package → ordered, hashed `jobs.json` (still → plate → upscale), LTX dims multiple of 64 (so a plate's half-size stage 1 is a multiple of 32; GPU test 3, N9), frames 8n+1.
+- Accept: pytest against a **local fake Comfy v2 server** (no GPU, no network): success path writes manifest; killed-mid-run leaves attempt records and reconcile polls instead of resubmitting; `submission_unknown` is surfaced, not retried; jobs planner unit tests (8n+1, ×64 for plates).
 
 **B3. Backends: Google Colab lifecycle + BYO ComfyUI URL** (`packages/backends/`, `colab/`; spec §6.5, §6.6, §6.7)
 - Copy (don't edit) `/home/box/orbitdesktop/server/colab-plan.mjs` helpers (`parseUsage`, `parseSessions`, `parseStatus`, `parseLs`, `parseNvidiaSmi`, `catalogFromHelp`, `redactSecrets`, `blockedLocalPath`, argv planning) and the detached worker / job-log pattern from `colab-orchestrator.mjs` / `colab-job-worker.mjs`; add the MIT relicence header.

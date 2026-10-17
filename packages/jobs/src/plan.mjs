@@ -15,12 +15,18 @@ export const JOBS_VERSION = 1;
 export const BATCH_ORDER = ["stills", "plates", "upscales", "audio"];
 
 /**
- * Latent downsampling factor per job kind: plates/upscales follow the LTX 32 rule, stills the
- * Klein 16 rule. Klein's VAE factor is 8 but its patch size is 2, so a still that is only a
- * multiple of 8 is padded or cropped by the model — GPU test 2 shipped 960x540 sample rasters and
- * the fix was "use 960x544 or 1024x576" (docs/GPU_TEST_2.md, issue 6).
+ * Latent downsampling factor per job kind: plates/upscales follow the LTX rule, stills the Klein
+ * 16 rule. Klein's VAE factor is 8 but its patch size is 2, so a still that is only a multiple of
+ * 8 is padded or cropped by the model — GPU test 2 shipped 960x540 sample rasters and the fix was
+ * "use 960x544 or 1024x576" (docs/GPU_TEST_2.md, issue 6).
+ *
+ * Plates are 64, not 32 (GPU test 3, N9): the two-stage graph renders stage 1 at *half* the final
+ * size, and LTX floors its latents to 32, so a final size that is a multiple of 32 but not of 64
+ * needs a stage-1 size that is not a multiple of 32 at all. A planned 960x544 went in and 960x512
+ * came out — the plan said one thing and the file was another, which is how a media dims mismatch
+ * reached `apply`. A multiple of 64 makes the half a multiple of 32 by construction.
  */
-export const DIM_MULTIPLE_BY_KIND = { still: 16, plate: 32, upscale: 32 };
+export const DIM_MULTIPLE_BY_KIND = { still: 16, plate: 64, upscale: 64 };
 
 /**
  * Parameters whose value is a *file* the graph has to be given a server-side name for
@@ -177,13 +183,13 @@ const ASPECT_TOLERANCE = 0.01;
  * a source of the wrong shape loses content silently - the plan refuses instead, and a caller that
  * really wants the crop has to say so (`{ allowAspectMismatch: true }`), which the plan then records.
  */
-function checkSourceAspect({ pkg, plateAssetId, sourceId, dims, format, kinds, errors, allowed, warnings }) {
+function checkSourceAspect({ pkg, plateAssetId, sourceId, dims, format, kinds, errors, allowed, warnings, sourceMultiple }) {
   if (!sourceId || !kinds.has(sourceId) || kinds.get(sourceId) !== "still") return;
   const inputs = (pkg.assets?.[sourceId]?.gen?.inputs) || {};
   const source = resolveDimensions(
     Number(inputs.width ?? format.width ?? 1024),
     Number(inputs.height ?? format.height ?? 1024),
-    DIM_MULTIPLE_BY_KIND.still,
+    sourceMultiple ?? DIM_MULTIPLE_BY_KIND.still,
   );
   const plateAspect = dims.width / dims.height;
   const sourceAspect = source.width / source.height;
@@ -251,6 +257,23 @@ export function planJobs(pkg, opts = {}) {
     kinds.set(assetId, kind);
   }
 
+  // Pass 1b: an i2v source is planned on its *plate's* lattice, not the still lattice.
+  // The source still is the plate's first frame, and the plate's dims are what the graph renders, so
+  // a 16-lattice source against a 64-lattice plate is a shape mismatch the aspect check has to
+  // refuse (GPU test 3, N9: a package asking 960x544 for both planned a 960x544 still and a 960x576
+  // plate). Resolving the source on the plate's lattice makes the pair agree by construction, so a
+  // package only has to state one size for both.
+  const sourceLattice = new Map();
+  for (const [assetId, kind] of kinds) {
+    if (kind !== "plate" && kind !== "upscale") continue;
+    const sourceId = assets[assetId]?.gen?.inputs?.image;
+    if (typeof sourceId !== "string") continue;
+    const lattice = DIM_MULTIPLE_BY_KIND[kind] ?? DIM_MULTIPLE_BY_KIND.still;
+    sourceLattice.set(sourceId, Math.max(lattice, sourceLattice.get(sourceId) ?? 0));
+  }
+  /** The lattice a still's dims resolve on: its plate's when it is one, its own otherwise. */
+  const latticeFor = (assetId) => sourceLattice.get(assetId) ?? DIM_MULTIPLE_BY_KIND.still;
+
   // Pass 2: build jobs.
   const jobs = [];
   const add = (job) => {
@@ -317,7 +340,7 @@ export function planJobs(pkg, opts = {}) {
         width: Number(params.width ?? format.width ?? 1024),
         height: Number(params.height ?? format.height ?? 1024),
       };
-      const dims = resolveDimensions(requested.width, requested.height, DIM_MULTIPLE_BY_KIND.still);
+      const dims = resolveDimensions(requested.width, requested.height, latticeFor(assetId));
       job.dims = { width: dims.width, height: dims.height };
       job.dimsAdjusted = dims.adjusted;
       // A still only sends width/height to the workflow when the package asked for them: some
@@ -328,8 +351,10 @@ export function planJobs(pkg, opts = {}) {
       if (params.cutout === true || asset.cutout === true) job.cutout = true;
       params.cutout = job.cutout === true;
     } else if (kind === "plate") {
-      const width = Number(params.width ?? 960);
-      const height = Number(params.height ?? 544);
+      // the default is a 64-multiple in 16:9 (N9); 960x544 used to be the default and came back
+      // 960x512 from the graph, because half of 544 is 272 and LTX floors to 32
+      const width = Number(params.width ?? 1024);
+      const height = Number(params.height ?? 576);
       const dims = resolveDimensions(width, height, DIM_MULTIPLE_BY_KIND.plate);
       const requestedFrames = Number(params.frames ?? Math.round(Number(params.fps ?? 24) * 4));
       const frames = resolveFrames(requestedFrames);
@@ -341,6 +366,13 @@ export function planJobs(pkg, opts = {}) {
       // number the params map derives with {mul: 0.5} - the plan and the graph have to agree on it
       // (GPU test 2, issues 3 and 4: a planned 960x544 used to come back 1920x1088).
       job.stage1Dims = { width: dims.width / 2, height: dims.height / 2 };
+      // N9: dims is a multiple of 64, so this half is a multiple of 32 — the lattice LTX floors to
+      if (job.stage1Dims.width % 32 !== 0 || job.stage1Dims.height % 32 !== 0) {
+        throw new Error(
+          `${job.id}: stage1Dims ${job.stage1Dims.width}x${job.stage1Dims.height} is off the 32 lattice ` +
+            `(dims ${dims.width}x${dims.height} must be a multiple of 64; GPU test 3, N9)`,
+        );
+      }
       job.fps = Number(params.fps ?? 24);
       job.frames = frames;
       job.framesAdjusted = frames !== requestedFrames;
@@ -350,7 +382,7 @@ export function planJobs(pkg, opts = {}) {
       params.fps = job.fps;
       job.inputAsset = typeof params.image === "string" ? params.image : null;
       job.output = `out/intermediates/${assetId}.plate.mp4`;
-      checkSourceAspect({ pkg, plateAssetId: assetId, sourceId: job.inputAsset, dims, format, kinds, errors, allowed: opts.allowAspectMismatch === true, warnings });
+      checkSourceAspect({ pkg, plateAssetId: assetId, sourceId: job.inputAsset, dims, format, kinds, errors, allowed: opts.allowAspectMismatch === true, warnings, sourceMultiple: job.inputAsset ? latticeFor(job.inputAsset) : undefined });
 
       if (params.upscale) {
         // A plate that will be upscaled is an intermediate; the upscale job owns the asset file.

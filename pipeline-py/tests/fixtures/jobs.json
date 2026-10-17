@@ -78,15 +78,15 @@
       "deps": [],
       "output": "assets/a_plate1_still.png",
       "outputKind": "image",
-      "cacheKey": "6b33a46f0659f33718f0db88d2e5e9e5b43ebc3b6a6d8dfd7225c1bab4d0c992",
+      "cacheKey": "d151fb1ae63f2c534a2634c9b7d127c0efa33ce3f37047599cd89cc4947e91a1",
       "dims": {
         "width": 960,
-        "height": 544
+        "height": 576
       },
       "dimsAdjusted": true,
       "params": {
         "width": 960,
-        "height": 544,
+        "height": 576,
         "seed": 42,
         "steps": 16,
         "cutout": false
@@ -110,15 +110,15 @@
       ],
       "output": "out/intermediates/a_plate1.plate.mp4",
       "outputKind": "video",
-      "cacheKey": "278cd78c373935cbd69793956a40b5a2490651a3802e0d7d4780e4632ca0ba90",
+      "cacheKey": "ec2f8632ab503e4b7fab9fe372f8906bee1e70b68fec5bd8c13293ddccc3df6f",
       "dims": {
         "width": 960,
-        "height": 544
+        "height": 576
       },
-      "dimsAdjusted": false,
+      "dimsAdjusted": true,
       "stage1Dims": {
         "width": 480,
-        "height": 272
+        "height": 288
       },
       "fps": 24,
       "frames": 97,
@@ -128,7 +128,7 @@
         "image": "a_plate1_still",
         "prompt": "slow drift through a soft blue nebula, no text, no letters, no words, no logos, no watermarks, static camera, gentle motion, no cuts",
         "width": 960,
-        "height": 544,
+        "height": 576,
         "frames": 97,
         "fps": 24,
         "upscale": "x2+crop",
@@ -179,7 +179,7 @@
         "image": "a_plate1_still",
         "prompt": "slow drift through a soft blue nebula, no text, no letters, no words, no logos, no watermarks, static camera, gentle motion, no cuts",
         "width": 960,
-        "height": 544,
+        "height": 576,
         "frames": 97,
         "fps": 24,
         "upscale": "x2+crop",
@@ -192,11 +192,11 @@
       },
       "upscaleTarget": {
         "width": 1920,
-        "height": 1088
+        "height": 1152
       },
       "crop": {
-        "top": 4,
-        "bottom": 4,
+        "top": 36,
+        "bottom": 36,
         "left": 0,
         "right": 0
       },
@@ -226,7 +226,7 @@
           "because": "GPU test 2: the verified good i2v prompts used a static camera and no cuts; push-ins and orbits went wrong"
         }
       ],
-      "cacheKey": "a0b5047ba92330ea4d087a53da937133b1f8a91f5b58528974e67e8ee686a8ad"
+      "cacheKey": "40f5224def1db071fe0a4bdfc0c42de5b28272794190c68d2b72c1553f37ea6e"
     },
     {
       "id": "a_narr.audio",
@@ -259,5 +259,5 @@
     }
   ],
   "warnings": [],
-  "hash": "fe958233fe244cac20d0598a463f1e607c224a077088956e088b0c642c1dce90"
+  "hash": "45cacf945bb7a5f00cf58df7d08e893221b37c685071f5752a400070d2b36295"
 }

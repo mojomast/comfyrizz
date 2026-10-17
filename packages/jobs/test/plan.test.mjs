@@ -1,5 +1,6 @@
 // B2 acceptance: planner unit tests - batch ordering (every still before any plate),
-// LTX dimensions x32, frames 8n+1, deterministic hashing, cache keys, cutout.
+// LTX dimensions on the kind's lattice (64 for plates, N9), frames 8n+1, deterministic hashing,
+// cache keys, cutout.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -48,6 +49,47 @@ test("dimensions resolve to the required multiple", () => {
   assert.equal(resolveDimensions(960, 544).adjusted, false);
   assert.ok(isDimensionValid(960, 32) && isDimensionValid(992, 32));
   assert.ok(!isDimensionValid(961, 32) && !isDimensionValid(16, 32));
+});
+
+test("a plate is planned on the 64 lattice so its stage 1 stays on the 32 lattice (GPU test 3, N9)", () => {
+  // 960x544 went in and 960x512 came out: half of 544 is 272, and LTX floors a latent to 32, so a
+  // final size that is only a multiple of 32 cannot survive the two-stage graph unchanged.
+  const doc = planJobs(fixture("package-pending.json"));
+  const plate = doc.jobs.find((job) => job.id === "a_plate1.plate");
+  assert.ok(plate, "the fixture plans a plate");
+  // the fixture asks 960x544 for the plate and 961x545 for its first frame: both land on 960x576, so
+  // the pair agrees without the package having to state two sizes that match
+  assert.deepEqual(plate.dims, { width: 960, height: 576 }, "544 ties up to 576 on the 64 lattice");
+  assert.deepEqual(doc.jobs.find((job) => job.id === "a_plate1_still.still").dims, { width: 960, height: 576 });
+  for (const job of doc.jobs) {
+    if (job.kind !== "plate") continue;
+    assert.equal(job.dims.width % 64, 0, `${job.id} dims ${JSON.stringify(job.dims)}`);
+    assert.equal(job.dims.height % 64, 0, `${job.id} dims ${JSON.stringify(job.dims)}`);
+    assert.equal(job.stage1Dims.width % 32, 0, `${job.id}: what the graph's node 8 takes`);
+    assert.equal(job.stage1Dims.height % 32, 0, `${job.id}: what the graph's node 8 takes`);
+    assert.deepEqual(job.stage1Dims, { width: job.dims.width / 2, height: job.dims.height / 2 });
+  }
+  // an upscale's own dims are the package's frame (1920x1080) after the x2 crop, so it is not the
+  // plate lattice that decides them - but its stage 1 is still half of that frame
+  const upscale = doc.jobs.find((job) => job.id === "a_plate1.upscale");
+  assert.deepEqual(upscale.stage1Dims, { width: upscale.dims.width / 2, height: upscale.dims.height / 2 });
+
+  // a plate that asks for no size gets the 64-multiple default, in 16:9 rather than the old 960x544
+  const bare = fixture("package-pending.json");
+  delete bare.assets.a_plate1.gen.inputs.width;
+  delete bare.assets.a_plate1.gen.inputs.height;
+  bare.assets.a_plate1_still.gen.inputs.width = 1024;
+  bare.assets.a_plate1_still.gen.inputs.height = 576;
+  const barePlate = planJobs(bare).jobs.find((job) => job.id === "a_plate1.plate");
+  assert.deepEqual(barePlate.dims, { width: 1024, height: 576 });
+  assert.deepEqual(barePlate.stage1Dims, { width: 512, height: 288 });
+  assert.equal(barePlate.dimsAdjusted, false);
+
+  // a first frame that asks for a different shape than its plate is still refused, naming the plate
+  const square = fixture("package-pending.json");
+  square.assets.a_plate1_still.gen.inputs.width = 960;
+  square.assets.a_plate1_still.gen.inputs.height = 960;
+  assert.throws(() => planJobs(square), /renders at 960x576 \(aspect 1\.667\)/);
 });
 
 test("frame counts resolve to 8n+1 (nearest, ties up)", () => {
@@ -185,28 +227,29 @@ test("plate jobs record the stage-1 lattice the two-stage graph actually renders
   const byId = Object.fromEntries(doc.jobs.map((j) => [j.id, j]));
   const plate = byId["a_plate1.plate"];
   // dims is the finished frame; stage 1 is half of it, which the x2 latent upsampler doubles back
-  assert.deepEqual(plate.dims, { width: 960, height: 544 });
-  assert.deepEqual(plate.stage1Dims, { width: 480, height: 272 });
+  assert.deepEqual(plate.dims, { width: 960, height: 576 });
+  assert.deepEqual(plate.stage1Dims, { width: 480, height: 288 });
   assert.deepEqual(byId["a_plate1.upscale"].stage1Dims, { width: 960, height: 540 }, "half of the 1920x1080 finals frame");
   assert.equal(byId["a_plate1_still.still"].stage1Dims, undefined, "a still is one pass, no lattice");
   assert.deepEqual(checkJobsDoc(doc), []);
 
   const broken = JSON.parse(JSON.stringify(doc));
-  broken.jobs.find((j) => j.id === "a_plate1.plate").stage1Dims = { width: 960, height: 544 };
-  assert.ok(checkJobsDoc(broken).some((p) => /stage1Dims 960x544 is not half of dims 960x544/.test(p)));
+  broken.jobs.find((j) => j.id === "a_plate1.plate").stage1Dims = { width: 480, height: 272 };
+  assert.ok(checkJobsDoc(broken).some((p) => /stage1Dims 480x272 is not half of dims 960x576/.test(p)));
 });
 
 test("an i2v source at a different aspect than its plate is refused, naming both", () => {
   const pkg = fixture("package-pending.json");
   pkg.assets.a_plate1_still.gen.inputs.width = 1024;
   pkg.assets.a_plate1_still.gen.inputs.height = 1024;
-  assert.throws(() => planJobs(pkg), /first frame a_plate1_still is planned at 1024x1024 \(aspect 1\.000\) but this plate renders at 960x544/);
+  assert.throws(() => planJobs(pkg), /first frame a_plate1_still is planned at 1024x1024 \(aspect 1\.000\) but this plate renders at 960x576/);
   assert.throws(() => planJobs(pkg), /generate it at the plate's aspect/);
 
-  // a source within 1% of the plate's aspect is rounding noise, not a different shape
+  // a source within 1% of the plate's aspect is rounding noise, not a different shape (and a source
+  // like this one rounds onto the plate's own lattice, N9)
   const close = fixture("package-pending.json");
   close.assets.a_plate1_still.gen.inputs.width = 960;
-  close.assets.a_plate1_still.gen.inputs.height = 540;
+  close.assets.a_plate1_still.gen.inputs.height = 570;
   assert.deepEqual(planJobs(close).warnings, []);
 
   // and a caller who really wants the centre-crop can say so: the plan then records it
@@ -230,16 +273,16 @@ test("jobs carry resolved dimensions, frames, crop and the cache key", () => {
   const doc = planJobs(fixture("package-pending.json"));
   const byId = Object.fromEntries(doc.jobs.map((j) => [j.id, j]));
   const plate = byId["a_plate1.plate"];
-  assert.deepEqual(plate.dims, { width: 960, height: 544 });
+  assert.deepEqual(plate.dims, { width: 960, height: 576 }, "960x544 on the plate's 64 lattice (N9)");
   assert.equal(plate.frames, 97, "100 requested frames resolve to 97");
   assert.equal(plate.framesAdjusted, true);
   assert.equal(plate.fps, 24);
   const up = byId["a_plate1.upscale"];
-  assert.deepEqual(up.upscaleTarget, { width: 1920, height: 1088 });
+  assert.deepEqual(up.upscaleTarget, { width: 1920, height: 1152 }, "x2 of the 960x576 plate");
   assert.deepEqual(up.dims, { width: 1920, height: 1080 }, "x2 then crop to the package format");
-  assert.deepEqual(up.crop, { top: 4, bottom: 4, left: 0, right: 0 });
+  assert.deepEqual(up.crop, { top: 36, bottom: 36, left: 0, right: 0 });
   const still = byId["a_plate1_still.still"];
-  assert.deepEqual(still.dims, { width: 960, height: 544 }, "961x545 rounds to multiples of 8 for a still");
+  assert.deepEqual(still.dims, { width: 960, height: 576 }, "a plate's first frame follows the plate's lattice (N9)");
   for (const job of doc.jobs) {
     assert.match(job.cacheKey, /^[a-f0-9]{64}$/);
   }
@@ -403,27 +446,32 @@ test("LTX's measured weak spots are warnings, not silent rewrites", () => {
   assert.deepEqual(checkJobsDoc(planJobs(labels)), [], "warnings stay schema-valid");
 });
 
-test("stills resolve to the Klein 16 px lattice, plates to the LTX 32 lattice", () => {
+test("stills resolve to the Klein 16 px lattice, and plates and their first frames to 64 (N9)", () => {
   const pkg = fixture("package-pending.json");
-  pkg.assets.a_plate1_still.gen.inputs.width = 960;
-  pkg.assets.a_plate1_still.gen.inputs.height = 540;
+  // The GPU test 2 example (a 960x540 sample raster becomes 960x544) needs a still nobody consumes:
+  // a still that IS a plate's first frame is planned on the plate's lattice instead (N9).
+  pkg.assets.a_cutout.gen.inputs.width = 960;
+  pkg.assets.a_cutout.gen.inputs.height = 540;
   const doc = planJobs(pkg);
   for (const job of doc.jobs.filter((j) => j.kind === "still")) {
     assert.equal(job.dims.width % 16, 0, `${job.id} width`);
     assert.equal(job.dims.height % 16, 0, `${job.id} height`);
   }
-  // the GPU test 2 example: a 960x540 sample raster becomes 960x544
+  const cutout = doc.jobs.find((j) => j.id === "a_cutout.still");
+  assert.deepEqual(cutout.dims, { width: 960, height: 544 });
+  // and the still's own params carry the resolved lattice, not the requested number
+  assert.deepEqual([cutout.params.width, cutout.params.height], [960, 544]);
+  // the plate's first frame is on the plate's lattice, which is why the fixture's 961x545 still and
+  // its 960x544 plate both come out 960x576
   const source = doc.jobs.find((j) => j.id === "a_plate1_still.still");
-  assert.deepEqual(source.dims, { width: 960, height: 544 });
+  assert.deepEqual(source.dims, { width: 960, height: 576 });
   for (const job of doc.jobs.filter((j) => j.kind === "plate")) {
-    assert.equal(job.dims.width % 32, 0, `${job.id} width`);
-    assert.equal(job.dims.height % 32, 0, `${job.id} height`);
+    assert.equal(job.dims.width % 64, 0, `${job.id} width`);
+    assert.equal(job.dims.height % 64, 0, `${job.id} height`);
   }
   // an upscale ends on the package's own frame (1920x1080 after the x2 crop), so it is not on the
-  // 32 lattice by design - its stage-1 lattice is, and the plan states both
+  // 64 lattice by design - its stage-1 lattice is, and the plan states both
   const upscale = doc.jobs.find((j) => j.id === "a_plate1.upscale");
   assert.deepEqual(upscale.dims, { width: 1920, height: 1080 });
-  assert.deepEqual(upscale.crop, { top: 4, bottom: 4, left: 0, right: 0 });
-  // and the still's own params carry the resolved lattice, not the requested number
-  assert.deepEqual([source.params.width, source.params.height], [960, 544]);
+  assert.deepEqual(upscale.crop, { top: 36, bottom: 36, left: 0, right: 0 });
 });
