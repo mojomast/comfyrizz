@@ -9,4 +9,4 @@
 7. Keep it lean: no cloud agents, no extra workers or subagents. No network calls at render time.
 8. Box facts: Node is **v20.19.2** (spec says 22; target `>=20` and avoid Node-22-only APIs; if you truly need 22, say so on the board instead of installing a system Node). pnpm 9, Python 3.13, ffmpeg/ffprobe present. Use a project-local `.venv` for Python.
 
-Board: the Orbit board for group `e6f45aa9-1fe6-44b5-a4ba-09f7ed3b6667`. CLI: `~/bin/collab-board e6f45aa9-1fe6-44b5-a4ba-09f7ed3b6667 list|checkin|update … --as <your handle>` (Pi = `pipi`, Hermes = `hermes`). Check in when you start, at each acceptance item, and when blocked; set `review` when done (DOLAN/Kyle moves it to done).
+Board: the Orbit board of group "Comfyrizz build" `dba10adc-e6a5-42ff-b174-9d21d3cc5691`. CLI: `~/bin/collab-board dba10adc-e6a5-42ff-b174-9d21d3cc5691 list|checkin|update … --as <your handle>` (Pi = `pipi`, Hermes = `hermes`). Check in when you start, at each acceptance item, and when blocked; set `review` when done (DOLAN/Kyle moves it to done).

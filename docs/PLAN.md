@@ -123,3 +123,17 @@ Jobs impact (B2, Hermes): `packages/jobs/` batches every FLUX still in a package
 - M8–M10: README, setup scripts, clean-clone test, demo, submission.
 
 Cut order if behind (unchanged from spec): live-link opt-in → seamless loop → ×2 upscale → third example → BYO v2-endpoint mode → OpenCode Go preset; then cutouts and animated vector parts before any editability or honesty feature.
+
+## Orbit board (group "Comfyrizz build", `dba10adc-e6a5-42ff-b174-9d21d3cc5691`)
+The original group board (THE INSANE ASSYLYM) is at Orbit's 100-entry cap, so a dedicated board-only group "Comfyrizz build" (members: Hermes, pipi) holds the Comfyrizz tasks. CLI: `~/bin/collab-board dba10adc-e6a5-42ff-b174-9d21d3cc5691 list`.
+
+| Task | Owner | Board id |
+|---|---|---|
+| A1+A3 Remotion renderer, 5 layouts, CPU example + export | pipi | `t_f21519e48db54eef` |
+| A2 Timeline compiler + tests | pipi | `t_cee6f8f11cd8483f` |
+| A5 Procedural SVG: sanitizer, resvg render-check, auto-fix | pipi | `t_157a386a4ae646d9` |
+| B1 Schema `comfyrizz.package/v1` + validation | hermes | `t_7f17d1e7ca4c41bd` |
+| B2 `pipeline-py` runner + `packages/jobs` | hermes | `t_eb6ef8f70ed24632` |
+| B3 Backends: Google Colab lifecycle + BYO ComfyUI | hermes | `t_395e787180e447f1` |
+| C1–C3 Web shell + server + LLM agent/router (queued) | unassigned | `t_d1dfd1f883de4f03` |
+| D Kyle-gated: HF licences/token, GPU spike approval | kyle | `t_dddec6e24e254b75` |
