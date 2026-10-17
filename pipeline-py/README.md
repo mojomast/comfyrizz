@@ -13,6 +13,7 @@ Owner: **Hermes** (WS-B). Python side of Comfyrizz: the `comfy-sdk` runner that 
 | `comfyrizz_pipeline/progress.py` | JSON-lines progress, `{"v":1,"attempt":…,"job":…,"seq":…,"event":…}`. |
 | `comfyrizz_pipeline/client.py` | The one place that talks to Comfy: submit classification, params injection, downloads. |
 | `comfyrizz_pipeline/runner.py` | `jobs.json` → Comfy → manifest; `--reconcile` mode; CLI. |
+| `comfyrizz_pipeline/launch.py` | run the runner in a child process from a notebook/kernel (`run_jobs`) and the idempotent metadata shim. |
 | `comfyrizz_pipeline/health.py` | v2 / ComfyUI / node+model / optional smoke-job checks. |
 
 ## Setup and run
@@ -70,6 +71,67 @@ unknown, `2` the jobs file itself was rejected.
 7. A `422 idempotency_key_reuse` is *not* replayed: the runner tries to adopt the job the
    first attempt created (job labels are best-effort — SPEC.md 5.1 notes the proxy ignores
    them) and otherwise records `submission_unknown`.
+
+## Job labels (`metadata`) and the contract that actually holds
+
+The idempotency key is `comfyrizz-<job>-<cacheKey[:16]>-<attempt seq>`, which is deterministic. When
+a second run of the same plan re-offers a key the server has already seen, the server answers `422
+idempotency_key_reuse` — deliberately, so a resubmit cannot be billed twice. Finding the job that
+key created means listing jobs **by label**, which is why labels matter and why their absence is
+recorded rather than guessed at.
+
+The two ends disagreed on GPU test 2: `comfy-sdk` sends `metadata` as an object, and
+`comfy-api-proxy` rejected it in its own words — *"'metadata' must be a string (opaque label)"* — while
+the SDK cannot send a bare string instead. Only *no* metadata is accepted by both. So:
+
+- the runner asks for labels by default (`job_labels="auto"`) and classifies a refusal with
+  `client.classify_metadata_refusal` rather than string-matching in the caller;
+- on the first refusal it emits a `metadata_unsupported` progress line, submits that one job again
+  without labels (`metadata_retry` on the attempt), and stops asking for the rest of the run
+  (`runner.labels_ok`); the manifest gains a `notes` entry naming the server and saying that a lost
+  submit can no longer be found by label;
+- `--job-labels` pins labels on (the refusal is then final: the job fails with the server's own
+  words), `--no-job-labels` pins them off. Either way the manifest says what was asked for.
+
+## Getting out of `submission_unknown` (by hand, the only way)
+
+`submission_unknown` means the submit request was sent but never answered: the job may exist and be
+running, or not exist at all. The runner never resolves that guess. Look at the run
+(`--reconcile` reports each attempt's state) and then choose:
+
+```bash
+# 1. the server console (or the Google Colab job list) shows a job for this attempt: adopt it and poll it
+python -m comfyrizz_pipeline.runner --jobs out/jobs.json --out out --base-url http://127.0.0.1:8189 \
+       --adopt a_cutout.still=job_abc123
+# 2. the server shows nothing for this attempt: close it as failed, so the job can be retried
+python -m comfyrizz_pipeline.runner --jobs out/jobs.json --out out --base-url http://127.0.0.1:8189 \
+       --clear a_cutout.still --reason "checked the server console: no job for this attempt"
+```
+
+Neither command submits anything. `--adopt` polls the job id you name, records it on the attempt
+(`adopted_by_user`) and collects its outputs as usual; `--clear` marks the attempt failed
+(`cleared_by_user`, with your reason), which makes the *next* run pick the job up normally. Both
+refuse a job with no unresolved attempt, and `--clear` refuses a job that is not in the plan.
+With labels unavailable, a re-run of the same plan against the same server lands here by design:
+the duplicate-key rejection cannot be resolved by a label search that the server does not support,
+so the job is surfaced for a human instead of being resubmitted behind their back.
+
+## Running the runner from a notebook or a long-lived kernel
+
+Run it as a **child process**. On GPU test 2 a Google Colab driver patched `ComfyClient.submit` in
+place and called the runner with `runpy` in the same kernel; the second run wrapped the wrapper and
+died with `RecursionError`, after the session had been billed. `comfyrizz_pipeline.launch` is the
+supported path:
+
+```python
+from comfyrizz_pipeline import launch
+launch.run_jobs("out/jobs.json", "out", base_url="http://127.0.0.1:8189")  # as often as you like
+```
+
+Each call is a fresh `python -m comfyrizz_pipeline.runner`, so module state, SDK imports and any
+patch die with the child. If a caller truly cannot use a child process, `launch.install_metadata_shim()`
+installs the metadata patch idempotently (a second install is a no-op, not a second wrapper) and
+`launch.uninstall_metadata_shim()` puts the original method back.
 
 ## Tests
 
