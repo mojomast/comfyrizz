@@ -40,6 +40,8 @@
           "anim": "fade-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -72,6 +74,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -106,6 +110,8 @@
           "anim": "zoom-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -133,6 +139,8 @@
         }
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -169,6 +177,8 @@
           "anim": "parallax-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -206,6 +216,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     }
@@ -222,5 +234,5 @@
   "warnings": [],
   "proposals": [],
   "sourceHash": "9fa32fc7c29265e1e9d02270e4f8b97c8936e2472570f0387c3d5dfa57e40158",
-  "hash": "ceb20281e39468d502e60e47f01ae1ffca4e5c4162738ad514eed74362782c11"
+  "hash": "a5cd2d9bf933a005bbbb8b933a0a26cbeddc63304cd87c65ca107273cc753447"
 }

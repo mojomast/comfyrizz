@@ -7,6 +7,7 @@ import narratedTimelineJson from '../../../examples/narrated-demo/timeline.json'
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import { TimelinePlayer, sceneById } from './player';
+import { narrationAudio } from './audio-model';
 import type { InlineAsset } from './components';
 import type { MediaSidecar } from './media';
 
@@ -38,6 +39,30 @@ function NarratedDemo() {
   );
 }
 
+/**
+ * The export path used by renderPackage and the server. Unlike LaunchDemo it
+ * plays the package's measured narration and, when the timeline has measured
+ * (non-estimated) captions, burns them in (N7).
+ */
+function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, generatedAssets, media }: Partial<DemoProps>) {
+  const resolvedPkg = demoPkg ?? pkg;
+  const resolvedTimeline = demoTimeline ?? timeline;
+  const audio = narrationAudio(resolvedPkg);
+  const captions = (resolvedTimeline.captions ?? []).some(cue => !cue.estimated) ? resolvedTimeline.captions : undefined;
+  return (
+    <>
+      {audio ? <Audio src={staticFile(audio.file)} /> : null}
+      <TimelinePlayer
+        pkg={resolvedPkg}
+        timeline={resolvedTimeline}
+        generatedAssets={generatedAssets}
+        media={media}
+        {...(captions ? { captions } : {})}
+      />
+    </>
+  );
+}
+
 function ScenePreview({ sceneId }: { sceneId: string }) {
   const scene = sceneById(timeline, sceneId);
   if (!scene) return null;
@@ -65,7 +90,7 @@ export function RemotionRoot() {
       />
       <Composition
         id="PackageDemo"
-        component={LaunchDemo}
+        component={PackageDemo}
         defaultProps={{ pkg, timeline }}
         calculateMetadata={({ props }) => {
           const timeline = (props as DemoProps).timeline;

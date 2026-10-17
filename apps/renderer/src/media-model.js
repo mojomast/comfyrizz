@@ -58,12 +58,14 @@ export function isRenderableMedia(asset) {
  * @returns {ResolvedSceneMedia}
  */
 export function resolveSceneMedia(scene, pkg, media) {
-  const withMedia = /** @type {{ id: string, media_only?: boolean, lower_third?: LowerThirdContent, background?: { asset?: string, scrim?: number } | null }} */ (scene);
+  const withMedia = /** @type {{ id: string, media_only?: boolean, mediaOnly?: boolean, lower_third?: LowerThirdContent, lowerThird?: LowerThirdContent, background?: { asset?: string, scrim?: number } | null }} */ (scene);
   const backgroundId = withMedia.background?.asset;
   const background = backgroundId ? pkg.assets?.[backgroundId] : undefined;
   const scrim = normalizeScrim(withMedia.background?.scrim ?? media?.scrim?.[scene.id]);
-  const mediaOnly = withMedia.media_only === true || media?.skipLayout?.includes(scene.id) === true;
-  const lowerThird = withMedia.lower_third ?? media?.lowerThird?.[scene.id];
+  // The compiled timeline carries camelCase mediaOnly/lowerThird; raw package
+  // scenes and the media.json sidecar use the schema/sidecar spellings.
+  const mediaOnly = withMedia.media_only === true || withMedia.mediaOnly === true || media?.skipLayout?.includes(scene.id) === true;
+  const lowerThird = withMedia.lower_third ?? withMedia.lowerThird ?? media?.lowerThird?.[scene.id];
   return {
     ...(background ? { background } : {}),
     scrim,

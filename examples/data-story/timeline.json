@@ -40,6 +40,8 @@
           "anim": "fade-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -72,6 +74,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -99,6 +103,8 @@
         }
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -133,6 +139,8 @@
           "anim": "zoom-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -179,6 +187,8 @@
           "anim": "ken-burns"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -215,6 +225,8 @@
           "anim": "parallax-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     },
@@ -252,6 +264,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": null,
       "provisional": false
     }
@@ -268,5 +282,5 @@
   "warnings": [],
   "proposals": [],
   "sourceHash": "07d02aa1b0d08bb1b60ae511a0ac18a7c357bc2221d2c58d12213238f41fa1d4",
-  "hash": "da7e9c5e784d3adbebcbfa389a3dc76b723b7bf596a38b1ef8c55ca6efc1a1a4"
+  "hash": "9d11116e38cb906e63bcd668fdedfbc994a526d0ab67ec0791cc10b739ffe556"
 }

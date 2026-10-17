@@ -65,6 +65,18 @@ test('lower third comes from the schema field or the sidecar', () => {
   assert.deepEqual(sidecar.lowerThird, { text: 'S' });
 });
 
+test('the compiled timeline camelCase fields reach the renderer (N8)', () => {
+  const pkg = { assets: {}, scenes: [] };
+  const timelineScene = { id: 's_flow', layout: 'hero', mediaOnly: true, lowerThird: { kicker: 'K', text: 'T' } };
+  const resolved = resolveSceneMedia(timelineScene, pkg);
+  assert.equal(resolved.mediaOnly, true);
+  assert.deepEqual(resolved.lowerThird, { kicker: 'K', text: 'T' });
+  // schema/package spelling still wins when both are present
+  const both = resolveSceneMedia({ id: 's', media_only: false, mediaOnly: true, lower_third: { text: 'schema' }, lowerThird: { text: 'timeline' } }, pkg);
+  assert.equal(both.mediaOnly, true);
+  assert.deepEqual(both.lowerThird, { text: 'schema' });
+});
+
 test('text colours never depend on an unusable palette[0]', () => {
   const transparent = { theme: { palette: ['transparent', '#13304a', '#ffd166', '#f1faee'] } };
   const colors = textColors(transparent);

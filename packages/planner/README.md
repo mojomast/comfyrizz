@@ -30,6 +30,10 @@ npm test         # tsc + node:test
   `plates[]` entry with `speed`, `retimedFrames` and strategy (`retime`, `trim`, `loop`).
 - Captions are sentence-level, from measured chunks when present, otherwise marked
   `estimated: true`.
+- A scene's `media_only` and `lower_third` schema fields survive compilation as
+  `TimelineScene.mediaOnly` / `.lowerThird`, so the renderer can draw a full-frame
+  media plate with a lower third and skip the layout without a sidecar (P-fix3 N8).
+  Non-media scenes carry `mediaOnly: false` and `lowerThird: null`.
 - `hash` is a SHA-256 over the canonical JSON of everything except the hash itself.
   Identical input → identical hash; any package edit changes it.
 

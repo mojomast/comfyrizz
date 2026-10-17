@@ -21,7 +21,10 @@ zero baseline), `List` (bullets/quote). Registered compositions:
 
 - `LaunchDemo` — full example, 1095 frames @ 30 fps (36.5 s), 1920×1080
 - `PackageDemo` — the same component with `calculateMetadata`, so a render can
-  swap in any `(package, timeline)` props (used for `examples/showcase-gpu2`)
+  swap in any `(package, timeline)` props (used for `examples/showcase-gpu2`).
+  It plays the package's measured narration audio and burns in measured
+  captions when the timeline has them (N7), so `renderPackage` on a narrated
+  package exports the narrated length instead of `preferredFrames`.
 - `NarratedDemo` — Kokoro audio + sentence-caption overlay, 1312 frames @ 30 fps (43.7 s) (A4)
 - `Preview-Title`, `Preview-Hero`, `Preview-Stat`, `Preview-Chart`, `Preview-List`
   — one scene each, for frame 0 / mid / last stills
@@ -38,16 +41,19 @@ Raster/video assets can fill the frame or sit in a framed panel:
   (x/y/w/h/z + `anim`: `slide-in`, `fade-in`, `zoom-in`, `ken-burns`,
   `parallax-in`, `none`).
 - `scene.media_only` (or a sidecar `skipLayout`) skips the layout and draws the
-  media + scrim + panels + `scene.lower_third` (`{ kicker?, text }`).
+  media + scrim + panels + `scene.lower_third` (`{ kicker?, text }`). Both fields
+  are carried through `compileTimeline` into `timeline.json` (P-fix3 N8), so a
+  render from the timeline keeps them.
 - `theme.text` / `theme.text_muted` / `theme.text_on_accent` decouple text from
   `palette[0]` (which may be `transparent`); defaults stay identical for the
   existing 4-colour packages.
 
-The proposed field names above are Hermes's H-fix1 (`packages/schema`). Until
-that lands, the renderer falls back to an `examples/<name>/media.json` sidecar
-(`scrim`, `skipLayout`, `lowerThird`); the resolution logic lives in
-`src/media-model.js` and is unit-tested on plain Node 20 (`npm test`, no type
-stripper).
+The field names are Hermes's H-fix1 (`packages/schema`). `compileTimeline`
+carries `media_only`/`lower_third` into the timeline (N8); the renderer still
+accepts an `examples/<name>/media.json` sidecar (`scrim`, `skipLayout`,
+`lowerThird`) for older timelines, and the scene fields win when both are
+present. The resolution logic lives in `src/media-model.js` and is unit-tested
+on plain Node 20 (`npm test`, no type stripper).
 
 ## Determinism
 
@@ -160,18 +166,20 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 
 | Check | Result |
 |---|---|
-| `npm test` | 40/40 pass (incl. P-fix3 freshness for all 7 bundled examples + report fallback) |
+| `npm test` | 49/49 pass (incl. P-fix3 freshness for all 7 bundled examples + report fallback) |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
-| `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `ceb20281…2c11` |
+| `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `a5cd2d9b…3447` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
 | MP4 export | 1920×1080, H.264 High, 30/1 fps, **1095 frames**, 36.500 s, no audio (voice off), 2.63 MB |
 | CPU render time | **78.7 s** for 36.5 s of video (~2.2× realtime, concurrency 2, Node 22.23.3, `/usr/bin/google-chrome`) |
 | ffprobe | `codec_name=h264`, `nb_frames=1095`, `r_frame_rate=30/1`, `pix_fmt=yuvj420p`; audio stream count 0 |
-| Narrated export (A4) | 1312 frames, 43.733 s, H.264 + AAC 48 kHz stereo, 14 captions, hash `0c05e157…1956`; CPU 96.4 s |
-| Showcase export (P-fix1) | `examples/showcase-gpu2` via `PackageDemo`, 1920×1080 H.264, 1110 frames, 37.000 s, 21.8 MB, 7 scenes + 12 captions; no custom composition, no `node_modules` symlink. Frame correlation vs the retired `Showcase.tsx` render: title 0.99, flow 0.92, stat 0.93, chart 0.99, outro 0.98 |
-| Data story (A6) | 1920×1080 30/1 H.264, **1320 frames**, 44.000 s, 4.4 MB, hash `da7e9c5e…a1a4`, 7 segments; CPU 125.5 s |
-| Product explainer (A6) | 1920×1080 30/1 H.264 + AAC, **1349 frames**, 44.967 s, 5.8 MB, hash `9273c779…1c85`, 7 segments, 8 captions; CPU 124.9 s |
-| Wind showcase (A7) | `examples/showcase-gpu3` incremental, 1920×1080 30/1 H.264 + AAC, **1092 frames**, 36.400 s, hash `b993c942…4947`, 6 segments, 9 captions; CPU 132.7 s |
+| Narrated export (A4) | 1312 frames, 43.733 s, H.264 + AAC 48 kHz stereo, 14 captions, hash `1a428083…a284`; CPU 96.4 s |
+| renderPackage narration (N7) | `examples/showcase-gpu3` via `PackageDemo`/`renderPackage`, 1920×1080 H.264 + AAC 48 kHz stereo, **1092 frames = 36.400 s** (not 30.5 s silent), 15.2 MB, hash `fb4792fb…9184`; CPU 113.8 s |
+| media_only/lower_third (N8) | `compileTimeline` now emits `mediaOnly`/`lowerThird`; `resolveSceneMedia` gives identical results from the timeline and the `media.json` sidecar for all 6 showcase-gpu3 scenes |
+| Showcase export (P-fix1, N7) | `examples/showcase-gpu2` via `PackageDemo`, 1920×1080 H.264 + AAC 48 kHz stereo, **1312 frames**, 43.733 s, 25.3 MB, hash `33485719…ef6b5`, 7 scenes + 12 captions; no custom composition, no `node_modules` symlink; CPU 141.4 s |
+| Data story (A6) | 1920×1080 30/1 H.264, **1320 frames**, 44.000 s, 4.4 MB, hash `9d11116e…e556`, 7 segments; CPU 125.5 s |
+| Product explainer (A6) | 1920×1080 30/1 H.264 + AAC, **1349 frames**, 44.967 s, 5.8 MB, hash `08dfa492…e831`, 7 segments, 8 captions; CPU 124.9 s |
+| Wind showcase (A7) | `examples/showcase-gpu3` incremental, 1920×1080 30/1 H.264 + AAC, **1092 frames**, 36.400 s, hash `fb4792fb…9184`, 6 segments, 9 captions; CPU 132.7 s |
 | Layout overlap gate (A6) | `findLayoutOverlaps` clean for all six bundled packages; `layout.test.mjs` 5/5 |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is

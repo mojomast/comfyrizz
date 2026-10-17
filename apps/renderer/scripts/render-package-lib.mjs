@@ -49,6 +49,27 @@ function needsMediaPublicDir(pkg) {
   return Object.values(pkg.assets ?? {}).some(asset => asset?.kind === 'image' || asset?.kind === 'video' || asset?.kind === 'audio');
 }
 
+/**
+ * Measured narration options for the timeline compiler (N7). When the package
+ * directory carries an audio/durations.json from a Kokoro run, feed those
+ * chunk seconds to compileTimeline so scene lengths and captions match the
+ * audio instead of falling back to preferredFrames and rendering silent.
+ */
+export function narrationOptions(packageDir) {
+  const durationsPath = join(packageDir, 'audio', 'durations.json');
+  if (!existsSync(durationsPath)) return {};
+  const durations = JSON.parse(readFileSync(durationsPath, 'utf8'));
+  const narration = {};
+  for (const [sceneId, scene] of Object.entries(durations.scenes ?? {})) {
+    narration[sceneId] = (scene.chunks ?? []).map(chunk => ({ text: chunk.text, seconds: chunk.seconds }));
+  }
+  return {
+    narration,
+    narrationGapSeconds: durations.gapSeconds,
+    narrationPaddingSeconds: durations.paddingSeconds,
+  };
+}
+
 /** Copy fonts + the package's asset folders into a throwaway Remotion public dir. */
 export function preparePublicDir(pkg, packageDir) {
   const temp = mkdtempSync(join(tmpdir(), 'comfyrizz-public-'));
@@ -68,7 +89,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
     throw new Error(`package invalid: ${detail}`);
   }
   const packageDir = dirname(packagePath);
-  const timeline = compileTimeline(pkg);
+  const timeline = compileTimeline(pkg, narrationOptions(packageDir));
   const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
   const mediaPath = join(packageDir, 'media.json');
   const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
@@ -76,6 +97,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(media ? { media } : {}) }));
   onLog(`inlined ${Object.keys(generatedAssets).length} generated asset(s)`);
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
+  if (timeline.provisional) onLog('warning: narration is not measured; timeline is provisional and must not be exported as final');
 
   let resolvedPublicDir = publicDir;
   let cleanupDir = null;

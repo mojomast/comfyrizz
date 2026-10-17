@@ -40,6 +40,8 @@
           "anim": "fade-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Comfyrizz turns a short brief into a finished product video. Everything renders on this machine.",
       "provisional": false
     },
@@ -79,6 +81,8 @@
           "anim": "fade-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Every asset starts as a package entry, so the storyboard stays the source of truth.",
       "provisional": false
     },
@@ -118,6 +122,8 @@
           "anim": "ken-burns"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "The asset router sends icons and diagrams to generated SVG, and marks heavier stills for the GPU.",
       "provisional": false
     },
@@ -152,6 +158,8 @@
           "anim": "zoom-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "A full CPU pass takes a few minutes, with no network and no cloud runtime.",
       "provisional": false
     },
@@ -179,6 +187,8 @@
         }
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "The timeline locks integer frames at thirty per second, so the export matches the plan exactly.",
       "provisional": false
     },
@@ -215,6 +225,8 @@
           "anim": "parallax-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Three rules keep it honest: measure the speech, never clip the copy, and label every estimate.",
       "provisional": false
     },
@@ -252,6 +264,8 @@
           "anim": "zoom-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Ready to render, locally and deterministically.",
       "provisional": false
     }
@@ -325,5 +339,5 @@
   "warnings": [],
   "proposals": [],
   "sourceHash": "12cf0527ed3095b3e633ec93f2af12403a16af0800d990217f2f10997b0f0181",
-  "hash": "9273c779de172c865ce58fcb52c5acb08888e776f7467c7bc508dfb873681c85"
+  "hash": "08dfa4925bbd7e2061898e26f11db84e54f7b92bf7effb51cdb318239379e831"
 }

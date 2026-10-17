@@ -136,6 +136,23 @@ test('flexible timelines past the 90 s cap warn and propose shorter copy without
   assert.match(timeline.proposals[0], /Shorten copy/);
 });
 
+test('media_only and lower_third survive the compile (N8)', () => {
+  const withOverlay = pkg([
+    scene('s1', {
+      media_only: true,
+      lower_third: { kicker: 'How it flows', text: 'Wind -> Grid' },
+      transitionOut: { type: 'none', frames: 0 },
+    }),
+  ]);
+  const timeline = compileTimeline(withOverlay);
+  assert.equal(timeline.scenes[0].mediaOnly, true);
+  assert.deepEqual(timeline.scenes[0].lowerThird, { kicker: 'How it flows', text: 'Wind -> Grid' });
+
+  const plain = compileTimeline(pkg([scene('s1', { transitionOut: { type: 'none', frames: 0 } })]));
+  assert.equal(plain.scenes[0].mediaOnly, false);
+  assert.equal(plain.scenes[0].lowerThird, null);
+});
+
 test('empty or duplicate scene ids fail closed', () => {
   assert.throws(() => compileTimeline({ ...pkg(), scenes: [] }), (error: unknown) => error instanceof TimelineError && error.code === 'empty-package');
   assert.throws(

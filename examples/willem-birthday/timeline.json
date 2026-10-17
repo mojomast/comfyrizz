@@ -27,6 +27,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Aujourd'hui, Willem a trois ans ! Et à trois ans, on peut tout faire !",
       "provisional": false
     },
@@ -49,6 +51,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Willem, pilote de fusée, file tout droit vers la Lune !",
       "provisional": false
     },
@@ -71,6 +75,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Une vague géante ? Aucun problème pour la reine du surf !",
       "provisional": false
     },
@@ -93,6 +99,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Vroum ! Elle prend le virage à toute vitesse !",
       "provisional": false
     },
@@ -115,6 +123,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Place à la DJ ! Tout le monde danse avec Willem !",
       "provisional": false
     },
@@ -137,6 +147,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Et maintenant, une balade à dos de dragon au-dessus des nuages !",
       "provisional": false
     },
@@ -159,6 +171,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Elle tire… et c'est le but gagnant !",
       "provisional": false
     },
@@ -181,6 +195,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Maestro Willem dirige l'orchestre des animaux !",
       "provisional": false
     },
@@ -203,6 +219,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Trois bougies, un grand souffle… Joyeux anniversaire, Willem ! On t'aime fort !",
       "provisional": false
     }
@@ -400,5 +418,5 @@
   "warnings": [],
   "proposals": [],
   "sourceHash": "f8c1f435c30654f43ca6eba2ac4161b77bfb60f337b3dcb8c90ddcb8e0bf8a30",
-  "hash": "dcfc7fa64811ce19758c073b008f129cbef844a2f8086d3787370daadcef1031"
+  "hash": "af0327aceb91dfdc9bf009603f9362c855a85fd07ff05fed7ad78aedd29a2973"
 }

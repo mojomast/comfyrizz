@@ -1,5 +1,5 @@
 {
-  "note": "Renderer sidecar (P-fix1) for examples/showcase-gpu3: how each scene's GPU media is placed (full-frame background with scrim, or a framed panel). Superseded by H-fix1 schema fields once they land.",
+  "note": "Renderer sidecar (P-fix1) for examples/showcase-gpu3. The schema's scene.media_only/lower_third are now carried through compileTimeline into the timeline (P-fix3 N8), so this sidecar is optional and kept for older renderers.",
   "skipLayout": [
     "s_flow"
   ],

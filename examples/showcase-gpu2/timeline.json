@@ -27,6 +27,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "How does sunlight become the power in your home? Let's follow the energy, step by step.",
       "provisional": false
     },
@@ -64,6 +66,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Solar panels are made of silicon cells. When sunlight hits them, it knocks electrons loose and creates a direct current.",
       "provisional": false
     },
@@ -86,6 +90,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "An inverter converts that direct current into alternating current, the kind your home actually uses.",
       "provisional": false
     },
@@ -112,6 +118,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "And there is plenty of it. The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use.",
       "provisional": false
     },
@@ -149,6 +157,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Extra energy from the afternoon charges a home battery, so the lights stay on after sunset.",
       "provisional": false
     },
@@ -176,6 +186,8 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Output follows the sun. It climbs through the morning, peaks around midday, and fades by evening.",
       "provisional": false
     },
@@ -207,6 +219,8 @@
           "anim": "fade-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Every image, clip and diagram here came from one short GPU session. Made with Comfyrizz.",
       "provisional": false
     }
@@ -381,5 +395,5 @@
   "warnings": [],
   "proposals": [],
   "sourceHash": "e47fea845386660baabb81a7b78dce3afa664cb36618cfb9e75a364d2f834eef",
-  "hash": "ea9055fa0bbe884b1dd3c7adf911416bb91dbec0708732ed4f0ed5fbf5b68d63"
+  "hash": "3348571979e295eb3e28df011bf6ce3ca0fcfaa8f65f130ccf51537cdf3ef6b5"
 }

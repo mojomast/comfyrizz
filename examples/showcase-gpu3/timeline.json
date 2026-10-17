@@ -28,6 +28,8 @@
         "scrim": 0.45
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "How does a breeze out at sea end up lighting your kitchen? Let's follow the wind.",
       "provisional": false
     },
@@ -65,6 +67,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Wind pushes on the long blades and turns the rotor. Inside the nacelle, a generator turns that spin into electricity.",
       "provisional": false
     },
@@ -87,6 +91,11 @@
         "muted": true
       },
       "foreground": [],
+      "mediaOnly": true,
+      "lowerThird": {
+        "kicker": "How it flows",
+        "text": "Wind → Turbine → Transformer → Grid → Home"
+      },
       "narration": "A transformer steps the voltage up, so the power can travel across the grid with little loss, all the way to your home.",
       "provisional": false
     },
@@ -114,6 +123,8 @@
         "scrim": 0.6
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "A single large turbine can supply more than a thousand homes, a rough but commonly cited figure.",
       "provisional": false
     },
@@ -151,6 +162,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "And the wind keeps working after dark, often blowing hardest at night, when solar panels are resting.",
       "provisional": false
     },
@@ -183,6 +196,8 @@
           "anim": "fade-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Every clip in this video came from one short GPU session. Made with Comfyrizz.",
       "provisional": false
     }
@@ -309,5 +324,5 @@
   "warnings": [],
   "proposals": [],
   "sourceHash": "bcb5978bdb3b8d0a1bc0cc85252168dd15fe1b02e216b55a5dc13310906f8331",
-  "hash": "b993c942d047f98148040c8897b9044870ae69fea3732733f4880f01f7484947"
+  "hash": "fb4792fb010d528ebcada7ba517be29e50375e3ba3c1b32fb95607e63a409184"
 }

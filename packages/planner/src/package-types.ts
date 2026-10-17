@@ -57,6 +57,11 @@ export interface SceneTransition {
   frames: number;
 }
 
+export interface SceneLowerThird {
+  kicker?: string;
+  text: string;
+}
+
 export interface Scene {
   id: string;
   layout: LayoutId;
@@ -68,6 +73,10 @@ export interface Scene {
   foreground?: SceneForeground[];
   transitionOut?: SceneTransition;
   narration?: string;
+  /** Draw only the media layer (background + scrim + foreground + lower third), skipping the layout. */
+  media_only?: boolean;
+  /** Lower-third overlay content for full-bleed and media-only scenes. */
+  lower_third?: SceneLowerThird;
   locked?: boolean;
 }
 

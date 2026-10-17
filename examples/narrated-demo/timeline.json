@@ -40,6 +40,8 @@
           "anim": "fade-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Comfyrizz turns one package into a finished launch video. Everything you see is generated from code.",
       "provisional": false
     },
@@ -72,6 +74,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Generated-first assets start as SVG. Each vector is sanitized and render-checked on the CPU before it reaches the composition.",
       "provisional": false
     },
@@ -106,6 +110,8 @@
           "anim": "zoom-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "This launch video renders locally in about eighty seconds. No GPU, no cloud, and no network calls during the render.",
       "provisional": false
     },
@@ -133,6 +139,8 @@
         }
       },
       "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "The timeline locks integer frames at thirty per second. Speech sets the scene length, and fades overlap instead of stacking.",
       "provisional": false
     },
@@ -169,6 +177,8 @@
           "anim": "parallax-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Three rules keep it honest. Measure every narration chunk. Never clip or speed up speech. Export captions from the same cues the player uses.",
       "provisional": false
     },
@@ -206,6 +216,8 @@
           "anim": "slide-in"
         }
       ],
+      "mediaOnly": false,
+      "lowerThird": null,
       "narration": "Ready to render, locally and deterministically. Comfyrizz.",
       "provisional": false
     }
@@ -321,5 +333,5 @@
   "warnings": [],
   "proposals": [],
   "sourceHash": "b5959b57b08e6a021f2010f6443f2bfa3bd84e6b5a3d4dc47d666e152ec91057",
-  "hash": "0c05e15759c18d172bb67825b3693341fe488f1f0ce76e8a8d5aee1dfcd81956"
+  "hash": "1a4280831b2f971155a743c4fd3a668d23ab7dd26265329dfcf0536d5282a284"
 }

@@ -23,6 +23,7 @@ import type {
   LayoutId,
   NarrationChunk,
   Scene,
+  SceneLowerThird,
 } from './package-types.js';
 
 export const TIMELINE_VERSION = 1;
@@ -61,6 +62,10 @@ export interface TimelineScene {
   data: unknown;
   background: unknown;
   foreground: unknown;
+  /** Media-only scene: the layout is skipped and only the media layer draws (P-fix1, N8). */
+  mediaOnly: boolean;
+  /** Lower-third overlay carried through the compile so the render can draw it (N8). */
+  lowerThird: SceneLowerThird | null;
   narration: string | null;
   provisional: boolean;
 }
@@ -365,6 +370,8 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
       data: plan.scene.data ?? null,
       background: plan.scene.background ?? null,
       foreground: plan.scene.foreground ?? [],
+      mediaOnly: plan.scene.media_only === true,
+      lowerThird: plan.scene.lower_third ?? null,
       narration: plan.scene.narration ?? null,
       provisional: plan.provisional,
     });
