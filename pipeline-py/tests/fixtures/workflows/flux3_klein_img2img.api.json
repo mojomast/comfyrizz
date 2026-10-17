@@ -1,0 +1,22 @@
+{
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "text": "" }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": { "seed": 1, "steps": 16, "denoise": 0.6, "positive": ["4", 0], "latent_image": ["11", 0] }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["7", 0], "filename_prefix": "comfyrizz" }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "placeholder.png" }
+  },
+  "11": {
+    "class_type": "ImageScale",
+    "inputs": { "image": ["10", 0], "width": 1024, "height": 1024, "upscale_method": "lanczos", "crop": "center" }
+  }
+}

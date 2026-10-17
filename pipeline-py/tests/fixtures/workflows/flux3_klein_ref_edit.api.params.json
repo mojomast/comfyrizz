@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "generator": "flux3-klein",
+  "files": ["image", "reference"],
+  "map": {
+    "prompt": ["4", "text"],
+    "image": ["10", "image"],
+    "reference": ["10", "image"],
+    "megapixels": ["12", "resolution.megapixels"],
+    "seed": ["7", "seed"],
+    "steps": ["7", "steps"],
+    "denoise": ["7", "denoise"]
+  }
+}

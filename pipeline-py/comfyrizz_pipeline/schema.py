@@ -63,6 +63,8 @@ SEMANTIC_CODES = (
     "SEM_VOICE_INCOMPLETE",
     "SEM_DATASET_UNAPPROVED",
     "SEM_BACKGROUND_AMBIGUOUS",
+    "SEM_MEDIA_ONLY_NO_MEDIA",
+    "SEM_LOWER_THIRD_EMPTY",
     "SEM_CUTOUT_KIND",
 )
 
@@ -400,6 +402,23 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
             has_procedural = _is_obj(bg.get("procedural"))
             if has_asset == has_procedural:
                 errors.append(_err("SEM_BACKGROUND_AMBIGUOUS", f"{at}/background", "background must set exactly one of asset or procedural"))
+        # Media layer (H-fix1, from Pi's P-fix1 proposal): a scene can skip its layout and show
+        # only media, with an optional lower third. Two ways that goes wrong, both caught here.
+        lower_third = scene.get("lower_third")
+        if _is_obj(lower_third) and "text" in lower_third and not _non_empty(lower_third.get("text")):
+            errors.append(_err("SEM_LOWER_THIRD_EMPTY", f"{at}/lower_third/text", "lower_third.text must not be blank"))
+        if scene.get("media_only") is True:
+            has_media_background = _is_obj(bg) and _is_str(bg.get("asset"))
+            has_foreground = isinstance(scene.get("foreground"), list) and len(scene["foreground"]) > 0
+            if not has_media_background and not has_foreground:
+                errors.append(
+                    _err(
+                        "SEM_MEDIA_ONLY_NO_MEDIA",
+                        f"{at}/media_only",
+                        "media_only skips the layout, so it needs a media background (background.asset) or at least one "
+                        "foreground item; this scene would render an empty frame",
+                    )
+                )
 
 
 def _check_assets(assets, errors) -> None:

@@ -42,18 +42,21 @@ PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"comfyrizz-fixture-raster" * 8
 
 
 def still_job(**overrides) -> dict:
+    asset = overrides.get("asset", "a_src")
     job = {
         "id": "a_src.still",
         "kind": "still",
         "batch": "stills",
-        "asset": "a_src",
+        "asset": asset,
         "scene": "s1",
         "sceneIndex": 0,
         "generator": "flux3-klein",
         "workflow": "workflows/flux3_klein_t2i.api.json",
         "workflowSha256": WORKFLOW_SHA,
         "deps": [],
-        "output": "assets/a_src.png",
+        # each job owns its own file: two stills that wrote the same path would collect over
+        # each other and change the bytes an upload is keyed on
+        "output": f"assets/{asset}.png",
         "outputKind": "image",
         "cacheKey": "c" * 64,
         "dims": {"width": 960, "height": 544},
@@ -65,18 +68,19 @@ def still_job(**overrides) -> dict:
 
 def plate_job(**overrides) -> dict:
     """An i2v plate that starts from the still above: the job fileInputs is about."""
+    asset = overrides.get("asset", "a_plate")
     job = {
         "id": "a_plate.plate",
         "kind": "plate",
         "batch": "plates",
-        "asset": "a_plate",
+        "asset": asset,
         "scene": "s2",
         "sceneIndex": 1,
         "generator": "ltx25",
         "workflow": "workflows/i2v_declared.api.json",
         "workflowSha256": PLATE_SHA,
         "deps": ["a_src.still"],
-        "output": "out/intermediates/a_plate.plate.mp4",
+        "output": f"out/intermediates/{asset}.plate.mp4",
         "outputKind": "video",
         "cacheKey": "d" * 64,
         "dims": {"width": 960, "height": 544},
@@ -240,6 +244,41 @@ def test_a_package_file_next_to_jobs_json_is_uploaded(tmp_path: Path, servers):
     expected = f"svg_raster_{sha256_file(raster)[:8]}.png"
     assert [entry["filename"] for entry in fake.upload_requests()] == [expected]
     assert fake.submitted_input(LTX_NODE_V0_LOADIMAGE) == [expected]
+
+
+def test_img2img_gets_its_init_image_and_reference_edit_its_reference(tmp_path: Path, servers):
+    """The two stills the GPU test 2 findings name: img2img (image) and reference edit (reference)."""
+    fake = servers()
+    i2i = still_job(
+        id="a_i2i.still",
+        asset="a_i2i",
+        sceneIndex=1,
+        workflow="workflows/flux3_klein_img2img.api.json",
+        deps=["a_src.still"],
+        cacheKey="1" * 64,
+        fileInputs=[{"param": "image", "from": "job", "job": "a_src.still", "path": "assets/a_src.png"}],
+        params={"prompt": "same scene, warmer", "image": "a_src", "width": 1344, "height": 768, "seed": 7, "steps": 16, "denoise": 0.6},
+    )
+    ref = still_job(
+        id="a_ref.still",
+        asset="a_ref",
+        sceneIndex=2,
+        workflow="workflows/flux3_klein_ref_edit.api.json",
+        deps=["a_src.still"],
+        cacheKey="2" * 64,
+        fileInputs=[{"param": "reference", "from": "job", "job": "a_src.still", "path": "assets/a_src.png"}],
+        params={"prompt": "restyle as soft clay, keep every label", "reference": "a_src", "megapixels": 1.0, "seed": 8, "steps": 16, "denoise": 1.0},
+    )
+    work = workspace(tmp_path, jobs_doc([still_job(), i2i, ref]))
+    manifest = runner_for(work, fake).run()
+
+    assert manifest["counts"] == {"succeeded": 3}, manifest
+    # one upload of the still, and each graph's LoadImage (node 10) got the same server-side name
+    assert len(fake.upload_requests()) == 1
+    name = f"a_src_{sha256_file(work / 'out' / 'assets' / 'a_src.png')[:8]}.png"
+    assert fake.submitted_input("10") == [None, name, name]
+    # ... and nothing was handed the asset id
+    assert all(entry != "a_src" for entry in fake.submitted_input("10"))
 
 
 # ------------------------------------------------------------------------------ refusals
