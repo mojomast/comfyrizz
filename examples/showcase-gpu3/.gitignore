@@ -1,0 +1,6 @@
+assets/*.mp4
+assets/*.png
+public/
+out/
+audio/narration/
+audio/*.wav

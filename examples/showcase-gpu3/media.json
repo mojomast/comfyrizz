@@ -1,0 +1,12 @@
+{
+  "note": "Renderer sidecar (P-fix1) for examples/showcase-gpu3: how each scene's GPU media is placed (full-frame background with scrim, or a framed panel). Superseded by H-fix1 schema fields once they land.",
+  "skipLayout": [
+    "s_flow"
+  ],
+  "lowerThird": {
+    "s_flow": {
+      "kicker": "How it flows",
+      "text": "Wind → Turbine → Transformer → Grid → Home"
+    }
+  }
+}

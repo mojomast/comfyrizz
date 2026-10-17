@@ -1,0 +1,313 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 1092,
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 165,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Comfyrizz GPU test 3",
+        "headline": "How wind becomes power",
+        "sub": "FLUX 3 Klein, LTX-2.5 and SVG guides on one Google Colab GPU"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_title_plate",
+        "fit": "cover",
+        "loop": true,
+        "muted": true,
+        "scrim": 0.45
+      },
+      "foreground": [],
+      "narration": "How does a breeze out at sea end up lighting your kitchen? Let's follow the wind.",
+      "provisional": false
+    },
+    {
+      "id": "s_turbine",
+      "layout": "hero",
+      "variant": "split",
+      "from": 150,
+      "durationInFrames": 234,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Step 1",
+        "headline": "Blades catch the wind",
+        "body": "Moving air turns the rotor, and a generator in the nacelle turns that spin into electricity."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#0a1a2a",
+            "#123049",
+            "#8ecae6"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_turbine",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": "Wind pushes on the long blades and turns the rotor. Inside the nacelle, a generator turns that spin into electricity.",
+      "provisional": false
+    },
+    {
+      "id": "s_flow",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 369,
+      "durationInFrames": 214,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Wind to home"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_flow",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "A transformer steps the voltage up, so the power can travel across the grid with little loss, all the way to your home.",
+      "provisional": false
+    },
+    {
+      "id": "s_city",
+      "layout": "stat",
+      "from": 568,
+      "durationInFrames": 197,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "One large turbine can power",
+        "body": "1,000+ homes",
+        "sub": "a rough, commonly cited figure for a modern onshore turbine"
+      },
+      "data": {
+        "dataset": "d_homes",
+        "display": "number"
+      },
+      "background": {
+        "asset": "a_city",
+        "fit": "cover",
+        "loop": true,
+        "muted": true,
+        "scrim": 0.6
+      },
+      "foreground": [],
+      "narration": "A single large turbine can supply more than a thousand homes, a rough but commonly cited figure.",
+      "provisional": false
+    },
+    {
+      "id": "s_chart",
+      "layout": "hero",
+      "variant": "split",
+      "from": 750,
+      "durationInFrames": 192,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Step 2",
+        "headline": "The wind never clocks out",
+        "body": "Wind often blows hardest at night, when solar panels rest."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 5,
+          "palette": [
+            "#0a1a2a",
+            "#123049",
+            "#ffb703"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_chart_i2i",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": "And the wind keeps working after dark, often blowing hardest at night, when solar panels are resting.",
+      "provisional": false
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "from": 927,
+      "durationInFrames": 165,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 0,
+      "copy": {
+        "headline": "Made with Comfyrizz",
+        "sub": "FLUX 3 Klein · LTX-2.5 · SVG guides · Kokoro"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_turbine",
+        "fit": "cover",
+        "loop": true,
+        "muted": true,
+        "scrim": 0.65
+      },
+      "foreground": [
+        {
+          "asset": "a_mascot",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.2,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": "Every clip in this video came from one short GPU session. Made with Comfyrizz.",
+      "provisional": false
+    }
+  ],
+  "captions": [
+    {
+      "text": "How does a breeze out at sea end up lighting your kitchen?",
+      "from": 0,
+      "to": 82,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Let's follow the wind.",
+      "from": 87,
+      "to": 127,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Wind pushes on the long blades and turns the rotor.",
+      "from": 150,
+      "to": 244,
+      "sceneId": "s_turbine",
+      "estimated": false
+    },
+    {
+      "text": "Inside the nacelle, a generator turns that spin into electricity.",
+      "from": 249,
+      "to": 370,
+      "sceneId": "s_turbine",
+      "estimated": false
+    },
+    {
+      "text": "A transformer steps the voltage up, so the power can travel across the grid with little loss, all the way to your home.",
+      "from": 369,
+      "to": 568,
+      "sceneId": "s_flow",
+      "estimated": false
+    },
+    {
+      "text": "A single large turbine can supply more than a thousand homes, a rough but commonly cited figure.",
+      "from": 568,
+      "to": 750,
+      "sceneId": "s_city",
+      "estimated": false
+    },
+    {
+      "text": "And the wind keeps working after dark, often blowing hardest at night, when solar panels are resting.",
+      "from": 750,
+      "to": 927,
+      "sceneId": "s_chart",
+      "estimated": false
+    },
+    {
+      "text": "Every clip in this video came from one short GPU session.",
+      "from": 927,
+      "to": 1032,
+      "sceneId": "s_outro",
+      "estimated": false
+    },
+    {
+      "text": "Made with Comfyrizz.",
+      "from": 1037,
+      "to": 1078,
+      "sceneId": "s_outro",
+      "estimated": false
+    }
+  ],
+  "plates": [
+    {
+      "assetId": "a_city",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_flow",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_mascot",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_title_plate",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_turbine",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    }
+  ],
+  "target": {
+    "requested": null,
+    "actual": 1092,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [],
+  "proposals": [],
+  "sourceHash": "bcb5978bdb3b8d0a1bc0cc85252168dd15fe1b02e216b55a5dc13310906f8331",
+  "hash": "b993c942d047f98148040c8897b9044870ae69fea3732733f4880f01f7484947"
+}

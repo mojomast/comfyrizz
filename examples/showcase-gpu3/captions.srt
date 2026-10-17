@@ -1,0 +1,35 @@
+1
+00:00:00,000 --> 00:00:02,733
+How does a breeze out at sea end up lighting your kitchen?
+
+2
+00:00:02,900 --> 00:00:04,233
+Let's follow the wind.
+
+3
+00:00:05,000 --> 00:00:08,133
+Wind pushes on the long blades and turns the rotor.
+
+4
+00:00:08,300 --> 00:00:12,333
+Inside the nacelle, a generator turns that spin into electricity.
+
+5
+00:00:12,300 --> 00:00:18,933
+A transformer steps the voltage up, so the power can travel across the grid with little loss, all the way to your home.
+
+6
+00:00:18,933 --> 00:00:25,000
+A single large turbine can supply more than a thousand homes, a rough but commonly cited figure.
+
+7
+00:00:25,000 --> 00:00:30,900
+And the wind keeps working after dark, often blowing hardest at night, when solar panels are resting.
+
+8
+00:00:30,900 --> 00:00:34,400
+Every clip in this video came from one short GPU session.
+
+9
+00:00:34,567 --> 00:00:35,933
+Made with Comfyrizz.

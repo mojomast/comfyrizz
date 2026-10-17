@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "engine": "kokoro-onnx",
+  "engineVersion": "0.4.9",
+  "model": "kokoro-v1.0.onnx",
+  "voices": "voices-v1.0.bin",
+  "voice": "af_heart",
+  "speed": 1.0,
+  "sampleRate": 24000,
+  "gapSeconds": 0.15,
+  "paddingSeconds": 0.5,
+  "loadSeconds": 1.17,
+  "scenes": {
+    "s_title": {
+      "chunks": [
+        {
+          "text": "How does a breeze out at sea end up lighting your kitchen?",
+          "spoken": "How does a breeze out at sea end up lighting your kitchen?",
+          "seconds": 2.7093,
+          "samples": 65024
+        },
+        {
+          "text": "Let's follow the wind.",
+          "spoken": "Let's follow the wind.",
+          "seconds": 1.3227,
+          "samples": 31744
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 4.682,
+      "file": "audio/narration/s_title.wav"
+    },
+    "s_turbine": {
+      "chunks": [
+        {
+          "text": "Wind pushes on the long blades and turns the rotor.",
+          "spoken": "Wind pushes on the long blades and turns the rotor.",
+          "seconds": 3.1147,
+          "samples": 74752
+        },
+        {
+          "text": "Inside the nacelle, a generator turns that spin into electricity.",
+          "spoken": "Inside the nacelle, a generator turns that spin into electricity.",
+          "seconds": 4.032,
+          "samples": 96768
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 7.7967,
+      "file": "audio/narration/s_turbine.wav"
+    },
+    "s_flow": {
+      "chunks": [
+        {
+          "text": "A transformer steps the voltage up, so the power can travel across the grid with little loss, all the way to your home.",
+          "spoken": "A transformer steps the voltage up, so the power can travel across the grid with little loss, all the way to your home.",
+          "seconds": 6.6133,
+          "samples": 158720
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 7.1133,
+      "file": "audio/narration/s_flow.wav"
+    },
+    "s_city": {
+      "chunks": [
+        {
+          "text": "A single large turbine can supply more than a thousand homes, a rough but commonly cited figure.",
+          "spoken": "A single large turbine can supply more than a thousand homes, a rough but commonly cited figure.",
+          "seconds": 6.0373,
+          "samples": 144896
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 6.5373,
+      "file": "audio/narration/s_city.wav"
+    },
+    "s_chart": {
+      "chunks": [
+        {
+          "text": "And the wind keeps working after dark, often blowing hardest at night, when solar panels are resting.",
+          "spoken": "And the wind keeps working after dark, often blowing hardest at night, when solar panels are resting.",
+          "seconds": 5.8667,
+          "samples": 140800
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 6.3667,
+      "file": "audio/narration/s_chart.wav"
+    },
+    "s_outro": {
+      "chunks": [
+        {
+          "text": "Every clip in this video came from one short GPU session.",
+          "spoken": "Every clip in this video came from one short G P U session.",
+          "seconds": 3.4987,
+          "samples": 83968
+        },
+        {
+          "text": "Made with Comfyrizz.",
+          "spoken": "Made with Comfy rizz.",
+          "seconds": 1.344,
+          "samples": 32256
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 5.4927,
+      "file": "audio/narration/s_outro.wav"
+    }
+  },
+  "totalSeconds": 38.5887,
+  "synthesisSeconds": 9.13,
+  "file": "narration.raw.wav"
+}

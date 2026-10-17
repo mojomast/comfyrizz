@@ -107,9 +107,9 @@ npm run recompile:timeline -- --all
 measured narration; this script is the offline equivalent and also refreshes
 `narration-report.json`'s `timelineHash`.
 
-## Bundled examples (A6)
+## Bundled examples
 
-Two longer examples exercise every layout and the incremental CPU export:
+Two silent examples exercise every layout and the incremental CPU export:
 
 - `examples/product-explainer` — product explainer, 1349 frames @ 30 fps
   (44.97 s), layouts `title, hero, hero, stat, chart, list, title`, one narrated
@@ -121,6 +121,22 @@ Both use mostly `llm-svg` assets (including one `vector-anim` part each) and
 reference FLUX/LTX assets only as `pending` foregrounds with procedural
 fallbacks, so the export path never calls an LLM, a GPU or the network.
 
+Two GPU-media showcases carry real FLUX/LTX/SVG-guide media from the GPU test
+sessions plus measured Kokoro narration:
+
+- `examples/showcase-gpu2` — GPU test 2 solar explainer, 1312 frames @ 30 fps
+  (43.733 s), layouts `title, hero, hero, stat, hero, chart, title`, scrims and a
+  `media.json` lower-third sidecar, captions committed.
+- `examples/showcase-gpu3` (A7) — GPU test 3 wind explainer, 1092 frames @ 30 fps
+  (36.400 s), layouts `title, hero, hero, stat, hero, title`, five LTX plates
+  retimed 24→30 fps by the compiler, `media_only`/`lower_third` via `media.json`,
+  captions committed.
+
+Their `assets/*.mp4`, `assets/*.png`, `audio/*.wav` and `out/` media stay out of
+Git (`.gitignore`) and come from the GPU test session; the committed
+`package.json`, recompiled `timeline.json` and `narration-report.json` are the
+source of truth and are checked by the freshness guard above.
+
 `render:package` renders each scene as its own content-addressed segment under
 `apps/renderer/.cache/<pkg.id>/`, so an unchanged scene is reused and a one-scene
 edit only re-renders the affected segment (plus the fade before it).
@@ -129,6 +145,7 @@ edit only re-renders the affected segment (plus the fade before it).
 |---|---|---|---|---|
 | `examples/data-story` | 1320 | 44.000 s | **125.5 s** (7 rendered, 0 reused) | `rendered 0, reused 7` |
 | `examples/product-explainer` | 1349 | 44.967 s | **124.9 s** (7 rendered, 0 reused), H.264 + AAC | `rendered 0, reused 7` |
+| `examples/showcase-gpu3` | 1092 | 36.400 s | **132.7 s** (6 rendered, 0 reused), H.264 + AAC | `rendered 0, reused 6` |
 
 Render times are CPU-only, `--concurrency=2`, `/usr/bin/google-chrome`, Node
 20.19.2. `render:package` hard-fails before rendering if any foreground asset
@@ -138,7 +155,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 
 | Check | Result |
 |---|---|
-| `npm test` | 38/38 pass (incl. P-fix3 freshness for all 6 bundled examples) |
+| `npm test` | 39/39 pass (incl. P-fix3 freshness for all 7 bundled examples) |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `ceb20281…2c11` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
@@ -149,6 +166,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 | Showcase export (P-fix1) | `examples/showcase-gpu2` via `PackageDemo`, 1920×1080 H.264, 1110 frames, 37.000 s, 21.8 MB, 7 scenes + 12 captions; no custom composition, no `node_modules` symlink. Frame correlation vs the retired `Showcase.tsx` render: title 0.99, flow 0.92, stat 0.93, chart 0.99, outro 0.98 |
 | Data story (A6) | 1920×1080 30/1 H.264, **1320 frames**, 44.000 s, 4.4 MB, hash `da7e9c5e…a1a4`, 7 segments; CPU 125.5 s |
 | Product explainer (A6) | 1920×1080 30/1 H.264 + AAC, **1349 frames**, 44.967 s, 5.8 MB, hash `9273c779…1c85`, 7 segments, 8 captions; CPU 124.9 s |
+| Wind showcase (A7) | `examples/showcase-gpu3` incremental, 1920×1080 30/1 H.264 + AAC, **1092 frames**, 36.400 s, hash `b993c942…4947`, 6 segments, 9 captions; CPU 132.7 s |
 | Layout overlap gate (A6) | `findLayoutOverlaps` clean for all six bundled packages; `layout.test.mjs` 5/5 |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is

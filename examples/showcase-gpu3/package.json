@@ -1,0 +1,710 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_showcasegpu3",
+  "title": "How wind becomes power: Comfyrizz GPU showcase (GPU test 3)",
+  "createdAt": "2026-10-17T14:47:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#0a1a2a",
+      "#123049",
+      "#8ecae6",
+      "#f1faee"
+    ],
+    "font": "Inter",
+    "text": "#f7f8fb",
+    "text_muted": "#b8c4d0",
+    "text_on_accent": "#0a1a2a"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 1,
+    "language": "en-us"
+  },
+  "datasets": {
+    "d_homes": {
+      "unit": "homes",
+      "label": "Homes one large onshore turbine can supply",
+      "values": [
+        {
+          "label": "homes",
+          "value": 1000
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "Rough commonly cited figure."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 165,
+      "copy": {
+        "kicker": "Comfyrizz GPU test 3",
+        "headline": "How wind becomes power",
+        "sub": "FLUX 3 Klein, LTX-2.5 and SVG guides on one Google Colab GPU"
+      },
+      "background": {
+        "asset": "a_title_plate",
+        "fit": "cover",
+        "loop": true,
+        "muted": true,
+        "scrim": 0.45
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "How does a breeze out at sea end up lighting your kitchen? Let's follow the wind.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 140
+    },
+    {
+      "id": "s_turbine",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 180,
+      "copy": {
+        "kicker": "Step 1",
+        "headline": "Blades catch the wind",
+        "body": "Moving air turns the rotor, and a generator in the nacelle turns that spin into electricity."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#0a1a2a",
+            "#123049",
+            "#8ecae6"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_turbine",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "Wind pushes on the long blades and turns the rotor. Inside the nacelle, a generator turns that spin into electricity.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 234
+    },
+    {
+      "id": "s_flow",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "Wind to home"
+      },
+      "media_only": true,
+      "background": {
+        "asset": "a_flow",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "lower_third": {
+        "kicker": "How it flows",
+        "text": "Wind → Turbine → Transformer → Grid → Home"
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "A transformer steps the voltage up, so the power can travel across the grid with little loss, all the way to your home.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 213
+    },
+    {
+      "id": "s_city",
+      "layout": "stat",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "One large turbine can power",
+        "body": "1,000+ homes",
+        "sub": "a rough, commonly cited figure for a modern onshore turbine"
+      },
+      "data": {
+        "dataset": "d_homes",
+        "display": "number"
+      },
+      "background": {
+        "asset": "a_city",
+        "fit": "cover",
+        "loop": true,
+        "muted": true,
+        "scrim": 0.6
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "A single large turbine can supply more than a thousand homes, a rough but commonly cited figure.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 196
+    },
+    {
+      "id": "s_chart",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 165,
+      "copy": {
+        "kicker": "Step 2",
+        "headline": "The wind never clocks out",
+        "body": "Wind often blows hardest at night, when solar panels rest."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 5,
+          "palette": [
+            "#0a1a2a",
+            "#123049",
+            "#ffb703"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_chart_i2i",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "And the wind keeps working after dark, often blowing hardest at night, when solar panels are resting.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 191
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Made with Comfyrizz",
+        "sub": "FLUX 3 Klein · LTX-2.5 · SVG guides · Kokoro"
+      },
+      "background": {
+        "asset": "a_turbine",
+        "fit": "cover",
+        "loop": true,
+        "muted": true,
+        "scrim": 0.65
+      },
+      "foreground": [
+        {
+          "asset": "a_mascot",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.2,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": "Every clip in this video came from one short GPU session. Made with Comfyrizz.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 165
+    }
+  ],
+  "assets": {
+    "a_svg_flow_src": {
+      "kind": "image",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/wind_flow.png",
+      "sha256": "d9b999003123d2ddb0005b6134e01093b913d4536a572da8ed91fd87477dc573",
+      "bytes": 17044,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "alpha": false
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "notes": "hand-written SVG (scripts/gpu3/svg) rasterised with resvg, labels kept, as the guide for the SVG-guided stills"
+    },
+    "a_svg_chart_src": {
+      "kind": "image",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/wind_chart.png",
+      "sha256": "ae285b70fcb6fee5c4b064b5ccd57293bf0ad5f12ae76cd88c255759cc146f06",
+      "bytes": 13343,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "alpha": false
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "notes": "hand-written SVG (scripts/gpu3/svg) rasterised with resvg, labels kept, as the guide for the SVG-guided stills"
+    },
+    "a_turbine_still": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-FLUX.3-Image-Klein",
+        "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein"
+      },
+      "gen": {
+        "generator": "flux3-klein",
+        "model": "flux-3-image-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "workflow_sha256": "e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689",
+        "caption": "turbine close-up",
+        "inputs": {
+          "prompt": "Photoreal close-up of a modern white wind turbine nacelle and three long blades against a golden-hour sky with soft clouds, rolling green hills far below, shot on a 200 mm lens, crisp detail, cinematic colour grade, calm empty sky on the left third.",
+          "width": 1024,
+          "height": 576,
+          "seed": 1101,
+          "steps": 16
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_turbine_still.png",
+      "sha256": "76c1ecd5ce16e764dfcfe8ca8cce8a447ca1b271b7e1b8dcb76c42033ef69191",
+      "bytes": 682465,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "alpha": false
+      }
+    },
+    "a_city_still": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-FLUX.3-Image-Klein",
+        "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein"
+      },
+      "gen": {
+        "generator": "flux3-klein",
+        "model": "flux-3-image-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "workflow_sha256": "e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689",
+        "caption": "isometric city",
+        "inputs": {
+          "prompt": "Isometric miniature city at dusk seen from above: small glowing houses, office towers and streets connected by thin power lines to a substation, a row of tiny wind turbines on a hill at the edge, warm window lights and a deep blue evening sky, clean 3D illustration with soft shadows.",
+          "width": 961,
+          "height": 545,
+          "seed": 1102,
+          "steps": 16
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_city_still.png",
+      "sha256": "9c2095b0ebf49159ffa7c2190d473d7f034a9d21fbbc0a2f95130dc4817f3881",
+      "bytes": 915113,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 960,
+        "height": 544,
+        "alpha": false
+      }
+    },
+    "a_mascot_still": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-FLUX.3-Image-Klein",
+        "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein"
+      },
+      "gen": {
+        "generator": "flux3-klein",
+        "model": "flux-3-image-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "workflow_sha256": "e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689",
+        "caption": "clay mascot",
+        "inputs": {
+          "prompt": "3D claymorphism render of a cute round robot mascot made of soft matte clay, mint-green body, cream face screen with two oval eyes and a small smile, a tiny propeller on its head, one arm waving, standing slightly left of centre in a wide 16:9 frame on a plain soft sky-blue background with a soft contact shadow, full body visible with margin.",
+          "width": 1024,
+          "height": 576,
+          "seed": 1103,
+          "steps": 16
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_mascot_still.png",
+      "sha256": "5ad9818bc47a9ffcc35a412be9e5fff5b0bf681bee337f25cc5420c1231c54bc",
+      "bytes": 605716,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "alpha": false
+      }
+    },
+    "a_flow_ref": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-FLUX.3-Image-Klein",
+        "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein"
+      },
+      "gen": {
+        "generator": "flux3-klein",
+        "model": "flux-3-image-klein",
+        "workflow": "workflows/flux3_klein_ref_edit.api.json",
+        "workflow_sha256": "ecf1b281737c8f3bad5afe7be79e76d7aa3595146b97a8df3e8098c21c080e09",
+        "caption": "SVG-guided reference edit (glass)",
+        "inputs": {
+          "reference": "a_svg_flow_src",
+          "prompt": "Redraw the diagram from the reference image: a left-to-right flow diagram with a light-blue oval labelled \"Wind\", a white box labelled \"Turbine\", an amber box labelled \"Transformer\", a green box labelled \"Grid\" and a peach house shape labelled \"Home\", joined by four blue arrows. Render it as a polished glassmorphism presentation slide: every shape becomes a frosted glass element with soft inner glow, thin light borders and gentle shadows over a dark navy gradient backdrop with soft coloured light blobs. Keep the exact layout, positions, colours and all labels exactly as written, in clean white bold sans-serif. Do not add or remove elements, no watermarks, no logos.",
+          "seed": 1104,
+          "steps": 16
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_flow_ref.png",
+      "sha256": "2f9e714f26ce9f9e3c65b89a0ee2b8b13781b4bc6072296f46f9590424bd4ac3",
+      "bytes": 1049897,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 1360,
+        "height": 768,
+        "alpha": false
+      }
+    },
+    "a_chart_i2i": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-FLUX.3-Image-Klein",
+        "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein"
+      },
+      "gen": {
+        "generator": "flux3-klein",
+        "model": "flux-3-image-klein",
+        "workflow": "workflows/flux3_klein_img2img.api.json",
+        "workflow_sha256": "91d4b539ed813532895c278505bdb29efdc359fdd7a44b07191c79606be980aa",
+        "caption": "SVG-guided img2img (clay)",
+        "inputs": {
+          "image": "a_svg_chart_src",
+          "prompt": "An infographic slide showing a bar chart of wind power by time of day with four bars labelled 6 am, 12 pm, 6 pm and 12 am, the last bar highlighted coral. Render it as a soft 3D claymorphism scene: every bar becomes a rounded matte clay block with soft shadows on a warm cream backdrop. Keep the exact layout and all labels exactly as written, no watermarks, no logos.",
+          "width": 1024,
+          "height": 576,
+          "denoise": 0.55,
+          "seed": 1105,
+          "steps": 16
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_chart_i2i.png",
+      "sha256": "8ef88c3cf41d880ca94761dcb69b66e634a15c04a14e0e61a118ed94e8e6d06a",
+      "bytes": 195008,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "alpha": false
+      }
+    },
+    "a_title_plate": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5"
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "workflow": "workflows/ltx25_t2v_2stage.api.json",
+        "workflow_sha256": "4e7f0a46d32988acb86e3c66ea15e6854a8eddb9032a76896549da662891d4b8",
+        "inputs": {
+          "prompt": "Aerial view of an offshore wind farm at sunrise, rows of white turbines with slowly turning blades standing in a calm silver sea, soft golden mist on the horizon, gentle light glinting on the water. Static camera, slow continuous motion, no cuts.",
+          "width": 1024,
+          "height": 576,
+          "frames": 97,
+          "fps": 24,
+          "seed": 1201
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_title_plate.mp4",
+      "sha256": "0a63405b3af3abc453e13c696d5a3443b5a43ff8efe16d82dccdbb82490e184b",
+      "bytes": 1175436,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "audio": "muted"
+      }
+    },
+    "a_turbine": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5"
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "workflow": "workflows/ltx25_i2v_2stage.api.json",
+        "workflow_sha256": "7c9cefdb885e54eb4e6f8a68c43c09dbee07e192ab03d6f18b65d611f20d81ba",
+        "inputs": {
+          "image": "a_turbine_still",
+          "prompt": "Use the provided start image as the first frame. The three turbine blades rotate slowly and steadily, soft clouds drift behind, the golden light shifts gently. Static camera, no cuts.",
+          "width": 1024,
+          "height": 576,
+          "frames": 97,
+          "fps": 24,
+          "seed": 1202
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_turbine.mp4",
+      "sha256": "c0821d812bc64c10a598b03af1e13b0b0288a17a81bcbe24772e7377b60bc328",
+      "bytes": 858849,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "audio": "muted"
+      }
+    },
+    "a_flow": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5"
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "workflow": "workflows/ltx25_i2v_2stage.api.json",
+        "workflow_sha256": "7c9cefdb885e54eb4e6f8a68c43c09dbee07e192ab03d6f18b65d611f20d81ba",
+        "inputs": {
+          "image": "a_flow_ref",
+          "prompt": "Use the provided start image as the first frame. Pulses of soft blue light travel along the arrows from Wind to Turbine to Transformer to Grid to Home, each glass element glows gently in turn, the background light blobs drift slowly. Static camera, the layout and labels stay perfectly still and legible. No cuts, no watermarks.",
+          "width": 1024,
+          "height": 576,
+          "frames": 97,
+          "fps": 24,
+          "seed": 1203
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_flow.mp4",
+      "sha256": "d698b44f3293b71593f2be8bb46cda864b14d73360abd4b3e4b499d37f68bcfe",
+      "bytes": 424808,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "audio": "muted"
+      }
+    },
+    "a_city": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5"
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "workflow": "workflows/ltx25_i2v_2stage.api.json",
+        "workflow_sha256": "7c9cefdb885e54eb4e6f8a68c43c09dbee07e192ab03d6f18b65d611f20d81ba",
+        "inputs": {
+          "image": "a_city_still",
+          "prompt": "Use the provided start image as the first frame. Window lights flicker on across the little city, tiny pulses of light travel along the power lines from the wind turbines to the houses, the turbine blades turn slowly. Static camera, no cuts.",
+          "width": 960,
+          "height": 544,
+          "frames": 97,
+          "fps": 24,
+          "seed": 1204
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_city.mp4",
+      "sha256": "1d34bae7114e8c3dd46507d6f6ec206bd05a5088e41bcea8c66b918bc05e5d6c",
+      "bytes": 1268103,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 960,
+        "height": 512,
+        "fps": 24,
+        "frames": 97,
+        "audio": "muted"
+      }
+    },
+    "a_mascot": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5"
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "workflow": "workflows/ltx25_i2v_2stage.api.json",
+        "workflow_sha256": "7c9cefdb885e54eb4e6f8a68c43c09dbee07e192ab03d6f18b65d611f20d81ba",
+        "inputs": {
+          "image": "a_mascot_still",
+          "prompt": "Use the provided start image as the first frame. The little clay robot waves its arm in a friendly loop, blinks its oval eyes and bobs gently, its head propeller spins. Static camera, soft studio lighting, playful stop-motion feel, no cuts.",
+          "width": 1024,
+          "height": 576,
+          "frames": 97,
+          "fps": 24,
+          "seed": 1205
+        },
+        "backend": "colab:G4",
+        "created_at": "2026-10-17T18:31:02+00:00"
+      },
+      "file": "assets/a_mascot.mp4",
+      "sha256": "2672f702b3a44200a4e6d4f8aa784c59e3dc64b481d1d1d4eb3b374fa53a4715",
+      "bytes": 491620,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "audio": "muted"
+      }
+    },
+    "a_narration": {
+      "kind": "audio",
+      "origin": "generated",
+      "status": "ready",
+      "file": "audio/narration.norm.wav",
+      "sha256": "6f008dfbffaf3948b0fd10c4c954e0e99c4beecbc5ffa93716edbbc79055f0f4",
+      "bytes": 1747278,
+      "media": {
+        "durationSeconds": 36.4,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "Apache-2.0",
+        "url": "https://huggingface.co/hexgrad/Kokoro-82M",
+        "note": "Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md."
+      },
+      "gen": {
+        "generator": "kokoro",
+        "model": "kokoro-v1.0.onnx",
+        "inputs": {
+          "voice": "af_heart",
+          "speed": 1,
+          "sample_rate": 24000,
+          "chunks": 9
+        },
+        "caption": "Six-sentence-level-scene narration synthesized locally on CPU from the package narration text."
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "hand-written",
+      "weights": "open"
+    },
+    "backends_used": [
+      "colab:G4"
+    ],
+    "closed_apis_used": [],
+    "warnings": [
+      "Stills and plates generated in GPU test 3 on Google Colab G4 (FLUX 3 Klein BF16, LTX-2.5 int8) through the pipeline-py runner.",
+      "The homes-per-turbine figure is a rough commonly cited estimate."
+    ]
+  }
+}
