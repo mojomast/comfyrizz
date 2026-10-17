@@ -67,6 +67,19 @@ def test_every_workflow_is_api_format_and_has_a_params_map(graph_path: Path):
     assert not set(doc["map"]) & CONTROL_PARAMS, "job-level controls are not node inputs"
 
 
+def test_the_text_flags_are_job_controls_not_node_inputs():
+    """GPU test 3, N1: an older planner put `text`/`allowText` in params and the runner refused the
+    whole job ("no params.json mapping for text") before it was ever submitted. They are plan-time
+    flags, so injecting a job that still carries them must not raise."""
+    assert {"text", "allowText"} <= CONTROL_PARAMS
+    graph = {"6": {"class_type": "CLIPTextEncode", "inputs": {"text": "from the graph"}}}
+    injected = inject_params(graph, {"prompt": ["6", "text"]}, {"prompt": "from the job", "text": True, "allowText": True})
+    assert injected["6"]["inputs"]["text"] == "from the job"
+    # and a genuinely unmapped parameter still fails loudly
+    with pytest.raises(ValueError, match="no params.json mapping for textish"):
+        inject_params({"6": {"class_type": "CLIPTextEncode", "inputs": {}}}, {"prompt": ["6", "text"]}, {"textish": 1})
+
+
 @pytest.mark.parametrize("graph_path", GRAPH_FILES, ids=[p.name for p in GRAPH_FILES])
 def test_every_mapped_target_exists_in_the_graph(graph_path: Path):
     graph = json.loads(graph_path.read_text(encoding="utf-8"))

@@ -52,8 +52,11 @@ import httpx
 
 from .atomic import sha256_file
 
-#: Parameters the planner sets that are job controls, not node inputs.
-CONTROL_PARAMS = {"upscale", "cutout", "frames_seconds"}
+#: Parameters the planner sets that are job controls, not node inputs. `text`/`allowText` are
+#: planner-only flags: the plan already used them to decide the prompt guards, and a package written
+#: by an older planner still carries them in `params` — refusing the job for that would lose a whole
+#: GPU job to a flag the graph never sees (GPU test 3, N1).
+CONTROL_PARAMS = {"upscale", "cutout", "frames_seconds", "text", "allowText"}
 
 #: Local failures that mean no request was ever made (a missing workflow, an unreadable file).
 #: They are clean refusals, never `submission_unknown`: nothing can have reached the server.

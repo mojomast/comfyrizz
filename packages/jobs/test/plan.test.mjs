@@ -404,6 +404,29 @@ test("an asset that asked for text keeps its prompt verbatim", () => {
   assert.equal(still.promptGuards, undefined);
 });
 
+test("the text flag stays on the job, not in params, where the runner would refuse it (GPU test 3, N1)", () => {
+  // The repro was `gen.inputs.text = true`: the flag reached jobs[].params, and the runner failed the
+  // job before submitting it ("no params.json mapping for text"). Either spelling is planner-only.
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_cutout.gen.inputs.text = true;
+  pkg.assets.a_cutout.gen.inputs.allowText = true;
+  pkg.assets.a_cutout.gen.inputs.prompt = "a diagram with the label Solar Panel";
+  const doc = planJobs(pkg);
+  const still = doc.jobs.find((j) => j.id === "a_cutout.still");
+  assert.equal(still.params.text, undefined, "`text` is not a node input");
+  assert.equal(still.params.allowText, undefined, "`allowText` is not a node input");
+  assert.equal(still.allowText, true, "the decision is recorded on the job");
+  for (const job of doc.jobs) {
+    assert.ok(!("text" in job.params) && !("allowText" in job.params), `${job.id} carries a planner flag in params`);
+  }
+  // and the guards it steers are unchanged by the move: text allowed -> prompt verbatim, no guard
+  assert.equal(still.params.prompt, "a diagram with the label Solar Panel");
+  assert.equal(still.promptGuards, undefined);
+  // a job that did not ask for text does not get the flag
+  const plain = planJobs(fixture("package-pending.json")).jobs.find((j) => j.id === "a_cutout.still");
+  assert.equal(plain.allowText, undefined);
+});
+
 test("a prompt that already refuses text is not given a second negative", () => {
   const pkg = fixture("package-pending.json");
   pkg.assets.a_cutout.gen.inputs.prompt = "a quiet nebula, no text, no letters";

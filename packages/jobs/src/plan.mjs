@@ -298,6 +298,13 @@ export function planJobs(pkg, opts = {}) {
     }
 
     const params = { ...inputs };
+    // Planner-only flags are not node inputs. `text`/`allowText` steer the prompt guards below, and
+    // they used to travel inside `params`, which the runner refused on the VM with "no params.json
+    // mapping for text" (GPU test 3, N1) - a whole job lost to a flag the graph never sees. The
+    // decision stays on the job (`allowText`) instead.
+    const textAllowed = inputs.text === true || inputs.allowText === true;
+    delete params.text;
+    delete params.allowText;
     // Prompt defaults first, so the plate's upscale stage (which copies these params) inherits the
     // same guards, and so the guard is part of the cache key rather than a VM-side edit.
     let promptGuards = [];
@@ -306,12 +313,8 @@ export function planJobs(pkg, opts = {}) {
       const applied = applyPromptDefaults(params, {
         kind,
         asset: assetId,
-        textAllowed: inputs.text === true || inputs.allowText === true,
-        textFrames:
-          inputs.text === true ||
-          inputs.allowText === true ||
-          sourceInputs.text === true ||
-          sourceInputs.allowText === true,
+        textAllowed,
+        textFrames: textAllowed || sourceInputs.text === true || sourceInputs.allowText === true,
         hasSourceImage: typeof inputs.image === "string" && inputs.image !== "",
       });
       promptGuards = applied.applied;
@@ -334,6 +337,7 @@ export function planJobs(pkg, opts = {}) {
       outputKind: OUTPUT_KIND[kind],
       cacheKey: null,
     };
+    if (textAllowed) job.allowText = true;
 
     if (kind === "still") {
       const requested = {
