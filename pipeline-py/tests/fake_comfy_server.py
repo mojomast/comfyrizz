@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--drop-first-response", action="store_true")
     parser.add_argument("--request-log", default=None, help="append one JSON line per request")
     parser.add_argument("--upload-status", type=int, default=200, help="what /upload/image answers (404 = a server without the route)")
-    parser.add_argument("--bytes-kind", default=None, choices=["image", "video", "audio"], help="serve real magic bytes for this kind (default: arbitrary bytes)")
+    parser.add_argument("--bytes-kind", default=None, choices=["image", "video", "audio", "match"], help="serve real magic bytes for this kind, or \"match\" = the kind each graph implies (default: arbitrary bytes)")
     parser.add_argument("--reject-metadata", action="store_true", help="refuse dict job labels like comfy-api-proxy does")
     parser.add_argument("--lifetime-seconds", type=float, default=300.0, help="exit after this long, so a test can never leak a server")
     args = parser.parse_args(argv)

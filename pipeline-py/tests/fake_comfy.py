@@ -148,6 +148,8 @@ class FakeComfyState:
         self.bytes_kind = bytes_kind
         #: the size a served PNG declares in its IHDR (N4: the runner measures the file it got)
         self.image_size = image_size
+        #: which kind of bytes each served asset should be (bytes_kind="match")
+        self._kind_for: dict[str, str] = {}
         self.metadata_rejections = 0
         self.jobs: dict[str, dict[str, Any]] = {}
         self.idempotency_seen: dict[str, str] = {}
@@ -220,6 +222,7 @@ class FakeComfyState:
             kind = self.output_kind or graph_output_kind(body.get("workflow")) or "image"
             for index in range(self.outputs):
                 asset_id = f"asset_{self.asset_counter:03d}_{index}"
+                self._kind_for[asset_id] = kind
                 outputs.append(
                     {
                         "node_id": "9",
@@ -282,7 +285,12 @@ class FakeComfyState:
         per frame into files the plan expected to be videos, and the SDK reports a ``SaveVideo`` mp4
         as ``image``), so the two tests that care about that pass ``bytes_kind``.
         """
-        if self.bytes_kind == "image":
+        kind = self.bytes_kind
+        if kind == "match":
+            # serve bytes that match the kind this output's own graph implies, so one server can stand
+            # in for a real ComfyUI across stills and plates (N4: the runner measures what it got)
+            kind = self._kind_for.get(asset_id, "image")
+        if kind == "image":
             # a real PNG IHDR, so the runner's header reader sees the size it reports (N4)
             width, height = self.image_size
             ihdr = (
@@ -292,9 +300,9 @@ class FakeComfyState:
                 + b"\x08\x02\x00\x00\x00"
             )
             return b"\x89PNG\r\n\x1a\n" + ihdr + b"comfyrizz-fake-frame" * 8
-        if self.bytes_kind == "video":
+        if kind == "video":
             return b"\x00\x00\x00\x18ftypmp42" + b"comfyrizz-fake-video" * 8
-        if self.bytes_kind == "audio":
+        if kind == "audio":
             return b"RIFF" + (2048).to_bytes(4, "little") + b"WAVEfmt " + b"comfyrizz-fake-audio" * 4
         return (f"COMFYRIZZ-FAKE-OUTPUT-{asset_id}-".encode() * 64)[:2048]
 
