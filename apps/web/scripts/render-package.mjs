@@ -1,45 +1,13 @@
 /**
- * C1 dev export: package JSON -> A2 compile -> Remotion CPU render.
- * C2 replaces this with the local HTTP server (token, Host/Origin checks, SSE).
+ * C1 dev export CLI: package JSON -> shared CPU render. The C2 server imports
+ * the same library instead of spawning this script.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { resolve } from 'node:path';
+import { renderPackage } from '../../renderer/scripts/render-package-lib.mjs';
 
 const packagePath = resolve(process.argv[2] ?? '');
-if (!packagePath) throw new Error('usage: render-package.mjs <package.json>');
-const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
-const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, '..', '..', '..');
-const rendererDir = join(root, 'apps', 'renderer');
-const output = packagePath.replace(/\.package\.json$/, '.mp4');
-const propsPath = packagePath.replace(/\.package\.json$/, '.props.json');
-
-const validate = spawnSync(
-  process.execPath,
-  [join(root, 'packages', 'schema', 'bin', 'comfyrizz-validate.mjs'), packagePath],
-  { encoding: 'utf8' },
-);
-process.stderr.write(validate.stdout);
-if (validate.status !== 0) throw new Error(`package invalid: ${validate.stdout.slice(-500)}`);
-
-const timeline = compileTimeline(pkg);
-writeFileSync(propsPath, JSON.stringify({ pkg, timeline }));
-process.stderr.write(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}\n`);
-
-const render = spawnSync(
-  'npx',
-  [
-    'remotion', 'render', 'src/index.ts', 'LaunchDemo', output,
-    `--props=${propsPath}`,
-    '--browser-executable=/usr/bin/google-chrome',
-    '--concurrency=2',
-    '--log=error',
-  ],
-  { cwd: rendererDir, stdio: 'inherit' },
-);
-if (render.status !== 0) throw new Error(`remotion render exited ${render.status}`);
-process.stdout.write(`OUTPUT=${output}\n`);
-process.stdout.write(`FRAMES=${timeline.durationInFrames}\nHASH=${timeline.hash}\n`);
+if (!packagePath) throw new Error('usage: render-package.mjs <package.json> [output.mp4]');
+const output = resolve(process.argv[3] ?? packagePath.replace(/\.package\.json$/, '.mp4'));
+const result = renderPackage(packagePath, output, { onLog: line => process.stderr.write(`${line}\n`) });
+process.stdout.write(`OUTPUT=${result.output}\n`);
+process.stdout.write(`FRAMES=${result.frames}\nHASH=${result.hash}\nBYTES=${result.bytes}\n`);

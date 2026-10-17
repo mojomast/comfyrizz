@@ -1,0 +1,170 @@
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer, request as httpRequest, get as httpGet } from 'node:http';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createApp } from '../src/app.mjs';
+
+const TOKEN = 'test-token-0123456789abcdef';
+const seed = JSON.parse(readFileSync(new URL('../../../examples/launch-demo/package.json', import.meta.url), 'utf8'));
+let runtime;
+let app;
+let server;
+let port;
+
+before(async () => {
+  runtime = mkdtempSync(join(tmpdir(), 'comfyrizz-server-'));
+  app = createApp({
+    root: new URL('../../..', import.meta.url).pathname,
+    token: TOKEN,
+    runtimeDir: runtime,
+    render: async (packagePath, output) => {
+      const bytes = Buffer.from('fake mp4 bytes');
+      writeFileSync(output, bytes);
+      return { output, bytes: bytes.length, frames: 42, hash: 'deadbeef' };
+    },
+  });
+  app.store.seed(JSON.parse(JSON.stringify(seed)));
+  server = createServer(app.handler);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  port = server.address().port;
+});
+
+after(async () => {
+  app.close();
+  await new Promise(resolve => server.close(resolve));
+  rmSync(runtime, { recursive: true, force: true });
+});
+
+function request({ method = 'GET', path = '/', token = TOKEN, origin = `http://127.0.0.1:${port}`, host = `127.0.0.1:${port}`, body, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const req = requestRaw({ method, path, token, origin, host, payload, headers });
+    req.on('response', response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let json;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = undefined;
+        }
+        resolve({ status: response.statusCode, headers: response.headers, text, json });
+      });
+    });
+    req.on('error', reject);
+    req.end(payload);
+  });
+}
+
+function requestRaw({ method, path, token, origin, host, payload, headers }) {
+  const allHeaders = { ...headers };
+  if (token) allHeaders['x-comfyrizz-token'] = token;
+  if (origin) allHeaders.origin = origin;
+  if (host) allHeaders.host = host;
+  if (payload !== undefined) allHeaders['content-type'] = 'application/json';
+  allHeaders['content-length'] = payload === undefined ? undefined : Buffer.byteLength(payload);
+  for (const key of Object.keys(allHeaders)) if (allHeaders[key] === undefined) delete allHeaders[key];
+  return httpRequest({ hostname: '127.0.0.1', port, path, method, headers: allHeaders });
+}
+
+test('health is public but host-checked', async () => {
+  const ok = await request({ path: '/api/health', token: null });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.ok, true);
+  const bad = await request({ path: '/api/health', token: null, host: 'evil.example' });
+  assert.equal(bad.status, 403);
+});
+
+test('rejects missing/wrong token and wrong Host', async () => {
+  assert.equal((await request({ path: '/api/package/pkg_launchdemo0001', token: null })).status, 401);
+  assert.equal((await request({ path: '/api/package/pkg_launchdemo0001', token: 'nope' })).status, 401);
+  assert.equal((await request({ path: '/api/package/pkg_launchdemo0001', host: 'evil.example' })).status, 403);
+});
+
+test('GET package exposes revision', async () => {
+  const response = await request({ path: '/api/package/pkg_launchdemo0001' });
+  assert.equal(response.status, 200);
+  assert.equal(response.json.revision, 1);
+  assert.equal(response.json.package.id, 'pkg_launchdemo0001');
+});
+
+test('PATCH requires same-origin and a live base revision', async () => {
+  assert.equal((await request({ method: 'PATCH', path: '/api/package/pkg_launchdemo0001', origin: 'http://evil.example', body: { baseRevision: 1, package: seed } })).status, 403);
+  assert.equal((await request({ method: 'PATCH', path: '/api/package/pkg_launchdemo0001', origin: null, body: { baseRevision: 1, package: seed } })).status, 403);
+  const stale = await request({ method: 'PATCH', path: '/api/package/pkg_launchdemo0001', body: { baseRevision: 99, package: seed } });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.json.currentRevision, 1);
+});
+
+test('PATCH saves, bumps revision and persists', async () => {
+  const edited = structuredClone(seed);
+  edited.scenes[0].copy.headline = 'Edited in C2';
+  const saved = await request({ method: 'PATCH', path: '/api/package/pkg_launchdemo0001', body: { baseRevision: 1, package: edited } });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.revision, 2);
+  assert.equal(saved.json.package.scenes[0].copy.headline, 'Edited in C2');
+  const reread = await request({ path: '/api/package/pkg_launchdemo0001' });
+  assert.equal(reread.json.revision, 2);
+  assert.equal(reread.json.package.scenes[0].copy.headline, 'Edited in C2');
+  // A second stale write cannot silently overwrite the accepted edit.
+  assert.equal((await request({ method: 'PATCH', path: '/api/package/pkg_launchdemo0001', body: { baseRevision: 1, package: seed } })).status, 409);
+});
+
+test('PATCH rejects an invalid package with details', async () => {
+  const invalid = structuredClone(seed);
+  invalid.schemaVersion = 99;
+  const response = await request({ method: 'PATCH', path: '/api/package/pkg_launchdemo0001', body: { baseRevision: 2, package: invalid } });
+  assert.equal(response.status, 422);
+  assert.equal(response.json.error, 'invalid package');
+  assert.ok(Array.isArray(response.json.details) && response.json.details.length > 0);
+});
+
+test('POST /api/render returns MP4 and records SSE events', async () => {
+  const response = await request({ method: 'POST', path: '/api/render', body: { packageId: 'pkg_launchdemo0001', baseRevision: 2 } });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['content-type'], 'video/mp4');
+  assert.equal(response.text, 'fake mp4 bytes');
+  assert.equal(response.headers['x-comfyrizz-frames'], '42');
+  assert.equal(response.headers['x-comfyrizz-revision'], '2');
+  const eventTypes = app.events.replay(0).map(event => event.type);
+  assert.deepEqual(eventTypes.slice(-2), ['render.started', 'render.finished']);
+  assert.equal(app.events.replay(0).at(-1).timeline_sha256, 'deadbeef');
+});
+
+test('POST /api/render rejects a stale base revision before rendering', async () => {
+  const response = await request({ method: 'POST', path: '/api/render', body: { packageId: 'pkg_launchdemo0001', baseRevision: 1 } });
+  assert.equal(response.status, 409);
+  assert.equal(response.json.currentRevision, 2);
+});
+
+test('SSE replays from Last-Event-ID', async () => {
+  app.events.publish({ type: 'test.one' });
+  app.events.publish({ type: 'test.two' });
+  const last = app.events.replay(0).at(-1).id;
+  const text = await new Promise((resolve, reject) => {
+    const req = httpGet({ hostname: '127.0.0.1', port, path: `/api/events?token=${TOKEN}&lastEventId=${last - 1}`, headers: { host: `127.0.0.1:${port}` } }, response => {
+      let data = '';
+      response.on('data', chunk => {
+        data += chunk;
+        if (data.includes('test.two')) {
+          response.destroy();
+          resolve(data);
+        }
+      });
+    });
+    req.on('error', error => {
+      if (error.code !== 'ECONNRESET') reject(error);
+    });
+  });
+  assert.match(text, /event: test\.two/);
+  assert.match(text, new RegExp(`id: ${last}`));
+});
+
+test('static path traversal is rejected', async () => {
+  const response = await request({ path: '/%2e%2e/package.json', token: null, origin: null });
+  assert.ok([403, 404].includes(response.status));
+});

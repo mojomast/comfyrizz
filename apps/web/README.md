@@ -29,8 +29,12 @@ npm run build
 
 `npm run dev` exposes a **dev-only** `POST /api/render` route. It validates the edited package,
 compiles it with A2, passes `{pkg, timeline}` to Remotion as `--props`, renders on CPU, and streams
-the MP4 back. The route is bound to `127.0.0.1` and is deliberately not the C2 server: C2 adds the
-token-in-fragment, strict Host/Origin checks, revision conflicts, SSE progress and cancellation.
+the MP4 back. The route is bound to `127.0.0.1` and is deliberately not the C2 server.
+
+For the C2 server (`apps/server`), run `npm start` there after `npm run build`. It serves this
+build, reads the token from the URL fragment into `sessionStorage`, strips the fragment, and sends
+the token on API calls. Export then PATCHes the package with `baseRevision`, renders the accepted
+revision, and listens to `/api/events` for Activity entries. C2 also adds strict Host/Origin checks.
 
 ## M2 evidence (2026-10-17)
 

@@ -1,0 +1,15 @@
+{
+  "name": "@comfyrizz/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Comfyrizz local server (C2): loopback HTTP, token, package revisions, CPU render, SSE",
+  "scripts": {
+    "start": "npm --prefix ../../packages/planner run build && npm --prefix ../web run build && node src/index.mjs",
+    "dev": "npm --prefix ../../packages/planner run build && node --watch src/index.mjs",
+    "pretest": "npm --prefix ../../packages/planner run build",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}

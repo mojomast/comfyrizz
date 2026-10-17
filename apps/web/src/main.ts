@@ -8,6 +8,21 @@ import { mountPreview, updatePreview } from './preview';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
+// The C2 server prints http://127.0.0.1:4319/#token=...; the fragment never
+// leaves the browser. Strip it from the visible URL and keep it for API calls.
+const TOKEN_KEY = 'comfyrizz.token';
+const fragmentToken = new URLSearchParams(location.hash.slice(1)).get('token');
+if (fragmentToken) {
+  sessionStorage.setItem(TOKEN_KEY, fragmentToken);
+  history.replaceState(null, '', `${location.pathname}${location.search}`);
+}
+const token = fragmentToken ?? sessionStorage.getItem(TOKEN_KEY);
+function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (token) headers.set('x-comfyrizz-token', token);
+  return fetch(input, { ...init, headers });
+}
+
 /* Lifted from Orbit's Grok Bots shell (MIT): escape, then a tiny markdown subset. */
 function esc(value: unknown): string {
   return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
@@ -162,10 +177,24 @@ async function exportMp4(): Promise<void> {
   label.textContent = 'recompiling + rendering on CPU (~90 s)…';
   logActivity('Export started: recompile with A2, render with Remotion on CPU');
   try {
-    const response = await fetch('/api/render', {
+    let body: Record<string, unknown> = { package: pkg };
+    if (token) {
+      // C2: persist with a base revision, then render that exact revision.
+      const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }),
+      });
+      const savedBody = await saved.json().catch(() => ({}));
+      if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
+      pkg.revision = savedBody.revision;
+      body = { packageId: pkg.id, baseRevision: savedBody.revision };
+      logActivity(`Saved revision ${savedBody.revision} before render`);
+    }
+    const response = await apiFetch('/api/render', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ package: pkg }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? `HTTP ${response.status}`);
     const blob = await response.blob();
@@ -216,6 +245,26 @@ function init(): void {
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   $('render').addEventListener('click', () => void exportMp4());
+
+  if (token) {
+    const stream = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    stream.addEventListener('package.updated', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { revision: number };
+      logActivity(`Server accepted package revision ${data.revision}`);
+    });
+    stream.addEventListener('render.started', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { renderId: string };
+      logActivity(`Render ${data.renderId} started on the server`);
+    });
+    stream.addEventListener('render.finished', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { renderId: string; frames: number; bytes: number };
+      logActivity(`Render ${data.renderId} finished: ${data.frames} frames, ${(data.bytes / 1e6).toFixed(1)} MB`);
+    });
+    stream.addEventListener('render.failed', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { message: string };
+      logActivity(`Render failed: ${data.message}`);
+    });
+  }
 
   $<HTMLFormElement>('composer').addEventListener('submit', event => {
     event.preventDefault();

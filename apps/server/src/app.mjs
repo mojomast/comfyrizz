@@ -1,0 +1,273 @@
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { extname, join, resolve, sep } from 'node:path';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
+import { EventLog } from './events.mjs';
+import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
+
+const MAX_BODY = 5 * 1024 * 1024;
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.ttf': 'font/ttf',
+  '.woff2': 'font/woff2',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+};
+
+function sendJson(response, status, value, extraHeaders = {}) {
+  const body = JSON.stringify(value);
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store',
+    ...extraHeaders,
+  });
+  response.end(body);
+}
+
+function safeTokenEqual(given, expected) {
+  if (typeof given !== 'string' || typeof expected !== 'string') return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function hostAllowed(host) {
+  return typeof host === 'string' && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
+}
+
+function sameOrigin(origin, host) {
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.host === host;
+  } catch {
+    return false;
+  }
+}
+
+function bearer(request) {
+  const header = request.headers.authorization ?? '';
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  return match ? match[1] : null;
+}
+
+export function createApp({
+  root = repoRoot,
+  token,
+  runtimeDir = join(root, 'apps', 'server', '.runtime'),
+  webDist = join(root, 'apps', 'web', 'dist'),
+  render = defaultRenderPackage,
+} = {}) {
+  if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
+  mkdirSync(runtimeDir, { recursive: true });
+  const rendersDir = join(runtimeDir, 'renders');
+  mkdirSync(rendersDir, { recursive: true });
+  const store = new PackageStore(join(runtimeDir, 'packages'));
+  const events = new EventLog();
+  let activeRender = null;
+
+  async function readJson(request) {
+    let size = 0;
+    const chunks = [];
+    for await (const chunk of request) {
+      size += chunk.length;
+      if (size > MAX_BODY) {
+        const error = new Error('request body too large');
+        error.status = 413;
+        throw error;
+      }
+      chunks.push(chunk);
+    }
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    } catch {
+      const error = new Error('invalid JSON body');
+      error.status = 400;
+      throw error;
+    }
+  }
+
+  function auth(request, url) {
+    const host = request.headers.host;
+    if (!hostAllowed(host)) return { error: 'host not allowed', status: 403 };
+    if (!sameOrigin(request.headers.origin, host) && request.method !== 'GET' && request.method !== 'HEAD') {
+      return { error: 'origin not allowed', status: 403 };
+    }
+    const supplied = request.headers['x-comfyrizz-token'] ?? bearer(request) ?? url.searchParams.get('token');
+    if (!safeTokenEqual(supplied, token)) return { error: 'unauthorized', status: 401 };
+    return null;
+  }
+
+  function serveStatic(request, response, url) {
+    let pathname;
+    try {
+      pathname = decodeURIComponent(url.pathname);
+    } catch {
+      return sendJson(response, 400, { error: 'bad path' });
+    }
+    if (pathname === '/') pathname = '/index.html';
+    const file = resolve(webDist, `.${pathname}`);
+    if (file !== webDist && !file.startsWith(webDist + sep)) return sendJson(response, 403, { error: 'forbidden' });
+    const exists = existsSync(file) && statSync(file).isFile();
+    if (!exists) {
+      if (extname(pathname)) return sendJson(response, 404, { error: 'not found' });
+      // SPA fallback.
+      const index = join(webDist, 'index.html');
+      if (!existsSync(index)) return sendJson(response, 503, { error: 'web build missing; run npm run build in apps/web' });
+      response.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' });
+      createReadStream(index).pipe(response);
+      return;
+    }
+    const headers = { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' };
+    if (pathname.startsWith('/assets/')) headers['cache-control'] = 'public, max-age=31536000, immutable';
+    response.writeHead(200, headers);
+    if (request.method === 'HEAD') return response.end();
+    createReadStream(file).pipe(response);
+  }
+
+  async function handler(request, response) {
+    const host = request.headers.host ?? '127.0.0.1';
+    if (!hostAllowed(host)) return sendJson(response, 403, { error: 'host not allowed' });
+    const url = new URL(request.url ?? '/', `http://${host}`);
+
+    if (url.pathname === '/api/health') {
+      return sendJson(response, 200, { ok: true, service: 'comfyrizz-local' });
+    }
+    if (!url.pathname.startsWith('/api/')) {
+      if (request.method !== 'GET' && request.method !== 'HEAD') return sendJson(response, 405, { error: 'method not allowed' });
+      return serveStatic(request, response, url);
+    }
+
+    const denied = auth(request, url);
+    if (denied) return sendJson(response, denied.status, { error: denied.error });
+
+    if (url.pathname === '/api/events' && request.method === 'GET') {
+      const lastEventId = request.headers['last-event-id'] ?? url.searchParams.get('lastEventId');
+      events.subscribe(request, response, lastEventId);
+      return;
+    }
+
+    const packageMatch = /^\/api\/package\/([^/]+)$/.exec(url.pathname);
+    if (packageMatch) {
+      const id = packageMatch[1];
+      if (request.method === 'GET') {
+        const pkg = store.read(id);
+        if (!pkg) return sendJson(response, 404, { error: 'package not found' });
+        return sendJson(response, 200, { package: pkg, revision: pkg.revision });
+      }
+      if (request.method === 'PATCH') {
+        const body = await readJson(request);
+        if (!body.package || typeof body.package !== 'object') return sendJson(response, 400, { error: 'package required' });
+        try {
+          const saved = store.save(id, body.package, body.baseRevision);
+          events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
+          return sendJson(response, 200, { package: saved, revision: saved.revision });
+        } catch (error) {
+          if (error instanceof ConflictError) {
+            return sendJson(response, 409, { error: 'conflict', currentRevision: error.currentRevision });
+          }
+          if (error instanceof InvalidPackageError) {
+            return sendJson(response, 422, { error: 'invalid package', details: error.errors });
+          }
+          if (error.message === 'invalid package id') return sendJson(response, 400, { error: error.message });
+          throw error;
+        }
+      }
+      return sendJson(response, 405, { error: 'method not allowed' });
+    }
+
+    if (url.pathname === '/api/render' && request.method === 'POST') {
+      if (activeRender) return sendJson(response, 409, { error: 'render busy', renderId: activeRender });
+      const body = await readJson(request);
+      const renderId = `r_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      activeRender = renderId;
+      const output = join(rendersDir, `${renderId}.mp4`);
+      let pkg;
+      let packagePath;
+      let revision = null;
+      if (body.package && typeof body.package === 'object') {
+        // C1 compatibility: an edited draft, rendered without mutating the stored package.
+        pkg = body.package;
+        packagePath = join(rendersDir, `${renderId}.package.json`);
+        writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
+        revision = Number.isFinite(pkg.revision) ? pkg.revision : null;
+      } else {
+        const id = body.packageId;
+        if (!id) {
+          activeRender = null;
+          return sendJson(response, 400, { error: 'packageId or package required' });
+        }
+        pkg = store.read(id);
+        if (!pkg) {
+          activeRender = null;
+          return sendJson(response, 404, { error: 'package not found' });
+        }
+        if (body.baseRevision != null && Number(body.baseRevision) !== pkg.revision) {
+          activeRender = null;
+          return sendJson(response, 409, { error: 'conflict', currentRevision: pkg.revision });
+        }
+        packagePath = store.path(id);
+        revision = pkg.revision;
+      }
+
+      events.publish({ type: 'render.started', renderId, packageId: pkg.id, revision });
+      try {
+        const result = await render(packagePath, output, {
+          onLog: line => events.publish({ type: 'render.log', renderId, line }),
+        });
+        events.publish({
+          type: 'render.finished',
+          renderId,
+          packageId: pkg.id,
+          revision,
+          bytes: result.bytes,
+          frames: result.frames,
+          timeline_sha256: result.hash,
+        });
+        response.writeHead(200, {
+          'content-type': 'video/mp4',
+          'content-length': result.bytes,
+          'cache-control': 'no-store',
+          'content-disposition': `attachment; filename="comfyrizz-${renderId}.mp4"`,
+          'x-comfyrizz-render-id': renderId,
+          'x-comfyrizz-timeline-sha256': result.hash,
+          'x-comfyrizz-frames': String(result.frames),
+          ...(revision == null ? {} : { 'x-comfyrizz-revision': String(revision) }),
+        });
+        createReadStream(result.output).pipe(response);
+      } catch (error) {
+        events.publish({ type: 'render.failed', renderId, packageId: pkg.id, message: error.message });
+        sendJson(response, 500, { error: error.message, renderId });
+      } finally {
+        activeRender = null;
+      }
+      return;
+    }
+
+    return sendJson(response, 404, { error: 'not found' });
+  }
+
+  return {
+    handler: (request, response) => {
+      Promise.resolve(handler(request, response)).catch(error => {
+        if (response.headersSent) {
+          response.destroy(error);
+          return;
+        }
+        sendJson(response, error.status ?? 500, { error: error.message });
+      });
+    },
+    store,
+    events,
+    rendersDir,
+    webDist,
+    close: () => events.closeAll(),
+  };
+}
