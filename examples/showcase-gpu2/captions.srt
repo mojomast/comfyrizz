@@ -1,0 +1,47 @@
+1
+00:00:00,000 --> 00:00:02,367
+How does sunlight become the power in your home?
+
+2
+00:00:02,533 --> 00:00:04,833
+Let's follow the energy, step by step.
+
+3
+00:00:05,500 --> 00:00:07,900
+Solar panels are made of silicon cells.
+
+4
+00:00:08,067 --> 00:00:12,733
+When sunlight hits them, it knocks electrons loose and creates a direct current.
+
+5
+00:00:12,700 --> 00:00:18,600
+An inverter converts that direct current into alternating current, the kind your home actually uses.
+
+6
+00:00:18,600 --> 00:00:19,967
+And there is plenty of it.
+
+7
+00:00:20,133 --> 00:00:25,933
+The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use.
+
+8
+00:00:25,900 --> 00:00:31,600
+Extra energy from the afternoon charges a home battery, so the lights stay on after sunset.
+
+9
+00:00:31,600 --> 00:00:33,100
+Output follows the sun.
+
+10
+00:00:33,267 --> 00:00:37,267
+It climbs through the morning, peaks around midday, and fades by evening.
+
+11
+00:00:37,233 --> 00:00:41,767
+Every image, clip and diagram here came from one short GPU session.
+
+12
+00:00:41,933 --> 00:00:43,300
+Made with Comfyrizz.

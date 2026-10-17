@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1344" height="768" viewBox="0 0 1344 768">
+ <defs><marker id="a" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#ffd166"/></marker></defs>
+ <rect width="1344" height="768" fill="#0b1d2e"/>
+ <g font-family="DejaVu Sans, sans-serif" font-weight="bold" fill="#0b1d2e" text-anchor="middle" font-size="34">
+  <circle cx="170" cy="384" r="110" fill="#ffd166"/><text x="170" y="396">Sunlight</text>
+  <rect x="380" y="294" width="250" height="180" rx="20" fill="#4cc9f0"/><text x="505" y="396">Panel</text>
+  <rect x="740" y="294" width="250" height="180" rx="20" fill="#80ed99"/><text x="865" y="396">Inverter</text>
+  <path d="M1110,474 L1110,344 L1200,274 L1290,344 L1290,474 z" fill="#f8f9fa"/><text x="1200" y="430">Home</text>
+ </g>
+ <g stroke="#ffd166" stroke-width="8" marker-end="url(#a)"><line x1="290" y1="384" x2="368" y2="384"/><line x1="640" y1="384" x2="728" y2="384"/><line x1="1000" y1="384" x2="1098" y2="384"/></g>
+</svg>

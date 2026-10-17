@@ -1,0 +1,132 @@
+{
+ "v": 1,
+ "packageId": "pkg_jobplan000001",
+ "revision": 4,
+ "revisionHash": null,
+ "fps": 30,
+ "batches": [
+  {
+   "name": "stills",
+   "jobs": [
+    "a_cutout.still",
+    "a_plate1_still.still"
+   ]
+  },
+  {
+   "name": "plates",
+   "jobs": [
+    "a_plate1.plate"
+   ]
+  }
+ ],
+ "jobs": [
+  {
+   "id": "a_cutout.still",
+   "kind": "still",
+   "batch": "stills",
+   "asset": "a_cutout",
+   "scene": "s1",
+   "sceneIndex": 0,
+   "generator": "flux3-klein",
+   "workflow": "workflows/flux3_klein_t2i.api.json",
+   "workflowSha256": "e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689",
+   "model": "flux-3-image-klein",
+   "modelRevision": null,
+   "deps": [],
+   "output": "assets/a_cutout.png",
+   "outputKind": "image",
+   "cacheKey": "1a96b4358ffb7ce9631246ea7ba62715df3435475b7df572c7750cba743380b4",
+   "dims": {
+    "width": 1024,
+    "height": 1024
+   },
+   "dimsAdjusted": false,
+   "cutout": true,
+   "params": {
+    "width": 1024,
+    "height": 1024,
+    "seed": 7,
+    "steps": 16,
+    "cutout": true,
+    "prompt": "A cute round lavender clay robot mascot waving, plain white background, soft studio light, no text."
+   },
+   "seed": 7
+  },
+  {
+   "id": "a_plate1_still.still",
+   "kind": "still",
+   "batch": "stills",
+   "asset": "a_plate1_still",
+   "scene": null,
+   "sceneIndex": null,
+   "generator": "flux3-klein",
+   "workflow": "workflows/flux3_klein_t2i.api.json",
+   "workflowSha256": "e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689",
+   "model": "flux-3-image-klein",
+   "modelRevision": null,
+   "deps": [],
+   "output": "assets/a_plate1_still.png",
+   "outputKind": "image",
+   "cacheKey": "6b33a46f0659f33718f0db88d2e5e9e5b43ebc3b6a6d8dfd7225c1bab4d0c992",
+   "dims": {
+    "width": 960,
+    "height": 544
+   },
+   "dimsAdjusted": true,
+   "params": {
+    "width": 960,
+    "height": 544,
+    "seed": 42,
+    "steps": 16,
+    "cutout": false,
+    "prompt": "Abstract dark navy background with soft periwinkle light ribbons, calm negative space, no text."
+   },
+   "seed": 42
+  },
+  {
+   "id": "a_plate1.plate",
+   "kind": "plate",
+   "batch": "plates",
+   "asset": "a_plate1",
+   "scene": "s1",
+   "sceneIndex": 0,
+   "generator": "ltx25",
+   "workflow": "workflows/ltx25_i2v_2stage.api.json",
+   "workflowSha256": "7c9cefdb885e54eb4e6f8a68c43c09dbee07e192ab03d6f18b65d611f20d81ba",
+   "model": "ltx-2.5-22b-distilled",
+   "modelRevision": null,
+   "deps": [
+    "a_plate1_still.still"
+   ],
+   "output": "out/intermediates/a_plate1.plate.mp4",
+   "outputKind": "video",
+   "cacheKey": "aad7ba20428bf650efc9c99d9c70a37306261399ea42b5151e1b44bba3cd66ff",
+   "dims": {
+    "width": 960,
+    "height": 544
+   },
+   "dimsAdjusted": false,
+   "fps": 24,
+   "frames": 97,
+   "framesAdjusted": true,
+   "inputAsset": "a_plate1_still",
+   "params": {
+    "image": "a_plate1_still",
+    "prompt": "Slow drift of soft periwinkle light ribbons across a dark navy void, static camera, no text.",
+    "width": 960,
+    "height": 544,
+    "frames": 97,
+    "fps": 24,
+    "seed": 42
+   },
+   "seed": 42
+  }
+ ],
+ "skipped": [
+  {
+   "asset": "a_logo",
+   "reason": "llm-svg is CPU work (A5 sanitize + render-check), not a Comfy job"
+  }
+ ],
+ "hash": "06698d08fd94eaaba6b39a70beae20c295d247ac048c622584925ff4c462eefc"
+}

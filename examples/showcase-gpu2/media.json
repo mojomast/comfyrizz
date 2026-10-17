@@ -1,0 +1,19 @@
+{
+  "note": "Sidecar for scripts/gpu2/explainer: how each scene's GPU media is placed (full-frame background with scrim, or a framed panel).",
+  "scrim": {
+    "s_title": 0.45,
+    "s_flow": 0.0,
+    "s_stat": 0.62,
+    "s_chart": 0.55,
+    "s_outro": 0.5
+  },
+  "skipLayout": [
+    "s_flow"
+  ],
+  "lowerThird": {
+    "s_flow": {
+      "kicker": "How it flows",
+      "text": "Sunlight  \u2192  Panel (DC)  \u2192  Inverter (AC)  \u2192  Home"
+    }
+  }
+}

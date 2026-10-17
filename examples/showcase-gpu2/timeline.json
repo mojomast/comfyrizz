@@ -1,0 +1,385 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 1312,
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 180,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Comfyrizz GPU showcase",
+        "headline": "How solar power works",
+        "sub": "Made with FLUX 3 Klein, LTX-2.5 and SVG on one Google Colab GPU"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_sunrise",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "How does sunlight become the power in your home? Let's follow the energy, step by step.",
+      "provisional": false
+    },
+    {
+      "id": "s_panels",
+      "layout": "hero",
+      "variant": "split",
+      "from": 165,
+      "durationInFrames": 231,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Step 1",
+        "headline": "Panels catch the light",
+        "body": "Silicon cells turn photons into a flow of electrons: direct current."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 7,
+          "palette": [
+            "#0b1d2e",
+            "#13304a",
+            "#ffd166"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_iso_solar",
+          "x": 0.75,
+          "y": 0.5,
+          "w": 0.44,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": "Solar panels are made of silicon cells. When sunlight hits them, it knocks electrons loose and creates a direct current.",
+      "provisional": false
+    },
+    {
+      "id": "s_flow",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 381,
+      "durationInFrames": 192,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Sunlight to home"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_svg_flow",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "An inverter converts that direct current into alternating current, the kind your home actually uses.",
+      "provisional": false
+    },
+    {
+      "id": "s_stat",
+      "layout": "stat",
+      "from": 558,
+      "durationInFrames": 234,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Sunlight reaching Earth in",
+        "body": "90 min",
+        "sub": "roughly matches a year of global energy use (a common estimate)."
+      },
+      "data": {
+        "dataset": "d_solar_day",
+        "display": "number"
+      },
+      "background": {
+        "asset": "a_solarfarm",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "And there is plenty of it. The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use.",
+      "provisional": false
+    },
+    {
+      "id": "s_battery",
+      "layout": "hero",
+      "variant": "split",
+      "from": 777,
+      "durationInFrames": 186,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Step 2",
+        "headline": "Store it for the night",
+        "body": "A home battery keeps the extra daytime energy for the evening."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 4,
+          "palette": [
+            "#0b1d2e",
+            "#13304a",
+            "#ffd166"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_battery",
+          "x": 0.75,
+          "y": 0.5,
+          "w": 0.44,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": "Extra energy from the afternoon charges a home battery, so the lights stay on after sunset.",
+      "provisional": false
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "from": 948,
+      "durationInFrames": 184,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "A day of home solar",
+        "sub": "Output peaks around midday.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "data": {
+        "dataset": "d_solar_day",
+        "display": "bar"
+      },
+      "background": {
+        "asset": "a_ribbons",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Output follows the sun. It climbs through the morning, peaks around midday, and fades by evening.",
+      "provisional": false
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "from": 1117,
+      "durationInFrames": 195,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 0,
+      "copy": {
+        "headline": "Made with Comfyrizz",
+        "sub": "FLUX 3 Klein · LTX-2.5 · SVG guides · Kokoro"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_particles",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [
+        {
+          "asset": "a_mascot",
+          "x": 0.84,
+          "y": 0.5,
+          "w": 0.26,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": "Every image, clip and diagram here came from one short GPU session. Made with Comfyrizz.",
+      "provisional": false
+    }
+  ],
+  "captions": [
+    {
+      "text": "How does sunlight become the power in your home?",
+      "from": 0,
+      "to": 71,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Let's follow the energy, step by step.",
+      "from": 76,
+      "to": 145,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Solar panels are made of silicon cells.",
+      "from": 165,
+      "to": 237,
+      "sceneId": "s_panels",
+      "estimated": false
+    },
+    {
+      "text": "When sunlight hits them, it knocks electrons loose and creates a direct current.",
+      "from": 242,
+      "to": 382,
+      "sceneId": "s_panels",
+      "estimated": false
+    },
+    {
+      "text": "An inverter converts that direct current into alternating current, the kind your home actually uses.",
+      "from": 381,
+      "to": 558,
+      "sceneId": "s_flow",
+      "estimated": false
+    },
+    {
+      "text": "And there is plenty of it.",
+      "from": 558,
+      "to": 599,
+      "sceneId": "s_stat",
+      "estimated": false
+    },
+    {
+      "text": "The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use.",
+      "from": 604,
+      "to": 778,
+      "sceneId": "s_stat",
+      "estimated": false
+    },
+    {
+      "text": "Extra energy from the afternoon charges a home battery, so the lights stay on after sunset.",
+      "from": 777,
+      "to": 948,
+      "sceneId": "s_battery",
+      "estimated": false
+    },
+    {
+      "text": "Output follows the sun.",
+      "from": 948,
+      "to": 993,
+      "sceneId": "s_chart",
+      "estimated": false
+    },
+    {
+      "text": "It climbs through the morning, peaks around midday, and fades by evening.",
+      "from": 998,
+      "to": 1118,
+      "sceneId": "s_chart",
+      "estimated": false
+    },
+    {
+      "text": "Every image, clip and diagram here came from one short GPU session.",
+      "from": 1117,
+      "to": 1253,
+      "sceneId": "s_outro",
+      "estimated": false
+    },
+    {
+      "text": "Made with Comfyrizz.",
+      "from": 1258,
+      "to": 1299,
+      "sceneId": "s_outro",
+      "estimated": false
+    }
+  ],
+  "plates": [
+    {
+      "assetId": "a_battery",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_iso_solar",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_mascot",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_particles",
+      "sourceFps": 24,
+      "sourceFrames": 84,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 68,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_ribbons",
+      "sourceFps": 24,
+      "sourceFrames": 84,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 68,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_solarfarm",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_sunrise",
+      "sourceFps": 24,
+      "sourceFrames": 241,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 193,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_svg_flow",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    }
+  ],
+  "target": {
+    "requested": null,
+    "actual": 1312,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [],
+  "proposals": [],
+  "sourceHash": "519f1cbeffd9678001bd3b12f8e0dd7f40affe602c7d99a5047c19179f44b32e",
+  "hash": "5af39f8b89594564dfdf95141196223f2a9324b12161ff54949e600af9613850"
+}

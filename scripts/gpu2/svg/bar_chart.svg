@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1344" height="768" viewBox="0 0 1344 768">
+ <rect width="1344" height="768" fill="#0d0f14"/>
+ <line x1="160" y1="640" x2="1200" y2="640" stroke="#e6e8ee" stroke-width="4"/>
+ <g fill="#6d8cff"><rect x="220" y="460" width="160" height="180" rx="10"/><rect x="460" y="380" width="160" height="260" rx="10"/><rect x="700" y="260" width="160" height="380" rx="10"/><rect x="940" y="140" width="160" height="500" rx="10" fill="#ff7ab6"/></g>
+ <g font-family="DejaVu Sans, sans-serif" font-weight="bold" fill="#e6e8ee" text-anchor="middle" font-size="34">
+  <text x="300" y="700">2023</text><text x="540" y="700">2024</text><text x="780" y="700">2025</text><text x="1020" y="700">2026</text>
+  <text x="300" y="440">12</text><text x="540" y="360">19</text><text x="780" y="240">28</text><text x="1020" y="120">41</text>
+ </g>
+</svg>

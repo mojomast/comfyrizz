@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1344" height="768" viewBox="0 0 1344 768">
+ <rect width="1344" height="768" fill="#101418"/>
+ <line x1="140" y1="384" x2="1204" y2="384" stroke="#2ec4b6" stroke-width="10" stroke-linecap="round"/>
+ <g fill="#2ec4b6" stroke="#101418" stroke-width="6"><circle cx="240" cy="384" r="34"/><circle cx="530" cy="384" r="34"/><circle cx="820" cy="384" r="34"/><circle cx="1110" cy="384" r="40" fill="#ff9f1c"/></g>
+ <g font-family="DejaVu Sans, sans-serif" font-weight="bold" fill="#f1faee" text-anchor="middle" font-size="36">
+  <text x="240" y="300">Beta</text><text x="530" y="490">Launch</text><text x="820" y="300">Cards</text><text x="1110" y="490">1M users</text>
+ </g>
+ <g font-family="DejaVu Sans, sans-serif" fill="#8d99ae" text-anchor="middle" font-size="26">
+  <text x="240" y="490">Q1</text><text x="530" y="300">Q2</text><text x="820" y="490">Q3</text><text x="1110" y="300">Q4</text>
+ </g>
+</svg>

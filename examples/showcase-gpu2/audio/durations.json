@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "engine": "kokoro-onnx",
+  "engineVersion": "0.4.9",
+  "model": "kokoro-v1.0.onnx",
+  "voices": "voices-v1.0.bin",
+  "voice": "af_heart",
+  "speed": 1.0,
+  "sampleRate": 24000,
+  "gapSeconds": 0.15,
+  "paddingSeconds": 0.5,
+  "loadSeconds": 1.246,
+  "scenes": {
+    "s_title": {
+      "chunks": [
+        {
+          "text": "How does sunlight become the power in your home?",
+          "spoken": "How does sunlight become the power in your home?",
+          "seconds": 2.3467,
+          "samples": 56320
+        },
+        {
+          "text": "Let's follow the energy, step by step.",
+          "spoken": "Let's follow the energy, step by step.",
+          "seconds": 2.2827,
+          "samples": 54784
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 5.2793,
+      "file": "audio/narration/s_title.wav"
+    },
+    "s_panels": {
+      "chunks": [
+        {
+          "text": "Solar panels are made of silicon cells.",
+          "spoken": "Solar panels are made of silicon cells.",
+          "seconds": 2.368,
+          "samples": 56832
+        },
+        {
+          "text": "When sunlight hits them, it knocks electrons loose and creates a direct current.",
+          "spoken": "When sunlight hits them, it knocks electrons loose and creates a direct current.",
+          "seconds": 4.6507,
+          "samples": 111616
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 7.6687,
+      "file": "audio/narration/s_panels.wav"
+    },
+    "s_flow": {
+      "chunks": [
+        {
+          "text": "An inverter converts that direct current into alternating current, the kind your home actually uses.",
+          "spoken": "An inverter converts that direct current into alternating current, the kind your home actually uses.",
+          "seconds": 5.888,
+          "samples": 141312
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 6.388,
+      "file": "audio/narration/s_flow.wav"
+    },
+    "s_stat": {
+      "chunks": [
+        {
+          "text": "And there is plenty of it.",
+          "spoken": "And there is plenty of it.",
+          "seconds": 1.3653,
+          "samples": 32768
+        },
+        {
+          "text": "The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use.",
+          "spoken": "The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use.",
+          "seconds": 5.7813,
+          "samples": 138752
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 7.7967,
+      "file": "audio/narration/s_stat.wav"
+    },
+    "s_battery": {
+      "chunks": [
+        {
+          "text": "Extra energy from the afternoon charges a home battery, so the lights stay on after sunset.",
+          "spoken": "Extra energy from the afternoon charges a home battery, so the lights stay on after sunset.",
+          "seconds": 5.696,
+          "samples": 136704
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 6.196,
+      "file": "audio/narration/s_battery.wav"
+    },
+    "s_chart": {
+      "chunks": [
+        {
+          "text": "Output follows the sun.",
+          "spoken": "Output follows the sun.",
+          "seconds": 1.4933,
+          "samples": 35840
+        },
+        {
+          "text": "It climbs through the morning, peaks around midday, and fades by evening.",
+          "spoken": "It climbs through the morning, peaks around midday, and fades by evening.",
+          "seconds": 3.9893,
+          "samples": 95744
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 6.1327,
+      "file": "audio/narration/s_chart.wav"
+    },
+    "s_outro": {
+      "chunks": [
+        {
+          "text": "Every image, clip and diagram here came from one short GPU session.",
+          "spoken": "Every image, clip and diagram here came from one short G P U session.",
+          "seconds": 4.5013,
+          "samples": 108032
+        },
+        {
+          "text": "Made with Comfyrizz.",
+          "spoken": "Made with Comfy rizz.",
+          "seconds": 1.344,
+          "samples": 32256
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 6.4953,
+      "file": "audio/narration/s_outro.wav"
+    }
+  },
+  "totalSeconds": 46.6567,
+  "synthesisSeconds": 8.3,
+  "file": "narration.raw.wav"
+}

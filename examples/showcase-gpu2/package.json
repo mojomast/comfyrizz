@@ -1,0 +1,561 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_showcasegpu2",
+  "title": "How solar power works: Comfyrizz GPU showcase (GPU test 2)",
+  "createdAt": "2026-10-17T13:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#0b1d2e",
+      "#13304a",
+      "#ffd166",
+      "#f1faee"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 1,
+    "language": "en-us"
+  },
+  "datasets": {
+    "d_solar_day": {
+      "unit": "kWh",
+      "label": "Home solar output by time of day",
+      "values": [
+        {
+          "label": "9 am",
+          "value": 2.1
+        },
+        {
+          "label": "12 pm",
+          "value": 4.8
+        },
+        {
+          "label": "3 pm",
+          "value": 3.9
+        },
+        {
+          "label": "6 pm",
+          "value": 1.2
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "Invented numbers for the showcase; labelled as example data on screen."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 180,
+      "copy": {
+        "kicker": "Comfyrizz GPU showcase",
+        "headline": "How solar power works",
+        "sub": "Made with FLUX 3 Klein, LTX-2.5 and SVG on one Google Colab GPU"
+      },
+      "background": {
+        "asset": "a_sunrise",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "How does sunlight become the power in your home? Let's follow the energy, step by step."
+    },
+    {
+      "id": "s_panels",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 180,
+      "copy": {
+        "kicker": "Step 1",
+        "headline": "Panels catch the light",
+        "body": "Silicon cells turn photons into a flow of electrons: direct current."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 7,
+          "palette": [
+            "#0b1d2e",
+            "#13304a",
+            "#ffd166"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_iso_solar",
+          "x": 0.75,
+          "y": 0.5,
+          "w": 0.44,
+          "anim": "slide-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "Solar panels are made of silicon cells. When sunlight hits them, it knocks electrons loose and creates a direct current."
+    },
+    {
+      "id": "s_flow",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Sunlight to home"
+      },
+      "background": {
+        "asset": "a_svg_flow",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "An inverter converts that direct current into alternating current, the kind your home actually uses."
+    },
+    {
+      "id": "s_stat",
+      "layout": "stat",
+      "preferredFrames": 180,
+      "copy": {
+        "headline": "Sunlight reaching Earth in",
+        "body": "90 min",
+        "sub": "roughly matches a year of global energy use (a common estimate)."
+      },
+      "data": {
+        "dataset": "d_solar_day",
+        "display": "number"
+      },
+      "background": {
+        "asset": "a_solarfarm",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "And there is plenty of it. The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use."
+    },
+    {
+      "id": "s_battery",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 165,
+      "copy": {
+        "kicker": "Step 2",
+        "headline": "Store it for the night",
+        "body": "A home battery keeps the extra daytime energy for the evening."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 4,
+          "palette": [
+            "#0b1d2e",
+            "#13304a",
+            "#ffd166"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_battery",
+          "x": 0.75,
+          "y": 0.5,
+          "w": 0.44,
+          "anim": "slide-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "Extra energy from the afternoon charges a home battery, so the lights stay on after sunset."
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "preferredFrames": 180,
+      "copy": {
+        "headline": "A day of home solar",
+        "sub": "Output peaks around midday.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "data": {
+        "dataset": "d_solar_day",
+        "display": "bar"
+      },
+      "background": {
+        "asset": "a_ribbons",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "Output follows the sun. It climbs through the morning, peaks around midday, and fades by evening."
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "Made with Comfyrizz",
+        "sub": "FLUX 3 Klein · LTX-2.5 · SVG guides · Kokoro"
+      },
+      "background": {
+        "asset": "a_particles",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [
+        {
+          "asset": "a_mascot",
+          "x": 0.84,
+          "y": 0.5,
+          "w": 0.26,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": "Every image, clip and diagram here came from one short GPU session. Made with Comfyrizz."
+    }
+  ],
+  "assets": {
+    "a_sunrise": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_sunrise.mp4",
+      "sha256": "29d8071e8d1521b96059a8b929980197dea86de0a4c79f88ca1957be6d8ae344",
+      "bytes": 3254115,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 241,
+        "durationSeconds": 10.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "Gated LTX-2.5 licence accepted on Hugging Face; output terms not yet reviewed (PLAN rights work, M6)."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "A slow cinematic aerial shot over a vast solar farm at sunrise. The camera glides forward smoothly and steadily above long rows of solar panels as the sun rises over distant hills, warm golden light spreading across the panels and catching their reflections, thin mist drifting in the valleys, a few birds crossing the sky. Continuous single shot, no cuts, no text."
+      },
+      "notes": "GPU test 2 (comfyrizz-gpu2, Oct 17 2026), source raw/long_solar_sunrise.mp4"
+    },
+    "a_iso_solar": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_iso_solar.mp4",
+      "sha256": "2dbc1981a5e2ddbd47bd7c0cdde5c8450acb57d60f0819b84f9f8297b79c98fa",
+      "bytes": 1839440,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "Gated LTX-2.5 licence accepted on Hugging Face; output terms not yet reviewed (PLAN rights work, M6)."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "Use the provided start image as the first frame. The camera performs a slow, smooth push-in toward the house while the glowing energy lines pulse and flow from the solar panels into the house, sun rays shimmer gently. Subtle parallax between the house and the background. No cuts, no text."
+      },
+      "notes": "GPU test 2 (comfyrizz-gpu2, Oct 17 2026), source raw/i2v_iso_solar_push.mp4"
+    },
+    "a_svg_flow": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_svg_flow.mp4",
+      "sha256": "e498796d2530436813f5a5aad65789d68ba72754137a294fdb4c2ad3d0eacb13",
+      "bytes": 437289,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "Gated LTX-2.5 licence accepted on Hugging Face; output terms not yet reviewed (PLAN rights work, M6)."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "LTX-2.5 i2v from the SVG-guided FLUX 3 Klein reference edit of an agent-written flow diagram"
+      },
+      "notes": "GPU test 2 (comfyrizz-gpu2, Oct 17 2026), source raw/i2v_svg_solar_glass.mp4"
+    },
+    "a_solarfarm": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_solarfarm.mp4",
+      "sha256": "36ad9334e9fc186fd5668a707a6db7d88d5711d6c708979019528b6f9bcd1247",
+      "bytes": 2806589,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "Gated LTX-2.5 licence accepted on Hugging Face; output terms not yet reviewed (PLAN rights work, M6)."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "Use the provided start image as the first frame. The drone camera drifts slowly forward over the solar panel rows, warm golden light shimmers across the panels, light haze moves on the horizon. Smooth cinematic motion, no cuts, no text."
+      },
+      "notes": "GPU test 2 (comfyrizz-gpu2, Oct 17 2026), source raw/i2v_solarfarm_drift.mp4"
+    },
+    "a_battery": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_battery.mp4",
+      "sha256": "be7099e4944f0a3c96aeae60904f1389ec05e5d0291524f97f602eb0f99db89d",
+      "bytes": 1133816,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "Gated LTX-2.5 licence accepted on Hugging Face; output terms not yet reviewed (PLAN rights work, M6)."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "Use the provided start image as the first frame. The camera slowly orbits a few degrees around the battery unit like a smooth product turntable, the cyan status light strip gently pulses, soft light glides across the matte surface. Calm commercial product video, no cuts, no text."
+      },
+      "notes": "GPU test 2 (comfyrizz-gpu2, Oct 17 2026), source raw/i2v_battery_turntable.mp4"
+    },
+    "a_ribbons": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_ribbons.mp4",
+      "sha256": "bef0b3e6b744c405998599e76c67e53b45d7717b71320b06988135100a85d8ea",
+      "bytes": 443075,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 84,
+        "durationSeconds": 3.5,
+        "audio": "none"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "Gated LTX-2.5 licence accepted on Hugging Face; output terms not yet reviewed (PLAN rights work, M6)."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "Slow seamless abstract motion background. Translucent periwinkle and violet ribbons of light drift gently from left to right across a dark navy void, softly undulating like silk in slow motion. The camera is locked off and completely static. Calm, continuous, evenly paced motion with no cuts, no flashes and no text."
+      },
+      "notes": "GPU test 2 (comfyrizz-gpu2, Oct 17 2026), source loops/loop_ribbons_seamless.mp4"
+    },
+    "a_particles": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_particles.mp4",
+      "sha256": "024494b97381cd40112744c0c6a889ec4ddee30fcd0f0448ea6811a3c861800e",
+      "bytes": 1629239,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 84,
+        "durationSeconds": 3.5,
+        "audio": "none"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "Gated LTX-2.5 licence accepted on Hugging Face; output terms not yet reviewed (PLAN rights work, M6)."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "Slow seamless abstract background: thousands of tiny glowing golden particles float slowly upward through deep blue darkness, some drifting in and out of focus, gentle depth of field. The camera is completely static. Calm, continuous, evenly paced motion with no cuts, no flashes and no text."
+      },
+      "notes": "GPU test 2 (comfyrizz-gpu2, Oct 17 2026), source loops/loop_particles_seamless.mp4"
+    },
+    "a_mascot": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_mascot.mp4",
+      "sha256": "e6afb676f5ded636bdaec04a4d4f1b2dc9be688c706bd637eb221a555af6aa2e",
+      "bytes": 431102,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "Gated LTX-2.5 licence accepted on Hugging Face; output terms not yet reviewed (PLAN rights work, M6)."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "LTX-2.5 i2v idle loop of the FLUX 3 Klein clay mascot"
+      },
+      "notes": "GPU test 2 (comfyrizz-gpu2, Oct 17 2026), source raw/i2v_clay_mascot_wide.mp4"
+    },
+    "a_narration": {
+      "kind": "audio",
+      "origin": "generated",
+      "status": "ready",
+      "file": "audio/narration.norm.wav",
+      "sha256": "73b0e7f7da14289ce8c3ff0a1099deb8ead148b9629d7c1dfd466d3ba3f229f9",
+      "bytes": 2099262,
+      "media": {
+        "durationSeconds": 43.733,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "Apache-2.0",
+        "url": "https://huggingface.co/hexgrad/Kokoro-82M",
+        "note": "Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md."
+      },
+      "gen": {
+        "generator": "kokoro",
+        "model": "kokoro-v1.0.onnx",
+        "inputs": {
+          "voice": "af_heart",
+          "speed": 1,
+          "sample_rate": 24000,
+          "chunks": 12
+        },
+        "caption": "Six-sentence-level-scene narration synthesized locally on CPU from the package narration text."
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "hand-written (DOLAN)",
+      "weights": "open"
+    },
+    "backends_used": [
+      "colab:G4"
+    ],
+    "closed_apis_used": [],
+    "warnings": [
+      "Stills and plates were generated in GPU test 2 on Google Colab G4 (FLUX 3 Klein BF16, LTX-2.5 int8).",
+      "Chart data is invented and labelled as example data.",
+      "The 90-minute sunlight figure is a commonly cited rough estimate."
+    ]
+  }
+}
