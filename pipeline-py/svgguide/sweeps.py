@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .workflows import SWEEP_AXES, check_sweep_axes
+
 #: Kept in step with packages/backends/src/budget.mjs.
 RATE_PER_HOUR_DEFAULT = 8.9
 COLLECT_AND_STOP_RESERVE_MINUTES = 6
@@ -46,35 +48,56 @@ def build_sweep_spec(
     seeds: tuple[int, ...] = (42, 43),
     denoise_grid: tuple[float, ...] = (0.35, 0.5, 0.65, 0.85),
     approaches: tuple[str, ...] = ("img2img", "ref_edit", "ltx_i2v"),
-    reference_weights: tuple[float, ...] = (0.0, 0.25, 0.5),
+    reference_megapixels: tuple[float, ...] = (0.5, 1.0, 1.5),
     templates_version: str = "0.1.0",
     rate_per_hour: float = RATE_PER_HOUR_DEFAULT,
 ) -> dict[str, Any]:
-    """The full sweep: every scene x seed x approach (x denoise for the img2img family)."""
+    """The full sweep: every scene x seed x approach (x denoise for the img2img family).
+
+    ``ref_edit`` sweeps the reference **budget** (``ReferenceMultiLatent``'s
+    ``resolution.megapixels``), not a weight: that node has no weight input, so the old
+    ``reference_weight`` axis was a no-op that made every reference-edit job in GPU test 2 the same
+    render (issue 5). Every axis produced here is checked against the approach's params map before
+    any job exists, so an axis with no target node cannot be planned again.
+    """
     if not scenes:
         raise ValueError("a sweep needs at least one scene")
     jobs = []
+    checked: set[str] = set()
     for scene in scenes:
         for approach in approaches:
             if approach not in APPROACH_MINUTES:
                 raise ValueError(f"unknown approach {approach!r}; expected {', '.join(APPROACH_MINUTES)}")
+            problems = check_sweep_axes(approach) if approach not in checked else []
+            if problems:
+                raise ValueError(f"{approach} sweep axes do not reach a node: " + "; ".join(problems))
+            checked.add(approach)
             denominators = denoise_grid if approach == "img2img" else (None,)
-            weights = reference_weights if approach == "ref_edit" else (None,)
+            budgets = reference_megapixels if approach == "ref_edit" else (None,)
             width, height = APPROACH_GEOMETRY[approach]
+            # the fields this approach's jobs actually vary; each must be a declared axis
+            varied = {"seed"}
+            if approach == "img2img":
+                varied |= {"denoise"}
+            if approach == "ref_edit":
+                varied |= {"reference_megapixels"}
+            undeclared = sorted(varied - set(SWEEP_AXES[approach]))
+            if undeclared:
+                raise ValueError(f"{approach} varies {', '.join(undeclared)}, which SWEEP_AXES does not declare")
             for seed in seeds:
                 for denoise in denominators:
-                    for weight in weights:
+                    for budget in budgets:
                         jobs.append(
                             {
                                 "id": f"{scene['id']}.{approach}.s{seed}"
                                 + (f".d{denoise}" if denoise is not None else "")
-                                + (f".w{weight}" if weight is not None else ""),
+                                + (f".mp{budget}" if budget is not None else ""),
                                 "scene": scene["id"],
                                 "role": scene.get("role", "hero-subject"),
                                 "approach": approach,
                                 "seed": seed,
                                 "denoise": denoise,
-                                "reference_weight": weight,
+                                "reference_megapixels": budget,
                                 "width": width,
                                 "height": height,
                                 "guide": scene.get("guide"),

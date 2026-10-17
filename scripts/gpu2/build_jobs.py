@@ -28,15 +28,15 @@ dump("b2_svg", b2)
 from svgguide.workflows import build_approach
 e2 = json.load(open(f"{REPO}/workflows/svg-guided/sweeps/e2.json"))
 cap = {s["id"]: s["caption"] for s in e2["scenes"]}
-b3, seen, e2_issues = [], set(), []
+b3 = []
 for j in e2["jobs"]:
     img = f"e2_{j['scene']}.png"
     if j["approach"] == "img2img":
         params = dict(image=img, prompt=cap[j["scene"]], width=1280, height=720, seed=j["seed"], steps=16, denoise=j["denoise"])
     elif j["approach"] == "ref_edit":
-        key = (j["scene"], j["seed"])
-        if key in seen: continue  # reference_weight has no node to map to (ReferenceMultiLatent has no weight)
-        seen.add(key); params = dict(reference=img, prompt=cap[j["scene"]], megapixels=1.0, seed=j["seed"], steps=16, denoise=1.0)
+        # the reference budget is a real node input (node 12, resolution.megapixels) - the old
+        # reference_weight axis had no target node and every job in that batch was the same render
+        params = dict(reference=img, prompt=cap[j["scene"]], megapixels=j["reference_megapixels"], seed=j["seed"], steps=16, denoise=1.0)
     else:
         continue
     d = build_approach(j["approach"], params=params)

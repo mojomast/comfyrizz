@@ -15,7 +15,7 @@ cd pipeline-py
 | `samples/{hero,background,texture}.svg` | three hand-written scenes, one per layout role |
 | `samples/*.regions.json` | the v0 contract: palette (far→near), declared regions, text-safe regions, template and sweep parameters |
 | `samples/out/` | generated: raster PNG, `canny`/`lineart`/`depth` maps, one mask per region, filled workflow + params files per approach, and `manifest.json` (gitignored; regenerate with the command above) |
-| `sweeps/e2.json` | the E2 sweep plan: seeds, denoise grid, reference weights, scenes, rubric, and a unit estimate |
+| `sweeps/e2.json` | the E2 sweep plan: seeds, denoise grid, reference budgets, scenes, rubric, and a unit estimate |
 
 ## The four guidance approaches (PLAN.md E1)
 
@@ -88,3 +88,11 @@ Kyle's explicit approval of the session and the budget before anything runs, and
 so. Output: a CSV of `edge_iou` / `chamfer_px` / `mask_iou` / `palette ΔE` per job plus a contact
 sheet per scene, a CLIP score where a checkpoint is available (optional, CPU-slow, off by default),
 and a human 1–5 sheet that picks the defaults per layout role.
+
+Every axis is checked against the approach's params map before the plan is written
+(`svgguide.workflows.SWEEP_AXES` + `check_sweep_axes`, used by `build_sweep_spec`): an axis whose
+parameter reaches no node input is a no-op that still costs GPU units, which is exactly what the
+first E2 plan shipped — a `reference_weight` axis for `ReferenceMultiLatent`, a node with no weight
+input, so every reference-edit job in that batch was one render under three names (`w0_0`). The
+reference-edit axis is now `reference_megapixels`, the reference **budget** the node really takes
+(`resolution.megapixels`).

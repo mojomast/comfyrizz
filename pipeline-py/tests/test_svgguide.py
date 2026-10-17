@@ -21,10 +21,14 @@ from svgguide import (
     CONTROLNET_STATUS,
     LAYOUT_ROLES,
     RASTER_BACKEND,
+    SWEEP_AXES,
+    AxisError,
     RasterError,
+    assert_sweep_axes,
     build_approach,
     build_sweep_spec,
     canny_edges,
+    check_sweep_axes,
     coverage,
     depth_from_layers,
     estimate_units,
@@ -256,7 +260,7 @@ def test_a_draft_can_be_written_and_read_back(tmp_path: Path):
 def test_the_sweep_spec_covers_every_scene_and_labels_its_estimate():
     scenes = [{"id": f"sample_{name}", "role": role, "guide": "raster.png"} for name, role in (("hero", "hero-subject"), ("background", "background-plate"), ("texture", "texture"))]
     spec = build_sweep_spec(scenes, seeds=(42, 43), denoise_grid=(0.35, 0.5, 0.65, 0.85))
-    # per scene: 2 seeds x (4 denoise img2img + 1 ref_edit x 3 weights + 1 ltx) = 16 -> 48 jobs
+    # per scene: 2 seeds x (4 denoise img2img + 1 ref_edit x 3 reference budgets + 1 ltx) = 16 -> 48 jobs
     assert len(spec["jobs"]) == 48
     assert {job["scene"] for job in spec["jobs"]} == {scene["id"] for scene in scenes}
     assert {job["approach"] for job in spec["jobs"]} == {"img2img", "ref_edit", "ltx_i2v"}
@@ -288,6 +292,66 @@ def test_the_sweep_spec_carries_the_geometry_every_approach_runs_at():
 def test_the_sweep_spec_refuses_an_unknown_approach():
     with pytest.raises(ValueError, match="unknown approach"):
         build_sweep_spec([{"id": "s1"}], approaches=("controlnet",))
+
+
+# ----------------------------------------------------------- sweep axes must reach a node input
+def test_every_sweep_axis_reaches_a_node_input_in_the_real_graph():
+    """GPU test 2, issue 5: an axis with no target node is a no-op, and it is swept for nothing."""
+    for approach in SWEEP_AXES:
+        assert check_sweep_axes(approach) == [], f"{approach} has an axis with no target node"
+    assert set(SWEEP_AXES) == set(APPROACHES), "every drafted approach declares its axes"
+    # the reference-edit axis is the reference budget, which is a real input of the real node
+    ref_params = {"reference": "r.png", "prompt": "x", "seed": 1, "steps": 16, "denoise": 1.0}
+    assert build_approach("ref_edit", params={**ref_params, "megapixels": 1.0})["graph"]["12"]["inputs"]["resolution.megapixels"] == 1.0
+    assert build_approach("ref_edit", params={**ref_params, "megapixels": 0.5})["graph"]["12"]["inputs"]["resolution.megapixels"] == 0.5
+
+
+def test_an_axis_with_no_target_node_is_reported_and_refused():
+    """The check bites in both shapes bug 5 could take: an unmapped parameter, and a mapped node
+    that does not have the input."""
+    graph = build_approach("ref_edit", params={"reference": "r.png", "prompt": "x", "megapixels": 1.0, "seed": 1, "steps": 16, "denoise": 1.0})["graph"]
+
+    # (a) the parameter carries no mapping at all - what `reference_weight` did in e2.json
+    unmapped = check_sweep_axes("ref_edit", graph=graph, mapping={"seed": [["7", "seed"]], "denoise": [["7", "denoise"]]})
+    assert len(unmapped) == 1 and "reference_megapixels" in unmapped[0] and "does not map to any node" in unmapped[0]
+
+    # (b) the mapping points at a node whose inputs do not include that field
+    wrong_field = check_sweep_axes("ref_edit", graph=graph, mapping={"seed": [["7", "seed"]], "denoise": [["7", "denoise"]], "megapixels": [["12", "weight"]]})
+    assert len(wrong_field) == 1 and "ReferenceMultiLatent" in wrong_field[0] and "no such input" in wrong_field[0]
+
+    # (c) a mapping to a node that is not in the graph
+    missing_node = check_sweep_axes("ref_edit", graph=graph, mapping={"seed": [["7", "seed"]], "denoise": [["7", "denoise"]], "megapixels": [["99", "resolution.megapixels"]]})
+    assert len(missing_node) == 1 and "missing node 99" in missing_node[0]
+
+    with pytest.raises(AxisError, match="reference_megapixels"):
+        assert_sweep_axes("ref_edit", graph=graph, mapping={"seed": [["7", "seed"]]})
+    # a clean mapping passes
+    assert assert_sweep_axes("ref_edit") is None
+
+
+def test_declaring_an_axis_with_no_target_node_stops_the_sweep(monkeypatch):
+    """The acceptance for issue 5: put an axis in SWEEP_AXES that no node can be reached from and
+    the sweep refuses to plan, instead of spending GPU units on identical renders."""
+    # `reference_weight` driving a parameter the reference-edit map does not carry: bug 5 exactly
+    monkeypatch.setitem(SWEEP_AXES["ref_edit"], "reference_weight", "weight")
+    problems = check_sweep_axes("ref_edit")
+    assert len(problems) == 1 and "reference_weight" in problems[0] and "does not map to any node" in problems[0]
+
+    with pytest.raises(ValueError, match="reference_weight"):
+        build_sweep_spec([{"id": "sample_hero", "role": "hero-subject", "guide": "r.png"}])
+    # the axis list is per approach: dropping the declaration again lets the sweep plan
+    monkeypatch.delitem(SWEEP_AXES["ref_edit"], "reference_weight")
+    assert len(build_sweep_spec([{"id": "sample_hero", "role": "hero-subject", "guide": "r.png"}])["jobs"]) == 8 + 6 + 2
+
+
+def test_the_ref_edit_axis_is_the_reference_budget_not_a_weight():
+    spec = build_sweep_spec([{"id": "sample_hero", "role": "hero-subject", "guide": "r.png"}])
+    refs = [job for job in spec["jobs"] if job["approach"] == "ref_edit"]
+    assert len(refs) == 2 * 3, "2 seeds x 3 reference budgets"
+    assert {job["reference_megapixels"] for job in refs} == {0.5, 1.0, 1.5}
+    assert all("reference_weight" not in job for job in spec["jobs"])
+    assert all(job["denoise"] is None for job in refs), "the budget moves, not the denoise"
+    assert ".mp" in refs[0]["id"]
 
 
 # --------------------------------------------------------------------------- eval metrics

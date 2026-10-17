@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from comfyrizz_pipeline.client import inject_params, load_params_map
 
@@ -56,6 +56,75 @@ CONTROLNET_STATUS = {
 
 class GraphError(ValueError):
     """A graph whose wiring or parameter injection does not hold up."""
+
+
+#: The fields an E2 sweep may vary, per approach, and the **mapped parameter** each one drives.
+#: A sweep axis counts only if it reaches a real node input: GPU test 2, issue 5 shipped a
+#: ``reference_weight`` axis that had no target node at all (``ReferenceMultiLatent`` has no weight
+#: input), so every reference-edit job in that sweep was the same render, named ``w0_0`` — GPU units
+#: spent to learn nothing. ``check_sweep_axes`` is what refuses that now.
+#:
+#: ``ref_edit`` deliberately has no ``width``/``height`` axis: that graph sizes its output from
+#: ``resolution.megapixels`` and the reference image, and its params map carries no width/height
+#: target, so claiming those as axes would be the same no-op in a different hat.
+SWEEP_AXES: dict[str, dict[str, str]] = {
+    "img2img": {"seed": "seed", "denoise": "denoise", "width": "width", "height": "height"},
+    "ref_edit": {"seed": "seed", "reference_megapixels": "megapixels"},
+    "ltx_i2v": {"seed": "seed", "frames": "frames", "width": "width", "height": "height"},
+}
+
+
+class AxisError(GraphError):
+    """A sweep axis that would not change anything on the server."""
+
+
+def check_sweep_axes(
+    approach: str,
+    *,
+    graph: dict[str, Any] | None = None,
+    mapping: dict[str, Any] | None = None,
+    axes: Sequence[str] | None = None,
+) -> list[str]:
+    """Problems with `approach`'s sweep axes, as strings (empty means every axis has a target).
+
+    Each axis maps to a parameter in the workflow's params file, which maps to ``[node, field]``
+    entries; passing `axes` checks just those names (this is how the test proves the check bites).
+    """
+    if approach not in SWEEP_AXES:
+        return [f"unknown approach {approach!r}; expected one of {', '.join(SWEEP_AXES)}"]
+    if graph is None or mapping is None:
+        graph_path = Path(BASE_GRAPHS[approach])
+        graph = json.loads(graph_path.read_text(encoding="utf-8")) if graph is None else graph
+        mapping = load_params_map(graph_path) if mapping is None else mapping
+    wanted = axes if axes is not None else tuple(SWEEP_AXES[approach])
+    problems: list[str] = []
+    for axis in wanted:
+        param = SWEEP_AXES[approach].get(axis)
+        if param is None:
+            problems.append(f"axis {axis!r} is not declared in SWEEP_AXES[{approach!r}]")
+            continue
+        targets = mapping.get(param) or []
+        if not targets:
+            problems.append(f"axis {axis!r} drives parameter {param!r}, which the params map does not map to any node")
+            continue
+        for target in targets:
+            node_id, field = str(target[0]), str(target[1])
+            node = graph.get(node_id)
+            if node is None:
+                problems.append(f"axis {axis!r} maps to missing node {node_id}")
+            elif field not in (node.get("inputs") or {}):
+                problems.append(
+                    f"axis {axis!r} maps to {node_id}.{field}, but node {node_id} "
+                    f"({node.get('class_type')}) has no such input"
+                )
+    return problems
+
+
+def assert_sweep_axes(approach: str, **kwargs: Any) -> None:
+    """Raise :class:`AxisError` unless every sweep axis of `approach` reaches a real node input."""
+    problems = check_sweep_axes(approach, **kwargs)
+    if problems:
+        raise AxisError(f"{approach}: " + "; ".join(problems))
 
 
 def check_graph(graph: dict[str, Any]) -> list[str]:

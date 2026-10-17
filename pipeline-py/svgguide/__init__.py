@@ -19,7 +19,16 @@ from .controlmaps import (
 from .raster import RASTER_BACKEND, RasterError, rasterize, sanitize_svg
 from .sweeps import APPROACH_GEOMETRY, build_sweep_spec, estimate_units, write_sweep_spec
 from .templates import TEMPLATES_VERSION, LAYOUT_ROLES, render_caption
-from .workflows import APPROACHES, CONTROLNET_STATUS, build_approach, write_approach
+from .workflows import (
+    APPROACHES,
+    CONTROLNET_STATUS,
+    SWEEP_AXES,
+    AxisError,
+    assert_sweep_axes,
+    build_approach,
+    check_sweep_axes,
+    write_approach,
+)
 
 __all__ = [
     "APPROACHES",
@@ -28,10 +37,14 @@ __all__ = [
     "LAYOUT_ROLES",
     "RASTER_BACKEND",
     "RasterError",
+    "SWEEP_AXES",
+    "AxisError",
     "TEMPLATES_VERSION",
+    "assert_sweep_axes",
     "build_approach",
     "build_sweep_spec",
     "canny_edges",
+    "check_sweep_axes",
     "depth_from_layers",
     "estimate_units",
     "lineart",
