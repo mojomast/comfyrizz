@@ -100,6 +100,24 @@ def _content_type(path: Path) -> str:
 
 
 
+def classify_metadata_refusal(outcome: SubmitOutcome) -> bool:
+    """Does this refusal say the server will not take job labels? (H-fix3, GPU test 2 issue 1.)
+
+    ``comfy-api-proxy`` rejects the SDK's metadata object — its own words on the GPU test 2 run were
+    "'metadata' must be a string (opaque label)" — while the SDK cannot send a string instead. So the
+    only contract both accept is *no* metadata, and the runner has to discover that from the refusal
+    rather than pretend one form works everywhere. A refusal is safe to retry: a 4xx means the
+    submission was not accepted, so nothing is double-billed.
+    """
+    if not outcome.refused or not outcome.error:
+        return False
+    code = str(outcome.error.get("code") or "")
+    message = str(outcome.error.get("message") or "")
+    if code in ("invalid_workflow", "invalid_request", "validation_error") and "metadata" in message.lower():
+        return True
+    return "metadata" in message.lower() and ("must be a string" in message.lower() or "opaque label" in message.lower())
+
+
 @dataclass
 class SubmitOutcome:
     """``kind`` is one of submitted | ambiguous | refused | duplicate_key."""

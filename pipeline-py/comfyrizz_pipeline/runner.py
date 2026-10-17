@@ -29,7 +29,7 @@ from typing import Any
 
 from .atomic import canonical_hash, ensure_dir, read_json, sha256_file, write_json_atomic
 from .attempts import Attempt, AttemptStore, attempts_jsonl, now_iso
-from .client import ComfyClient, UploadError, load_file_params
+from .client import ComfyClient, UploadError, classify_metadata_refusal, load_file_params
 from .manifest import build_manifest, manifest_decides_success, read_manifest, write_manifest
 from .progress import stdout_writer
 from .schema import validate_jobs
@@ -65,6 +65,9 @@ class RunnerConfig:
     #: forward ComfyUI's native routes can be bypassed by pointing this at ComfyUI itself)
     upload_url: str | None = None
     uploads_enabled: bool = True
+    #: Job labels (`metadata`): `"auto"` sends them and drops them for the rest of the run if the
+    #: server refuses them (comfy-api-proxy does: GPU test 2, issue 1); True/False force one way.
+    job_labels: bool | str = "auto"
     #: run only one batch of the plan ("stills" | "plates" | "upscales" | "audio"); the Google
     #: Colab backend admits and collects batch by batch so the reserve is checked mid-package
     batch: str | None = None
@@ -93,6 +96,9 @@ class Runner:
         #: sha256 -> {name, url, at}: what this run has already uploaded, so two jobs that need
         #: the same bytes (a still used as an i2v source twice) upload them once
         self._uploads: dict[str, dict[str, Any]] = {}
+        #: job labels state: None until the server says something, then True/False
+        self.labels_ok: bool | None = None
+        self.label_note: str | None = None
         self.run_id = config.run_id or f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
         # the run directory is named after the run id, so keep the two in step
         self.config.run_id = self.run_id
@@ -265,6 +271,8 @@ class Runner:
 
     # -- manifest ------------------------------------------------------------------
     def _write_manifest(self, notes: list[str] | None = None) -> dict[str, Any]:
+        if self.label_note:
+            notes = [*(notes or []), self.label_note]
         manifest = build_manifest(
             run_id=self.run_id,
             jobs_doc=self.jobs_doc,
@@ -366,6 +374,34 @@ class Runner:
         self.progress.emit("job_failed", job=job["id"], attempt=attempt.attempt_id, value=error.get("code"))
         return self._result(job, state, attempt, error=error)
 
+    def job_labels_enabled(self) -> bool:
+        """Whether the *next* submit carries metadata labels.
+
+        ``auto`` starts optimistic: labels are what make an ambiguous submit recoverable, so the
+        runner asks for them until a server says no. ``comfy-api-proxy`` refuses the SDK's metadata
+        object (GPU test 2, issue 1), so a run against it pays one refused submit and then goes
+        label-free — recorded in the manifest note rather than silently.
+        """
+        if self.config.job_labels is True:
+            return True
+        if self.config.job_labels is False:
+            return False
+        return self.labels_ok is not False
+
+    def _job_labels(self, attempt_id: str, job: dict[str, Any]) -> dict[str, str] | None:
+        if not self.job_labels_enabled():
+            return None
+        return {"comfyrizz_attempt": attempt_id, "comfyrizz_job": job["id"]}
+
+    def _note_labels_unsupported(self, job: dict[str, Any], outcome: Any) -> None:
+        self.labels_ok = False
+        self.label_note = (
+            f"this server refused job labels ({outcome.error.get('code') if outcome.error else 'refused'}"
+            f"{': ' + str(outcome.error.get('message'))[:160] if outcome.error else ''}); "
+            "the run continued without metadata, so a lost submit cannot be recovered from its label"
+        )
+        self.progress.emit("metadata_unsupported", job=job["id"], attempt=None, value=self.label_note)
+
     def _submit_job(self, job: dict[str, Any], *, file_inputs: dict[str, Path] | None = None) -> dict[str, Any]:
         params = dict(job.get("params") or {})
         file_inputs = file_inputs or {}
@@ -430,13 +466,31 @@ class Runner:
             self.workflow_path(job),
             params=params,
             idempotency_key=idempotency_key,
-            metadata={"comfyrizz_attempt": attempt_id, "comfyrizz_job": job["id"]},
+            metadata=self._job_labels(attempt_id, job),
             params_source=self.job_params_source(job),
             # the paths go back in so the workflow's own `files` declaration is enforced; the
             # uploader is the same cache, so this second pass makes no second upload
             file_inputs=file_inputs,
             upload=self.upload_input,
         )
+
+        if outcome.kind == "refused" and self.job_labels_enabled() and classify_metadata_refusal(outcome):
+            # one contract, chosen by the server: ask for labels, and if it says no, ask again
+            # without them. A refusal means nothing was accepted, so this cannot double-bill.
+            self._note_labels_unsupported(job, outcome)
+            attempt = self.attempts.update(
+                attempt,
+                events=[*(attempt.events or []), {"at": now_iso(), "event": "metadata_retry", "because": (outcome.error or {}).get("code")}],
+            )
+            outcome = self.client.submit(
+                self.workflow_path(job),
+                params=params,
+                idempotency_key=idempotency_key,
+                metadata=None,
+                params_source=self.job_params_source(job),
+                file_inputs=file_inputs,
+                upload=self.upload_input,
+            )
 
         if outcome.submitted:
             # 3. the job id is written the moment we have it, before any progress line
@@ -457,8 +511,13 @@ class Runner:
         return self._result(job, "failed", attempt, error=outcome.error)
 
     def _recover_duplicate_key(self, job: dict[str, Any], attempt: Attempt, outcome: Any) -> dict[str, Any]:
-        """A reused key is rejected, not replayed: adopt the job it created, if we can find it."""
-        listed = self.client.list_jobs(metadata={"comfyrizz_job": job["id"]})
+        """A reused key is rejected, not replayed: adopt the job it created, if we can find it.
+
+        Finding it means listing jobs by label, which the proxy refuses (GPU test 2, issue 1), so with
+        labels off this goes straight to ``submission_unknown`` — the honest answer, because a label
+        search that cannot run is not evidence that no job exists.
+        """
+        listed = self.client.list_jobs(metadata={"comfyrizz_job": job["id"]}) if self.job_labels_enabled() else []
         for item in listed:
             if str(item.get("id", "")).startswith("job_"):
                 attempt = self.attempts.update(
