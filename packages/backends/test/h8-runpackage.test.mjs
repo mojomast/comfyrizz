@@ -183,11 +183,18 @@ test("a teardown that itself fails is reported, not thrown away", async () => {
 });
 
 test("teardownMode says how the box is left behind", async () => {
-  for (const [mode, reason] of [["done", "done"], ["idle", "idle"], ["never", null]]) {
+  // done: stop it; idle: stop it but tell the backend to keep it warm for the next run; never: leave
+  // it entirely alone (the caller owns it then)
+  for (const [mode, reason, state] of [["done", "done", "stopped"], ["idle", "idle", "stopped"], ["never", null, null]]) {
     const backend = stubBackend();
     const result = await runPackage(backend, fixture(), { workDir: workdir(), teardownMode: mode });
-    assert.equal(result.teardown, null, `${mode} leaves the box alone`);
-    assert.deepEqual(backend.calls.filter((call) => call.startsWith("teardown")), reason ? [`teardown:${reason}`] : []);
+    assert.deepEqual(backend.calls.filter((call) => call.startsWith("teardown")), reason ? [`teardown:${reason}`] : [], mode);
+    if (state === null) {
+      assert.equal(result.teardown, null, `${mode} leaves the box alone`);
+    } else {
+      assert.equal(result.teardown.state, state, mode);
+      assert.match(result.teardown.evidence, new RegExp(reason), mode);
+    }
     assert.ok(TEARDOWN_MODES.includes(mode));
   }
   await assert.rejects(() => runPackage(stubBackend(), fixture(), { workDir: workdir(), teardownMode: "later" }), /unknown teardownMode/);

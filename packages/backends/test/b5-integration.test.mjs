@@ -361,3 +361,42 @@ test("one injected job failure: partial results kept, dependents skipped, only t
   assert.deepEqual(plateAttempts.map((attempt) => attempt.seq), [1, 2]);
   assert.equal(attempts.filter((attempt) => attempt.job === "a_b5_still.still").length, 1);
 });
+
+test("H8: backend.runPackage takes the package all the way to applied assets (BYO, fakes)", async (t) => {
+  if (!existsSync(PYTHON)) {
+    t.skip(`no venv python at ${PYTHON}`);
+    return;
+  }
+  const workspace = mkdtempSync(join(tmpdir(), "comfyrizz-h8-"));
+  const outDir = join(workspace, "out");
+  mkdirSync(outDir, { recursive: true });
+  const pkg = buildFixture(workspace);
+  const requestLog = join(workspace, "requests.jsonl");
+  const comfyui = await startFake({ requestLog });
+  // the backend is created before the run, as an app would: it plans nothing itself
+  const backend = registerBackend(backendFor({ workspace, jobsDoc: planWithPackage(pkg, workspace), comfyuiUrl: comfyui.url, runnerOut: outDir, proxyLog: requestLog }));
+
+  const phases = [];
+  const result = await backend.runPackage(pkg, { workDir: workspace, outDir, onEvent: (event) => phases.push(event.phase ?? event.event) });
+
+  assert.equal(result.backend.id, "byo-comfyui");
+  assert.equal(result.ok, true, JSON.stringify(result.counts));
+  assert.deepEqual(result.counts, { succeeded: 3 });
+  assert.equal(result.manifest.complete, true);
+  assert.deepEqual(result.jobsDoc.jobs.map((job) => job.id), ["a_b5_still.still", "a_b5_plate.plate", "a_b5_plate2.plate"]);
+  assert.ok(result.estimate, "the spend estimate is part of the record");
+  assert.equal(result.estimate.gpuMinutes, null, "BYO does not pretend to measure the user's hardware");
+  assert.match(result.estimate.note, /user's hardware/);
+  assert.equal(result.teardown.state, "stopped");
+  assert.match(result.teardown.evidence, /proxy/, JSON.stringify(result.teardown));
+  // the phases are in the order H8 promises, and the runner's own events came through
+  assert.deepEqual(phases.filter((phase) => ["planned", "up", "ran", "applied", "teardown"].includes(phase)), ["planned", "up", "ran", "applied", "teardown"]);
+  assert.ok(phases.includes("job_done"), "the runner's events reach the caller");
+  // every job was submitted once, stills before plates, exactly as a manual run would
+  assert.deepEqual(postsIn(requestLog).map((entry) => entry.label), ["a_b5_still.still", "a_b5_plate.plate", "a_b5_plate2.plate"]);
+  // and the package it returns is the applied one: ready assets with provenance, still valid
+  assert.equal(result.applied.length, 3);
+  assert.equal(result.package.assets.a_b5_still.status, "ready");
+  assert.equal(result.package.assets.a_b5_plate.media.frames, 97);
+  assert.deepEqual(validatePackage(result.package).errors, []);
+});
