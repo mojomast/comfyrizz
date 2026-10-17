@@ -73,6 +73,11 @@ npm --prefix packages/tts test          # 11 tests (unit + narrated acceptance)
 cd apps/renderer && npm run render:narrated
 ```
 
+`narrate.mjs` adds `assets.a_narration` and points every narrated scene at it
+(`narration_asset` + measured `narration_duration_frames`), so package
+validation reports no `WARN_ASSET_UNUSED`. `scripts/fetch-models.sh` is
+executable and can be run directly.
+
 `--padding 0.5` matches the 15-frame fade at 30 fps. It guarantees the previous
 scene's speech ends exactly when the next scene starts; the mix trims that
 overlap rather than letting two sentences collide.

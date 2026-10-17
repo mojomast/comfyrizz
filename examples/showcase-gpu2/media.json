@@ -1,5 +1,5 @@
 {
-  "note": "Sidecar for scripts/gpu2/explainer: how each scene's GPU media is placed (full-frame background with scrim, or a framed panel).",
+  "note": "Renderer sidecar (P-fix1) for examples/showcase-gpu2: how each scene's GPU media is placed (full-frame background with scrim, or a framed panel). Superseded by H-fix1 schema fields once they land.",
   "scrim": {
     "s_title": 0.45,
     "s_flow": 0.0,
