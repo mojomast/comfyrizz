@@ -1,0 +1,8 @@
+assets/
+public/
+out/
+audio/
+*.mp4
+*.wav
+*.png
+*.jpg

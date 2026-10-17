@@ -1,0 +1,63 @@
+{
+  "note": "Sidecar for scripts/willem/explainer.",
+  "scrim": {},
+  "skipLayout": [
+    "s_title",
+    "s_rocket",
+    "s_surf",
+    "s_racecar",
+    "s_dj",
+    "s_dragon",
+    "s_soccer",
+    "s_orchestra",
+    "s_cake"
+  ],
+  "lowerThird": {
+    "s_rocket": {
+      "kicker": "Willem,",
+      "text": "Pilote de fusée !"
+    },
+    "s_surf": {
+      "kicker": "Willem,",
+      "text": "Reine du surf !"
+    },
+    "s_racecar": {
+      "kicker": "Willem,",
+      "text": "Pilote de course !"
+    },
+    "s_dj": {
+      "kicker": "Willem,",
+      "text": "DJ de la soirée !"
+    },
+    "s_dragon": {
+      "kicker": "Willem,",
+      "text": "Dresseuse de dragon !"
+    },
+    "s_soccer": {
+      "kicker": "Willem,",
+      "text": "But gagnant !"
+    },
+    "s_orchestra": {
+      "kicker": "Willem,",
+      "text": "Cheffe d'orchestre !"
+    }
+  },
+  "bigTitle": {
+    "s_title": {
+      "kicker": "17 octobre 2026",
+      "text": "Willem a 3 ans !",
+      "sub": "Une journée super extraordinaire",
+      "position": "bottom",
+      "confetti": false
+    },
+    "s_cake": {
+      "text": "Joyeux 3e anniversaire, Willem !",
+      "sub": "Gros bisous de ton parrain Kyle"
+    }
+  },
+  "music": {
+    "file": "music.wav",
+    "fromScene": "s_cake",
+    "volume": 0.35
+  }
+}

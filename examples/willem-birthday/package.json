@@ -1,0 +1,570 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_willem3",
+  "title": "Joyeux 3e anniversaire, Willem !",
+  "createdAt": "2026-10-17T15:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#2b1640",
+      "#ff7a59",
+      "#ffd166",
+      "#fff8f0"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "kokoro",
+    "voice": "ff_siwis",
+    "speed": 1,
+    "language": "fr-fr"
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 165,
+      "copy": {
+        "kicker": "17 octobre 2026",
+        "headline": "Willem a 3 ans !",
+        "sub": "Une journée super extraordinaire"
+      },
+      "background": {
+        "asset": "a_portrait",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 12
+      },
+      "narration": "Aujourd'hui, Willem a trois ans ! Et à trois ans, on peut tout faire !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 124
+    },
+    {
+      "id": "s_rocket",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "Pilote de fusée !"
+      },
+      "background": {
+        "asset": "a_rocket",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 12
+      },
+      "narration": "Willem, pilote de fusée, file tout droit vers la Lune !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 104
+    },
+    {
+      "id": "s_surf",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "Reine du surf !"
+      },
+      "background": {
+        "asset": "a_surf",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 12
+      },
+      "narration": "Une vague géante ? Aucun problème pour la reine du surf !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 118
+    },
+    {
+      "id": "s_racecar",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "Pilote de course !"
+      },
+      "background": {
+        "asset": "a_racecar",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 12
+      },
+      "narration": "Vroum ! Elle prend le virage à toute vitesse !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 105
+    },
+    {
+      "id": "s_dj",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "DJ de la soirée !"
+      },
+      "background": {
+        "asset": "a_dj",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 12
+      },
+      "narration": "Place à la DJ ! Tout le monde danse avec Willem !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 118
+    },
+    {
+      "id": "s_dragon",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "Dresseuse de dragon !"
+      },
+      "background": {
+        "asset": "a_dragon",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 12
+      },
+      "narration": "Et maintenant, une balade à dos de dragon au-dessus des nuages !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 134
+    },
+    {
+      "id": "s_soccer",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "But gagnant !"
+      },
+      "background": {
+        "asset": "a_soccer",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 12
+      },
+      "narration": "Elle tire… et c'est le but gagnant !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 71
+    },
+    {
+      "id": "s_orchestra",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 165,
+      "copy": {
+        "headline": "Cheffe d'orchestre !"
+      },
+      "background": {
+        "asset": "a_orchestra",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 12
+      },
+      "narration": "Maestro Willem dirige l'orchestre des animaux !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 99
+    },
+    {
+      "id": "s_cake",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 330,
+      "copy": {
+        "headline": "Joyeux 3e anniversaire, Willem !"
+      },
+      "background": {
+        "asset": "a_cake",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "narration": "Trois bougies, un grand souffle… Joyeux anniversaire, Willem ! On t'aime fort !",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 153
+    }
+  ],
+  "assets": {
+    "a_portrait": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_portrait.mp4",
+      "sha256": "2a373064fe6a8268fcc238c698522eb2be9a9b21c5a93b8db16595ad68078291",
+      "bytes": 1317425,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "She waves hello at the viewer, blinks and smiles warmly, her hair and bow bounce gently."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_rocket": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_rocket.mp4",
+      "sha256": "f6dc3476f5fe0b3d1f843d0775399ace249f9106ac6a15be77c0ba2ac0b061a5",
+      "bytes": 1888360,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "The rocket flies toward the Moon, the girl grips the controls and laughs, stars streak past, the control lights blink."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_surf": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_surf.mp4",
+      "sha256": "84368089cc255127b4857bd3e79c9245f822f3d965ec54afea37dd8018f3c8cb",
+      "bytes": 2369452,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "She rides along the curling wave on her surfboard, spray sparkles around her, her hair blows in the wind."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_racecar": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_racecar.mp4",
+      "sha256": "722fbc898b9ff7bbf35bd8e5a2d8c746ade5b3aa4d4c237542241984a580664c",
+      "bytes": 2358658,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "The little race car speeds along the track, the background streaks past, she grips the wheel and grins."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_dj": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_dj.mp4",
+      "sha256": "f7684d8fcc708647c1aed7bdd523c6051819f5601d64929c5624ec31a17caf76",
+      "bytes": 2085738,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "She bobs her head and taps the DJ buttons, the disco lights sweep and the animal friends dance."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_dragon": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_dragon.mp4",
+      "sha256": "af190b3044b1fb83c7427a54e0e90403d47ef520a57354f2a5e0a62327ceb3c1",
+      "bytes": 1344485,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "The friendly dragon flaps its wings and glides over the clouds, the girl holds on and cheers."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_soccer": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_soccer.mp4",
+      "sha256": "d4fa6a57bea8c1ee404e7e92ec5a7d25ab1f4aed7d170f50261d9e0a8145b5c4",
+      "bytes": 2828581,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "She kicks the ball and it flies into the net, confetti falls and she throws her arms up in celebration."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_orchestra": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_orchestra.mp4",
+      "sha256": "f7618904eded281d5fb9b8cc51d2bf1bac4125f984585b37b4c9a807f9c30f84",
+      "bytes": 1541718,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "She waves the little baton in time, the animal musicians play and sway, the stage lights glow."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_cake": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_cake.mp4",
+      "sha256": "b6f75a348f616e8a0060ef9e9ccaae08ba10eb947d0ac5462a381eb4a32174b2",
+      "bytes": 1387343,
+      "media": {
+        "width": 1024,
+        "height": 576,
+        "fps": 24,
+        "frames": 97,
+        "durationSeconds": 4.042,
+        "audio": "none"
+      },
+      "license": {
+        "id": "LicenseRef-private-family"
+      },
+      "redistributable": false,
+      "model_license": {
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5",
+        "note": "LTX-2.5 i2v from a FLUX 3 Klein reference-edit still."
+      },
+      "gen": {
+        "generator": "ltx25",
+        "model": "ltx-2.5-22b-distilled",
+        "quantization": "int8",
+        "caption": "She takes a breath and blows, the three candle flames flicker and go out, confetti drifts down, balloons sway."
+      },
+      "notes": "Private family video (comfyrizz-willem, Oct 17 2026). Reference photo and media are not committed."
+    },
+    "a_narration": {
+      "kind": "audio",
+      "origin": "generated",
+      "status": "ready",
+      "file": "audio/narration.norm.wav",
+      "sha256": "0a3a5778c9dcf8c6e634398fea36b70b90cb64493256fa9d7ba2586cc2f57ef3",
+      "bytes": 2486478,
+      "media": {
+        "durationSeconds": 51.8,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "Apache-2.0",
+        "url": "https://huggingface.co/hexgrad/Kokoro-82M",
+        "note": "Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md."
+      },
+      "gen": {
+        "generator": "kokoro",
+        "model": "kokoro-v1.0.onnx",
+        "inputs": {
+          "voice": "ff_siwis",
+          "speed": 1,
+          "sample_rate": 24000,
+          "chunks": 14
+        },
+        "caption": "Six-sentence-level-scene narration synthesized locally on CPU from the package narration text."
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "hand-written",
+      "weights": "open"
+    },
+    "backends_used": [
+      "colab:G4"
+    ],
+    "closed_apis_used": [],
+    "warnings": [
+      "Private family video: the reference photo and all generated media stay out of git.",
+      "Stills: FLUX 3 Klein reference edit (BF16); motion: LTX-2.5 i2v (int8) on Google Colab G4."
+    ]
+  }
+}

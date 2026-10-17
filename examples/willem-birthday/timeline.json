@@ -1,0 +1,404 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 1554,
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 165,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 12,
+      "copy": {
+        "kicker": "17 octobre 2026",
+        "headline": "Willem a 3 ans !",
+        "sub": "Une journée super extraordinaire"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_portrait",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Aujourd'hui, Willem a trois ans ! Et à trois ans, on peut tout faire !",
+      "provisional": false
+    },
+    {
+      "id": "s_rocket",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 153,
+      "durationInFrames": 165,
+      "transitionInFrames": 12,
+      "transitionOutFrames": 12,
+      "copy": {
+        "headline": "Pilote de fusée !"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_rocket",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Willem, pilote de fusée, file tout droit vers la Lune !",
+      "provisional": false
+    },
+    {
+      "id": "s_surf",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 306,
+      "durationInFrames": 165,
+      "transitionInFrames": 12,
+      "transitionOutFrames": 12,
+      "copy": {
+        "headline": "Reine du surf !"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_surf",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Une vague géante ? Aucun problème pour la reine du surf !",
+      "provisional": false
+    },
+    {
+      "id": "s_racecar",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 459,
+      "durationInFrames": 165,
+      "transitionInFrames": 12,
+      "transitionOutFrames": 12,
+      "copy": {
+        "headline": "Pilote de course !"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_racecar",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Vroum ! Elle prend le virage à toute vitesse !",
+      "provisional": false
+    },
+    {
+      "id": "s_dj",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 612,
+      "durationInFrames": 165,
+      "transitionInFrames": 12,
+      "transitionOutFrames": 12,
+      "copy": {
+        "headline": "DJ de la soirée !"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_dj",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Place à la DJ ! Tout le monde danse avec Willem !",
+      "provisional": false
+    },
+    {
+      "id": "s_dragon",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 765,
+      "durationInFrames": 165,
+      "transitionInFrames": 12,
+      "transitionOutFrames": 12,
+      "copy": {
+        "headline": "Dresseuse de dragon !"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_dragon",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Et maintenant, une balade à dos de dragon au-dessus des nuages !",
+      "provisional": false
+    },
+    {
+      "id": "s_soccer",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 918,
+      "durationInFrames": 165,
+      "transitionInFrames": 12,
+      "transitionOutFrames": 12,
+      "copy": {
+        "headline": "But gagnant !"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_soccer",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Elle tire… et c'est le but gagnant !",
+      "provisional": false
+    },
+    {
+      "id": "s_orchestra",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 1071,
+      "durationInFrames": 165,
+      "transitionInFrames": 12,
+      "transitionOutFrames": 12,
+      "copy": {
+        "headline": "Cheffe d'orchestre !"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_orchestra",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Maestro Willem dirige l'orchestre des animaux !",
+      "provisional": false
+    },
+    {
+      "id": "s_cake",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "from": 1224,
+      "durationInFrames": 330,
+      "transitionInFrames": 12,
+      "transitionOutFrames": 0,
+      "copy": {
+        "headline": "Joyeux 3e anniversaire, Willem !"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_cake",
+        "fit": "cover",
+        "loop": true,
+        "muted": true
+      },
+      "foreground": [],
+      "narration": "Trois bougies, un grand souffle… Joyeux anniversaire, Willem ! On t'aime fort !",
+      "provisional": false
+    }
+  ],
+  "captions": [
+    {
+      "text": "Aujourd'hui, Willem a trois ans !",
+      "from": 0,
+      "to": 52,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Et à trois ans, on peut tout faire !",
+      "from": 57,
+      "to": 107,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Willem, pilote de fusée, file tout droit vers la Lune !",
+      "from": 153,
+      "to": 240,
+      "sceneId": "s_rocket",
+      "estimated": false
+    },
+    {
+      "text": "Une vague géante ?",
+      "from": 306,
+      "to": 342,
+      "sceneId": "s_surf",
+      "estimated": false
+    },
+    {
+      "text": "Aucun problème pour la reine du surf !",
+      "from": 347,
+      "to": 407,
+      "sceneId": "s_surf",
+      "estimated": false
+    },
+    {
+      "text": "Vroum !",
+      "from": 459,
+      "to": 483,
+      "sceneId": "s_racecar",
+      "estimated": false
+    },
+    {
+      "text": "Elle prend le virage à toute vitesse !",
+      "from": 488,
+      "to": 547,
+      "sceneId": "s_racecar",
+      "estimated": false
+    },
+    {
+      "text": "Place à la DJ !",
+      "from": 612,
+      "to": 659,
+      "sceneId": "s_dj",
+      "estimated": false
+    },
+    {
+      "text": "Tout le monde danse avec Willem !",
+      "from": 664,
+      "to": 714,
+      "sceneId": "s_dj",
+      "estimated": false
+    },
+    {
+      "text": "Et maintenant, une balade à dos de dragon au-dessus des nuages !",
+      "from": 765,
+      "to": 882,
+      "sceneId": "s_dragon",
+      "estimated": false
+    },
+    {
+      "text": "Elle tire… et c'est le but gagnant !",
+      "from": 918,
+      "to": 972,
+      "sceneId": "s_soccer",
+      "estimated": false
+    },
+    {
+      "text": "Maestro Willem dirige l'orchestre des animaux !",
+      "from": 1071,
+      "to": 1153,
+      "sceneId": "s_orchestra",
+      "estimated": false
+    },
+    {
+      "text": "Trois bougies, un grand souffle… Joyeux anniversaire, Willem !",
+      "from": 1224,
+      "to": 1325,
+      "sceneId": "s_cake",
+      "estimated": false
+    },
+    {
+      "text": "On t'aime fort !",
+      "from": 1330,
+      "to": 1361,
+      "sceneId": "s_cake",
+      "estimated": false
+    }
+  ],
+  "plates": [
+    {
+      "assetId": "a_cake",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_dj",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_dragon",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_orchestra",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_portrait",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_racecar",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_rocket",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_soccer",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    },
+    {
+      "assetId": "a_surf",
+      "sourceFps": 24,
+      "sourceFrames": 97,
+      "targetFps": 30,
+      "speed": 1.25,
+      "retimedFrames": 78,
+      "strategy": "retime"
+    }
+  ],
+  "target": {
+    "requested": null,
+    "actual": 1554,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [],
+  "proposals": [],
+  "sourceHash": "47aaba109727b179528d6b6752d73e797d67489f230b36fa8da0457ae6770466",
+  "hash": "f92208f71bb8ea440b8a1b8e3b50163d887833ae3a0e9bb5c4b5a90a4d608430"
+}

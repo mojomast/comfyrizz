@@ -1,0 +1,72 @@
+{
+  "timelineHash": "f92208f71bb8ea440b8a1b8e3b50163d887833ae3a0e9bb5c4b5a90a4d608430",
+  "durationInFrames": 1554,
+  "seconds": 51.8,
+  "scenes": [
+    {
+      "id": "s_title",
+      "frames": 165,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_rocket",
+      "frames": 165,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_surf",
+      "frames": 165,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_racecar",
+      "frames": 165,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_dj",
+      "frames": 165,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_dragon",
+      "frames": 165,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_soccer",
+      "frames": 165,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_orchestra",
+      "frames": 165,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_cake",
+      "frames": 330,
+      "narrationFrames": true
+    }
+  ],
+  "captions": 14,
+  "narration": {
+    "voice": "ff_siwis",
+    "sampleRate": 24000,
+    "seconds": 51.8,
+    "audioCodec": "pcm_s16le",
+    "audioChannels": 1,
+    "audioDuration": 51.8
+  },
+  "loudness": {
+    "inputIntegratedLufs": -18.96,
+    "inputTruePeakDbtp": 0.14,
+    "outputIntegratedLufs": -16.39,
+    "outputTruePeakDbtp": -1
+  },
+  "checks": {
+    "notProvisional": true,
+    "captionsMatchScenes": true,
+    "audioDurationMatchesTimeline": true
+  }
+}
