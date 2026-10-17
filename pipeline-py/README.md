@@ -82,5 +82,39 @@ happened, which is how "reconcile polls instead of resubmitting" is actually ver
 `tests/fixtures/jobs.json` is the planner's committed output, re-planned by the contract
 test; `tests/fixtures/workflows/*.api.json` + `*.api.params.json` are the graphs it points at.
 
-Not wired here on purpose: SDK asset upload for reference images (M3, against a real
-endpoint), and the Google Colab lifecycle itself (B3, `packages/backends/` + `colab/`).
+Not wired here on purpose: the Google Colab lifecycle itself (B3, `packages/backends/` +
+`colab/`).
+
+## Input files (uploads)
+
+A graph node that takes a file (`LoadImage` on the i2v, img2img and reference-edit graphs) needs a
+name in the *server's* input directory — not an asset id and not a local path. Handing it the asset
+id is exactly how `a_plate1.plate` failed on the GPU test 2 run with "Prompt outputs failed
+validation", after the Google Colab session had been billed.
+
+Two halves, one contract:
+
+1. **The plan** (`jobs.json`) carries a `fileInputs` entry per file-valued parameter:
+   `{param, from, path}` where `from: "job"` means `path` is relative to the output directory (a
+   dependency's output — the still an i2v plate starts from) and `from: "package"` means it is
+   relative to the `jobs.json` directory (an SVG raster shipped with the bundle).
+2. **The workflow's params file** declares which parameters are files: `"files": ["image"]`. A
+   file-valued parameter the map does not declare is *refused* (`upload_not_declared`) before
+   anything is uploaded or submitted; without that check the graph would fail late, on the GPU.
+
+The runner uploads each file to `<deployment root>/upload/image` (override with `--upload-url` or
+`COMFY_UPLOAD_URL`; **[unverified against a real `comfy-api-proxy`: the GPU test runs used the SDK
+path]**, so pointing this at ComfyUI itself is the fallback), then injects the returned name into
+the mapped node input. A few properties worth keeping:
+
+- the upload is content-addressed (`<stem>_<sha8><suffix>`) and cached in
+  `out/cache/uploads.json` **keyed by (deployment root, sha256)**: a retry or a re-run that resubmits
+  a job does not upload the same bytes twice, and a *different* server (a fresh Google Colab VM with
+  an empty input directory) always gets them again;
+- a missing input file or an upload that fails is a clean refusal with no attempt record
+  (`input_file_missing`, `upload_unsupported`, `upload_failed`, `upload_disabled`) — nothing was
+  submitted, so nothing is ambiguous;
+- the attempt record gained an `inputs_uploaded` event naming the files, and the attempt's
+  `inputs_hash` covers the uploaded content, so two runs that differ only in the bytes behind an
+  asset id are not the same attempt.
+
