@@ -1,0 +1,28 @@
+{
+  "name": "@comfyrizz/sources",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Comfyrizz sources (C4): Openverse search, uploads, licence policy, credits and package.zip filter",
+  "type": "module",
+  "license": "MIT",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.6.3"
+  }
+}
