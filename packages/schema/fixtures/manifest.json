@@ -18,6 +18,15 @@
       "warnings": []
     },
     {
+      "file": "valid/media-layer.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": [
+        "WARN_DATASET_UNUSED"
+      ]
+    },
+    {
       "file": "valid/minimal.json",
       "kind": "valid",
       "schemaOk": true,
@@ -359,6 +368,56 @@
     },
     {
       "file": "invalid/colab-backend-label.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_PATTERN"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/media-only-without-media.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_MEDIA_ONLY_NO_MEDIA"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/lower-third-blank.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LOWER_THIRD_EMPTY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/lower-third-too-long.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_MAXLENGTH"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/scrim-out-of-range.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_ONEOF"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/text-colour-not-hex.json",
       "kind": "invalid",
       "schemaOk": false,
       "schemaCodes": [

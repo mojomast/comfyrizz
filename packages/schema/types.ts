@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: ee596d97c3c756e9a08ca69c4d614a65b606445a286fb523fbd1f94e56a77c70
+// Schema sha256: ecdbe7312db94cf8ac8315750becdc2924635a30eaf480b0133ed9693e620a19
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -64,6 +64,13 @@ export interface PackageV1 {
       license?: License;
       }>;
     logo_asset?: AssetId;
+    /**
+     * Primary text colour. Without it the renderer falls back to palette[0], which a media scene may
+     * set to 'transparent' (P-fix1).
+     */
+    text?: HexColor;
+    text_muted?: HexColor;
+    text_on_accent?: HexColor;
     };
   voice?: {
     enabled: boolean;
@@ -215,6 +222,12 @@ export interface Background {
     palette?: Array<HexColor>;
     };
   fit?: "cover" | "contain";
+  /**
+   * Dark overlay drawn between the media and the layout text, 0 (none) to 1 (black). P-fix1 renders
+   * it in the media layer.
+   * [min 0, max 1, default 0]
+   */
+  scrim?: number;
   loop?: boolean;
   muted?: boolean;
   speed?: number;
@@ -246,6 +259,20 @@ export interface Scene {
     };
   background?: null | Background;
   foreground?: Array<ForegroundItem>;
+  /**
+   * Skip this scene's layout and draw only the media layer (background media + scrim + foreground
+   * panels + lower_third). Requires a media background or a foreground item (P-fix1).
+   * [default false]
+   */
+  media_only?: boolean;
+  /**
+   * Lower-third overlay, drawn by the media layer (P-fix1). Its text is bound by the same rule as
+   * copy: too long is a visible fail state, never silent clipping.
+   */
+  lower_third?: {
+    kicker?: string;
+    text: string;
+    };
   /**
    * Transition into the next scene (PLAN.md A1: fades). Missing transitionOut means a default fade.
    * [default {"type":"fade","frames":15}]

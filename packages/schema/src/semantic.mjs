@@ -30,6 +30,8 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_VOICE_INCOMPLETE",
   "SEM_DATASET_UNAPPROVED",
   "SEM_BACKGROUND_AMBIGUOUS",
+  "SEM_MEDIA_ONLY_NO_MEDIA",
+  "SEM_LOWER_THIRD_EMPTY",
   "SEM_CUTOUT_KIND",
 ]);
 
@@ -319,6 +321,24 @@ function checkScenes(scenes, assets, datasets, errors) {
     if (Array.isArray(scene.foreground)) {
       // asset resolution for foreground items is reported by checkRefs, which owns
       // the unresolved-reference code; nothing extra to check here.
+    }
+    // Media layer (H-fix1, from Pi's P-fix1 proposal): a scene can skip its layout and show
+    // only media, with an optional lower third. Two ways that goes wrong, both caught here.
+    if (isObj(scene.lower_third) && scene.lower_third.text !== undefined && !nonEmpty(scene.lower_third.text)) {
+      errors.push(error("SEM_LOWER_THIRD_EMPTY", `${at}/lower_third/text`, "lower_third.text must not be blank"));
+    }
+    if (scene.media_only === true) {
+      const hasMediaBackground = isObj(scene.background) && isStr(scene.background.asset);
+      const hasForeground = Array.isArray(scene.foreground) && scene.foreground.length > 0;
+      if (!hasMediaBackground && !hasForeground) {
+        errors.push(
+          error(
+            "SEM_MEDIA_ONLY_NO_MEDIA",
+            `${at}/media_only`,
+            "media_only skips the layout, so it needs a media background (background.asset) or at least one foreground item; this scene would render an empty frame",
+          ),
+        );
+      }
     }
   });
 }

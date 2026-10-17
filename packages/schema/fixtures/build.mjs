@@ -221,6 +221,47 @@ export const MUTATIONS = [
     expect: { schemaOk: false, semantic: [] },
     schemaCodes: ["SCHEMA_PATTERN"],
   },
+  // --- media layer (H-fix1, Pi's P-fix1 proposal) -------------------------------------
+  {
+    name: "media-only-without-media",
+    base: "spec-6.3-example",
+    ops: [
+      ["set", "scenes.0.background", { procedural: { pattern: "gradient", palette: ["#0d0f14"] } }],
+      ["set", "scenes.0.foreground", []],
+      ["set", "scenes.0.media_only", true],
+    ],
+    expect: { schemaOk: true, semantic: ["SEM_MEDIA_ONLY_NO_MEDIA"] },
+  },
+  {
+    name: "lower-third-blank",
+    base: "spec-6.3-example",
+    ops: [["set", "scenes.0.lower_third", { kicker: "Still", text: "   " }]],
+    expect: { schemaOk: true, semantic: ["SEM_LOWER_THIRD_EMPTY"] },
+  },
+  {
+    name: "lower-third-too-long",
+    base: "spec-6.3-example",
+    ops: [["set", "scenes.0.lower_third", { text: "x".repeat(121) }]],
+    expect: { schemaOk: false, semantic: [] },
+    schemaCodes: ["SCHEMA_MAXLENGTH"],
+  },
+  {
+    name: "scrim-out-of-range",
+    base: "spec-6.3-example",
+    ops: [["set", "scenes.0.background.scrim", 1.4]],
+    // background is a oneOf(null, $ref background), so ajv reports SCHEMA_MAXIMUM at the scrim
+    // while jsonschema reports the enclosing SCHEMA_ONEOF. Only the code both produce is
+    // declared here; the TS side still proves the bound itself in its own unit test.
+    expect: { schemaOk: false, semantic: [] },
+    schemaCodes: ["SCHEMA_ONEOF"],
+  },
+  {
+    name: "text-colour-not-hex",
+    base: "spec-6.3-example",
+    ops: [["set", "theme.text", "white"]],
+    expect: { schemaOk: false, semantic: [] },
+    schemaCodes: ["SCHEMA_PATTERN"],
+  },
 ];
 
 /** Warnings each hand-written valid fixture is expected to raise (advisory only). */
@@ -249,6 +290,25 @@ export const DERIVED_VALID = [
       ],
     ],
     expect: { schemaOk: true, semantic: [], warnings: ["WARN_ASSET_UNUSED"] },
+  },
+  {
+    // The media layer Pi's P-fix1 asked for: a scene that skips its layout, a scrim over the
+    // media, a lower third, and text colours that do not come from palette[0].
+    name: "media-layer",
+    base: "spec-6.3-example",
+    ops: [
+      ["set", "scenes.0.background.scrim", 0.45],
+      ["set", "scenes.0.media_only", true],
+      [
+        "set",
+        "scenes.0.lower_third",
+        { kicker: "FLUX 3 Klein on Google Colab", text: "Every plate in this scene was generated, not licensed." },
+      ],
+      ["set", "theme.text", "#f7f8fb"],
+      ["set", "theme.text_muted", "#a9b0c0"],
+      ["set", "theme.text_on_accent", "#0d0f14"],
+    ],
+    expect: { schemaOk: true, semantic: [], warnings: ["WARN_DATASET_UNUSED"] },
   },
 ];
 

@@ -163,6 +163,16 @@
         },
         "logo_asset": {
           "$ref": "#/$defs/assetId"
+        },
+        "text": {
+          "$ref": "#/$defs/hexColor",
+          "description": "Primary text colour. Without it the renderer falls back to palette[0], which a media scene may set to 'transparent' (P-fix1)."
+        },
+        "text_muted": {
+          "$ref": "#/$defs/hexColor"
+        },
+        "text_on_accent": {
+          "$ref": "#/$defs/hexColor"
         }
       }
     },
@@ -626,6 +636,13 @@
           ],
           "default": "cover"
         },
+        "scrim": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "Dark overlay drawn between the media and the layout text, 0 (none) to 1 (black). P-fix1 renders it in the media layer."
+        },
         "loop": {
           "type": "boolean",
           "default": true
@@ -790,6 +807,31 @@
           "items": {
             "$ref": "#/$defs/foregroundItem"
           }
+        },
+        "media_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip this scene's layout and draw only the media layer (background media + scrim + foreground panels + lower_third). Requires a media background or a foreground item (P-fix1)."
+        },
+        "lower_third": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "kicker": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "description": "Lower-third overlay, drawn by the media layer (P-fix1). Its text is bound by the same rule as copy: too long is a visible fail state, never silent clipping."
         },
         "transitionOut": {
           "type": "object",
