@@ -7,7 +7,7 @@
 // path, and asserts it wrote a frame and logged one warning per missing file.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -38,9 +38,12 @@ test('missingMediaFiles reports the GPU example media a clean clone lacks (P-fix
     assert.equal(missing.length, declared.length, 'none of the media files are in the bare clone');
     assert.ok(missing.some(item => item.file === 'assets/a_turbine.mp4'));
     assert.ok(missing.some(item => item.file === 'audio/narration.norm.wav' && item.kind === 'audio'));
-    // In the real tree the media is present, so nothing is reported missing.
-    const realPkg = JSON.parse(readFileSync(join(gpu3, 'package.json'), 'utf8'));
-    assert.deepEqual(missingMediaFiles(realPkg, gpu3), []);
+    // A declared file that is present is not reported missing (clone-independent).
+    mkdirSync(join(dir, 'assets'), { recursive: true });
+    writeFileSync(join(dir, 'assets', 'a_turbine.mp4'), 'not-really-a-video');
+    const after = missingMediaFiles(pkg, dir);
+    assert.equal(after.length, declared.length - 1);
+    assert.ok(!after.some(item => item.file === 'assets/a_turbine.mp4'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
