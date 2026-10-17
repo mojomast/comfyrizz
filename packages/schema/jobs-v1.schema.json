@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://comfyrizz.example/schema/jobs-v1.json",
+  "title": "comfyrizz.jobs/v1",
+  "description": "The generation jobs the planner writes and pipeline-py executes (SPEC.md 6.4). Written by packages/jobs (planJobs) and read by pipeline-py/comfyrizz_pipeline/runner.py, which validates a jobs.json against this file before submitting anything. Forward-compatible: unknown extra keys on a job are allowed so a newer planner does not break an older runner, but the keys the runner relies on are required.",
+  "type": "object",
+  "required": ["v", "jobs", "hash"],
+  "properties": {
+    "v": { "const": 1 },
+    "packageId": { "type": ["string", "null"] },
+    "revision": { "type": ["integer", "null"] },
+    "revisionHash": { "type": ["string", "null"] },
+    "fps": { "type": "number", "minimum": 1, "maximum": 240 },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "batches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "jobs"],
+        "properties": {
+          "name": { "enum": ["stills", "plates", "upscales", "audio"] },
+          "jobs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "batch", "deps", "output", "cacheKey"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "kind": { "enum": ["still", "plate", "upscale", "audio"] },
+          "batch": { "enum": ["stills", "plates", "upscales", "audio"] },
+          "asset": { "type": "string", "minLength": 1 },
+          "scene": { "type": ["string", "null"] },
+          "sceneIndex": { "type": ["integer", "null"] },
+          "generator": { "enum": ["llm-svg", "flux3-klein", "ltx25", "kokoro"] },
+          "workflow": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "workflowSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "model": { "type": ["string", "null"] },
+          "modelRevision": { "type": ["string", "null"] },
+          "deps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "output": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "outputKind": { "enum": ["image", "video", "audio"] },
+          "cacheKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "params": { "type": "object" },
+          "dims": {
+            "type": "object",
+            "required": ["width", "height"],
+            "properties": {
+              "width": { "type": "integer", "minimum": 1, "maximum": 32768 },
+              "height": { "type": "integer", "minimum": 1, "maximum": 32768 }
+            }
+          },
+          "frames": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+          "fps": { "type": "number", "minimum": 1, "maximum": 240 },
+          "seed": { "type": ["integer", "null"], "minimum": 0, "maximum": 4294967295 },
+          "cutout": { "type": "boolean" },
+          "inputAsset": { "type": ["string", "null"] },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["asset", "reason"],
+        "properties": {
+          "asset": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

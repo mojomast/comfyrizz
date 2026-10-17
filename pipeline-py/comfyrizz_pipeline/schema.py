@@ -30,6 +30,9 @@ __all__ = [
     "semantic_check",
     "apply_defaults",
     "validate_package",
+    "validate_jobs",
+    "load_jobs_schema",
+    "jobs_schema_path",
     "load_schema",
     "schema_path",
     "SCHEMA_VERSION",
@@ -574,6 +577,71 @@ def _fill_defaults(value: Any, sub: Any, schema: dict[str, Any]) -> None:
         if _is_obj(sub.get("items")):
             for item in value:
                 _fill_defaults(item, sub["items"], schema)
+
+
+# ------------------------------------------------------------------- jobs/v1 document
+
+
+_JOBS_SCHEMA_CACHE: dict[str, Any] | None = None
+_JOBS_VALIDATOR_CACHE: jsonschema.Draft202012Validator | None = None
+
+
+def jobs_schema_path() -> Path:
+    return schema_path().with_name("jobs-v1.schema.json")
+
+
+def load_jobs_schema() -> dict[str, Any]:
+    global _JOBS_SCHEMA_CACHE
+    if _JOBS_SCHEMA_CACHE is None:
+        with open(jobs_schema_path(), encoding="utf-8") as fh:
+            _JOBS_SCHEMA_CACHE = json.load(fh)
+    return _JOBS_SCHEMA_CACHE
+
+
+def _jobs_validator() -> jsonschema.Draft202012Validator:
+    global _JOBS_VALIDATOR_CACHE
+    if _JOBS_VALIDATOR_CACHE is None:
+        _JOBS_VALIDATOR_CACHE = jsonschema.Draft202012Validator(load_jobs_schema())
+    return _JOBS_VALIDATOR_CACHE
+
+
+def validate_jobs(doc: Any) -> list[dict[str, Any]]:
+    """Structural problems in a comfyrizz.jobs/v1 document, as [{code, path, message}].
+
+    The runner refuses to submit anything when this is non-empty: a jobs.json that does
+    not describe what the planner meant is worth more as an error than as a GPU session.
+    """
+    problems = []
+    for error in _jobs_validator().iter_errors(doc):
+        path = "/" + "/".join(str(p) for p in error.absolute_path)
+        if path == "/":
+            path = ""
+        problems.append(
+            {"code": f"JOBS_{str(error.validator).upper()}", "path": path, "message": error.message}
+        )
+    if _is_obj(doc):
+        ids = [job.get("id") for job in doc.get("jobs", []) if _is_obj(job)]
+        for job_id in {i for i in ids if ids.count(i) > 1}:
+            problems.append({"code": "JOBS_DUPLICATE_JOB_ID", "path": "/jobs", "message": f"duplicate job id {job_id}"})
+        known = set(ids)
+        for i, job in enumerate(doc.get("jobs", [])):
+            if not _is_obj(job):
+                continue
+            for dep in job.get("deps", []) or []:
+                if dep not in known:
+                    problems.append(
+                        {"code": "JOBS_UNKNOWN_DEPENDENCY", "path": f"/jobs/{i}/deps", "message": f"dependency {dep} is not in this document"}
+                    )
+            problems.extend(
+                {
+                    "code": "JOBS_PATH_NOT_RELATIVE",
+                    "path": f"/jobs/{i}/output",
+                    "message": f"{problem}: {json.dumps(job.get('output'))}",
+                }
+                for problem in [path_problem(job.get("output"))]
+                if problem
+            )
+    return problems
 
 
 # --------------------------------------------------------------------------- validation

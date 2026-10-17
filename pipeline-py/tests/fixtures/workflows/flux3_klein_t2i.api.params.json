@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "generator": "flux3-klein",
+  "map": {
+    "width": ["5", "width"],
+    "height": ["5", "height"],
+    "seed": ["3", "seed"],
+    "steps": ["3", "steps"],
+    "prompt": ["6", "text"]
+  }
+}

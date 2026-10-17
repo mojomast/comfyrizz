@@ -1,0 +1,212 @@
+{
+  "v": 1,
+  "packageId": "pkg_jobplan000001",
+  "revision": 4,
+  "revisionHash": null,
+  "fps": 30,
+  "batches": [
+    {
+      "name": "stills",
+      "jobs": [
+        "a_cutout.still",
+        "a_plate1_still.still"
+      ]
+    },
+    {
+      "name": "plates",
+      "jobs": [
+        "a_plate1.plate"
+      ]
+    },
+    {
+      "name": "upscales",
+      "jobs": [
+        "a_plate1.upscale"
+      ]
+    },
+    {
+      "name": "audio",
+      "jobs": [
+        "a_narr.audio"
+      ]
+    }
+  ],
+  "jobs": [
+    {
+      "id": "a_cutout.still",
+      "kind": "still",
+      "batch": "stills",
+      "asset": "a_cutout",
+      "scene": "s1",
+      "sceneIndex": 0,
+      "generator": "flux3-klein",
+      "workflow": "workflows/flux3_klein_t2i.api.json",
+      "workflowSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "model": "flux-3-image-klein",
+      "modelRevision": null,
+      "deps": [],
+      "output": "assets/a_cutout.png",
+      "outputKind": "image",
+      "cacheKey": "1a96b4358ffb7ce9631246ea7ba62715df3435475b7df572c7750cba743380b4",
+      "dims": {
+        "width": 1024,
+        "height": 1024
+      },
+      "dimsAdjusted": false,
+      "cutout": true,
+      "params": {
+        "width": 1024,
+        "height": 1024,
+        "seed": 7,
+        "steps": 16,
+        "cutout": true
+      },
+      "seed": 7
+    },
+    {
+      "id": "a_plate1_still.still",
+      "kind": "still",
+      "batch": "stills",
+      "asset": "a_plate1_still",
+      "scene": null,
+      "sceneIndex": null,
+      "generator": "flux3-klein",
+      "workflow": "workflows/flux3_klein_t2i.api.json",
+      "workflowSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "model": "flux-3-image-klein",
+      "modelRevision": null,
+      "deps": [],
+      "output": "assets/a_plate1_still.png",
+      "outputKind": "image",
+      "cacheKey": "6b33a46f0659f33718f0db88d2e5e9e5b43ebc3b6a6d8dfd7225c1bab4d0c992",
+      "dims": {
+        "width": 960,
+        "height": 544
+      },
+      "dimsAdjusted": true,
+      "params": {
+        "width": 960,
+        "height": 544,
+        "seed": 42,
+        "steps": 16,
+        "cutout": false
+      },
+      "seed": 42
+    },
+    {
+      "id": "a_plate1.plate",
+      "kind": "plate",
+      "batch": "plates",
+      "asset": "a_plate1",
+      "scene": "s1",
+      "sceneIndex": 0,
+      "generator": "ltx25",
+      "workflow": "workflows/ltx25_i2v.api.json",
+      "workflowSha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "model": "ltx-2.5-22b-distilled",
+      "modelRevision": null,
+      "deps": [
+        "a_plate1_still.still"
+      ],
+      "output": "out/intermediates/a_plate1.plate.mp4",
+      "outputKind": "video",
+      "cacheKey": "aad7ba20428bf650efc9c99d9c70a37306261399ea42b5151e1b44bba3cd66ff",
+      "dims": {
+        "width": 960,
+        "height": 544
+      },
+      "dimsAdjusted": false,
+      "fps": 24,
+      "frames": 97,
+      "framesAdjusted": true,
+      "inputAsset": "a_plate1_still",
+      "params": {
+        "image": "a_plate1_still",
+        "prompt": "slow drift through a soft blue nebula",
+        "width": 960,
+        "height": 544,
+        "frames": 97,
+        "fps": 24,
+        "upscale": "x2+crop",
+        "seed": 42
+      },
+      "seed": 42
+    },
+    {
+      "id": "a_plate1.upscale",
+      "kind": "upscale",
+      "batch": "upscales",
+      "asset": "a_plate1",
+      "scene": "s1",
+      "sceneIndex": 0,
+      "generator": "ltx25",
+      "workflow": "workflows/ltx25_i2v.api.json",
+      "workflowSha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "model": "ltx-2.5-22b-distilled",
+      "modelRevision": null,
+      "deps": [
+        "a_plate1.plate"
+      ],
+      "output": "assets/a_plate1.mp4",
+      "outputKind": "video",
+      "params": {
+        "image": "a_plate1_still",
+        "prompt": "slow drift through a soft blue nebula",
+        "width": 960,
+        "height": 544,
+        "frames": 97,
+        "fps": 24,
+        "upscale": "x2+crop",
+        "seed": 42
+      },
+      "source": "out/intermediates/a_plate1.plate.mp4",
+      "dims": {
+        "width": 1920,
+        "height": 1080
+      },
+      "upscaleTarget": {
+        "width": 1920,
+        "height": 1088
+      },
+      "crop": {
+        "top": 4,
+        "bottom": 4,
+        "left": 0,
+        "right": 0
+      },
+      "frames": 97,
+      "fps": 24,
+      "cacheKey": "cb763cb995ce14816abc30827223941f3dc3eddc160040223b1acdeb3d9c07a6"
+    },
+    {
+      "id": "a_narr.audio",
+      "kind": "audio",
+      "batch": "audio",
+      "asset": "a_narr",
+      "scene": "s1",
+      "sceneIndex": 0,
+      "generator": "kokoro",
+      "workflow": "workflows/kokoro_tts.api.json",
+      "workflowSha256": "aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd",
+      "model": "kokoro-82m-v1.0",
+      "modelRevision": null,
+      "deps": [],
+      "output": "assets/a_narr.wav",
+      "outputKind": "audio",
+      "cacheKey": "728ace3192217249dc8dc5984863dd2ad95b4e3cc239e577cee02ecb84f4806a",
+      "text": "Pending work: every asset here still needs a job.",
+      "params": {
+        "voice": "af_heart",
+        "speed": 1
+      },
+      "seed": null
+    }
+  ],
+  "skipped": [
+    {
+      "asset": "a_logo",
+      "reason": "llm-svg is CPU work (A5 sanitize + render-check), not a Comfy job"
+    }
+  ],
+  "hash": "6411ea6d8080948ac800add276ddc37366a965ead6d0fd565ffbd458fba34a89"
+}

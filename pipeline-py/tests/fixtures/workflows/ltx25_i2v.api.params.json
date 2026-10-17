@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "generator": "ltx25",
+  "map": {
+    "width": ["5", "width"],
+    "height": ["5", "height"],
+    "frames": ["5", "length"],
+    "fps": ["5", "fps"],
+    "seed": ["3", "seed"],
+    "prompt": ["6", "text"],
+    "image": ["1", "image"]
+  }
+}

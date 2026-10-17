@@ -1,4 +1,5 @@
-# pipeline-py dev/test dependencies (B1 + B2). Install with:
+# pipeline-py dependencies (B1 + B2). Install with:
 #   python3 -m venv .venv && .venv/bin/pip install -r pipeline-py/requirements-dev.txt
 jsonschema==4.25.1
+comfy-sdk==0.5.0
 pytest==8.4.2

@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "generator": "kokoro",
+  "map": {
+    "voice": ["1", "voice"],
+    "speed": ["1", "speed"]
+  }
+}

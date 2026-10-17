@@ -1,0 +1,22 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "placeholder.png" }
+  },
+  "3": {
+    "class_type": "LTXVScheduler",
+    "inputs": { "seed": 1, "steps": 8 }
+  },
+  "5": {
+    "class_type": "EmptyLTXVLatentVideo",
+    "inputs": { "width": 960, "height": 544, "length": 97, "fps": 24 }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "text": "" }
+  },
+  "9": {
+    "class_type": "SaveWEBM",
+    "inputs": { "images": ["8", 0] }
+  }
+}

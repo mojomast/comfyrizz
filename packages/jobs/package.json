@@ -1,0 +1,21 @@
+{
+  "name": "@comfyrizz/jobs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "package.json -> ordered, hashed jobs.json for the Comfy SDK pipeline (WS-B, owner Hermes)",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./plan": "./src/plan.mjs",
+    "./dims": "./src/dims.mjs"
+  },
+  "bin": {
+    "comfyrizz-plan": "./bin/plan-jobs.mjs"
+  },
+  "scripts": {
+    "plan": "node bin/plan-jobs.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

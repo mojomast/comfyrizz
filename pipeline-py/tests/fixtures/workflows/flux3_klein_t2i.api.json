@@ -1,0 +1,22 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "placeholder.png" }
+  },
+  "3": {
+    "class_type": "KSampler",
+    "inputs": { "seed": 1, "steps": 16, "model": ["4", 0] }
+  },
+  "5": {
+    "class_type": "EmptyLatentImage",
+    "inputs": { "width": 1024, "height": 1024, "batch_size": 1 }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "text": "" }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["8", 0], "filename_prefix": "comfyrizz" }
+  }
+}
