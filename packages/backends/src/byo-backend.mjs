@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { ColabCliError } from "./cli.mjs";
 import { sleep } from "./cli.mjs";
+import { withRunPackage } from "./run-package.mjs";
 
 export const PROXY_BIN = "comfy-api-proxy";
 
@@ -273,7 +274,7 @@ export function createByoBackend({
     },
   };
 
-  return backend;
+  return withRunPackage(backend);
 }
 
 function allowRelative(url) {

@@ -12,6 +12,7 @@
 //   * a wall-clock cap applies even if metering is stale                 -> admit()
 //   * unknown comfyrizz-* sessions are offered, never auto-stopped       -> orphans()
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { withRunPackage } from "./run-package.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -636,7 +637,7 @@ export function createColabBackend({
   }
 
   state.runId = null;
-  return backend;
+  return withRunPackage(backend);
 }
 
 /** The revisions the model pin records, for the run log (a session should say what it downloaded). */

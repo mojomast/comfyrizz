@@ -3,6 +3,7 @@
 export { createColabBackend, MEASURED_JOB_MINUTES, BOOTSTRAP_OVERHEAD_MINUTES, isLost, createBundle, verifyAgainstManifest } from "./colab-backend.mjs";
 export { createByoBackend, collectModelFiles, findFreePort, PROXY_BIN } from "./byo-backend.mjs";
 export { ColabCli, ColabCliError } from "./cli.mjs";
+export { runPackage, withRunPackage, TEARDOWN_MODES } from "./run-package.mjs";
 export * from "./budget.mjs";
 export {
   COMFYRIZZ_RUNTIME,
@@ -43,6 +44,7 @@ export {
  * @property {(opts: {budget?: object, approved?: boolean, signal?: AbortSignal}) => Promise<object>} ensureUp
  * @property {() => Promise<{ok: boolean, detail: string, vramFreeGB?: number}>} health
  * @property {(jobsFile: string, onEvent: (e: object) => void, signal: AbortSignal) => Promise<object>} run
+ * @property {(pkg: object, opts?: object) => Promise<object>} runPackage  plan -> estimate -> up -> health -> run -> apply -> teardown (H8); the same call on either backend
  * @property {(runId: string) => Promise<object>} reconcile
  * @property {(manifest: object, destDir: string) => Promise<object>} collect
  * @property {(reason: "done"|"idle"|"budget"|"error"|"user") => Promise<{state: string, evidence: string}>} teardown
