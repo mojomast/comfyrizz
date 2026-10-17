@@ -1,8 +1,12 @@
 assets/
 public/
 out/
-audio/
+audio/*
 *.mp4
 *.wav
 *.png
 *.jpg
+# Measured narration metadata stays committed (like the other narrated
+# examples) so a clean clone can recompile timeline.json without the audio.
+!audio/durations.json
+!audio/loudness.json

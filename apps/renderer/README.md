@@ -95,8 +95,13 @@ with `REMOTION_BROWSER=/path/to/chrome`.
 A committed `examples/*/timeline.json` must equal a fresh compile of its
 `package.json` (with the measured chunks in `audio/durations.json` when the
 example is narrated). `test/timeline-freshness.test.mjs` enforces this for every
-bundled example and names the stale one. Recompile a stale timeline without
-re-synthesizing audio:
+bundled example and names the stale one. When an example does not commit
+`audio/durations.json` (so a clean clone cannot recompile with measured
+narration), the guard falls back to checking the committed timeline against its
+`narration-report.json` frame counts and reports the weaker mode as a
+diagnostic; measured examples are always compared exactly. Narration metadata
+(`audio/durations.json`, `audio/loudness.json`) is committed by every narrated
+example. Recompile a stale timeline without re-synthesizing audio:
 
 ```bash
 npm run recompile:timeline -- --example examples/showcase-gpu2
@@ -155,7 +160,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 
 | Check | Result |
 |---|---|
-| `npm test` | 39/39 pass (incl. P-fix3 freshness for all 7 bundled examples) |
+| `npm test` | 40/40 pass (incl. P-fix3 freshness for all 7 bundled examples + report fallback) |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `ceb20281…2c11` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
