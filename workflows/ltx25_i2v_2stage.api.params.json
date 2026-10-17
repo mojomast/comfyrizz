@@ -2,7 +2,7 @@
   "v": 1,
   "generator": "ltx25",
   "kind": "plate",
-  "note": "Stage 1 is half the final size: the latent upsampler (21) doubles the latent, so a planned 960x544 must be 480x272 in EmptyLTXVLatentVideo(8) or the output comes back 2x (GPU test 2, issue 3). The i2v image scale (31) is unmapped by default and then keeps its own 960x544 whatever the plan says (issue 4), so it takes the same halved value: the start image is then scaled and centre-cropped to exactly the stage-1 lattice it is injected into, which is the spatial relationship the GPU test 2 runs used (image 1:1 with stage 1, and stage 2's latent the doubled one). One planned value reaches both because a target carries a multiplier. The audio latent (9) carries its own frame count, so 'frames' maps to both. frame_rate is on LTXVConditioning(7). The planner already resolved width/height to multiples of 32 and frames to 8n+1. The start image is a local file: 'files' declares that the runner uploads it and injects the name the server returns (GPU test 2, issue 2).",
+  "note": "Stage 1 is half the final size: the latent upsampler (21) doubles the latent, so a planned 960x544 must be 480x272 in EmptyLTXVLatentVideo(8) or the output comes back 2x (GPU test 2, issue 3). The i2v image scale (31) is unmapped by default and then keeps its own 960x544 whatever the plan says (issue 4), so it takes the same halved value: the start image is then scaled and centre-cropped to exactly the stage-1 lattice it is injected into, which is the spatial relationship the GPU test 2 runs used (image 1:1 with stage 1, and stage 2's latent the doubled one). One planned value reaches both because a target carries a multiplier. The audio latent (9) carries its own frame count, so 'frames' maps to both. frame_rate is on LTXVConditioning(7). The planner already resolved width/height to multiples of 32 and frames to 8n+1. The start image is a local file: 'files' declares that the runner uploads it and injects the name the server returns (GPU test 2, issue 2). N3 (GPU test 3): the graph ends in CreateVideo(42) -> SaveVideo(43, mp4/h264) instead of SaveImage, because ComfyUI saved one PNG per frame and the runner then collected frame 0 as the plate's .mp4. 'fps' therefore reaches the conditioning node (7) and the container (42).",
   "files": ["image"],
   "map": {
     "prompt": ["5", "text"],
@@ -10,7 +10,7 @@
     "width": [["31", "width", { "mul": 0.5 }], ["8", "width", { "mul": 0.5 }]],
     "height": [["31", "height", { "mul": 0.5 }], ["8", "height", { "mul": 0.5 }]],
     "frames": [["8", "length"], ["9", "frames_number"]],
-    "fps": ["7", "frame_rate"],
+    "fps": [["7", "frame_rate"], ["42", "fps"]],
     "seed": ["11", "noise_seed"],
     "stage2_seed": ["23", "noise_seed"],
     "stage2_sigmas": ["24", "sigmas"]

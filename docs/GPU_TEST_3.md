@@ -41,6 +41,24 @@ Through the runner on the VM (`pipeline/run1b_uploadurl.log`, 6 jobs): a still 6
 
 Setup: 218.5 s measured here against 215 s on GPU test 2, so `BOOTSTRAP_OVERHEAD_MINUTES` is 4 (was a 5-minute placeholder). The cached-wheelhouse path (`colab/wheelhouse.py`) is not on this critical path yet: this run installed from PyPI and spent 193.5 s on it.
 
+## N3: LTX plates came back as PNG frames (fixed)
+
+Both two-stage LTX graphs ended in `SaveImage`, so ComfyUI wrote **one PNG per frame**: the runner
+collected frame 0 as `<id>.plate.mp4` (PNG bytes behind a video name), hashed that one frame, and
+the package recorded a `video` asset pointing at a PNG. The graphs now end in
+`CreateVideo(fps)` -> `SaveVideo(mp4, h264)` (the node schema at the ref this run used, ComfyUI
+`ce1e922`), and the plan's `fps` reaches both the conditioning node and the container. Kyle's GPU
+probe of the same change returned a single 1024x576 h264 mp4 in 7.5 s (`logs/n3_savevideo.log`).
+
+Two follow-ups on the runner side, because a graph can be wrong again:
+
+- a download's kind is labelled from its **magic bytes** (`sniff_kind`), with the server's claim kept
+  as `reportedKind` (the SDK reports a `SaveVideo` mp4 as `image`) and `kindSource` saying which of
+  the two decided;
+- a job whose declared `outputKind` disagrees with **byte-level** evidence fails with
+  `output_kind_mismatch`, the unusable file is removed and nothing is cached, so a retry re-runs the
+  job instead of handing the renderer a PNG called a video.
+
 ## The upload blocker (fixed as H-fix6)
 
 The root cause of five failed jobs: the runner uploaded inputs to `<deployment root>/upload/image`, the root is `comfy-api-proxy` on 8189, and the proxy serves `/api/v2` **without forwarding ComfyUI's native upload route**. Run `run1` shows it exactly:

@@ -43,6 +43,23 @@ def _iso(epoch: float | None) -> str | None:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
 
 
+#: The node classes that make ComfyUI write a video, and the ones that write a still. The runner
+#: labels a download by its magic bytes and checks them against the plan's `outputKind` (GPU test 3,
+#: N3), so a fake that always answered "image" would be lying about every plate graph.
+VIDEO_SAVERS = ("SaveVideo", "SaveWEBM", "SaveAnimatedWEBP")
+IMAGE_SAVERS = ("SaveImage", "SaveWEBP")
+
+
+def graph_output_kind(workflow: Any) -> str | None:
+    """What a submitted graph's saver writes, or ``None`` when the graph does not say."""
+    class_types = {node.get("class_type") for node in (workflow or {}).values() if isinstance(node, dict)}
+    if class_types & set(VIDEO_SAVERS) or "CreateVideo" in class_types:
+        return "video"
+    if class_types & set(IMAGE_SAVERS):
+        return "image"
+    return None
+
+
 def parse_multipart(body: bytes, content_type: str) -> list[dict[str, Any]]:
     """A minimal multipart/form-data reader (the upload route is the only user).
 
@@ -90,7 +107,7 @@ class FakeComfyState:
         self,
         *,
         outputs: int = 1,
-        output_kind: str = "image",
+        output_kind: str | None = None,
         fail: bool = False,
         never_finish: bool = False,
         finish_after: float = 0.0,
@@ -103,6 +120,7 @@ class FakeComfyState:
         model_files: list[str] | None = None,
         upload_status: int = 200,
         reject_metadata: bool = False,
+        bytes_kind: str | None = None,
     ):
         self.outputs = outputs
         self.output_kind = output_kind
@@ -124,6 +142,9 @@ class FakeComfyState:
         self.upload_status = upload_status
         #: comfy-api-proxy behaviour: it refuses the SDK's metadata object (GPU test 2, issue 1)
         self.reject_metadata = reject_metadata
+        #: real magic bytes for the *content* when a test needs the runner's sniffer (N3);
+        #: None keeps the arbitrary bytes the rest of the suite uses
+        self.bytes_kind = bytes_kind
         self.metadata_rejections = 0
         self.jobs: dict[str, dict[str, Any]] = {}
         self.idempotency_seen: dict[str, str] = {}
@@ -191,14 +212,17 @@ class FakeComfyState:
             job_id = f"job_{self.counter:03d}"
             self.asset_counter += 1
             outputs = []
+            # an explicit `output_kind` is an instruction (a test saying "this server lies");
+            # otherwise the graph's saver decides, exactly as ComfyUI does
+            kind = self.output_kind or graph_output_kind(body.get("workflow")) or "image"
             for index in range(self.outputs):
                 asset_id = f"asset_{self.asset_counter:03d}_{index}"
                 outputs.append(
                     {
                         "node_id": "9",
-                        "name": f"comfyrizz_{job_id}_{index}.png" if self.output_kind == "image" else f"comfyrizz_{job_id}_{index}.mp4",
-                        "type": self.output_kind,
-                        "content_type": "image/png" if self.output_kind == "image" else "video/mp4",
+                        "name": f"comfyrizz_{job_id}_{index}.png" if kind == "image" else f"comfyrizz_{job_id}_{index}.mp4",
+                        "type": kind,
+                        "content_type": "image/png" if kind == "image" else "video/mp4",
                         "size_bytes": 4096,
                         "id": asset_id,
                         "hash": None,
@@ -249,6 +273,18 @@ class FakeComfyState:
         return job
 
     def content(self, asset_id: str) -> bytes:
+        """The output bytes. Arbitrary by default; real magic bytes when a test asks for a kind.
+
+        The runner sniffs a downloaded file's magic bytes (N3: ComfyUI's ``SaveImage`` wrote one PNG
+        per frame into files the plan expected to be videos, and the SDK reports a ``SaveVideo`` mp4
+        as ``image``), so the two tests that care about that pass ``bytes_kind``.
+        """
+        if self.bytes_kind == "image":
+            return b"\x89PNG\r\n\x1a\n" + b"comfyrizz-fake-frame" * 8
+        if self.bytes_kind == "video":
+            return b"\x00\x00\x00\x18ftypmp42" + b"comfyrizz-fake-video" * 8
+        if self.bytes_kind == "audio":
+            return b"RIFF" + (2048).to_bytes(4, "little") + b"WAVEfmt " + b"comfyrizz-fake-audio" * 4
         return (f"COMFYRIZZ-FAKE-OUTPUT-{asset_id}-".encode() * 64)[:2048]
 
     def job_payload(self, job: dict[str, Any]) -> dict[str, Any]:

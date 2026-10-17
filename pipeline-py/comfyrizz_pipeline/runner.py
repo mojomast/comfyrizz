@@ -413,6 +413,53 @@ class Runner:
             )
         return self._poll_attempt(job, attempt, timeout=self.config.reconcile_timeout, collecting=True)
 
+    def _output_kind_problem(self, job: dict[str, Any], outputs: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """N3 (GPU test 3): a file's bytes decide its kind, and they must match the plan.
+
+        ``SaveImage`` at the end of an LTX graph made ComfyUI write *one PNG per frame*; the runner
+        then collected frame 0 as ``<id>.plate.mp4``, hashed it and let the package call it a video.
+        The graph now ends in ``CreateVideo`` -> ``SaveVideo``, and this is the guard for the general
+        case: when the bytes of the output the package will use say a different kind than
+        ``job.outputKind``, the job fails here rather than handing the renderer something it cannot
+        play. An unrecognised container is left alone (the server's word is all we have).
+        """
+        declared = job.get("outputKind")
+        if not declared or not outputs:
+            return None
+        primary = outputs[0]
+        kind = primary.get("kind")
+        # only the bytes are evidence. A kind the server merely *claimed* (the SDK calls an LTX mp4
+        # an image) or a graph the fake could not classify says nothing about what is in the file.
+        if primary.get("kindSource") != "bytes" or not kind or kind == declared:
+            return None
+        # the file we would have recorded is not the thing the plan asked for: read its magic for
+        # the message, remove it, so a later cached run cannot pick it up, and say what was found
+        path = Path(primary.get("file", ""))
+        magic = ""
+        try:
+            with path.open("rb") as handle:
+                magic = " ".join(f"{byte:02x}" for byte in handle.read(8))
+        except OSError:
+            magic = ""
+        removed = False
+        try:
+            if path.is_file():
+                path.unlink()
+                removed = True
+        except OSError:
+            removed = False
+        return {
+            "code": "output_kind_mismatch",
+            "message": (
+                f"{job['id']}: the server returned {kind} bytes for a {declared} output "
+                f"({path.name}{f', magic {magic}' if magic else ''}"
+                f"{f', the server called it {primary.get('reportedKind')}' if primary.get('reportedKind') else ''}). "
+                f"{'The file was removed; ' if removed else ''}nothing was recorded for it, so a retry re-runs the job "
+                "(GPU test 3, N3: a SaveImage terminal node writes one PNG per frame)"
+            ),
+            "output": {"file": str(path), "kind": kind, "declared": declared},
+        }
+
     def _poll_attempt(self, job: dict[str, Any], attempt: Attempt, *, timeout: float, collecting: bool) -> dict[str, Any]:
         if not attempt.job_id:
             raise ValueError(f"cannot poll attempt {attempt.attempt_id}: it has no job id (state {attempt.state})")
@@ -430,6 +477,11 @@ class Runner:
 
         if snapshot.status == "succeeded":
             outputs = self._collect(job, snapshot, attempt) if collecting else []
+            mismatch = self._output_kind_problem(job, outputs)
+            if mismatch:
+                attempt = self.attempts.update(attempt, state="failed", error=mismatch, finished_at=now_iso())
+                self.progress.emit("job_failed", job=job["id"], attempt=attempt.attempt_id, value=mismatch["code"])
+                return self._result(job, "failed", attempt, error=mismatch)
             attempt = self.attempts.update(attempt, state="succeeded", outputs=outputs, finished_at=now_iso())
             self._cache_store(job, outputs, attempt.attempt_id)
             self.progress.emit("job_done", job=job["id"], attempt=attempt.attempt_id, value=len(outputs))

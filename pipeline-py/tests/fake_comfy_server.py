@@ -23,13 +23,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="fake_comfy_server")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--outputs", type=int, default=1)
-    parser.add_argument("--output-kind", default="image")
+    parser.add_argument("--output-kind", default=None, choices=["image", "video", "audio"], help="override the kind the graph's saver implies")
     parser.add_argument("--fail-labels", default="", help="comma-separated job labels that must fail")
     parser.add_argument("--finish-after", type=float, default=0.0)
     parser.add_argument("--never-finish", action="store_true")
     parser.add_argument("--drop-first-response", action="store_true")
     parser.add_argument("--request-log", default=None, help="append one JSON line per request")
     parser.add_argument("--upload-status", type=int, default=200, help="what /upload/image answers (404 = a server without the route)")
+    parser.add_argument("--bytes-kind", default=None, choices=["image", "video", "audio"], help="serve real magic bytes for this kind (default: arbitrary bytes)")
     parser.add_argument("--reject-metadata", action="store_true", help="refuse dict job labels like comfy-api-proxy does")
     parser.add_argument("--lifetime-seconds", type=float, default=300.0, help="exit after this long, so a test can never leak a server")
     args = parser.parse_args(argv)
@@ -45,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         request_log=args.request_log,
         upload_status=args.upload_status,
         reject_metadata=args.reject_metadata,
+        bytes_kind=args.bytes_kind,
     )
     fake.state.origin = f"http://127.0.0.1:{args.port}" if args.port else fake.base_url
     lifetime = float(args.lifetime_seconds)

@@ -229,6 +229,40 @@ def _content_type(path: Path) -> str:
     return _CONTENT_TYPES.get(Path(path).suffix.lower(), "application/octet-stream")
 
 
+#: What a saved file's first bytes say it is. A server's claim about an output's *kind* is not
+#: evidence — on the GPU test 3 run the SDK reported a `SaveVideo` mp4 as ``image``, and ComfyUI's
+#: ``SaveImage`` wrote one PNG per frame into files the plan expected to be videos (N3). The magic
+#: bytes are evidence, and an unrecognised container is left to the server rather than guessed at.
+_MAGIC_KINDS: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image"),
+    (b"\xff\xd8\xff", "image"),
+    (b"GIF8", "image"),
+    (b"BM", "image"),
+    (b"\x1a\x45\xdf\xa3", "video"),  # matroska / webm
+    (b"fLaC", "audio"),
+    (b"ID3", "audio"),
+    (b"OggS", "audio"),
+)
+
+
+def sniff_kind(path: Path) -> str | None:
+    """``image``/``video``/``audio`` from a file's magic bytes, or ``None`` when unrecognised."""
+    path = Path(path)
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(16)
+    except OSError:
+        return None
+    if len(head) >= 12 and head[4:8] in (b"ftyp", b"moov", b"mdat", b"free", b"skip"):
+        return "video"
+    if head[:4] == b"RIFF" and len(head) >= 12:
+        return "video" if head[8:12] == b"WEBM" else ("audio" if head[8:12] == b"WAVE" else None)
+    for magic, kind in _MAGIC_KINDS:
+        if head.startswith(magic):
+            return kind
+    return None
+
+
 
 def classify_metadata_refusal(outcome: SubmitOutcome) -> bool:
     """Does this refusal say the server will not take job labels? (H-fix3, GPU test 2 issue 1.)
@@ -754,10 +788,19 @@ class ComfyClient:
             raise RuntimeError("output has no SDK handle to download; poll the job first")
         handle.to_file(tmp)
         tmp.replace(dest)
-        return {
+        reported = output.get("type")
+        sniffed = sniff_kind(dest)
+        record = {
             "file": str(dest),
             "sha256": sha256_file(dest),
             "bytes": dest.stat().st_size,
-            "kind": output.get("type"),
+            # the bytes decide the kind when they are recognisable; otherwise the server's word is
+            # all there is. `kindSource` is what keeps a *claim* from being treated as evidence
+            # (GPU test 3, N3 — the guard only accuses on bytes).
+            "kind": sniffed or reported,
+            "kindSource": "bytes" if sniffed else "server",
             "name": output.get("name"),
         }
+        if reported and sniffed and reported != sniffed:
+            record["reportedKind"] = reported
+        return record

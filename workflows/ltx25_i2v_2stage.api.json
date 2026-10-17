@@ -331,14 +331,26 @@
    "temporal_overlap": 16
   }
  },
- "41": {
-  "class_type": "SaveImage",
+ "42": {
+  "class_type": "CreateVideo",
   "inputs": {
    "images": [
     "40",
     0
    ],
-   "filename_prefix": "ltx"
+   "fps": 24.0
+  }
+ },
+ "43": {
+  "class_type": "SaveVideo",
+  "inputs": {
+   "video": [
+    "42",
+    0
+   ],
+   "filename_prefix": "ltx",
+   "format": "mp4",
+   "codec": "h264"
   }
  }
 }

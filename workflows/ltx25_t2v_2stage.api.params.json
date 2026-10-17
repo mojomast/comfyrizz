@@ -2,13 +2,13 @@
   "v": 1,
   "generator": "ltx25",
   "kind": "plate",
-  "note": "Text-to-video (no first frame): same geometry rules as i2v, minus LoadImage. The planned size is the *final* size, so the stage-1 latent (8) takes half of it and the x2 latent upsampler doubles it back - a planned 1024x576 sent whole to node 8 came back 2048x1152 (GPU test 2, issue 3).",
+  "note": "Text-to-video (no first frame): same geometry rules as i2v, minus LoadImage. The planned size is the *final* size, so the stage-1 latent (8) takes half of it and the x2 latent upsampler doubles it back - a planned 1024x576 sent whole to node 8 came back 2048x1152 (GPU test 2, issue 3). N3 (GPU test 3): the graph ends in CreateVideo(42) -> SaveVideo(43, mp4/h264) instead of SaveImage, because ComfyUI saved one PNG per frame and the runner then collected frame 0 as the plate's .mp4. 'fps' therefore reaches the conditioning node (7) and the container (42).",
   "map": {
     "prompt": ["5", "text"],
     "width": [["8", "width", { "mul": 0.5 }]],
     "height": [["8", "height", { "mul": 0.5 }]],
     "frames": [["8", "length"], ["9", "frames_number"]],
-    "fps": ["7", "frame_rate"],
+    "fps": [["7", "frame_rate"], ["42", "fps"]],
     "seed": ["11", "noise_seed"],
     "stage2_seed": ["23", "noise_seed"]
   }

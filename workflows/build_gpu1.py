@@ -89,7 +89,13 @@ def ltx(prompt, seed=42, w=960, h=544, length=97, fps=24, image=None, prefix="lt
         wf["26"]={"class_type":"LTXVSeparateAVLatent","inputs":{"av_latent":["25",0]}}
         final=["26",0]
     wf["40"]={"class_type":"VAEDecodeTiled","inputs":{"samples":final,"vae":["3",0],"tile_size":512,"overlap":64,"temporal_size":64,"temporal_overlap":16}}
-    wf["41"]={"class_type":"SaveImage","inputs":{"images":["40",0],"filename_prefix":prefix}}
+    # N3 (GPU test 3): a SaveImage at the end of an LTX graph writes *one PNG per frame*. The
+    # runner then collected frame 0 as "<id>.plate.mp4" with PNG bytes in it, hashed that one frame
+    # and called the asset a video. ComfyUI's video path is CreateVideo -> SaveVideo: one mp4 per
+    # job. Inputs are the schema at ComfyUI ce1e922 (comfy_extras/nodes_video.py):
+    # CreateVideo(images, fps, audio optional), SaveVideo(video, filename_prefix, format, codec).
+    wf["42"]={"class_type":"CreateVideo","inputs":{"images":["40",0],"fps":24.0}}
+    wf["43"]={"class_type":"SaveVideo","inputs":{"video":["42",0],"filename_prefix":prefix,"format":"mp4","codec":"h264"}}
     return wf
 
 if __name__=="__main__":
