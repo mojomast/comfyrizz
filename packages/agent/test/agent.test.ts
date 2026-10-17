@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { routeAsset, routeBrief } from '../src/router.js';
-import { expandFluxCaption } from '../src/caption.js';
+import { expandFluxCaption, expandVideoCaption, aspectFromSize, sourceDims } from '../src/caption.js';
 import { createToolset, generateSvgSchema, proposeSchema } from '../src/tools.js';
 import { runAgent } from '../src/agent.js';
 import type { ChatChunk, ChatModel, ChatRequest } from '../src/types.js';
@@ -47,7 +47,33 @@ test('FLUX caption expansion is deterministic and suppresses text/logos', () => 
   assert.match(caption, /A rocket lifting off/);
   assert.match(caption, /#0d0f14, #6d8cff/);
   assert.match(caption, /transparent background/);
-  assert.match(caption, /no text, no lettering, no logos/);
+  assert.match(caption, /no text, no letters, no words, no logos/);
+});
+
+test('caption: text escape hatch, labelled static camera, aspect helpers', () => {
+  const wanted = expandFluxCaption({ intent: 'A dashboard hero', text: true });
+  assert.doesNotMatch(wanted, /no text/);
+  assert.match(wanted, /legible labels only/);
+  const labelled = expandFluxCaption({ intent: 'A solar flow diagram', labelled: true });
+  assert.match(labelled, /static camera/);
+  assert.match(labelled, /legible labels only/);
+  assert.equal(aspectFromSize(1920, 1080), '16:9');
+  assert.equal(aspectFromSize(1024, 1024), '1:1');
+  assert.equal(aspectFromSize(1080, 1350), '4:5');
+  assert.equal(aspectFromSize(1080, 1920), '9:16');
+  assert.deepEqual(sourceDims('16:9'), { width: 1024, height: 576 });
+  assert.deepEqual(sourceDims('9:16'), { width: 576, height: 1024 });
+});
+
+test('video caption: i2v start image and static camera on labelled frames', () => {
+  const i2v = expandVideoCaption({ intent: 'Animate the diagram', startImage: true, labelled: true });
+  assert.match(i2v, /Use the provided start image as the first frame\./);
+  assert.match(i2v, /static camera, no cuts/);
+  assert.match(i2v, /One gentle motion: one subtle pulse/);
+  assert.doesNotMatch(i2v, /push-in|orbit/);
+  const loop = expandVideoCaption({ intent: 'Abstract ribbons', motion: 'drift' });
+  assert.match(loop, /One gentle motion: a slow steady drift/);
+  assert.match(loop, /no text/);
 });
 
 test('zod rejects malformed tool arguments before execution', () => {
@@ -80,6 +106,19 @@ test('tools: propose + edit package, SVG result, planned FLUX job', async () => 
   assert.equal(image.note, 'planned only; no GPU job was submitted');
   assert.match(image.caption, /no text/);
   assert.equal(image.asset.gen.model, 'flux-3-klein');
+  assert.equal(image.reference_edit, false);
+  assert.equal(image.output_aspect, '16:9');
+  assert.equal(image.asset.gen.workflow, 'workflows/flux3_klein_t2i.api.json');
+
+  const refEdit = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'restyle the flow diagram', refs: ['a_svg_flow'] }) as any;
+  assert.equal(refEdit.reference_edit, true);
+  assert.equal(refEdit.asset.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
+  assert.deepEqual(refEdit.asset.gen.inputs.reference, ['a_svg_flow']);
+  assert.match(refEdit.asset.notes, /ReferenceMultiLatent/);
+
+  const mismatched = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'a mascot', aspect: '1:1' }) as any;
+  assert.equal(mismatched.source_aspect, '1:1');
+  assert.match(mismatched.note, /centre-crop/);
 });
 
 test('agent builds and edits a package and routes SVG vs FLUX on a mixed brief', async () => {

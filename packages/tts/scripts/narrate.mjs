@@ -137,6 +137,14 @@ pkg.assets.a_narration = {
     caption: 'Six-sentence-level-scene narration synthesized locally on CPU from the package narration text.',
   },
 };
+// Reference the narration asset from every narrated scene so the validator does
+// not raise WARN_ASSET_UNUSED (P-fix2).
+for (const scene of pkg.scenes ?? []) {
+  const measured = durations.scenes[scene.id];
+  if (!measured) continue;
+  scene.narration_asset = 'a_narration';
+  scene.narration_duration_frames = Math.round(measured.seconds * timeline.fps);
+}
 writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`);
 
 const validate = spawnSync(

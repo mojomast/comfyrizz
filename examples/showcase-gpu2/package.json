@@ -78,7 +78,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "How does sunlight become the power in your home? Let's follow the energy, step by step."
+      "narration": "How does sunlight become the power in your home? Let's follow the energy, step by step.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 158
     },
     {
       "id": "s_panels",
@@ -114,7 +116,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "Solar panels are made of silicon cells. When sunlight hits them, it knocks electrons loose and creates a direct current."
+      "narration": "Solar panels are made of silicon cells. When sunlight hits them, it knocks electrons loose and creates a direct current.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 230
     },
     {
       "id": "s_flow",
@@ -134,7 +138,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "An inverter converts that direct current into alternating current, the kind your home actually uses."
+      "narration": "An inverter converts that direct current into alternating current, the kind your home actually uses.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 192
     },
     {
       "id": "s_stat",
@@ -159,7 +165,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "And there is plenty of it. The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use."
+      "narration": "And there is plenty of it. The sunlight reaching Earth in about ninety minutes roughly matches a whole year of global energy use.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 234
     },
     {
       "id": "s_battery",
@@ -195,7 +203,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "Extra energy from the afternoon charges a home battery, so the lights stay on after sunset."
+      "narration": "Extra energy from the afternoon charges a home battery, so the lights stay on after sunset.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 186
     },
     {
       "id": "s_chart",
@@ -221,7 +231,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "Output follows the sun. It climbs through the morning, peaks around midday, and fades by evening."
+      "narration": "Output follows the sun. It climbs through the morning, peaks around midday, and fades by evening.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 184
     },
     {
       "id": "s_outro",
@@ -230,7 +242,7 @@
       "preferredFrames": 165,
       "copy": {
         "headline": "Made with Comfyrizz",
-        "sub": "FLUX 3 Klein · LTX-2.5 · SVG guides · Kokoro"
+        "sub": "FLUX 3 Klein \u00b7 LTX-2.5 \u00b7 SVG guides \u00b7 Kokoro"
       },
       "background": {
         "asset": "a_particles",
@@ -247,7 +259,9 @@
           "anim": "fade-in"
         }
       ],
-      "narration": "Every image, clip and diagram here came from one short GPU session. Made with Comfyrizz."
+      "narration": "Every image, clip and diagram here came from one short GPU session. Made with Comfyrizz.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 195
     }
   ],
   "assets": {

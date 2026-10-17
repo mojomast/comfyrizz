@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { routeAsset, type AssetNeed, type RouteDecision } from './router.js';
 import { foregroundFor } from './package.js';
-import { expandFluxCaption } from './caption.js';
+import { expandFluxCaption, aspectFromSize, sourceDims, type Aspect } from './caption.js';
 import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
 
@@ -93,6 +93,10 @@ export const generateImageSchema = z.object({
   refs: z.array(z.string()).max(4).optional(),
   cutout: z.boolean().optional(),
   aspect: z.enum(['16:9', '1:1', '4:5', '9:16']).optional(),
+  /** Allow text in the still (default false: Klein draws garbled pseudo-text). */
+  text: z.boolean().optional(),
+  /** Labelled frame: keep labels and lock the camera. */
+  labelled: z.boolean().optional(),
 });
 
 const searchSchema = z.object({
@@ -250,8 +254,29 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
 
   const planImage = (args: z.infer<typeof generateImageSchema>) => {
     const planned = options.planImage?.(args) ?? {};
-    const caption = planned.caption ?? expandFluxCaption({ intent: args.intent, cutout: args.cutout, ...(args.aspect ? { aspect: args.aspect } : {}) });
+    const format = state.package?.format ?? {};
+    const outputAspect = aspectFromSize(format.width, format.height);
+    const requestedAspect = (args.aspect as Aspect | undefined) ?? outputAspect;
+    const dims = sourceDims(requestedAspect);
+    const caption = planned.caption ?? expandFluxCaption({
+      intent: args.intent,
+      ...(args.cutout ? { cutout: true } : {}),
+      ...(args.text ? { text: true } : {}),
+      ...(args.labelled ? { labelled: true } : {}),
+      aspect: requestedAspect,
+    });
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
+    const refs = args.refs ?? [];
+    const isRefEdit = refs.length > 0;
+    const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
+    const defaultInputs: Record<string, unknown> = {
+      prompt: caption,
+      width: dims.width,
+      height: dims.height,
+      seed: args.seed ?? 0,
+      ...(args.cutout ? { cutout: true } : {}),
+      ...(isRefEdit ? { reference: refs } : {}),
+    };
     const asset = {
       kind: 'image',
       origin: 'generated',
@@ -259,12 +284,14 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       license: { id: 'CC0-1.0' },
       model_license: { id: 'Apache-2.0', url: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell' },
       redistributable: true,
-      notes: 'pending-GPU: procedural background is the CPU fallback until a spend is approved',
+      notes: isRefEdit
+        ? 'pending-GPU: ReferenceMultiLatent keeps the source layout/labels while restyling (GPU test 2)'
+        : 'pending-GPU: procedural background is the CPU fallback until a spend is approved',
       gen: {
         generator: 'flux3-klein',
-        workflow: planned.workflow ?? 'workflows/flux3_klein_t2i.api.json',
+        workflow: planned.workflow ?? defaultWorkflow,
         model: planned.model ?? 'flux-3-klein',
-        inputs: planned.inputs ?? { prompt: caption, width: 1024, height: 576, seed: args.seed ?? 0, ...(args.cutout ? { cutout: true } : {}) },
+        inputs: planned.inputs ?? defaultInputs,
         backend: planned.backend ?? 'colab:G4',
       },
     };
@@ -276,12 +303,18 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       };
       touch();
     }
+    const aspectMismatch = args.aspect !== undefined && requestedAspect !== outputAspect;
     return {
       scene_id: args.scene_id,
       asset: { id, ...asset },
       caption,
+      reference_edit: isRefEdit,
+      source_aspect: requestedAspect,
+      output_aspect: outputAspect,
       requires_approval: 'spend',
-      note: 'planned only; no GPU job was submitted',
+      note: aspectMismatch
+        ? `planned only; no GPU job was submitted. Source is ${requestedAspect} but the package output is ${outputAspect}: i2v will centre-crop.`
+        : 'planned only; no GPU job was submitted',
     };
   };
 
@@ -317,7 +350,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     'assets.generate_image': tool(
       'assets.generate_image',
       'Plan a FLUX still with an expanded caption. This never runs a GPU job; spend needs approval.',
-      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] } }, ['scene_id', 'intent']),
+      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' } }, ['scene_id', 'intent']),
       generateImageSchema,
       planImage,
     ),

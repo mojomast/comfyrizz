@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "revision": 1,
   "id": "pkg_narrated0001",
-  "title": "Launch demo — narrated (Kokoro CPU)",
+  "title": "Launch demo \u2014 narrated (Kokoro CPU)",
   "createdAt": "2025-10-18T00:00:00.000Z",
   "format": {
     "width": 1920,
@@ -92,7 +92,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "Comfyrizz turns one package into a finished launch video. Everything you see is generated from code."
+      "narration": "Comfyrizz turns one package into a finished launch video. Everything you see is generated from code.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 199
     },
     {
       "id": "s_hero",
@@ -123,7 +125,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "Generated-first assets start as SVG. Each vector is sanitized and render-checked on the CPU before it reaches the composition."
+      "narration": "Generated-first assets start as SVG. Each vector is sanitized and render-checked on the CPU before it reaches the composition.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 275
     },
     {
       "id": "s_stat",
@@ -157,7 +161,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "This launch video renders locally in about eighty seconds. No GPU, no cloud, and no network calls during the render."
+      "narration": "This launch video renders locally in about eighty seconds. No GPU, no cloud, and no network calls during the render.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 243
     },
     {
       "id": "s_chart",
@@ -183,7 +189,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "The timeline locks integer frames at thirty per second. Speech sets the scene length, and fades overlap instead of stacking."
+      "narration": "The timeline locks integer frames at thirty per second. Speech sets the scene length, and fades overlap instead of stacking.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 233
     },
     {
       "id": "s_list",
@@ -218,7 +226,9 @@
         "type": "fade",
         "frames": 15
       },
-      "narration": "Three rules keep it honest. Measure every narration chunk. Never clip or speed up speech. Export captions from the same cues the player uses."
+      "narration": "Three rules keep it honest. Measure every narration chunk. Never clip or speed up speech. Export captions from the same cues the player uses.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 278
     },
     {
       "id": "s_outro",
@@ -250,7 +260,9 @@
           "anim": "slide-in"
         }
       ],
-      "narration": "Ready to render, locally and deterministically. Comfyrizz."
+      "narration": "Ready to render, locally and deterministically. Comfyrizz.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 133
     }
   ],
   "assets": {
