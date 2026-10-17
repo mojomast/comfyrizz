@@ -1,0 +1,21 @@
+Comfyrizz
+Copyright (c) 2026 Kyle Durepos. Licensed under the MIT License (see LICENSE).
+
+Portions derived from Orbit (mojomast/orbitdesktop): the Grok Bots chat UI
+patterns and helpers, and the Google Colab CLI parsing helpers and detached
+worker pattern. Those portions are relicensed under the MIT License by their
+owner, Kyle Durepos. Files containing them carry a header saying so.
+
+Third-party software (not vendored unless stated; see each package's lockfile):
+- google-colab-cli (Apache-2.0), invoked as an external command.
+- comfy-sdk / @comfyorg/sdk and comfy-api-proxy (MIT).
+- ComfyUI (GPL-3.0): not vendored; cloned at runtime by colab/bootstrap.py.
+- Remotion: source-available under the Remotion License (not OSI). Free for
+  individuals and organisations of up to 3 people; larger companies need a
+  Company License. See https://www.remotion.dev/license
+- Vercel AI SDK (Apache-2.0), resvg / @resvg/resvg-js (MPL-2.0), kokoro-onnx
+  and Kokoro-82M voices (see their notices).
+
+Models are not distributed with this repository. FLUX 3 Image Klein (FLUX
+Kommunity License v1.0), LTX-2.5 (LTX-2.x Community License) and Kokoro-82M
+are downloaded by each user under their own licences.

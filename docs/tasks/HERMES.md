@@ -1,0 +1,13 @@
+# Hermes: Workstream B, first batch (due M1, Sun Oct 18 evening, Toronto)
+
+Read first: `docs/tasks/RULES.md`, `docs/PLAN.md` (Workstream B, "Generated-first assets"), `docs/SPEC.md` §5.1, §5.2, §6.3–§6.7, `/workspace/comfy-hackathon/test/COLAB_TEST.md` (read-only).
+
+You own: `packages/schema/`, `pipeline-py/`, `packages/jobs/`, `packages/backends/`, `colab/`, `workflows/`, `scripts/setup-local-comfy.sh`.
+
+Order: **B1 first (Pi depends on it; target ~3 h)** → B2 → B3.
+
+- **B1 Schema `comfyrizz.package/v1`** (`packages/schema/`): JSON Schema 2020-12, generated TS types, ajv validator, Python `jsonschema` validator, semantic checks (unique ids, resolvable refs, bounded numbers, relative paths only, layout/variant enums, `model_license` separate from `license`/`redistributable`). Include generated-first fields: asset `kind` `svg` and `vector-anim`; `gen.generator` ∈ {`llm-svg`, `flux3-klein`, `ltx25`, `kokoro`}; `gen.sanitizer_version`, `gen.render_check`; generated outputs default `CC0-1.0`, `redistributable: true`; image jobs may set `cutout: true`. Accept: valid/invalid fixtures tested in TS and Python; post a check-in "types ready" for Pi.
+- **B2 `pipeline-py` + `packages/jobs/`**: comfy-sdk runner, JSON-lines progress, atomic attempt records written before submit (`job_id` added immediately), `submission_unknown` never auto-resubmitted, atomic `out/manifest.json` decides success, reconcile mode, cache key, `health.py`. Jobs planner batches all FLUX stills of a package before plates, LTX dims ×32 and frames 8n+1. Accept: pytest against a **local fake Comfy v2 server**: success, kill mid-run → reconcile polls not resubmits, `submission_unknown` surfaced; planner unit tests.
+- **B3 Backends** (`packages/backends/`, `colab/`): copy (don't edit) the `colab-plan.mjs` parsers + `redactSecrets` + `blockedLocalPath` + argv planning and the detached worker/job-log pattern from `/home/box/orbitdesktop/server/colab-*.mjs` with the MIT relicence header; `Backend` interface (§6.5); Google Colab lifecycle with **no secrets via `--env`** (HF token as 0600 file upload), manifest decides success, attempt-record reconcile, verified teardown else **`stop_unconfirmed`**, **reserve formula** before each job (warn 80%), wall-clock cap, orphan reaper offers only, spend labelled estimate; BYO ComfyUI URL via local `comfy-api-proxy` with health checks; draft `colab/bootstrap.py`/`health.py` from the test scripts (never executed on Google Colab). Accept: tests with a **fake `colab` executable** (happy path, lost exec → reconcile, unconfirmed stop, budget refusal, no token in any argv/`--env`, redaction). **Zero real Google Colab calls.**
+
+Board entries: B1, B2, B3 (see `collab-board … list`). Coordinate with Pi only through board check-ins.
