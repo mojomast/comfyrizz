@@ -118,3 +118,13 @@ the mapped node input. A few properties worth keeping:
   `inputs_hash` covers the uploaded content, so two runs that differ only in the bytes behind an
   asset id are not the same attempt.
 
+## Two-stage LTX geometry
+
+The LTX graph (`workflows/ltx25_*_2stage.api.json`) renders stage 1 at *half* the finished size and a
+latent upsampler doubles it back, so a planned 960x544 must reach the graph's stage-1 latent (node 8)
+and its i2v image scale (node 31) as 480x272. The plan states both numbers — `job.dims` is the frame
+the package asked for, `job.stage1Dims` is the lattice the graph renders — and every LTX params map
+derives the stage-1 value from the planned one with a `{mul: 0.5}` target, so the map cannot disagree
+with the plan. A planned size sent whole to node 8 came back at 2x on the GPU test 2 run (issue 3),
+and an unmapped node 31 kept the graph's own 960x544 whatever the plan said (issue 4).
+

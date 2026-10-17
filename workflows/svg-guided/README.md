@@ -44,6 +44,18 @@ execute cannot be produced.
    tested one.
 4. **No image library**: rasters come from `@resvg/resvg-js` through `svgguide/_resvg.mjs` (read-only
    use of Pi's `packages/vector` dependency), and maps are written as PNGs by a ~20-line zlib writer.
+5. **Geometry (GPU test 2, issue 6)**: a raster is snapped onto the 16-pixel lattice before it goes
+   anywhere. `snap_size` prefers a size whose aspect is exactly the SVG's — a 16:9 scene asked for at
+   width 960 becomes 1024x576, which is also the size the GPU test 2 findings recommend — and falls
+   back to rounding the height to the nearest step, with `fit_box` stretching the painting to the box
+   (a letterboxed guide would have a transparent band the model reads as "nothing here"). For a 16:9
+   lattice size the width has to be a multiple of 256, so 480→512x288 and 960→1024x576 are exact
+   twins while 320, 640 and 1920 take the fallback.
+6. **A guided plate runs at its output aspect**: `svgguide.sweeps.APPROACH_GEOMETRY` carries the
+   geometry each approach runs at (stills 1280x720, i2v 1024x576) into both the workflow drafts and
+   `sweeps/e2.json`, so an i2v first frame is never centre-cropped down from another shape — the
+   failure the GPU test 2 mascot showed. `packages/jobs` refuses a package whose i2v source is a
+   different aspect than its plate for the same reason.
 
 ## Research note (E1)
 
