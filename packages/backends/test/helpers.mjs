@@ -31,7 +31,12 @@ export function writeState(statePath, state) {
 }
 
 export function readLog(logPath) {
-  const text = readFileSync(logPath, "utf8");
+  let text = "";
+  try {
+    text = readFileSync(logPath, "utf8");
+  } catch {
+    return []; // the CLI was never invoked (a refused or not_owned path)
+  }
   return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 

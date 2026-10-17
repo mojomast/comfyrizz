@@ -137,8 +137,23 @@ export function createByoBackend({
     async run(jobsFileOrNull, onEvent = () => {}, signal = null) {
       const file = jobsFileOrNull || jobsFile;
       if (!file) throw new ColabCliError("byo run needs a jobs.json path");
-      const command = runnerCommand || [pythonBin, "-m", "comfyrizz_pipeline.runner", "--jobs", file, "--out", outDir || join(process.cwd(), "out"), "--progress-log", join(outDir || process.cwd(), "progress.jsonl")];
-      const child = spawn(command[0], [...command.slice(1), "--base-url", v2()], { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+      // `runnerCommand` is the prefix (default: the pipeline-py module); the jobs file, the
+      // output directory and the proxy URL are always appended here so a caller cannot forget
+      // them. The manifest is read from `outDir`, never from the exit code.
+      const runOut = outDir || join(process.cwd(), "out");
+      const command = runnerCommand || [pythonBin, "-m", "comfyrizz_pipeline.runner"];
+      const args = [
+        ...command.slice(1),
+        "--jobs",
+        file,
+        "--out",
+        runOut,
+        "--progress-log",
+        join(runOut, "progress.jsonl"),
+        "--base-url",
+        v2(),
+      ];
+      const child = spawn(command[0], args, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
       let buffer = "";
       const handle = (chunk) => {
         buffer += chunk.toString("utf8");

@@ -93,6 +93,7 @@ function backendFor(fake, extra = {}) {
     hfTokenPath: tokenPath,
     jobsFile,
     teardownRetryMs: 5,
+    watchdogMinutes: 0.02, // arm it, but never leave a 45-minute timer behind in a test
     ...extra.options,
   });
 }
@@ -128,7 +129,8 @@ test("happy path: preflight, allocate, bootstrap, health, run, verified stop", a
 
   const commands = readLog(fake.logPath).map((entry) => entry.argv.join(" "));
   const order = readLog(fake.logPath).map((entry) => entry.argv[0]);
-  assert.deepEqual(order.slice(0, 4), ["version", "usage", "sessions", "new"]);
+  assert.deepEqual(order.slice(0, 3), ["version", "usage", "sessions"]);
+  assert.ok(order.indexOf("new") > 2, `allocation happens after the read-only preflight (${order.join(",")})`);
   assert.ok(order.includes("upload") && order.includes("download") && order.includes("stop"));
   assert.ok(
     commands.some((line) => line.includes("exec -s comfyrizz-demo0001 -f bootstrap.py --timeout 900")),
@@ -197,7 +199,7 @@ test("the reserve formula refuses the next job, and warns at 80%", async () => {
   assert.ok(!refusedCommands.some((command) => command === "exec"), "no exec for a refused job");
 
   const tight = installFakeColab(ws.dir, { state: baseState(), name: "colab-tight" });
-  const warning = backendFor(tight, { workspace: ws, options: { budgetUnits: 2.4 } });
+  const warning = backendFor(tight, { workspace: ws, options: { budgetUnits: 1.1 } });
   const admitted = await warning.admit([{ kind: "still" }]);
   assert.equal(admitted.allowed, true);
   assert.equal(admitted.warn, true, admitted.message);

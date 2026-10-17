@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   HF_TOKEN_REMOTE_PATH,
   REMOTE_ROOT,
@@ -71,6 +71,7 @@ export function createColabBackend({
   pythonBin = process.env.COMFYRIZZ_PYTHON || "python3",
   teardownRetries = 3,
   teardownRetryMs = 50,
+  watchdogMinutes = 45,
   now = () => Date.now(),
   zipCommand = null,
 } = {}) {
@@ -194,17 +195,34 @@ export function createColabBackend({
     return { allowed: true, warn: decision.warn, message: decision.message, decision, clock, estimate };
   }
 
-  /** A stop-only watchdog, detached, so the VM cannot outlive the app by accident. */
-  function armWatchdog({ minutes = 45 } = {}) {
+  /**
+   * A stop-only watchdog, detached, so the VM cannot outlive the app by accident
+   * (SPEC.md 6.6). `spawn` + `unref`, never `spawnSync`: a synchronous spawn would block
+   * the caller until the watchdog fired, which is the whole 45 minutes.
+   */
+  function armWatchdog({ minutes = watchdogMinutes } = {}) {
+    if (!minutes || minutes <= 0) return null;
     const deadline = now() + minutes * 60000;
     const spec = join(logs, `watchdog-${session}.json`);
     mkdirSync(logs, { recursive: true });
     writeFileSync(
       spec,
-      JSON.stringify({ bin: client.bin, args: argvStop({ session }), log: join(logs, `watchdog-${session}.log`), exit: join(logs, `watchdog-${session}.exit.json`), deadlineMs: deadline, env: client.environment() }, null, 2),
+      JSON.stringify(
+        {
+          bin: client.bin,
+          args: argvStop({ session }),
+          log: join(logs, `watchdog-${session}.log`),
+          exit: join(logs, `watchdog-${session}.exit.json`),
+          deadlineMs: deadline,
+          env: client.environment(),
+        },
+        null,
+        2,
+      ),
       { mode: 0o600 },
     );
-    const child = spawnSync(process.execPath, [join(HERE, "watchdog.mjs"), spec], { detached: true, stdio: "ignore" });
+    const child = spawn(process.execPath, [join(HERE, "watchdog.mjs"), spec], { detached: true, stdio: "ignore" });
+    child.unref();
     state.watchdog = { pid: child.pid || null, deadline, spec, minutes };
     rememberSession({ watchdogDeadline: new Date(deadline).toISOString(), watchdogPid: child.pid || null });
     return state.watchdog;
@@ -470,11 +488,16 @@ export function createColabBackend({
     const attempts = existsSync(attemptsPath)
       ? readdirSync(attemptsPath).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(readFileSync(join(attemptsPath, name), "utf8")))
       : [];
-    if (expectComplete && manifest && manifest.complete === true) {
-      verifyAgainstManifest(manifest, localOut);
-    }
-    emit(onEvent, { type: "collect", complete: manifest?.complete === true, attempts: attempts.length });
-    return { ok: result.ok, manifest, attempts, local: localOut };
+    const verification = manifest ? verifyAgainstManifest(manifest, localOut) : { verified: false, problems: [] };
+    emit(onEvent, {
+      type: "collect",
+      complete: manifest?.complete === true,
+      attempts: attempts.length,
+      verified: verification.verified,
+      problems: verification.problems,
+      expectComplete,
+    });
+    return { ok: result.ok, manifest, attempts, local: localOut, verified: verification.verified, problems: verification.problems };
   }
 
   state.runId = null;

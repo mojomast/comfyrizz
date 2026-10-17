@@ -32,6 +32,7 @@ const server = createServer((request, response) => {
   send({ error: { code: "not_found", message: url.pathname } }, 404);
 });
 server.listen(port, "127.0.0.1", () => {
-  process.stdout.write(`v2-stub listening on ${port}\n`);
+  // report the *bound* port so `--port 0` lets a test allocate a free one
+  process.stdout.write(`v2-stub listening on ${server.address().port}\n`);
 });
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
