@@ -1,16 +1,29 @@
 import React from 'react';
-import { Composition } from 'remotion';
+import { Audio, Composition, staticFile } from 'remotion';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
+import narratedPkgJson from '../../../examples/narrated-demo/package.json';
+import narratedTimelineJson from '../../../examples/narrated-demo/timeline.json';
 import type { PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import { TimelinePlayer, sceneById } from './player';
 
 const pkg = pkgJson as unknown as PackageV1;
 const timeline = timelineJson as unknown as Timeline;
+const narratedPkg = narratedPkgJson as unknown as PackageV1;
+const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
 function LaunchDemo() {
   return <TimelinePlayer pkg={pkg} timeline={timeline} />;
+}
+
+function NarratedDemo() {
+  return (
+    <>
+      <Audio src={staticFile('narration.norm.wav')} />
+      <TimelinePlayer pkg={narratedPkg} timeline={narratedTimeline} captions={narratedTimeline.captions} />
+    </>
+  );
 }
 
 function ScenePreview({ sceneId }: { sceneId: string }) {
@@ -36,6 +49,14 @@ export function RemotionRoot() {
         fps={timeline.fps}
         width={timeline.width}
         height={timeline.height}
+      />
+      <Composition
+        id="NarratedDemo"
+        component={NarratedDemo}
+        durationInFrames={narratedTimeline.durationInFrames}
+        fps={narratedTimeline.fps}
+        width={narratedTimeline.width}
+        height={narratedTimeline.height}
       />
       {previews.map(preview => (
         <Composition

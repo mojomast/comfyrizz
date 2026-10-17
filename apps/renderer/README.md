@@ -20,6 +20,7 @@ inlined, so the composition only ever sees verified markup.
 zero baseline), `List` (bullets/quote). Registered compositions:
 
 - `LaunchDemo` — full example, 1095 frames @ 30 fps (36.5 s), 1920×1080
+- `NarratedDemo` — Kokoro audio + sentence-caption overlay, 1312 frames @ 30 fps (43.7 s) (A4)
 - `Preview-Title`, `Preview-Hero`, `Preview-Stat`, `Preview-Chart`, `Preview-List`
   — one scene each, for frame 0 / mid / last stills
 
@@ -51,7 +52,8 @@ npm test                        # package/timeline/asset/network checks (5 tests
 npm run build:assets            # sanitize + render-check the 4 SVG assets
 npm run compile:example         # package.json -> timeline.json (A2 compiler)
 npm run still                   # 15 stills (5 layouts x frame 0/mid/last)
-npm run render:example          # CPU MP4 + ffprobe gate
+npm run render:example          # CPU MP4 + ffprobe gate (silent example)
+npm run render:narrated         # Kokoro audio + captions, ffprobe audio gate (A4)
 ```
 
 `render:example` and `still` use `/usr/bin/google-chrome` by default; override
@@ -68,6 +70,7 @@ with `REMOTION_BROWSER=/path/to/chrome`.
 | MP4 export | 1920×1080, H.264 High, 30/1 fps, **1095 frames**, 36.500 s, no audio (voice off), 2.63 MB |
 | CPU render time | **78.7 s** for 36.5 s of video (~2.2× realtime, concurrency 2, Node 22.23.3, `/usr/bin/google-chrome`) |
 | ffprobe | `codec_name=h264`, `nb_frames=1095`, `r_frame_rate=30/1`, `pix_fmt=yuvj420p`; audio stream count 0 |
+| Narrated export (A4) | 1312 frames, 43.733 s, H.264 + AAC 48 kHz stereo, 14 captions, hash `4943e204…19c9`; CPU 96.4 s |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is
 reproducible with `npm run render:example`.

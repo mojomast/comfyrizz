@@ -2,16 +2,29 @@ import React from 'react';
 import { TransitionSeries, linearTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
-import type { Timeline } from '../../../packages/planner/dist/src/index.js';
+import type { Timeline, TimelineCaption } from '../../../packages/planner/dist/src/index.js';
 import { SceneView } from './components';
+import { CaptionOverlay } from './captions';
 
 /**
  * Composes the compiled timeline. Each scene is a TransitionSeries sequence; the
  * transition after it uses exactly the compiled `transitionOutFrames`, so the
  * composition duration equals timeline.durationInFrames.
  */
-export function TimelinePlayer({ pkg, timeline, scenes }: { pkg: PackageV1; timeline: Timeline; scenes?: Scene[] }) {
-  const list = scenes ?? timeline.scenes;
+export function TimelinePlayer({
+  pkg,
+  timeline,
+  scenes,
+  captions,
+}: {
+  pkg: PackageV1;
+  timeline: Timeline;
+  scenes?: Scene[];
+  captions?: TimelineCaption[];
+}) {
+  const list = (scenes ?? timeline.scenes) as unknown as Array<
+    Scene & { durationInFrames: number; transitionOutFrames: number }
+  >;
   const children: React.ReactNode[] = [];
   list.forEach((scene, index) => {
     children.push(
@@ -30,9 +43,14 @@ export function TimelinePlayer({ pkg, timeline, scenes }: { pkg: PackageV1; time
       );
     }
   });
-  return <TransitionSeries>{children}</TransitionSeries>;
+  return (
+    <>
+      <TransitionSeries>{children}</TransitionSeries>
+      {captions && <CaptionOverlay captions={captions} />}
+    </>
+  );
 }
 
 export function sceneById(timeline: Timeline, sceneId: string): Scene | undefined {
-  return timeline.scenes.find(scene => scene.id === sceneId);
+  return timeline.scenes.find(scene => scene.id === sceneId) as unknown as Scene | undefined;
 }

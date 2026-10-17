@@ -11,7 +11,8 @@
     "studio": "remotion studio src/index.ts",
     "still": "node scripts/still-all.mjs",
     "render:example": "node scripts/render-example.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "render:narrated": "node scripts/render-narrated.mjs"
   },
   "dependencies": {
     "@remotion/cli": "4.0.536",

@@ -296,7 +296,7 @@ function HeroLayout({ scene, pkg, frame }: LayoutProps) {
           <div style={{ fontSize: TYPE_SCALE.headlineLg, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.05, opacity: head.opacity, transform: `translateY(${head.translateY}px)` }}>
             {copy.headline}
           </div>
-          {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: colors[2], fontSize: 30 }}>{copy.sub}</div> : null}
+          {copy.sub ? <div style={{ fontSize: 30, color: colors[2] }}>{copy.sub}</div> : null}
           {copy.body ? (
             <div style={{ fontSize: TYPE_SCALE.body, color: colors[3], opacity: 0.86 * body.opacity, transform: `translateY(${body.translateY}px)` }}>{copy.body}</div>
           ) : null}
@@ -397,7 +397,7 @@ function ListLayout({ scene, pkg, frame }: LayoutProps) {
                   <div style={{ width: 44, height: 44, borderRadius: 999, background: colors[2], color: colors[0], display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24 }}>
                     {index + 1}
                   </div>
-                  <div style={{ fontSize: TYPE_SCALE.body, fontSize: 34 }}>{item}</div>
+                  <div style={{ fontSize: 34 }}>{item}</div>
                 </div>
               );
             })}

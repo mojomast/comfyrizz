@@ -1,0 +1,162 @@
+/**
+ * Captions and measured narration (spec 6.8).
+ *
+ * Kokoro synthesises one sentence at a time. `synth.py` writes the measured
+ * seconds per chunk; this module turns them into compiler options and exports
+ * SRT/VTT from the *same* cues the player uses. No word timestamps are invented.
+ */
+
+export interface NarrationChunk {
+  text: string;
+  seconds: number;
+}
+
+export interface SceneNarration {
+  chunks: NarrationChunk[];
+  gapSeconds: number;
+  paddingSeconds: number;
+  seconds: number;
+  file?: string;
+}
+
+export interface NarrationDurations {
+  version: number;
+  engine: string;
+  engineVersion: string;
+  model: string;
+  voices: string;
+  voice: string;
+  speed: number;
+  sampleRate: number;
+  gapSeconds: number;
+  paddingSeconds: number;
+  scenes: Record<string, SceneNarration>;
+  totalSeconds: number;
+  file?: string;
+}
+
+export interface CaptionCue {
+  text: string;
+  from: number;
+  to: number;
+  sceneId?: string;
+  estimated?: boolean;
+}
+
+export interface CompileNarrationOptions {
+  narration: Record<string, NarrationChunk[]>;
+  narrationGapSeconds: number;
+  narrationPaddingSeconds: number;
+}
+
+const DEFAULT_GAP = 0.15;
+const DEFAULT_PADDING = 0.25;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Parse and validate `durations.json`; throws instead of trusting partial data. */
+export function parseDurations(input: unknown): NarrationDurations {
+  if (!isRecord(input)) throw new Error('durations must be an object');
+  if (input.version !== 1) throw new Error(`unsupported durations version ${String(input.version)}`);
+  if (!isRecord(input.scenes)) throw new Error('durations.scenes must be an object');
+  const scenes: Record<string, SceneNarration> = {};
+  for (const [sceneId, value] of Object.entries(input.scenes)) {
+    if (!isRecord(value)) throw new Error(`scene ${sceneId} must be an object`);
+    if (!Array.isArray(value.chunks) || value.chunks.length === 0) {
+      throw new Error(`scene ${sceneId} has no measured chunks`);
+    }
+    const chunks = value.chunks.map((chunk, index) => {
+      if (!isRecord(chunk) || typeof chunk.text !== 'string' || typeof chunk.seconds !== 'number') {
+        throw new Error(`scene ${sceneId} chunk ${index} is invalid`);
+      }
+      if (!(chunk.seconds > 0)) throw new Error(`scene ${sceneId} chunk ${index} has no duration`);
+      return { text: chunk.text, seconds: chunk.seconds };
+    });
+    const seconds = typeof value.seconds === 'number' ? value.seconds : 0;
+    scenes[sceneId] = {
+      chunks,
+      gapSeconds: typeof value.gapSeconds === 'number' ? value.gapSeconds : DEFAULT_GAP,
+      paddingSeconds: typeof value.paddingSeconds === 'number' ? value.paddingSeconds : DEFAULT_PADDING,
+      seconds,
+      file: typeof value.file === 'string' ? value.file : undefined,
+    };
+  }
+  const sampleRate = typeof input.sampleRate === 'number' ? input.sampleRate : 24_000;
+  if (sampleRate !== 24_000) throw new Error(`unexpected Kokoro sample rate ${sampleRate}`);
+  return {
+    version: 1,
+    engine: String(input.engine ?? 'kokoro-onnx'),
+    engineVersion: String(input.engineVersion ?? ''),
+    model: String(input.model ?? ''),
+    voices: String(input.voices ?? ''),
+    voice: String(input.voice ?? ''),
+    speed: typeof input.speed === 'number' ? input.speed : 1,
+    sampleRate,
+    gapSeconds: typeof input.gapSeconds === 'number' ? input.gapSeconds : DEFAULT_GAP,
+    paddingSeconds: typeof input.paddingSeconds === 'number' ? input.paddingSeconds : DEFAULT_PADDING,
+    scenes,
+    totalSeconds: typeof input.totalSeconds === 'number' ? input.totalSeconds : 0,
+    file: typeof input.file === 'string' ? input.file : undefined,
+  };
+}
+
+/** Options for `compileTimeline` — measured durations only, so not provisional. */
+export function compileOptionsFromDurations(durations: NarrationDurations): CompileNarrationOptions {
+  const narration: Record<string, NarrationChunk[]> = {};
+  for (const [sceneId, scene] of Object.entries(durations.scenes)) {
+    narration[sceneId] = scene.chunks.map(chunk => ({ text: chunk.text, seconds: chunk.seconds }));
+  }
+  return {
+    narration,
+    narrationGapSeconds: durations.gapSeconds,
+    narrationPaddingSeconds: durations.paddingSeconds,
+  };
+}
+
+/** Sum of measured speech + fixed gaps + end padding, in seconds. */
+export function sceneNarrationSeconds(scene: SceneNarration): number {
+  const spoken = scene.chunks.reduce((total, chunk) => total + chunk.seconds, 0);
+  return spoken + scene.gapSeconds * Math.max(0, scene.chunks.length - 1) + scene.paddingSeconds;
+}
+
+function timestamp(seconds: number, comma: boolean): string {
+  const safe = Math.max(0, seconds);
+  const totalMs = Math.round(safe * 1000);
+  const ms = totalMs % 1000;
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const s = totalSeconds % 60;
+  const m = Math.floor(totalSeconds / 60) % 60;
+  const h = Math.floor(totalSeconds / 3600);
+  const pad = (value: number, width = 2) => String(value).padStart(width, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}${comma ? ',' : '.'}${pad(ms, 3)}`;
+}
+
+function cueBounds(cue: CaptionCue, fps: number): { from: number; to: number } {
+  const from = cue.from / fps;
+  const to = Math.max(from + 0.2, cue.to / fps);
+  return { from, to };
+}
+
+/** SRT from timeline cues (frames at `fps`). Sentence-level, no word timing. */
+export function captionsToSrt(cues: CaptionCue[], fps = 30): string {
+  if (cues.length === 0) return '';
+  return `${cues
+    .map((cue, index) => {
+      const { from, to } = cueBounds(cue, fps);
+      return `${index + 1}\n${timestamp(from, true)} --> ${timestamp(to, true)}\n${cue.text.trim()}\n`;
+    })
+    .join('\n')}`;
+}
+
+/** WebVTT from the same cues, with a stable header for Remotion/HTML players. */
+export function captionsToVtt(cues: CaptionCue[], fps = 30): string {
+  const body = cues
+    .map((cue, index) => {
+      const { from, to } = cueBounds(cue, fps);
+      return `cue-${index + 1}\n${timestamp(from, false)} --> ${timestamp(to, false)}\n${cue.text.trim()}\n`;
+    })
+    .join('\n');
+  return `WEBVTT\n\n${body}`;
+}

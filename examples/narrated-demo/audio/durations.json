@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "engine": "kokoro-onnx",
+  "engineVersion": "0.4.9",
+  "model": "kokoro-v1.0.onnx",
+  "voices": "voices-v1.0.bin",
+  "voice": "af_heart",
+  "speed": 1.0,
+  "sampleRate": 24000,
+  "gapSeconds": 0.15,
+  "paddingSeconds": 0.5,
+  "loadSeconds": 1.254,
+  "scenes": {
+    "s_title": {
+      "chunks": [
+        {
+          "text": "Comfyrizz turns one package into a finished launch video.",
+          "spoken": "Comfy rizz turns one package into a finished launch video.",
+          "seconds": 3.4347,
+          "samples": 82432
+        },
+        {
+          "text": "Everything you see is generated from code.",
+          "spoken": "Everything you see is generated from code.",
+          "seconds": 2.5387,
+          "samples": 60928
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 6.6233,
+      "file": "audio/narration/s_title.wav"
+    },
+    "s_hero": {
+      "chunks": [
+        {
+          "text": "Generated-first assets start as SVG.",
+          "spoken": "Generated-first assets start as S V G.",
+          "seconds": 2.88,
+          "samples": 69120
+        },
+        {
+          "text": "Each vector is sanitized and render-checked on the CPU before it reaches the composition.",
+          "spoken": "Each vector is sanitized and render-checked on the C P U before it reaches the composition.",
+          "seconds": 5.6533,
+          "samples": 135680
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 9.1833,
+      "file": "audio/narration/s_hero.wav"
+    },
+    "s_stat": {
+      "chunks": [
+        {
+          "text": "This launch video renders locally in about eighty seconds.",
+          "spoken": "This launch video renders locally in about eighty seconds.",
+          "seconds": 3.2,
+          "samples": 76800
+        },
+        {
+          "text": "No GPU, no cloud, and no network calls during the render.",
+          "spoken": "No G P U, no cloud, and no network calls during the render.",
+          "seconds": 4.2453,
+          "samples": 101888
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 8.0953,
+      "file": "audio/narration/s_stat.wav"
+    },
+    "s_chart": {
+      "chunks": [
+        {
+          "text": "The timeline locks integer frames at thirty per second.",
+          "spoken": "The timeline locks integer frames at thirty per second.",
+          "seconds": 3.3493,
+          "samples": 80384
+        },
+        {
+          "text": "Speech sets the scene length, and fades overlap instead of stacking.",
+          "spoken": "Speech sets the scene length, and fades overlap instead of stacking.",
+          "seconds": 3.776,
+          "samples": 90624
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 7.7753,
+      "file": "audio/narration/s_chart.wav"
+    },
+    "s_list": {
+      "chunks": [
+        {
+          "text": "Three rules keep it honest.",
+          "spoken": "Three rules keep it honest.",
+          "seconds": 1.664,
+          "samples": 39936
+        },
+        {
+          "text": "Measure every narration chunk.",
+          "spoken": "Measure every narration chunk.",
+          "seconds": 1.728,
+          "samples": 41472
+        },
+        {
+          "text": "Never clip or speed up speech.",
+          "spoken": "Never clip or speed up speech.",
+          "seconds": 1.7067,
+          "samples": 40960
+        },
+        {
+          "text": "Export captions from the same cues the player uses.",
+          "spoken": "Export captions from the same cues the player uses.",
+          "seconds": 3.2213,
+          "samples": 77312
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 9.27,
+      "file": "audio/narration/s_list.wav"
+    },
+    "s_outro": {
+      "chunks": [
+        {
+          "text": "Ready to render, locally and deterministically.",
+          "spoken": "Ready to render, locally and deterministically.",
+          "seconds": 2.8587,
+          "samples": 68608
+        },
+        {
+          "text": "Comfyrizz.",
+          "spoken": "Comfy rizz.",
+          "seconds": 0.9387,
+          "samples": 22528
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.5,
+      "seconds": 4.4473,
+      "file": "audio/narration/s_outro.wav"
+    }
+  },
+  "totalSeconds": 45.9947,
+  "synthesisSeconds": 8.71,
+  "file": "narration.raw.wav"
+}

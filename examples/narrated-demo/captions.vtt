@@ -1,0 +1,57 @@
+WEBVTT
+
+cue-1
+00:00:00.000 --> 00:00:03.467
+Comfyrizz turns one package into a finished launch video.
+
+cue-2
+00:00:03.633 --> 00:00:06.200
+Everything you see is generated from code.
+
+cue-3
+00:00:06.133 --> 00:00:09.033
+Generated-first assets start as SVG.
+
+cue-4
+00:00:09.200 --> 00:00:14.867
+Each vector is sanitized and render-checked on the CPU before it reaches the composition.
+
+cue-5
+00:00:14.833 --> 00:00:18.033
+This launch video renders locally in about eighty seconds.
+
+cue-6
+00:00:18.200 --> 00:00:22.467
+No GPU, no cloud, and no network calls during the render.
+
+cue-7
+00:00:22.433 --> 00:00:25.800
+The timeline locks integer frames at thirty per second.
+
+cue-8
+00:00:25.967 --> 00:00:29.767
+Speech sets the scene length, and fades overlap instead of stacking.
+
+cue-9
+00:00:29.933 --> 00:00:31.600
+Three rules keep it honest.
+
+cue-10
+00:00:31.767 --> 00:00:33.500
+Measure every narration chunk.
+
+cue-11
+00:00:33.667 --> 00:00:35.400
+Never clip or speed up speech.
+
+cue-12
+00:00:35.567 --> 00:00:38.800
+Export captions from the same cues the player uses.
+
+cue-13
+00:00:38.733 --> 00:00:41.600
+Ready to render, locally and deterministically.
+
+cue-14
+00:00:41.767 --> 00:00:42.733
+Comfyrizz.
