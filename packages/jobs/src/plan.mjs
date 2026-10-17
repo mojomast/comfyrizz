@@ -14,8 +14,13 @@ import { resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./di
 export const JOBS_VERSION = 1;
 export const BATCH_ORDER = ["stills", "plates", "upscales", "audio"];
 
-/** Latent downsampling factor per job kind: plates/upscales follow the LTX 32 rule. */
-export const DIM_MULTIPLE_BY_KIND = { still: 8, plate: 32, upscale: 32 };
+/**
+ * Latent downsampling factor per job kind: plates/upscales follow the LTX 32 rule, stills the
+ * Klein 16 rule. Klein's VAE factor is 8 but its patch size is 2, so a still that is only a
+ * multiple of 8 is padded or cropped by the model — GPU test 2 shipped 960x540 sample rasters and
+ * the fix was "use 960x544 or 1024x576" (docs/GPU_TEST_2.md, issue 6).
+ */
+export const DIM_MULTIPLE_BY_KIND = { still: 16, plate: 32, upscale: 32 };
 
 /**
  * Parameters whose value is a *file* the graph has to be given a server-side name for
@@ -272,13 +277,21 @@ export function planJobs(pkg, opts = {}) {
     const params = { ...inputs };
     // Prompt defaults first, so the plate's upscale stage (which copies these params) inherits the
     // same guards, and so the guard is part of the cache key rather than a VM-side edit.
+    let promptGuards = [];
     if (kind === "still" || kind === "plate") {
+      const sourceInputs = (typeof inputs.image === "string" && assets[inputs.image]?.gen?.inputs) || {};
       const applied = applyPromptDefaults(params, {
         kind,
         asset: assetId,
         textAllowed: inputs.text === true || inputs.allowText === true,
+        textFrames:
+          inputs.text === true ||
+          inputs.allowText === true ||
+          sourceInputs.text === true ||
+          sourceInputs.allowText === true,
         hasSourceImage: typeof inputs.image === "string" && inputs.image !== "",
       });
+      promptGuards = applied.applied;
       warnings.push(...applied.warnings);
     }
     const job = {
@@ -386,6 +399,8 @@ export function planJobs(pkg, opts = {}) {
         // the upscale pass reuses the plate's graph, so it needs the same start image: resolving
         // it here keeps the finals stage from being handed an asset id where a filename belongs
         withFileInputs(up, up.params, assetId, { pkg, kinds, errors });
+        // and it inherits the plate's prompt guards, so its note says the same thing
+        if (promptGuards?.length) up.promptGuards = promptGuards;
         up.cacheKey = cacheKeyFor({
           workflowSha256: up.workflowSha256,
           generator: up.generator,
@@ -405,6 +420,11 @@ export function planJobs(pkg, opts = {}) {
     }
 
     job.params = params;
+    if (promptGuards?.length) {
+      // what the planner appended to the caller's prompt, and why: the prompt the GPU receives is in
+      // `params`, and this is the note that says it is not verbatim what the package asked for
+      job.promptGuards = promptGuards;
+    }
     // File-valued parameters (the start image of an i2v plate, the init image of an img2img
     // still, the reference of a reference edit) become an explicit instruction for the runner:
     // which local file to upload, and where it comes from. The graph itself is never handed an

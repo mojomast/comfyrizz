@@ -336,3 +336,94 @@ test("the CLI plans and re-checks a jobs.json", () => {
   assert.equal(check.status, 0, `${check.stdout}${check.stderr}`);
   assert.match(check.stdout, /jobs\.json is current/);
 });
+
+// --- prompt defaults (H-fix4): GPU test 2, docs/GPU_TEST_2.md "What looked bad" ---------------
+
+test("a still prompt gets the no-text guard, and the job records what was appended", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_cutout.gen.inputs.prompt = "a small robot holding a film clapper, plain flat background";
+  const still = planJobs(pkg).jobs.find((j) => j.id === "a_cutout.still");
+  assert.match(still.params.prompt, /plain flat background, no text, no letters, no words, no logos, no watermarks$/);
+  assert.deepEqual(still.promptGuards.map((g) => g.guard), ["text"]);
+  assert.match(still.promptGuards[0].because, /GPU test 2/);
+  // no prompt at all stays no prompt: the guard is not a prompt in itself
+  const bare = planJobs(fixture("package-pending.json")).jobs.find((j) => j.id === "a_cutout.still");
+  assert.equal(bare.params.prompt, undefined);
+  assert.equal(bare.promptGuards, undefined);
+});
+
+test("an asset that asked for text keeps its prompt verbatim", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_cutout.gen.inputs.text = true;
+  pkg.assets.a_cutout.gen.inputs.prompt = "a diagram with the label Solar Panel";
+  const still = planJobs(pkg).jobs.find((j) => j.id === "a_cutout.still");
+  assert.equal(still.params.prompt, "a diagram with the label Solar Panel");
+  assert.equal(still.promptGuards, undefined);
+});
+
+test("a prompt that already refuses text is not given a second negative", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_cutout.gen.inputs.prompt = "a quiet nebula, no text, no letters";
+  const still = planJobs(pkg).jobs.find((j) => j.id === "a_cutout.still");
+  assert.equal(still.params.prompt, "a quiet nebula, no text, no letters");
+  assert.equal(still.promptGuards, undefined);
+});
+
+test("a plate gets the motion guard for its flavour, and keeps its own camera direction", () => {
+  const i2v = planJobs(fixture("package-pending.json")).jobs.find((j) => j.id === "a_plate1.plate");
+  assert.match(i2v.params.prompt, /static camera, gentle motion, no cuts$/);
+  assert.deepEqual(i2v.promptGuards.map((g) => g.guard).sort(), ["motion_i2v", "text"]);
+  const upscale = planJobs(fixture("package-pending.json")).jobs.find((j) => j.id === "a_plate1.upscale");
+  assert.deepEqual(upscale.promptGuards, i2v.promptGuards, "the finals pass inherits the plate's guards");
+
+  const t2vPkg = fixture("package-pending.json");
+  delete t2vPkg.assets.a_plate1.gen.inputs.image;
+  const t2v = planJobs(t2vPkg).jobs.find((j) => j.id === "a_plate1.plate");
+  assert.match(t2v.params.prompt, /slow continuous motion, static camera, seamless, no cuts$/);
+
+  const own = fixture("package-pending.json");
+  own.assets.a_plate1.gen.inputs.prompt = "the camera slowly pans right across the corridor";
+  const kept = planJobs(own).jobs.find((j) => j.id === "a_plate1.plate");
+  assert.equal(kept.params.prompt, `the camera slowly pans right across the corridor, ${"no text, no letters, no words, no logos, no watermarks"}`);
+  assert.deepEqual(kept.promptGuards.map((g) => g.guard), ["text"], "a prompt with its own camera direction gets no motion guard");
+});
+
+test("LTX's measured weak spots are warnings, not silent rewrites", () => {
+  const orbit = fixture("package-pending.json");
+  orbit.assets.a_plate1.gen.inputs.prompt = "a slow orbit around the battery";
+  assert.deepEqual(planJobs(orbit).warnings.map((w) => w.code), ["PLAN_ORBIT_UNRELIABLE"]);
+  assert.match(planJobs(orbit).warnings[0].message, /does not reliably orbit/);
+
+  // a labelled first frame plus a moving camera is the combination that pushed labels out of frame
+  const labels = fixture("package-pending.json");
+  labels.assets.a_plate1_still.gen.inputs.text = true;
+  labels.assets.a_plate1.gen.inputs.prompt = "a gentle push in on the diagram";
+  const codes = planJobs(labels).warnings.map((w) => w.code).sort();
+  assert.deepEqual(codes, ["PLAN_CAMERA_ON_TEXT_FRAME", "PLAN_PUSH_IN_LABELS"]);
+  assert.deepEqual(checkJobsDoc(planJobs(labels)), [], "warnings stay schema-valid");
+});
+
+test("stills resolve to the Klein 16 px lattice, plates to the LTX 32 lattice", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_plate1_still.gen.inputs.width = 960;
+  pkg.assets.a_plate1_still.gen.inputs.height = 540;
+  const doc = planJobs(pkg);
+  for (const job of doc.jobs.filter((j) => j.kind === "still")) {
+    assert.equal(job.dims.width % 16, 0, `${job.id} width`);
+    assert.equal(job.dims.height % 16, 0, `${job.id} height`);
+  }
+  // the GPU test 2 example: a 960x540 sample raster becomes 960x544
+  const source = doc.jobs.find((j) => j.id === "a_plate1_still.still");
+  assert.deepEqual(source.dims, { width: 960, height: 544 });
+  for (const job of doc.jobs.filter((j) => j.kind === "plate")) {
+    assert.equal(job.dims.width % 32, 0, `${job.id} width`);
+    assert.equal(job.dims.height % 32, 0, `${job.id} height`);
+  }
+  // an upscale ends on the package's own frame (1920x1080 after the x2 crop), so it is not on the
+  // 32 lattice by design - its stage-1 lattice is, and the plan states both
+  const upscale = doc.jobs.find((j) => j.id === "a_plate1.upscale");
+  assert.deepEqual(upscale.dims, { width: 1920, height: 1080 });
+  assert.deepEqual(upscale.crop, { top: 4, bottom: 4, left: 0, right: 0 });
+  // and the still's own params carry the resolved lattice, not the requested number
+  assert.deepEqual([source.params.width, source.params.height], [960, 544]);
+});

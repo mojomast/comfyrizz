@@ -110,7 +110,7 @@
       ],
       "output": "out/intermediates/a_plate1.plate.mp4",
       "outputKind": "video",
-      "cacheKey": "aad7ba20428bf650efc9c99d9c70a37306261399ea42b5151e1b44bba3cd66ff",
+      "cacheKey": "278cd78c373935cbd69793956a40b5a2490651a3802e0d7d4780e4632ca0ba90",
       "dims": {
         "width": 960,
         "height": 544
@@ -126,7 +126,7 @@
       "inputAsset": "a_plate1_still",
       "params": {
         "image": "a_plate1_still",
-        "prompt": "slow drift through a soft blue nebula",
+        "prompt": "slow drift through a soft blue nebula, no text, no letters, no words, no logos, no watermarks, static camera, gentle motion, no cuts",
         "width": 960,
         "height": 544,
         "frames": 97,
@@ -134,6 +134,18 @@
         "upscale": "x2+crop",
         "seed": 42
       },
+      "promptGuards": [
+        {
+          "guard": "text",
+          "value": "no text, no letters, no words, no logos, no watermarks",
+          "because": "GPU test 2: without it the model writes garbled pseudo-text or a stray legible word"
+        },
+        {
+          "guard": "motion_i2v",
+          "value": "static camera, gentle motion, no cuts",
+          "because": "GPU test 2: the verified good i2v prompts used a static camera and no cuts; push-ins and orbits went wrong"
+        }
+      ],
       "fileInputs": [
         {
           "param": "image",
@@ -165,7 +177,7 @@
       "outputKind": "video",
       "params": {
         "image": "a_plate1_still",
-        "prompt": "slow drift through a soft blue nebula",
+        "prompt": "slow drift through a soft blue nebula, no text, no letters, no words, no logos, no watermarks, static camera, gentle motion, no cuts",
         "width": 960,
         "height": 544,
         "frames": 97,
@@ -202,7 +214,19 @@
           "path": "assets/a_plate1_still.png"
         }
       ],
-      "cacheKey": "cb763cb995ce14816abc30827223941f3dc3eddc160040223b1acdeb3d9c07a6"
+      "promptGuards": [
+        {
+          "guard": "text",
+          "value": "no text, no letters, no words, no logos, no watermarks",
+          "because": "GPU test 2: without it the model writes garbled pseudo-text or a stray legible word"
+        },
+        {
+          "guard": "motion_i2v",
+          "value": "static camera, gentle motion, no cuts",
+          "because": "GPU test 2: the verified good i2v prompts used a static camera and no cuts; push-ins and orbits went wrong"
+        }
+      ],
+      "cacheKey": "a0b5047ba92330ea4d087a53da937133b1f8a91f5b58528974e67e8ee686a8ad"
     },
     {
       "id": "a_narr.audio",
@@ -235,5 +259,5 @@
     }
   ],
   "warnings": [],
-  "hash": "769ce1ecc07584d453ff00008aa045ba778131395f4925bc5bcd3e4fd4c74b36"
+  "hash": "fe958233fe244cac20d0598a463f1e607c224a077088956e088b0c642c1dce90"
 }

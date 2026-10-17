@@ -44,15 +44,20 @@ export const UNRELIABLE_MOTION = [
 /**
  * Append the prompt guards a job needs, in place, and describe what was changed.
  *
+ * The guards are returned rather than pushed into the document's `warnings[]`: they are routine, and
+ * the runner records them per job. `warnings` carries only the *hazards* — things LTX-2.5 was
+ * measured to do badly — because those are what a reader has to decide about.
+ *
  * @param {object} params           the job's params (mutated: `prompt` may gain a suffix)
  * @param {object} opts
  * @param {"still"|"plate"} opts.kind
  * @param {boolean} [opts.textAllowed]  the asset asked for text (`gen.inputs.text: true`)
  * @param {boolean} [opts.hasSourceImage]  an i2v plate (the graph is given a first frame)
+ * @param {boolean} [opts.textFrames]  the frame carries labels (the plate or its source asked for text)
  * @param {string} [opts.asset]
  * @returns {{applied: object[], warnings: object[]}}
  */
-export function applyPromptDefaults(params, { kind, textAllowed = false, hasSourceImage = false, asset = null } = {}) {
+export function applyPromptDefaults(params, { kind, textAllowed = false, hasSourceImage = false, textFrames = false, asset = null } = {}) {
   const applied = [];
   const warnings = [];
   const prompt = typeof params.prompt === "string" ? params.prompt.trim() : null;
@@ -83,17 +88,19 @@ export function applyPromptDefaults(params, { kind, textAllowed = false, hasSour
         warnings.push({ asset, code: item.code, message: item.message });
       }
     }
+    if (textFrames && CAMERA_MENTIONED.test(prompt)) {
+      warnings.push({
+        asset,
+        code: "PLAN_CAMERA_ON_TEXT_FRAME",
+        message:
+          "this plate's first frame carries labels and the prompt moves the camera: a moving camera pushes labels out of frame " +
+          "(GPU test 2: the timeline and chart reference-edit plates). Keep the camera static and put the motion in the subject",
+      });
+    }
   }
 
   if (parts.length > 1) {
     params.prompt = parts.join(", ");
-    for (const entry of applied) {
-      warnings.push({
-        asset,
-        code: `PLAN_PROMPT_${entry.guard.toUpperCase()}`,
-        message: `added the ${entry.guard} guard to the prompt: ${JSON.stringify(entry.value)} (${entry.because})`,
-      });
-    }
   }
   return { applied, warnings };
 }
