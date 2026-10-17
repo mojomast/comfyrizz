@@ -4,6 +4,7 @@ import { fade } from '@remotion/transitions/fade';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline, TimelineCaption } from '../../../packages/planner/dist/src/index.js';
 import { GeneratedAssetsProvider, SceneView, type InlineAsset } from './components';
+import type { MediaSidecar } from './media';
 import { CaptionOverlay } from './captions';
 
 /**
@@ -17,12 +18,14 @@ export function TimelinePlayer({
   scenes,
   captions,
   generatedAssets,
+  media,
 }: {
   pkg: PackageV1;
   timeline: Timeline;
   scenes?: Scene[];
   captions?: TimelineCaption[];
   generatedAssets?: Record<string, InlineAsset>;
+  media?: MediaSidecar;
 }) {
   const list = (scenes ?? timeline.scenes) as unknown as Array<
     Scene & { durationInFrames: number; transitionOutFrames: number }
@@ -31,7 +34,7 @@ export function TimelinePlayer({
   list.forEach((scene, index) => {
     children.push(
       <TransitionSeries.Sequence key={scene.id} durationInFrames={scene.durationInFrames}>
-        <SceneView scene={scene} pkg={pkg} />
+        <SceneView scene={scene} pkg={pkg} media={media} />
       </TransitionSeries.Sequence>,
     );
     const transition = scene.transitionOutFrames ?? 0;

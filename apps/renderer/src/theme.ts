@@ -1,6 +1,9 @@
 import { staticFile } from 'remotion';
 import { loadFont } from '@remotion/fonts';
-import type { PackageV1, Scene } from '../../../packages/schema/types';
+import type { Scene } from '../../../packages/schema/types';
+import { DEFAULT_PALETTE, color, palette, textColors } from './theme-model';
+
+export { DEFAULT_PALETTE, color, palette, textColors };
 
 /**
  * One design system (spec 6.9): a pinned local font, an 8px spacing scale, a type
@@ -16,18 +19,6 @@ void loadFont({
   style: 'normal',
   display: 'block',
 });
-
-export const DEFAULT_PALETTE = ['#0d0f14', '#6d8cff', '#e6e8ee'] as const;
-
-export function palette(pkg: PackageV1): string[] {
-  const values = pkg.theme?.palette;
-  if (!values || values.length < 2) return [...DEFAULT_PALETTE];
-  return values.map((value, index) => value || DEFAULT_PALETTE[index % DEFAULT_PALETTE.length]);
-}
-
-export function color(colors: string[], index: number): string {
-  return colors[index % colors.length] ?? DEFAULT_PALETTE[0];
-}
 
 /** Copy limits copied from the schema README/semantic layer: overflow is a fail state. */
 export const COPY_LIMITS: Record<Scene['layout'], Partial<Record<string, number>>> = {

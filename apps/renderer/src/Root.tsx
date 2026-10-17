@@ -8,16 +8,24 @@ import type { PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import { TimelinePlayer, sceneById } from './player';
 import type { InlineAsset } from './components';
+import type { MediaSidecar } from './media';
 
 const pkg = pkgJson as unknown as PackageV1;
 const timeline = timelineJson as unknown as Timeline;
 const narratedPkg = narratedPkgJson as unknown as PackageV1;
 const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
-type DemoProps = { pkg: PackageV1; timeline: Timeline; generatedAssets?: Record<string, InlineAsset> };
+type DemoProps = { pkg: PackageV1; timeline: Timeline; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar };
 
 function LaunchDemo(props: Partial<DemoProps>) {
-  return <TimelinePlayer pkg={props.pkg ?? pkg} timeline={props.timeline ?? timeline} generatedAssets={props.generatedAssets} />;
+  return (
+    <TimelinePlayer
+      pkg={props.pkg ?? pkg}
+      timeline={props.timeline ?? timeline}
+      generatedAssets={props.generatedAssets}
+      media={props.media}
+    />
+  );
 }
 
 function NarratedDemo() {
@@ -53,6 +61,20 @@ export function RemotionRoot() {
         fps={timeline.fps}
         width={timeline.width}
         height={timeline.height}
+      />
+      <Composition
+        id="PackageDemo"
+        component={LaunchDemo}
+        defaultProps={{ pkg, timeline }}
+        calculateMetadata={({ props }) => {
+          const timeline = (props as DemoProps).timeline;
+          return {
+            durationInFrames: timeline.durationInFrames,
+            fps: timeline.fps,
+            width: timeline.width,
+            height: timeline.height,
+          };
+        }}
       />
       <Composition
         id="NarratedDemo"

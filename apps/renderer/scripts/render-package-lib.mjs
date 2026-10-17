@@ -1,6 +1,7 @@
 // Shared CPU render path: validate package -> A2 compile -> Remotion render -> ffprobe-free
 // metadata. Used by the C1 dev route and the C2 local server. No network.
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -34,31 +35,77 @@ export function inlineGeneratedAssets(pkg, packageDir) {
   return assets;
 }
 
-export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {} } = {}) {
+function assetDirs(pkg) {
+  const dirs = new Set();
+  for (const asset of Object.values(pkg.assets ?? {})) {
+    if (typeof asset?.file !== 'string') continue;
+    const [top] = asset.file.split('/');
+    if (top && top !== asset.file) dirs.add(top);
+  }
+  return [...dirs];
+}
+
+function needsMediaPublicDir(pkg) {
+  return Object.values(pkg.assets ?? {}).some(asset => asset?.kind === 'image' || asset?.kind === 'video' || asset?.kind === 'audio');
+}
+
+/** Copy fonts + the package's asset folders into a throwaway Remotion public dir. */
+function preparePublicDir(pkg, packageDir) {
+  const temp = mkdtempSync(join(tmpdir(), 'comfyrizz-public-'));
+  cpSync(join(rendererDir, 'public', 'fonts'), join(temp, 'fonts'), { recursive: true });
+  for (const dir of assetDirs(pkg)) {
+    const source = join(packageDir, dir);
+    if (existsSync(source)) cpSync(source, join(temp, dir), { recursive: true });
+  }
+  return temp;
+}
+
+export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo' } = {}) {
   const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
   const validation = validatePackage(pkg);
   if (!validation.valid) {
     const detail = validation.errors.map(error => `${error.code} ${error.path}: ${error.message}`).join('; ');
     throw new Error(`package invalid: ${detail}`);
   }
+  const packageDir = dirname(packagePath);
   const timeline = compileTimeline(pkg);
-  const generatedAssets = inlineGeneratedAssets(pkg, dirname(packagePath));
+  const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
+  const mediaPath = join(packageDir, 'media.json');
+  const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
   const propsPath = outputPath.replace(/\.mp4$/, '.props.json');
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets }));
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(media ? { media } : {}) }));
   onLog(`inlined ${Object.keys(generatedAssets).length} generated asset(s)`);
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
 
-  const render = spawnSync(
-    'npx',
-    [
-      'remotion', 'render', 'src/index.ts', 'LaunchDemo', outputPath,
-      `--props=${propsPath}`,
-      '--browser-executable=/usr/bin/google-chrome',
-      '--concurrency=2',
-      '--log=error',
-    ],
-    { cwd: rendererDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
-  );
+  let resolvedPublicDir = publicDir;
+  let cleanupDir = null;
+  if (!resolvedPublicDir) {
+    if (needsMediaPublicDir(pkg)) {
+      resolvedPublicDir = preparePublicDir(pkg, packageDir);
+      cleanupDir = resolvedPublicDir;
+      onLog(`prepared public dir ${resolvedPublicDir}`);
+    } else {
+      resolvedPublicDir = join(rendererDir, 'public');
+    }
+  }
+
+  let render;
+  try {
+    render = spawnSync(
+      'npx',
+      [
+        'remotion', 'render', 'src/index.ts', compositionId, outputPath,
+        `--props=${propsPath}`,
+        `--public-dir=${resolvedPublicDir}`,
+        '--browser-executable=/usr/bin/google-chrome',
+        '--concurrency=2',
+        '--log=error',
+      ],
+      { cwd: rendererDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+    );
+  } finally {
+    if (cleanupDir) rmSync(cleanupDir, { recursive: true, force: true });
+  }
   if (render.status !== 0) {
     throw new Error(`remotion render exited ${render.status}: ${(render.stderr || render.stdout || '').slice(-1200)}`);
   }
@@ -69,5 +116,6 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
     bytes: statSync(outputPath).size,
     timeline,
     package: pkg,
+    ...(media ? { media } : {}),
   };
 }

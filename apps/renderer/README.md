@@ -20,9 +20,33 @@ inlined, so the composition only ever sees verified markup.
 zero baseline), `List` (bullets/quote). Registered compositions:
 
 - `LaunchDemo` — full example, 1095 frames @ 30 fps (36.5 s), 1920×1080
+- `PackageDemo` — the same component with `calculateMetadata`, so a render can
+  swap in any `(package, timeline)` props (used for `examples/showcase-gpu2`)
 - `NarratedDemo` — Kokoro audio + sentence-caption overlay, 1312 frames @ 30 fps (43.7 s) (A4)
 - `Preview-Title`, `Preview-Hero`, `Preview-Stat`, `Preview-Chart`, `Preview-List`
   — one scene each, for frame 0 / mid / last stills
+
+## Media layer (P-fix1)
+
+Raster/video assets can fill the frame or sit in a framed panel:
+
+- `background.asset` (+ `fit`/`loop`/`muted`/`speed`/`trim`) renders an
+  `Img`/`OffthreadVideo` fill; short clips are stretched (down to half speed)
+  before looping. A dark `background.scrim` (0..1) is drawn between the media and
+  the layout text.
+- `foreground[]` with an `image`/`video` asset renders a rounded `MediaPanel`
+  (x/y/w/h/z + `anim`: `slide-in`, `fade-in`, `zoom-in`, `ken-burns`,
+  `parallax-in`, `none`).
+- `scene.media_only` (or a sidecar `skipLayout`) skips the layout and draws the
+  media + scrim + panels + `scene.lower_third` (`{ kicker?, text }`).
+- `theme.text` / `theme.text_muted` / `theme.text_on_accent` decouple text from
+  `palette[0]` (which may be `transparent`); defaults stay identical for the
+  existing 4-colour packages.
+
+The proposed field names above are Hermes's H-fix1 (`packages/schema`). Until
+that lands, the renderer falls back to an `examples/<name>/media.json` sidecar
+(`scrim`, `skipLayout`, `lowerThird`); the resolution logic lives in
+`src/media-model.ts` and is unit-tested.
 
 ## Determinism
 
@@ -38,21 +62,22 @@ state** (`CopyGuard`), never silent clipping.
 
 ## Video component decision
 
-The CPU slice has no plate/still video assets, so no video component is used yet.
-When plates land, the pinned 4.0.536 build will use `<OffthreadVideo>` (it is the
-stable looping-capable component in this version); the decision is recorded here
-per PLAN A1. `@remotion/transitions` fades are already used for the compiled
-transitions.
+Media backgrounds and panels use `<OffthreadVideo>` (the stable looping-capable
+component in the pinned 4.0.536 build). The CPU slice has no video assets, so
+`LaunchDemo`/`NarratedDemo` remain procedural; `examples/showcase-gpu2` exercises
+the media layer end to end. `@remotion/transitions` fades are used for the
+compiled transitions.
 
 ## Commands
 
 ```bash
 npm install                     # local to apps/renderer; no lockfile committed
-npm test                        # package/timeline/asset/network checks (5 tests)
+npm test                        # package/timeline/asset/network/media checks (13 tests)
 npm run build:assets            # sanitize + render-check the 4 SVG assets
 npm run compile:example         # package.json -> timeline.json (A2 compiler)
 npm run still                   # 15 stills (5 layouts x frame 0/mid/last)
 npm run render:example          # CPU MP4 + ffprobe gate (silent example)
+npm run render:showcase         # examples/showcase-gpu2 via PackageDemo (P-fix1)
 npm run render:narrated         # Kokoro audio + captions, ffprobe audio gate (A4)
 ```
 
@@ -63,7 +88,7 @@ with `REMOTION_BROWSER=/path/to/chrome`.
 
 | Check | Result |
 |---|---|
-| `npm test` | 5/5 pass |
+| `npm test` | 13/13 pass |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `fb41de79…d571` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
@@ -71,6 +96,7 @@ with `REMOTION_BROWSER=/path/to/chrome`.
 | CPU render time | **78.7 s** for 36.5 s of video (~2.2× realtime, concurrency 2, Node 22.23.3, `/usr/bin/google-chrome`) |
 | ffprobe | `codec_name=h264`, `nb_frames=1095`, `r_frame_rate=30/1`, `pix_fmt=yuvj420p`; audio stream count 0 |
 | Narrated export (A4) | 1312 frames, 43.733 s, H.264 + AAC 48 kHz stereo, 14 captions, hash `4943e204…19c9`; CPU 96.4 s |
+| Showcase export (P-fix1) | `examples/showcase-gpu2` via `PackageDemo`, 1920×1080 H.264, 1110 frames, 37.000 s, 21.8 MB, 7 scenes + 12 captions; no custom composition, no `node_modules` symlink. Frame correlation vs the retired `Showcase.tsx` render: title 0.99, flow 0.92, stat 0.93, chart 0.99, outro 0.98 |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is
 reproducible with `npm run render:example`.

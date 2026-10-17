@@ -17,7 +17,8 @@ const GeneratedAssetsContext = createContext<Record<string, InlineAsset>>(GENERA
 export function GeneratedAssetsProvider({ assets, children }: { assets: Record<string, InlineAsset>; children: React.ReactNode }) {
   return <GeneratedAssetsContext.Provider value={assets}>{children}</GeneratedAssetsContext.Provider>;
 }
-import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, fontFamily, palette } from './theme';
+import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, fontFamily, palette, textColors } from './theme';
+import { LowerThird, MediaFill, MediaPanel, Scrim, resolveSceneMedia, type MediaSidecar } from './media';
 
 /* ------------------------------------------------------------------ *
  * Animation vocabulary: reveal, stagger, emphasis, exit. Deterministic
@@ -120,15 +121,32 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
   return <AbsoluteFill style={{ background: `linear-gradient(140deg, ${base} 0%, ${mid} 58%, ${accent} 130%)` }} />;
 }
 
-function Background({ scene, pkg }: { scene: Scene; pkg: PackageV1 }) {
+function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media?: MediaSidecar }) {
   const colors = palette(pkg);
+  const { durationInFrames } = useVideoConfig();
   const background = scene.background;
   if (background?.procedural) {
     const pattern = background.procedural.pattern ?? 'gradient';
     const local = background.procedural.palette && background.procedural.palette.length >= 2 ? background.procedural.palette : colors;
     return <ProceduralBackground pattern={pattern} seed={background.procedural.seed ?? 1} colors={local} />;
   }
-  // Asset backgrounds are rendered by the foreground list when present; keep a base tone.
+  const resolved = resolveSceneMedia(scene, pkg, media);
+  if (resolved.background) {
+    return (
+      <>
+        <MediaFill
+          asset={resolved.background}
+          sceneFrames={durationInFrames}
+          fit={background?.fit ?? 'cover'}
+          loop={background?.loop ?? true}
+          muted={background?.muted ?? true}
+          {...(background?.speed !== undefined ? { speed: background.speed } : {})}
+          {...(background?.trim ? { trim: background.trim } : {})}
+        />
+        <Scrim opacity={resolved.scrim} />
+      </>
+    );
+  }
   return <AbsoluteFill style={{ background: colors[0] }} />;
 }
 
@@ -160,25 +178,30 @@ function VectorAsset({ assetId, frame, animation }: { assetId: string; frame: nu
 }
 
 function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame: number }) {
-  const colors = palette(pkg);
-  void colors;
+  const { durationInFrames } = useVideoConfig();
   return (
     <>
-      {(scene.foreground ?? []).map((item, index) => (
-        <div
-          key={`${item.asset}-${index}`}
-          style={{
-            position: 'absolute',
-            left: `${(item.x ?? 0.5) * 100}%`,
-            top: `${(item.y ?? 0.5) * 100}%`,
-            width: `${(item.w ?? 0.4) * 100}%`,
-            transform: 'translate(-50%, -50%)',
-            zIndex: item.z ?? 5,
-          }}
-        >
-          <VectorAsset assetId={item.asset} frame={frame - index * 3} animation={item.anim} />
-        </div>
-      ))}
+      {(scene.foreground ?? []).map((item, index) => {
+        const asset = pkg.assets?.[item.asset];
+        if (asset && asset.kind !== 'svg' && asset.kind !== 'vector-anim') {
+          return <MediaPanel key={`${item.asset}-${index}`} asset={asset} item={item} sceneFrames={durationInFrames} />;
+        }
+        return (
+          <div
+            key={`${item.asset}-${index}`}
+            style={{
+              position: 'absolute',
+              left: `${(item.x ?? 0.5) * 100}%`,
+              top: `${(item.y ?? 0.5) * 100}%`,
+              width: `${(item.w ?? 0.4) * 100}%`,
+              transform: 'translate(-50%, -50%)',
+              zIndex: item.z ?? 5,
+            }}
+          >
+            <VectorAsset assetId={item.asset} frame={frame - index * 3} animation={item.anim} />
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -235,6 +258,7 @@ interface LayoutProps {
   scene: Scene;
   pkg: PackageV1;
   frame: number;
+  media?: MediaSidecar;
 }
 
 function Kicker({ text }: { text?: string }) {
@@ -246,22 +270,23 @@ function Kicker({ text }: { text?: string }) {
   );
 }
 
-function TitleLayout({ scene, pkg, frame }: LayoutProps) {
+function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
   const colors = palette(pkg);
+  const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const headline = reveal(frame, 2, 22);
   const sub = reveal(frame, 10, 22);
   const outro = scene.variant === 'outro';
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: colors[3], justifyContent: 'center', alignItems: 'center', padding: SAFE_AREA.y, textAlign: 'center' }}>
-      <Background scene={scene} pkg={pkg} />
+    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary, justifyContent: 'center', alignItems: 'center', padding: SAFE_AREA.y, textAlign: 'center' }}>
+      <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 3, display: 'flex', flexDirection: 'column', gap: 26, alignItems: 'center' }}>
         <Kicker text={copy.kicker} />
         <div style={{ fontSize: outro ? TYPE_SCALE.headlineLg : TYPE_SCALE.headlineXl, fontWeight: 800, letterSpacing: -2, opacity: headline.opacity, transform: `translateY(${headline.translateY}px)` }}>
           {copy.headline}
         </div>
         {copy.sub ? (
-          <div style={{ fontSize: TYPE_SCALE.sub, color: colors[2], maxWidth: 1100, opacity: sub.opacity, transform: `translateY(${sub.translateY}px)` }}>{copy.sub}</div>
+          <div style={{ fontSize: TYPE_SCALE.sub, color: text.muted, maxWidth: 1100, opacity: sub.opacity, transform: `translateY(${sub.translateY}px)` }}>{copy.sub}</div>
         ) : null}
         {copy.cta ? (
           <div
@@ -270,7 +295,7 @@ function TitleLayout({ scene, pkg, frame }: LayoutProps) {
               padding: '16px 30px',
               borderRadius: 999,
               background: colors[2],
-              color: colors[0],
+              color: text.onAccent,
               fontSize: TYPE_SCALE.body,
               fontWeight: 700,
               opacity: emphasis(frame, 22),
@@ -285,15 +310,15 @@ function TitleLayout({ scene, pkg, frame }: LayoutProps) {
   );
 }
 
-function HeroLayout({ scene, pkg, frame }: LayoutProps) {
-  const colors = palette(pkg);
+function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
+  const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const split = scene.variant !== 'full-bleed';
   const head = reveal(frame, 2, 22);
   const body = reveal(frame, 12, 22);
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: colors[3] }}>
-      <Background scene={scene} pkg={pkg} />
+    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
+      <Background scene={scene} pkg={pkg} media={media} />
       <div
         style={{
           position: 'relative',
@@ -312,9 +337,9 @@ function HeroLayout({ scene, pkg, frame }: LayoutProps) {
           <div style={{ fontSize: TYPE_SCALE.headlineLg, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.05, opacity: head.opacity, transform: `translateY(${head.translateY}px)` }}>
             {copy.headline}
           </div>
-          {copy.sub ? <div style={{ fontSize: 30, color: colors[2] }}>{copy.sub}</div> : null}
+          {copy.sub ? <div style={{ fontSize: 30, color: text.muted }}>{copy.sub}</div> : null}
           {copy.body ? (
-            <div style={{ fontSize: TYPE_SCALE.body, color: colors[3], opacity: 0.86 * body.opacity, transform: `translateY(${body.translateY}px)` }}>{copy.body}</div>
+            <div style={{ fontSize: TYPE_SCALE.body, color: text.primary, opacity: 0.86 * body.opacity, transform: `translateY(${body.translateY}px)` }}>{copy.body}</div>
           ) : null}
         </div>
       </div>
@@ -323,8 +348,9 @@ function HeroLayout({ scene, pkg, frame }: LayoutProps) {
   );
 }
 
-function StatLayout({ scene, pkg, frame }: LayoutProps) {
+function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
   const colors = palette(pkg);
+  const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const datasetId = scene.data?.dataset;
   const dataset = datasetId ? pkg.datasets?.[datasetId] : undefined;
@@ -332,23 +358,24 @@ function StatLayout({ scene, pkg, frame }: LayoutProps) {
   const value = copy.body ?? (first ? `${first.value}${dataset?.unit ? ` ${dataset.unit}` : ''}` : '—');
   const number = emphasis(frame, 4);
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: colors[3] }}>
-      <Background scene={scene} pkg={pkg} />
+    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
+      <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 3, display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%', padding: `0 ${SAFE_AREA.x}px`, gap: 18 }}>
         <Kicker text={copy.headline} />
         <div style={{ fontSize: TYPE_SCALE.stat, fontWeight: 800, letterSpacing: -6, lineHeight: 1, color: colors[2], transform: `scale(${number})`, transformOrigin: 'left center' }}>
           {value}
         </div>
-        {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: colors[3], opacity: 0.85 }}>{copy.sub}</div> : null}
-        {dataset?.label ? <div style={{ fontSize: TYPE_SCALE.footnote, color: colors[3], opacity: 0.6 }}>{dataset.label} · example data</div> : null}
+        {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.primary, opacity: 0.85 }}>{copy.sub}</div> : null}
+        {dataset?.label ? <div style={{ fontSize: TYPE_SCALE.footnote, color: text.primary, opacity: 0.6 }}>{dataset.label} · example data</div> : null}
       </div>
       <Foreground scene={scene} pkg={pkg} frame={frame} />
     </AbsoluteFill>
   );
 }
 
-function ChartLayout({ scene, pkg, frame }: LayoutProps) {
+function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
   const colors = palette(pkg);
+  const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const datasetId = scene.data?.dataset;
   const dataset = datasetId ? pkg.datasets?.[datasetId] : undefined;
@@ -359,11 +386,11 @@ function ChartLayout({ scene, pkg, frame }: LayoutProps) {
   const gap = 42;
   const barWidth = values.length > 0 ? (width - gap * (values.length - 1)) / values.length : width;
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: colors[3] }}>
-      <Background scene={scene} pkg={pkg} />
+    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
+      <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 3, display: 'flex', flexDirection: 'column', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, gap: 22 }}>
         <div style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800 }}>{copy.headline}</div>
-        {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: colors[2] }}>{copy.sub}</div> : null}
+        {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.muted }}>{copy.sub}</div> : null}
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ marginTop: 12 }}>
           {values.map((item, index) => {
             const grow = interpolate(frame, [10 + index * 5, 40 + index * 5], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
@@ -372,10 +399,10 @@ function ChartLayout({ scene, pkg, frame }: LayoutProps) {
             return (
               <g key={item.label}>
                 <rect x={x} y={height - 40 - barHeight * grow} width={barWidth} height={barHeight * grow} rx={10} fill={index === values.length - 1 ? colors[3] : colors[2]} />
-                <text x={x + barWidth / 2} y={height - 14} fill={colors[3]} fontSize={24} textAnchor="middle" fontFamily={fontFamily()}>
+                <text x={x + barWidth / 2} y={height - 14} fill={text.primary} fontSize={24} textAnchor="middle" fontFamily={fontFamily()}>
                   {item.label}
                 </text>
-                <text x={x + barWidth / 2} y={height - 52 - barHeight * grow} fill={colors[3]} fontSize={26} fontWeight={700} textAnchor="middle" fontFamily={fontFamily()}>
+                <text x={x + barWidth / 2} y={height - 52 - barHeight * grow} fill={text.primary} fontSize={26} fontWeight={700} textAnchor="middle" fontFamily={fontFamily()}>
                   {item.value}
                 </text>
               </g>
@@ -389,20 +416,21 @@ function ChartLayout({ scene, pkg, frame }: LayoutProps) {
   );
 }
 
-function ListLayout({ scene, pkg, frame }: LayoutProps) {
+function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
   const colors = palette(pkg);
+  const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined | string[]>;
   const quote = scene.variant === 'quote';
   const items = Array.isArray(copy.items) ? (copy.items as string[]) : [];
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: colors[3] }}>
-      <Background scene={scene} pkg={pkg} />
+    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
+      <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 3, width: '100%', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, display: 'flex', flexDirection: 'column', gap: 30 }}>
         <div style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800, maxWidth: 1100 }}>{copy.headline}</div>
         {quote ? (
           <div style={{ fontSize: 52, lineHeight: 1.25, maxWidth: 1300 }}>
             “{copy.quote}”
-            {copy.attribution ? <div style={{ fontSize: TYPE_SCALE.sub, color: colors[2], marginTop: 18 }}>— {copy.attribution}</div> : null}
+            {copy.attribution ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.muted, marginTop: 18 }}>— {copy.attribution}</div> : null}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 1180 }}>
@@ -410,7 +438,7 @@ function ListLayout({ scene, pkg, frame }: LayoutProps) {
               const row = reveal(frame, 8 + index * 6, 18);
               return (
                 <div key={item} style={{ display: 'flex', gap: 20, alignItems: 'center', opacity: row.opacity, transform: `translateY(${row.translateY}px)` }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 999, background: colors[2], color: colors[0], display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 999, background: colors[2], color: text.onAccent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24 }}>
                     {index + 1}
                   </div>
                   <div style={{ fontSize: 34 }}>{item}</div>
@@ -425,11 +453,19 @@ function ListLayout({ scene, pkg, frame }: LayoutProps) {
   );
 }
 
-export function SceneView({ scene, pkg }: { scene: Scene; pkg: PackageV1 }) {
+export function SceneView({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media?: MediaSidecar }) {
   const frame = useCurrentFrame();
-  const { durationInFrames } = useVideoConfig();
-  void durationInFrames;
-  const props: LayoutProps = { scene, pkg, frame };
+  const resolved = resolveSceneMedia(scene, pkg, media);
+  const props: LayoutProps = { scene, pkg, frame, media };
+  if (resolved.mediaOnly) {
+    return (
+      <AbsoluteFill>
+        <Background scene={scene} pkg={pkg} media={media} />
+        <Foreground scene={scene} pkg={pkg} frame={frame} />
+        {resolved.lowerThird ? <LowerThird {...resolved.lowerThird} pkg={pkg} /> : null}
+      </AbsoluteFill>
+    );
+  }
   return (
     <CopyGuard scene={scene}>
       {scene.layout === 'title' ? <TitleLayout {...props} /> : null}
@@ -437,6 +473,7 @@ export function SceneView({ scene, pkg }: { scene: Scene; pkg: PackageV1 }) {
       {scene.layout === 'stat' ? <StatLayout {...props} /> : null}
       {scene.layout === 'chart' ? <ChartLayout {...props} /> : null}
       {scene.layout === 'list' ? <ListLayout {...props} /> : null}
+      {resolved.lowerThird ? <LowerThird {...resolved.lowerThird} pkg={pkg} /> : null}
     </CopyGuard>
   );
 }
