@@ -14,17 +14,30 @@ It exists for three reasons (SPEC.md 6.4/5.1):
 3. **One place that touches the network**, so tests can run the real SDK against a local
    fake Comfy v2 server.
 
-The workflow cache/upload plumbing that a real Comfy server needs for reference images is
-deliberately *not* wired here: it is M3 work against a real endpoint (SPEC.md 6.4), and
-this module passes a local path through instead of pretending the upload was verified.
+**File inputs (H-fix1, from the GPU test 2 findings).** A graph node that takes a file —
+``LoadImage`` on the i2v / img2img / reference-edit graphs — needs a *name in the server's
+input directory*, not an asset id and not a local path. Sending the bare value is exactly how
+``a_plate1.plate`` failed with "Prompt outputs failed validation" on the GPU test 2 run. So:
+
+1. the workflow's params file **declares** which parameters are file uploads
+   (``"files": ["image", "reference"]``). A file-valued parameter the map does not declare is
+   *refused* here (``upload_not_declared``), never passed through — a graph handed a local path
+   fails late, on the GPU, after the session is billed;
+2. the caller (the runner) resolves each declared parameter to a local file and hands the paths
+   in as ``file_inputs``; this module uploads them to ``/upload/image`` and injects the name the
+   server returns.
+
+Uploads are therefore one HTTP call per *file*, not per node, and the content-addressed name the
+caller caches means a retry after a lost exec does not upload twice.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -49,6 +62,42 @@ AMBIGUOUS = (
     httpx.RemoteProtocolError,
     httpx.LocalProtocolError,
 )
+
+#: The ComfyUI route that puts a file in the server's own input directory. It is the one a
+#: graph's `LoadImage` can name; the v2 asset API takes asset ids, which `LoadImage` cannot use.
+UPLOAD_ROUTE = "/upload/image"
+
+
+class UploadError(RuntimeError):
+    """An upload that did not produce a server-side name. ``code`` is machine-readable."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+    def as_error(self) -> dict[str, Any]:
+        return {"code": self.code, "message": self.message}
+
+
+#: What the server stores a file as. Only the shapes the planner can produce matter here
+#: (a still is a PNG, an alpha cutout a PNG, a reference plate an MP4).
+_CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".mp3": "audio/mpeg",
+}
+
+
+def _content_type(path: Path) -> str:
+    return _CONTENT_TYPES.get(Path(path).suffix.lower(), "application/octet-stream")
+
 
 
 @dataclass
@@ -92,12 +141,21 @@ def classify_submit_error(exc: BaseException, idempotency_key: str | None = None
     return SubmitOutcome("ambiguous", idempotency_key=idempotency_key, error=payload)
 
 
-def load_params_map(workflow_path: Path, source: str | None = None) -> dict[str, list[str]]:
+def load_params_doc(workflow_path: Path, source: str | None = None) -> dict[str, Any]:
     """``<workflow>.api.json`` -> sibling ``<workflow>.api.params.json`` (optional).
 
-    Each entry maps a parameter name to ``[node_id, field]`` or to a list of such pairs when
-    one value belongs in more than one node (LTX-2.5 keeps the frame count on both the video
-    and the audio latent).
+    Each entry of ``map`` maps a parameter name to ``[node_id, field]`` or to a list of such
+    pairs when one value belongs in more than one node (LTX-2.5 keeps the frame count on both
+    the video and the audio latent, and its two-stage geometry on the stage-1 latent *and* the
+    i2v image scale).
+
+    A target may carry a third element of options, which is how a single planned value lands at
+    two different sizes without inventing a second parameter name::
+
+        "width": [["31", "width"], ["8", "width", {"mul": 0.5}]]
+
+    ``files`` names the parameters whose value is a **local file to upload** rather than a node
+    value. A file-valued parameter with no ``files`` entry is refused (see ``submit``).
 
     ``source`` names a specialised map (``<workflow>.api.<source>.params.json``), which is how the
     finals upscale pass declares its own stage-2 controls while still reusing the graph. A missing
@@ -118,8 +176,36 @@ def load_params_map(workflow_path: Path, source: str | None = None) -> dict[str,
     for candidate in candidates:
         if candidate.is_file():
             data = json.loads(candidate.read_text(encoding="utf-8"))
-            return {name: list(target) for name, target in (data.get("map") or {}).items()}
-    return {}
+            # a target is [node, field] or [node, field, options]; normalise to a list of targets
+            mapping: dict[str, list] = {}
+            for name, target in (data.get("map") or {}).items():
+                target = list(target)
+                mapping[name] = target if isinstance(target[0], (list, tuple)) else [target]
+            return {"map": mapping, "files": list(data.get("files") or []), "path": candidate}
+    return {"map": {}, "files": [], "path": None}
+
+
+def load_params_map(workflow_path: Path, source: str | None = None) -> dict[str, list[str]]:
+    """Just the ``map`` half of :func:`load_params_doc` (the shape the B4 contract test uses)."""
+    return load_params_doc(workflow_path, source)["map"]
+
+
+def load_file_params(workflow_path: Path, source: str | None = None) -> list[str]:
+    """The parameters the workflow declares as local files to upload (``files`` in the map)."""
+    return load_params_doc(workflow_path, source)["files"]
+
+
+def _target_value(value: Any, options: Any) -> Any:
+    """Apply a target's options to the planned value (currently only ``mul``).
+
+    Kept to one operation on purpose: the params map is a declaration of *where* a value goes,
+    and arithmetic there is how a map stops matching the plan.
+    """
+    if not options:
+        return value
+    if "mul" in options and isinstance(value, (int, float)):
+        return int(round(value * float(options["mul"])))
+    return value
 
 
 def inject_params(graph: dict[str, Any], mapping: dict[str, list[str]], params: dict[str, Any]) -> dict[str, Any]:
@@ -142,9 +228,11 @@ def inject_params(graph: dict[str, Any], mapping: dict[str, list[str]], params: 
         # one target ([node, field]) or several ([[node, field], ...]) - the LTX audio latent
         # needs the same frame count as the video latent
         targets = target if isinstance(target[0], (list, tuple)) else [target]
-        for node_id, field_name in targets:
+        for pair in targets:
+            node_id, field_name = pair[0], pair[1]
+            options = pair[2] if len(pair) > 2 else None
             node = graph.setdefault(str(node_id), {"inputs": {}})
-            node.setdefault("inputs", {})[str(field_name)] = value
+            node.setdefault("inputs", {})[str(field_name)] = _target_value(value, options)
     return graph
 
 
@@ -163,13 +251,20 @@ class JobSnapshot:
 class ComfyClient:
     """Everything the runner needs from Comfy, in one wrapper."""
 
-    def __init__(self, base_url: str | None = None, timeout: float = 30.0, client: Any = None):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = 30.0,
+        client: Any = None,
+        upload_url: str | None = None,
+    ):
         self.base_url = base_url
         self.timeout = timeout
         self._client = client
+        self._upload_url = upload_url
 
     @property
-    def client(self) -> Any:
+    def client(self) -> Any:  # noqa: D401 - see the class docstring
         """The SDK client, built with ``COMFY_BASE_URL`` pointing at this client's base url.
 
         ``base_url`` is the *deployment root* (SPEC.md 5.1: ``http://127.0.0.1:8189`` for
@@ -178,8 +273,6 @@ class ComfyClient:
         fine here because there is one client per runner process.
         """
         if self._client is None:
-            import os
-
             from comfy_sdk import Comfy  # imported lazily so a broken install fails at use, not import
 
             if self.base_url:
@@ -187,9 +280,81 @@ class ComfyClient:
             self._client = Comfy(timeout=self.timeout)
         return self._client
 
+    @property
+    def upload_url(self) -> str:
+        """Where files are uploaded: ``<deployment root>/upload/image``.
+
+        ``COMFY_UPLOAD_URL`` (or ``--upload-url``) overrides it, which is how a user points the
+        uploads straight at ComfyUI's own port when the proxy in front of it does not forward
+        the native ComfyUI routes. **[unverified against a real comfy-api-proxy: the GPU test 1/2
+        runs used the SDK path, not a proxy]**
+        """
+        if self._upload_url:
+            return self._upload_url
+        base = self.base_url or os.environ.get("COMFY_BASE_URL")
+        if not base:
+            raise UploadError(
+                "upload_url_unknown",
+                f"no deployment root to upload to: set --base-url, {UPLOAD_ROUTE}'s full URL via --upload-url, or COMFY_BASE_URL",
+            )
+        return base.rstrip("/") + UPLOAD_ROUTE
+
     def close(self) -> None:
         if self._client is not None:
             self._client.close()
+
+    # -- uploads -------------------------------------------------------------------
+    def upload_file(self, path: Path, *, name: str | None = None, timeout: float | None = None) -> dict[str, Any]:
+        """Upload one local file to the server's input directory; return its server-side name.
+
+        The name comes back from the server and is what a ``LoadImage`` node must be given. A
+        server without the route (a proxy that only serves v2) is reported as
+        ``upload_unsupported`` rather than as a mystery job failure later.
+        """
+        path = Path(path)
+        if not path.is_file():
+            raise UploadError("input_file_missing", f"{path} is not a file")
+        filename = name or path.name
+        content_type = _content_type(path)
+        try:
+            with httpx.Client(timeout=timeout or max(self.timeout, 60.0)) as client:
+                with path.open("rb") as handle:
+                    response = client.post(
+                        self.upload_url,
+                        files={"image": (filename, handle, content_type)},
+                        data={"type": "input", "overwrite": "true", "subfolder": ""},
+                    )
+        except NEVER_REACHED as exc:
+            raise UploadError("upload_unreachable", f"{self.upload_url} refused the upload: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise UploadError("upload_failed", f"uploading {path.name} failed: {type(exc).__name__}: {exc}") from exc
+
+        if response.status_code in (404, 405):
+            raise UploadError(
+                "upload_unsupported",
+                f"{self.upload_url} answered {response.status_code}: this server does not expose the ComfyUI "
+                "upload route, so a workflow that needs an input file cannot run. Point --upload-url at ComfyUI itself.",
+            )
+        if response.status_code >= 400:
+            raise UploadError("upload_failed", f"{self.upload_url} answered {response.status_code}: {response.text[:300]}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise UploadError("upload_failed", f"{self.upload_url} did not return JSON: {response.text[:200]}") from exc
+        name = payload.get("name")
+        if not isinstance(name, str) or not name:
+            raise UploadError("upload_failed", f"{self.upload_url} returned no name: {json.dumps(payload)[:200]}")
+        subfolder = str(payload.get("subfolder") or "").strip("/")
+        return {
+            "name": name,
+            # what goes into the graph: ComfyUI resolves "subfolder/name"
+            "reference": f"{subfolder}/{name}" if subfolder else name,
+            "subfolder": subfolder,
+            "type": payload.get("type") or "input",
+            "bytes": path.stat().st_size,
+            "sha256": sha256_file(path),
+            "url": self.upload_url,
+        }
 
     # -- workflows -----------------------------------------------------------------
     def load_workflow(self, path: Path) -> Any:
@@ -203,13 +368,46 @@ class ComfyClient:
         idempotency_key: str,
         metadata: dict[str, str] | None = None,
         params_source: str | None = None,
+        file_inputs: dict[str, Path] | None = None,
+        upload: Callable[[Path], dict[str, Any]] | None = None,
     ) -> SubmitOutcome:
+        """Inject ``params`` (uploading ``file_inputs`` first) and submit one job.
+
+        ``file_inputs`` maps a parameter name to the local file the runner resolved for it.
+        Each name must be declared in the workflow's params file ``files`` list: a node that
+        takes a file and a map that does not say so is a bug the server would only report as a
+        validation error after the job was billed.
+        """
+        params = dict(params)
         try:
+            if file_inputs:
+                declared = set(load_file_params(workflow_path, params_source))
+                undeclared = sorted(name for name in file_inputs if name not in declared)
+                if undeclared:
+                    return SubmitOutcome(
+                        "refused",
+                        idempotency_key=idempotency_key,
+                        error={
+                            "code": "upload_not_declared",
+                            "message": (
+                                f"{Path(workflow_path).name} needs the local file(s) {', '.join(undeclared)} uploaded, but its "
+                                f"params file declares no `files` entry for them: add e.g. \"files\": [{', '.join(json.dumps(n) for n in undeclared)}]"
+                            ),
+                        },
+                    )
+                for name, path in file_inputs.items():
+                    if upload is None:
+                        raise UploadError("upload_failed", f"no uploader was supplied for {name}")
+                    params[name] = upload(Path(path))["reference"]
+
             workflow = self.load_workflow(workflow_path)
             mapping = load_params_map(workflow_path, params_source)
             inject_params(workflow.json, mapping, params)
             handle = self.client.submit(workflow, idempotency_key=idempotency_key, metadata=metadata)
             return SubmitOutcome("submitted", job_id=handle.id, idempotency_key=idempotency_key)
+        except UploadError as exc:
+            # nothing reached the job API: this is a refusal, not an ambiguous submit
+            return SubmitOutcome("refused", idempotency_key=idempotency_key, error=exc.as_error())
         except ValueError as exc:  # local validation (params mapping, UI-format graph)
             return SubmitOutcome("refused", idempotency_key=idempotency_key, error={"code": "invalid_workflow", "message": str(exc)})
         except Exception as exc:  # noqa: BLE001 - classified, never swallowed

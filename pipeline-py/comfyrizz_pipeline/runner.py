@@ -29,13 +29,18 @@ from typing import Any
 
 from .atomic import canonical_hash, ensure_dir, read_json, sha256_file, write_json_atomic
 from .attempts import Attempt, AttemptStore, attempts_jsonl, now_iso
-from .client import ComfyClient
+from .client import ComfyClient, UploadError, load_file_params
 from .manifest import build_manifest, manifest_decides_success, read_manifest, write_manifest
 from .progress import stdout_writer
 from .schema import validate_jobs
 
 KILL_AFTER_SUBMIT_ENV = "COMFYRIZZ_TEST_KILL_AFTER_SUBMIT"
 CACHE_INDEX = "cache/index.json"
+#: sha256 -> the name the server gave that file, per deployment root. A new VM has an empty
+#: input directory, so the cache is keyed by (url, sha256): reusing a name across servers would
+#: hand the graph a file that is not there. **[this is the invariant that keeps a retry honest]**
+UPLOAD_INDEX = "cache/uploads.json"
+
 
 
 def _truthy(value: str | None) -> bool:
@@ -56,6 +61,10 @@ class RunnerConfig:
     allow_retry_failed: bool = True
     progress_path: Path | None = None
     echo_progress: bool = True
+    #: upload endpoint override; default is ``<base_url>/upload/image`` (a proxy that does not
+    #: forward ComfyUI's native routes can be bypassed by pointing this at ComfyUI itself)
+    upload_url: str | None = None
+    uploads_enabled: bool = True
     #: run only one batch of the plan ("stills" | "plates" | "upscales" | "audio"); the Google
     #: Colab backend admits and collects batch by batch so the reserve is checked mid-package
     batch: str | None = None
@@ -65,20 +74,29 @@ class RunnerConfig:
         return Path(self.out_dir) / "runs" / (self.run_id or "unknown")
 
 
+
 class Runner:
     def __init__(self, config: RunnerConfig, client: ComfyClient | None = None, progress: Any = None):
         self.config = config
         self.config.out_dir = Path(self.config.out_dir)
         self.config.jobs_file = Path(self.config.jobs_file)
         self.attempts = AttemptStore(self.config.out_dir / "attempts")
-        self.client = client or ComfyClient(base_url=config.base_url, timeout=config.submit_timeout)
+        self.client = client or ComfyClient(
+            base_url=config.base_url,
+            timeout=config.submit_timeout,
+            upload_url=config.upload_url or os.environ.get("COMFY_UPLOAD_URL"),
+        )
         self.progress = progress or stdout_writer(config.progress_path, echo=config.echo_progress)
         self.jobs_doc: dict[str, Any] = {}
         self.results: dict[str, dict[str, Any]] = {}
         self.started_at = now_iso()
+        #: sha256 -> {name, url, at}: what this run has already uploaded, so two jobs that need
+        #: the same bytes (a still used as an i2v source twice) upload them once
+        self._uploads: dict[str, dict[str, Any]] = {}
         self.run_id = config.run_id or f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
         # the run directory is named after the run id, so keep the two in step
         self.config.run_id = self.run_id
+
 
     # -- setup ---------------------------------------------------------------------
     def load_jobs(self) -> dict[str, Any]:
@@ -153,6 +171,97 @@ class Runner:
             "at": now_iso(),
         }
         write_json_atomic(self._cache_path(), data)
+
+    # -- file inputs (uploads) ------------------------------------------------------
+    def _upload_cache_path(self) -> Path:
+        return self.config.out_dir / UPLOAD_INDEX
+
+    def _upload_cache_load(self) -> dict[str, Any]:
+        path = self._upload_cache_path()
+        if not path.is_file():
+            return {"v": 1, "entries": {}}
+        data = read_json(path)
+        data.setdefault("entries", {})
+        return data
+
+    def file_input_paths(self, job: dict[str, Any]) -> tuple[dict[str, Path], dict[str, Any] | None]:
+        """Resolve a job's declared file inputs to files on disk.
+
+        ``from: "job"`` is a path relative to the output directory (a dependency's output — the
+        still an i2v plate starts from); ``from: "package"`` is relative to the plan directory
+        (an SVG raster shipped with the bundle, or a file the caller staged next to jobs.json).
+
+        A missing file is returned as a problem, *before* any attempt record: this is a local
+        refusal, nothing was submitted, and the manifest says so instead of the GPU finding out.
+        """
+        entries = job.get("fileInputs") or []
+        paths: dict[str, Path] = {}
+        for entry in entries:
+            param = str(entry.get("param") or "")
+            source = str(entry.get("from") or "")
+            rel = entry.get("path")
+            if not param or source not in ("job", "package") or not isinstance(rel, str):
+                return {}, {
+                    "code": "input_file_unresolved",
+                    "message": f"{job['id']}: fileInputs entry {json.dumps(entry)} needs param, from (job|package) and path",
+                }
+            root = self.config.out_dir if source == "job" else self.config.jobs_file.parent
+            path = Path(rel)
+            if path.is_absolute():
+                return {}, {
+                    "code": "input_file_unresolved",
+                    "message": f"{job['id']}: fileInputs path {rel} is absolute; plan paths are relative to the {source} root",
+                }
+            resolved = root / path
+            if not resolved.is_file():
+                depends_on = entry.get("job")
+                detail = f"the {source} file {rel} is not on disk"
+                if source == "job" and depends_on:
+                    status = (self.results.get(depends_on) or {}).get("status")
+                    detail += f" (its source job {depends_on} is {status or 'not in this run'})"
+                return {}, {
+                    "code": "input_file_missing",
+                    "message": f"{job['id']}: {param} needs {detail}; nothing was submitted",
+                }
+            paths[param] = resolved
+        return paths, None
+
+    def upload_input(self, path: Path) -> dict[str, Any]:
+        """Upload once per (deployment root, content) and reuse the server's name after that.
+
+        The name the server returns is content-addressed by us (``<stem>_<sha8><suffix>``) and
+        cached in ``out/cache/uploads.json``. That cache is what makes a reconcile-after-lost-exec
+        cheap *and* correct: the file is already in that server's input directory, so a re-polled
+        job and a retried job both name the same file.
+        """
+        path = Path(path)
+        if not self.config.uploads_enabled:
+            raise UploadError("upload_disabled", f"uploads are disabled and {path.name} is needed as an input")
+        digest = sha256_file(path)
+        url = self.client.upload_url
+        entry = self._uploads.get(digest) or self._upload_cache_load()["entries"].get(digest)
+        if entry and entry.get("url") == url:
+            self._uploads[digest] = entry
+            self.progress.emit("upload_cached", job=None, value=entry["name"])
+            return entry
+
+        name = f"{path.stem}_{digest[:8]}{path.suffix}"
+        uploaded = self.client.upload_file(path, name=name)
+        entry = {
+            "name": uploaded["name"],
+            "reference": uploaded["reference"],
+            "sha256": digest,
+            "bytes": uploaded["bytes"],
+            "url": url,
+            "file": str(path),
+            "at": now_iso(),
+        }
+        self._uploads[digest] = entry
+        data = self._upload_cache_load()
+        data["entries"][digest] = entry
+        write_json_atomic(self._upload_cache_path(), data)
+        self.progress.emit("upload_done", value={"name": entry["name"], "bytes": entry["bytes"], "file": str(path)})
+        return entry
 
     # -- manifest ------------------------------------------------------------------
     def _write_manifest(self, notes: list[str] | None = None) -> dict[str, Any]:
@@ -257,7 +366,34 @@ class Runner:
         self.progress.emit("job_failed", job=job["id"], attempt=attempt.attempt_id, value=error.get("code"))
         return self._result(job, state, attempt, error=error)
 
-    def _submit_job(self, job: dict[str, Any]) -> dict[str, Any]:
+    def _submit_job(self, job: dict[str, Any], *, file_inputs: dict[str, Path] | None = None) -> dict[str, Any]:
+        params = dict(job.get("params") or {})
+        file_inputs = file_inputs or {}
+        # 1. the files this job needs go to the server's input directory first: a graph that
+        #    names a file that was never uploaded fails late, on the GPU, after the session
+        #    was billed. An upload that fails is a refusal - no attempt record, nothing submitted.
+        declared = set(load_file_params(self.workflow_path(job), self.job_params_source(job)))
+        misdeclared = sorted(name for name in file_inputs if name not in declared)
+        if misdeclared:
+            problem = {
+                "code": "upload_not_declared",
+                "message": (
+                    f"{job['id']}: {self.workflow_path(job).name} needs {', '.join(misdeclared)} uploaded, but its params file "
+                    f"declares no `files` entry for it: add \"files\": [{', '.join(json.dumps(name) for name in misdeclared)}] "
+                    "so the runner knows the value is a file and not a node value"
+                ),
+            }
+            self.progress.emit("job_failed", job=job["id"], value=problem["code"])
+            return self._result(job, "failed", error=problem, reason="the workflow does not declare this input as a file")
+        uploaded: dict[str, dict[str, Any]] = {}
+        for param, path in file_inputs.items():
+            try:
+                uploaded[param] = self.upload_input(path)
+            except UploadError as exc:
+                self.progress.emit("job_failed", job=job["id"], value=exc.code)
+                return self._result(job, "failed", error=exc.as_error(), reason="the input file could not be uploaded; nothing was submitted")
+        params.update({param: entry["reference"] for param, entry in uploaded.items()})
+
         seq = self.attempts.next_seq(job["id"])
         attempt_id = f"att_{job['id'].replace('/', '_')}_{seq:02d}"
         idempotency_key = f"comfyrizz-{job['id']}-{job['cacheKey'][:16]}-{seq}"
@@ -266,12 +402,25 @@ class Runner:
             job=job["id"],
             state="submitting",
             idempotency_key=idempotency_key,
-            inputs_hash=canonical_hash({"params": job.get("params"), "cacheKey": job.get("cacheKey")}),
+            inputs_hash=canonical_hash(
+                {
+                    "params": params,
+                    # the *content* of every uploaded input, so two runs that differ only in the
+                    # bytes behind an asset id are not the same attempt
+                    "files": {param: entry["sha256"] for param, entry in uploaded.items()},
+                    "cacheKey": job.get("cacheKey"),
+                }
+            ),
             seq=seq,
             backend=self.config.base_url or os.environ.get("COMFY_BASE_URL"),
             cache_key=job.get("cacheKey"),
+            events=(
+                [{"at": now_iso(), "event": "inputs_uploaded", "files": {param: entry["name"] for param, entry in uploaded.items()}}]
+                if uploaded
+                else []
+            ),
         )
-        # 1. the record exists before the request is made
+        # 2. the record exists before the request is made
         self.attempts.open(attempt)
         self.progress.emit("attempt_open", job=job["id"], attempt=attempt_id, value=attempt.state)
         if os.environ.get("COMFYRIZZ_TEST_KILL_BEFORE_SUBMIT") and _truthy(os.environ["COMFYRIZZ_TEST_KILL_BEFORE_SUBMIT"]):
@@ -279,14 +428,18 @@ class Runner:
 
         outcome = self.client.submit(
             self.workflow_path(job),
-            params=job.get("params", {}),
+            params=params,
             idempotency_key=idempotency_key,
             metadata={"comfyrizz_attempt": attempt_id, "comfyrizz_job": job["id"]},
             params_source=self.job_params_source(job),
+            # the paths go back in so the workflow's own `files` declaration is enforced; the
+            # uploader is the same cache, so this second pass makes no second upload
+            file_inputs=file_inputs,
+            upload=self.upload_input,
         )
 
         if outcome.submitted:
-            # 2. the job id is written the moment we have it, before any progress line
+            # 3. the job id is written the moment we have it, before any progress line
             attempt = self.attempts.update(attempt, state="submitted", job_id=outcome.job_id, submitted_at=now_iso())
             self.progress.emit("submitted", job=job["id"], attempt=attempt_id, value=outcome.job_id)
             if self.config.kill_after_submit:
@@ -389,7 +542,16 @@ class Runner:
                     self.progress.emit("job_failed", job=job["id"], attempt=prior[-1].attempt_id, value="retry_disabled")
                     self._write_manifest()
                     continue
-                result = self._submit_job(job)
+                # every file this job takes has to be on disk *before* an attempt record exists
+                file_inputs, problem = self.file_input_paths(job)
+                if problem is not None:
+                    self.results[job["id"]] = self._result(job, "failed", error=problem, reason="a local input file is missing")
+                    self.progress.emit("job_failed", job=job["id"], value=problem["code"])
+                    failed_jobs.add(job["id"])
+                    self._write_manifest()
+                    continue
+                result = self._submit_job(job, file_inputs=file_inputs)
+
             else:
                 self.progress.emit("job_start", job=job["id"], value=f"open attempt {open_attempt.attempt_id} ({open_attempt.state}); polling, not resubmitting")
                 result = self._resolve_open_attempt(job, open_attempt)
@@ -449,6 +611,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--jobs", required=True, help="path to jobs.json")
     parser.add_argument("--out", required=True, help="output directory (manifest.json, attempts/, assets/)")
     parser.add_argument("--base-url", default=None, help="COMFY_BASE_URL override (comfy-api-proxy v2 endpoint)")
+    parser.add_argument(
+        "--upload-url",
+        default=None,
+        help="where input files are uploaded (default <base-url>/upload/image; COMFY_UPLOAD_URL overrides)",
+    )
+    parser.add_argument("--no-uploads", action="store_true", help="refuse jobs that need an input file uploaded")
+
     parser.add_argument("--reconcile", action="store_true", help="poll known job ids instead of running")
     parser.add_argument("--poll-interval", type=float, default=0.25)
     parser.add_argument("--timeout", type=float, default=3600.0, help="per-job wall-clock budget in seconds")
@@ -471,6 +640,8 @@ def main(argv: list[str] | None = None) -> int:
         progress_path=Path(args.progress_log) if args.progress_log else None,
         echo_progress=not args.quiet,
         batch=args.batch,
+        upload_url=args.upload_url,
+        uploads_enabled=not args.no_uploads,
     )
     runner = Runner(config)
     try:

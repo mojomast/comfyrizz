@@ -2,7 +2,8 @@
   "v": 1,
   "generator": "flux3-klein",
   "kind": "still",
-  "note": "img2img: the init image is LoadImage(10), the geometry is ImageScale(11), the strength is KSampler(7).denoise.",
+  "note": "img2img: the init image is LoadImage(10), the geometry is ImageScale(11), the strength is KSampler(7).denoise. 'files' declares that the runner uploads image to the server's input directory and injects the returned name into node 10 - the graph cannot name a local path (GPU test 2, issue 2).",
+  "files": ["image"],
   "map": {
     "prompt": ["4", "text"],
     "image": ["10", "image"],

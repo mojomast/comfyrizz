@@ -2,7 +2,8 @@
   "v": 1,
   "generator": "flux3-klein",
   "kind": "still",
-  "note": "Reference/edit conditioning: LoadImage(10) is reference image 0, ReferenceMultiLatent(12) holds the reference budget. Bounding boxes belong in the prompt (model card).",
+  "note": "Reference/edit conditioning: LoadImage(10) is reference image 0, ReferenceMultiLatent(12) holds the reference budget. Bounding boxes belong in the prompt (model card). 'files' declares the uploaded parameters: image and reference are two names for the same ability (a package sets whichever word its asset used) and both land on node 10, so a package that sets both to different files would have one silently win - the planner reads gen.inputs and a well-formed asset sets one of them.",
+  "files": ["image", "reference"],
   "map": {
     "prompt": ["4", "text"],
     "image": ["10", "image"],

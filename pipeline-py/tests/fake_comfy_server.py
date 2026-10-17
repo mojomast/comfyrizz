@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--never-finish", action="store_true")
     parser.add_argument("--drop-first-response", action="store_true")
     parser.add_argument("--request-log", default=None, help="append one JSON line per request")
+    parser.add_argument("--upload-status", type=int, default=200, help="what /upload/image answers (404 = a server without the route)")
     parser.add_argument("--lifetime-seconds", type=float, default=300.0, help="exit after this long, so a test can never leak a server")
     args = parser.parse_args(argv)
 
@@ -41,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         drop_first_response=args.drop_first_response,
         fail_labels=[label for label in args.fail_labels.split(",") if label],
         request_log=args.request_log,
+        upload_status=args.upload_status,
     )
     fake.state.origin = f"http://127.0.0.1:{args.port}" if args.port else fake.base_url
     lifetime = float(args.lifetime_seconds)

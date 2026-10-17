@@ -62,6 +62,23 @@
           "seed": { "type": ["integer", "null"], "minimum": 0, "maximum": 4294967295 },
           "cutout": { "type": "boolean" },
           "inputAsset": { "type": ["string", "null"] },
+          "fileInputs": {
+            "type": "array",
+            "description": "Every parameter whose value is a local file the graph has to be given a server-side name for (a LoadImage-style node). The runner uploads each file to /upload/image and injects the returned name; `from` says where the file is on disk before that. GPU test 2, issue 2: a graph handed the asset id instead fails validation.",
+            "items": {
+              "type": "object",
+              "required": ["param", "from", "path"],
+              "properties": {
+                "param": { "enum": ["image", "reference", "mask", "audio"] },
+                "from": {
+                  "enum": ["job", "package"],
+                  "description": "job: `path` is relative to the output directory (a dependency's output). package: `path` is relative to the jobs.json directory."
+                },
+                "job": { "type": ["string", "null"], "description": "the job that produces the file when from=job" },
+                "path": { "type": "string", "minLength": 1, "maxLength": 512 }
+              }
+            }
+          },
           "text": { "type": "string" }
         }
       }

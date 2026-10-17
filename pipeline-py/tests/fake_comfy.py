@@ -11,6 +11,9 @@ through the real SDK:
 * ``GET  /api/v2/jobs`` — list (the metadata filter is a best-effort convenience: the
   real proxy ignores job labels, per SPEC.md 5.1)
 * ``GET  /api/v2/assets/{id}/content`` — the output bytes
+* ``POST /upload/image`` — ComfyUI's own input-file route (multipart), which is what an
+  i2v/img2img/reference graph needs (GPU test 2, issue 2). Uploads are kept, so a test can
+  assert *what* the graph was given and that the same bytes were uploaded once
 * ``GET  /system_stats`` and ``GET /object_info`` — the ComfyUI endpoints the BYO health
   check reads
 
@@ -20,6 +23,7 @@ whole point of "reconcile polls instead of resubmitting".
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -29,11 +33,56 @@ from urllib.parse import parse_qs, urlparse
 
 TERMINAL = ("succeeded", "failed", "canceled", "expired")
 
+#: The route ComfyUI serves an uploaded file under, and the field the client sends it in.
+UPLOAD_PATH = "/upload/image"
+
 
 def _iso(epoch: float | None) -> str | None:
     if epoch is None:
         return None
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
+
+def parse_multipart(body: bytes, content_type: str) -> list[dict[str, Any]]:
+    """A minimal multipart/form-data reader (the upload route is the only user).
+
+    Returns one dict per part: ``{field, filename, data, content_type}``.
+    """
+    marker = "boundary="
+    if marker not in content_type:
+        return []
+    boundary = content_type.split(marker, 1)[1].split(";")[0].strip().strip('"')
+    delimiter = b"--" + boundary.encode("utf-8")
+    parts = []
+    for chunk in body.split(delimiter):
+        if not chunk.strip() or chunk.strip() == b"--":
+            continue
+        head, separator, data = chunk.partition(b"\r\n\r\n")
+        if not separator:
+            continue
+        data = data[:-2] if data.endswith(b"\r\n") else data
+        headers: dict[str, str] = {}
+        for line in head.decode("utf-8", "replace").splitlines():
+            if ":" in line:
+                key, value = line.split(":", 1)
+                headers[key.strip().lower()] = value.strip()
+        disposition = headers.get("content-disposition", "")
+        field = filename = None
+        for token in disposition.split(";"):
+            token = token.strip()
+            if token.startswith("name="):
+                field = token[len("name=") :].strip('"')
+            elif token.startswith("filename="):
+                filename = token[len("filename=") :].strip('"')
+        parts.append(
+            {
+                "field": field,
+                "filename": filename,
+                "data": data,
+                "content_type": headers.get("content-type"),
+            }
+        )
+    return parts
 
 
 class FakeComfyState:
@@ -52,6 +101,7 @@ class FakeComfyState:
         progress_steps: int = 3,
         node_types: list[str] | None = None,
         model_files: list[str] | None = None,
+        upload_status: int = 200,
     ):
         self.outputs = outputs
         self.output_kind = output_kind
@@ -67,6 +117,10 @@ class FakeComfyState:
         self.progress_steps = progress_steps
         self.node_types = node_types or ["CheckpointLoaderSimple", "KSampler", "LoadImage", "SaveImage", "LTXVScheduler"]
         self.model_files = model_files or ["flux-3-image-klein.safetensors", "ltx-2.5-22b-distilled.safetensors"]
+        #: files that arrived through /upload/image, by the name the server gave them
+        self.uploads: dict[str, dict[str, Any]] = {}
+        #: what /upload/image answers: 200, or a status a server without the route would send
+        self.upload_status = upload_status
         self.jobs: dict[str, dict[str, Any]] = {}
         self.idempotency_seen: dict[str, str] = {}
         self.log: list[dict[str, Any]] = []
@@ -94,6 +148,25 @@ class FakeComfyState:
 
     def poll_count(self, job_id: str) -> int:
         return len([r for r in self.requests("GET") if r["path"] == f"/api/v2/jobs/{job_id}"])
+
+    def upload_requests(self) -> list[dict[str, Any]]:
+        """Every /upload/image call, with the filename and the bytes' sha256."""
+        return [entry for entry in self.log if entry["path"] == UPLOAD_PATH]
+
+    def submitted_workflows(self) -> list[dict[str, Any]]:
+        """The graph of every submitted job, in submission order (what the server was asked to run)."""
+        graphs = []
+        for entry in self.requests("POST", "/api/v2/jobs"):
+            if entry["path"].endswith("/cancel"):
+                continue
+            body = entry.get("body") or {}
+            graph = body.get("workflow")
+            graphs.append(graph if isinstance(graph, dict) else {})
+        return graphs
+
+    def submitted_input(self, node_id: str, field: str = "image") -> list[Any]:
+        """What each submitted graph had at ``node_id.inputs[field]`` (e.g. the LoadImage name)."""
+        return [graph.get(str(node_id), {}).get("inputs", {}).get(field) for graph in self.submitted_workflows()]
 
     def configure(self, **kwargs: Any) -> None:
         for key, value in kwargs.items():
@@ -199,15 +272,22 @@ class _Handler(BaseHTTPRequestHandler):
         return
 
     # -- plumbing ------------------------------------------------------------------
-    def _read_body(self) -> dict[str, Any]:
+    def _read_raw(self) -> bytes:
         length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length) if length else b""
+        return self.rfile.read(length) if length else b""
+
+    def _read_body(self, raw: bytes | None = None) -> dict[str, Any]:
+        raw = self._read_raw() if raw is None else raw
         if not raw:
             return {}
+        content_type = self.headers.get("Content-Type") or ""
+        if "multipart/form-data" in content_type:
+            # keep the log readable: a file body is summarised, not dumped
+            return {"_multipart": len(raw)}
         try:
             return json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError:
-            return {"_raw": raw.decode("utf-8", "replace")}
+            return {"_raw": raw[:300].decode("utf-8", "replace")}
 
     def _record(self, method: str, path: str, body: dict[str, Any] | None = None, status: int | None = None) -> None:
         if self.state.request_log:
@@ -240,10 +320,46 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _handle_upload(self, raw: bytes) -> None:
+        """``POST /upload/image`` — ComfyUI's input-file route (multipart/form-data)."""
+        state = self.state
+        if state.upload_status != 200:
+            # a server (or a proxy) without the native ComfyUI routes
+            state.log.append({"method": "POST", "path": UPLOAD_PATH, "status": state.upload_status, "at": time.time()})
+            self._send_json({"error": {"code": "not_found", "message": UPLOAD_PATH}}, status=state.upload_status)
+            return
+        parts = parse_multipart(raw, self.headers.get("Content-Type") or "")
+        files = [part for part in parts if part["filename"]]
+        if not files:
+            state.log.append({"method": "POST", "path": UPLOAD_PATH, "status": 400, "at": time.time()})
+            self._send_json({"error": {"code": "no_file", "message": "no file part in the multipart body"}}, status=400)
+            return
+        part = files[0]
+        digest = hashlib.sha256(part["data"]).hexdigest()
+        name = part["filename"]
+        state.uploads[name] = {
+            "bytes": len(part["data"]),
+            "sha256": digest,
+            "content_type": part["content_type"],
+            "fields": {p["field"]: p["data"].decode("utf-8", "replace") for p in parts if not p["filename"]},
+            "at": time.time(),
+        }
+        state.log.append(
+            {"method": "POST", "path": UPLOAD_PATH, "filename": name, "sha256": digest, "bytes": len(part["data"]), "at": time.time()}
+        )
+        if state.request_log:
+            with open(state.request_log, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"method": "POST", "path": UPLOAD_PATH, "upload": name, "at": time.time()}) + "\n")
+        self._send_json({"name": name, "subfolder": "", "type": "input"})
+
     # -- routes --------------------------------------------------------------------
     def do_POST(self) -> None:  # noqa: N802 - http.server API
         path = urlparse(self.path).path
-        body = self._read_body()
+        raw = self._read_raw()
+        if path == UPLOAD_PATH:
+            self._handle_upload(raw)
+            return
+        body = self._read_body(raw)
         self._record("POST", path, body)
         state = self.state
 
@@ -376,6 +492,19 @@ class FakeComfy:
 
     def configure(self, **kwargs: Any) -> None:
         self.state.configure(**kwargs)
+
+    def upload_requests(self) -> list[dict[str, Any]]:
+        return self.state.upload_requests()
+
+    def submitted_workflows(self) -> list[dict[str, Any]]:
+        return self.state.submitted_workflows()
+
+    def submitted_input(self, node_id: str, field: str = "image") -> list[Any]:
+        return self.state.submitted_input(node_id, field)
+
+    @property
+    def uploads(self) -> dict[str, Any]:
+        return self.state.uploads
 
     @property
     def jobs(self) -> dict[str, Any]:

@@ -641,6 +641,30 @@ def validate_jobs(doc: Any) -> list[dict[str, Any]]:
                 for problem in [path_problem(job.get("output"))]
                 if problem
             )
+            for k, entry in enumerate(job.get("fileInputs", []) or []):
+                at = f"/jobs/{i}/fileInputs/{k}"
+                if not _is_obj(entry):
+                    problems.append({"code": "JOBS_INPUT_FILE_UNRESOLVED", "path": at, "message": "every fileInputs entry must be an object"})
+                    continue
+                if entry.get("from") not in ("job", "package"):
+                    problems.append(
+                        {
+                            "code": "JOBS_INPUT_FILE_UNRESOLVED",
+                            "path": at,
+                            "message": f"from must be job or package (got {json.dumps(entry.get('from'))}); the runner cannot tell where the file is",
+                        }
+                    )
+                problem = path_problem(entry.get("path"))
+                if problem:
+                    problems.append({"code": "JOBS_PATH_NOT_RELATIVE", "path": f"{at}/path", "message": f"{problem}: {json.dumps(entry.get('path'))}"})
+                if entry.get("from") == "job" and entry.get("job") not in known:
+                    problems.append(
+                        {
+                            "code": "JOBS_UNKNOWN_DEPENDENCY",
+                            "path": at,
+                            "message": f"file input {entry.get('param')} is produced by {entry.get('job')}, which is not in this document",
+                        }
+                    )
     return problems
 
 
