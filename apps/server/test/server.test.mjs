@@ -98,6 +98,14 @@ test('health is public but host-checked', async () => {
   assert.equal(bad.status, 403);
 });
 
+test('/api/providers is authenticated and reports key presence only', async () => {
+  assert.equal((await request({ path: '/api/providers', token: null })).status, 401);
+  const ok = await request({ path: '/api/providers' });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(Object.keys(ok.json.providers).sort(), ['custom', 'opencode-go', 'openrouter']);
+  for (const value of Object.values(ok.json.providers)) assert.equal(typeof value, 'boolean');
+});
+
 test('rejects missing/wrong token and wrong Host', async () => {
   assert.equal((await request({ path: '/api/package/pkg_launchdemo0001', token: null })).status, 401);
   assert.equal((await request({ path: '/api/package/pkg_launchdemo0001', token: 'nope' })).status, 401);

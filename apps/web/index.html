@@ -12,11 +12,12 @@
         <div class="brand"><span class="mark">◑</span><span>Comfyrizz</span><small>CPU slice</small></div>
         <label class="picker">LLM
           <select id="llm">
-            <option value="none">local · scripted</option>
+            <option value="none">local · scripted model</option>
             <option value="opencode-go">OpenCode Go · DeepSeek</option>
             <option value="custom">Custom · OpenAI-compatible</option>
             <option value="openrouter">OpenRouter</option>
           </select>
+          <span id="llm-status" class="hint"></span>
         </label>
         <label class="picker">Backend
           <select id="backend">
@@ -39,11 +40,11 @@
 
       <main>
         <section id="chat-pane" class="pane">
-          <div class="pane-head"><b>Chat</b><span class="hint">C1 shell · agent in C3</span></div>
+          <div class="pane-head"><b>Chat</b><span class="hint">brief → local agent → package</span></div>
           <div id="messages"></div>
           <form id="composer">
-            <textarea id="prompt" rows="2" placeholder="Describe a video brief… (agent builds a CPU package)"></textarea>
-            <div class="composer-row"><span class="hint">Enter to send</span><button type="submit" id="composer-send">Send</button></div>
+            <textarea id="prompt" rows="2" placeholder="Describe a video brief… (the agent builds a CPU package)"></textarea>
+            <div class="composer-row"><span class="hint" id="composer-hint">Enter to send · keys stay on the server</span><button type="submit" id="composer-send">Send</button></div>
           </form>
         </section>
 
@@ -64,11 +65,13 @@
 
         <aside id="activity-pane" class="pane">
           <div class="pane-head"><b>Run</b><span class="hint">backend lifecycle</span></div>
-          <div id="run-panel"><div class="hint">No backend run yet. Pick a backend and press Run.</div></div>
-          <div class="pane-head"><b>Activity</b><span class="hint">local only</span></div>
+          <div id="run-panel"><div class="empty">No backend run yet.<br /><span class="hint">Pick a backend and press Run.</span></div></div>
+          <div class="pane-head"><b>Activity</b><span class="hint">local + server</span></div>
           <div id="activity"></div>
           <div class="pane-head"><b>Assets</b><span class="hint">generated-first</span></div>
           <div id="assets"></div>
+          <div class="pane-head"><b>GPU queue</b><span class="hint">fallbacks active until approved</span></div>
+          <div id="gpu-queue"></div>
         </aside>
       </main>
     </div>

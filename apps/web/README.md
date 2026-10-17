@@ -1,4 +1,4 @@
-# `apps/web` — Comfyrizz shell (C1)
+# `apps/web` — Comfyrizz shell
 
 Vanilla TS + Vite shell styled from Orbit's Grok Bots chat layout, with **one React island** for
 the Remotion Player. The vanilla side owns a single state store (`pkg` + compiled `timeline`);
@@ -6,16 +6,19 @@ the island only receives the compiled timeline and playhead.
 
 ## What is here
 
-- **Chat pane** — local transcript, `esc()`/`md()` subset, composer. The agent arrives in C3;
-  C1 never calls a model and never sends a request to a network.
+- **Chat pane** — local transcript, `esc()`/`md()` subset, composer. Submitting a brief posts to `POST /api/agent` on the server, which runs the local or live model and returns the compiled package; the browser never holds a provider key. A streaming bubble shows while the request is in flight, and server `agent.*` SSE events are mirrored into Activity.
 - **Preview** — `@remotion/player` mounted with the same `TimelinePlayer` composition the MP4
   renderer uses. Edit a headline, a chart value or the palette: the preview updates on the next
   frame; the storyboard marks the timeline as a draft because the browser does not re-hash.
 - **Storyboard** — inline headline/sub/body fields for each scene, chart dataset values, and the
   four-swatch theme palette. Edits patch the package and the compiled timeline copy without
-  changing timing; the server recompiles and re-hashes on export.
-- **Activity** — local events only (load, Player ready, export start/finish/failure).
-- **Assets** — generated-first assets from the package, with generator + licence chips.
+  changing timing; the server recompiles and re-hashes on export. Clicking a scene card (outside its
+  fields) seeks the Player to that scene and marks it active, and empty Sub/body fields explain
+  themselves with placeholders.
+- **Activity** — local events plus server events (agent start/step/finish/fail, run lifecycle).
+- **Assets** — generated-first assets from the package, with generator + licence chips. Assets whose
+  generator is GPU-bound (`flux3-klein`, `ltx25`) stay `pending`, and are carded in the **GPU queue**
+  pane with their procedural fallback preview and a `pending spend` chip.
 
 ## Run
 
@@ -39,10 +42,12 @@ revision, and listens to `/api/events` for Activity entries. C2 also adds strict
 ## C5 agent slice (chat brief → package → Player → MP4)
 
 The composer now posts the brief to `POST /api/agent` on the C2 server. The top-bar **LLM**
-picker chooses the provider: `local · scripted` (offline), `opencode-go`, `custom`
+picker chooses the provider: `local · scripted model` (offline), `opencode-go`, `custom`
 (OpenAI-compatible) or `openrouter`. The server runs `packages/agent` (`runCpuSlice`) with a
-scripted model when no provider is set, or the selected live model otherwise. The router sends
-icons, diagrams,
+scripted model when no provider is set, or the selected live model otherwise. `GET /api/providers`
+(authenticated, booleans only) labels each option `configured` / `no key` and prints which server
+keys are present in the header — the key values never reach the page. The router sends icons,
+diagrams,
 patterns and vector-anim needs to `assets.generate_svg` (A5 stub offline, the model live) and
 leaves FLUX/LTX needs as `status: 'pending'` with a procedural fallback, so nothing GPU-bound is
 submitted. The returned package validates against `comfyrizz.package/v1`, the server compiles the
@@ -131,6 +136,10 @@ The export path really recompiles from the edited package; it is not a pre-rende
 
 ## Notes
 
+- **U1 UI polish** — before/after screenshots live in `docs/ui/`. The pass wired the composer to the
+  live agent, replaced the stale C1/C3 copy, raised layout text above foreground media panels and
+  switched scene transitions from a cross-fade to a push (renderer), added streaming/empty states
+  and click-to-seek scene selection, and carded GPU-pending assets with fallback previews.
 - `public/fonts/Inter-Variable.ttf` is the same OFL-licensed Inter file as the renderer. The comma
   in the upstream filename was dropped because Vite serves `%2C` as a SPA fallback (invalid font).
 - Vite dedupes `remotion`/`react` so the renderer source and the Player share one Remotion context.

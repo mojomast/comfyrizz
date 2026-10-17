@@ -38,12 +38,16 @@ function md(value: string): string {
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
 let generatedAssets: Record<string, InlineAsset> | undefined;
+let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
+let providerAvailability: Record<string, boolean> | null = null;
 const state = {
   dirty: false,
+  streaming: false,
+  streamLabel: '',
   messages: [
-    { role: 'assistant', text: 'This is the **C1 shell**: the compiled `examples/launch-demo` plays in the Remotion Player beside an editable storyboard. Edit a headline, a chart value or the palette and the preview updates instantly.' },
-    { role: 'assistant', text: 'No LLM or network is used yet. The agent/router lands in C3; export recompiles the package on the local CPU renderer.' },
-  ] as Array<{ role: 'user' | 'assistant'; text: string }>,
+    { role: 'assistant', text: 'Describe a brief and the **local agent** builds a package: router → assets → timeline → Player. Choose an **LLM** above to plan with a live model; its API key stays in the server environment and is never sent to this page.' },
+    { role: 'assistant', text: 'The compiled `examples/launch-demo` is open now. Edit a headline, a chart value or the palette and the preview updates instantly. **Export MP4** renders the current draft on the local CPU renderer.' },
+  ] as Array<{ role: 'user' | 'assistant'; text: string; streaming?: boolean }>,
   activity: [] as Array<{ at: string; text: string }>,
 };
 
@@ -63,9 +67,22 @@ function logActivity(text: string): void {
 }
 
 function renderMessages(): void {
-  $('messages').innerHTML = state.messages
-    .map(message => `<div class="msg ${message.role}"><div class="who">${message.role === 'user' ? 'you' : 'comfyrizz'}</div><div class="body">${md(message.text)}</div></div>`)
-    .join('');
+  const bubbles = state.messages.map(
+    message => `<div class="msg ${message.role}${message.streaming ? ' streaming' : ''}"><div class="who">${message.role === 'user' ? 'you' : 'comfyrizz'}</div><div class="body">${md(message.text)}</div></div>`,
+  );
+  if (state.streaming) bubbles.push(`<div class="msg assistant streaming"><div class="who">comfyrizz</div><div class="body"><span class="dot"></span>${esc(state.streamLabel || 'working…')}</div></div>`);
+  $('messages').innerHTML = bubbles.join('');
+}
+
+function setStreaming(active: boolean, label = ''): void {
+  state.streaming = active;
+  state.streamLabel = label;
+  const button = $<HTMLButtonElement>('composer-send');
+  if (button) button.textContent = active ? 'Working…' : 'Send';
+  const hint = $('composer-hint');
+  if (hint) hint.textContent = active ? 'agent streaming…' : 'Enter to send · keys stay on the server';
+  renderMessages();
+  $('messages').scrollTop = $('messages').scrollHeight;
 }
 
 function formatTime(frame: number, fps: number): string {
@@ -113,9 +130,9 @@ function renderStoryboard(): void {
       return `<div class="scene-card" data-scene-id="${esc(scene.id)}">
         <div class="scene-top"><span class="idx">${index + 1}</span><b>${esc(scene.id)}</b><span class="layout">${esc(scene.layout)}${scene.variant ? ` · ${esc(scene.variant)}` : ''}</span></div>
         <label>Headline</label>
-        <input type="text" data-scene="${esc(scene.id)}" data-field="headline" value="${esc(copy.headline ?? '')}" maxlength="64" />
+        <input type="text" data-scene="${esc(scene.id)}" data-field="headline" value="${esc(copy.headline ?? '')}" placeholder="Add a headline…" maxlength="64" />
         <label>Sub / body</label>
-        <input type="text" data-scene="${esc(scene.id)}" data-field="${scene.layout === 'hero' ? 'body' : 'sub'}" value="${esc(copy[scene.layout === 'hero' ? 'body' : 'sub'] ?? '')}" maxlength="240" />
+        <input type="text" data-scene="${esc(scene.id)}" data-field="${scene.layout === 'hero' ? 'body' : 'sub'}" value="${esc(copy[scene.layout === 'hero' ? 'body' : 'sub'] ?? '')}" placeholder="Add supporting copy…" maxlength="240" />
         ${chart}
       </div>`;
     })
@@ -138,6 +155,18 @@ function renderStoryboard(): void {
       if (!dataset || !dataset.values[index]) return;
       dataset.values[index].value = Number(input.value) || 0;
       markDirty(`chart.${dataset.values[index].label}`);
+    });
+  });
+  // Click a card (but not while editing a field) to jump the Player to that scene.
+  host.querySelectorAll<HTMLElement>('.scene-card').forEach(card => {
+    card.addEventListener('click', event => {
+      if ((event.target as HTMLElement).closest('input, label')) return;
+      const sceneId = card.dataset.sceneId;
+      const scene = timeline.scenes.find(item => item.id === sceneId);
+      if (!scene) return;
+      player?.seekTo(scene.from);
+      for (const other of host.querySelectorAll('.scene-card')) other.classList.toggle('active', other === card);
+      card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
   });
 }
@@ -163,20 +192,52 @@ function renderPalette(): void {
   });
 }
 
+function assetIcon(asset: { kind?: string }): string {
+  return asset.kind === 'svg' ? '◇' : asset.kind === 'vector-anim' ? '◈' : asset.kind === 'audio' ? '♪' : '▣';
+}
+
 function renderAssets(): void {
-  $('assets').innerHTML = Object.entries(pkg.assets ?? {})
+  const host = $('assets');
+  const entries = Object.entries(pkg.assets ?? {});
+  if (entries.length === 0) {
+    host.innerHTML = '<div class="empty">No assets yet.<br /><span class="hint">Send a brief to generate the first package.</span></div>';
+    renderGpuQueue();
+    return;
+  }
+  host.innerHTML = entries
     .map(([id, asset]) => {
-      const icon = asset.kind === 'svg' ? '◇' : asset.kind === 'vector-anim' ? '◈' : '▣';
       const origin = asset.origin === 'generated' ? asset.gen?.generator ?? 'generated' : asset.origin;
-      return `<div class="asset"><div class="thumb">${icon}</div><div><b>${esc(id)}</b><span>${esc(asset.kind)} · ${esc(origin)}</span></div><span class="chip">${esc(asset.license?.id ?? 'unlicensed')}</span></div>`;
+      const pending = asset.status === 'pending';
+      const chip = pending
+        ? '<span class="chip warn">pending gpu</span>'
+        : `<span class="chip">${esc(asset.license?.id ?? asset.status)}</span>`;
+      return `<div class="asset${pending ? ' pending' : ''}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div><b>${esc(id)}</b><span>${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${chip}</div>`;
     })
+    .join('');
+  renderGpuQueue();
+}
+
+/** GPU-pending assets keep their procedural fallback; this is what still needs spend. */
+function renderGpuQueue(): void {
+  const host = $('gpu-queue');
+  if (!host) return;
+  if (pendingGpu.length === 0) {
+    host.innerHTML = '<div class="empty">Nothing queued.<br /><span class="hint">GPU assets appear here when a brief asks for video.</span></div>';
+    return;
+  }
+  host.innerHTML = pendingGpu
+    .map(
+      item =>
+        `<div class="asset pending"><div class="thumb">◌</div><div><b>${esc(item.assetId)}</b><span>${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div><span class="chip warn">pending spend</span></div>`,
+    )
     .join('');
 }
 
 function renderActivity(): void {
-  $('activity').innerHTML = state.activity
-    .map(event => `<div class="event"><time>${esc(event.at)}</time>${esc(event.text)}</div>`)
-    .join('');
+  const host = $('activity');
+  host.innerHTML = state.activity.length
+    ? state.activity.map(event => `<div class="event"><time>${esc(event.at)}</time>${esc(event.text)}</div>`).join('')
+    : '<div class="empty">No activity yet.<br /><span class="hint">Agent and render events will show up here.</span></div>';
 }
 
 function jobsForPackage(): Array<Record<string, unknown>> {
@@ -195,7 +256,7 @@ function summarizeRunEvent(event: RunEvent): string {
 function renderRunPanel(): void {
   const host = $('run-panel');
   if (!runState.active) {
-    host.innerHTML = '<div class="hint">No backend run yet. Pick a backend and press Run.</div>';
+    host.innerHTML = '<div class="empty">No backend run yet.<br /><span class="hint">Pick a backend and press Run.</span></div>';
     return;
   }
   const rows = runState.events
@@ -226,6 +287,36 @@ function renderSpendCard(): void {
     renderSpendCard();
     logActivity('Spend card cancelled');
   });
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  none: 'local · scripted model',
+  'opencode-go': 'OpenCode Go · DeepSeek',
+  custom: 'Custom · OpenAI-compatible',
+  openrouter: 'OpenRouter',
+};
+
+/** Which providers have a server-side key; the browser only ever sees booleans. */
+async function loadProviders(): Promise<void> {
+  try {
+    const response = await apiFetch('/api/providers');
+    if (!response.ok) return;
+    const body = (await response.json()) as { providers?: Record<string, boolean> };
+    providerAvailability = body.providers ?? {};
+  } catch {
+    providerAvailability = null;
+  }
+  const select = $<HTMLSelectElement>('llm');
+  for (const option of Array.from(select.options)) {
+    const configured = providerAvailability?.[option.value];
+    const suffix = option.value === 'none' || configured === undefined ? '' : configured ? ' · configured' : ' · no key';
+    option.textContent = `${PROVIDER_LABELS[option.value] ?? option.value}${suffix}`;
+  }
+  const status = $('llm-status');
+  if (status) {
+    const ready = providerAvailability ? Object.entries(providerAvailability).filter(([, ok]) => ok).map(([name]) => name) : [];
+    status.textContent = providerAvailability === null ? '' : ready.length ? `server keys: ${ready.join(', ')}` : 'no provider keys on server';
+  }
 }
 
 async function refreshSpend(): Promise<void> {
@@ -334,8 +425,7 @@ async function runBrief(brief: string): Promise<void> {
   if (composer) composer.disabled = true;
   const provider = $<HTMLSelectElement>('llm').value;
   const useProvider = provider && provider !== 'none';
-  state.messages.push({ role: 'assistant', text: 'Building a CPU package from that brief: router → SVG assets → timeline → Player. GPU needs stay pending.' });
-  renderMessages();
+  setStreaming(true, useProvider ? `planning with ${provider}…` : 'planning with the scripted model…');
   logActivity(`Agent brief sent to /api/agent (${useProvider ? provider : 'scripted model'})`);
   try {
     const response = await apiFetch('/api/agent', {
@@ -348,6 +438,7 @@ async function runBrief(brief: string): Promise<void> {
     pkg = body.package as PackageV1;
     timeline = body.timeline as Timeline;
     generatedAssets = body.generatedAssets as Record<string, InlineAsset>;
+    pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu : [];
     scrub.max = String(timeline.durationInFrames - 1);
     renderStoryboard();
     renderPalette();
@@ -355,15 +446,15 @@ async function runBrief(brief: string): Promise<void> {
     updatePreview(pkg, timeline, generatedAssets);
     state.dirty = false;
     $('draft').textContent = `agent package · ${body.svgAssets.length} SVG assets${body.live ? ` · live ${body.provider ?? 'model'}` : ' · scripted model'}`;
-    const pending = Array.isArray(body.pendingGpu) && body.pendingGpu.length > 0 ? ` ${body.pendingGpu.length} GPU need(s) are pending spend approval; procedural fallbacks are active.` : '';
+    const pending = pendingGpu.length > 0 ? ` ${pendingGpu.length} GPU need(s) are pending spend approval; procedural fallbacks are active.` : '';
     state.messages.push({ role: 'assistant', text: `Built **${pkg.title}** with ${body.svgAssets.length} SVG assets and ${Object.keys(body.generatedAssets ?? {}).length} inlined vectors.${pending}` });
     logActivity(`Agent finished: ${pkg.id} rev ${body.revision}, ${body.svgAssets.length} SVG assets`);
   } catch (error) {
     state.messages.push({ role: 'assistant', text: `Agent request failed: ${(error as Error).message}` });
     logActivity(`Agent failed: ${(error as Error).message}`);
   } finally {
+    setStreaming(false);
     if (composer) composer.disabled = false;
-    renderMessages();
     $('messages').scrollTop = $('messages').scrollHeight;
   }
 }
@@ -375,6 +466,7 @@ function init(): void {
   renderAssets();
   renderRunPanel();
   renderSpendCard();
+  void loadProviders();
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: 'Loaded examples/launch-demo package + compiled timeline' }];
   renderActivity();
 
@@ -449,6 +541,23 @@ function init(): void {
     stream.addEventListener('run.refused', event => {
       const data = JSON.parse((event as MessageEvent).data) as { budget?: { message?: string } };
       logActivity(`Server refused the run: ${data.budget?.message ?? 'budget too small'}`);
+    });
+    stream.addEventListener('agent.started', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { brief?: string };
+      logActivity(`Server: agent started${data.brief ? ` — ${data.brief.slice(0, 80)}` : ''}`);
+    });
+    stream.addEventListener('agent.event', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { event?: { name?: string; ok?: boolean } };
+      const name = data.event?.name ?? 'step';
+      logActivity(`Agent ${name} ${data.event?.ok === false ? '✗' : '✓'}`);
+    });
+    stream.addEventListener('agent.finished', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { svgAssets?: number; live?: boolean; fallback?: boolean };
+      logActivity(`Server: agent finished (${data.svgAssets ?? 0} SVG assets${data.live ? ', live' : ', scripted'}${data.fallback ? ', repaired' : ''})`);
+    });
+    stream.addEventListener('agent.failed', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { message?: string };
+      logActivity(`Server: agent failed — ${data.message ?? 'unknown error'}`);
     });
     void refreshSpend();
   }

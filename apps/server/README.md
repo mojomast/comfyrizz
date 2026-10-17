@@ -24,6 +24,7 @@ requests and as `?token=` only for the SSE `EventSource` (which cannot set heade
 | Method | Path | Notes |
 | --- | --- | --- |
 | `GET` | `/api/health` | Public, host-checked: `{ok:true, service:"comfyrizz-local"}` |
+| `GET` | `/api/providers` | Auth: `{providers:{openrouter,opencode-go,custom}}` booleans reporting server-key *presence* only — key values never leave the server (U1) |
 | `GET` | `/api/package/:id` | `{package, revision}` |
 | `PATCH` | `/api/package/:id` | `{baseRevision, package}`; mismatch → `409 {currentRevision}`; invalid → `422 {details}` |
 | `POST` | `/api/agent` | C5 agent slice: `{brief, provider?, model?, sessionId?}`. Runs `runCpuSlice` (scripted offline, the live model when `provider` is set), validates and returns `{package, revision, timeline, generatedAssets, routes, pendingGpu, svgAssets, live, fallback, provider, model}` |

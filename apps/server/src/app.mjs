@@ -60,6 +60,15 @@ function bearer(request) {
   return match ? match[1] : null;
 }
 
+// Only key presence is ever reported; key values never leave the server.
+export function providerAvailability(env = process.env) {
+  return {
+    openrouter: Boolean(env.OPENROUTER_API_KEY),
+    'opencode-go': Boolean(env.OPENCODE_API_KEY || env.OPENCODE_GO_API_KEY),
+    custom: Boolean(env.COMFYRIZZ_CUSTOM_BASE_URL || env.COMFYRIZZ_CUSTOM_API_KEY),
+  };
+}
+
 // Loaded lazily so tests can inject a fake and so the backends module is not parsed
 // for every server test that never touches a GPU path.
 async function defaultBackendFactory(backendId, opts = {}) {
@@ -84,6 +93,7 @@ export function createApp({
   webDist = join(root, 'apps', 'web', 'dist'),
   render = defaultRenderPackage,
   agentRunner = null,
+  providers = providerAvailability(),
   backendFactory = defaultBackendFactory,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
@@ -174,6 +184,12 @@ export function createApp({
       const lastEventId = request.headers['last-event-id'] ?? url.searchParams.get('lastEventId');
       events.subscribe(request, response, lastEventId);
       return;
+    }
+
+    // Which live providers have a server-side key. Booleans only: the browser
+    // never receives a key and never needs one (U1).
+    if (url.pathname === '/api/providers' && request.method === 'GET') {
+      return sendJson(response, 200, { providers });
     }
 
     const packageMatch = /^\/api\/package\/([^/]+)$/.exec(url.pathname);
