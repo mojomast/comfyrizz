@@ -1,0 +1,33 @@
+{
+  "name": "@comfyrizz/agent",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Comfyrizz agent layer (C3): zod tool validation, repair loop, asset-type router",
+  "type": "module",
+  "license": "MIT",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "m4": "npm run build && node scripts/m4-live.mjs",
+    "m4:two": "npm run build && node scripts/m4-two-providers.mjs"
+  },
+  "dependencies": {
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.6.3"
+  }
+}
