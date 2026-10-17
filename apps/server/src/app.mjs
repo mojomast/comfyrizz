@@ -1,5 +1,5 @@
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { extname, join, resolve, sep } from 'node:path';
+import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
@@ -77,12 +77,14 @@ async function defaultBackendFactory(backendId, opts = {}) {
   if (backendId === 'colab') {
     return mod.createColabBackend({
       packageId: opts.packageId ?? 'comfyrizz-run',
+      packageDir: opts.workDir ?? undefined,
+      scratchDir: opts.scratchDir ?? undefined,
       budgetUnits: opts.budgetUnits ?? 0,
       ratePerHour: opts.ratePerHour ?? 8.9,
     });
   }
   if (backendId === 'byo-comfyui') {
-    return mod.createByoBackend({ comfyuiUrl: opts.comfyuiUrl ?? 'http://127.0.0.1:8188' });
+    return mod.createByoBackend({ comfyuiUrl: opts.comfyuiUrl ?? 'http://127.0.0.1:8188', outDir: opts.outDir ?? null });
   }
   return null;
 }
@@ -104,7 +106,73 @@ export function createApp({
   mkdirSync(rendersDir, { recursive: true });
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const events = new EventLog();
-  const runs = createRunController({ backendFactory, events, runtimeDir });
+
+  // C9: stage where H8's runPackage resolves relative paths: the package JSON, the repo's
+  // workflow graphs, and any assets the package already has on disk.
+  async function prepareRunWorkDir(pkg, workDir) {
+    mkdirSync(workDir, { recursive: true });
+    writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg, null, 2));
+    const workflowsLink = join(workDir, 'workflows');
+    if (!existsSync(workflowsLink)) {
+      const source = join(repoRoot, 'workflows');
+      try {
+        symlinkSync(source, workflowsLink, 'dir');
+      } catch {
+        cpSync(source, workflowsLink, { recursive: true });
+      }
+    }
+    const assets = join(dirname(store.path(pkg.id)), 'assets');
+    if (existsSync(assets)) cpSync(assets, join(workDir, 'assets'), { recursive: true });
+  }
+
+  // C9: H8's runPackage tags applied assets with the backend's short id (`colab`); the package
+  // schema accepts only `colab:<hardware>` (e.g. `colab:G4`) or `byo-comfyui`. Normalise here so a
+  // successful run always stores a valid package. Reported as an H8 follow-up on the board.
+  function normalizeBackendTag(pkg, record) {
+    if (record.backendId !== 'colab') return pkg;
+    const tag = `colab:${record.result?.up?.hardware ?? 'G4'}`;
+    for (const asset of Object.values(pkg.assets ?? {})) {
+      if (asset?.gen?.backend === 'colab') asset.gen.backend = tag;
+    }
+    if (Array.isArray(pkg.compliance?.backends_used)) {
+      pkg.compliance.backends_used = pkg.compliance.backends_used.map((entry) => (entry === 'colab' ? tag : entry));
+    }
+    return pkg;
+  }
+
+  // C9: after collect, write the applied package back next to its collected plates, then render
+  // the accepted revision to an MP4 the run panel can offer.
+  async function completeRun({ pkg, result, record }) {
+    if (!result?.package) return { revision: null, render: null };
+    normalizeBackendTag(result.package, record);
+    const id = pkg.id;
+    const packageDir = dirname(store.path(id));
+    const collectedAssets = join(record.outputDir, 'assets');
+    if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
+    const current = store.read(id);
+    const saved = current ? store.save(id, result.package, pkg.revision) : store.write(result.package);
+    events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
+    // A partial run keeps its finished plates (H8 already applied them), but there is nothing
+    // honest to render when the manifest says the run did not complete.
+    if (result.ok === false || result.manifest?.complete === false) return { revision: saved.revision, render: null };
+    const output = join(rendersDir, `${record.runId}.mp4`);
+    const rendered = await render(store.path(id), output, { onLog: line => events.publish({ type: 'run.log', runId: record.runId, line }) });
+    events.publish({
+      type: 'run.rendered',
+      runId: record.runId,
+      packageId: id,
+      revision: saved.revision,
+      bytes: rendered.bytes,
+      frames: rendered.frames,
+      timeline_sha256: rendered.hash,
+    });
+    return {
+      revision: saved.revision,
+      render: { bytes: rendered.bytes, frames: rendered.frames, timeline_sha256: rendered.hash, url: `/api/run/${record.runId}/video` },
+    };
+  }
+
+  const runs = createRunController({ backendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun });
   const exporter = createExporter({ exportsDir, render });
   let activeRender = null;
   let activeExport = null;
@@ -266,13 +334,24 @@ export function createApp({
     if (url.pathname === '/api/run' && request.method === 'POST') {
       const body = await readJson(request);
       try {
+        let pkg = null;
+        if (body.package && typeof body.package === 'object') pkg = body.package;
+        else if (body.packageId) {
+          pkg = store.read(body.packageId);
+          if (!pkg) return sendJson(response, 404, { error: 'package not found' });
+        } else {
+          return sendJson(response, 400, { error: 'packageId or package required' });
+        }
         const result = await runs.start({
           backendId: body.backendId ?? 'colab',
-          jobs: body.jobs,
+          pkg,
           budgetUnits: body.budgetUnits,
           approved: body.approved === true,
           comfyuiUrl: body.comfyuiUrl,
           ratePerHour: body.ratePerHour,
+          teardownMode: body.teardownMode,
+          includeReady: body.includeReady === true,
+          assets: body.assets,
         });
         return sendJson(response, result.status === 409 ? 409 : 200, result);
       } catch (error) {
@@ -298,6 +377,24 @@ export function createApp({
       const record = runs.get(runMatch[1]);
       if (!record) return sendJson(response, 404, { error: 'run not found' });
       return sendJson(response, 200, { run: record });
+    }
+
+    const runVideoMatch = /^\/api\/run\/([^/]+)\/video$/.exec(url.pathname);
+    if (runVideoMatch && request.method === 'GET') {
+      const record = runs.get(runVideoMatch[1]);
+      const file = record?.render ? join(rendersDir, `${record.runId}.mp4`) : null;
+      if (!file || !existsSync(file)) return sendJson(response, 404, { error: 'no rendered MP4 for this run yet' });
+      const size = statSync(file).size;
+      response.writeHead(200, {
+        'content-type': 'video/mp4',
+        'content-length': size,
+        'cache-control': 'no-store',
+        'content-disposition': `attachment; filename="comfyrizz-${record.runId}.mp4"`,
+        'x-comfyrizz-frames': String(record.render.frames ?? ''),
+        'x-comfyrizz-timeline-sha256': String(record.render.timeline_sha256 ?? ''),
+      });
+      createReadStream(file).pipe(response);
+      return;
     }
 
     if (url.pathname === '/api/export' && request.method === 'POST') {

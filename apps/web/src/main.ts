@@ -54,10 +54,13 @@ const state = {
 let player: PlayerRef | null = null;
 let scrub: HTMLInputElement;
 
-type RunEvent = { type: string; [key: string]: unknown };
+type RunEvent = { type?: string; event?: string; [key: string]: unknown };
+type RunRender = { url: string; frames?: number; bytes?: number; timeline_sha256?: string };
 const runState = {
   active: null as null | { runId: string; backendId: string; status: string },
   events: [] as RunEvent[],
+  render: null as null | RunRender,
+  teardown: null as null | { state: string; evidence?: string },
   spend: null as null | { planHash: string; backendId: string; estimate: Record<string, unknown>; budget: Record<string, unknown>; jobs: number },
 };
 
@@ -251,17 +254,31 @@ function renderActivity(): void {
     : '<div class="empty">No activity yet.<br /><span class="hint">Agent and render events will show up here.</span></div>';
 }
 
-function jobsForPackage(): Array<Record<string, unknown>> {
-  return pkg.scenes.map(scene => ({ id: scene.id, kind: scene.layout === 'title' ? 'still' : 'plate' }));
-}
-
 function summarizeRunEvent(event: RunEvent): string {
+  if (event.event === 'run_phase') {
+    const counts = (event.counts ?? {}) as { succeeded?: number; failed?: number; cached?: number };
+    if (event.phase === 'planned') return `${event.jobs ?? '?'} job(s) planned`;
+    if (event.phase === 'up') return `VM up: ${event.state ?? '?'}`;
+    if (event.phase === 'ran') return `ran: ${counts.succeeded ?? 0} ok${counts.cached ? `, ${counts.cached} cached` : ''}${counts.failed ? `, ${counts.failed} failed` : ''}`;
+    if (event.phase === 'applied') return `${event.assets ?? 0} asset(s) applied${event.candidates ? `, ${event.candidates} candidate(s)` : ''}`;
+    if (event.phase === 'teardown') return teardownLabel({ state: String(event.state ?? '') });
+    if (event.phase === 'failed') return `${event.message ?? ''}${event.teardown ? ` · ${teardownLabel({ state: String(event.teardown) })}` : ''}`;
+    return String(event.phase ?? 'phase');
+  }
   if (event.type === 'ensure_up') return `state ${event.state ?? '?'}`;
   if (event.type === 'health') return `${event.ok ? 'ok' : 'not ok'} · ${event.detail ?? ''}`;
-  if (event.type === 'collected') return `${event.files ?? '?'} file(s) → ${event.destDir ?? ''}`;
-  if (event.type === 'teardown') return `${event.state ?? '?'} · ${event.evidence ?? ''}`;
+  if (event.type === 'collected' || event.event === 'collect') return `${event.files ?? '?'} file(s) → ${event.destDir ?? ''}`;
+  if (event.type === 'teardown') return teardownLabel({ state: String(event.state ?? ''), evidence: event.evidence as string | undefined });
   if (event.type === 'error') return String(event.message ?? '');
+  if (event.type === 'job' || event.type === 'job_done' || event.type === 'job_failed') return `job ${event.id ?? event.job ?? ''} ${event.type === 'job_failed' ? '✗' : '✓'}`;
   return '';
+}
+
+/** H8's honest teardown vocabulary, in the run panel's words. */
+function teardownLabel(teardown: { state?: string; evidence?: string }): string {
+  const state = teardown?.state ?? 'unknown';
+  const label = state === 'stopped' ? 'VM stopped (verified)' : state === 'idle' ? 'VM left idle (verified)' : state === 'not_owned' ? 'VM not ours to stop' : `VM stop unconfirmed (${state})`;
+  return teardown?.evidence ? `${label} · ${teardown.evidence}` : label;
 }
 
 function renderRunPanel(): void {
@@ -271,9 +288,39 @@ function renderRunPanel(): void {
     return;
   }
   const rows = runState.events
-    .map(event => `<div class="event"><b>${esc(event.type)}</b> ${esc(summarizeRunEvent(event))}</div>`)
+    .map(event => `<div class="event"><b>${esc(String(event.event ?? event.type ?? 'event'))}</b> ${esc(summarizeRunEvent(event))}</div>`)
     .join('');
-  host.innerHTML = `<div class="run-head"><b>${esc(runState.active.runId)}</b><span class="chip">${esc(runState.active.status)}</span></div>${rows}`;
+  const teardown = runState.teardown ? `<div class="event"><b>teardown</b> ${esc(teardownLabel(runState.teardown))}</div>` : '';
+  const render = runState.render
+    ? `<div class="run-render"><button id="run-video">Download run MP4</button><span class="hint">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div>`
+    : '';
+  host.innerHTML = `<div class="run-head"><b>${esc(runState.active.runId)}</b><span class="chip">${esc(runState.active.status)}</span></div>${rows}${teardown}${render}`;
+  const video = $('run-video');
+  if (video) video.addEventListener('click', () => void downloadRunVideo());
+}
+
+/** The rendered run MP4 needs the token header, so it is fetched and downloaded, not a bare link. */
+async function downloadRunVideo(): Promise<void> {
+  const url = runState.render?.url;
+  if (!url) return;
+  const button = $<HTMLButtonElement>('run-video');
+  if (button) button.disabled = true;
+  try {
+    const response = await apiFetch(url);
+    if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${response.status}`);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = `comfyrizz-${runState.active?.runId ?? 'run'}.mp4`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+    logActivity(`Run MP4 downloaded (${(blob.size / 1e6).toFixed(1)} MB)`);
+  } catch (error) {
+    logActivity(`Run MP4 download failed: ${(error as Error).message}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 /** C10: the export bundle lives next to the run panel; progress arrives over SSE. */
@@ -415,33 +462,48 @@ async function runOnBackend(approved = false): Promise<void> {
   const button = $<HTMLButtonElement>('run-backend');
   button.disabled = true;
   try {
+    // C9: the run needs the package in the store (runPackage plans from it); persist the draft first.
+    let body: Record<string, unknown> = { backendId, packageId: pkg.id, budgetUnits, approved };
+    if (token) {
+      const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }),
+      });
+      const savedBody = await saved.json().catch(() => ({}));
+      if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
+      pkg.revision = savedBody.revision;
+      body = { backendId, packageId: pkg.id, baseRevision: savedBody.revision, budgetUnits, approved };
+    }
     const response = await apiFetch('/api/run', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ backendId, jobs: jobsForPackage(), budgetUnits, approved }),
+      body: JSON.stringify(body),
     });
-    const body = (await response.json().catch(() => ({}))) as Record<string, any>;
-    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-    if (body.approvalRequired) {
-      runState.spend = { planHash: body.planHash, backendId, estimate: body.estimate ?? {}, budget: body.budget ?? {}, jobs: body.jobs ?? 0 };
+    const result = (await response.json().catch(() => ({}))) as Record<string, any>;
+    if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+    if (result.approvalRequired) {
+      runState.spend = { planHash: result.planHash, backendId, estimate: result.estimate ?? {}, budget: result.budget ?? {}, jobs: result.jobs ?? 0 };
       renderSpendCard();
-      logActivity(`Spend approval needed: ${body.budget?.message ?? 'approve the plan to start the VM'}`);
+      logActivity(`Spend approval needed: ${result.budget?.message ?? 'approve the plan to start the VM'}`);
       return;
     }
-    if (body.refused) {
-      logActivity(`Run refused: ${body.budget?.message ?? 'budget too small'}`);
+    if (result.refused) {
+      logActivity(`Run refused: ${result.budget?.message ?? 'budget too small'}`);
       return;
     }
     runState.spend = null;
     renderSpendCard();
     // SSE may already have delivered run.started/events/finished for this runId while the
     // POST was in flight; never clobber that with the stale response.
-    if (runState.active?.runId !== body.runId) {
-      runState.active = { runId: body.runId, backendId, status: body.status ?? 'starting' };
+    if (runState.active?.runId !== result.runId) {
+      runState.active = { runId: result.runId, backendId, status: result.status ?? 'starting' };
       runState.events = [];
+      runState.render = null;
+      runState.teardown = null;
     }
     renderRunPanel();
-    logActivity(`Run ${body.runId} started on ${backendId}`);
+    logActivity(`Run ${result.runId} started on ${backendId}`);
   } catch (error) {
     logActivity(`Run request failed: ${(error as Error).message}`);
   } finally {
@@ -618,8 +680,18 @@ function init(): void {
     });
     stream.addEventListener('run.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { runId: string; backendId: string };
-      if (runState.active?.runId !== data.runId) runState.events = [];
+      if (runState.active?.runId !== data.runId) {
+        runState.events = [];
+        runState.render = null;
+        runState.teardown = null;
+      }
       runState.active = { runId: data.runId, backendId: data.backendId, status: 'starting' };
+      renderRunPanel();
+    });
+    stream.addEventListener('run.budget', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { runId: string; jobs: number; budget?: { state?: string; message?: string } };
+      if (runState.active?.runId === data.runId) runState.active.status = 'budget ok';
+      logActivity(`Budget check: ${data.jobs ?? 0} job(s) · ${data.budget?.state ?? 'ok'}${data.budget?.message ? ` — ${data.budget.message}` : ''}`);
       renderRunPanel();
     });
     stream.addEventListener('run.event', event => {
@@ -629,18 +701,28 @@ function init(): void {
         renderRunPanel();
       }
     });
-    stream.addEventListener('run.finished', event => {
-      const data = JSON.parse((event as MessageEvent).data) as { runId: string; status: string };
-      if (runState.active) runState.active.status = data.status;
+    stream.addEventListener('run.rendered', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { runId: string; revision: number; frames: number; bytes: number };
+      if (runState.active?.runId !== data.runId) return;
+      runState.render = { url: `/api/run/${data.runId}/video`, frames: data.frames, bytes: data.bytes };
       renderRunPanel();
-      logActivity(`Run ${data.runId} ${data.status}`);
+      logActivity(`Run rendered: ${data.frames} frames at revision ${data.revision}`);
+    });
+    stream.addEventListener('run.finished', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { runId: string; status: string; teardown?: { state: string; evidence?: string }; render?: RunRender | null };
+      if (runState.active) runState.active.status = data.status;
+      runState.teardown = data.teardown ?? runState.teardown;
+      if (data.render?.url) runState.render = data.render;
+      renderRunPanel();
+      logActivity(`Run ${data.runId} ${data.status}${data.teardown ? ` — ${teardownLabel(data.teardown)}` : ''}`);
       void refreshSpend();
     });
     stream.addEventListener('run.failed', event => {
-      const data = JSON.parse((event as MessageEvent).data) as { runId: string; message: string };
+      const data = JSON.parse((event as MessageEvent).data) as { runId: string; message: string; teardown?: { state: string; evidence?: string } };
       if (runState.active) runState.active.status = 'failed';
+      runState.teardown = data.teardown ?? runState.teardown;
       renderRunPanel();
-      logActivity(`Run ${data.runId} failed: ${data.message}`);
+      logActivity(`Run ${data.runId} failed: ${data.message}${data.teardown ? ` — ${teardownLabel(data.teardown)}` : ''}`);
     });
     stream.addEventListener('run.approval_required', () => logActivity('Server: spend approval required'));
     stream.addEventListener('run.refused', event => {

@@ -1,11 +1,15 @@
-// C6: the server side of the M5 run flow (SPEC.md 6.5/6.6). One run at a time. A
+// C6/C9: the server side of the M5 run flow (SPEC.md 6.5/6.6). One run at a time. A
 // Google Colab run is refused until its plan hash is approved; BYO ComfyUI never asks
 // (the compute is the user's own and its cost is not visible to Comfyrizz). Every step
 // publishes an event so the web Activity panel can show the lifecycle, and the teardown
 // result is reported honestly (`stopped` vs `stop_unconfirmed`).
+//
+// C9: the plan -> up -> health -> run -> collect -> apply -> teardown middle is H8's
+// `backend.runPackage`; this controller only owns the spend gate, the plan hash, the
+// one-run lock and the record. It never branches on the provider.
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { assessBudget, nextJobUpperEstimate } from '../../../packages/backends/src/budget.mjs';
 
 export const G4_RATE_PER_HOUR = 8.9;
@@ -19,13 +23,21 @@ function runIdFor(hash) {
   return `run_${createHash('sha256').update(`${hash}:${process.hrtime.bigint()}`).digest('hex').slice(0, 12)}`;
 }
 
+function isMetered(costVisibility) {
+  return typeof costVisibility === 'string' && costVisibility.includes('account-estimate');
+}
+
 /**
  * @param {object} options
  * @param {(backendId: string, opts: object) => object} options.backendFactory
  * @param {{publish?: (event: object) => void}} [options.events]
  * @param {string} options.runtimeDir
+ * @param {(pkg: object, workDir: string, context: object) => Promise<void>} [options.prepareWorkDir]
+ *   stage `workflows/`, `package.json` and any on-disk assets where `runPackage` resolves them
+ * @param {(context: {pkg: object, result: object, record: object}) => Promise<{revision?: number, render?: object}>} [options.onComplete]
+ *   persist the applied package and render it; the return value lands on the run record
  */
-export function createRunController({ backendFactory, events = null, runtimeDir, defaultRatePerHour = G4_RATE_PER_HOUR } = {}) {
+export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, defaultRatePerHour = G4_RATE_PER_HOUR } = {}) {
   if (typeof backendFactory !== 'function') throw new Error('createRunController needs a backendFactory');
   const runsDir = join(runtimeDir, 'runs');
   mkdirSync(runsDir, { recursive: true });
@@ -40,14 +52,26 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   async function backend(backendId, opts = {}) {
     const instance = await backendFactory(backendId, opts);
     if (!instance || instance.id !== backendId) throw new Error(`unknown backend: ${backendId}`);
+    if (typeof instance.runPackage !== 'function') throw new Error(`backend ${backendId} cannot run a package (no runPackage; see H8)`);
     return instance;
   }
 
-  async function estimate({ backendId, jobs, budgetUnits, ratePerHour = defaultRatePerHour }) {
-    const instance = await backend(backendId, { budgetUnits, ratePerHour });
+  async function estimate({ backendId, pkg, budgetUnits, ratePerHour = defaultRatePerHour, includeReady = false, assets = null, comfyuiUrl = null }) {
+    if (!pkg || typeof pkg !== 'object') throw new Error('a package is required to plan a run');
+    const instance = await backend(backendId, {
+      budgetUnits,
+      ratePerHour,
+      packageId: pkg.id,
+      workDir: join(runsDir, 'plan', backendId),
+      outDir: join(runsDir, 'plan', backendId, 'out'),
+      scratchDir: join(runsDir, 'plan', backendId),
+      comfyuiUrl,
+    });
     const described = await instance.describe();
-    const jobList = Array.isArray(jobs) ? jobs : [];
-    const est = await instance.estimate(jobList);
+    // A dry run is the same plan the real run will use: nothing is started and nothing is billed.
+    const planned = await instance.runPackage(pkg, { workDir: join(runsDir, 'plan', backendId), dryRun: true, includeReady, assets });
+    const jobList = planned.jobsDoc?.jobs ?? [];
+    const est = planned.estimate ?? (typeof instance.estimate === 'function' ? await instance.estimate(jobList) : { gpuMinutes: 0, overheadMinutes: 0 });
     const rate = est.ratePerHour ?? ratePerHour;
     const upper = nextJobUpperEstimate({
       gpuMinutes: est.gpuMinutes ?? 0,
@@ -56,7 +80,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     });
     // BYO ComfyUI is not metered: the compute is the user's own and its cost is not visible
     // to Comfyrizz, so the project unit budget does not gate it (SPEC.md 6.6).
-    const metered = described.costVisibility === 'account-estimate';
+    const metered = isMetered(described.costVisibility);
     const budget = metered
       ? assessBudget({ budgetUnits, spentEstimate, nextJobUpperEstimate: upper, ratePerHour: rate })
       : {
@@ -77,6 +101,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     return {
       backend: { id: backendId, ...described },
       jobs: jobList.length,
+      jobsDoc: planned.jobsDoc,
       estimate: est,
       budget,
       planHash,
@@ -92,52 +117,96 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     return { planHash, approved: true };
   }
 
-  async function execute(record, { backendId, jobsFile, budgetUnits, comfyuiUrl, ratePerHour }) {
+  async function execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour, teardownMode, includeReady, assets }) {
     const emit = (event) => {
       record.events.push(event);
       publish({ type: 'run.event', runId: record.runId, event });
     };
-    const instance = await backend(backendId, { budgetUnits, ratePerHour, comfyuiUrl });
+    const instance = await backend(backendId, {
+      budgetUnits,
+      ratePerHour,
+      comfyuiUrl,
+      packageId: pkg.id,
+      workDir: record.workDir,
+      outDir: record.outputDir,
+      scratchDir: dirname(record.outputDir),
+    });
     try {
-      record.status = 'ensure_up';
-      const up = await instance.ensureUp({ budget: record.budget, approved: true, onEvent: emit });
-      emit({ type: 'ensure_up', ...up });
-      record.health = await instance.health();
-      emit({ type: 'health', ...record.health });
       record.status = 'running';
-      const result = await instance.run(jobsFile, emit, record.signal);
+      // H8's runPackage does plan -> estimate -> up -> health -> run -> collect -> apply -> teardown.
+      const result = await instance.runPackage(pkg, {
+        workDir: record.workDir,
+        outDir: record.outputDir,
+        budget: record.budget,
+        approved: true,
+        teardownMode,
+        includeReady,
+        assets,
+        signal: record.signal,
+        onEvent: emit,
+      });
       record.result = result;
-      record.status = 'collecting';
-      const manifest = result?.manifest ?? result;
-      if (manifest) {
-        record.collected = await instance.collect(manifest, record.outputDir);
-        emit({ type: 'collected', ...record.collected });
-      }
-      record.status = 'stopping';
-      const teardown = await instance.teardown('done');
-      record.teardown = teardown;
-      emit({ type: 'teardown', ...teardown });
-      record.status = teardown.state === 'stopped' ? 'done' : 'stop_unconfirmed';
+      record.manifest = result.manifest ?? null;
+      record.counts = result.counts ?? null;
+      record.applied = result.applied ?? [];
+      record.teardown = result.teardown ?? null;
+      // H8's `ok` is false when the manifest says the run did not complete; that is a failure even
+      // though the box came up and went away cleanly, and the UI must say so.
+      const complete = result.ok !== false && (result.manifest?.complete ?? true) !== false;
+      record.status = complete ? (result.teardown?.state === 'stopped' ? 'done' : result.teardown?.state === 'idle' ? 'idle' : 'stop_unconfirmed') : 'failed';
       if (typeof record.budget?.required === 'number') spentEstimate += record.budget.required;
-      publish({ type: 'run.finished', runId: record.runId, backendId, status: record.status, teardown });
+
+      if (onComplete) {
+        try {
+          const after = await onComplete({ pkg, result, record });
+          record.revision = after?.revision ?? null;
+          record.render = after?.render ?? null;
+        } catch (error) {
+          // the plates landed; a render failure is reported, not a run failure
+          record.renderError = error.message;
+          emit({ v: 1, event: 'render_failed', message: error.message });
+        }
+      }
+      if (!complete) {
+        const unfinished = record.counts?.failed ?? record.counts?.pending ?? record.manifest?.counts?.failed ?? 0;
+        publish({
+          type: 'run.failed',
+          runId: record.runId,
+          backendId,
+          message: `the run did not complete (${unfinished} job(s) unfinished)`,
+          teardown: record.teardown,
+          counts: record.counts,
+          applied: record.applied,
+          revision: record.revision ?? null,
+        });
+        return;
+      }
+      publish({
+        type: 'run.finished',
+        runId: record.runId,
+        backendId,
+        status: record.status,
+        teardown: record.teardown,
+        counts: record.counts,
+        applied: record.applied,
+        revision: record.revision ?? null,
+        render: record.render ?? null,
+      });
     } catch (error) {
+      const partial = error.runPackage ?? null;
       record.status = 'failed';
       record.error = error.message;
-      emit({ type: 'error', message: error.message });
-      try {
-        const teardown = await instance.teardown('error');
-        record.teardown = teardown;
-        emit({ type: 'teardown', ...teardown });
-      } catch (teardownError) {
-        emit({ type: 'teardown_failed', message: teardownError.message });
-      }
-      publish({ type: 'run.failed', runId: record.runId, backendId, message: error.message });
+      record.teardown = partial?.teardown ?? record.teardown;
+      record.manifest = partial?.manifest ?? record.manifest;
+      record.counts = partial?.counts ?? record.counts;
+      emit({ v: 1, event: 'error', message: error.message, teardown: record.teardown?.state ?? null });
+      publish({ type: 'run.failed', runId: record.runId, backendId, message: error.message, teardown: record.teardown ?? null });
     }
   }
 
-  async function start({ backendId, jobs, budgetUnits, approved = false, comfyuiUrl, ratePerHour = defaultRatePerHour }) {
+  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = defaultRatePerHour, teardownMode = 'done', includeReady = false, assets = null }) {
     if (activeRunId) return { error: 'run busy', runId: activeRunId, status: 409 };
-    const preview = await estimate({ backendId, jobs, budgetUnits, ratePerHour });
+    const preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
     if (preview.requiresApproval && !(approved || approvals.has(preview.planHash))) {
       publish({ type: 'run.approval_required', ...preview });
       return { ...preview, approvalRequired: true };
@@ -147,8 +216,10 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       return { ...preview, refused: true };
     }
     const runId = runIdFor(preview.planHash);
-    const jobsFile = join(runsDir, `${runId}.jobs.json`);
-    writeFileSync(jobsFile, JSON.stringify({ jobs: Array.isArray(jobs) ? jobs : [] }, null, 2));
+    const workDir = join(runsDir, runId, 'work');
+    const outputDir = join(runsDir, runId, 'out');
+    mkdirSync(outputDir, { recursive: true });
+    if (prepareWorkDir) await prepareWorkDir(pkg, workDir, { runId, backendId });
     const record = {
       runId,
       backendId,
@@ -157,16 +228,20 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       budget: preview.budget,
       estimate: preview.estimate,
       backend: preview.backend,
+      jobs: preview.jobs,
       events: [],
-      outputDir: join(runsDir, runId, 'out'),
+      workDir,
+      outputDir,
+      revision: null,
+      render: null,
       startedAt: new Date().toISOString(),
       signal: new AbortController().signal,
     };
-    mkdirSync(record.outputDir, { recursive: true });
     runs.set(runId, record);
     activeRunId = runId;
+    publish({ type: 'run.budget', runId, backendId, budget: preview.budget, estimate: preview.estimate, jobs: preview.jobs });
     publish({ type: 'run.started', runId, backendId, planHash: preview.planHash, budget: preview.budget });
-    record.done = execute(record, { backendId, jobsFile, budgetUnits, comfyuiUrl, ratePerHour }).finally(() => {
+    record.done = execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour, teardownMode, includeReady, assets }).finally(() => {
       activeRunId = null;
     });
     return { runId, status: record.status, ...preview };
@@ -183,7 +258,14 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       activeRunId,
       spentEstimate,
       approvals: [...approvals],
-      runs: [...runs.values()].map((record) => ({ runId: record.runId, backendId: record.backendId, status: record.status, planHash: record.planHash })),
+      runs: [...runs.values()].map((record) => ({
+        runId: record.runId,
+        backendId: record.backendId,
+        status: record.status,
+        planHash: record.planHash,
+        revision: record.revision ?? null,
+        render: record.render ?? null,
+      })),
     };
   }
 
