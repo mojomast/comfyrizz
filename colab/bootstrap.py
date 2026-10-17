@@ -1,10 +1,13 @@
 """Comfyrizz Google Colab bootstrap (draft; never executed on Google Colab yet).
 
 Run with `colab exec -s comfyrizz-<pkg> -f bootstrap.py --timeout 900` after the backend has
-uploaded the Hugging Face token as a 0600 file (SPEC.md 6.7.2 step 4). Steps:
+uploaded the Hugging Face token as a 0600 file (SPEC.md 6.7.2 step 4). Add
+`--wheelhouse /content/wheelhouse` when the pre-built wheels are on the VM (colab/wheelhouse.py);
+`--offline` then refuses PyPI entirely. Steps:
 
 1. clone the pinned ComfyUI and install its requirements (torch is preinstalled on the G4 image;
-   measured in GPU test 1: clone 1.0 s, requirements 24.8 s);
+   measured in GPU test 1: clone 1.0 s, requirements 24.8 s — GPU test 2's 192 s is the number the
+   wheelhouse exists to cut, and this step now records its own seconds into ready.json);
 2. read the token from /content/.hf/token (0600), never from `--env`, never printed;
 3. download the pinned model files in parallel with `hf download` (519 MB/s measured), printing
    progress so the CLI's quiet-period timeout does not fire;
@@ -19,12 +22,17 @@ files and revisions are pinned in `colab/models.lock.json` when the M3 spike rec
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # so `import wheelhouse` works from /content/colab
+
+from wheelhouse import install_command  # noqa: E402 - a sibling module, imported after the path fix
 
 ROOT = Path("/content")
 COMFY = ROOT / "ComfyUI"
@@ -93,12 +101,40 @@ def download_models(token: str) -> dict:
     return results
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="colab.bootstrap", description="prepare a Google Colab VM for Comfyrizz")
+    parser.add_argument(
+        "--wheelhouse",
+        default=os.environ.get("COMFYRIZZ_WHEELHOUSE") or None,
+        help="directory of pre-downloaded wheels (colab/wheelhouse.py); installed with --find-links",
+    )
+    parser.add_argument("--offline", action="store_true", help="install with --no-index: the wheelhouse must be complete")
+    args = parser.parse_args(argv)
+    wheelhouse = Path(args.wheelhouse) if args.wheelhouse else None
+
     OUT.mkdir(parents=True, exist_ok=True)
     if run(f"cd {ROOT} && rm -rf ComfyUI && git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI.git && cd ComfyUI && git checkout -q {COMFYUI_REF} && git log -1 --format='%h %cd'", "clone") != 0:
         raise SystemExit("cloning ComfyUI failed")
-    if run(f"cd {COMFY} && grep -viE '^(torch|torchvision|torchaudio)([<>=~ ]|$)' requirements.txt > /tmp/req.txt && pip install -q -r /tmp/req.txt 'huggingface_hub[hf_xet]>=1.0' safetensors", "requirements") != 0:
+
+    # The install step GPU test 2 spent 192 s on. With a wheelhouse, pip reads the wheels from that
+    # directory first; `--offline` refuses the index altogether. Whatever happens, the seconds are
+    # recorded, so "a cache halves setup" becomes a measurement instead of a hope.
+    requirements = Path("/tmp/req.txt")
+    if run(f"cd {COMFY} && grep -viE '^(torch|torchvision|torchaudio)([<>=~ ]|$)' requirements.txt > {requirements} && grep -q . {requirements}", "requirements-list") != 0:
+        raise SystemExit("writing the requirements list failed")
+    install = {
+        "requirements": str(requirements),
+        "wheelhouse": str(wheelhouse) if wheelhouse else None,
+        "offline": bool(args.offline),
+        "command": install_command(requirements, wheelhouse, offline=args.offline),
+    }
+    if wheelhouse and not (wheelhouse / "manifest.json").is_file():
+        raise SystemExit(f"{wheelhouse} has no manifest.json: build it with colab/wheelhouse.py, or drop --wheelhouse")
+    started = time.time()
+    if run(f"cd {COMFY} && {install['command']} 'huggingface_hub[hf_xet]>=1.0' safetensors", "requirements") != 0:
         raise SystemExit("installing ComfyUI requirements failed")
+    install["seconds"] = round(time.time() - started, 1)
+    print(f"INSTALL {json.dumps(install)}", flush=True)
     if subprocess.run(f"cd {ROOT} && git clone -q --depth 1 https://github.com/Comfy-Org/comfy-api-proxy.git", shell=True).returncode != 0:
         raise SystemExit("cloning comfy-api-proxy failed")
 
@@ -157,7 +193,7 @@ def main() -> int:
         start_new_session=True,
     )
 
-    ready = {"ok": False, "comfyui": None, "proxy": None, "downloads": download, "at": time.time()}
+    ready = {"ok": False, "comfyui": None, "proxy": None, "downloads": download, "install": install, "at": time.time()}
     import urllib.request  # noqa: PLC0415
 
     for _ in range(60):

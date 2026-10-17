@@ -1,0 +1,48 @@
+# The Python packages the Google Colab VM installs, pinned (H-fix5).
+#
+# Why this file exists: GPU test 2 spent 192 s of its 215 s setup in `pip install` (docs/GPU_TEST_2.md,
+# "Other notes": "the 192 s pip install is the bigger target: pre-built wheels or a cached venv would
+# roughly halve setup"). This list is what that install pulled, so `colab/wheelhouse.py` can download
+# exactly these wheels on a machine with a fast link and the VM can then install with --no-index.
+#
+# comfyui-* and the rest come from ComfyUI's own requirements.txt at the ref the VM clones; refresh
+# this file when the ref moves. Source: https://raw.githubusercontent.com/comfyanonymous/ComfyUI/v0.41.3/requirements.txt
+# torch/torchvision are deliberately absent: the G4 image preinstalls torch, and a CUDA wheel is
+# hundreds of MB that must match the VM's CUDA, not ours.
+comfyui-frontend-package==1.55.17
+comfyui-workflow-templates==0.11.87
+comfyui-embedded-docs==0.5.14
+torchsde
+numpy>=1.25.0
+einops
+transformers>=4.50.3
+tokenizers>=0.13.3
+sentencepiece
+safetensors>=0.4.2
+aiohttp>=3.11.8
+yarl>=1.18.0
+pyyaml
+Pillow
+scipy
+tqdm
+psutil
+alembic
+SQLAlchemy>=2.0.0
+filelock
+av>=17.0.0
+comfy-kitchen==0.2.37
+comfy-aimdo==0.5.6
+requests
+simpleeval>=1.0.0
+blake3
+kornia>=0.7.1
+spandrel
+pydantic~=2.0
+pydantic-settings~=2.0
+PyOpenGL>=3.1.8
+comfy-angle
+# Comfyrizz's own additions, installed on the VM alongside ComfyUI (B3/B6):
+huggingface_hub[hf_xet]>=1.0
+comfy-api-proxy
+comfy-sdk==0.5.0
+jsonschema==4.25.1
