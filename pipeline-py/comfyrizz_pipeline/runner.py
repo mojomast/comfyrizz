@@ -184,7 +184,7 @@ class Runner:
             return None
         return entry
 
-    def _cache_store(self, job: dict[str, Any], outputs: list[dict[str, Any]], attempt_id: str) -> None:
+    def _cache_store(self, job: dict[str, Any], outputs: list[dict[str, Any]], attempt_id: str, job_id: str | None = None) -> None:
         if not self.config.cache_enabled or not outputs:
             return
         data = self._cache_load()
@@ -195,6 +195,9 @@ class Runner:
             "file": rel,
             "sha256": primary["sha256"],
             "attempt_id": attempt_id,
+            # the id of the Comfy job that produced this file, so a later cache hit can still write
+            # provenance that is a string and not a null (GPU test 3, N6)
+            **({"job_id": job_id} if job_id else {}),
             "at": now_iso(),
         }
         write_json_atomic(self._cache_path(), data)
@@ -491,7 +494,7 @@ class Runner:
                 self.progress.emit("job_failed", job=job["id"], attempt=attempt.attempt_id, value=mismatch["code"])
                 return self._result(job, "failed", attempt, error=mismatch)
             attempt = self.attempts.update(attempt, state="succeeded", outputs=outputs, finished_at=now_iso())
-            self._cache_store(job, outputs, attempt.attempt_id)
+            self._cache_store(job, outputs, attempt.attempt_id, attempt.job_id)
             self.progress.emit("job_done", job=job["id"], attempt=attempt.attempt_id, value=len(outputs))
             return self._result(job, "succeeded", attempt, outputs=outputs)
         state = "canceled" if snapshot.status == "canceled" else "failed"
@@ -666,11 +669,17 @@ class Runner:
         )
 
     @staticmethod
-    def _result(job: dict[str, Any], status: str, attempt: Attempt | None = None, *, outputs: list[dict[str, Any]] | None = None, error: dict[str, Any] | None = None, reason: str | None = None) -> dict[str, Any]:
+    def _result(job: dict[str, Any], status: str, attempt: Attempt | None = None, *, outputs: list[dict[str, Any]] | None = None, error: dict[str, Any] | None = None, reason: str | None = None, job_id: str | None = None, attempt_id: str | None = None) -> dict[str, Any]:
         result: dict[str, Any] = {"status": status, "outputs": outputs or [], "cache_key": job.get("cacheKey")}
         if attempt is not None:
             result["attempt_id"] = attempt.attempt_id
             result["job_id"] = attempt.job_id
+        # a cache hit has no attempt of this run: it carries the one that produced the file, so
+        # `apply` never writes a null id into the package (GPU test 3, N6)
+        if attempt_id is not None:
+            result["attempt_id"] = attempt_id
+        if job_id is not None:
+            result["job_id"] = job_id
         if error is not None:
             result["error"] = error
         if reason is not None:
@@ -721,7 +730,14 @@ class Runner:
                 if measured:
                     output["measured"] = measured
                 outputs = [output]
-                self.results[job["id"]] = self._result(job, "cached", outputs=outputs, reason=f"cache hit from attempt {cached['attempt_id']}")
+                self.results[job["id"]] = self._result(
+                    job,
+                    "cached",
+                    outputs=outputs,
+                    reason=f"cache hit from attempt {cached['attempt_id']}",
+                    attempt_id=cached.get("attempt_id"),
+                    job_id=cached.get("job_id"),
+                )
                 self.progress.emit("cache_hit", job=job["id"], value=cached["file"])
                 self._write_manifest()
                 continue

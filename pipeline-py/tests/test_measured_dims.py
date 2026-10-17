@@ -161,6 +161,9 @@ def test_the_cache_keeps_the_measurement_so_a_cached_run_still_writes_real_dims(
     entry = next(item for item in second["jobs"] if item["job"] == "a_src.still")
     assert entry["status"] in {"cached", "succeeded"}, entry
     assert entry["outputs"][0]["measured"] == {"width": 1360, "height": 768, "source": "header"}
+    # and the ids stay strings, so a second run's manifest can still be applied (N6)
+    assert isinstance(entry["job_id"], str) and entry["job_id"], entry
+    assert isinstance(entry["attempt_id"], str) and entry["attempt_id"], entry
 
 
 def test_the_measurement_helper_is_what_the_runner_calls():

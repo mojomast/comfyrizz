@@ -48,6 +48,28 @@ export const LAYOUTS = Object.freeze({
 
 export const GENERATED_OUTPUT_LICENSE = Object.freeze({ id: "CC0-1.0", redistributable: true });
 export const MODEL_GENERATORS = Object.freeze(["flux3-klein", "ltx25", "kokoro"]);
+
+/**
+ * The licence of each model the pipeline can run, as the shipped example packages record it.
+ *
+ * A ready generated asset needs `model_license` separately from its output licence
+ * (SEM_MODEL_LICENSE_MISSING), and a run that produced a file must be able to say which model terms
+ * it carries (GPU test 3, N6: apply left it empty). One map, so the examples and the run agree.
+ */
+export const MODEL_LICENSES = Object.freeze({
+  "flux3-klein": Object.freeze({
+    id: "LicenseRef-FLUX.3-Image-Klein",
+    url: "https://huggingface.co/black-forest-labs/flux-3-image-klein",
+  }),
+  ltx25: Object.freeze({
+    id: "LicenseRef-LTX-2.5",
+    url: "https://huggingface.co/Lightricks/LTX-2.5",
+  }),
+  kokoro: Object.freeze({
+    id: "Apache-2.0",
+    url: "https://huggingface.co/hexgrad/Kokoro-82M",
+  }),
+});
 export const FLEXIBLE_CEILING_FRAMES = 2700;
 
 const SCENE_ID_RE = /^s[A-Za-z0-9_-]{0,63}$/;

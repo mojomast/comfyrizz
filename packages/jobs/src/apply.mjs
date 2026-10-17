@@ -12,6 +12,8 @@
 import { statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
+import { MODEL_LICENSES, MODEL_GENERATORS } from "../../schema/src/semantic.mjs";
+
 const GENERATED_LICENSE = { id: "CC0-1.0" };
 
 /** Map a job kind onto the package's asset kinds and the media it implies.
@@ -77,12 +79,19 @@ export function applyManifestToPackage(pkg, { manifest, jobsDoc, outDir, backend
     }
     const relative = output.relative || output.file;
     const job = jobs.get(entry.job);
+    const generator = job?.generator ?? asset.gen?.generator;
+    // never a null: a cache hit carries the ids of the attempt that produced the file, and when even
+    // that is unknown the key is left out rather than written as null (GPU test 3, N6 - a null fails
+    // the package schema, so the run's result could not be applied at all)
+    const jobId = entry.job_id ?? asset.gen?.job_id;
+    const attemptId = entry.attempt_id ?? asset.gen?.attempt_id;
+    const modelLicense = asset.model_license ?? MODEL_LICENSES[generator];
     const provenance = {
       ...(asset.gen || {}),
-      generator: job?.generator ?? asset.gen?.generator,
+      generator,
       backend: backend || job?.backend || asset.gen?.backend || "byo-comfyui",
-      job_id: entry.job_id ?? null,
-      attempt_id: entry.attempt_id ?? null,
+      ...(jobId ? { job_id: jobId } : {}),
+      ...(attemptId ? { attempt_id: attemptId } : {}),
       created_at: manifest.updatedAt || new Date().toISOString(),
     };
     if (job?.workflow) provenance.workflow = job.workflow;
@@ -97,6 +106,7 @@ export function applyManifestToPackage(pkg, { manifest, jobsDoc, outDir, backend
       bytes: output.bytes ?? sizeOf(outDir, relative),
       license: asset.license || { ...GENERATED_LICENSE },
       redistributable: asset.redistributable ?? true,
+      ...(modelLicense ? { model_license: modelLicense } : {}),
       gen: provenance,
       ...(mediaFor(job, job?.cutout ?? asset.cutout, output) ? { media: mediaFor(job, job?.cutout ?? asset.cutout, output) } : {}),
     };

@@ -24,6 +24,7 @@ import {
 } from "../src/index.mjs";
 import { validatePackage } from "../../schema/src/index.mjs";
 import { applyManifestToPackage, dimsForMegapixels, mediaFor } from "../src/index.mjs";
+import { MODEL_GENERATORS, MODEL_LICENSES } from "../../schema/src/index.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (rel) => JSON.parse(readFileSync(join(here, "fixtures", rel), "utf8"));
@@ -588,4 +589,73 @@ test("apply writes the measured geometry into the package (N4)", () => {
   assert.equal(asset.status, "ready");
   assert.deepEqual(asset.media, { width: 1360, height: 768, alpha: false }, "the file's geometry, not the plan's");
   assert.equal(applied.applied.length, 1);
+});
+
+// --- GPU test 3, N6: a cached manifest must still apply, with string ids and a model licence ------
+
+test("a cached manifest entry applies with string ids, never null (N6)", () => {
+  const pkg = fixture("package-pending.json");
+  const doc = planJobs(pkg);
+  // the second run's manifest: the file came from the cache, so there is no job id for *this* run,
+  // and the runner carries the one that produced it
+  const manifest = {
+    v: 1,
+    updatedAt: "2026-10-17T20:00:00Z",
+    jobs: [
+      {
+        job: "a_plate1_still.still",
+        status: "cached",
+        attempt_id: "attempt-from-the-first-run",
+        job_id: "comfy-job-7",
+        outputs: [{ file: "out/assets/a_plate1_still.png", sha256: "1".repeat(64), bytes: 512 }],
+        reason: "cache hit from attempt attempt-from-the-first-run",
+      },
+    ],
+  };
+  const applied = applyManifestToPackage(pkg, { manifest, jobsDoc: doc });
+  const gen = applied.package.assets.a_plate1_still.gen;
+  assert.equal(gen.job_id, "comfy-job-7");
+  assert.equal(gen.attempt_id, "attempt-from-the-first-run");
+  const errors = validatePackage(applied.package).errors;
+  assert.deepEqual(
+    errors.filter((e) => /\/gen\/(job_id|attempt_id)/.test(e.path ?? "")),
+    [],
+    "no null id may reach the package",
+  );
+});
+
+test("apply leaves an id out rather than writing null, and fills the model licence (N6)", () => {
+  const pkg = fixture("package-pending.json");
+  const doc = planJobs(pkg);
+  const manifest = {
+    v: 1,
+    jobs: [
+      {
+        job: "a_plate1_still.still",
+        status: "cached",
+        outputs: [{ file: "out/assets/a_plate1_still.png", sha256: "2".repeat(64), bytes: 512 }],
+      },
+    ],
+  };
+  const applied = applyManifestToPackage(pkg, { manifest, jobsDoc: doc });
+  const asset = applied.package.assets.a_plate1_still;
+  assert.ok(!("job_id" in asset.gen), "no id at all, not a null");
+  assert.ok(!("attempt_id" in asset.gen));
+  // the generator needs its own licence, separate from the output licence
+  assert.deepEqual(asset.model_license, { id: "LicenseRef-FLUX.3-Image-Klein", url: "https://huggingface.co/black-forest-labs/flux-3-image-klein" });
+  assert.deepEqual(asset.license, { id: "CC0-1.0" });
+  const errors = validatePackage(applied.package).errors;
+  assert.deepEqual(errors.filter((e) => /model_license|SEM_MODEL_LICENSE_MISSING/.test(`${e.path} ${e.code}`)), []);
+
+  // an asset that already records its own model licence keeps it (a reviewer's edit is not overwritten)
+  const own = fixture("package-pending.json");
+  own.assets.a_plate1_still.model_license = { id: "LicenseRef-Custom" };
+  const kept = applyManifestToPackage(own, { manifest, jobsDoc: planJobs(own) });
+  assert.deepEqual(kept.package.assets.a_plate1_still.model_license, { id: "LicenseRef-Custom" });
+});
+
+test("every generator the pipeline runs has a model licence on record", () => {
+  for (const generator of MODEL_GENERATORS) {
+    assert.ok(MODEL_LICENSES[generator]?.id, `${generator} has no licence in the map`);
+  }
 });
