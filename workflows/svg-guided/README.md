@@ -89,6 +89,26 @@ so. Output: a CSV of `edge_iou` / `chamfer_px` / `mask_iou` / `palette ΔE` per 
 sheet per scene, a CLIP score where a checkpoint is available (optional, CPU-slow, off by default),
 and a human 1–5 sheet that picks the defaults per layout role.
 
+**Label legibility is scored too, because edge IoU scored the wrong thing.** On GPU test 2 edge IoU
+against the SVG raster rewarded a low-denoise near-copy (0.61–0.88) and punished the reference edits
+that looked best (0.07–0.74): an edit re-renders the texture and shifts geometry, so it is *not*
+pixel-registered and crisp SVG text cannot be overlaid on it. Two CPU checks, in `pipeline-py/eval/`:
+
+| check | what it answers | needs |
+|---|---|---|
+| `metrics.label_structure_retention(ref, out, label_mask)` | did the label's strokes and contrast survive in that region? | numpy only |
+| `legibility.check_labels(labels, image=…)` | do the SVG's label **strings** still read in the output? | an OCR engine (injected or installed) |
+
+`label_structure_retention` runs everywhere and is a *proxy* — it cannot tell a moved label from a
+kept one. `legibility` compares the SVG's known strings against OCR text with a similarity ratio per
+label, reporting near misses; this box has **no OCR engine** (`tesseract` binary, pytesseract and
+easyocr are all absent), so `read_labels` returns `available: false` with the install note instead of
+guessing, and the interface takes an injected engine (`check_labels(labels, image=..., engine=fn)`)
+so a transcription or a future OCR install drops straight in:
+`python -m eval.legibility --labels "Solar Panel" "Inverter" --observed "<text read from the frame>"`.
+A future sweep session should install `tesseract-ocr` on the VM and record the OCR rows next to the
+IoU rows, so "keeps the labels" is answered with a reading rather than an edge overlap.
+
 Every axis is checked against the approach's params map before the plan is written
 (`svgguide.workflows.SWEEP_AXES` + `check_sweep_axes`, used by `build_sweep_spec`): an axis whose
 parameter reaches no node input is a no-op that still costs GPU units, which is exactly what the

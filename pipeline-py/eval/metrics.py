@@ -119,6 +119,75 @@ def palette_delta_e(palette_a: list[str], palette_b: list[str]) -> dict[str, Any
     }
 
 
+def _local_mean(image: np.ndarray, radius: int = 2) -> np.ndarray:
+    """A box blur, so subtracting it leaves the high-frequency structure (strokes, letters)."""
+    total = np.zeros(np.shape(image), dtype=np.float64)
+    count = 0
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            total += np.roll(np.roll(image, dy, 0), dx, 1)
+            count += 1
+    return total / count
+
+
+def label_structure_retention(
+    reference: np.ndarray,
+    candidate: np.ndarray,
+    mask: np.ndarray,
+    *,
+    radius: int = 2,
+) -> dict[str, Any]:
+    """How much of the *label* structure survived, inside the label mask. No OCR, no weights.
+
+    GPU test 2 recorded why this exists next to edge IoU: edge IoU against the SVG raster rewards a
+    low-denoise copy and punishes exactly the reference edits that look best, and it says nothing
+    about whether a label is still readable ("you cannot overlay crisp SVG text on it without
+    misalignment ... a label-OCR/text-legibility check would fit 'keeps the labels' better"). This is
+    the dependency-free half of that: inside the mask, correlate the high-pass (the strokes) and
+    compare the contrast of the two images, so a label that was blurred away, repainted, or shuffled
+    scores low and a preserved one scores near 1.
+
+    [unverified] It is a *proxy*: it cannot read a moved or misspelled label, and the human 1-5
+    sheet stays the ground truth. `eval.legibility` adds the real OCR comparison when an engine is
+    installed.
+    """
+    reference_gray = np.asarray(reference, dtype=np.float64)
+    candidate_gray = np.asarray(candidate, dtype=np.float64)
+    mask_bool = _as_bool(mask)
+    if reference_gray.shape != candidate_gray.shape or reference_gray.shape != mask_bool.shape:
+        raise ValueError(
+            f"shape mismatch: reference {reference_gray.shape}, candidate {candidate_gray.shape}, mask {mask_bool.shape}"
+        )
+    pixels = int(mask_bool.sum())
+    if pixels == 0:
+        return {"score": 1.0, "pixels": 0, "correlation": 1.0, "contrast_ratio": 1.0, "note": "the label mask is empty"}
+
+    reference_hp = (reference_gray - _local_mean(reference_gray, radius))[mask_bool]
+    candidate_hp = (candidate_gray - _local_mean(candidate_gray, radius))[mask_bool]
+    reference_spread = float(reference_hp.std())
+    candidate_spread = float(candidate_hp.std())
+    if reference_spread == 0 and candidate_spread == 0:
+        correlation = 1.0
+    elif reference_spread == 0 or candidate_spread == 0:
+        correlation = 0.0
+    else:
+        correlation = float(np.corrcoef(reference_hp, candidate_hp)[0, 1])
+        if math.isnan(correlation):
+            correlation = 0.0
+
+    reference_contrast = float(reference_gray[mask_bool].std())
+    candidate_contrast = float(candidate_gray[mask_bool].std())
+    contrast_ratio = 1.0 if reference_contrast == 0 else candidate_contrast / reference_contrast
+    score = max(0.0, correlation) * min(1.0, contrast_ratio)
+    return {
+        "score": round(score, 4),
+        "pixels": pixels,
+        "correlation": round(correlation, 4),
+        "contrast_ratio": round(contrast_ratio, 4),
+        "note": "high-pass correlation x min(1, contrast ratio) inside the label mask; a proxy, not OCR",
+    }
+
+
 def clip_score(image: Any, caption: str, *, model: Any = None) -> dict[str, Any]:
     """Optional CLIP score. Returns `available: False` rather than failing when CLIP is absent."""
     if model is None:
@@ -142,6 +211,9 @@ def evaluate(
     }
     if reference.get("region") is not None and candidate.get("region") is not None:
         report["mask_iou"] = round(mask_iou(reference["region"], candidate["region"]), 4)
+    label_mask = reference.get("label_mask")
+    if label_mask is not None and candidate.get("gray") is not None and reference.get("gray") is not None:
+        report["label_structure_retention"] = label_structure_retention(reference["gray"], candidate["gray"], label_mask)
     if palette_a and palette_b:
         report["palette"] = palette_delta_e(palette_a, palette_b)
     return report
