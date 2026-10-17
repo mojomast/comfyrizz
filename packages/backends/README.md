@@ -13,7 +13,7 @@ node --test test/*.test.mjs        # or: npm test
 |---|---|
 | `src/orbit-colab-plan.mjs` | `/home/box/orbitdesktop/server/colab-plan.mjs`, **verbatim** with the MIT relicence header. `parseUsage`, `parseSessions`, `parseStatus`, `parseLs`, `parseNvidiaSmi`, `catalogFromHelp`, `redactSecrets`, `stripAnsi`, `blockedLocalPath`, `sessionName`, `remotePath`, `safeBasename`, `timeoutSeconds`, `colabEnvironment`. |
 | `src/job-worker.mjs` | `/home/box/orbitdesktop/server/colab-job-worker.mjs` (the detached worker + job-log pattern), header added; the interactive stdin socket is now optional. |
-| `src/watchdog.mjs` | Orbit's detached-worker pattern, reduced to a stop-only timer for one session name. |
+| `src/watchdog.mjs` | Orbit's detached-worker pattern, reduced to a stop-only timer for one session name. Armed for 45 minutes at allocation; **disarmed by `teardown()` once the stop is verified** (a sleeping process that outlives the run it belongs to is a leak, not a safety feature). A `stop_unconfirmed` keeps it armed, because that is exactly when it is the last thing that ends the spend. |
 
 Nothing in `/home/box/orbitdesktop` is modified, and Orbit's own `redactSecrets` is *extended*
 rather than edited: `redactAll` in `src/colab-plan.mjs` adds the provider keys SPEC.md §6.6 asks

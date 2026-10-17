@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createColabBackend } from "../src/colab-backend.mjs";
 import { createByoBackend } from "../src/byo-backend.mjs";
-import { installFakeColab, makeCli, readLog, readState } from "./helpers.mjs";
+import { installFakeColab, makeCli, readLog, readState, writeState } from "./helpers.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..");
@@ -120,7 +120,7 @@ test("a lost exec mid-package reconciles, and the VM is still verifiably stopped
   const dir = workspace();
   const doc = plan(dir);
   const fake = installFakeColab(dir, {
-    state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n", scripts: { "run_jobs.py": { lost: true } } },
+    state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n", scripts: { "run_jobs.py": { lost: true } } },
   });
   const backend = colabBackendFor({ dir, fake, options: { script: null } });
   await backend.ensureUp({ approved: true });
@@ -142,7 +142,7 @@ test("a collect that fails still stops the VM and keeps the manifest honest", as
   if (!HAVE_PYTHON) return t.skip("no venv python");
   const dir = workspace();
   const doc = plan(dir);
-  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
   stageVmOutput(fake, doc, dir);
   const state = readState(fake.statePath);
   state.failDownloads = 99; // every collect fails
@@ -154,15 +154,21 @@ test("a collect that fails still stops the VM and keeps the manifest honest", as
 
   assert.equal(run.manifest, null, "a failed collect cannot produce a manifest");
   assert.equal(run.collect.ok, false);
+  const execsBefore = readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec").length;
   const teardown = await backend.teardown("error");
   assert.equal(teardown.state, "stopped");
-  assert.equal(fake.submit_count(), 0, "a collect failure never resubmits: fakes only, no v2 on this path");
+  // a collect failure never resubmits: no further exec ran, and the failed run is still on record
+  assert.equal(readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec").length, execsBefore);
+  assert.ok(
+    backend.inspect().events.some((event) => event.type === "collect_failed" || event.type === "collect"),
+    JSON.stringify(backend.inspect().events.map((event) => event.type)),
+  );
 });
 
 test("stop fails twice, then succeeds: the VM is stopped, not abandoned", async () => {
   const dir = workspace();
   const fake = installFakeColab(dir, {
-    state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n", stopFailsTimes: 2 },
+    state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n", stopFailsTimes: 2 },
   });
   const backend = colabBackendFor({ dir, fake });
   await backend.ensureUp({ approved: true });
@@ -177,7 +183,7 @@ test("stop fails twice, then succeeds: the VM is stopped, not abandoned", async 
 
 test("stop that never confirms is surfaced as stop_unconfirmed, with the manual command", async () => {
   const dir = workspace();
-  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n", keepAfterStop: true } });
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n", keepAfterStop: true } });
   const backend = colabBackendFor({ dir, fake, options: { teardownRetries: 3 } });
   await backend.ensureUp({ approved: true });
 
@@ -191,7 +197,7 @@ test("stop that never confirms is surfaced as stop_unconfirmed, with the manual 
 test("the wall-clock cap refuses before anything is submitted", async (t) => {
   if (!HAVE_PYTHON) return t.skip("no venv python");
   const dir = workspace();
-  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
   const backend = colabBackendFor({ dir, fake, budgetUnits: 500, options: { wallClockCapMinutes: 0.0001 } });
   await backend.ensureUp({ approved: true });
   backend.state.startedAtMs = Date.now() - 60000;
@@ -211,7 +217,7 @@ test("the reserve formula refuses mid-package, and the budget is never exceeded"
   if (!HAVE_PYTHON) return t.skip("no venv python");
   const dir = workspace();
   const doc = plan(dir);
-  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
   stageVmOutput(fake, doc, dir, { complete: false });
   // enough for the stills batch (≈1.09 units) but not for the plate batch on top of it
   const backend = colabBackendFor({ dir, fake, budgetUnits: 1.15 });
@@ -288,25 +294,43 @@ test("the BYO path surfaces submission_unknown and never resubmits it", async (t
   assert.equal(unknown[0].error.code, "transport_ambiguous");
   assert.equal(first.manifest.complete, false);
 
-  const posts = () => readFileSync(requestLog, "utf8").split("\n").filter((line) => line.includes('"POST"')).length;
-  const before = posts();
-  assert.equal(before, 1, "exactly one submission reached the server before the reply was lost");
+  const posts = () => readFileSync(requestLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const submitsOf = (label) => posts().filter((entry) => entry.method === "POST" && entry.path === "/api/v2/jobs" && entry.label === label);
+  const jobPosts = () => posts().filter((entry) => entry.method === "POST" && entry.path === "/api/v2/jobs");
+  const labelsBefore = new Set(jobPosts().map((entry) => entry.label));
+  const firstJob = plan(dir).jobs[0].id;
+  assert.equal(submitsOf(firstJob).length, 1, "exactly one submission reached the server before the reply was lost");
   const second = await backend.run(join(dir, "jobs.json"));
-  assert.equal(posts(), before, "the ambiguous job was resubmitted");
+  assert.equal(submitsOf(firstJob).length, 1, "the ambiguous job was resubmitted");
+  // the second pass may re-run jobs that failed for ordinary reasons, but it can only ever send
+  // labels the first run already sent: nothing new is invented for an unresolved job
+  assert.ok(
+    jobPosts().every((entry) => labelsBefore.has(entry.label)),
+    JSON.stringify([...new Set(jobPosts().map((entry) => entry.label))].filter((label) => !labelsBefore.has(label))),
+  );
   assert.ok(second.manifest.jobs.some((entry) => entry.status === "submission_unknown" || entry.status === "skipped"));
+  assert.equal(
+    second.manifest.jobs.filter((entry) => entry.job === firstJob)[0].status,
+    "submission_unknown",
+    "the second run still reports the ambiguous job as unresolved, never as done",
+  );
 });
 
 test("the orphan reaper lists stale sessions and offers stop, never deletes", async () => {
   const dir = workspace();
   const fake = installFakeColab(dir, {
-    state: {
-      usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 2\n",
-      sessions:
-        "[comfyrizz-b6hardening01] live | Hardware: G4 | Shape: STANDARD | Variant: GPU | Status: IDLE\n[comfyrizz-staleone] old | Hardware: G4 | Shape: STANDARD | Variant: GPU | Status: IDLE\n[name-that-is-not-ours] someone | Hardware: T4 | Shape: STANDARD | Variant: GPU | Status: BUSY\n",
-    },
+    state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 2\n" },
   });
   const backend = colabBackendFor({ dir, fake });
   await backend.ensureUp({ approved: true });
+  // `colab new` writes the one session we just made, so the list the reaper scans is set after
+  // startup: ours, one stale comfyrizz-* session, and one that is not ours at all
+  const state = readState(fake.statePath);
+  state.sessions =
+    "[comfyrizz-b6hardening01] live | Hardware: G4 | Shape: STANDARD | Variant: GPU | Status: IDLE\n" +
+    "[comfyrizz-staleone] old | Hardware: G4 | Shape: STANDARD | Variant: GPU | Status: IDLE\n" +
+    "[name-that-is-not-ours] someone | Hardware: T4 | Shape: STANDARD | Variant: GPU | Status: BUSY\n";
+  writeState(fake.statePath, state);
 
   const { offers, autoStopped, scanned } = await backend.orphans();
   assert.equal(scanned, 3);
@@ -317,22 +341,64 @@ test("the orphan reaper lists stale sessions and offers stop, never deletes", as
   const stops = readLog(fake.logPath).filter((entry) => entry.argv[0] === "stop");
   assert.deepEqual(stops, [], "the reaper must stop nothing");
 
-  const spend = backend.spend();
+  const spend = await backend.usage().then(() => backend.spend());
   assert.equal(spend.label, "estimate");
   assert.match(spend.detail, /other sessions running/, "an account with more assignments than ours says so");
+  assert.equal(spend.assignments, 2);
 });
 
-test("no test process is left behind by the hardening cases", () => {
+test("a confirmed stop disarms the detached watchdog, an unconfirmed one keeps it armed", async () => {
+  const dir = workspace();
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
+  const backend = colabBackendFor({ dir, fake, options: { watchdogMinutes: 5 } });
+  await backend.ensureUp({ approved: true });
+  const armed = backend.inspect().watchdog;
+  assert.ok(armed?.pid, "the run armed a detached watchdog");
+
+  const stopped = await backend.teardown("done");
+  assert.equal(stopped.state, "stopped");
+  assert.equal(stopped.watchdog.disarmed, true, "a stopped VM has nothing left for the watchdog to stop");
+  // and the process really is gone, not merely recorded as gone
+  assert.throws(() => process.kill(armed.pid, 0), /ESRCH/, "the watchdog process must not outlive the run");
+
+  const stubborn = installFakeColab(join(dir, "second"), {
+    state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n", keepAfterStop: true },
+  });
+  const other = colabBackendFor({ dir: join(dir, "second"), fake: stubborn, options: { teardownRetries: 1, watchdogMinutes: 5 } });
+  await other.ensureUp({ approved: true });
+  const otherArmed = other.inspect().watchdog;
+  const unconfirmed = await other.teardown("error");
+  assert.equal(unconfirmed.state, "stop_unconfirmed");
+  assert.equal(unconfirmed.watchdog.disarmed, false, "an unconfirmed stop leaves the last line of defence armed");
+  assert.doesNotThrow(() => process.kill(otherArmed.pid, 0), "the watchdog is still alive for the unconfirmed case");
+  process.kill(otherArmed.pid, "SIGKILL");
+});
+
+test("no test process is left behind by the hardening cases", async () => {
+  // the fakes are spawned with a bounded lifetime and killed in test.after; this check is about
+  // the *detached* children (the watchdog, a proxy) that nothing else would reap, so it first
+  // stops everything this file registered and then looks for survivors
+  for (const child of children) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+  for (const backend of backends) {
+    try {
+      const pid = backend.inspect?.().proxyPid;
+      if (pid) process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 750));
   const listing = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" }).stdout.split("\n");
-  const ours = listing.filter(
-    (line) =>
-      scratchRoots.some((root) => line.includes(root)) ||
-      line.includes("backends/src/watchdog.mjs") ||
-      line.includes("backends/test/bin/v2-stub.mjs") ||
-      line.includes("tests/fake_comfy_server.py"),
-  );
-  // the fake servers are spawned with a bounded lifetime and killed in test.after; a survivor here
-  // means a test leaked a child (the B3/B5 suites did before this test existed)
+  // scoped to *this* file's scratch directories: other files' fake servers are legitimately alive
+  // while the suite runs, and each of those files asserts its own cleanup (colab-backend.test.mjs
+  // reaps any watchdog it armed). A survivor here is a process nothing would ever stop.
+  const ours = listing.filter((line) => scratchRoots.some((root) => line.includes(root)));
   assert.deepEqual(ours.map((line) => line.trim().slice(0, 120)), []);
   assert.ok(scratchRoots.length > 0);
 });

@@ -228,6 +228,40 @@ export function createColabBackend({
     return state.watchdog;
   }
 
+  /**
+   * Disarm the watchdog once the VM is *verifiably* stopped (B6 acceptance: "no leftover process").
+   *
+   * A detached watchdog is the last line of defence for an abandoned run: it must survive the app
+   * closing, which is also why nothing else would ever reap it. After a confirmed stop there is
+   * nothing left for it to stop, so it is sent SIGTERM and the pid is checked gone — a sleeping
+   * process that outlives the run it belongs to is a leak, not a safety feature. A *failed* stop
+   * keeps it armed, which is the whole point of the stop_unconfirmed case.
+   */
+  async function disarmWatchdog() {
+    const watchdog = state.watchdog;
+    if (!watchdog || !watchdog.pid) return { disarmed: true, pid: watchdog?.pid ?? null, note: "no watchdog was armed" };
+    const alive = () => {
+      try {
+        process.kill(watchdog.pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let signal = null;
+    try {
+      process.kill(watchdog.pid, "SIGTERM");
+      signal = "SIGTERM";
+    } catch (error) {
+      // ESRCH: it fired, exited or was already reaped. Anything else is worth reporting.
+      if (error?.code !== "ESRCH") signal = `failed:${error?.code || "error"}`;
+    }
+    for (let attempt = 0; attempt < 40 && alive(); attempt += 1) await sleep(25);
+    const gone = !alive();
+    if (gone) state.watchdog = { ...watchdog, disarmedAt: new Date().toISOString(), disarmedBy: signal };
+    return { signal, pid: watchdog.pid, disarmed: gone };
+  }
+
   // -- the Backend interface (SPEC.md 6.5) --------------------------------------------
   const backend = {
     id: "colab",
@@ -459,7 +493,13 @@ export function createColabBackend({
         const after = await sessions();
         if (after.empty || !after.sessions.some((entry) => entry.name === session)) {
           forgetSession();
-          return { state: "stopped", evidence: `colab sessions no longer lists ${session} (reason: ${reason})`, attempts: attempt };
+          const watchdog = await disarmWatchdog();
+          return {
+            state: "stopped",
+            evidence: `colab sessions no longer lists ${session} (reason: ${reason})`,
+            attempts: attempt,
+            watchdog,
+          };
         }
       }
       const after = await sessions();
@@ -468,6 +508,9 @@ export function createColabBackend({
         evidence: `the VM may still be running and units are draining: colab stop was accepted but colab sessions still lists ${session}. Last output: ${lastEvidence.slice(-160)}`,
         listed: after.sessions.map((entry) => entry.name),
         manual: `colab stop -s ${session}`,
+        // deliberately not disarmed: an unconfirmed stop is exactly when the watchdog has to stay
+        // armed, because it may be the only thing that ends the spend
+        watchdog: { disarmed: false, deadline: state.watchdog?.deadline ?? null },
       };
     },
 

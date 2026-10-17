@@ -146,7 +146,9 @@ export function spendEstimate({ usageBefore, usageAfter, elapsedMinutes, ourAssi
     label: "estimate",
     detail: otherSessionsRunning
       ? "estimate, other sessions running on this account"
-      : "estimate from the account balance delta and elapsed time",
+      : delta === null
+        ? "estimate from the elapsed time and the account rate (no balance reading on this run)"
+        : "estimate from the account balance delta and elapsed time",
     balanceDelta: delta === null ? null : round(delta, 3),
     byRate: byRate === null ? null : round(byRate, 3),
     elapsedMinutes: round(Number(elapsedMinutes), 1),

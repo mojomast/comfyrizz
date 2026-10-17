@@ -3,6 +3,7 @@
 // read back from its argv log and state file.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -13,8 +14,30 @@ import { readLog, installFakeColab, makeCli, readState } from "./helpers.mjs";
 const ASSET_BYTES = "COMFYRIZZ-FAKE-PLATE-BYTES-0123456789";
 const HF_TOKEN = "hf_FAKETOKENVALUE0123456789ABCDEF";
 
+//: every scratch directory this file created: a detached watchdog is the one child nothing else
+//: reaps, so the file checks for survivors itself (B6 acceptance: no leftover process)
+const scratchRoots = [];
+
+test.after(() => {
+  const listing = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" }).stdout.split("\n");
+  const ours = listing.filter((line) => scratchRoots.some((root) => line.includes(root)));
+  for (const line of ours) {
+    try {
+      process.kill(Number(line.trim().split(/\s+/)[0]), "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+  assert.deepEqual(
+    ours.map((line) => line.trim().slice(0, 120)),
+    [],
+    "a test left a process behind: arm the watchdog with a short deadline and stop the session",
+  );
+});
+
 function workspace() {
   const dir = mkdtempSync(join(tmpdir(), "comfyrizz-b3-"));
+  scratchRoots.push(dir);
   const jobsFile = join(dir, "jobs.json");
   writeFileSync(
     jobsFile,
@@ -278,6 +301,9 @@ test("provider keys are redacted out of every step log", async () => {
     packageDir: null,
     budgetUnits: 20,
     hfTokenPath: ws.tokenPath,
+    // even this short-lived backend arms a watchdog: keep its deadline short and stop the
+    // session, so no detached process outlives the test (B6 acceptance: no leftover process)
+    watchdogMinutes: 0.02,
   });
   await backend.ensureUp({ approved: true });
   await backend.health();
@@ -288,5 +314,10 @@ test("provider keys are redacted out of every step log", async () => {
   assert.ok(joined.includes("[redacted]"), joined.slice(-200));
   const healthLog = readdirSync(join(fake.tmpDir, "logs")).find((name) => name.startsWith("health"));
   const stepLog = readFileSync(join(fake.tmpDir, "logs", healthLog), "utf8");
+  // stop the session before the last assertion: a run that never tears down leaves the detached
+  // watchdog armed, which is what leaked a 45-minute sleeper before B6
+  const teardown = await backend.teardown("done");
+  assert.equal(teardown.state, "stopped");
+  assert.equal(teardown.watchdog.disarmed, true);
   assert.ok(!stepLog.includes("hf_ANOTHERSECRETVALUE0123456789"));
 });
