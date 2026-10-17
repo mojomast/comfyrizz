@@ -32,6 +32,8 @@ def main() -> int:
         print("jobs.json is not in the bundle", file=sys.stderr, flush=True)
         return 2
 
+    selector = REMOTE_ROOT / "batch.txt"
+    batch = selector.read_text(encoding="utf-8").strip() if selector.is_file() else ""
     command = [
         sys.executable,
         "-m",
@@ -45,6 +47,10 @@ def main() -> int:
         "--base-url",
         PROXY_URL,
     ]
+    if batch:
+        # the backend admits and collects one batch at a time (reserve formula, SPEC 6.6)
+        command += ["--batch", batch]
+        print(f"$ batch selector: {batch}", flush=True)
     print(f"$ {' '.join(command)}", flush=True)
     process = subprocess.Popen(command, cwd=str(workdir), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     assert process.stdout is not None

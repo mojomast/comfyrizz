@@ -1,0 +1,338 @@
+// B6 acceptance: Google Colab hardening against fakes.
+//
+// Every failure case ends with the VM verifiably stopped or `stop_unconfirmed` surfaced, nothing is
+// auto-resubmitted, and the budget is never exceeded. Fakes only: the fake `colab` executable
+// (test/bin/fake-colab.mjs) and the fake Comfy v2 server (pipeline-py/tests/fake_comfy_server.py).
+// No real Google Colab call is made anywhere in this file.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, copyFileSync, writeFileSync, symlinkSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { createColabBackend } from "../src/colab-backend.mjs";
+import { createByoBackend } from "../src/byo-backend.mjs";
+import { installFakeColab, makeCli, readLog, readState } from "./helpers.mjs";
+
+const HERE = fileURLToPath(new URL(".", import.meta.url));
+const REPO = resolve(HERE, "..", "..", "..");
+const PYTHON = join(REPO, ".venv", "bin", "python");
+const FAKE_SERVER = join(REPO, "pipeline-py", "tests", "fake_comfy_server.py");
+const PLAN_FIXTURE = join(REPO, "pipeline-py", "tests", "fixtures");
+const HAVE_PYTHON = existsSync(PYTHON);
+
+const children = [];
+const backends = [];
+const scratchRoots = [];
+
+test.after(() => {
+  for (const backend of backends) {
+    try {
+      const pid = backend.inspect?.().proxyPid;
+      if (pid) process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+  for (const child of children) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+});
+
+function register(backend) {
+  backends.push(backend);
+  return backend;
+}
+
+/** A workspace with the five-job plan (stills, plate, upscale, audio) and its workflows. */
+function workspace() {
+  const dir = mkdtempSync(join(tmpdir(), "comfyrizz-b6-"));
+  scratchRoots.push(dir);
+  copyFileSync(join(PLAN_FIXTURE, "jobs.json"), join(dir, "jobs.json"));
+  symlinkSync(join(PLAN_FIXTURE, "workflows"), join(dir, "workflows"));
+  mkdirSync(join(dir, "out"), { recursive: true });
+  return dir;
+}
+
+/** The VM's own output directory, as the fake colab sees it: the runner writes these. */
+function stageVmOutput(fake, jobsDoc, outDir, { complete = true } = {}) {
+  const state = readState(fake.statePath);
+  const files = [];
+  const assets = outDir || fake.tmpDir;
+  const jobs = complete ? jobsDoc.jobs.filter((job) => job.kind !== "upscale" || true) : [];
+  const entries = [];
+  for (const job of jobs) {
+    const contents = `FAKE-${job.id}-BYTES`;
+    files.push({ path: `/content/comfyrizz/out/${job.output}`, content: contents });
+    entries.push({
+      job: job.id,
+      status: "succeeded",
+      attempt_id: `att_${job.id}_01`,
+      job_id: `job_${job.id}`,
+      outputs: [{ file: job.output, relative: job.output, sha256: "0".repeat(64), bytes: contents.length }],
+    });
+  }
+  files.push({
+    path: "/content/comfyrizz/out/manifest.json",
+    content: JSON.stringify({ v: 1, run_id: "b6", jobsHash: jobsDoc.hash, complete, counts: {}, jobs: entries }),
+  });
+  state.scripts = {
+    ...(state.scripts || {}),
+    "run_jobs.py": { output: '{"v":1,"event":"job_done","value":1}', files },
+  };
+  writeFileSync(fake.statePath, JSON.stringify(state, null, 2));
+  return { assets, entries };
+}
+
+function colabBackendFor({ dir, fake, budgetUnits = 20, options = {} }) {
+  return register(
+    createColabBackend({
+      cli: makeCli(fake),
+      packageId: "pkg_b6hardening01",
+      scratchDir: join(dir, "scratch"),
+      logDir: join(fake.tmpDir, "logs"),
+      packageDir: null,
+      jobsFile: join(dir, "jobs.json"),
+      budgetUnits,
+      hfTokenPath: null,
+      teardownRetryMs: 5,
+      watchdogMinutes: 0.02,
+      ...options,
+    }),
+  );
+}
+
+function plan(dir) {
+  return JSON.parse(readFileSync(join(dir, "jobs.json"), "utf8"));
+}
+
+function commands(fake) {
+  return readLog(fake.logPath).map((entry) => entry.argv[0]);
+}
+
+test("a lost exec mid-package reconciles, and the VM is still verifiably stopped", async (t) => {
+  if (!HAVE_PYTHON) return t.skip("no venv python");
+  const dir = workspace();
+  const doc = plan(dir);
+  const fake = installFakeColab(dir, {
+    state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n", scripts: { "run_jobs.py": { lost: true } } },
+  });
+  const backend = colabBackendFor({ dir, fake, options: { script: null } });
+  await backend.ensureUp({ approved: true });
+
+  const run = await backend.run(join(dir, "jobs.json"));
+  assert.equal(run.lost, true);
+  assert.equal(run.batchesRun.length, 1, "the first batch was the one that was lost");
+
+  const execs = readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec").map((entry) => entry.argv[entry.argv.indexOf("-f") + 1]);
+  assert.deepEqual(execs, ["run_jobs.py", "reconcile.py"], "the batch ran once and reconciled once");
+
+  const teardown = await backend.teardown("error");
+  assert.equal(teardown.state, "stopped", "a lost exec still ends with a verified stop");
+  assert.match(teardown.evidence, /no longer lists/);
+  assert.ok(!commands(fake).includes("attach"));
+});
+
+test("a collect that fails still stops the VM and keeps the manifest honest", async (t) => {
+  if (!HAVE_PYTHON) return t.skip("no venv python");
+  const dir = workspace();
+  const doc = plan(dir);
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
+  stageVmOutput(fake, doc, dir);
+  const state = readState(fake.statePath);
+  state.failDownloads = 99; // every collect fails
+  writeFileSync(fake.statePath, JSON.stringify(state, null, 2));
+
+  const backend = colabBackendFor({ dir, fake });
+  await backend.ensureUp({ approved: true });
+  const run = await backend.run(join(dir, "jobs.json"));
+
+  assert.equal(run.manifest, null, "a failed collect cannot produce a manifest");
+  assert.equal(run.collect.ok, false);
+  const teardown = await backend.teardown("error");
+  assert.equal(teardown.state, "stopped");
+  assert.equal(fake.submit_count(), 0, "a collect failure never resubmits: fakes only, no v2 on this path");
+});
+
+test("stop fails twice, then succeeds: the VM is stopped, not abandoned", async () => {
+  const dir = workspace();
+  const fake = installFakeColab(dir, {
+    state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n", stopFailsTimes: 2 },
+  });
+  const backend = colabBackendFor({ dir, fake });
+  await backend.ensureUp({ approved: true });
+
+  const teardown = await backend.teardown("done");
+  assert.equal(teardown.state, "stopped", JSON.stringify(teardown));
+  assert.equal(teardown.attempts, 3, "two failures, then the stop that worked");
+  const stops = readLog(fake.logPath).filter((entry) => entry.argv[0] === "stop");
+  assert.equal(stops.length, 3);
+  assert.deepEqual(readState(fake.statePath).stopFailCount, 2);
+});
+
+test("stop that never confirms is surfaced as stop_unconfirmed, with the manual command", async () => {
+  const dir = workspace();
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n", keepAfterStop: true } });
+  const backend = colabBackendFor({ dir, fake, options: { teardownRetries: 3 } });
+  await backend.ensureUp({ approved: true });
+
+  const teardown = await backend.teardown("user");
+  assert.equal(teardown.state, "stop_unconfirmed");
+  assert.match(teardown.evidence, /units are draining/);
+  assert.equal(teardown.manual, "colab stop -s comfyrizz-b6hardening01");
+  assert.equal(readLog(fake.logPath).filter((entry) => entry.argv[0] === "stop").length, 3);
+});
+
+test("the wall-clock cap refuses before anything is submitted", async (t) => {
+  if (!HAVE_PYTHON) return t.skip("no venv python");
+  const dir = workspace();
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
+  const backend = colabBackendFor({ dir, fake, budgetUnits: 500, options: { wallClockCapMinutes: 0.0001 } });
+  await backend.ensureUp({ approved: true });
+  backend.state.startedAtMs = Date.now() - 60000;
+
+  const run = await backend.run(join(dir, "jobs.json"));
+  assert.equal(run.refused, true);
+  assert.equal(run.reason, "wall_clock");
+  assert.match(run.message, /Wall-clock cap reached/);
+  const seen = commands(fake);
+  assert.ok(!seen.includes("upload"), "nothing was uploaded for a refused run");
+  assert.ok(!seen.includes("exec"), "nothing was executed for a refused run");
+  const teardown = await backend.teardown("budget");
+  assert.equal(teardown.state, "stopped");
+});
+
+test("the reserve formula refuses mid-package, and the budget is never exceeded", async (t) => {
+  if (!HAVE_PYTHON) return t.skip("no venv python");
+  const dir = workspace();
+  const doc = plan(dir);
+  const fake = installFakeColab(dir, { state: { usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 0\n" } });
+  stageVmOutput(fake, doc, dir, { complete: false });
+  // enough for the stills batch (≈1.09 units) but not for the plate batch on top of it
+  const backend = colabBackendFor({ dir, fake, budgetUnits: 1.15 });
+  await backend.ensureUp({ approved: true });
+
+  const run = await backend.run(join(dir, "jobs.json"));
+  assert.equal(run.refused, true, JSON.stringify(run).slice(0, 300));
+  assert.equal(run.reason, "refused");
+  assert.match(run.message, /Refusing the next job/);
+  assert.equal(run.batchesRun.length, 1, "the first batch ran, the second was refused");
+  assert.deepEqual(run.batchesRun.map((entry) => entry.batch), ["stills"]);
+
+  const uploads = readLog(fake.logPath).filter((entry) => entry.argv[0] === "upload");
+  assert.equal(uploads.length, 2, "one bundle upload plus one batch selector");
+  const selector = uploads.map((entry) => entry.argv[4]).find((remote) => String(remote).endsWith("batch.txt"));
+  assert.equal(selector, "/content/comfyrizz/batch.txt");
+  assert.ok(backend.inspect().events.some((event) => event.type === "refused"));
+
+  const teardown = await backend.teardown("budget");
+  assert.equal(teardown.state, "stopped");
+  assert.ok(doc.batches.length > 1, "the fixture really is a multi-batch plan");
+});
+
+test("the BYO path surfaces submission_unknown and never resubmits it", async (t) => {
+  if (!HAVE_PYTHON) return t.skip("no venv python");
+  const dir = workspace();
+  const requestLog = join(dir, "requests.jsonl");
+  const fake = spawn(PYTHON, [FAKE_SERVER, "--port", "0", "--lifetime-seconds", "90", "--drop-first-response", "--request-log", requestLog], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  children.push(fake);
+  const port = await new Promise((res, rej) => {
+    let buffer = "";
+    const timer = setTimeout(() => rej(new Error("fake did not start")), 10000);
+    fake.stdout.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const match = /listening on (\d+)/.exec(buffer);
+      if (match) {
+        clearTimeout(timer);
+        res(Number(match[1]));
+      }
+    });
+  });
+  const comfyui = await new Promise((res, rej) => {
+    const other = spawn(PYTHON, [FAKE_SERVER, "--port", "0", "--lifetime-seconds", "90"], { stdio: ["ignore", "pipe", "pipe"] });
+    children.push(other);
+    let buffer = "";
+    const timer = setTimeout(() => rej(new Error("fake comfyui did not start")), 10000);
+    other.stdout.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const match = /listening on (\d+)/.exec(buffer);
+      if (match) {
+        clearTimeout(timer);
+        res(Number(match[1]));
+      }
+    });
+  });
+
+  const backend = register(
+    createByoBackend({
+      comfyuiUrl: `http://127.0.0.1:${comfyui}`,
+      port,
+      pythonBin: PYTHON,
+      runnerTimeoutSeconds: 20,
+      healthTimeoutMs: 5000,
+      outDir: join(dir, "out"),
+      jobsFile: join(dir, "jobs.json"),
+      jobsDoc: plan(dir),
+    }),
+  );
+  const first = await backend.run(join(dir, "jobs.json"));
+  const unknown = first.manifest.jobs.filter((entry) => entry.status === "submission_unknown");
+  assert.equal(unknown.length, 1, JSON.stringify(first.manifest.counts));
+  assert.equal(unknown[0].error.code, "transport_ambiguous");
+  assert.equal(first.manifest.complete, false);
+
+  const posts = () => readFileSync(requestLog, "utf8").split("\n").filter((line) => line.includes('"POST"')).length;
+  const before = posts();
+  assert.equal(before, 1, "exactly one submission reached the server before the reply was lost");
+  const second = await backend.run(join(dir, "jobs.json"));
+  assert.equal(posts(), before, "the ambiguous job was resubmitted");
+  assert.ok(second.manifest.jobs.some((entry) => entry.status === "submission_unknown" || entry.status === "skipped"));
+});
+
+test("the orphan reaper lists stale sessions and offers stop, never deletes", async () => {
+  const dir = workspace();
+  const fake = installFakeColab(dir, {
+    state: {
+      usage: "Current balance: 387 units\nUsage rate: 8.90/hr\nActive assignments: 2\n",
+      sessions:
+        "[comfyrizz-b6hardening01] live | Hardware: G4 | Shape: STANDARD | Variant: GPU | Status: IDLE\n[comfyrizz-staleone] old | Hardware: G4 | Shape: STANDARD | Variant: GPU | Status: IDLE\n[name-that-is-not-ours] someone | Hardware: T4 | Shape: STANDARD | Variant: GPU | Status: BUSY\n",
+    },
+  });
+  const backend = colabBackendFor({ dir, fake });
+  await backend.ensureUp({ approved: true });
+
+  const { offers, autoStopped, scanned } = await backend.orphans();
+  assert.equal(scanned, 3);
+  assert.deepEqual(offers.map((offer) => offer.session), ["comfyrizz-staleone"], "only the stale comfyrizz-* session is offered");
+  assert.deepEqual(autoStopped, []);
+  assert.ok(offers[0].offer.startsWith("colab stop -s"));
+  assert.match(offers[0].note, /user's decision/);
+  const stops = readLog(fake.logPath).filter((entry) => entry.argv[0] === "stop");
+  assert.deepEqual(stops, [], "the reaper must stop nothing");
+
+  const spend = backend.spend();
+  assert.equal(spend.label, "estimate");
+  assert.match(spend.detail, /other sessions running/, "an account with more assignments than ours says so");
+});
+
+test("no test process is left behind by the hardening cases", () => {
+  const listing = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" }).stdout.split("\n");
+  const ours = listing.filter(
+    (line) =>
+      scratchRoots.some((root) => line.includes(root)) ||
+      line.includes("backends/src/watchdog.mjs") ||
+      line.includes("backends/test/bin/v2-stub.mjs") ||
+      line.includes("tests/fake_comfy_server.py"),
+  );
+  // the fake servers are spawned with a bounded lifetime and killed in test.after; a survivor here
+  // means a test leaked a child (the B3/B5 suites did before this test existed)
+  assert.deepEqual(ours.map((line) => line.trim().slice(0, 120)), []);
+  assert.ok(scratchRoots.length > 0);
+});

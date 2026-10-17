@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "generator": "ltx25",
+  "kind": "upscale",
+  "note": "Finals pass (SPEC 6.4: stage 1 -> x2 latent upscale -> crop). A planned upscale job carries the plate's resolved parameters and this map declares where each lands, with the stage-2 controls (its own noise seed and the short sigma schedule) named explicitly. The upsampler node itself (21, LTXVLatentUpsampler) takes no scalar input; the target size and the crop that brings the result back to the package format live on the job (dims/upscaleTarget/crop) and are applied by the renderer, not by the graph. A package that names gen.inputs.upscale_workflow gets that graph's own map instead - which is why the map has a name of its own.",
+  "map": {
+    "prompt": ["5", "text"],
+    "image": ["30", "image"],
+    "width": ["8", "width"],
+    "height": ["8", "height"],
+    "frames": [["8", "length"], ["9", "frames_number"]],
+    "fps": ["7", "frame_rate"],
+    "seed": ["11", "noise_seed"],
+    "stage2_seed": ["23", "noise_seed"],
+    "stage2_sigmas": ["24", "sigmas"]
+  }
+}

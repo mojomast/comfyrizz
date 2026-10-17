@@ -56,6 +56,9 @@ class RunnerConfig:
     allow_retry_failed: bool = True
     progress_path: Path | None = None
     echo_progress: bool = True
+    #: run only one batch of the plan ("stills" | "plates" | "upscales" | "audio"); the Google
+    #: Colab backend admits and collects batch by batch so the reserve is checked mid-package
+    batch: str | None = None
     kill_after_submit: bool = field(default_factory=lambda: _truthy(os.environ.get(KILL_AFTER_SUBMIT_ENV)))
 
     def run_dir(self) -> Path:
@@ -84,11 +87,34 @@ class Runner:
         if problems:
             detail = "\n".join(f"  {p['path']} {p['code']}: {p['message']}" for p in problems)
             raise ValueError(f"{self.config.jobs_file} is not a valid comfyrizz.jobs/v1 document:\n{detail}")
+        if self.config.batch:
+            raw = self._filter_batch(raw, self.config.batch)
         self.jobs_doc = raw
         return raw
 
+    def _filter_batch(self, doc: dict[str, Any], batch: str) -> dict[str, Any]:
+        """Keep one batch, and refuse to run it before its dependencies have landed."""
+        known = {job["batch"] for job in doc.get("jobs", [])}
+        if batch not in known:
+            raise ValueError(f"batch {batch!r} is not in this plan (it has: {', '.join(sorted(known))})")
+        succeeded = {attempt.job for attempt in self.attempts.load_all() if attempt.state == "succeeded"}
+        kept = []
+        for job in doc.get("jobs", []):
+            if job.get("batch") != batch:
+                continue
+            blocked = [dep for dep in job.get("deps", []) if dep not in succeeded and all(other["id"] != dep or other.get("batch") != batch for other in doc.get("jobs", []))]
+            if blocked:
+                job = {**job, "_blockedBy": blocked}
+            kept.append(job)
+        filtered = {**doc, "jobs": kept, "batch": batch, "batches": [entry for entry in doc.get("batches", []) if entry["name"] in (batch,)]}
+        filtered["hash"] = doc.get("hash")
+        return filtered
+
     def _jobs_by_id(self) -> dict[str, dict[str, Any]]:
         return {job["id"]: job for job in self.jobs_doc.get("jobs", [])}
+
+    def job_params_source(self, job: dict[str, Any]) -> str | None:
+        return job.get("paramsSource")
 
     # -- cache ---------------------------------------------------------------------
     def _cache_path(self) -> Path:
@@ -256,6 +282,7 @@ class Runner:
             params=job.get("params", {}),
             idempotency_key=idempotency_key,
             metadata={"comfyrizz_attempt": attempt_id, "comfyrizz_job": job["id"]},
+            params_source=self.job_params_source(job),
         )
 
         if outcome.submitted:
@@ -321,10 +348,16 @@ class Runner:
         failed_jobs: set[str] = set()
         for job in jobs:
             dependencies = [dep for dep in job.get("deps", []) if dep in failed_jobs]
-            if dependencies:
+            blocked = list(job.get("_blockedBy") or [])
+            if dependencies or blocked:
                 failed_jobs.add(job["id"])
-                self.results[job["id"]] = self._result(job, "skipped", reason=f"dependency failed: {', '.join(dependencies)}")
-                self.progress.emit("job_skipped", job=job["id"], value=f"dependency failed: {', '.join(dependencies)}")
+                reason = (
+                    f"dependency not in this batch and not already succeeded: {', '.join(blocked)}"
+                    if blocked
+                    else f"dependency failed: {', '.join(dependencies)}"
+                )
+                self.results[job["id"]] = self._result(job, "skipped", reason=reason)
+                self.progress.emit("job_skipped", job=job["id"], value=reason)
                 self._write_manifest()
                 continue
 
@@ -422,6 +455,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reconcile-timeout", type=float, default=120.0)
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--progress-log", default=None, help="also append JSON-lines progress to this file")
+    parser.add_argument("--batch", default=None, help="run one batch of the plan (stills|plates|upscales|audio)")
     parser.add_argument("--quiet", action="store_true", help="do not echo progress lines")
     parser.add_argument("--json", action="store_true", help="print the manifest summary as JSON")
     args = parser.parse_args(argv)
@@ -436,6 +470,7 @@ def main(argv: list[str] | None = None) -> int:
         cache_enabled=not args.no_cache,
         progress_path=Path(args.progress_log) if args.progress_log else None,
         echo_progress=not args.quiet,
+        batch=args.batch,
     )
     runner = Runner(config)
     try:

@@ -327,45 +327,93 @@ export function createColabBackend({
       return { ok: Boolean(report.ok), detail: report.detail || "health.py reported", vramFreeGB: report.vramFreeGB, report };
     },
 
-    /** Upload the bundle and run the batch on the VM. The manifest, not the exit code, decides. */
+    /**
+     * Upload the bundle and run the plan on the VM, one batch at a time.
+     *
+     * The manifest, not the exit code, decides success. Admitting and collecting per batch is what
+     * makes the reserve formula work "before each job" in the SPEC.md §6.6 sense: a package whose
+     * second batch would not fit the budget stops after the first, with the earlier outputs already
+     * on the host ("a later failure never discards earlier outputs", §6.4).
+     */
     async run(jobsFile, onEvent = () => {}, signal = null) {
-      const jobs = readJobs(jobsFile);
-      const admission = admit(jobs, { onEvent });
-      if (!admission.allowed) {
-        emit(onEvent, { type: "refused", reason: admission.reason, message: admission.message });
-        return { refused: true, reason: admission.reason, message: admission.message, manifest: null };
-      }
-      const bundle = createBundle({ jobsFile, packageDir, scratch, zipCommand });
-      const uploadBundle = await step(argvUpload({ session, localPath: bundle, remotePath: `${REMOTE_ROOT}/jobs.zip` }), {
-        label: "upload-bundle",
-        wallMs: 600000,
-      });
-      if (uploadBundle.code !== 0) throw new ColabCliError(`uploading jobs.zip failed (exit ${uploadBundle.code})`);
+      const doc = JSON.parse(readFileSync(jobsFile, "utf8"));
+      const jobs = Array.isArray(doc.jobs) ? doc.jobs : [];
+      const batchNames = (doc.batches || []).map((entry) => entry.name);
+      const perBatch = batchNames.length > 1;
+      const planned = perBatch ? batchNames : [null];
+      state.runId = state.runId || `run_${jobs.length}_${Date.now().toString(36)}`;
+      let manifest = null;
+      let collect = null;
+      let uploaded = false;
+      const ran = [];
 
-      const exec = await step(argvExec({ session, file: runJobsScript, timeout: 3600 }), {
-        label: "run-jobs",
-        wallMs: 3660000,
-        onLog: (text) => {
-          for (const line of text.split("\n")) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("{")) continue;
-            try {
-              onEvent(JSON.parse(trimmed));
-            } catch {
-              /* not a progress line */
+      for (const name of planned) {
+        const subset = name ? jobs.filter((job) => job.batch === name) : jobs;
+        const admission = admit(subset, { onEvent });
+        if (!admission.allowed) {
+          emit(onEvent, { type: "refused", batch: name, reason: admission.reason, message: admission.message });
+          return {
+            refused: true,
+            reason: admission.reason,
+            message: admission.message,
+            batchesRun: ran,
+            manifest,
+            collect,
+          };
+        }
+        if (!uploaded) {
+          const bundle = createBundle({ jobsFile, packageDir, scratch, zipCommand });
+          const uploadBundle = await step(argvUpload({ session, localPath: bundle, remotePath: `${REMOTE_ROOT}/jobs.zip` }), {
+            label: "upload-bundle",
+            wallMs: 600000,
+          });
+          if (uploadBundle.code !== 0) throw new ColabCliError(`uploading jobs.zip failed (exit ${uploadBundle.code})`);
+          uploaded = true;
+        }
+        if (name) {
+          // the batch selector travels as a file: `colab exec -f` takes a script, and inventing an
+          // argv shape for script arguments is not something this backend will do unverified
+          const selector = join(scratch, "batch.txt");
+          writeFileSync(selector, `${name}\n`);
+          const uploadSelector = await step(argvUpload({ session, localPath: selector, remotePath: `${REMOTE_ROOT}/batch.txt` }), {
+            label: "upload-batch",
+            wallMs: 120000,
+          });
+          if (uploadSelector.code !== 0) throw new ColabCliError(`uploading the batch selector failed (exit ${uploadSelector.code})`);
+          emit(onEvent, { type: "batch_start", batch: name, jobs: subset.length });
+        }
+
+        const exec = await step(argvExec({ session, file: runJobsScript, timeout: 3600 }), {
+          label: name ? `run-jobs-${name}` : "run-jobs",
+          wallMs: 3660000,
+          onLog: (text) => {
+            for (const line of text.split("\n")) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("{")) continue;
+              try {
+                onEvent(JSON.parse(trimmed));
+              } catch {
+                /* not a progress line */
+              }
             }
-          }
-        },
-      });
-      state.lastExec = { code: exec.code, lost: isLost(exec), timedOut: Boolean(exec.timedOut) };
-      const lost = isLost(exec);
-      emit(onEvent, { type: "run_exec", code: exec.code, lost, timedOut: Boolean(exec.timedOut) });
-      if (lost) {
-        const reconciled = await backend.reconcile(state.runId || "unknown", { onEvent });
-        return { lost: true, manifest: reconciled.manifest, reconcile: reconciled };
+          },
+        });
+        ran.push({ batch: name, code: exec.code, lost: isLost(exec), timedOut: Boolean(exec.timedOut) });
+        state.lastExec = { code: exec.code, lost: isLost(exec), timedOut: Boolean(exec.timedOut), batch: name };
+        emit(onEvent, { type: "run_exec", batch: name, code: exec.code, lost: isLost(exec), timedOut: Boolean(exec.timedOut) });
+
+        if (isLost(exec)) {
+          const reconciled = await backend.reconcile(state.runId, { onEvent });
+          return { lost: true, batchesRun: ran, manifest: reconciled.manifest, reconcile: reconciled };
+        }
+        // collect after every batch, so a later failure never discards this batch's work
+        collect = await collectOut({ onEvent, expectComplete: false });
+        manifest = collect.manifest;
       }
-      const collected = await collectOut({ onEvent });
-      return { lost: false, manifest: collected.manifest, collect: collected };
+
+      collect = await collectOut({ onEvent, expectComplete: true });
+      manifest = collect.manifest || manifest;
+      return { lost: false, batchesRun: ran, manifest, collect };
     },
 
     /**

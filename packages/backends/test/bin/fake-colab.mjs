@@ -34,6 +34,8 @@ const command = argv[0];
 const state = load();
 state.sessions ??= "No active sessions found on server.\n";
 state.remoteDir ??= path.join(path.dirname(STATE_PATH), "remote");
+state.failDownloads ??= 0;   // number of `download` calls that must fail (collect fails)
+state.stopFailsTimes ??= 0;  // number of `stop` calls that exit non-zero before one works
 fs.mkdirSync(state.remoteDir, { recursive: true });
 
 function out(text, code = 0) {
@@ -65,6 +67,12 @@ if (command === "new") {
 if (command === "stop") {
   const session = sessionOf(argv);
   if (state.failStop) out("[colab] Error: could not stop the session", 1);
+  if (Number(state.stopFailsTimes) > 0) {
+    state.stopFailCount = (state.stopFailCount || 0) + 1;
+    state.stopFailsTimes = Number(state.stopFailsTimes) - 1;
+    save(state);
+    out("[colab] Error: the runtime refused the stop request", 1);
+  }
   state.stopCount = (state.stopCount || 0) + 1;
   if (state.keepAfterStop) {
     // the CLI accepted the stop but the session is still listed: the stop_unconfirmed case
@@ -89,6 +97,11 @@ if (command === "upload") {
   out(`[colab] Uploaded ${local} -> ${remote}`);
 }
 if (command === "download") {
+  if (Number(state.failDownloads) > 0) {
+    state.failDownloads = Number(state.failDownloads) - 1;
+    save(state);
+    out("[colab] Error: transfer failed", 1);
+  }
   const [, , , remote, local] = argv;
   const source = remoteToLocal(remote);
   if (!fs.existsSync(source)) out(`[colab] Error: ${remote} not found`, 1);

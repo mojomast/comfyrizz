@@ -38,6 +38,10 @@
           "generator": { "enum": ["llm-svg", "flux3-klein", "ltx25", "kokoro"] },
           "workflow": { "type": "string", "minLength": 1, "maxLength": 512 },
           "workflowSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "paramsSource": {
+            "type": ["string", "null"],
+            "description": "Specialised params map to prefer, e.g. 'upscale' for the finals stage of a plate graph."
+          },
           "model": { "type": ["string", "null"] },
           "modelRevision": { "type": ["string", "null"] },
           "deps": { "type": "array", "items": { "type": "string", "minLength": 1 } },

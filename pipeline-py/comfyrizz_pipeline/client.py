@@ -92,15 +92,26 @@ def classify_submit_error(exc: BaseException, idempotency_key: str | None = None
     return SubmitOutcome("ambiguous", idempotency_key=idempotency_key, error=payload)
 
 
-def load_params_map(workflow_path: Path) -> dict[str, list[str]]:
+def load_params_map(workflow_path: Path, source: str | None = None) -> dict[str, list[str]]:
     """``<workflow>.api.json`` -> sibling ``<workflow>.api.params.json`` (optional).
 
     Each entry maps a parameter name to ``[node_id, field]`` or to a list of such pairs when
     one value belongs in more than one node (LTX-2.5 keeps the frame count on both the video
     and the audio latent).
+
+    ``source`` names a specialised map (``<workflow>.api.<source>.params.json``), which is how the
+    finals upscale pass declares its own stage-2 controls while still reusing the graph. A missing
+    specialised file falls back to the plain map, so a package can name a workflow before anyone
+    has written its map.
     """
     workflow_path = Path(workflow_path)
-    candidates = [
+    candidates = []
+    if source:
+        candidates += [
+            workflow_path.with_suffix(f".{source}.params.json"),
+            workflow_path.parent / f"{workflow_path.stem}.{source}.params.json",
+        ]
+    candidates += [
         workflow_path.with_suffix(".params.json"),
         workflow_path.parent / f"{workflow_path.stem}.params.json",
     ]
@@ -191,10 +202,11 @@ class ComfyClient:
         params: dict[str, Any],
         idempotency_key: str,
         metadata: dict[str, str] | None = None,
+        params_source: str | None = None,
     ) -> SubmitOutcome:
         try:
             workflow = self.load_workflow(workflow_path)
-            mapping = load_params_map(workflow_path)
+            mapping = load_params_map(workflow_path, params_source)
             inject_params(workflow.json, mapping, params)
             handle = self.client.submit(workflow, idempotency_key=idempotency_key, metadata=metadata)
             return SubmitOutcome("submitted", job_id=handle.id, idempotency_key=idempotency_key)

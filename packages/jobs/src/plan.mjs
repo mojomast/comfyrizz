@@ -202,15 +202,20 @@ export function planJobs(pkg, opts = {}) {
         // A plate that will be upscaled is an intermediate; the upscale job owns the asset file.
         job.output = `out/intermediates/${assetId}.plate.mp4`;
         const upscaleParams = { ...params, upscale: params.upscale };
+        // A package may name a dedicated finals graph; otherwise the upscale stage of the plate
+        // graph is reused, and `paramsSource` tells the runner to prefer that stage's map.
+        const upscaleWorkflow = inputs.upscale_workflow ?? gen.workflow;
+        requireRelativePath(upscaleWorkflow, `assets.${assetId}.gen.inputs.upscale_workflow`, errors);
         const up = {
           id: `${assetId}.upscale`,
           kind: "upscale",
           batch: "upscales",
           asset: assetId,
           scene,
-          sceneIndex,
+          sceneIndex: sceneIndex >= 0 ? sceneIndex : null,
           generator: gen.generator,
-          workflow: gen.workflow,
+          workflow: upscaleWorkflow,
+          paramsSource: "upscale",
           workflowSha256: gen.workflow_sha256 ?? null,
           model: gen.model ?? null,
           modelRevision: gen.model_revision ?? null,
