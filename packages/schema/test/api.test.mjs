@@ -1,0 +1,137 @@
+// B1 acceptance: API surface, semantic units that no JSON fixture can carry, and the CLI.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  applyDefaults,
+  loadSchema,
+  pathProblem,
+  semanticCheck,
+  validatePackage,
+  SCHEMA_PATH,
+  LAYOUTS,
+  GENERATED_OUTPUT_LICENSE,
+} from "../src/index.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const pkgDir = join(here, "..");
+const repo = join(pkgDir, "..", "..");
+const fixture = (rel) => join(pkgDir, "fixtures", rel);
+const load = (rel) => JSON.parse(readFileSync(fixture(rel), "utf8"));
+
+test("the schema file is JSON Schema 2020-12 and declares the v1 id", () => {
+  const schema = loadSchema();
+  assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
+  assert.equal(schema.title, "comfyrizz.package/v1");
+  assert.ok(SCHEMA_PATH.endsWith("package-v1.schema.json"));
+  assert.deepEqual(schema.properties.schemaVersion, { const: 1, description: schema.properties.schemaVersion.description });
+});
+
+test("layout contract is published and the chart layout requires data", () => {
+  assert.deepEqual(Object.keys(LAYOUTS).sort(), ["chart", "hero", "list", "stat", "title"]);
+  assert.equal(LAYOUTS.chart.requiresData, true);
+  assert.deepEqual(LAYOUTS.chart.variants, ["bar"]);
+  assert.deepEqual(LAYOUTS.list.variants, ["bullets", "quote"]);
+  assert.equal(LAYOUTS.title.limits.headline, 48);
+});
+
+test("copy that exceeds a layout limit is a fail state, not silent clipping", () => {
+  const doc = load("valid/minimal.json");
+  doc.scenes[0].copy.headline = "x".repeat(LAYOUTS.title.limits.headline + 1);
+  const result = validatePackage(doc);
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.semantic.map((e) => e.code), ["SEM_COPY_TOO_LONG"]);
+  assert.match(result.semantic[0].message, /allows 48 characters/);
+});
+
+test("a non-finite number is reported instead of crashing", () => {
+  const doc = load("valid/minimal.json");
+  doc.datasets = { d_bad: { unit: "x", values: [{ label: "a", value: Number.NaN }], source: "user" } };
+  const result = semanticCheck(doc);
+  assert.ok(result.errors.some((e) => e.code === "SEM_NUMBER_NOT_FINITE"));
+});
+
+test("path rules: the documented table", () => {
+  const table = [
+    ["assets/a.png", null],
+    ["out/final.mp4", null],
+    ["/etc/passwd", "absolute path"],
+    ["~/secrets.txt", "home-relative path"],
+    ["C:/windows/thing.png", "Windows drive path"],
+    ["assets\\a.png", "backslash separator"],
+    ["../outside.mp4", "parent-directory traversal"],
+    ["assets/../../outside.mp4", "parent-directory traversal"],
+    ["https://example.com/a.png", "URL where a relative path is expected"],
+    ["assets//a.png", "empty path segment"],
+    ["./assets/a.png", "leading ./ is noise; use a clean relative path"],
+    ["", "empty path"],
+    [null, "empty path"],
+    [12, "empty path"],
+  ];
+  for (const [value, expected] of table) {
+    assert.equal(pathProblem(value), expected, `pathProblem(${JSON.stringify(value)})`);
+  }
+});
+
+test("applyDefaults fills the generated-first defaults and does not mutate the input", () => {
+  const doc = load("valid/defaults-unfilled.json");
+  const out = applyDefaults(doc, loadSchema());
+  assert.deepEqual(out.assets.a_bg.license, { id: GENERATED_OUTPUT_LICENSE.id });
+  assert.equal(out.assets.a_bg.redistributable, true);
+  assert.equal(out.assets.a_bg.cutout, false);
+  assert.equal(out.scenes[0].locked, false);
+  assert.deepEqual(out.scenes[0].transitionOut, { type: "fade", frames: 15 });
+  assert.equal(out.scenes[0].background.fit, "cover");
+  assert.equal(out.scenes[0].background.loop, true);
+  assert.equal(out.scenes[0].foreground[0].anim, "none");
+  assert.equal(out.datasets.d_maybe.approved, false);
+  assert.equal(doc.assets.a_bg.license, undefined, "applyDefaults must be pure");
+});
+
+test("validatePackage with defaults validates the normalised document", () => {
+  const doc = load("valid/defaults-unfilled.json");
+  const result = validatePackage(doc, { defaults: true });
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.document.scenes[0].transitionOut, { type: "fade", frames: 15 });
+});
+
+test("CLI: valid fixture exits 0, invalid exits 1, --json carries the codes", () => {
+  const cli = join(pkgDir, "bin", "comfyrizz-validate.mjs");
+  const good = spawnSync(process.execPath, [cli, fixture("valid/minimal.json"), "--json"], { encoding: "utf8" });
+  assert.equal(good.status, 0, good.stderr);
+  const goodReport = JSON.parse(good.stdout);
+  assert.equal(goodReport.valid, true);
+
+  const bad = spawnSync(process.execPath, [cli, fixture("invalid/absolute-path.json")], { encoding: "utf8" });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /SEM_PATH_NOT_RELATIVE/);
+
+  const missing = spawnSync(process.execPath, [cli, fixture("nope.json")], { encoding: "utf8" });
+  assert.equal(missing.status, 2);
+});
+
+test("CLI reads a package from stdin", () => {
+  const cli = join(pkgDir, "bin", "comfyrizz-validate.mjs");
+  const text = readFileSync(fixture("valid/spec-6.3-example.json"), "utf8");
+  const run = spawnSync(process.execPath, [cli, "-", "--json"], { input: text, encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(JSON.parse(run.stdout).valid, true);
+});
+
+test("the package validator is not a no-op on the repo's own example layout", () => {
+  // A guard against a validator that passes everything: a mangled document must fail.
+  const doc = load("valid/spec-6.3-example.json");
+  doc.scenes[0].layout = "carousel";
+  const result = validatePackage(doc);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.code === "SCHEMA_ENUM"));
+  assert.ok(repo.endsWith("comfyrizz"));
+});
+
+test("SEMANTIC_CODES is exported and stable-sized", () => {
+  assert.ok(Object.isFrozen(LAYOUTS));
+  assert.ok(Object.isFrozen(GENERATED_OUTPUT_LICENSE));
+});

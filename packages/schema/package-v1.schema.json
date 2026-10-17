@@ -1,0 +1,1233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://comfyrizz.example/schema/package-v1.json",
+  "title": "comfyrizz.package/v1",
+  "description": "Comfyrizz package document (SPEC.md 6.3). A package is the deterministic input of the timeline compiler and the renderer, and the record of how every asset was obtained. Structural rules live here; cross-field rules (unique ids, resolvable refs, relative paths only, licence/rights separation, layout limits) live in the shared semantic validator implemented identically in TypeScript (src/semantic.mjs) and Python (pipeline-py/comfyrizz_pipeline/schema.py). Generated-first assets (PLAN.md 'Generated-first assets'): asset kind svg / vector-anim, gen.generator in llm-svg | flux3-klein | ltx25 | kokoro, gen.sanitizer_version, gen.render_check, output licence defaults to CC0-1.0 with redistributable true.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "revision",
+    "id",
+    "title",
+    "format",
+    "duration",
+    "scenes",
+    "assets",
+    "compliance"
+  ],
+  "unevaluatedProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "Documentation URL of the schema this document was written against. Deliberately not checked as a URI: the scaffolded placeholder in SPEC.md 6.3 is a literal example and must be filled in before release."
+    },
+    "schemaVersion": {
+      "const": 1,
+      "description": "Version of the comfyrizz.package schema this document conforms to."
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "description": "Monotonic package revision. Bumped by every accepted edit; a later render must record the revision it used."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^pkg_[A-Za-z0-9_-]{4,64}$",
+      "description": "Stable package id. Google Colab session names are derived from it (comfyrizz-<id>)."
+    },
+    "title": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "format": {
+      "type": "object",
+      "required": [
+        "width",
+        "height",
+        "fps"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 7680,
+          "multipleOf": 2
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 4320,
+          "multipleOf": 2
+        },
+        "fps": {
+          "type": "integer",
+          "enum": [
+            24,
+            25,
+            30,
+            50,
+            60
+          ],
+          "default": 30
+        }
+      }
+    },
+    "duration": {
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "target",
+            "flexible"
+          ]
+        },
+        "targetFrames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 108000,
+          "description": "Required for mode target. Integer frames at format.fps."
+        },
+        "minFrames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 108000
+        },
+        "maxFrames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 108000
+        },
+        "flexibleCeilingFrames": {
+          "const": 2700,
+          "description": "Documented ceiling of flexible mode (SPEC.md 6.8, PLAN.md A2)."
+        }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "palette": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/hexColor"
+          }
+        },
+        "font": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "default": "Inter"
+        },
+        "fonts": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": [
+              "family",
+              "file"
+            ],
+            "unevaluatedProperties": false,
+            "properties": {
+              "family": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "file": {
+                "$ref": "#/$defs/relativePath"
+              },
+              "weight": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 900
+              },
+              "license": {
+                "$ref": "#/$defs/license"
+              }
+            }
+          }
+        },
+        "logo_asset": {
+          "$ref": "#/$defs/assetId"
+        }
+      }
+    },
+    "voice": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "engine": {
+          "type": "string",
+          "enum": [
+            "kokoro",
+            "none"
+          ]
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0,
+          "default": 1.0
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16
+        }
+      }
+    },
+    "datasets": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {
+        "pattern": "^d[A-Za-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/dataset"
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/scene"
+      }
+    },
+    "assets": {
+      "type": "object",
+      "maxProperties": 512,
+      "propertyNames": {
+        "pattern": "^a[A-Za-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/asset"
+      }
+    },
+    "compliance": {
+      "type": "object",
+      "required": [
+        "open_weights_only"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "open_weights_only": {
+          "type": "boolean"
+        },
+        "llm": {
+          "type": "object",
+          "required": [
+            "provider",
+            "model",
+            "weights"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "provider": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "model": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "weights": {
+              "type": "string",
+              "enum": [
+                "open",
+                "closed",
+                "unknown"
+              ]
+            }
+          }
+        },
+        "backends_used": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "pattern": "^(colab:[A-Za-z0-9]+|byo-comfyui(:v2)?)$"
+          }
+        },
+        "closed_apis_used": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "renders": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "mode",
+          "file",
+          "revision"
+        ],
+        "unevaluatedProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "preview",
+              "draft",
+              "final"
+            ]
+          },
+          "file": {
+            "$ref": "#/$defs/relativePath"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "timeline_sha256": {
+            "$ref": "#/$defs/sha256Hex"
+          },
+          "frames": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 108000
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 7680
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4320
+          },
+          "fps": {
+            "type": "integer",
+            "enum": [
+              24,
+              25,
+              30,
+              50,
+              60
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "hexColor": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{6})$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "Repository-relative POSIX path. Absolute paths, traversal, backslashes, drive letters and ~ are rejected by the semantic validator so the failure message can name the offending form."
+    },
+    "sha256Hex": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Lowercase hex sha256. Uppercase is rejected on purpose: hashes are compared byte-for-byte across the manifest and the package."
+    },
+    "assetId": {
+      "type": "string",
+      "pattern": "^a[A-Za-z0-9_-]{0,63}$"
+    },
+    "sceneId": {
+      "type": "string",
+      "pattern": "^s[A-Za-z0-9_-]{0,63}$"
+    },
+    "datasetId": {
+      "type": "string",
+      "pattern": "^d[A-Za-z0-9_-]{0,63}$"
+    },
+    "number01": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "unitFloat": {
+      "type": "number",
+      "minimum": -4,
+      "maximum": 4
+    },
+    "license": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "unevaluatedProperties": false,
+      "description": "Rights of the *output file* (SPEC.md 6.3). Distinct from model_license, which covers the model that produced it.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 512
+        },
+        "attribution": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "approved_by_user": {
+          "type": "boolean"
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "blocked": {
+          "type": "boolean",
+          "description": "Set when a rights filter refused the asset (NC/ND/unknown). Blocked assets must not ship.",
+          "default": false
+        },
+        "blocked_reason": {
+          "type": "string",
+          "maxLength": 256
+        }
+      }
+    },
+    "modelLicense": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "unevaluatedProperties": false,
+      "description": "Licence of the *model weights*, never the output's rights.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 512
+        },
+        "commercial_ok_if": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "required": [
+        "unit",
+        "values",
+        "source"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "value"
+            ],
+            "unevaluatedProperties": false,
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "value": {
+                "type": "number",
+                "minimum": -1000000000000.0,
+                "maximum": 1000000000000.0
+              }
+            }
+          }
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "openverse",
+            "example",
+            "derived"
+          ],
+          "description": "example means invented placeholder numbers: they must be approved before a final render can cite them."
+        },
+        "approved": {
+          "type": "boolean",
+          "default": false
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 512
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 256
+        }
+      }
+    },
+    "copy": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "headline": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "kicker": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "sub": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "quote": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "attribution": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "footnote": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "cta": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 72
+          },
+          "description": "Bullet lines for the list layout."
+        }
+      }
+    },
+    "background": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/assetId"
+        },
+        "procedural": {
+          "type": "object",
+          "required": [
+            "pattern"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "enum": [
+                "gradient",
+                "grid",
+                "dots",
+                "grain",
+                "mesh"
+              ]
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            "palette": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/hexColor"
+              }
+            }
+          }
+        },
+        "fit": {
+          "type": "string",
+          "enum": [
+            "cover",
+            "contain"
+          ],
+          "default": "cover"
+        },
+        "loop": {
+          "type": "boolean",
+          "default": true
+        },
+        "muted": {
+          "type": "boolean",
+          "default": true
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 4
+        },
+        "trim": {
+          "type": "object",
+          "required": [
+            "startSeconds"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "startSeconds": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3600
+            },
+            "endSeconds": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3600
+            }
+          }
+        }
+      }
+    },
+    "foregroundItem": {
+      "type": "object",
+      "required": [
+        "asset"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/assetId"
+        },
+        "x": {
+          "$ref": "#/$defs/unitFloat"
+        },
+        "y": {
+          "$ref": "#/$defs/unitFloat"
+        },
+        "w": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 4
+        },
+        "h": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 4
+        },
+        "z": {
+          "type": "integer",
+          "minimum": -32,
+          "maximum": 32
+        },
+        "anim": {
+          "type": "string",
+          "enum": [
+            "none",
+            "fade-in",
+            "slide-in",
+            "parallax-in",
+            "zoom-in",
+            "ken-burns"
+          ],
+          "default": "none"
+        }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "required": [
+        "id",
+        "layout"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/sceneId"
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "title",
+            "hero",
+            "stat",
+            "chart",
+            "list"
+          ]
+        },
+        "variant": {
+          "type": "string",
+          "enum": [
+            "centered",
+            "outro",
+            "full-bleed",
+            "split",
+            "bar",
+            "bullets",
+            "quote"
+          ]
+        },
+        "preferredFrames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 108000
+        },
+        "copy": {
+          "$ref": "#/$defs/copy"
+        },
+        "data": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "dataset"
+              ],
+              "unevaluatedProperties": false,
+              "properties": {
+                "dataset": {
+                  "$ref": "#/$defs/datasetId"
+                },
+                "display": {
+                  "type": "string",
+                  "enum": [
+                    "bar",
+                    "number",
+                    "counter"
+                  ],
+                  "default": "bar"
+                }
+              }
+            }
+          ]
+        },
+        "background": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/background"
+            }
+          ]
+        },
+        "foreground": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/foregroundItem"
+          }
+        },
+        "transitionOut": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "none",
+                "fade",
+                "slide",
+                "wipe"
+              ]
+            },
+            "frames": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 120,
+              "default": 15
+            }
+          },
+          "default": {
+            "type": "fade",
+            "frames": 15
+          },
+          "description": "Transition into the next scene (PLAN.md A1: fades). Missing transitionOut means a default fade."
+        },
+        "narration": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "narration_asset": {
+          "$ref": "#/$defs/assetId"
+        },
+        "narration_duration_frames": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 108000
+        },
+        "locked": {
+          "type": "boolean",
+          "default": false
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        },
+        "fps": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 240
+        },
+        "frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "durationSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 36000
+        },
+        "audio": {
+          "type": "string",
+          "enum": [
+            "none",
+            "muted",
+            "present"
+          ],
+          "default": "none"
+        },
+        "alpha": {
+          "type": "boolean",
+          "default": false
+        },
+        "codec": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "crop": {
+          "type": "object",
+          "description": "Recorded crop applied to the final plate (SPEC.md 6.4: 1920x1088 -> 1920x1080).",
+          "required": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "top": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 512
+            },
+            "bottom": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 512
+            },
+            "left": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 512
+            },
+            "right": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 512
+            }
+          }
+        }
+      }
+    },
+    "assetSource": {
+      "type": "object",
+      "required": [
+        "provider"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openverse",
+            "upload",
+            "user",
+            "repo"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "landing_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 512
+        },
+        "creator": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "original_file": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
+    "gen": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "description": "Provenance of a generated asset (PLAN.md 'Generated-first assets').",
+      "properties": {
+        "generator": {
+          "type": "string",
+          "enum": [
+            "llm-svg",
+            "flux3-klein",
+            "ltx25",
+            "kokoro"
+          ],
+          "description": "llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein stills; ltx25 = LTX-2.5 plates; kokoro = narration audio."
+        },
+        "workflow": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "workflow_sha256": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "model_revision": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "model_sha256": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "quantization": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Resolved workflow inputs. Paths here are repository-relative and any value naming an asset must resolve.",
+          "maxProperties": 64,
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "caption": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "expansion": {
+          "type": "object",
+          "required": [
+            "model"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "model": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "template_version": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "template": {
+              "type": "string",
+              "enum": [
+                "t2i",
+                "i2i",
+                "upsampler"
+              ]
+            },
+            "at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "sanitizer_version": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Required for llm-svg assets (PLAN.md A5): which sanitizer produced the stored SVG."
+        },
+        "render_check": {
+          "type": "object",
+          "description": "CPU rasterisation check result (A5 renderCheck). Required for ready llm-svg assets and must have ok true.",
+          "required": [
+            "ok"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "rasterizer": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32768
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32768
+            },
+            "blank": {
+              "type": "boolean"
+            },
+            "palette_ok": {
+              "type": "boolean"
+            },
+            "at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "errors": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "unevaluatedProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 512
+                  }
+                }
+              }
+            }
+          }
+        },
+        "backend": {
+          "type": "string",
+          "pattern": "^(colab:[A-Za-z0-9]+|byo-comfyui(:v2)?)$"
+        },
+        "attempt_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "job_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "idempotency_key": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "params_hash": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "required": [
+        "kind",
+        "origin",
+        "status"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "svg",
+            "vector-anim"
+          ],
+          "description": "svg and vector-anim are the generated-first kinds (PLAN.md); vector-anim is a keyframed vector part whose animation is driven by the Remotion frame, not by SMIL clocks."
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "generated",
+            "stock",
+            "upload"
+          ],
+          "default": "generated"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "failed",
+            "missing",
+            "candidate",
+            "rejected"
+          ],
+          "default": "pending"
+        },
+        "file": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000000000
+        },
+        "cutout": {
+          "type": "boolean",
+          "default": false,
+          "description": "The stored image is an alpha cutout (transparent PNG), so the renderer must composite, not fill."
+        },
+        "media": {
+          "$ref": "#/$defs/media"
+        },
+        "source": {
+          "$ref": "#/$defs/assetSource"
+        },
+        "license": {
+          "$ref": "#/$defs/license",
+          "description": "Output rights. Defaults for generated assets: id CC0-1.0 and redistributable true."
+        },
+        "model_license": {
+          "$ref": "#/$defs/modelLicense"
+        },
+        "redistributable": {
+          "type": "boolean",
+          "default": true
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}

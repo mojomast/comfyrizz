@@ -1,0 +1,38 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_defaults0001",
+  "title": "Omitted optional fields",
+  "format": { "width": 1280, "height": 720, "fps": 30 },
+  "duration": { "mode": "target", "targetFrames": 120 },
+  "theme": { "font": "Inter" },
+  "datasets": {
+    "d_maybe": { "unit": "count", "values": [{ "label": "A", "value": 3 }], "source": "user" }
+  },
+  "scenes": [
+    {
+      "id": "s1",
+      "layout": "stat",
+      "preferredFrames": 120,
+      "copy": { "headline": "3", "sub": "copies of this headline" },
+      "data": { "dataset": "d_maybe" },
+      "background": { "asset": "a_bg" },
+      "foreground": [{ "asset": "a_bg", "x": 0.5, "y": 0.5, "w": 0.3 }]
+    }
+  ],
+  "assets": {
+    "a_bg": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "caption": "A quiet abstract gradient, no text.",
+        "inputs": { "width": 960, "height": 544, "seed": 1, "steps": 16 }
+      }
+    }
+  },
+  "compliance": { "open_weights_only": true }
+}

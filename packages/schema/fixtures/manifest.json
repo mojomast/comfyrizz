@@ -1,0 +1,371 @@
+{
+  "version": 1,
+  "generatedBy": "packages/schema/fixtures/build.mjs",
+  "note": "sha256 values and dates in fixtures are synthetic; they exist to exercise the format, not to describe real files.",
+  "fixtures": [
+    {
+      "file": "valid/defaults-unfilled.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
+      "file": "valid/generated-first.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
+      "file": "valid/minimal.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
+      "file": "valid/spec-6.3-example.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": [
+        "WARN_DATASET_UNUSED"
+      ]
+    },
+    {
+      "file": "valid/warnings-unused-asset.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": [
+        "WARN_ASSET_UNUSED"
+      ]
+    },
+    {
+      "file": "invalid/duplicate-scene-id.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_DUPLICATE_SCENE_ID"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/bad-scene-id-pattern.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_PATTERN"
+      ],
+      "semantic": [
+        "SEM_ID_PATTERN"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/bad-dataset-id-pattern.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_PATTERN"
+      ],
+      "semantic": [
+        "SEM_ID_PATTERN",
+        "SEM_REF_UNRESOLVED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/unresolved-asset-ref.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_REF_UNRESOLVED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/unresolved-dataset-ref.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_REF_UNRESOLVED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/absolute-path.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_PATH_NOT_RELATIVE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/traversal-path.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_PATH_NOT_RELATIVE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/windows-path.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_PATH_NOT_RELATIVE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/layout-variant.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LAYOUT_VARIANT"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/chart-without-data.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LAYOUT_REQUIRES_DATA"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/title-without-headline.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_COPY_REQUIRED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/copy-too-long.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_COPY_TOO_LONG"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/bullets-without-items.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_COPY_REQUIRED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/non-commercial-license-redistributable.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LICENSE_CONFLICT"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/blocked-license-redistributable.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LICENSE_CONFLICT"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/svg-missing-sanitizer.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_SVG_PROVENANCE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/render-check-failed.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_RENDER_CHECK_FAILED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/model-license-missing.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_MODEL_LICENSE_MISSING"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/ready-without-file.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_READY_WITHOUT_FILE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/narration-blank.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_NARRATION_EMPTY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/voice-incomplete.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_VOICE_INCOMPLETE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/example-data-unapproved.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_DATASET_UNAPPROVED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/background-ambiguous.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_BACKGROUND_AMBIGUOUS"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/cutout-on-audio.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_CUTOUT_KIND"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/generated-without-generator.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_GEN_MISSING_GENERATOR"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/generated-without-output-license.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LICENSE_MISSING"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/duration-target-without-frames.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_DURATION_TARGET_REQUIRED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/flexible-over-ceiling.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_FLEXIBLE_OVER_CEILING"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/extra-property.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_UNEVALUATEDPROPERTIES"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/uppercase-sha256.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_PATTERN"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/value-overflows-to-infinity.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_NUMBER_NOT_FINITE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/colab-backend-label.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_PATTERN"
+      ],
+      "semantic": [],
+      "warnings": null
+    }
+  ]
+}

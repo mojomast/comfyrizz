@@ -1,0 +1,245 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_noncommerciallicenseredistributable",
+  "title": "Orbit CLI launch",
+  "createdAt": "2026-10-17T09:00:00-04:00",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "target",
+    "targetFrames": 1350
+  },
+  "theme": {
+    "palette": [
+      "#0d0f14",
+      "#6d8cff",
+      "#e6e8ee"
+    ],
+    "font": "Inter",
+    "logo_asset": "a_logo",
+    "fonts": [
+      {
+        "family": "Inter",
+        "file": "assets/fonts/Inter-Regular.woff2",
+        "weight": 400,
+        "license": {
+          "id": "OFL-1.1"
+        }
+      }
+    ]
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 1
+  },
+  "datasets": {
+    "d_stars": {
+      "unit": "stars",
+      "values": [
+        {
+          "label": "2025",
+          "value": 1200
+        }
+      ],
+      "source": "user",
+      "approved": true
+    }
+  },
+  "scenes": [
+    {
+      "id": "s1",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 120,
+      "copy": {
+        "headline": "Meet Orbit",
+        "sub": "An agent-shaped desktop"
+      },
+      "data": null,
+      "background": {
+        "asset": "a_plate1",
+        "fit": "cover",
+        "loop": true
+      },
+      "foreground": [
+        {
+          "asset": "a_hero",
+          "x": 0.6,
+          "y": 0.5,
+          "w": 0.35,
+          "anim": "parallax-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration": "Meet Orbit, an agent-shaped desktop.",
+      "locked": false
+    }
+  ],
+  "assets": {
+    "a_plate1": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_plate1.mp4",
+      "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "bytes": 4823041,
+      "media": {
+        "width": 1920,
+        "height": 1080,
+        "fps": 24,
+        "frames": 97,
+        "audio": "muted",
+        "codec": "h264"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "ltx25",
+        "workflow": "workflows/ltx25_i2v.api.json",
+        "workflow_sha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "model": "ltx-2.5-22b-distilled",
+        "model_revision": "refs/pr/12",
+        "inputs": {
+          "image": "a_plate1_still",
+          "prompt": "slow drift through a soft blue nebula",
+          "width": 960,
+          "height": 544,
+          "frames": 97,
+          "fps": 24,
+          "upscale": "x2+crop",
+          "seed": 42
+        },
+        "backend": "colab:G4",
+        "attempt_id": "att_01JORBIT0001",
+        "job_id": "job_01JORBIT0001",
+        "idempotency_key": "idem_01JORBIT0001"
+      },
+      "model_license": {
+        "id": "LTX-2.x-Community",
+        "commercial_ok_if": "revenue<10M"
+      }
+    },
+    "a_plate1_still": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_plate1_still.png",
+      "sha256": "aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd",
+      "media": {
+        "width": 960,
+        "height": 544,
+        "alpha": false
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "cutout": false,
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "workflow_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "model": "flux-3-image-klein",
+        "caption": "A wide shot of a soft blue nebula with violet filaments, empty dark space at the top left for a headline.",
+        "inputs": {
+          "width": 960,
+          "height": 544,
+          "seed": 42,
+          "steps": 16
+        },
+        "backend": "colab:G4"
+      },
+      "model_license": {
+        "id": "FLUX.3-Image-Klein",
+        "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein"
+      }
+    },
+    "a_hero": {
+      "kind": "image",
+      "origin": "stock",
+      "status": "ready",
+      "file": "assets/a_hero.jpg",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "media": {
+        "width": 1600,
+        "height": 1200
+      },
+      "source": {
+        "provider": "openverse",
+        "id": "0b7c2a91-1f4e-4a3b-9f0e-2f8d1c5a6b70",
+        "landing_url": "https://openverse.org/image/0b7c2a91-1f4e-4a3b-9f0e-2f8d1c5a6b70",
+        "creator": "Jane Doe",
+        "title": "Abstract flow",
+        "retrieved_at": "2026-10-20T14:03:00-04:00"
+      },
+      "license": {
+        "id": "CC-BY-NC-4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "\"Abstract flow\" by Jane Doe, CC BY 4.0",
+        "approved_by_user": true,
+        "approved_at": "2026-10-20T14:03:00-04:00"
+      },
+      "redistributable": true
+    },
+    "a_logo": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_logo.svg",
+      "sha256": "aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 512
+        }
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "openrouter",
+      "model": "qwen/qwen3-vl-235b-a22b-instruct",
+      "weights": "open"
+    },
+    "backends_used": [
+      "colab:G4"
+    ],
+    "closed_apis_used": [],
+    "warnings": []
+  },
+  "renders": [
+    {
+      "mode": "final",
+      "file": "out/final.mp4",
+      "revision": 7,
+      "timeline_sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "frames": 1350,
+      "at": "2026-10-21T18:00:00-04:00"
+    }
+  ]
+}

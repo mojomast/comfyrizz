@@ -1,0 +1,39 @@
+{
+  "name": "@comfyrizz/schema",
+  "version": "0.1.0",
+  "private": true,
+  "description": "comfyrizz.package/v1 JSON Schema, generated TS types, ajv + semantic validator. Owner: Hermes (WS-B).",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./schema": "./package-v1.schema.json",
+    "./types": "./types.ts"
+  },
+  "bin": {
+    "comfyrizz-validate": "./bin/comfyrizz-validate.mjs"
+  },
+  "files": [
+    "package-v1.schema.json",
+    "types.ts",
+    "src",
+    "bin",
+    "fixtures",
+    "README.md"
+  ],
+  "scripts": {
+    "gen:types": "node scripts/gen-types.mjs",
+    "check:types": "node scripts/gen-types.mjs --check",
+    "validate": "node bin/comfyrizz-validate.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:py": "../../.venv/bin/python -m pytest ../../pipeline-py/tests -q"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,613 @@
+"""comfyrizz.package/v1 validation for pipeline-py.
+
+Mirrors packages/schema/src/semantic.mjs rule-for-rule and code-for-code: the same
+fixture corpus is run through both implementations by
+packages/schema/test/conformance.test.mjs and tests/test_conformance.py, so a rule
+cannot exist on one side only.
+
+Structural validation is JSON Schema 2020-12 via ``jsonschema``; the schema file
+lives in packages/schema/package-v1.schema.json and is the single source of truth.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+import jsonschema
+
+__all__ = [
+    "SEMANTIC_CODES",
+    "LAYOUTS",
+    "GENERATED_OUTPUT_LICENSE",
+    "MODEL_GENERATORS",
+    "FLEXIBLE_CEILING_FRAMES",
+    "path_problem",
+    "semantic_check",
+    "apply_defaults",
+    "validate_package",
+    "load_schema",
+    "schema_path",
+    "SCHEMA_VERSION",
+]
+
+SCHEMA_VERSION = 1
+
+SEMANTIC_CODES = (
+    "SEM_DUPLICATE_SCENE_ID",
+    "SEM_ID_PATTERN",
+    "SEM_REF_UNRESOLVED",
+    "SEM_PATH_NOT_RELATIVE",
+    "SEM_NUMBER_NOT_FINITE",
+    "SEM_LAYOUT_VARIANT",
+    "SEM_LAYOUT_REQUIRES_DATA",
+    "SEM_COPY_REQUIRED",
+    "SEM_COPY_TOO_LONG",
+    "SEM_LICENSE_MISSING",
+    "SEM_LICENSE_CONFLICT",
+    "SEM_MODEL_LICENSE_MISSING",
+    "SEM_SVG_PROVENANCE",
+    "SEM_RENDER_CHECK_FAILED",
+    "SEM_GEN_MISSING_GENERATOR",
+    "SEM_READY_WITHOUT_FILE",
+    "SEM_DURATION_TARGET_REQUIRED",
+    "SEM_FLEXIBLE_OVER_CEILING",
+    "SEM_NARRATION_EMPTY",
+    "SEM_VOICE_INCOMPLETE",
+    "SEM_DATASET_UNAPPROVED",
+    "SEM_BACKGROUND_AMBIGUOUS",
+    "SEM_CUTOUT_KIND",
+)
+
+# Published layout contract (PLAN.md A5 / SPEC.md 6.3); the schema holds the loose
+# syntax bounds, these are the readability limits that make copy a fail state.
+LAYOUTS: dict[str, dict[str, Any]] = {
+    "title": {"variants": ["centered", "outro"], "requiresHeadline": True, "limits": {"headline": 48, "sub": 90}},
+    "hero": {"variants": ["full-bleed", "split"], "requiresHeadline": True, "limits": {"headline": 64, "sub": 120, "body": 240}},
+    "stat": {"variants": [], "requiresData": True, "requiresHeadline": True, "limits": {"headline": 48, "sub": 90, "body": 40}},
+    "chart": {"variants": ["bar"], "requiresData": True, "limits": {"headline": 64, "sub": 120, "footnote": 120}},
+    "list": {"variants": ["bullets", "quote"], "limits": {"headline": 64, "quote": 200, "attribution": 80}},
+}
+
+GENERATED_OUTPUT_LICENSE = {"id": "CC0-1.0", "redistributable": True}
+MODEL_GENERATORS = ("flux3-klein", "ltx25", "kokoro")
+FLEXIBLE_CEILING_FRAMES = 2700
+
+SCENE_ID_RE = re.compile(r"^s[A-Za-z0-9_-]{0,63}$")
+ASSET_ID_RE = re.compile(r"^a[A-Za-z0-9_-]{0,63}$")
+DATASET_ID_RE = re.compile(r"^d[A-Za-z0-9_-]{0,63}$")
+NON_REDISTRIBUTABLE_LICENSE_RE = re.compile(
+    r"(^|[-_ ])(NC|ND|NONCOMMERCIAL|NON-COMMERCIAL|NODERIV|NO-DERIV)([-_ ]|$)", re.IGNORECASE
+)
+URL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def repo_root() -> Path:
+    """Walk up from this file to the repository root (the directory with packages/)."""
+    here = Path(__file__).resolve()
+    for parent in [here.parent, *here.parents]:
+        if (parent / "packages" / "schema" / "package-v1.schema.json").is_file():
+            return parent
+    raise RuntimeError("cannot locate packages/schema/package-v1.schema.json")
+
+
+def schema_path() -> Path:
+    override = os.environ.get("COMFYRIZZ_SCHEMA")
+    if override:
+        return Path(override)
+    return repo_root() / "packages" / "schema" / "package-v1.schema.json"
+
+
+_SCHEMA_CACHE: dict[str, Any] | None = None
+_VALIDATOR_CACHE: jsonschema.Draft202012Validator | None = None
+
+
+def load_schema() -> dict[str, Any]:
+    global _SCHEMA_CACHE
+    if _SCHEMA_CACHE is None:
+        with open(schema_path(), encoding="utf-8") as fh:
+            _SCHEMA_CACHE = json.load(fh)
+    return _SCHEMA_CACHE
+
+
+def _validator() -> jsonschema.Draft202012Validator:
+    global _VALIDATOR_CACHE
+    if _VALIDATOR_CACHE is None:
+        _VALIDATOR_CACHE = jsonschema.Draft202012Validator(
+            load_schema(), format_checker=jsonschema.FormatChecker()
+        )
+    return _VALIDATOR_CACHE
+
+
+def _is_obj(value: Any) -> bool:
+    return isinstance(value, dict)
+
+
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def path_problem(value: Any) -> str | None:
+    """Relative-path check. Same order of checks and same wording as the TS side."""
+    if not _is_str(value) or value == "":
+        return "empty path"
+    if "\\" in value:
+        return "backslash separator"
+    if value.startswith("/"):
+        return "absolute path"
+    if value.startswith("~"):
+        return "home-relative path"
+    if DRIVE_RE.match(value):
+        return "Windows drive path"
+    if URL_RE.match(value):
+        return "URL where a relative path is expected"
+    if ".." in value.split("/"):
+        return "parent-directory traversal"
+    if "" in value.split("/"):
+        return "empty path segment"
+    if value.startswith("./"):
+        return "leading ./ is noise; use a clean relative path"
+    return None
+
+
+def _err(code: str, path: str, message: str) -> dict[str, Any]:
+    return {"code": code, "path": path, "message": message, "source": "semantic"}
+
+
+def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, str]] = set()
+    out: list[dict[str, Any]] = []
+    for item in items:
+        key = (item["code"], item["path"], item["message"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    out.sort(key=lambda i: (i["path"], i["code"]))
+    return out
+
+
+def semantic_check(doc: Any) -> dict[str, list[dict[str, Any]]]:
+    """Run every semantic rule; returns {'errors': [...], 'warnings': [...]}."""
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    if not _is_obj(doc):
+        return {"errors": [_err("SEM_NUMBER_NOT_FINITE", "", "document is not an object")], "warnings": []}
+
+    errors.extend(_check_finite(doc))
+    scenes, assets, datasets = _collect(doc, errors)
+    _check_ids(doc, scenes, assets, datasets, errors)
+    _check_refs(scenes, assets, datasets, errors)
+    _check_paths(doc, assets, errors)
+    _check_duration(doc, errors)
+    _check_voice(doc, errors)
+    _check_scenes(scenes, assets, datasets, errors)
+    _check_assets(assets, errors)
+    _check_datasets(datasets, errors)
+    _check_unused(doc, scenes, assets, datasets, warnings)
+    return {"errors": _dedupe(errors), "warnings": _dedupe(warnings)}
+
+
+def _walk(value: Any, path: str, visit) -> None:
+    visit(value, path)
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            _walk(item, f"{path}/{i}", visit)
+    elif _is_obj(value):
+        for key, item in value.items():
+            _walk(item, f"{path}/{key}", visit)
+
+
+def _check_finite(doc: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+
+    def visit(value: Any, path: str) -> None:
+        if not _is_number(value):
+            return
+        number = float(value)
+        if not math.isfinite(number):
+            out.append(_err("SEM_NUMBER_NOT_FINITE", path, "number is not finite"))
+        elif abs(number) > 1e15:
+            out.append(_err("SEM_NUMBER_NOT_FINITE", path, "number is outside the representable bound 1e15"))
+
+    _walk(doc, "", visit)
+    return out
+
+
+def _collect(doc: dict[str, Any], errors: list[dict[str, Any]]):
+    raw_scenes = doc.get("scenes")
+    scenes = [s for s in raw_scenes if _is_obj(s)] if isinstance(raw_scenes, list) else []
+    if isinstance(raw_scenes, list) and len(raw_scenes) != len(scenes):
+        errors.append(_err("SEM_ID_PATTERN", "/scenes", "scenes must be objects with an id"))
+    assets = doc.get("assets") if _is_obj(doc.get("assets")) else {}
+    datasets = doc.get("datasets") if _is_obj(doc.get("datasets")) else {}
+    return scenes, assets, datasets
+
+
+def _check_ids(doc, scenes, assets, datasets, errors) -> None:
+    seen: set[str] = set()
+    for i, scene in enumerate(scenes):
+        sid = scene.get("id")
+        if not _is_str(sid) or not SCENE_ID_RE.fullmatch(sid):
+            errors.append(
+                _err("SEM_ID_PATTERN", f"/scenes/{i}/id", f"scene id must match ^s[A-Za-z0-9_-]{{0,63}}$ (got {json.dumps(sid)})")
+            )
+        elif sid in seen:
+            errors.append(_err("SEM_DUPLICATE_SCENE_ID", f"/scenes/{i}/id", f"duplicate scene id {sid}"))
+        else:
+            seen.add(sid)
+    for key in assets:
+        if not ASSET_ID_RE.fullmatch(str(key)):
+            errors.append(_err("SEM_ID_PATTERN", f"/assets/{key}", "asset id must match ^a[A-Za-z0-9_-]{0,63}$"))
+    for key in datasets:
+        if not DATASET_ID_RE.fullmatch(str(key)):
+            errors.append(_err("SEM_ID_PATTERN", f"/datasets/{key}", "dataset id must match ^d[A-Za-z0-9_-]{0,63}$"))
+    theme = doc.get("theme")
+    if _is_obj(theme) and "logo_asset" in theme and not _is_obj(assets.get(theme.get("logo_asset"))):
+        errors.append(_err("SEM_REF_UNRESOLVED", "/theme/logo_asset", f"unknown asset {json.dumps(theme.get('logo_asset'))}"))
+
+
+def _require_asset(assets, asset_id, path, errors) -> None:
+    if asset_id is None:
+        return
+    if not _is_str(asset_id) or not _is_obj(assets.get(asset_id)):
+        errors.append(_err("SEM_REF_UNRESOLVED", path, f"unknown asset {json.dumps(asset_id)}"))
+
+
+def _check_refs(scenes, assets, datasets, errors) -> None:
+    for i, scene in enumerate(scenes):
+        bg = scene.get("background")
+        if _is_obj(bg) and "asset" in bg:
+            _require_asset(assets, bg.get("asset"), f"/scenes/{i}/background/asset", errors)
+        fg_list = scene.get("foreground")
+        if isinstance(fg_list, list):
+            for j, fg in enumerate(fg_list):
+                if _is_obj(fg):
+                    _require_asset(assets, fg.get("asset"), f"/scenes/{i}/foreground/{j}/asset", errors)
+        data = scene.get("data")
+        if _is_obj(data) and "dataset" in data:
+            if not _is_str(data.get("dataset")) or not _is_obj(datasets.get(data.get("dataset"))):
+                errors.append(
+                    _err("SEM_REF_UNRESOLVED", f"/scenes/{i}/data/dataset", f"unknown dataset {json.dumps(data.get('dataset'))}")
+                )
+        if "narration_asset" in scene:
+            _require_asset(assets, scene.get("narration_asset"), f"/scenes/{i}/narration_asset", errors)
+    for asset_id, asset in assets.items():
+        gen = asset.get("gen") if _is_obj(asset) else None
+        inputs = gen.get("inputs") if _is_obj(gen) else None
+        if not _is_obj(inputs):
+            continue
+        for key, value in inputs.items():
+            if key in ("image", "mask", "reference", "audio") and _is_str(value) and not _is_obj(assets.get(value)):
+                errors.append(
+                    _err("SEM_REF_UNRESOLVED", f"/assets/{asset_id}/gen/inputs/{key}", f"unknown asset {json.dumps(value)}")
+                )
+
+
+def _check_paths(doc, assets, errors) -> None:
+    for asset_id, asset in assets.items():
+        if not _is_obj(asset):
+            continue
+        file_value = asset.get("file")
+        if file_value is not None:
+            problem = path_problem(file_value)
+            if problem:
+                errors.append(_err("SEM_PATH_NOT_RELATIVE", f"/assets/{asset_id}/file", f"{problem}: {json.dumps(file_value)}"))
+        gen = asset.get("gen")
+        workflow = gen.get("workflow") if _is_obj(gen) else None
+        if workflow is not None:
+            problem = path_problem(workflow)
+            if problem:
+                errors.append(_err("SEM_PATH_NOT_RELATIVE", f"/assets/{asset_id}/gen/workflow", f"{problem}: {json.dumps(workflow)}"))
+    renders = doc.get("renders")
+    if isinstance(renders, list):
+        for i, render in enumerate(renders):
+            if not _is_obj(render):
+                continue
+            problem = path_problem(render.get("file"))
+            if problem:
+                errors.append(_err("SEM_PATH_NOT_RELATIVE", f"/renders/{i}/file", f"{problem}: {json.dumps(render.get('file'))}"))
+    theme = doc.get("theme")
+    if _is_obj(theme) and isinstance(theme.get("fonts"), list):
+        for i, font in enumerate(theme["fonts"]):
+            if not _is_obj(font):
+                continue
+            problem = path_problem(font.get("file"))
+            if problem:
+                errors.append(_err("SEM_PATH_NOT_RELATIVE", f"/theme/fonts/{i}/file", f"{problem}: {json.dumps(font.get('file'))}"))
+
+
+def _check_duration(doc, errors) -> None:
+    duration = doc.get("duration")
+    if not _is_obj(duration):
+        return
+    if duration.get("mode") == "target" and not _is_number(duration.get("targetFrames")):
+        errors.append(_err("SEM_DURATION_TARGET_REQUIRED", "/duration/targetFrames", "mode target requires targetFrames"))
+    if duration.get("mode") == "flexible":
+        for key in ("targetFrames", "maxFrames"):
+            value = duration.get(key)
+            if _is_number(value) and value > FLEXIBLE_CEILING_FRAMES:
+                errors.append(
+                    _err("SEM_FLEXIBLE_OVER_CEILING", f"/duration/{key}", f"flexible mode ceiling is {FLEXIBLE_CEILING_FRAMES} frames (got {value})")
+                )
+
+
+def _check_voice(doc, errors) -> None:
+    voice = doc.get("voice")
+    if not _is_obj(voice) or voice.get("enabled") is not True:
+        return
+    voice_id = voice.get("voice")
+    if voice.get("engine") != "kokoro" or not _is_str(voice_id) or voice_id == "":
+        errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro and a non-empty voice"))
+
+
+def _non_empty(value: Any) -> bool:
+    return _is_str(value) and value.strip() != ""
+
+
+def _check_scenes(scenes, assets, datasets, errors) -> None:
+    for i, scene in enumerate(scenes):
+        at = f"/scenes/{i}"
+        layout = scene.get("layout")
+        spec = LAYOUTS.get(layout) if _is_str(layout) else None
+        if spec:
+            if "variant" in scene:
+                variants = spec.get("variants", [])
+                if scene.get("variant") not in variants:
+                    allowed = ", ".join(variants) if variants else "no variant"
+                    errors.append(
+                        _err("SEM_LAYOUT_VARIANT", f"{at}/variant", f"layout {layout} allows {allowed} (got {json.dumps(scene.get('variant'))})")
+                    )
+            copy = scene.get("copy") if _is_obj(scene.get("copy")) else {}
+            if spec.get("requiresData") and not (_is_obj(scene.get("data")) and _is_str(scene["data"].get("dataset"))):
+                errors.append(_err("SEM_LAYOUT_REQUIRES_DATA", f"{at}/data", f"layout {layout} requires data.dataset"))
+            if spec.get("requiresHeadline") and not _non_empty(copy.get("headline")):
+                errors.append(_err("SEM_COPY_REQUIRED", f"{at}/copy/headline", f"layout {layout} requires copy.headline"))
+            if layout == "list" and scene.get("variant") == "bullets":
+                items = copy.get("items")
+                if not isinstance(items, list) or len(items) < 2:
+                    errors.append(
+                        _err("SEM_COPY_REQUIRED", f"{at}/copy/items", "list variant bullets requires copy.items with 2 to 6 entries")
+                    )
+            if layout == "list" and scene.get("variant") == "quote" and not _non_empty(copy.get("quote")):
+                errors.append(_err("SEM_COPY_REQUIRED", f"{at}/copy/quote", "list variant quote requires copy.quote"))
+            for field, limit in (spec.get("limits") or {}).items():
+                value = copy.get(field)
+                if _is_str(value) and len(value) > limit:
+                    errors.append(
+                        _err("SEM_COPY_TOO_LONG", f"{at}/copy/{field}", f"layout {layout} allows {limit} characters for {field} (got {len(value)})")
+                    )
+        copy = scene.get("copy")
+        if _is_obj(copy) and "headline" in copy and not _non_empty(copy.get("headline")):
+            errors.append(_err("SEM_COPY_REQUIRED", f"{at}/copy/headline", "copy.headline must not be blank"))
+        if "narration" in scene and _is_str(scene.get("narration")) and scene["narration"].strip() == "":
+            errors.append(_err("SEM_NARRATION_EMPTY", f"{at}/narration", "narration is present but blank"))
+        bg = scene.get("background")
+        if _is_obj(bg):
+            has_asset = "asset" in bg
+            has_procedural = _is_obj(bg.get("procedural"))
+            if has_asset == has_procedural:
+                errors.append(_err("SEM_BACKGROUND_AMBIGUOUS", f"{at}/background", "background must set exactly one of asset or procedural"))
+
+
+def _check_assets(assets, errors) -> None:
+    for asset_id, asset in assets.items():
+        if not _is_obj(asset):
+            continue
+        at = f"/assets/{asset_id}"
+        ready = asset.get("status") == "ready"
+        gen = asset.get("gen") if _is_obj(asset.get("gen")) else {}
+        generator = gen.get("generator")
+        if asset.get("origin") == "generated" and not _is_str(generator):
+            errors.append(
+                _err("SEM_GEN_MISSING_GENERATOR", f"{at}/gen/generator", "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | kokoro)")
+            )
+        if asset.get("origin") == "generated" and ready:
+            license_obj = asset.get("license") if _is_obj(asset.get("license")) else {}
+            if not _is_str(license_obj.get("id")):
+                errors.append(
+                    _err("SEM_LICENSE_MISSING", f"{at}/license/id", "a ready generated asset needs an output licence; generated output defaults to CC0-1.0")
+                )
+        if asset.get("cutout") is True and asset.get("kind") != "image":
+            errors.append(_err("SEM_CUTOUT_KIND", f"{at}/cutout", f"cutout is an image flag (got kind {json.dumps(asset.get('kind'))})"))
+        if ready and (not _is_str(asset.get("file")) or not _is_str(asset.get("sha256"))):
+            errors.append(_err("SEM_READY_WITHOUT_FILE", at, "status ready requires both file and sha256"))
+        if generator == "llm-svg":
+            has_sanitizer = _is_str(gen.get("sanitizer_version"))
+            has_check = _is_obj(gen.get("render_check"))
+            if not has_sanitizer or not has_check:
+                errors.append(_err("SEM_SVG_PROVENANCE", f"{at}/gen", "llm-svg assets record gen.sanitizer_version and gen.render_check"))
+            elif ready and gen["render_check"].get("ok") is not True:
+                errors.append(_err("SEM_RENDER_CHECK_FAILED", f"{at}/gen/render_check/ok", "a ready llm-svg asset must pass the CPU render-check"))
+            license_obj = asset.get("license") if _is_obj(asset.get("license")) else {}
+            if ready and license_obj.get("id") != GENERATED_OUTPUT_LICENSE["id"]:
+                errors.append(
+                    _err("SEM_LICENSE_CONFLICT", f"{at}/license/id", "generated vector output ships as CC0-1.0 unless a reviewer changes the default on purpose")
+                )
+        if generator in MODEL_GENERATORS and ready:
+            model_license = asset.get("model_license") if _is_obj(asset.get("model_license")) else {}
+            if not _is_str(model_license.get("id")):
+                errors.append(
+                    _err("SEM_MODEL_LICENSE_MISSING", f"{at}/model_license/id", f"generator {generator} needs model_license (separate from the output licence)")
+                )
+        if asset.get("redistributable") is True:
+            license_obj = asset.get("license") if _is_obj(asset.get("license")) else {}
+            license_id = license_obj.get("id")
+            blocked = license_obj.get("blocked") is True
+            if blocked or (_is_str(license_id) and NON_REDISTRIBUTABLE_LICENSE_RE.search(license_id)):
+                errors.append(
+                    _err("SEM_LICENSE_CONFLICT", f"{at}/redistributable", f"licence {json.dumps(license_id)} must not be marked redistributable")
+                )
+
+
+def _check_datasets(datasets, errors) -> None:
+    for dataset_id, dataset in datasets.items():
+        if not _is_obj(dataset):
+            continue
+        if dataset.get("source") == "example" and dataset.get("approved") is not True:
+            errors.append(
+                _err("SEM_DATASET_UNAPPROVED", f"/datasets/{dataset_id}/approved", "invented example data must be approved before it can be rendered as fact")
+            )
+
+
+def _check_unused(doc, scenes, assets, datasets, warnings) -> None:
+    used: set[str] = set()
+    theme = doc.get("theme")
+    if _is_obj(theme) and _is_str(theme.get("logo_asset")):
+        used.add(theme["logo_asset"])
+    for scene in scenes:
+        bg = scene.get("background")
+        if _is_obj(bg) and _is_str(bg.get("asset")):
+            used.add(bg["asset"])
+        if isinstance(scene.get("foreground"), list):
+            for fg in scene["foreground"]:
+                if _is_obj(fg) and _is_str(fg.get("asset")):
+                    used.add(fg["asset"])
+        if _is_str(scene.get("narration_asset")):
+            used.add(scene["narration_asset"])
+    for asset in assets.values():
+        gen = asset.get("gen") if _is_obj(asset) else None
+        inputs = gen.get("inputs") if _is_obj(gen) else None
+        if _is_obj(inputs):
+            for value in inputs.values():
+                if _is_str(value) and _is_obj(assets.get(value)):
+                    used.add(value)
+    for asset_id in assets:
+        if asset_id not in used:
+            warnings.append(_err("WARN_ASSET_UNUSED", f"/assets/{asset_id}", "asset is not referenced by any scene"))
+    for dataset_id in datasets:
+        referenced = any(_is_obj(s.get("data")) and s["data"].get("dataset") == dataset_id for s in scenes)
+        if not referenced:
+            warnings.append(_err("WARN_DATASET_UNUSED", f"/datasets/{dataset_id}", "dataset is not referenced by any scene"))
+
+
+# --------------------------------------------------------------------------- defaults
+
+
+def _resolve_ref(schema: dict[str, Any], sub: Any) -> Any:
+    if _is_obj(sub) and "$ref" in sub:
+        ref = sub["$ref"]
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            name = ref[len("#/$defs/"):]
+            merged = dict(schema.get("$defs", {}).get(name, {}))
+            merged.update({k: v for k, v in sub.items() if k != "$ref"})
+            return merged
+    return sub
+
+
+def apply_defaults(doc: Any, schema: dict[str, Any] | None = None) -> Any:
+    """Fill schema `default` keywords plus the generated-first output licence default.
+
+    Same algorithm as packages/schema/src/semantic.mjs ``applyDefaults``; the
+    conformance test compares the two outputs on fixtures/valid/defaults-unfilled.json.
+    """
+    if not _is_obj(doc):
+        return doc
+    schema = schema or load_schema()
+    out = json.loads(json.dumps(doc))
+    _fill_defaults(out, schema, schema)
+    for asset in (out.get("assets") or {}).values():
+        if not _is_obj(asset):
+            continue
+        if asset.get("origin", "generated") == "generated":
+            if not _is_obj(asset.get("license")):
+                asset["license"] = {"id": GENERATED_OUTPUT_LICENSE["id"]}
+            if "redistributable" not in asset:
+                asset["redistributable"] = GENERATED_OUTPUT_LICENSE["redistributable"]
+    return out
+
+
+def _fill_defaults(value: Any, sub: Any, schema: dict[str, Any]) -> None:
+    sub = _resolve_ref(schema, sub)
+    if not _is_obj(sub):
+        return
+    branches = sub.get("oneOf") if isinstance(sub.get("oneOf"), list) else sub.get("anyOf")
+    if isinstance(branches, list):
+        if isinstance(value, list):
+            kind = "array"
+        elif value is None:
+            kind = "null"
+        elif isinstance(value, dict):
+            kind = "object"
+        elif isinstance(value, bool):
+            kind = "boolean"
+        elif isinstance(value, (int, float)):
+            kind = "number"
+        else:
+            kind = "string"
+        for branch in branches:
+            resolved = _resolve_ref(schema, branch)
+            if not _is_obj(resolved) or resolved.get("type") in (None, "null"):
+                continue
+            if resolved.get("type") != kind and not (resolved.get("type") == "integer" and kind == "float"):
+                continue
+            _fill_defaults(value, resolved, schema)
+        return
+    if _is_obj(value):
+        properties = sub.get("properties")
+        if _is_obj(properties):
+            for key, child in properties.items():
+                resolved = _resolve_ref(schema, child)
+                if key not in value:
+                    if _is_obj(resolved) and "default" in resolved:
+                        value[key] = json.loads(json.dumps(resolved["default"]))
+                else:
+                    _fill_defaults(value[key], resolved, schema)
+        for key, item in value.items():
+            if _is_obj(properties) and key in properties:
+                continue  # already visited above
+            for pattern, child in (sub.get("patternProperties") or {}).items():
+                if re.search(pattern, key):
+                    _fill_defaults(item, child, schema)
+            if _is_obj(sub.get("additionalProperties")):
+                _fill_defaults(item, sub["additionalProperties"], schema)
+    elif isinstance(value, list):
+        if _is_obj(sub.get("items")):
+            for item in value:
+                _fill_defaults(item, sub["items"], schema)
+
+
+# --------------------------------------------------------------------------- validation
+
+
+def schema_errors(doc: Any) -> list[dict[str, Any]]:
+    out = []
+    for error in _validator().iter_errors(doc):
+        path = "/" + "/".join(str(p) for p in error.absolute_path)
+        if path == "/":
+            path = ""
+        out.append(
+            {
+                "source": "schema",
+                "code": f"SCHEMA_{str(error.validator).upper()}",
+                "path": path,
+                "message": error.message,
+            }
+        )
+    return out
+
+
+def validate_package(doc: Any, defaults: bool = False) -> dict[str, Any]:
+    """Structural + semantic validation. Mirrors packages/schema/src/index.mjs."""
+    document = apply_defaults(doc) if defaults else doc
+    schema_problems = schema_errors(document)
+    semantic = semantic_check(document)
+    errors = schema_problems + semantic["errors"]
+    errors.sort(key=lambda i: (i["path"], i["code"]))
+    return {
+        "valid": not errors,
+        "schemaOk": not schema_problems,
+        "errors": errors,
+        "warnings": semantic["warnings"],
+        "semantic": semantic["errors"],
+        "document": document,
+    }
