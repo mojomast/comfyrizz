@@ -36,6 +36,22 @@ test('router: SVG for icons/diagrams/charts/patterns, FLUX for illustrations/tex
   assert.equal(routeAsset({ sceneId: 's', intent: 'abstract launch visual' }).tool, 'assets.generate_svg');
 });
 
+test('router: a styled hero/background/diagram routes to sketch-to-render, icons stay SVG-only', () => {
+  assert.equal(routeAsset({ sceneId: 's', intent: 'clay-style solar diagram', kind: 'diagram', style: 'clay' }).tool, 'assets.sketch_to_render');
+  assert.equal(routeAsset({ sceneId: 's', intent: 'a clay hero visual', kind: 'hero', style: 'clay' }).tool, 'assets.sketch_to_render');
+  assert.equal(routeAsset({ sceneId: 's', intent: 'a glass background', kind: 'background', style: 'glass' }).tool, 'assets.sketch_to_render');
+  // Icons never get a style pass: a styled icon is still procedural vector art.
+  assert.equal(routeAsset({ sceneId: 's', intent: 'a clay rocket icon', kind: 'icon', style: 'clay' }).tool, 'assets.generate_svg');
+  assert.equal(routeAsset({ sceneId: 's', intent: 'a clay rocket icon', style: 'clay' }).tool, 'assets.generate_svg');
+  // No style keeps the existing SVG/FLUX split.
+  assert.equal(routeAsset({ sceneId: 's', intent: 'solar diagram', kind: 'diagram' }).tool, 'assets.generate_svg');
+  assert.equal(routeAsset({ sceneId: 's', intent: 'clay hero visual', kind: 'hero' }).tool, 'assets.generate_image');
+  // A styled photo has no SVG base to restyle; it stays a styled t2i.
+  assert.equal(routeAsset({ sceneId: 's', intent: 'a clay-style photo of a plant', kind: 'photo', style: 'clay' }).tool, 'assets.generate_image');
+  // A style plus a restylable word and no explicit kind still restyles.
+  assert.equal(routeAsset({ sceneId: 's', intent: 'a clay-style solar diagram', style: 'clay' }).tool, 'assets.sketch_to_render');
+});
+
 test('routeBrief splits a mixed sentence into SVG and FLUX decisions', () => {
   const routes = routeBrief('Create an icon of a rocket and an illustration of a nebula.');
   assert.equal(routes.length, 2);
@@ -124,12 +140,69 @@ test('tools: propose + edit package, SVG result, planned FLUX job', async () => 
   const refEdit = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'restyle the flow diagram', refs: ['a_svg_flow'] }) as any;
   assert.equal(refEdit.reference_edit, true);
   assert.equal(refEdit.asset.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
-  assert.deepEqual(refEdit.asset.gen.inputs.reference, ['a_svg_flow']);
+  assert.equal(refEdit.asset.gen.inputs.reference, 'a_svg_flow');
+  assert.equal(refEdit.asset.gen.inputs.text, true);
+  assert.match(refEdit.asset.gen.inputs.prompt, /Restyle this restyle the flow diagram as clay/);
+  assert.match(refEdit.asset.gen.inputs.prompt, /Keep the exact layout, positions, colours and all labels exactly as written/);
   assert.match(refEdit.asset.notes, /ReferenceMultiLatent/);
 
   const mismatched = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'a mascot', aspect: '1:1' }) as any;
   assert.equal(mismatched.source_aspect, '1:1');
   assert.match(mismatched.note, /centre-crop/);
+});
+
+test('C7: a styled diagram yields an SVG base plus a reference-edit image that plans an upload', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const schema = await import(new URL('../../../schema/src/index.mjs', import.meta.url).href);
+  const jobs = await import(new URL('../../../jobs/src/index.mjs', import.meta.url).href);
+  const workflowSha = createHash('sha256').update(readFileSync(new URL('../../../../workflows/flux3_klein_ref_edit.api.json', import.meta.url))).digest('hex');
+
+  let draft: any;
+  const tools = createToolset({
+    generateSvg: () => ({ svg: SVG, sanitizerVersion: '1.0.0', renderCheck: { ok: true, version: '1.0.0', width: 512, height: 512, opaqueFraction: 0.5, outOfPaletteFraction: 0 } }),
+    planImage: () => ({ workflowSha256: workflowSha }),
+    onPackageChange: pkg => { draft = pkg; },
+  });
+  const model = new ScriptedModel(step => {
+    if (step === 0) return [{ type: 'tool_call', id: 'c1', name: 'storyboard.propose', args: { brief: 'A clay-style solar diagram hero', title: 'Solar', scenes: [{ id: 's_hero', layout: 'hero', copy: { headline: 'Solar, explained' } }] } }, { type: 'done' }];
+    if (step === 1) return [{ type: 'tool_call', id: 'c2', name: 'assets.route', args: { scene_id: 's_hero', kind: 'diagram', need: 'a clay-style solar diagram', style: 'clay' } }, { type: 'done' }];
+    if (step === 2) return [{ type: 'tool_call', id: 'c3', name: 'assets.sketch_to_render', args: { scene_id: 's_hero', kind: 'diagram', intent: 'solar diagram', style: 'clay' } }, { type: 'done' }];
+    return [{ type: 'text', delta: 'Planned the solar hero.' }, { type: 'done' }];
+  });
+  const result = await runAgent({ model, brief: 'A clay-style solar diagram hero', tools, maxSteps: 8 });
+  assert.equal(result.ok, true, result.error);
+
+  const route: any = result.toolCalls.find(call => call.name === 'assets.route')!.result;
+  assert.equal(route.tool, 'assets.sketch_to_render');
+  const sketch: any = result.toolCalls.find(call => call.name === 'assets.sketch_to_render')!.result;
+  assert.equal(sketch.reference_edit, true);
+  assert.equal(sketch.svg_asset, sketch.svg.id);
+  assert.equal(sketch.image_asset, sketch.image.id);
+
+  const svgId = sketch.svg_asset;
+  const imageId = sketch.image_asset;
+  assert.equal(draft.assets[svgId].gen.generator, 'llm-svg');
+  assert.equal(draft.assets[svgId].status, 'ready');
+  assert.equal(draft.assets[imageId].gen.generator, 'flux3-klein');
+  assert.equal(draft.assets[imageId].status, 'pending');
+  assert.equal(draft.assets[imageId].gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
+  assert.equal(draft.assets[imageId].gen.workflow_sha256, workflowSha);
+  assert.equal(draft.assets[imageId].gen.inputs.reference, svgId);
+  assert.equal(draft.assets[imageId].gen.inputs.text, true);
+  assert.match(draft.assets[imageId].gen.inputs.prompt, /^Restyle this solar diagram as clay/);
+  assert.match(draft.assets[imageId].gen.inputs.prompt, /Keep the exact layout, positions, colours and all labels exactly as written/);
+  assert.ok(draft.scenes[0].foreground.some((fg: any) => fg.asset === svgId), 'the SVG base is the visible CPU asset');
+
+  const validation = schema.validatePackage(draft);
+  assert.equal(validation.valid, true, JSON.stringify(validation.errors, null, 2));
+
+  const plan = jobs.planJobs(draft);
+  assert.deepEqual(jobs.checkJobsDoc(plan), []);
+  const refJob = plan.jobs.find((job: any) => job.asset === imageId);
+  assert.ok(refJob, 'a reference-edit still job is planned');
+  assert.deepEqual(refJob.fileInputs, [{ param: 'reference', from: 'package', path: draft.assets[svgId].file }]);
+  assert.ok(!plan.jobs.some((job: any) => job.asset === svgId), 'llm-svg stays CPU work, never a GPU job');
 });
 
 test('agent builds and edits a package and routes SVG vs FLUX on a mixed brief', async () => {

@@ -70,6 +70,32 @@ export function expandFluxCaption(input: CaptionInput): string {
   return `${input.intent.trim().replace(/[.!?]+$/, '')}. ${style}; ${palette}; ${framing}; ${cutout}${camera}; ${text}.`;
 }
 
+export interface ReferenceEditCaptionInput {
+  intent: string;
+  /** Target style, e.g. clay, glass, editorial. */
+  style?: string;
+  palette?: string[];
+  aspect?: Aspect;
+}
+
+/**
+ * Klein reference-edit caption (GPU test 2, "Best prompt templates"): the SVG
+ * raster is image0 and the graph keeps layout, positions and labels while it
+ * restyles the surface. The template is deliberately explicit about keeping
+ * every label, because the edit is what makes an agent SVG look finished.
+ */
+export function expandReferenceEditCaption(input: ReferenceEditCaptionInput): string {
+  const subject = input.intent.trim().replace(/[.!?]+$/, '');
+  const style = input.style?.trim() || 'clay';
+  const palette = input.palette?.length ? `palette ${input.palette.join(', ')}` : 'the source palette';
+  const framing = FRAMING[input.aspect ?? '16:9'];
+  return (
+    `Restyle this ${subject} as ${style}; ${palette}; ${framing}. ` +
+    'Keep the exact layout, positions, colours and all labels exactly as written. ' +
+    'Do not add or remove elements.'
+  );
+}
+
 export interface VideoCaptionInput {
   intent: string;
   /** i2v: use the supplied still as the first frame. */

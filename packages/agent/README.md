@@ -11,6 +11,10 @@ The agent layer is provider-agnostic and transport-free: it consumes the structu
   animated vector parts. This is the default for procedural, text-light art.
 - `assets.generate_image` — illustrations, photos, textures, backgrounds, plates,
   transparent cutouts and other raster art (FLUX plan with an expanded caption).
+- `assets.sketch_to_render` — a hero/background/diagram that asks for a style (`clay`,
+  `glass`, `editorial`, ...). It emits an SVG base through the same A5 pipeline and then
+  plans a Klein reference edit whose image0 is that SVG, so the style pass keeps the source
+  layout and labels (docs/GPU_TEST_2.md). Icons never take this path: they stay SVG-only.
 - `assets.search` / `assets.upload` — only when the need explicitly asks for stock or
   an upload; they are fallbacks, not automatic choices.
 
@@ -26,6 +30,7 @@ illustration of a nebula" becomes one SVG route and one FLUX route.
 | `assets.route` | Router decision |
 | `assets.generate_svg` | Calls the injected A5 generator; result records `origin: generated`, `generator: llm-svg`, CC0, sha256/bytes, attempts/repairs |
 | `assets.generate_image` | Plans a FLUX still + expanded caption; never submits a GPU job (`requires_approval: spend`) |
+| `assets.sketch_to_render` | SVG base through A5 **plus** a planned Klein reference edit (`refs: [svg_id]`, ref-edit workflow, GPU test 2 template); icons stay SVG-only |
 | `assets.search` / `assets.attach` | Fallback metadata; attach requires approval |
 
 `createToolset({generateSvg, planImage, initialPackage})` injects the real generator.
@@ -50,7 +55,7 @@ max 2 repairs), unknown tools and tool failures become tool results, and the loo
 ## Evidence
 
 ```bash
-npm test                         # 8 tests: router, zod, repair loop, step cap, A5 bridge
+npm test                         # 14 tests: router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render
 node scripts/m4-live.mjs         # live OpenCode Go: propose → edit → 2 routes → SVG through A5
 node scripts/m4-two-providers.mjs # same loop against a local OpenAI-compatible endpoint
 ```

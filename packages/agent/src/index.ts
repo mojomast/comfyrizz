@@ -1,7 +1,7 @@
 export { routeAsset, routeBrief } from './router.js';
 export type { AssetNeed, AssetRoute, RouteDecision } from './router.js';
-export { expandFluxCaption, expandVideoCaption, aspectFromSize, sourceDims } from './caption.js';
-export type { CaptionInput, VideoCaptionInput, Aspect } from './caption.js';
+export { expandFluxCaption, expandReferenceEditCaption, expandVideoCaption, aspectFromSize, sourceDims } from './caption.js';
+export type { CaptionInput, ReferenceEditCaptionInput, VideoCaptionInput, Aspect } from './caption.js';
 export { svgPipeline } from './svg.js';
 export type { AutoFixLike, SvgFixResult, SvgGeneratorLike, SvgIntentLike } from './svg.js';
 export {
@@ -11,6 +11,7 @@ export {
   routeSchema,
   generateSvgSchema,
   generateImageSchema,
+  sketchToRenderSchema,
 } from './tools.js';
 export type { AgentTool, PlannedImage, SvgAssetResult, ToolsetOptions } from './tools.js';
 export { runAgent } from './agent.js';

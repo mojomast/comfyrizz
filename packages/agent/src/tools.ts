@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { routeAsset, type AssetNeed, type RouteDecision } from './router.js';
 import { foregroundFor } from './package.js';
-import { expandFluxCaption, aspectFromSize, sourceDims, type Aspect } from './caption.js';
+import { expandFluxCaption, expandReferenceEditCaption, aspectFromSize, sourceDims, type Aspect } from './caption.js';
 import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
 
@@ -27,6 +27,8 @@ export interface SvgAssetResult {
 export interface PlannedImage {
   caption?: string;
   workflow?: string;
+  /** sha256 of the workflow graph, so a planned asset can pass the jobs planner. */
+  workflowSha256?: string;
   model?: string;
   inputs?: Record<string, unknown>;
   backend?: string;
@@ -77,6 +79,8 @@ export const routeSchema = z.object({
   animated: z.boolean().optional(),
   transparent: z.boolean().optional(),
   source: z.enum(['generate', 'openverse', 'stock', 'upload']).optional(),
+  /** Requested style; a styled hero/background/diagram routes to assets.sketch_to_render. */
+  style: z.string().optional(),
 });
 
 export const generateSvgSchema = z.object({
@@ -101,6 +105,20 @@ export const generateImageSchema = z.object({
   text: z.boolean().optional(),
   /** Labelled frame: keep labels and lock the camera. */
   labelled: z.boolean().optional(),
+  /** Target style for a reference edit (with refs): clay, glass, editorial, ... */
+  style: z.string().min(1).max(80).optional(),
+});
+
+export const sketchToRenderSchema = z.object({
+  scene_id: z.string().min(1),
+  kind: z.enum(['diagram', 'hero', 'background', 'illustration', 'plate', 'pattern', 'chart', 'vector', 'vector-anim']),
+  intent: z.string().min(1),
+  style: z.string().min(1).max(80),
+  palette: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/)).max(8).optional(),
+  width: z.number().int().positive().max(4096).optional(),
+  height: z.number().int().positive().max(4096).optional(),
+  seed: z.number().int().optional(),
+  aspect: z.enum(['16:9', '1:1', '4:5', '9:16']).optional(),
 });
 
 const searchSchema = z.object({
@@ -310,7 +328,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   };
 
   const route = (args: z.infer<typeof routeSchema>): RouteDecision =>
-    routeAsset({ sceneId: args.scene_id, intent: args.need, kind: args.kind, animated: args.animated, transparent: args.transparent, source: args.source } as AssetNeed);
+    routeAsset({ sceneId: args.scene_id, intent: args.need, kind: args.kind, animated: args.animated, transparent: args.transparent, source: args.source, style: args.style } as AssetNeed);
 
   const generateSvg = async (args: z.infer<typeof generateSvgSchema>) => {
     const intent: SvgIntentLike = {
@@ -388,24 +406,38 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const outputAspect = aspectFromSize(format.width, format.height);
     const requestedAspect = (args.aspect as Aspect | undefined) ?? outputAspect;
     const dims = sourceDims(requestedAspect);
-    const caption = planned.caption ?? expandFluxCaption({
-      intent: args.intent,
-      ...(args.cutout ? { cutout: true } : {}),
-      ...(args.text ? { text: true } : {}),
-      ...(args.labelled ? { labelled: true } : {}),
-      aspect: requestedAspect,
-    });
-    const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
+    const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
     const refs = args.refs ?? [];
     const isRefEdit = refs.length > 0;
+    const caption = planned.caption ?? (isRefEdit
+      ? expandReferenceEditCaption({
+          intent: args.intent,
+          ...(args.style ? { style: args.style } : {}),
+          ...(palette ? { palette } : {}),
+          aspect: requestedAspect,
+        })
+      : expandFluxCaption({
+          intent: args.intent,
+          ...(args.style ? { style: args.style } : {}),
+          ...(args.cutout ? { cutout: true } : {}),
+          ...(args.text ? { text: true } : {}),
+          ...(args.labelled ? { labelled: true } : {}),
+          aspect: requestedAspect,
+        }));
+    const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
     const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
+    // The package schema only allows scalar gen.inputs values, and ReferenceMultiLatent
+    // wires image0, so the first ref is the reference raster; extras are recorded only.
+    const extraRefs = isRefEdit && refs.length > 1
+      ? Object.fromEntries(refs.slice(1).map((ref, index) => [`reference_${index + 2}`, ref]))
+      : {};
     const defaultInputs: Record<string, unknown> = {
       prompt: caption,
       width: dims.width,
       height: dims.height,
       seed: args.seed ?? 0,
       ...(args.cutout ? { cutout: true } : {}),
-      ...(isRefEdit ? { reference: refs } : {}),
+      ...(isRefEdit ? { reference: refs[0], text: true, ...extraRefs } : {}),
     };
     const asset = {
       kind: 'image',
@@ -420,6 +452,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       gen: {
         generator: 'flux3-klein',
         workflow: planned.workflow ?? defaultWorkflow,
+        ...(planned.workflowSha256 ? { workflow_sha256: planned.workflowSha256 } : {}),
         model: planned.model ?? 'flux-3-klein',
         inputs: planned.inputs ?? defaultInputs,
         backend: planned.backend ?? 'colab:G4',
@@ -448,6 +481,48 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     };
   };
 
+  /**
+   * Sketch-to-render (C7): a styled hero/background/diagram becomes an SVG base
+   * through the A5 pipeline plus a Klein reference edit whose image0 is that SVG
+   * (GPU test 2: the reference edit is the best way to style an agent SVG). The
+   * SVG is CPU-ready; the restyle is planned only and needs spend approval.
+   */
+  const sketchToRender = async (args: z.infer<typeof sketchToRenderSchema>) => {
+    const svgKind: z.infer<typeof generateSvgSchema>['kind'] =
+      args.kind === 'vector-anim' ? 'vector-anim' : args.kind === 'pattern' || args.kind === 'background' ? 'pattern' : 'diagram';
+    const svg = await generateSvg({
+      scene_id: args.scene_id,
+      kind: svgKind,
+      intent: args.intent,
+      ...(args.palette ? { palette: args.palette } : {}),
+      ...(args.width ? { width: args.width } : {}),
+      ...(args.height ? { height: args.height } : {}),
+      ...(args.seed !== undefined ? { seed: args.seed } : {}),
+    });
+    const svgAssetId = svg.asset.id;
+    const image = planImage({
+      scene_id: args.scene_id,
+      kind: args.kind,
+      intent: args.intent,
+      style: args.style,
+      refs: [svgAssetId],
+      labelled: true,
+      ...(args.aspect ? { aspect: args.aspect } : {}),
+      ...(args.seed !== undefined ? { seed: args.seed + 1 } : {}),
+    });
+    return {
+      scene_id: args.scene_id,
+      kind: args.kind,
+      style: args.style,
+      reference_edit: true,
+      svg_asset: svgAssetId,
+      image_asset: image.asset.id,
+      svg: svg.asset,
+      image: image.asset,
+      note: 'SVG is the CPU-ready base; the Klein reference edit is planned only (spend needs approval).',
+    };
+  };
+
   return {
     'storyboard.propose': tool(
       'storyboard.propose',
@@ -465,8 +540,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ),
     'assets.route': tool(
       'assets.route',
-      'Choose SVG, FLUX image, stock search or upload for a scene need. SVG is default for icons/diagrams/charts/patterns.',
-      baseParameters({ scene_id: { type: 'string' }, need: { type: 'string' }, kind: { type: 'string' }, animated: { type: 'boolean' }, transparent: { type: 'boolean' }, source: { type: 'string', enum: ['generate', 'openverse', 'stock', 'upload'] } }, ['scene_id', 'need']),
+      'Choose SVG, FLUX image, sketch-to-render (styled SVG base + reference edit), stock search or upload for a scene need. SVG is default for icons/diagrams/charts/patterns.',
+      baseParameters({ scene_id: { type: 'string' }, need: { type: 'string' }, kind: { type: 'string' }, animated: { type: 'boolean' }, transparent: { type: 'boolean' }, source: { type: 'string', enum: ['generate', 'openverse', 'stock', 'upload'] }, style: { type: 'string' } }, ['scene_id', 'need']),
       routeSchema,
       route,
     ),
@@ -480,9 +555,16 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     'assets.generate_image': tool(
       'assets.generate_image',
       'Plan a FLUX still with an expanded caption. This never runs a GPU job; spend needs approval.',
-      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' } }, ['scene_id', 'intent']),
+      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string' } }, ['scene_id', 'intent']),
       generateImageSchema,
       planImage,
+    ),
+    'assets.sketch_to_render': tool(
+      'assets.sketch_to_render',
+      'Styled hero/background/diagram: emit an SVG base through A5, then plan a Klein reference edit that restyles it and keeps every label. Icons stay SVG-only.',
+      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string', enum: ['diagram', 'hero', 'background', 'illustration', 'plate', 'pattern', 'chart', 'vector', 'vector-anim'] }, intent: { type: 'string' }, style: { type: 'string' }, palette: { type: 'array', items: { type: 'string' } }, width: { type: 'number' }, height: { type: 'number' }, seed: { type: 'number' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] } }, ['scene_id', 'kind', 'intent', 'style']),
+      sketchToRenderSchema,
+      sketchToRender,
     ),
     'assets.search': tool(
       'assets.search',
