@@ -14,12 +14,20 @@
           <select id="llm"><option value="none">local · not configured</option></select>
         </label>
         <label class="picker">Backend
-          <select id="backend"><option value="cpu">CPU · no network</option></select>
+          <select id="backend">
+            <option value="cpu">CPU · no network</option>
+            <option value="byo-comfyui">BYO ComfyUI · fake</option>
+            <option value="colab">Google Colab G4 · fake</option>
+          </select>
+        </label>
+        <label class="picker">Budget
+          <input id="budget" type="number" min="0" step="1" value="15" title="project unit budget for Google Colab" />
         </label>
         <span class="badge" title="Every asset in this package is generated or CC0">open weights</span>
         <span class="meter" id="ctx">ctx 0 / 200k</span>
         <span class="meter" id="spend">0.0 GPU units</span>
         <span class="spacer"></span>
+        <button id="run-backend">Run on backend</button>
         <button id="render" class="primary">Export MP4</button>
         <span id="render-state" class="hint"></span>
       </header>
@@ -44,11 +52,14 @@
           </div>
           <div class="pane-head"><b>Theme</b><span class="hint">palette changes the procedural backgrounds</span></div>
           <div id="palette" class="palette" style="padding: 12px 16px;"></div>
+          <div id="spend-card"></div>
           <div class="pane-head"><b>Storyboard</b><span class="hint">inline edits update the Player immediately</span></div>
           <div id="storyboard"></div>
         </section>
 
         <aside id="activity-pane" class="pane">
+          <div class="pane-head"><b>Run</b><span class="hint">backend lifecycle</span></div>
+          <div id="run-panel"><div class="hint">No backend run yet. Pick a backend and press Run.</div></div>
           <div class="pane-head"><b>Activity</b><span class="hint">local only</span></div>
           <div id="activity"></div>
           <div class="pane-head"><b>Assets</b><span class="hint">generated-first</span></div>

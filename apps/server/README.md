@@ -27,12 +27,26 @@ requests and as `?token=` only for the SSE `EventSource` (which cannot set heade
 | `GET` | `/api/package/:id` | `{package, revision}` |
 | `PATCH` | `/api/package/:id` | `{baseRevision, package}`; mismatch → `409 {currentRevision}`; invalid → `422 {details}` |
 | `POST` | `/api/render` | `{packageId, baseRevision}`, or a C1-style `{package}` draft; returns `video/mp4` |
+| `POST` | `/api/run` | C6 backend run: `{backendId, jobs, budgetUnits, approved?, comfyuiUrl?}`. Returns the estimate + `planHash`; a Colab run without approval returns `approvalRequired:true` and starts nothing |
+| `GET` | `/api/run` | C6 run status: active run, `spentEstimate`, approvals and run list |
+| `POST` | `/api/run/approve` | `{planHash}`; approves exactly that plan (hardware + budget), so a changed plan needs a new card |
+| `GET` | `/api/run/:id` | One run record: status, budget, estimate, lifecycle events, teardown |
 | `GET` | `/api/events` | `text/event-stream`, replay from `Last-Event-ID`/`lastEventId` |
 
 Render events: `render.started`, `render.log`, `render.finished`, `render.failed`,
 `package.updated`. The route is synchronous (the HTTP response is the MP4); SSE carries the same
 lifecycle for the Activity panel and for future async progress. Only one CPU render runs at a
 time; a second request gets `409 render busy`.
+
+Run events (C6): `run.approval_required`, `run.approved`, `run.refused`, `run.started`,
+`run.event` (one `ensure_up` / `health` / `collected` / `teardown` / `error` payload each),
+`run.finished`, `run.failed`. A run is admitted only if the reserve formula allows it
+(`spent + committed + next_job_upper + collect_and_stop_reserve <= budget`); BYO ComfyUI is not
+metered and never asks for approval. Only one backend run runs at a time. The teardown result is
+reported as `stopped` or `stop_unconfirmed`; the spend figure is always labelled an estimate.
+
+The server takes a `backendFactory(backendId, opts)` so tests run the full lifecycle against a
+fake (see `test/run.test.mjs`); the default factory lazily loads `packages/backends`.
 
 The web shell persists an edit with a base revision before rendering, so a stale `PATCH` gets a
 conflict instead of silently overwriting an accepted edit. A render records the revision it used

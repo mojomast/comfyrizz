@@ -68,6 +68,25 @@ ended with `agent did not produce a package draft` while the offline scripted ru
 e2e (valid package + ffprobe-checked MP4) both pass. The runner keeps the deterministic fallback
 so the slice still completes; the live-model tool loop is the open item.
 
+## C6 backend run (spend card + run panel)
+
+The top bar's **Backend** picker now offers `BYO ComfyUI` and `Google Colab G4` alongside `CPU`.
+**Run on backend** posts the current package's scenes as jobs to `POST /api/run`. A Google Colab
+run returns `approvalRequired` with the estimate (GPU minutes, setup, `required` vs `budget`
+units) and starts nothing; the shell renders that as a **spend card** in the Preview pane with
+**Start** / **Cancel**. Start re-posts the same plan with `approved: true`. BYO ComfyUI is not
+metered and runs straight away.
+
+The Activity pane gained a **Run** panel driven entirely by `/api/events`: `ensure_up`, `health`,
+per-job, `collected` and `teardown` rows, with the terminal status (`done` / `stop_unconfirmed` /
+`failed`) in the chip. The top-bar spend meter shows the server's `spentEstimate` after each run.
+The teardown line is the honest stop result, and every spend figure is labelled an estimate.
+
+C6 ships against fakes only: `apps/server/test/run.test.mjs` drives the full lifecycle through a
+fake backend, and a real headless-Chrome check (fake backend injected into `createApp`) confirmed
+the card → Start → `done` flow with the lifecycle rows and the spend meter at `4.29 GPU units
+(est.)`. No Google Colab runtime and no ComfyUI URL are contacted.
+
 ## M2 evidence (2026-10-17)
 
 Real headless Chrome against `http://127.0.0.1:4174/`:

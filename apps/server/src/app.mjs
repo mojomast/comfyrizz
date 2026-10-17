@@ -3,6 +3,7 @@ import { extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
+import { createRunController } from './run.mjs';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
@@ -59,6 +60,23 @@ function bearer(request) {
   return match ? match[1] : null;
 }
 
+// Loaded lazily so tests can inject a fake and so the backends module is not parsed
+// for every server test that never touches a GPU path.
+async function defaultBackendFactory(backendId, opts = {}) {
+  const mod = await import('../../../packages/backends/src/index.mjs');
+  if (backendId === 'colab') {
+    return mod.createColabBackend({
+      packageId: opts.packageId ?? 'comfyrizz-run',
+      budgetUnits: opts.budgetUnits ?? 0,
+      ratePerHour: opts.ratePerHour ?? 8.9,
+    });
+  }
+  if (backendId === 'byo-comfyui') {
+    return mod.createByoBackend({ comfyuiUrl: opts.comfyuiUrl ?? 'http://127.0.0.1:8188' });
+  }
+  return null;
+}
+
 export function createApp({
   root = repoRoot,
   token,
@@ -66,6 +84,7 @@ export function createApp({
   webDist = join(root, 'apps', 'web', 'dist'),
   render = defaultRenderPackage,
   agentRunner = null,
+  backendFactory = defaultBackendFactory,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
@@ -73,6 +92,7 @@ export function createApp({
   mkdirSync(rendersDir, { recursive: true });
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const events = new EventLog();
+  const runs = createRunController({ backendFactory, events, runtimeDir });
   let activeRender = null;
 
   async function readJson(request) {
@@ -222,6 +242,43 @@ export function createApp({
       }
     }
 
+    if (url.pathname === '/api/run' && request.method === 'POST') {
+      const body = await readJson(request);
+      try {
+        const result = await runs.start({
+          backendId: body.backendId ?? 'colab',
+          jobs: body.jobs,
+          budgetUnits: body.budgetUnits,
+          approved: body.approved === true,
+          comfyuiUrl: body.comfyuiUrl,
+          ratePerHour: body.ratePerHour,
+        });
+        return sendJson(response, result.status === 409 ? 409 : 200, result);
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
+    }
+
+    if (url.pathname === '/api/run' && request.method === 'GET') {
+      return sendJson(response, 200, runs.status());
+    }
+
+    if (url.pathname === '/api/run/approve' && request.method === 'POST') {
+      const body = await readJson(request);
+      try {
+        return sendJson(response, 200, runs.approve(body.planHash));
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
+    }
+
+    const runMatch = /^\/api\/run\/([^/]+)$/.exec(url.pathname);
+    if (runMatch && request.method === 'GET') {
+      const record = runs.get(runMatch[1]);
+      if (!record) return sendJson(response, 404, { error: 'run not found' });
+      return sendJson(response, 200, { run: record });
+    }
+
     if (url.pathname === '/api/render' && request.method === 'POST') {
       if (activeRender) return sendJson(response, 409, { error: 'render busy', renderId: activeRender });
       const body = await readJson(request);
@@ -305,6 +362,7 @@ export function createApp({
     },
     store,
     events,
+    runs,
     rendersDir,
     webDist,
     close: () => events.closeAll(),

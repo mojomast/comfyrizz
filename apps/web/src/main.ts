@@ -50,6 +50,13 @@ const state = {
 let player: PlayerRef | null = null;
 let scrub: HTMLInputElement;
 
+type RunEvent = { type: string; [key: string]: unknown };
+const runState = {
+  active: null as null | { runId: string; backendId: string; status: string },
+  events: [] as RunEvent[],
+  spend: null as null | { planHash: string; backendId: string; estimate: Record<string, unknown>; budget: Record<string, unknown>; jobs: number },
+};
+
 function logActivity(text: string): void {
   state.activity.unshift({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), text });
   renderActivity();
@@ -172,6 +179,110 @@ function renderActivity(): void {
     .join('');
 }
 
+function jobsForPackage(): Array<Record<string, unknown>> {
+  return pkg.scenes.map(scene => ({ id: scene.id, kind: scene.layout === 'title' ? 'still' : 'plate' }));
+}
+
+function summarizeRunEvent(event: RunEvent): string {
+  if (event.type === 'ensure_up') return `state ${event.state ?? '?'}`;
+  if (event.type === 'health') return `${event.ok ? 'ok' : 'not ok'} · ${event.detail ?? ''}`;
+  if (event.type === 'collected') return `${event.files ?? '?'} file(s) → ${event.destDir ?? ''}`;
+  if (event.type === 'teardown') return `${event.state ?? '?'} · ${event.evidence ?? ''}`;
+  if (event.type === 'error') return String(event.message ?? '');
+  return '';
+}
+
+function renderRunPanel(): void {
+  const host = $('run-panel');
+  if (!runState.active) {
+    host.innerHTML = '<div class="hint">No backend run yet. Pick a backend and press Run.</div>';
+    return;
+  }
+  const rows = runState.events
+    .map(event => `<div class="event"><b>${esc(event.type)}</b> ${esc(summarizeRunEvent(event))}</div>`)
+    .join('');
+  host.innerHTML = `<div class="run-head"><b>${esc(runState.active.runId)}</b><span class="chip">${esc(runState.active.status)}</span></div>${rows}`;
+}
+
+function renderSpendCard(): void {
+  const host = $('spend-card');
+  const spend = runState.spend;
+  if (!spend) {
+    host.innerHTML = '';
+    return;
+  }
+  const estimate = spend.estimate as { gpuMinutes?: number; overheadMinutes?: number };
+  const budget = spend.budget as { required?: number; budget?: number; message?: string };
+  const label = spend.backendId === 'colab' ? 'Google Colab G4' : 'Your own ComfyUI';
+  host.innerHTML = `<div class="spend-card">
+    <b>Start ${esc(label)}?</b>
+    <p>${esc(String(estimate.gpuMinutes ?? '?'))} GPU min + ${esc(String(estimate.overheadMinutes ?? 0))} min setup · ${esc(String(budget.required ?? '?'))} of ${esc(String(budget.budget ?? '?'))} units (estimate)</p>
+    <p class="hint">${esc(budget.message ?? '')} Google Colab spend is an account-level estimate.</p>
+    <div class="spend-actions"><button id="spend-start" class="primary">Start</button><button id="spend-cancel">Cancel</button></div>
+  </div>`;
+  $('spend-start').addEventListener('click', () => void runOnBackend(true));
+  $('spend-cancel').addEventListener('click', () => {
+    runState.spend = null;
+    renderSpendCard();
+    logActivity('Spend card cancelled');
+  });
+}
+
+async function refreshSpend(): Promise<void> {
+  try {
+    const response = await apiFetch('/api/run');
+    if (!response.ok) return;
+    const body = (await response.json()) as { spentEstimate?: number };
+    if (typeof body.spentEstimate === 'number') $('spend').textContent = `${body.spentEstimate.toFixed(2)} GPU units (est.)`;
+  } catch {
+    /* the meter is best-effort */
+  }
+}
+
+async function runOnBackend(approved = false): Promise<void> {
+  const backendId = $<HTMLSelectElement>('backend').value;
+  if (backendId === 'cpu') {
+    logActivity('CPU is not a GPU backend; use Export MP4 for the CPU slice');
+    return;
+  }
+  const budgetUnits = Number($<HTMLInputElement>('budget').value) || 0;
+  const button = $<HTMLButtonElement>('run-backend');
+  button.disabled = true;
+  try {
+    const response = await apiFetch('/api/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ backendId, jobs: jobsForPackage(), budgetUnits, approved }),
+    });
+    const body = (await response.json().catch(() => ({}))) as Record<string, any>;
+    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+    if (body.approvalRequired) {
+      runState.spend = { planHash: body.planHash, backendId, estimate: body.estimate ?? {}, budget: body.budget ?? {}, jobs: body.jobs ?? 0 };
+      renderSpendCard();
+      logActivity(`Spend approval needed: ${body.budget?.message ?? 'approve the plan to start the VM'}`);
+      return;
+    }
+    if (body.refused) {
+      logActivity(`Run refused: ${body.budget?.message ?? 'budget too small'}`);
+      return;
+    }
+    runState.spend = null;
+    renderSpendCard();
+    // SSE may already have delivered run.started/events/finished for this runId while the
+    // POST was in flight; never clobber that with the stale response.
+    if (runState.active?.runId !== body.runId) {
+      runState.active = { runId: body.runId, backendId, status: body.status ?? 'starting' };
+      runState.events = [];
+    }
+    renderRunPanel();
+    logActivity(`Run ${body.runId} started on ${backendId}`);
+  } catch (error) {
+    logActivity(`Run request failed: ${(error as Error).message}`);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function exportMp4(): Promise<void> {
   const button = $<HTMLButtonElement>('render');
   const label = $('render-state');
@@ -260,6 +371,8 @@ function init(): void {
   renderStoryboard();
   renderPalette();
   renderAssets();
+  renderRunPanel();
+  renderSpendCard();
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: 'Loaded examples/launch-demo package + compiled timeline' }];
   renderActivity();
 
@@ -284,6 +397,7 @@ function init(): void {
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   $('render').addEventListener('click', () => void exportMp4());
+  $('run-backend').addEventListener('click', () => void runOnBackend(false));
 
   if (token) {
     const stream = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
@@ -303,6 +417,38 @@ function init(): void {
       const data = JSON.parse((event as MessageEvent).data) as { message: string };
       logActivity(`Render failed: ${data.message}`);
     });
+    stream.addEventListener('run.started', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { runId: string; backendId: string };
+      if (runState.active?.runId !== data.runId) runState.events = [];
+      runState.active = { runId: data.runId, backendId: data.backendId, status: 'starting' };
+      renderRunPanel();
+    });
+    stream.addEventListener('run.event', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { runId: string; event: RunEvent };
+      if (runState.active?.runId === data.runId) {
+        runState.events.push(data.event);
+        renderRunPanel();
+      }
+    });
+    stream.addEventListener('run.finished', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { runId: string; status: string };
+      if (runState.active) runState.active.status = data.status;
+      renderRunPanel();
+      logActivity(`Run ${data.runId} ${data.status}`);
+      void refreshSpend();
+    });
+    stream.addEventListener('run.failed', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { runId: string; message: string };
+      if (runState.active) runState.active.status = 'failed';
+      renderRunPanel();
+      logActivity(`Run ${data.runId} failed: ${data.message}`);
+    });
+    stream.addEventListener('run.approval_required', () => logActivity('Server: spend approval required'));
+    stream.addEventListener('run.refused', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { budget?: { message?: string } };
+      logActivity(`Server refused the run: ${data.budget?.message ?? 'budget too small'}`);
+    });
+    void refreshSpend();
   }
 
   $<HTMLFormElement>('composer').addEventListener('submit', event => {
