@@ -4,6 +4,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { createRunController } from './run.mjs';
+import { createExporter } from './export.mjs';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
@@ -90,6 +91,7 @@ export function createApp({
   root = repoRoot,
   token,
   runtimeDir = join(root, 'apps', 'server', '.runtime'),
+  exportsDir = join(runtimeDir, 'out', 'export'),
   webDist = join(root, 'apps', 'web', 'dist'),
   render = defaultRenderPackage,
   agentRunner = null,
@@ -103,7 +105,9 @@ export function createApp({
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const events = new EventLog();
   const runs = createRunController({ backendFactory, events, runtimeDir });
+  const exporter = createExporter({ exportsDir, render });
   let activeRender = null;
+  let activeExport = null;
 
   async function readJson(request) {
     let size = 0;
@@ -296,6 +300,61 @@ export function createApp({
       return sendJson(response, 200, { run: record });
     }
 
+    if (url.pathname === '/api/export' && request.method === 'POST') {
+      if (activeExport) return sendJson(response, 409, { error: 'export busy', exportId: activeExport });
+      const body = await readJson(request);
+      const exportId = `x_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      activeExport = exportId;
+      let pkg;
+      let packagePath;
+      let revision = null;
+      try {
+        if (body.package && typeof body.package === 'object') {
+          // C1 compatibility: an edited draft draft-exported without mutating the store.
+          pkg = body.package;
+          packagePath = join(rendersDir, `${exportId}.package.json`);
+          writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
+          revision = Number.isFinite(pkg.revision) ? pkg.revision : null;
+        } else {
+          const id = body.packageId;
+          if (!id) return sendJson(response, 400, { error: 'packageId or package required' });
+          pkg = store.read(id);
+          if (!pkg) return sendJson(response, 404, { error: 'package not found' });
+          if (body.baseRevision != null && Number(body.baseRevision) !== pkg.revision) {
+            return sendJson(response, 409, { error: 'conflict', currentRevision: pkg.revision });
+          }
+          packagePath = store.path(id);
+          revision = pkg.revision;
+        }
+        events.publish({ type: 'export.started', exportId, packageId: pkg.id, revision });
+        const result = await exporter({
+          pkg,
+          packagePath,
+          revision,
+          force: body.force === true,
+          onLog: line => events.publish({ type: 'export.log', exportId, line }),
+        });
+        events.publish({
+          type: 'export.finished',
+          exportId,
+          packageId: pkg.id,
+          revision,
+          dir: result.dir,
+          files: result.files.map(file => file.name),
+          frames: result.frames,
+          captions: result.captions,
+          complete: result.complete,
+          excluded: result.excluded,
+        });
+        return sendJson(response, 200, { exportId, ...result });
+      } catch (error) {
+        events.publish({ type: 'export.failed', exportId, packageId: pkg?.id, message: error.message });
+        return sendJson(response, error.status ?? 500, { error: error.message, exportId });
+      } finally {
+        activeExport = null;
+      }
+    }
+
     if (url.pathname === '/api/render' && request.method === 'POST') {
       if (activeRender) return sendJson(response, 409, { error: 'render busy', renderId: activeRender });
       const body = await readJson(request);
@@ -381,6 +440,7 @@ export function createApp({
     events,
     runs,
     rendersDir,
+    exportsDir,
     webDist,
     close: () => events.closeAll(),
   };

@@ -130,7 +130,9 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
         ...(asset.sha256 ? { sha256: asset.sha256 } : {}),
         ...(asset.license?.id ? { licenseId: asset.license.id } : {}),
         ...(asset.source?.landing_url ? { sourceUrl: asset.source.landing_url } : {}),
-        reason: asset.license?.blocked_reason ?? asset.license?.blocked ? 'licence policy blocked this asset' : 'not marked redistributable under the v0.1 licence policy',
+        reason:
+          asset.license?.blocked_reason ??
+          (asset.license?.blocked ? 'licence policy blocked this asset' : 'not marked redistributable under the v0.1 licence policy'),
       });
       continue;
     }

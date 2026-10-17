@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp } from './app.mjs';
 import { createCpuAgentRunner } from './agent-runner.mjs';
@@ -31,7 +31,14 @@ const app = createApp({
   }),
 });
 const seedPath = join(repoRoot, 'examples', 'launch-demo', 'package.json');
-if (existsSync(seedPath)) app.store.seed(JSON.parse(readFileSync(seedPath, 'utf8')));
+if (existsSync(seedPath)) {
+  app.store.seed(JSON.parse(readFileSync(seedPath, 'utf8')));
+  // The package JSON references assets/*.svg; the store keeps packages in
+  // <runtime>/packages, so copy the example's committed vectors next to it.
+  // Without this the seeded demo cannot render or export its SVG assets.
+  const seedAssets = join(repoRoot, 'examples', 'launch-demo', 'assets');
+  if (existsSync(seedAssets)) cpSync(seedAssets, join(runtimeDir, 'packages', 'assets'), { recursive: true });
+}
 
 const server = createServer(app.handler);
 server.listen(port, host, () => {
