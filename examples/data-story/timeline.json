@@ -1,0 +1,272 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 1320,
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 150,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Data story",
+        "headline": "Four weeks of renders",
+        "sub": "A chart-led story built from one package."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 31,
+          "palette": [
+            "#120b1f",
+            "#2a1b45",
+            "#f6a94a"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_data_frame",
+          "x": 0.5,
+          "y": 0.88,
+          "w": 0.09,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_hero",
+      "layout": "hero",
+      "variant": "split",
+      "from": 135,
+      "durationInFrames": 240,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "The trend is the story",
+        "sub": "Each week added more finished renders.",
+        "body": "The same compiled timeline drives the chart, the captions and the CPU export, so the numbers and the picture never drift apart."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 13
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_trend_line",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "from": 360,
+      "durationInFrames": 240,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Renders per week",
+        "sub": "Fourteen in the last week.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "data": {
+        "dataset": "d_renders",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 19
+        }
+      },
+      "foreground": [],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_stat",
+      "layout": "stat",
+      "from": 585,
+      "durationInFrames": 180,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Renders in the final week",
+        "sub": "Up from four in week one.",
+        "body": "14"
+      },
+      "data": {
+        "dataset": "d_renders",
+        "display": "number"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "gradient",
+          "seed": 23
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_kpi_cards",
+          "x": 0.13,
+          "y": 0.2,
+          "w": 0.08,
+          "anim": "zoom-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_plate",
+      "layout": "hero",
+      "variant": "split",
+      "from": 750,
+      "durationInFrames": 240,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Room for a richer plate",
+        "sub": "GPU stills stay planned until a spend is approved.",
+        "body": "The scene keeps a procedural background as its CPU fallback, so the export never blocks on the GPU."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 29
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_data_frame",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        },
+        {
+          "asset": "a_data_still",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "fade-in"
+        },
+        {
+          "asset": "a_data_plate",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "ken-burns"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_list",
+      "layout": "list",
+      "variant": "bullets",
+      "from": 975,
+      "durationInFrames": 210,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "What the story keeps",
+        "items": [
+          "One dataset, approved as example data",
+          "Bar and number views from the same values",
+          "A procedural fallback under every GPU slot",
+          "An export that matches the compiled timeline"
+        ]
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 2
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_kpi_cards",
+          "x": 0.86,
+          "y": 0.5,
+          "w": 0.24,
+          "anim": "parallax-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "from": 1170,
+      "durationInFrames": 150,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 0,
+      "copy": {
+        "headline": "Tell the next story",
+        "sub": "One package, five layouts, CPU render.",
+        "cta": "github.example/comfyrizz"
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 37,
+          "palette": [
+            "#120b1f",
+            "#2a1b45",
+            "#f6a94a"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_anim_rise",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.24,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": null,
+      "provisional": false
+    }
+  ],
+  "captions": [],
+  "plates": [],
+  "target": {
+    "requested": null,
+    "actual": 1320,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [],
+  "proposals": [],
+  "sourceHash": "07d02aa1b0d08bb1b60ae511a0ac18a7c357bc2221d2c58d12213238f41fa1d4",
+  "hash": "da7e9c5e784d3adbebcbfa389a3dc76b723b7bf596a38b1ef8c55ca6efc1a1a4"
+}

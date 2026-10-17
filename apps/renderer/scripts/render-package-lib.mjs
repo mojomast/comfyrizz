@@ -50,7 +50,7 @@ function needsMediaPublicDir(pkg) {
 }
 
 /** Copy fonts + the package's asset folders into a throwaway Remotion public dir. */
-function preparePublicDir(pkg, packageDir) {
+export function preparePublicDir(pkg, packageDir) {
   const temp = mkdtempSync(join(tmpdir(), 'comfyrizz-public-'));
   cpSync(join(rendererDir, 'public', 'fonts'), join(temp, 'fonts'), { recursive: true });
   for (const dir of assetDirs(pkg)) {

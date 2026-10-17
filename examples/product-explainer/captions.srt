@@ -1,0 +1,31 @@
+1
+00:00:00,000 --> 00:00:03,667
+Comfyrizz turns a short brief into a finished product video.
+
+2
+00:00:03,833 --> 00:00:05,733
+Everything renders on this machine.
+
+3
+00:00:05,467 --> 00:00:10,167
+Every asset starts as a package entry, so the storyboard stays the source of truth.
+
+4
+00:00:12,967 --> 00:00:19,967
+The asset router sends icons and diagrams to generated SVG, and marks heavier stills for the GPU.
+
+5
+00:00:20,467 --> 00:00:25,400
+A full CPU pass takes a few minutes, with no network and no cloud runtime.
+
+6
+00:00:25,967 --> 00:00:31,700
+The timeline locks integer frames at thirty per second, so the export matches the plan exactly.
+
+7
+00:00:33,467 --> 00:00:39,267
+Three rules keep it honest: measure the speech, never clip the copy, and label every estimate.
+
+8
+00:00:39,967 --> 00:00:42,833
+Ready to render, locally and deterministically.

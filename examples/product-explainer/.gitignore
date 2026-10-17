@@ -1,0 +1,5 @@
+# Commit the normalised mix the export uses; ignore raw/intermediate audio.
+audio/narration.raw.wav
+audio/narration.wav
+audio/narration/
+out/

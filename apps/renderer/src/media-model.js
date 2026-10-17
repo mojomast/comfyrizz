@@ -42,6 +42,16 @@ export function isMediaKind(kind) {
 }
 
 /**
+ * A media asset can only be drawn once it is ready and has a file. Pending GPU
+ * slots keep the scene's procedural fallback instead of loading an empty path.
+ * @param {Asset} [asset]
+ * @returns {boolean}
+ */
+export function isRenderableMedia(asset) {
+  return Boolean(asset) && isMediaKind(asset?.kind) && asset?.status === 'ready' && typeof asset.file === 'string' && asset.file.length > 0;
+}
+
+/**
  * @param {Scene} scene
  * @param {PackageV1} pkg
  * @param {MediaSidecar} [media]

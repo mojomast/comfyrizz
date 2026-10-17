@@ -4,7 +4,7 @@ import type { Asset, ForegroundItem, PackageV1 } from '../../../packages/schema/
 import { fontFamily, textColors } from './theme';
 
 export type { MediaSidecar, LowerThirdContent, ResolvedSceneMedia } from './media-model.js';
-export { resolveSceneMedia } from './media-model.js';
+export { isRenderableMedia, resolveSceneMedia } from './media-model.js';
 
 /** A raster/video asset stretched over the frame, looped to fill the scene. */
 export function MediaFill({

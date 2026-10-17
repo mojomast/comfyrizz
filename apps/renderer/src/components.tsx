@@ -18,7 +18,8 @@ export function GeneratedAssetsProvider({ assets, children }: { assets: Record<s
   return <GeneratedAssetsContext.Provider value={assets}>{children}</GeneratedAssetsContext.Provider>;
 }
 import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, fontFamily, palette, textColors } from './theme';
-import { LowerThird, MediaFill, MediaPanel, Scrim, resolveSceneMedia, type MediaSidecar } from './media';
+import { proceduralStyle } from './background-model.js';
+import { LowerThird, MediaFill, MediaPanel, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
 
 /* ------------------------------------------------------------------ *
  * Animation vocabulary: reveal, stagger, emphasis, exit. Deterministic
@@ -51,14 +52,14 @@ function seeded(seed: number): number[] {
 
 function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed: number; colors: string[] }) {
   const random = seeded(seed);
-  const base = color(colors, 0);
   const mid = color(colors, 1);
   const accent = color(colors, 2);
   const soft = color(colors, 3);
+  const style = proceduralStyle(pattern, colors);
 
   if (pattern === 'grain') {
     return (
-      <AbsoluteFill style={{ background: base }}>
+      <AbsoluteFill style={style}>
         <svg width="100%" height="100%" viewBox="0 0 1920 1080" preserveAspectRatio="none">
           <filter id="comfyrizz-grain">
             <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves={2} seed={seed} stitchTiles="stitch" />
@@ -70,26 +71,6 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
     );
   }
 
-  if (pattern === 'dots') {
-    return (
-      <AbsoluteFill
-        style={{
-          background: `${base} radial-gradient(${accent} 2.5px, transparent 2.6px) 0 0 / 46px 46px, radial-gradient(${soft} 1.5px, transparent 1.6px) 23px 23px / 46px 46px`,
-        }}
-      />
-    );
-  }
-
-  if (pattern === 'grid') {
-    return (
-      <AbsoluteFill
-        style={{
-          background: `${base} linear-gradient(${mid} 1.5px, transparent 1.5px) 0 0 / 96px 96px, linear-gradient(90deg, ${mid} 1.5px, transparent 1.5px) 0 0 / 96px 96px`,
-        }}
-      />
-    );
-  }
-
   if (pattern === 'mesh') {
     const blobs = random.slice(0, 5).map((value, index) => ({
       x: 10 + value * 80,
@@ -98,7 +79,7 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
       tone: [accent, mid, soft][index % 3],
     }));
     return (
-      <AbsoluteFill style={{ background: base }}>
+      <AbsoluteFill style={style}>
         {blobs.map((blob, index) => (
           <div
             key={index}
@@ -118,7 +99,7 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
     );
   }
 
-  return <AbsoluteFill style={{ background: `linear-gradient(140deg, ${base} 0%, ${mid} 58%, ${accent} 130%)` }} />;
+  return <AbsoluteFill style={style} />;
 }
 
 function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media?: MediaSidecar }) {
@@ -131,11 +112,12 @@ function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media
     return <ProceduralBackground pattern={pattern} seed={background.procedural.seed ?? 1} colors={local} />;
   }
   const resolved = resolveSceneMedia(scene, pkg, media);
-  if (resolved.background) {
+  const backgroundAsset = resolved.background;
+  if (backgroundAsset && isRenderableMedia(backgroundAsset)) {
     return (
       <>
         <MediaFill
-          asset={resolved.background}
+          asset={backgroundAsset}
           sceneFrames={durationInFrames}
           fit={background?.fit ?? 'cover'}
           loop={background?.loop ?? true}
@@ -184,6 +166,7 @@ function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame
       {(scene.foreground ?? []).map((item, index) => {
         const asset = pkg.assets?.[item.asset];
         if (asset && asset.kind !== 'svg' && asset.kind !== 'vector-anim') {
+          if (!isRenderableMedia(asset)) return null;
           return <MediaPanel key={`${item.asset}-${index}`} asset={asset} item={item} sceneFrames={durationInFrames} />;
         }
         return (

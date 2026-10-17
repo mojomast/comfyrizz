@@ -1,16 +1,19 @@
 /**
- * Compile examples/launch-demo/package.json into timeline.json with the A2
- * compiler. This is the only step that computes frame positions; the renderer
- * reads the committed timeline so a render never re-derives timing.
+ * Compile an example's package.json into timeline.json with the A2 compiler.
+ * This is the only step that computes frame positions; the renderer reads the
+ * committed timeline so a render never re-derives timing.
+ *
+ *   node scripts/compile-example.mjs [--example examples/launch-demo]
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
-const exampleDir = join(repoRoot, 'examples', 'launch-demo');
+const exampleArg = process.argv.indexOf('--example');
+const exampleDir = resolve(repoRoot, exampleArg >= 0 ? process.argv[exampleArg + 1] : 'examples/launch-demo');
 const plannerDir = join(repoRoot, 'packages', 'planner');
 
 const build = spawnSync('npm', ['run', 'build'], { cwd: plannerDir, stdio: 'pipe', encoding: 'utf8' });

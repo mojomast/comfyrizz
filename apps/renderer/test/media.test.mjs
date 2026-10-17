@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isMediaKind, normalizeScrim, resolveSceneMedia } from '../src/media-model.js';
+import { isMediaKind, isRenderableMedia, normalizeScrim, resolveSceneMedia } from '../src/media-model.js';
 import { contrastText, textColors } from '../src/theme-model.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -79,6 +79,16 @@ test('text colours never depend on an unusable palette[0]', () => {
 test('the launch-demo palette keeps its exact original text colours', () => {
   const pkg = { theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'] } };
   assert.deepEqual(textColors(pkg), { primary: '#e6e8ee', muted: '#6d8cff', onAccent: '#0d0f14' });
+});
+
+test('a pending GPU slot is not renderable until it has a file', () => {
+  assert.equal(isRenderableMedia(undefined), false);
+  assert.equal(isRenderableMedia({ kind: 'image', status: 'pending' }), false);
+  assert.equal(isRenderableMedia({ kind: 'image', status: 'ready' }), false, 'ready without a file is still skipped');
+  assert.equal(isRenderableMedia({ kind: 'image', status: 'ready', file: '' }), false);
+  assert.equal(isRenderableMedia({ kind: 'image', status: 'ready', file: 'assets/a.png' }), true);
+  assert.equal(isRenderableMedia({ kind: 'video', status: 'ready', file: 'assets/a.mp4' }), true);
+  assert.equal(isRenderableMedia({ kind: 'svg', status: 'ready', file: 'assets/a.svg' }), false);
 });
 
 test('the showcase package resolves every scene media case through the sidecar', () => {

@@ -1,0 +1,329 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 1349,
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 179,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Product explainer",
+        "headline": "Comfyrizz",
+        "sub": "One brief, one package, one CPU render."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#0b1020",
+            "#1b2a4a",
+            "#5ad1c8"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_logo_mark",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.07,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": "Comfyrizz turns a short brief into a finished product video. Everything renders on this machine.",
+      "provisional": false
+    },
+    {
+      "id": "s_hero",
+      "layout": "hero",
+      "variant": "split",
+      "from": 164,
+      "durationInFrames": 240,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Generated-first assets",
+        "sub": "Icons, diagrams and patterns are SVG written as code.",
+        "body": "The package is the source of truth. The router sends procedural art to generated SVG and marks heavier stills for the GPU."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 3
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_feature_cards",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        },
+        {
+          "asset": "a_hero_still",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": "Every asset starts as a package entry, so the storyboard stays the source of truth.",
+      "provisional": false
+    },
+    {
+      "id": "s_flow",
+      "layout": "hero",
+      "variant": "split",
+      "from": 389,
+      "durationInFrames": 240,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "From brief to timeline",
+        "sub": "The router plans each asset before anything renders.",
+        "body": "SVG is free on CPU; FLUX and LTX slots wait for an approved spend and keep a procedural fallback."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 5
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_flow_pipeline",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        },
+        {
+          "asset": "a_plate_loop",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "ken-burns"
+        }
+      ],
+      "narration": "The asset router sends icons and diagrams to generated SVG, and marks heavier stills for the GPU.",
+      "provisional": false
+    },
+    {
+      "id": "s_stat",
+      "layout": "stat",
+      "from": 614,
+      "durationInFrames": 180,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "CPU minutes for this explainer",
+        "sub": "Measured locally, no GPU and no network.",
+        "body": "5 min"
+      },
+      "data": {
+        "dataset": "d_minutes",
+        "display": "number"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "gradient",
+          "seed": 7
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_logo_mark",
+          "x": 0.13,
+          "y": 0.12,
+          "w": 0.06,
+          "anim": "zoom-in"
+        }
+      ],
+      "narration": "A full CPU pass takes a few minutes, with no network and no cloud runtime.",
+      "provisional": false
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "from": 779,
+      "durationInFrames": 240,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Where the explainer minutes went",
+        "sub": "Shorter is better.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "data": {
+        "dataset": "d_minutes",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 17
+        }
+      },
+      "foreground": [],
+      "narration": "The timeline locks integer frames at thirty per second, so the export matches the plan exactly.",
+      "provisional": false
+    },
+    {
+      "id": "s_list",
+      "layout": "list",
+      "variant": "bullets",
+      "from": 1004,
+      "durationInFrames": 210,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "What keeps the render honest",
+        "items": [
+          "Measure every narration chunk",
+          "Never clip copy; show a red fail state",
+          "Label every estimate and placeholder",
+          "Keep the CPU export free of network calls"
+        ]
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 2
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_feature_cards",
+          "x": 0.86,
+          "y": 0.5,
+          "w": 0.24,
+          "anim": "parallax-in"
+        }
+      ],
+      "narration": "Three rules keep it honest: measure the speech, never clip the copy, and label every estimate.",
+      "provisional": false
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "from": 1199,
+      "durationInFrames": 150,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 0,
+      "copy": {
+        "headline": "Ready to render",
+        "sub": "Local, deterministic and free.",
+        "cta": "github.example/comfyrizz"
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 23,
+          "palette": [
+            "#0b1020",
+            "#1b2a4a",
+            "#5ad1c8"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_anim_orbit",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.24,
+          "anim": "zoom-in"
+        }
+      ],
+      "narration": "Ready to render, locally and deterministically.",
+      "provisional": false
+    }
+  ],
+  "captions": [
+    {
+      "text": "Comfyrizz turns a short brief into a finished product video.",
+      "from": 0,
+      "to": 110,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Everything renders on this machine.",
+      "from": 115,
+      "to": 172,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Every asset starts as a package entry, so the storyboard stays the source of truth.",
+      "from": 164,
+      "to": 305,
+      "sceneId": "s_hero",
+      "estimated": false
+    },
+    {
+      "text": "The asset router sends icons and diagrams to generated SVG, and marks heavier stills for the GPU.",
+      "from": 389,
+      "to": 599,
+      "sceneId": "s_flow",
+      "estimated": false
+    },
+    {
+      "text": "A full CPU pass takes a few minutes, with no network and no cloud runtime.",
+      "from": 614,
+      "to": 762,
+      "sceneId": "s_stat",
+      "estimated": false
+    },
+    {
+      "text": "The timeline locks integer frames at thirty per second, so the export matches the plan exactly.",
+      "from": 779,
+      "to": 951,
+      "sceneId": "s_chart",
+      "estimated": false
+    },
+    {
+      "text": "Three rules keep it honest: measure the speech, never clip the copy, and label every estimate.",
+      "from": 1004,
+      "to": 1178,
+      "sceneId": "s_list",
+      "estimated": false
+    },
+    {
+      "text": "Ready to render, locally and deterministically.",
+      "from": 1199,
+      "to": 1285,
+      "sceneId": "s_outro",
+      "estimated": false
+    }
+  ],
+  "plates": [],
+  "target": {
+    "requested": null,
+    "actual": 1349,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [],
+  "proposals": [],
+  "sourceHash": "12cf0527ed3095b3e633ec93f2af12403a16af0800d990217f2f10997b0f0181",
+  "hash": "9273c779de172c865ce58fcb52c5acb08888e776f7467c7bc508dfb873681c85"
+}

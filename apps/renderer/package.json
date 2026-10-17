@@ -10,10 +10,14 @@
     "compile:example": "node scripts/compile-example.mjs",
     "studio": "remotion studio src/index.ts",
     "still": "node scripts/still-all.mjs",
+    "still:example": "node scripts/still-example.mjs",
     "render:example": "node scripts/render-example.mjs",
+    "render:package": "node scripts/render-package-example.mjs",
     "render:showcase": "node scripts/render-showcase.mjs",
+    "pretest": "pnpm --filter @comfyrizz/planner build && pnpm --filter @comfyrizz/vector build",
     "test": "node --test test/*.test.mjs",
-    "render:narrated": "node scripts/render-narrated.mjs"
+    "render:narrated": "node scripts/render-narrated.mjs",
+    "layout:check": "node --test test/layout.test.mjs"
   },
   "dependencies": {
     "@remotion/cli": "4.0.536",

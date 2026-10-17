@@ -1,0 +1,518 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_productexplainer01",
+  "title": "Comfyrizz product explainer",
+  "createdAt": "2025-10-18T00:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#0b1020",
+      "#1b2a4a",
+      "#5ad1c8",
+      "#eef3ff"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 1,
+    "language": "en-us"
+  },
+  "datasets": {
+    "d_minutes": {
+      "unit": "minutes",
+      "label": "CPU minutes for a finished product explainer",
+      "values": [
+        {
+          "label": "Storyboard",
+          "value": 3
+        },
+        {
+          "label": "SVG assets",
+          "value": 6
+        },
+        {
+          "label": "Narration",
+          "value": 2
+        },
+        {
+          "label": "CPU render",
+          "value": 5
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "Invented numbers for the CPU explainer; labelled as an example on the chart."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "Product explainer",
+        "headline": "Comfyrizz",
+        "sub": "One brief, one package, one CPU render."
+      },
+      "narration": "Comfyrizz turns a short brief into a finished product video. Everything renders on this machine.",
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#0b1020",
+            "#1b2a4a",
+            "#5ad1c8"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_logo_mark",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.07,
+          "anim": "fade-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 178
+    },
+    {
+      "id": "s_hero",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Generated-first assets",
+        "sub": "Icons, diagrams and patterns are SVG written as code.",
+        "body": "The package is the source of truth. The router sends procedural art to generated SVG and marks heavier stills for the GPU."
+      },
+      "narration": "Every asset starts as a package entry, so the storyboard stays the source of truth.",
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 3
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_feature_cards",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        },
+        {
+          "asset": "a_hero_still",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "fade-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 148
+    },
+    {
+      "id": "s_flow",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "From brief to timeline",
+        "sub": "The router plans each asset before anything renders.",
+        "body": "SVG is free on CPU; FLUX and LTX slots wait for an approved spend and keep a procedural fallback."
+      },
+      "narration": "The asset router sends icons and diagrams to generated SVG, and marks heavier stills for the GPU.",
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 5
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_flow_pipeline",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        },
+        {
+          "asset": "a_plate_loop",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "ken-burns"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 217
+    },
+    {
+      "id": "s_stat",
+      "layout": "stat",
+      "preferredFrames": 180,
+      "copy": {
+        "headline": "CPU minutes for this explainer",
+        "sub": "Measured locally, no GPU and no network.",
+        "body": "5 min"
+      },
+      "narration": "A full CPU pass takes a few minutes, with no network and no cloud runtime.",
+      "data": {
+        "dataset": "d_minutes",
+        "display": "number"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "gradient",
+          "seed": 7
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_logo_mark",
+          "x": 0.13,
+          "y": 0.12,
+          "w": 0.06,
+          "anim": "zoom-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 155
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Where the explainer minutes went",
+        "sub": "Shorter is better.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "narration": "The timeline locks integer frames at thirty per second, so the export matches the plan exactly.",
+      "data": {
+        "dataset": "d_minutes",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 17
+        }
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 179
+    },
+    {
+      "id": "s_list",
+      "layout": "list",
+      "variant": "bullets",
+      "preferredFrames": 210,
+      "copy": {
+        "headline": "What keeps the render honest",
+        "items": [
+          "Measure every narration chunk",
+          "Never clip copy; show a red fail state",
+          "Label every estimate and placeholder",
+          "Keep the CPU export free of network calls"
+        ]
+      },
+      "narration": "Three rules keep it honest: measure the speech, never clip the copy, and label every estimate.",
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 2
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_feature_cards",
+          "x": 0.86,
+          "y": 0.5,
+          "w": 0.24,
+          "anim": "parallax-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 181
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Ready to render",
+        "sub": "Local, deterministic and free.",
+        "cta": "github.example/comfyrizz"
+      },
+      "narration": "Ready to render, locally and deterministically.",
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 23,
+          "palette": [
+            "#0b1020",
+            "#1b2a4a",
+            "#5ad1c8"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_anim_orbit",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.24,
+          "anim": "zoom-in"
+        }
+      ],
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 93
+    }
+  ],
+  "assets": {
+    "a_logo_mark": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_logo_mark.svg",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "caption": "Flat product mark: a ring and a centre dot in the theme palette.",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 512,
+          "palette_ok": true
+        }
+      },
+      "sha256": "2ec693da85f9c04e85ae80471c16faa3052ea7c5df3b8b83330ad0478c3a4f27",
+      "bytes": 266
+    },
+    "a_feature_cards": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_feature_cards.svg",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "caption": "Three feature cards, one highlighted in the accent colour.",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 288,
+          "palette_ok": true
+        }
+      },
+      "sha256": "3fb5682a734a3f96477aea021d89ddfe893a69dcaba5a5ee4ee762729141c1db",
+      "bytes": 699
+    },
+    "a_flow_pipeline": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_flow_pipeline.svg",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "caption": "Four-stage pipeline diagram from brief to render.",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 288,
+          "palette_ok": true
+        }
+      },
+      "sha256": "ca802cb79d2127a5c66d181f18f96ccc18247b4f6c07ebee74a7f5068511146d",
+      "bytes": 762
+    },
+    "a_anim_orbit": {
+      "kind": "vector-anim",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_anim_orbit.svg",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "caption": "Concentric orbit rings; the Remotion frame drives the scale-in.",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 288,
+          "palette_ok": true
+        }
+      },
+      "sha256": "84d2055f8630f6921c11cc11797b067f090f6d5c760df24dd9e32f65e3f7d655",
+      "bytes": 474
+    },
+    "a_hero_still": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "pending",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "model_license": {
+        "id": "Apache-2.0",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell"
+      },
+      "redistributable": true,
+      "notes": "pending-GPU: FLUX 3 Image Klein hero still. The scene's procedural background is the CPU fallback until a spend is approved.",
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "model": "flux-3-klein",
+        "inputs": {
+          "prompt": "clean product hero still, no text, no letters",
+          "width": 1920,
+          "height": 1080,
+          "seed": 7
+        },
+        "backend": "colab:G4"
+      }
+    },
+    "a_plate_loop": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "pending",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "model_license": {
+        "id": "Apache-2.0",
+        "url": "https://huggingface.co/Lightricks/LTX-Video"
+      },
+      "redistributable": true,
+      "notes": "pending-GPU: LTX-2.5 ambient plate. The scene's procedural background is the CPU fallback until a spend is approved.",
+      "gen": {
+        "generator": "ltx25",
+        "workflow": "workflows/ltx25_t2v_2stage.api.json",
+        "model": "ltx-2.5",
+        "inputs": {
+          "prompt": "slow ambient product background plate, no text, no letters",
+          "width": 1920,
+          "height": 1080,
+          "seed": 12,
+          "frames": 121
+        },
+        "backend": "colab:G4"
+      }
+    },
+    "a_narration": {
+      "kind": "audio",
+      "origin": "generated",
+      "status": "ready",
+      "file": "audio/narration.norm.wav",
+      "sha256": "225f83f2bad3274c7ca93857572ed0e5ab0eca1a5551b43e4792109e7f00992c",
+      "bytes": 2158494,
+      "media": {
+        "durationSeconds": 44.967,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "Apache-2.0",
+        "url": "https://huggingface.co/hexgrad/Kokoro-82M",
+        "note": "Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md."
+      },
+      "gen": {
+        "generator": "kokoro",
+        "model": "kokoro-v1.0.onnx",
+        "inputs": {
+          "voice": "af_heart",
+          "speed": 1,
+          "sample_rate": 24000,
+          "chunks": 8
+        },
+        "caption": "Six-sentence-level-scene narration synthesized locally on CPU from the package narration text."
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "llm-svg",
+      "weights": "open"
+    },
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Dataset numbers are invented placeholders and are labelled as an example.",
+      "FLUX and LTX assets are planned only; no GPU job was submitted.",
+      "This package uses no LLM, GPU or network calls at render time."
+    ]
+  }
+}

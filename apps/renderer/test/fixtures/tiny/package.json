@@ -1,0 +1,204 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_tinyincrem001",
+  "title": "Tiny incremental fixture",
+  "createdAt": "2025-10-18T00:00:00.000Z",
+  "format": {
+    "width": 640,
+    "height": 360,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#101522",
+      "#1d2b45",
+      "#7bd1c0",
+      "#f2f6ff"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": false,
+    "engine": "none"
+  },
+  "datasets": {
+    "d_tiny": {
+      "unit": "steps",
+      "label": "Tiny fixture steps",
+      "values": [
+        {
+          "label": "Plan",
+          "value": 3
+        },
+        {
+          "label": "Render",
+          "value": 5
+        }
+      ],
+      "source": "example",
+      "approved": true
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 60,
+      "copy": {
+        "kicker": "Fixture",
+        "headline": "Incremental render",
+        "sub": "Three scenes, one cache."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 1
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_tiny_logo",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.08,
+          "anim": "fade-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_stat",
+      "layout": "stat",
+      "preferredFrames": 60,
+      "copy": {
+        "headline": "Steps to render",
+        "sub": "Small and quick.",
+        "body": "5"
+      },
+      "data": {
+        "dataset": "d_tiny",
+        "display": "number"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 2
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_tiny_cards",
+          "x": 0.85,
+          "y": 0.12,
+          "w": 0.14,
+          "anim": "zoom-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 60,
+      "copy": {
+        "headline": "Done",
+        "sub": "Reuse what did not change.",
+        "cta": "example.test"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 3
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_tiny_logo",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.08,
+          "anim": "fade-in"
+        }
+      ]
+    }
+  ],
+  "assets": {
+    "a_tiny_logo": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_tiny_logo.svg",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "caption": "Ring and centre dot.",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 512,
+          "palette_ok": true
+        }
+      },
+      "sha256": "070d29ee4216e015b344210a865cc3c2058d71a941eee4174942336548c8403e",
+      "bytes": 202
+    },
+    "a_tiny_cards": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_tiny_cards.svg",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "caption": "Three small cards.",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 256,
+          "palette_ok": true
+        }
+      },
+      "sha256": "27b547b34b2e0e86da414541c4e7140cc5546a896f2ca679b99f85453d488f16",
+      "bytes": 280
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "llm-svg",
+      "weights": "open"
+    },
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Fixture data is invented."
+    ]
+  }
+}

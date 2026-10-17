@@ -1,0 +1,62 @@
+{
+  "timelineHash": "9273c779de172c865ce58fcb52c5acb08888e776f7467c7bc508dfb873681c85",
+  "durationInFrames": 1349,
+  "seconds": 44.967,
+  "scenes": [
+    {
+      "id": "s_title",
+      "frames": 179,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_hero",
+      "frames": 240,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_flow",
+      "frames": 240,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_stat",
+      "frames": 180,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_chart",
+      "frames": 240,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_list",
+      "frames": 210,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_outro",
+      "frames": 150,
+      "narrationFrames": true
+    }
+  ],
+  "captions": 8,
+  "narration": {
+    "voice": "af_heart",
+    "sampleRate": 24000,
+    "seconds": 44.967,
+    "audioCodec": "pcm_s16le",
+    "audioChannels": 1,
+    "audioDuration": 44.967
+  },
+  "loudness": {
+    "inputIntegratedLufs": -22.36,
+    "inputTruePeakDbtp": 0.22,
+    "outputIntegratedLufs": -16.26,
+    "outputTruePeakDbtp": -1
+  },
+  "checks": {
+    "notProvisional": true,
+    "captionsMatchScenes": true,
+    "audioDurationMatchesTimeline": true
+  }
+}

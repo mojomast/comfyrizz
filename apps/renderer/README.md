@@ -73,23 +73,53 @@ compiled transitions.
 
 ```bash
 npm install                     # local to apps/renderer; no lockfile committed
-npm test                        # package/timeline/asset/network/media checks (13 tests)
+npm test                        # schema/timeline/asset/network/media/layout/incremental checks
 npm run build:assets            # sanitize + render-check the 4 SVG assets
-npm run compile:example         # package.json -> timeline.json (A2 compiler)
+npm run compile:example -- --example examples/data-story   # package.json -> timeline.json (A2 compiler)
 npm run still                   # 15 stills (5 layouts x frame 0/mid/last)
+npm run still:example -- --example examples/data-story     # one midpoint still per scene
 npm run render:example          # CPU MP4 + ffprobe gate (silent example)
+npm run render:package -- --example examples/data-story    # incremental per-scene export (A6)
 npm run render:showcase         # examples/showcase-gpu2 via PackageDemo (P-fix1)
 npm run render:narrated         # Kokoro audio + captions, ffprobe audio gate (A4)
+npm run layout:check            # text/asset overlap unit tests (A6)
 ```
 
 `render:example` and `still` use `/usr/bin/google-chrome` by default; override
 with `REMOTION_BROWSER=/path/to/chrome`.
 
+## Bundled examples (A6)
+
+Two longer examples exercise every layout and the incremental CPU export:
+
+- `examples/product-explainer` — product explainer, 1349 frames @ 30 fps
+  (44.97 s), layouts `title, hero, hero, stat, chart, list, title`, one narrated
+  scene set (Kokoro), captions in `captions.srt`/`captions.vtt`.
+- `examples/data-story` — data story, 1320 frames @ 30 fps (44.00 s), layouts
+  `title, hero, chart, stat, hero, list, title`.
+
+Both use mostly `llm-svg` assets (including one `vector-anim` part each) and
+reference FLUX/LTX assets only as `pending` foregrounds with procedural
+fallbacks, so the export path never calls an LLM, a GPU or the network.
+
+`render:package` renders each scene as its own content-addressed segment under
+`apps/renderer/.cache/<pkg.id>/`, so an unchanged scene is reused and a one-scene
+edit only re-renders the affected segment (plus the fade before it).
+
+| Example | Frames | Duration | CPU render | Reuse probe |
+|---|---|---|---|---|
+| `examples/data-story` | 1320 | 44.000 s | **125.5 s** (7 rendered, 0 reused) | `rendered 0, reused 7` |
+| `examples/product-explainer` | 1349 | 44.967 s | **124.9 s** (7 rendered, 0 reused), H.264 + AAC | `rendered 0, reused 7` |
+
+Render times are CPU-only, `--concurrency=2`, `/usr/bin/google-chrome`, Node
+20.19.2. `render:package` hard-fails before rendering if any foreground asset
+would overlap body copy or a caption (`findLayoutOverlaps`).
+
 ## Recorded evidence
 
 | Check | Result |
 |---|---|
-| `npm test` | 13/13 pass |
+| `npm test` | 31/31 pass |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `fb41de79…d571` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
@@ -98,6 +128,9 @@ with `REMOTION_BROWSER=/path/to/chrome`.
 | ffprobe | `codec_name=h264`, `nb_frames=1095`, `r_frame_rate=30/1`, `pix_fmt=yuvj420p`; audio stream count 0 |
 | Narrated export (A4) | 1312 frames, 43.733 s, H.264 + AAC 48 kHz stereo, 14 captions, hash `4943e204…19c9`; CPU 96.4 s |
 | Showcase export (P-fix1) | `examples/showcase-gpu2` via `PackageDemo`, 1920×1080 H.264, 1110 frames, 37.000 s, 21.8 MB, 7 scenes + 12 captions; no custom composition, no `node_modules` symlink. Frame correlation vs the retired `Showcase.tsx` render: title 0.99, flow 0.92, stat 0.93, chart 0.99, outro 0.98 |
+| Data story (A6) | 1920×1080 30/1 H.264, **1320 frames**, 44.000 s, 4.4 MB, hash `da7e9c5e…a1a4`, 7 segments; CPU 125.5 s |
+| Product explainer (A6) | 1920×1080 30/1 H.264 + AAC, **1349 frames**, 44.967 s, 5.8 MB, hash `9273c779…1c85`, 7 segments, 8 captions; CPU 124.9 s |
+| Layout overlap gate (A6) | `findLayoutOverlaps` clean for all six bundled packages; `layout.test.mjs` 5/5 |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is
 reproducible with `npm run render:example`.

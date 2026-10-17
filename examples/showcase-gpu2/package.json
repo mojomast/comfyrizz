@@ -106,9 +106,9 @@
       "foreground": [
         {
           "asset": "a_iso_solar",
-          "x": 0.75,
+          "x": 0.79,
           "y": 0.5,
-          "w": 0.44,
+          "w": 0.4,
           "anim": "slide-in"
         }
       ],
@@ -193,9 +193,9 @@
       "foreground": [
         {
           "asset": "a_battery",
-          "x": 0.75,
+          "x": 0.79,
           "y": 0.5,
-          "w": 0.44,
+          "w": 0.4,
           "anim": "slide-in"
         }
       ],
@@ -253,9 +253,9 @@
       "foreground": [
         {
           "asset": "a_mascot",
-          "x": 0.84,
-          "y": 0.5,
-          "w": 0.26,
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.2,
           "anim": "fade-in"
         }
       ],

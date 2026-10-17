@@ -83,7 +83,7 @@
         {
           "asset": "a_icon_check",
           "x": 0.5,
-          "y": 0.79,
+          "y": 0.86,
           "w": 0.07,
           "anim": "fade-in"
         }
@@ -115,9 +115,9 @@
       "foreground": [
         {
           "asset": "a_diagram_flow",
-          "x": 0.72,
+          "x": 0.79,
           "y": 0.5,
-          "w": 0.46,
+          "w": 0.4,
           "anim": "slide-in"
         }
       ],
@@ -152,7 +152,7 @@
         {
           "asset": "a_icon_check",
           "x": 0.13,
-          "y": 0.2,
+          "y": 0.12,
           "w": 0.06,
           "anim": "zoom-in"
         }
@@ -216,9 +216,9 @@
       "foreground": [
         {
           "asset": "a_pattern_dots",
-          "x": 0.83,
+          "x": 0.86,
           "y": 0.5,
-          "w": 0.3,
+          "w": 0.24,
           "anim": "parallax-in"
         }
       ],
@@ -255,8 +255,8 @@
         {
           "asset": "a_anim_bars",
           "x": 0.5,
-          "y": 0.72,
-          "w": 0.34,
+          "y": 0.86,
+          "w": 0.24,
           "anim": "slide-in"
         }
       ],

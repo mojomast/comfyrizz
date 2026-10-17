@@ -61,7 +61,7 @@
         }
       },
       "foreground": [
-        { "asset": "a_icon_check", "x": 0.5, "y": 0.79, "w": 0.07, "anim": "fade-in" }
+        { "asset": "a_icon_check", "x": 0.5, "y": 0.86, "w": 0.07, "anim": "fade-in" }
       ],
       "transitionOut": { "type": "fade", "frames": 15 }
     },
@@ -82,7 +82,7 @@
         }
       },
       "foreground": [
-        { "asset": "a_diagram_flow", "x": 0.72, "y": 0.5, "w": 0.46, "anim": "slide-in" }
+        { "asset": "a_diagram_flow", "x": 0.79, "y": 0.5, "w": 0.4, "anim": "slide-in" }
       ],
       "transitionOut": { "type": "fade", "frames": 15 }
     },
@@ -103,7 +103,7 @@
         }
       },
       "foreground": [
-        { "asset": "a_icon_check", "x": 0.13, "y": 0.2, "w": 0.06, "anim": "zoom-in" }
+        { "asset": "a_icon_check", "x": 0.13, "y": 0.12, "w": 0.06, "anim": "zoom-in" }
       ],
       "transitionOut": { "type": "fade", "frames": 15 }
     },
@@ -147,7 +147,7 @@
         }
       },
       "foreground": [
-        { "asset": "a_pattern_dots", "x": 0.83, "y": 0.5, "w": 0.3, "anim": "parallax-in" }
+        { "asset": "a_pattern_dots", "x": 0.86, "y": 0.5, "w": 0.24, "anim": "parallax-in" }
       ],
       "transitionOut": { "type": "fade", "frames": 15 }
     },
@@ -169,7 +169,7 @@
         }
       },
       "foreground": [
-        { "asset": "a_anim_bars", "x": 0.5, "y": 0.72, "w": 0.34, "anim": "slide-in" }
+        { "asset": "a_anim_bars", "x": 0.5, "y": 0.86, "w": 0.24, "anim": "slide-in" }
       ]
     }
   ],

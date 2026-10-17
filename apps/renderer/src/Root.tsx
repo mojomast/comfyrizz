@@ -4,7 +4,7 @@ import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
 import narratedPkgJson from '../../../examples/narrated-demo/package.json';
 import narratedTimelineJson from '../../../examples/narrated-demo/timeline.json';
-import type { PackageV1 } from '../../../packages/schema/types';
+import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import { TimelinePlayer, sceneById } from './player';
 import type { InlineAsset } from './components';
@@ -15,13 +15,14 @@ const timeline = timelineJson as unknown as Timeline;
 const narratedPkg = narratedPkgJson as unknown as PackageV1;
 const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
-type DemoProps = { pkg: PackageV1; timeline: Timeline; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar };
+type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar };
 
 function LaunchDemo(props: Partial<DemoProps>) {
   return (
     <TimelinePlayer
       pkg={props.pkg ?? pkg}
       timeline={props.timeline ?? timeline}
+      {...(props.scenes ? { scenes: props.scenes } : {})}
       generatedAssets={props.generatedAssets}
       media={props.media}
     />

@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "engine": "kokoro-onnx",
+  "engineVersion": "0.4.9",
+  "model": "kokoro-v1.0.onnx",
+  "voices": "voices-v1.0.bin",
+  "voice": "af_heart",
+  "speed": 1.0,
+  "sampleRate": 24000,
+  "gapSeconds": 0.15,
+  "paddingSeconds": 0.25,
+  "loadSeconds": 1.229,
+  "scenes": {
+    "s_title": {
+      "chunks": [
+        {
+          "text": "Comfyrizz turns a short brief into a finished product video.",
+          "spoken": "Comfy rizz turns a short brief into a finished product video.",
+          "seconds": 3.648,
+          "samples": 87552
+        },
+        {
+          "text": "Everything renders on this machine.",
+          "spoken": "Everything renders on this machine.",
+          "seconds": 1.8987,
+          "samples": 45568
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 5.9467,
+      "file": "audio/narration/s_title.wav"
+    },
+    "s_hero": {
+      "chunks": [
+        {
+          "text": "Every asset starts as a package entry, so the storyboard stays the source of truth.",
+          "spoken": "Every asset starts as a package entry, so the storyboard stays the source of truth.",
+          "seconds": 4.6933,
+          "samples": 112640
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 4.9433,
+      "file": "audio/narration/s_hero.wav"
+    },
+    "s_flow": {
+      "chunks": [
+        {
+          "text": "The asset router sends icons and diagrams to generated SVG, and marks heavier stills for the GPU.",
+          "spoken": "The asset router sends icons and diagrams to generated S V G, and marks heavier stills for the G P U.",
+          "seconds": 6.976,
+          "samples": 167424
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 7.226,
+      "file": "audio/narration/s_flow.wav"
+    },
+    "s_stat": {
+      "chunks": [
+        {
+          "text": "A full CPU pass takes a few minutes, with no network and no cloud runtime.",
+          "spoken": "A full C P U pass takes a few minutes, with no network and no cloud runtime.",
+          "seconds": 4.9067,
+          "samples": 117760
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 5.1567,
+      "file": "audio/narration/s_stat.wav"
+    },
+    "s_chart": {
+      "chunks": [
+        {
+          "text": "The timeline locks integer frames at thirty per second, so the export matches the plan exactly.",
+          "spoken": "The timeline locks integer frames at thirty per second, so the export matches the plan exactly.",
+          "seconds": 5.7173,
+          "samples": 137216
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 5.9673,
+      "file": "audio/narration/s_chart.wav"
+    },
+    "s_list": {
+      "chunks": [
+        {
+          "text": "Three rules keep it honest: measure the speech, never clip the copy, and label every estimate.",
+          "spoken": "Three rules keep it honest: measure the speech, never clip the copy, and label every estimate.",
+          "seconds": 5.7813,
+          "samples": 138752
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 6.0313,
+      "file": "audio/narration/s_list.wav"
+    },
+    "s_outro": {
+      "chunks": [
+        {
+          "text": "Ready to render, locally and deterministically.",
+          "spoken": "Ready to render, locally and deterministically.",
+          "seconds": 2.8587,
+          "samples": 68608
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 3.1087,
+      "file": "audio/narration/s_outro.wav"
+    }
+  },
+  "totalSeconds": 39.08,
+  "synthesisSeconds": 6.62,
+  "file": "narration.raw.wav"
+}
