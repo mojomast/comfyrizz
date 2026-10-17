@@ -12,7 +12,7 @@
 - **Budget**: a reserve formula is checked before each job. Google Colab spend is labelled an account-level estimate (§6.6).
 - **New §6.8 Timeline compiler** with sentence-level captions.
 - **Fixes**: positioning (Higgsfield already does infographics and kinetic typography, §1); the BYO proxy auth boundary (§6.5); "G4 requires Pro+" in §6.7.1 (the Oct 16 test showed it doesn't); export rights for Pexels originals and BY-SA (§6.10, §8.5).
-- **Still open** (§9): model size probably above 63 GB, unverified BYO auth claims, and whether a strict open-weights LLM can run on vLLM on the same G4.
+- **Still open** (§9): unverified BYO auth claims, and whether a strict open-weights LLM can run on vLLM on the same G4. Model size was measured on Oct 17 (60.0 GB, fits; see `test/GPU_TEST_1.md`).
 
 **Revision 4a (Oct 17, Kyle's direction)**: generated-first assets. An asset-type router prefers LLM-written procedural SVG (icons, diagrams, patterns, animated vector parts; sanitized and render-checked on CPU with resvg, auto-fix loop), then batched FLUX 3 Klein images (illustrations, textures, backgrounds, transparent cutouts where feasible), with Openverse and uploads as the fallback (§5.5, §6.2). §10 now points to the compressed parallel plan in `PLAN.md`. New §6.11: experimental SVG-guided generation (SVG raster as structure guidance for Klein and LTX).
 
@@ -279,7 +279,7 @@ The schema lives in `packages/schema/package-v1.schema.json`. TS types are gener
   - **Draft**: stage 1 at **960×544**. **Final**: stage 1 → ×2 latent upscale → **1920×1088 → crop 4 px top and bottom → 1920×1080**. The crop is recorded in asset metadata. "720p" (not a multiple of 32) is no longer used.
   - Requested lengths are resolved to a valid 8n+1 count before submission. The plate is then trimmed or looped to the compiled timeline (§6.8).
   - LTX-2.5 generates audio jointly. Keep the tested graph, including the audio VAE, and **strip or mute the audio afterwards** with ffmpeg. Keep the original and record the muted derivative. Don't remove audio nodes unless that path has been tested.
-- **Model downloads**: an earlier estimate put Klein + LTX at about 63 GB. **Probably low**: the BF16 LTX transformer plus Gemma 4 12B alone may exceed that. Recheck on Day 3, choose quantizations (Comfy int8 or NVFP4 on G4), and pin exact files, hashes and revisions in `colab/models.lock.json` (§9).
+- **Model downloads [verified, Oct 17 GPU test 1]**: the minimum set is **60.0 GB**. FLUX 3 Klein BF16 from `black-forest-labs/flux-3-image-klein` is 20.3 GB (transformer 11.1, Qwen3-VL-4B TE 8.9 as 2 shards merged into one file, VAE 0.34). LTX-2.5 Comfy int8 from `Lightricks/LTX-2.5` is 39.7 GB (22B distilled 21.5, Gemma 4 12B TE 15.4, video VAE 1.5, audio VAE 0.36, ×2 upscaler 1.0). Download speed was about 360–390 MB/s per repo (163 s one after the other). The int8 Klein files in `flux-3-image-klein-comfy` would save about 9 GB, but that repo needs its own licence acceptance (403 today). Pin exact files, hashes and revisions in `colab/models.lock.json`. Two-stage LTX output sizes must be multiples of 64 (960×544 comes out as 960×512); use 1024×576.
 - Workflows (UI `.json` + API `.api.json` + `params.json` mapping names to node IDs). Start from the official ComfyUI LTX-2.5 templates and pick one tested combination:
   1. `flux3_klein_t2i`
   2. `flux3_klein_edit` (references + boxes)
@@ -349,12 +349,12 @@ What the official CLI offers (checked with `--help` for every command, the insta
 #### 6.7.2 Lifecycle (transport c)
 Every step shells out to `colab` with argv arrays (no shell), with redaction applied to all output:
 1. **Preflight (no allocation)**: `colab version`; `colab usage` → balance and rate (Orbit's `parseUsage`); `colab sessions` → reuse a live `comfyrizz-*` session we own. Check the HF token and **gated access** to both repos: FLUX 3 Image Klein and LTX-2.5 are `gated: auto` and need licence acceptance on the user's HF account plus a read token **[verified, Oct 16]**. Refuse early with fix-it steps.
-2. **Spend approval card** with the live rate (8.90 units/h observed on G4), about 5 min setup (≈ 0.7 units), draft estimate, budget and reserve.
+2. **Spend approval card** with the live rate (8.90 units/h observed on G4), about 4.5 min setup (≈ 0.65 units), draft estimate, budget and reserve.
 3. **Spin up**: persist intent, arm the watchdog, then `colab new -s comfyrizz-<pkgid> --gpu G4` (READY in 4 s on Oct 16). Configurable fallback G4 → H100 → A100, each with a VRAM check and its own quantization profile. A fallback with a higher rate needs a new approval.
 4. **Bootstrap**: `colab upload` `colab/bootstrap.py` + lockfiles → `colab exec -s … -f bootstrap.py --timeout 900`.
    - **HF token**: uploaded as a 0600 file into a 0700 directory via `colab upload`. **Never `--env`**, because the CLI writes it into its local history as code and it shows in argv (§5.2). It is never in script source; the download step reads it, deletes the file, and never passes it to ComfyUI or custom nodes.
    - The script clones pinned ComfyUI and nodes, runs `hf download` of the pinned files with hf-xet + `HF_XET_HIGH_PERFORMANCE=1` (printing progress so the quiet-period timeout doesn't fire), and starts ComfyUI on 127.0.0.1:8188 and comfy-api-proxy on 127.0.0.1:8189 with `Popen(start_new_session=True)`. It writes `out/ready.json` (versions, node types, models, free VRAM).
-   - **Measured Oct 16 [verified]**: create 4 s, clone + requirements 28.5 s (torch preinstalled), ComfyUI ready in 16 s, downloads at **519 MB/s**. **Expected cold start ≈ 4 to 5 min ≈ 0.7 units**, longer if the pinned models are well above 63 GB (§6.4).
+   - **Measured Oct 16 [verified]**: create 4 s, clone + requirements 28.5 s (torch preinstalled), ComfyUI ready in 16 s, downloads at **519 MB/s**. **Measured Oct 17 with real models [verified]**: 60 GB downloaded in 163 s, TE merge 26 s, first Klein image 7.9 s, first LTX clip 22.7 s. **Cold start ≈ 4.4 min ≈ 0.65 units.** Warm: about 2.5 s per 1024² image and about 11–12 s per 4–5 s 960×512 clip. Both models stay resident (about 57 GB, peak 54.8 GB), so there is no swapping.
 5. **Health**: `colab exec -f health.py` → `out/health.json`: proxy reachable, node types and models present, a small FLUX smoke job, `nvidia-smi` free VRAM.
 6. **Run**: `colab upload` of `jobs.zip` (package, `jobs.json`, workflows, inputs) → `colab exec -f run_jobs.py --timeout 3600`, in small batches. JSON-lines progress is parsed from stdout into the Activity panel. Only one exec runs per session at a time.
 7. **Collect**: zip `/content/out` → `colab download` → verify sha256 against the manifest → atomically merge into the package. If the exec was lost: `colab download` the attempt records and manifest, then reconcile (§6.4).
@@ -446,7 +446,7 @@ Licence policy (v0.1): **allow CC0, PDM and CC BY; block NC, ND, BY-SA and unkno
 
 ### Top risks
 1. **Klein and LTX-2.5 ComfyUI workflows are unproven** (Klein came out Oct 15). Day 3 spike. Fallback: FLUX.2 [klein] 4B (Apache-2.0), which loses the FLUX bonus but keeps LTX.
-2. **Model size probably above 63 GB**: the earlier 63 GB download estimate is likely low, because the BF16 LTX-2.5 transformer plus the Gemma 4 12B text encoder alone may exceed it. That would lengthen cold start beyond 4 to 5 min and raise its unit cost. Peak VRAM on G4 for the chosen quantizations is also unmeasured. Measure on Day 3, pick quantizations (Comfy int8 or NVFP4), and pin them in `colab/models.lock.json` (§6.4).
+2. **Model size [resolved Oct 17]**: measured 60.0 GB (Klein BF16 + LTX int8), cold start about 4.4 min (about 0.65 units), peak VRAM 54.8 GB with both models resident on G4. Remaining risk: Hugging Face throughput varies, and a cold-disk load (page cache not warm) is unmeasured. Pin files in `colab/models.lock.json` (§6.4).
 3. **HF gating**: Kyle must accept both licences on HF and provide a read token (none on the box yet). Every user needs the same, so the wizard checks it.
 4. **Tool calling on open models** can be flaky. Mitigations: zod validation with repair, a small tool surface, a test matrix of 2 to 3 models.
 5. **OpenCode Go fit**: Go targets coding-agent traffic, so OpenRouter and custom are the baseline (§5.4).
