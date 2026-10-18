@@ -18,7 +18,19 @@ from .controlmaps import (
 )
 from .raster import RASTER_BACKEND, RasterError, rasterize, sanitize_svg
 from .sweeps import APPROACH_GEOMETRY, build_sweep_spec, estimate_units, write_sweep_spec
-from .templates import TEMPLATES_VERSION, LAYOUT_ROLES, render_caption
+from .templates import (
+    TEMPLATES_VERSION,
+    LAYOUT_ROLES,
+    REF_EDIT_ROLES,
+    MOTION_ROLES,
+    FRAMING_LOCK,
+    render_caption,
+    render_style_block,
+    render_ref_edit_caption,
+    render_motion_caption,
+    anchor_rows,
+    to_box_row,
+)
 from .workflows import (
     APPROACHES,
     CONTROLNET_STATUS,
