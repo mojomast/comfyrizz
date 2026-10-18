@@ -306,22 +306,33 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if ready["ok"] else 1
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+#: The arguments this script runs with, always (GPU test 5, G5-1).
+#:
+#: `colab exec` runs this file as an IPython kernel cell with `__name__ == "__main__"`, so a
+#: `if __name__ == "__main__"` block fires *and* the process argv belongs to ipykernel
+#: (`-f /root/.local/share/jupyter/runtime/kernel-....json`). Anything that reads `sys.argv` - argparse
+#: included - sees those flags, raises `SystemExit: 2` and aborts the cell before the first step, so
+#: the host only ever sees a missing sentinel. The backend never passes flags: run with none.
+NO_ARGS: list[str] = []
 
 
 def _run() -> None:
     """Run main() and print the sentinel the backend looks for (GPU test 4, G4-6).
 
     `colab exec` runs this file as a kernel cell, so an exception inside it prints a traceback and the
-    CLI still exits 0. The backend therefore requires the positive `COMFYRIZZ_OK bootstrap` line, and
-    a crash prints FAIL plus the traceback instead.
+    CLI still exits 0, and a `SystemExit` (how main() refuses) does not stop the cell either. The
+    backend therefore requires the positive `COMFYRIZZ_OK bootstrap` line, and every other outcome has
+    to say FAIL - a non-zero return included, because that is ready.json saying the box is not usable.
     """
     try:
-        main()
-    except Exception:  # noqa: BLE001 - the traceback is the evidence, and the CLI will not report it
+        # G5-1: never the kernel's argv
+        code = main(NO_ARGS)
+    except (Exception, SystemExit):  # noqa: BLE001 - SystemExit too: `raise SystemExit(msg)` refuses
         traceback.print_exc()
         print("COMFYRIZZ_FAIL bootstrap", flush=True)
+        return
+    if code != 0:
+        print(f"COMFYRIZZ_FAIL bootstrap (main returned {code}: ready.json says the box is not ready)", flush=True)
         return
     print("COMFYRIZZ_OK bootstrap", flush=True)
 

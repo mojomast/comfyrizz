@@ -8,7 +8,11 @@
 // file into whatever directory it happened to run from - which put a test log inside the repo.
 // Nothing writes into the working tree now; the temp defaults are per-machine, not per-repo.
 //
-// State knobs: version, usage, sessions, scripts (per-script {code,output,files,lost}),
+// A script spec may also ask for a *real* run: `runForReal: "<script path>"` executes the file the way
+// `colab exec` does - python, `run_name="__main__"`, ipykernel's argv - and always exits 0, because a
+// kernel cell reports a crash in its output rather than in the CLI's exit code (GPU test 5, G5-1).
+//
+// State knobs: version, usage, sessions, scripts (per-script {code,output,files,lost,runForReal}),
 // remoteDir (the "VM filesystem" root), allowNew, failStop, keepAfterStop, stopped, and the two
 // parity knobs uploadCreatesDirs / downloadDirs (both off: the real CLI creates no directories and
 // downloads single files only - H13).
@@ -16,6 +20,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 const STATE_PATH = process.env.FAKE_COLAB_STATE || path.join(os.tmpdir(), "comfyrizz-fake-colab-state.json");
 const LOG_PATH = process.env.FAKE_COLAB_LOG || path.join(os.tmpdir(), "comfyrizz-fake-colab-log.jsonl");
@@ -198,6 +203,25 @@ if (command === "exec") {
     fs.writeFileSync(destination, materialised.content);
   }
   if (spec.lost) process.exit(spec.code ?? 1); // a killed exec: no output, no evidence
+  if (spec.runForReal) {
+    // G5-1 parity: `colab exec` runs the file's source as an IPython kernel cell - `__name__` is
+    // "__main__" and the process argv is ipykernel's, not the script's. Reproducing that here is what
+    // makes a script that parses sys.argv fail in a test instead of on the VM.
+    const cell = [
+      "import runpy, sys",
+      "sys.argv = ['ipykernel_launcher.py', '-f', '/root/.local/share/jupyter/runtime/kernel-h16.json']",
+      `runpy.run_path(${JSON.stringify(String(spec.runForReal))}, run_name='__main__')`,
+    ].join("\n");
+    const real = spawnSync(process.env.FAKE_COLAB_PYTHON || "python3", ["-c", cell], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+      timeout: Number(spec.runTimeoutMs || 120000),
+      env: { ...process.env, ...(spec.runEnv || {}) },
+    });
+    if (real.stdout) process.stdout.write(real.stdout);
+    if (real.stderr) process.stderr.write(real.stderr);
+    process.exit(0); // the kernel cell itself never sets the CLI's exit code
+  }
   if (spec.output) process.stdout.write(spec.output.endsWith("\n") ? spec.output : `${spec.output}\n`);
   if (spec.kernelCrash) {
     // G4-5/G4-6 parity: `colab exec` runs the file's source as a kernel cell, so an exception inside
