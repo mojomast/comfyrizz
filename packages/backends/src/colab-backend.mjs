@@ -942,7 +942,12 @@ export function mergeBatchManifests(manifests, jobs = []) {
     ...last,
     jobs: merged,
     counts,
-    complete: jobs.length ? jobs.every((job) => settled(byJob.get(job.id))) : merged.every(settled),
+    // "complete" is the plan's question: every entry in the merged set is settled, and every planned
+    // job is in it. A manifest that carries no per-job entries at all (an older runner, or a harness
+    // that stages one) falls back to its own verdict rather than being called incomplete for being terse.
+    complete: merged.length
+      ? merged.every(settled) && (jobs.length === 0 || jobs.every((job) => settled(byJob.get(job.id))))
+      : last.complete === true,
     notes: [...new Set(manifests.flatMap((manifest) => manifest?.notes || []))],
     runs: manifests.filter(Boolean).flatMap((manifest) => manifest.runs || []),
     batches: manifests
