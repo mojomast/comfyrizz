@@ -99,6 +99,8 @@ export async function dryRun({ outDir = null } = {}) {
   const byoOut = join(workspace, "out");
   const requestLog = join(root, "requests.jsonl");
   mkdirSync(byoOut, { recursive: true });
+  // the session budget the run panel would be given: the estimate is checked against it
+  const budgetUnits = 20;
   const pkg = writeGpu4Package(workspace);
   check.ok("package", "the test 4 package validates", validatePackage(pkg).errors.length === 0);
 
@@ -193,7 +195,7 @@ export async function dryRun({ outDir = null } = {}) {
     scratchDir: join(ws, "scratch"),
     logDir: join(fake.tmpDir, "logs"),
     packageDir: null,
-    budgetUnits: 20,
+    budgetUnits,
     hfTokenPath: tokenPath,
     jobsFile: join(workspace, "jobs.json"),
     teardownRetryMs: 5,
