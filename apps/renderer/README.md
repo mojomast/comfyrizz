@@ -49,6 +49,13 @@ asset table is untouched — while 16:9 is the identity transform. In portrait a
 and the bar chart shrinks to the safe area (`components.tsx`), so a vertical render is a real re-layout rather than a
 centre crop. `apps/renderer/test/relayout.test.mjs` checks both aspects for wide/square/tall assets.
 
+## Data-driven charts (D1)
+
+`src/chart-model.js` `chartSeries(dataset)` is the exact series `ChartLayout` maps over (label,
+value, ratio), so a test can assert an on-screen label equals the source CSV without a pixel
+render. `apps/renderer/test/csv-charts.test.mjs` builds `examples/csv-charts/` and checks the
+committed package and the drawn series against `data.csv`.
+
 ## Media layer (P-fix1)
 
 Raster/video assets can fill the frame or sit in a framed panel:

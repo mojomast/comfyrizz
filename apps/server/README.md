@@ -55,6 +55,7 @@ The missing step for a true stranger is a committed `pnpm-lock.yaml`, which live
 | `POST` | `/api/brief` | R2 plan-mode brief: `{prompt, mode?: "plan"\|"express", decisions?, askMore?, attachments?}` → `{mode, complete, brief, questions, outline?}`. No model/network: the deterministic extractor in `@comfyrizz/agent` fills the §2.3 brief, then the response carries the top ≤3 §2.4 questions (chips + a Decide-for-me default); sending `decisions` applies them and completes, and a completed response also carries the §2.2 script-first `outline` (beats + estimated seconds) |
 | `POST` | `/api/brief/outline` | R2 step 4: `{brief}` → `{mode, complete: true, brief, outline}`. Completes an edited Brief card and returns a fresh script-first outline; a cleared field falls back to its preset default |
 | `GET` | `/api/brief/presets` | R2 step 5: `{presets}` — the six bundled looks with their palette, font, attributes and an inline 160×90 CPU/SVG `thumbnail`. `/api/brief` and `/api/brief/outline` also carry it so the picker renders without a second round-trip |
+| `POST` | `/api/dataset` | D1: `{csv, unit, datasetId?, label?, source?, labelColumn?, valueColumn?}` (paste/upload) or `{url, unit, ...}` (server-side fetch, 256 KB cap, http/https only, private hosts blocked). Returns `{datasetId, dataset, warnings, header, scenes}` where `scenes` are the proposed `chart`/`stat`/`list` scenes with the CSV's exact values |
 | `POST` | `/api/render` | `{packageId, baseRevision}`, or a C1-style `{package}` draft; returns `video/mp4` |
 | `POST` | `/api/export` | C10 bundle: `{packageId, baseRevision, force?}` or `{package}` draft. Renders (or reuses) the MP4 and writes `out/export/<package-id>/{video.mp4,captions.srt,captions.vtt,CREDITS.md,package.zip}`; `package.zip` ships only assets the v0.1 rights policy allows and lists every refusal with its licence reason. L1: add `variants: {languages?, aspects?, translations?}` to export `out/export/<variant-id>/` per language/aspect + a `variants.json` manifest |
 | `POST` | `/api/run` | C6 backend run: `{backendId, jobs, budgetUnits, approved?, comfyuiUrl?}`. Returns the estimate + `planHash`; a Colab run without approval returns `approvalRequired:true` and starts nothing |
@@ -233,7 +234,7 @@ fallback (`x-comfyrizz-full-render: 1`, reason `scene durations changed`).
 npm test          # host/token/origin, revisions/conflict, invalid package, render + SSE, replay,
                   # traversal, the C5/C8 agent end-to-end renders, the C10 export-bundle e2e,
                   # C11 per-scene re-run, C13 changed-scenes-only and the R2 plan-mode brief
-                  # (57 tests; real CPU render, ~4 min — the agent e2e is slow, run it alone under load)
+                  # (62 tests; real CPU render, ~4 min — the agent e2e is slow, run it alone under load)
 ```
 
 Real end-to-end check (2026-10-17): built web served by this server, opened with the fragment

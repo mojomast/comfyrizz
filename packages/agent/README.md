@@ -81,11 +81,21 @@ JSON-out instruction for the agent LLM (names, URLs and numbers stay exact); `tr
 copy + narration and `voice.language` set (Kokoro reads it), leaving the source package untouched.
 The translator is injected, so tests and offline examples use `dictionaryTranslator`.
 
+## Data-driven charts (D1)
+
+`src/dataset.ts` turns CSV text into a validated `package-v1` dataset:
+`parseCsv` (quotes, `\r\n`, a BOM, `,`/`;`/tab), `parseCsvNumber` (thousands
+separators, currency, `(42)` negatives, `%`) and `datasetFromCsv`, which warns
+on bad rows/duplicates and clamps to 64 values. `src/chart-scenes.ts`
+`proposeChartScenes` builds a bar, a big-number and a comparison scene whose
+labels and values are the dataset's own — no invented numbers. See
+`examples/csv-charts/`.
+
 ## Evidence
 
 ```bash
-npm test                         # 51 tests: router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render,
-                                 # R2 brief/outline/presets/scene-chips, B1 brand kit and L1 language variants
+npm test                         # 65 tests: router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render,
+                                 # R2 brief/outline/presets/scene-chips, B1 brand kit, L1 language variants and D1 CSV/chart scenes
 node scripts/m4-live.mjs         # live OpenCode Go: propose → edit → 2 routes → SVG through A5
 node scripts/m4-two-providers.mjs # same loop against a local OpenAI-compatible endpoint
 ```
