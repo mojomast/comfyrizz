@@ -23,6 +23,7 @@ BASE_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 MODEL_LICENSE = "Apache-2.0"
 ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
+ASR_MODEL = "Qwen/Qwen3-ASR-0.6B"
 DEFAULT_REFERENCE = "Hello. I will narrate this film."
 # Qwen3-TTS language argument is the English name of the language [unverified].
 _LANG_NAMES = {
@@ -135,6 +136,35 @@ class Qwen3Aligner:
         aligner = aligner_cls.from_pretrained(ALIGNER_MODEL)
         result = aligner.align(audio=np.asarray(samples), sample_rate=sample_rate, text=text, language=lang)
         return coerce_aligner_tokens(result)
+
+
+class Qwen3Asr:
+    """Qwen3-ASR-0.6B transcript for the mispronunciation check.
+
+    The package name and call shape are [unverified] until a GPU run. Tests
+    pass a scripted fake and never import this.
+    """
+
+    def available(self) -> bool:
+        return importlib.util.find_spec("qwen_asr") is not None
+
+    def transcribe(self, samples: np.ndarray, sample_rate: int, lang: str) -> str:
+        try:
+            import qwen_asr  # type: ignore  # optional extra
+        except ImportError as exc:
+            raise QwenRuntimeUnavailable(
+                "qwen-asr is not installed. It is an optional extra and is not part of the default install or the tests."
+            ) from exc
+        model_cls = getattr(qwen_asr, "Qwen3ASRModel", None)
+        if model_cls is None:
+            raise QwenRuntimeUnavailable("qwen_asr.Qwen3ASRModel is missing")
+        model = model_cls.from_pretrained(ASR_MODEL)
+        result = model.transcribe(audio=np.asarray(samples), sample_rate=sample_rate, language=lang)
+        if isinstance(result, str):
+            return result
+        if isinstance(result, dict):
+            return str(result.get("text", ""))
+        return str(getattr(result, "text", result))
 
 
 class Qwen3Tts:

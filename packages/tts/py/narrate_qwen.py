@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from pronounce import pronounce
+from qa import MAX_ATTEMPTS, missing_pronunciations, should_regenerate, wer
 from qwen import (
     ALIGNER_MODEL,
     BASE_MODEL,
@@ -206,12 +207,89 @@ def _unavailable(voice_cfg: dict, reason: str, kokoro_runner):
     raise FallbackToKokoro(reason)
 
 
+def _asr_available(asr) -> bool:
+    if asr is None:
+        return False
+    if hasattr(asr, "available") and not asr.available():
+        return False
+    return True
+
+
+def _synthesize_checked(adapter, asr, *, spoken: str, prompt: dict, instruct: str | None, lang: str, base_seed: int):
+    """Synthesise, transcribe, and retry with a new seed while the check fails.
+
+    At most ``MAX_ATTEMPTS`` takes. The lowest-WER take is kept when every
+    attempt is still over the limit, and that scene is flagged rather than
+    dropped. A missing ASR does not retry and does not fail the scene.
+    """
+    checking = _asr_available(asr)
+    best_audio = None
+    best_score = None
+    best_missing: list[str] = []
+    records: list[dict] = []
+    for attempt in range(MAX_ATTEMPTS):
+        seed = base_seed + attempt
+        audio, sample_rate = _adapter_call(
+            "scene synthesis",
+            lambda seed=seed: adapter.synthesize(spoken, prompt=prompt, instruct=instruct, lang=lang, seed=seed),
+        )
+        audio = to_sample_rate(np.asarray(audio, dtype=np.float32), int(sample_rate), SAMPLE_RATE)
+        if audio.size == 0:
+            raise QwenRuntimeUnavailable("Qwen3-TTS returned empty audio")
+        if not checking:
+            return audio, {
+                "wer": None,
+                "attempts": 1,
+                "flagged": False,
+                "missing": [],
+                "skipped": "asr-unavailable",
+                "seeds": [seed],
+            }
+        try:
+            transcript = asr.transcribe(audio, SAMPLE_RATE, lang)
+        except QwenRuntimeUnavailable as exc:
+            raise
+        except Exception as exc:
+            return audio, {
+                "wer": None,
+                "attempts": attempt + 1,
+                "flagged": False,
+                "missing": [],
+                "skipped": f"asr-failed: {exc}",
+                "seeds": [seed],
+            }
+        score = wer(spoken, transcript)
+        missing = missing_pronunciations(spoken, transcript)
+        records.append({"seed": seed, "wer": round(score, 4), "missing": list(missing)})
+        if best_audio is None or best_score is None or score < best_score:
+            best_audio = audio
+            best_score = score
+            best_missing = missing
+        if not should_regenerate(spoken, transcript):
+            return audio, {
+                "wer": round(score, 4),
+                "attempts": attempt + 1,
+                "flagged": False,
+                "missing": [],
+                "seeds": [item["seed"] for item in records],
+                "transcript": transcript,
+            }
+    return best_audio, {
+        "wer": None if best_score is None else round(best_score, 4),
+        "attempts": len(records),
+        "flagged": True,
+        "missing": best_missing,
+        "seeds": [item["seed"] for item in records],
+    }
+
+
 def narrate_qwen(
     package: dict,
     out: Path,
     *,
     tts=None,
     aligner=None,
+    asr=None,
     gap: float = 0.15,
     padding: float = 0.25,
     kokoro_runner=None,
@@ -284,15 +362,17 @@ def narrate_qwen(
         instruct = scene.get("narration_style") if isinstance(scene.get("narration_style"), str) and scene.get("narration_style").strip() else None
         seed = scene_seed(str(scene.get("id", "")), spoken)
         try:
-            audio, sample_rate = _adapter_call(
-                "scene synthesis",
-                lambda: adapter.synthesize(spoken, prompt=prompt, instruct=instruct, lang=lang, seed=seed),
+            audio, qa = _synthesize_checked(
+                adapter,
+                asr,
+                spoken=spoken,
+                prompt=prompt,
+                instruct=instruct,
+                lang=lang,
+                base_seed=seed,
             )
         except QwenRuntimeUnavailable as exc:
             return _unavailable(voice_cfg, str(exc), kokoro_runner)
-        audio = to_sample_rate(np.asarray(audio, dtype=np.float32), int(sample_rate), SAMPLE_RATE)
-        if audio.size == 0:
-            return _unavailable(voice_cfg, "Qwen3-TTS returned empty audio", kokoro_runner)
         speech_seconds = round(len(audio) / SAMPLE_RATE, 4)
         align_text = " ".join(sentences)
         tokens = _collect_tokens(aligner, audio, align_text, lang)
@@ -307,7 +387,8 @@ def narrate_qwen(
             "seconds": round(read_wav_seconds(scene_path), 4),
             "file": str(scene_path.relative_to(out.parent)),
             "instruct": instruct,
-            "seed": seed,
+            "seed": qa["seeds"][-1] if qa.get("seeds") else seed,
+            "qa": qa,
         }
         full.append(scene_audio)
         full.append(np.zeros(int(round(WORD_SPLIT_GAP * SAMPLE_RATE)), dtype=np.float32))
