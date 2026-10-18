@@ -104,7 +104,9 @@ def test_path_problem_table(value, expected):
 
 
 def test_layout_limits_are_published_and_enforced():
-    doc = load(VALID[0])
+    # Pin the title layout. The first valid fixture is whichever file sorts first, and a
+    # hero scene's headline budget is wider than a title's.
+    doc = json.loads((FIXTURES / "valid" / "minimal.json").read_text(encoding="utf-8"))
     doc["scenes"][0]["copy"]["headline"] = "x" * (S.LAYOUTS["title"]["limits"]["headline"] + 1)
     result = S.validate_package(doc)
     assert [e["code"] for e in result["semantic"]] == ["SEM_COPY_TOO_LONG"]
