@@ -863,7 +863,7 @@ function readJobs(jobsFile) {
  * The bundle the VM unpacks: jobs.json, the workflow graphs, the params maps and the package.
  * zipped with `python3 -m zipfile` (no extra dependency).
  */
-export function createBundle({ jobsFile, packageDir, scratch, zipCommand = null }) {
+export function createBundle({ jobsFile, packageDir, scratch, zipCommand = null, zipBundleScript = join(REPO, "colab", "zip_bundle.py") }) {
   const bundle = join(scratch, "jobs.zip");
   if (existsSync(bundle)) rmSync(bundle, { force: true });
   const command = zipCommand || [process.env.COMFYRIZZ_PYTHON || "python3", "-m", "zipfile", "-c", bundle];
@@ -873,6 +873,18 @@ export function createBundle({ jobsFile, packageDir, scratch, zipCommand = null 
   });
   if (result.status !== 0 || !existsSync(bundle)) {
     throw new ColabCliError(`could not build jobs.zip: ${(result.stderr || "").slice(-200)}`);
+  }
+  // G5-5: the VM runs `python -m comfyrizz_pipeline.runner` from the unpacked bundle and validates
+  // jobs.json against the repo's schemas, and neither was ever in the zip. `colab/zip_bundle.py`
+  // appends both at the root and refuses to leave the bundle inconsistent.
+  const extras = zipBundleScript || null;
+  if (extras) {
+    const added = spawnSync(process.env.COMFYRIZZ_PYTHON || "python3", [extras, "--bundle", bundle, "--repo", REPO], {
+      encoding: "utf8",
+    });
+    if (added.status !== 0) {
+      throw new ColabCliError(`could not add the runner to jobs.zip: ${(added.stderr || added.stdout || "").slice(-200)}`);
+    }
   }
   return bundle;
 }
