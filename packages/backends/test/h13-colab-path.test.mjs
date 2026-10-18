@@ -31,7 +31,7 @@ function setup({ scripts = {} } = {}) {
       usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n",
       sessions: "No active session found on server.\n",
       scripts: {
-        "hf_token_dir.py": { mkdirs: [HF_TOKEN_REMOTE_DIR], output: `hf token dir ${HF_TOKEN_REMOTE_DIR} mode 700` },
+        "hf_token_dir.py": { output: `hf token dir ${HF_TOKEN_REMOTE_DIR} mode 700` },
         "bootstrap.py": { output: "bootstrap done" },
         ...scripts,
       },

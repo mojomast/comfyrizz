@@ -509,3 +509,26 @@ test("both model hosts download at the same time, not one after the other (G5-11
   assert.ok(reported.elapsed < 0.75, `two 0.4 s downloads took ${reported.elapsed}s: they are serial`);
   assert.ok(reported.overlap < 0.1, `the second download started ${reported.overlap}s after the first`);
 });
+
+test("the smoke graph the health check submits is on the VM, and is derived not hand-written (G5-12)", async () => {
+  const graph = JSON.parse(readFileSync(join(REPO, "workflows/smoke.api.json"), "utf8"));
+  const params = JSON.parse(readFileSync(join(REPO, "workflows/smoke.api.params.json"), "utf8"));
+
+  // it is the pipeline's own still graph, shrunk: same nodes, smoke sizes
+  const source = JSON.parse(readFileSync(join(REPO, "workflows/flux3_klein_t2i.api.json"), "utf8"));
+  assert.deepEqual(Object.keys(graph).filter((key) => !key.startsWith("comfyrizz")).sort(), Object.keys(source).sort());
+  for (const [field, expected] of Object.entries({ width: 256, height: 256, steps: 4 })) {
+    const [node, key] = params.map[field];
+    assert.equal(graph[node].inputs[key], expected, `${field} is not the smoke value`);
+  }
+
+  // and bootstrap puts it where health.py looks for it
+  const { fake, backend } = setup();
+  await backend.ensureUp({ approved: true });
+  await backend.bootstrap();
+  const uploads = readLog(fake.logPath).filter((entry) => entry.argv[0] === "upload");
+  const smoke = uploads.find((entry) => String(entry.argv[4]).endsWith("workflows/smoke.api.json"));
+  assert.ok(smoke, `no smoke graph was uploaded: ${uploads.map((entry) => entry.argv[4]).join(", ")}`);
+  assert.equal(smoke.argv[4], "/content/comfyrizz/workflows/smoke.api.json", "health.py reads this exact path");
+  await backend.teardown("done");
+});

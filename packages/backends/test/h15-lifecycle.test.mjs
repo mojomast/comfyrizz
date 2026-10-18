@@ -176,7 +176,7 @@ test("the VM directories exist before anything is uploaded (G4-4)", async () => 
   // the fake's VM maps /content/comfyrizz/<rest> onto <remoteDir>/<rest>, so the bundle root is the
   // fake's own root and the out dir sits directly under it
   const remoteDir = join(fake.tmpDir, "remote");
-  for (const path of ["content/.hf", ".", "out"]) {
+  for (const path of ["content/.hf", ".", "out", "workflows"]) {
     assert.ok(existsSync(join(remoteDir, path)), `${path} was never created on the VM`);
   }
   const source = readFileSync(join(REPO, "colab/hf_token_dir.py"), "utf8");

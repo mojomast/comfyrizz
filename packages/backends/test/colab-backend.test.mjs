@@ -76,7 +76,9 @@ function baseState(overrides = {}) {
       // H13: the backend runs this before uploading the token, because `colab upload` does not create
       // the directory and the CLI has no mkdir. A fake without it fails the bootstrap, as the real VM
       // would if the directory were missing.
-      "hf_token_dir.py": { mkdirs: ["/content/.hf"], output: "hf token dir /content/.hf mode 700" },
+      // the fake's built-in spec is what the real script does (the 0700 token dir plus the bundle,
+      // out/ and workflows/ directories); only the output is worth overriding here
+      "hf_token_dir.py": { output: "hf token dir /content/.hf mode 700" },
       "bootstrap.py": { output: "bootstrap done", files: [{ path: "/content/comfyrizz/out/ready.json", content: '{"ok":true,"comfyui":"0.41.0"}' }] },
       "health.py": { output: "health done", files: [{ path: "/content/comfyrizz/out/health.json", content: JSON.stringify({ ok: true, detail: "3 node types present", vramFreeGB: 82.1 }) }] },
       "run_jobs.py": {

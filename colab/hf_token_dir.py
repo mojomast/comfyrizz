@@ -24,14 +24,19 @@ TOKEN_DIR = Path("/content/.hf")
 #: run later.
 BUNDLE_DIR = Path("/content/comfyrizz")
 OUT_DIR = BUNDLE_DIR / "out"
+#: health.py submits `/content/comfyrizz/workflows/smoke.api.json` to prove the proxy reaches ComfyUI
+#: (G5-12), and the backend uploads it with the token and the model lock - so the directory has to be
+#: there first, for the same reason as the others.
+WORKFLOWS_DIR = BUNDLE_DIR / "workflows"
 
 
 def main() -> int:
     TOKEN_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(TOKEN_DIR, 0o700)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    WORKFLOWS_DIR.mkdir(parents=True, exist_ok=True)
     mode = stat.S_IMODE(TOKEN_DIR.stat().st_mode)
-    print(f"vm dirs ready: {TOKEN_DIR} mode {mode:o}, {BUNDLE_DIR} and {OUT_DIR} present", flush=True)
+    print(f"vm dirs ready: {TOKEN_DIR} mode {mode:o}, {BUNDLE_DIR}, {OUT_DIR} and {WORKFLOWS_DIR} present", flush=True)
     if mode != 0o700:
         print("the token directory is not 0700; refusing to have the token uploaded into it", file=sys.stderr, flush=True)
         return 1

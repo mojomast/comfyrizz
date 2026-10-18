@@ -124,6 +124,7 @@ export function createColabBackend({
   tokenDirScript = join(REPO, "colab", "hf_token_dir.py"),
   listScript = join(REPO, "colab", "list_out.py"),
   modelsLock = join(REPO, "colab", "models.lock.json"),
+  smokeGraph = join(REPO, "workflows", "smoke.api.json"),
   healthScript = join(REPO, "colab", "health.py"),
   runJobsScript = join(REPO, "colab", "run_jobs.py"),
   reconcileScript = join(REPO, "colab", "reconcile.py"),
@@ -519,6 +520,18 @@ export function createColabBackend({
       });
       if (lockUpload.code !== 0) throw new ColabCliError(`uploading colab/models.lock.json failed (exit ${lockUpload.code})`);
       emit(onEvent, { type: "models_lock", path: modelsLock, revisions: lockRevisions(modelsLock) });
+      // G5-12: health.py submits a 256 px smoke job to prove the proxy reaches ComfyUI, but nothing
+      // ever put a graph at the path it reads, so the check reported "skipped" on every real run and
+      // the only evidence was the proxy's own health endpoint. `workflows/build_smoke.py` derives the
+      // graph from the still generator the pipeline runs.
+      if (smokeGraph && existsSync(smokeGraph)) {
+        const smokeUpload = await step(argvUpload({ session, localPath: smokeGraph, remotePath: `${REMOTE_ROOT}/workflows/smoke.api.json` }), {
+          label: "upload-smoke",
+          wallMs: 120000,
+        });
+        if (smokeUpload.code !== 0) throw new ColabCliError(`uploading workflows/smoke.api.json failed (exit ${smokeUpload.code})`);
+        emit(onEvent, { type: "smoke_graph", path: smokeGraph });
+      }
       const result = await execScript(bootstrapScript, {
         step: "bootstrap",
         timeout,

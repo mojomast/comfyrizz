@@ -1,0 +1,28 @@
+{
+ "generator": "flux3-klein",
+ "kind": "still",
+ "map": {
+  "height": [
+   "6",
+   "height"
+  ],
+  "prompt": [
+   "4",
+   "text"
+  ],
+  "seed": [
+   "7",
+   "seed"
+  ],
+  "steps": [
+   "7",
+   "steps"
+  ],
+  "width": [
+   "6",
+   "width"
+  ]
+ },
+ "note": "Derived from flux3_klein_t2i by workflows/build_smoke.py: health.py submits this graph to prove the proxy reaches ComfyUI. It is a wiring check, not a workload.",
+ "v": 1
+}
