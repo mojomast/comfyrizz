@@ -322,8 +322,13 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
 function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
   const family = useFontFamily();
   const text = textColors(pkg);
+  const { width: frameWidth, height: frameHeight } = useVideoConfig();
+  // L1 re-layout: a split hero stacks (copy on top, media below) in portrait
+  // instead of cropping, matching textZones('9:16', 'hero-split').
+  const portrait = frameHeight > frameWidth;
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const split = scene.variant !== 'full-bleed';
+  const stacked = split && portrait;
   const head = reveal(frame, 2, 22);
   const body = reveal(frame, 12, 22);
   return (
@@ -334,15 +339,16 @@ function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
           position: 'relative',
           zIndex: 7,
           display: 'flex',
+          flexDirection: stacked ? 'column' : 'row',
           width: '100%',
           height: '100%',
-          alignItems: 'center',
-          gap: 60,
-          padding: `0 ${SAFE_AREA.x}px`,
+          alignItems: stacked ? 'flex-start' : 'center',
+          gap: stacked ? 28 : 60,
+          padding: stacked ? `${SAFE_AREA.y}px ${SAFE_AREA.x}px` : `0 ${SAFE_AREA.x}px`,
           justifyContent: split ? 'flex-start' : 'center',
         }}
       >
-        <div style={{ flex: split ? '0 0 52%' : '1 1 auto', maxWidth: split ? 900 : 1400, display: 'flex', flexDirection: 'column', gap: 24, textAlign: split ? 'left' : 'center' }}>
+        <div style={{ flex: split ? (stacked ? '0 0 auto' : '0 0 52%') : '1 1 auto', maxWidth: split ? (stacked ? '100%' : 900) : 1400, display: 'flex', flexDirection: 'column', gap: 24, textAlign: split ? 'left' : 'center' }}>
           <Kicker text={copy.kicker} />
           <div style={{ fontSize: TYPE_SCALE.headlineLg, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.05, opacity: head.opacity, transform: `translateY(${head.translateY}px)` }}>
             {copy.headline}
@@ -396,7 +402,10 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
   const datasetId = scene.data?.dataset;
   const dataset = datasetId ? pkg.datasets?.[datasetId] : undefined;
   const values = dataset?.values ?? [];
-  const width = 1180;
+  // L1 re-layout: the bar chart shrinks to the safe area instead of overflowing
+  // a 1080-wide portrait/square frame. Landscape keeps the authored 1180 px.
+  const { width: frameWidth } = useVideoConfig();
+  const width = Math.min(1180, Math.max(320, frameWidth - 2 * SAFE_AREA.x));
   const height = 420;
   const max = Math.max(1, ...values.map(item => item.value));
   const gap = 42;

@@ -7,18 +7,55 @@
  * layout may draw text and the box a foreground asset occupies, so callers can
  * assert that text and assets never intersect. Added for A6 after review found
  * a foreground card covering body copy / a caption (DOLAN 12:50).
+ *
+ * L1 adds aspect-aware zones and re-layout rules: a 16:9 package can be
+ * re-laid-out for 9:16 / 1:1 by moving foreground assets into a free area
+ * below (or beside) the text-safe zone. Assets are never cropped or scaled.
  */
 
 const W = 1920;
 const H = 1080;
 
 /** @typedef {{x0:number,y0:number,x1:number,y1:number}} Box */
+/** @typedef {'16:9'|'9:16'|'1:1'} Aspect */
+
+/** Frame sizes for the three supported aspects. */
+export const FORMATS = {
+  '16:9': { width: 1920, height: 1080 },
+  '9:16': { width: 1080, height: 1920 },
+  '1:1': { width: 1080, height: 1080 },
+};
+
+/** @type {Aspect[]} */
+export const ASPECTS = ['16:9', '9:16', '1:1'];
 
 /**
- * Conservative safe zones (normalized) where each layout may draw text.
- * Derived from components.tsx (SAFE_AREA = 144x96 px at 1920x1080) plus each
- * layout's padding and max-width. A drawn foreground asset must not intersect
- * these boxes.
+ * Name the closest supported aspect for a format size.
+ * @param {number} [width]
+ * @param {number} [height]
+ * @returns {Aspect}
+ */
+export function aspectName(width, height) {
+  if (!width || !height) return '16:9';
+  const ratio = width / height;
+  if (Math.abs(ratio - 9 / 16) < 0.02) return '9:16';
+  if (Math.abs(ratio - 1) < 0.02) return '1:1';
+  return '16:9';
+}
+
+/**
+ * @param {string} [aspect]
+ * @returns {{width:number,height:number}}
+ */
+export function formatFor(aspect) {
+  return FORMATS[aspect] ?? FORMATS['16:9'];
+}
+
+/**
+ * Conservative safe zones (normalized) where each layout may draw text at
+ * 16:9. Derived from components.tsx (SAFE_AREA = 144x96 px at 1920x1080) plus
+ * each layout's padding and max-width. A drawn foreground asset must not
+ * intersect these boxes.
  * @type {Record<string, Box[]>}
  */
 export const TEXT_ZONES = {
@@ -31,16 +68,91 @@ export const TEXT_ZONES = {
 };
 
 /**
- * Text zones for a scene, taking its variant into account.
+ * Text-safe zones per aspect. Portrait stacks a split hero (copy on top, media
+ * below) and keeps a bottom strip free for a foreground card; square keeps the
+ * left/right split but leaves the whole lower band free.
+ * @type {Record<Aspect, Record<string, Box[]>>}
+ */
+export const TEXT_ZONES_BY_ASPECT = {
+  '16:9': TEXT_ZONES,
+  '9:16': {
+    title: [{ x0: 0.1, y0: 0.3, x1: 0.9, y1: 0.66 }],
+    hero: [{ x0: 0.1, y0: 0.28, x1: 0.9, y1: 0.66 }],
+    'hero-split': [{ x0: 0.08, y0: 0.05, x1: 0.92, y1: 0.46 }],
+    stat: [{ x0: 0.1, y0: 0.26, x1: 0.9, y1: 0.62 }],
+    chart: [{ x0: 0.08, y0: 0.06, x1: 0.92, y1: 0.58 }],
+    list: [{ x0: 0.08, y0: 0.08, x1: 0.92, y1: 0.66 }],
+  },
+  '1:1': {
+    title: [{ x0: 0.1, y0: 0.26, x1: 0.9, y1: 0.66 }],
+    hero: [{ x0: 0.08, y0: 0.24, x1: 0.92, y1: 0.66 }],
+    'hero-split': [{ x0: 0.07, y0: 0.14, x1: 0.5, y1: 0.86 }],
+    stat: [{ x0: 0.08, y0: 0.24, x1: 0.78, y1: 0.64 }],
+    chart: [{ x0: 0.08, y0: 0.06, x1: 0.92, y1: 0.66 }],
+    list: [{ x0: 0.08, y0: 0.08, x1: 0.72, y1: 0.66 }],
+  },
+};
+
+/**
+ * The free area a re-laid-out foreground asset may occupy: the complement of
+ * the text-safe zone where the layout can still draw media. Landscape is the
+ * identity (16:9 keeps its authored item coordinates).
+ * @type {Record<Aspect, Record<string, Box>>}
+ */
+export const FREE_AREAS = {
+  '16:9': {},
+  '9:16': {
+    title: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
+    hero: { x0: 0.08, y0: 0.7, x1: 0.92, y1: 0.96 },
+    'hero-split': { x0: 0.08, y0: 0.5, x1: 0.92, y1: 0.96 },
+    stat: { x0: 0.08, y0: 0.68, x1: 0.92, y1: 0.96 },
+    chart: { x0: 0.08, y0: 0.64, x1: 0.92, y1: 0.96 },
+    list: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
+  },
+  '1:1': {
+    title: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
+    hero: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
+    'hero-split': { x0: 0.54, y0: 0.14, x1: 0.94, y1: 0.86 },
+    stat: { x0: 0.08, y0: 0.7, x1: 0.92, y1: 0.96 },
+    chart: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
+    list: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
+  },
+};
+
+/**
+ * @param {string} [aspect]
+ * @param {string} [key] `hero` / `hero-split` / a layout id
+ * @returns {Box | null}
+ */
+export function freeArea(aspect, key) {
+  const table = FREE_AREAS[aspect] ?? FREE_AREAS['16:9'];
+  return table[key] ?? null;
+}
+
+/**
+ * Text zones for a scene, taking its variant and aspect into account.
  * @param {any} scene
+ * @param {Aspect} [aspect]
  * @returns {Box[]}
  */
-export function textZones(scene) {
+export function textZones(scene, aspect = '16:9') {
+  const table = TEXT_ZONES_BY_ASPECT[aspect] ?? TEXT_ZONES;
   const layout = scene?.layout;
   if (layout === 'hero') {
-    return TEXT_ZONES[scene.variant === 'full-bleed' ? 'hero' : 'hero-split'];
+    return table[scene.variant === 'full-bleed' ? 'hero' : 'hero-split'];
   }
-  return TEXT_ZONES[layout] ?? [];
+  return table[layout] ?? [];
+}
+
+/**
+ * The safe-zone key for a scene: split heroes use their own zone at portrait
+ * and square, otherwise the layout id.
+ * @param {any} scene
+ * @returns {string}
+ */
+function zoneKey(scene) {
+  if (scene?.layout === 'hero') return scene.variant === 'full-bleed' ? 'hero' : 'hero-split';
+  return scene?.layout;
 }
 
 /**
@@ -82,11 +194,13 @@ export function isDrawnForeground(asset) {
  * @param {any} item
  * @param {any} asset
  * @param {Record<string, {width:number,height:number}>} [dims]
+ * @param {Aspect} [aspect]
  * @returns {Box}
  */
-export function foregroundBox(item, asset, dims) {
+export function foregroundBox(item, asset, dims, aspect = '16:9') {
+  const frame = formatFor(aspect);
   const w = item?.w ?? 0.4;
-  const h = (w * W) / (assetAspect(asset, dims) * H);
+  const h = (w * frame.width) / (assetAspect(asset, dims) * frame.height);
   const cx = item?.x ?? 0.5;
   const cy = item?.y ?? 0.5;
   return { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 };
@@ -113,17 +227,18 @@ function sceneEntries(pkg) {
  * Find text/asset overlaps across a package. Only drawn foreground assets are
  * considered.
  * @param {any} pkg
- * @param {{margin?:number, mediaDims?:Record<string, {width:number,height:number}>}} [options]
+ * @param {{margin?:number, mediaDims?:Record<string, {width:number,height:number}>, aspect?:Aspect}} [options]
  * @returns {{scene:string,asset:string,text:Box,box:Box}[]}
  */
-export function findLayoutOverlaps(pkg, { margin = 0.005, mediaDims } = {}) {
+export function findLayoutOverlaps(pkg, { margin = 0.005, mediaDims, aspect } = {}) {
+  const resolved = aspect ?? aspectName(pkg?.format?.width, pkg?.format?.height);
   const overlaps = [];
   for (const [sceneId, scene] of sceneEntries(pkg)) {
-    const zones = textZones(scene);
+    const zones = textZones(scene, resolved);
     for (const item of scene?.foreground ?? []) {
       const asset = pkg?.assets?.[item.asset];
       if (!isDrawnForeground(asset)) continue;
-      const box = foregroundBox(item, asset, mediaDims);
+      const box = foregroundBox(item, asset, mediaDims, resolved);
       for (const zone of zones) {
         if (intersects(box, zone, margin)) {
           overlaps.push({ scene: sceneId, asset: item.asset, text: zone, box });
@@ -132,4 +247,68 @@ export function findLayoutOverlaps(pkg, { margin = 0.005, mediaDims } = {}) {
     }
   }
   return overlaps;
+}
+
+/**
+ * Fit one foreground item into an aspect's free area without changing the
+ * asset: keep the authored width when it fits, otherwise shrink to the free
+ * area. Anchored to the bottom of the strip so copy above stays clear.
+ * @param {any} item
+ * @param {any} asset
+ * @param {Box} free
+ * @param {Aspect} aspect
+ * @returns {{x:number,y:number,w:number}}
+ */
+export function fitForeground(item, asset, free, aspect) {
+  const frame = formatFor(aspect);
+  const aspectRatio = assetAspect(asset);
+  const heightPerWidth = frame.width / (aspectRatio * frame.height);
+  const freeW = free.x1 - free.x0;
+  const freeH = free.y1 - free.y0;
+  let w = Math.min(item?.w ?? 0.4, freeW);
+  let h = w * heightPerWidth;
+  if (h > freeH) {
+    h = freeH;
+    w = h / heightPerWidth;
+  }
+  const round = value => Number(value.toFixed(4));
+  const x = (free.x0 + free.x1) / 2;
+  const y = free.y1 - h / 2 - 0.02;
+  return { x: round(x), y: round(y), w: round(w) };
+}
+
+/**
+ * Re-lay-out a package at a different aspect by setting the frame size and
+ * fitting every foreground asset into the free area for its layout. Assets are
+ * never cropped or re-encoded, and 16:9 is the identity transform.
+ * @param {any} pkg
+ * @param {Aspect} aspect
+ * @returns {any} a new package
+ */
+export function relayoutPackage(pkg, aspect) {
+  const frame = formatFor(aspect);
+  const variant = structuredClone(pkg);
+  variant.format = { ...(pkg.format ?? {}), width: frame.width, height: frame.height };
+  if (aspect === '16:9') return variant;
+  for (const scene of variant.scenes ?? []) {
+    if (!Array.isArray(scene?.foreground) || scene.foreground.length === 0) continue;
+    const free = freeArea(aspect, zoneKey(scene));
+    if (!free) continue;
+    scene.foreground = scene.foreground.map(item => {
+      const asset = variant.assets?.[item.asset];
+      const fitted = fitForeground(item, asset, free, aspect);
+      return { ...item, ...fitted };
+    });
+  }
+  return variant;
+}
+
+/**
+ * Re-lay-out every requested aspect (16:9 included as a no-op baseline).
+ * @param {any} pkg
+ * @param {Aspect[]} [aspects]
+ * @returns {Record<string, any>}
+ */
+export function relayoutVariants(pkg, aspects = ASPECTS) {
+  return Object.fromEntries(aspects.map(aspect => [aspect, relayoutPackage(pkg, aspect)]));
 }
