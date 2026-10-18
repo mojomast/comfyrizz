@@ -146,9 +146,9 @@
       "foreground": [
         {
           "asset": "a_diagram_flow",
-          "x": 0.83,
+          "x": 0.88,
           "y": 0.5,
-          "w": 0.3,
+          "w": 0.2,
           "anim": "slide-in"
         }
       ],

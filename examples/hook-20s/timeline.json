@@ -100,9 +100,9 @@
       "foreground": [
         {
           "asset": "a_diagram_flow",
-          "x": 0.83,
+          "x": 0.88,
           "y": 0.5,
-          "w": 0.3,
+          "w": 0.2,
           "anim": "slide-in"
         }
       ],
@@ -198,6 +198,6 @@
   "provisional": false,
   "warnings": [],
   "proposals": [],
-  "sourceHash": "3f469269635b81cb0d426be7f2fce7454c0b7ea3aea4b5063f45b9536f5d458d",
-  "hash": "0451bac5c4a3577f59b62fe7f5ff1852691d795832be2f0f13a5eecb1b1311ae"
+  "sourceHash": "bebe6e763984d7188a42393bce2b8c2f86b3b0598cc0811f46eab1f5150e7c76",
+  "hash": "94bd41692ce9b808e5253124683f2251bcd1e8902946e5352d40d9d287d38e27"
 }

@@ -148,6 +148,13 @@ Git (`.gitignore`) and come from the GPU test session; the committed
 `package.json`, recompiled `timeline.json` and `narration-report.json` are the
 source of truth and are checked by the freshness guard above.
 
+`examples/hook-20s` (A10) is the 20 second launch hook used to open the
+submission video: 566 frames @ 30 fps (18.867 s), layouts
+`title, chart, list, title`, procedural mesh/grid/dots backgrounds, three
+first-party SVG/`vector-anim` assets and measured Kokoro narration with
+committed captions. It carries no GPU media, so the whole thing exports on CPU
+from a clean clone as H.264 + AAC 1920×1080 (see `CREDITS.md`).
+
 ### Media in a clean clone (P-fix4)
 
 The GPU showcases are reproducible from the committed manifests alone. When a
@@ -206,6 +213,7 @@ validates a copy with the renderer-only field removed (`validationView`).
 | `examples/data-story` | 1320 | 44.000 s | **125.5 s** (7 rendered, 0 reused) | `rendered 0, reused 7` |
 | `examples/product-explainer` | 1349 | 44.967 s | **124.9 s** (7 rendered, 0 reused), H.264 + AAC | `rendered 0, reused 7` |
 | `examples/showcase-gpu3` | 1092 | 36.400 s | **132.7 s** (6 rendered, 0 reused), H.264 + AAC | `rendered 0, reused 6` |
+| `examples/hook-20s` | 566 | 18.867 s | **56.6 s** (4 rendered, 0 reused), H.264 + AAC | — |
 
 Render times are CPU-only, `--concurrency=2`, `/usr/bin/google-chrome`, Node
 20.19.2. `render:package` hard-fails before rendering if any foreground asset
@@ -215,7 +223,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 
 | Check | Result |
 |---|---|
-| `npm test` | 61/61 pass (incl. P-fix3 freshness, N7/N8 narration, P-fix4 missing-media placeholder, A8 real-dims, A9 final-render) |
+| `npm test` | 62/62 pass (incl. P-fix3 freshness, N7/N8 narration, P-fix4 missing-media placeholder, A8 real-dims, A9 final-render, A10 hook-20s) |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `a5cd2d9b…3447` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
@@ -233,6 +241,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 | Missing media (P-fix4) | `showcase-gpu3` still rendered through `renderPackage` with `assets/` + `audio/` removed: labelled placeholder, silent, committed captions, `missing-media.test.mjs` 2/2 + 2 `media.test.mjs` unit cases |
 | Real media dims (A8) | `media-dims.test.mjs` 5/5: PNG/JPEG/GIF header reads, a 960x512 video plate and a 1024x1024 still declared 1920x1080 cover-fit centred with a uniform scale (no stretch), mismatch warnings, `foregroundBox` from the real aspect |
 | A8 gpu3 re-render | `examples/showcase-gpu3` incremental after A8: 1920x1080 30/1 H.264 + AAC, **1092 frames**, 36.496 s, hash `fb4792fb…9184`, 6 rendered; no declared/real mismatch; CPU 141.0 s |
+| 20 s hook (A10) | `examples/hook-20s` incremental CPU export: 1920×1080 30/1 H.264 + AAC 48 kHz stereo, **566 frames**, 18.940 s, hash `94bd4169…d38e`, 4 rendered (0 reused), 5 captions; timeline-freshness measured mode passes |
 | Final export (A9) | `final-render.test.mjs` 3/3: preview stays 960×544 with the red base file; with and without an upscaled variant the final is 1920×1080 H.264 with ffprobe frames == compiled timeline; when the variant is present the lime upscaled file is the one on screen |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is

@@ -7,7 +7,7 @@
  * The example's committed timeline.json is the timing source of truth; the
  * export frame count must equal it.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +54,12 @@ const info = JSON.parse(probe.stdout);
 const video = info.streams.find(stream => stream.codec_type === 'video') ?? {};
 const audio = info.streams.find(stream => stream.codec_type === 'audio');
 
+// A10: a narrated example commits its normalised mix, so the export must carry
+// an AAC audio stream. Examples whose audio is not on disk (clean GPU clone)
+// fall back to the P-fix4 missing-media path and are reported without audio.
+const narrationFile = pkg.assets?.a_narration?.file;
+const hasNarration = typeof narrationFile === 'string' && existsSync(join(exampleDir, narrationFile));
+
 const checks = [
   ['width', Number(video.width), timeline.width],
   ['height', Number(video.height), timeline.height],
@@ -61,6 +67,7 @@ const checks = [
   ['frames', Number(video.nb_frames), timeline.durationInFrames],
   ['codec', video.codec_name, 'h264'],
 ];
+if (hasNarration) checks.push(['audio codec', audio?.codec_name ?? null, 'aac']);
 const failures = checks.filter(([, actual, expected]) => actual !== expected);
 for (const [name, actual, expected] of checks) {
   process.stdout.write(`${actual === expected ? 'ok  ' : 'FAIL'} ${name}: ${actual} (expected ${expected})\n`);
