@@ -10,7 +10,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
-import { EXPORT_FILE_NAMES } from '../src/export.mjs';
+import { EXPORT_FILE_NAMES, hasWordCues } from '../src/export.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
 const TOKEN = 'test-token-0123456789abcdef';
@@ -187,4 +187,20 @@ test('export excludes a CC BY-NC asset and still writes captions', { timeout: 60
   const listed = zipEntries(zip);
   assert.ok(!listed.includes('assets/a_nc_photo.png'), 'the refused asset must not ship');
   assert.ok(listed.includes('assets/a_icon_check.svg'), 'the CC0 asset still ships');
+});
+
+test('K1: the word-level VTT is only written when a cue carries word timings', async () => {
+  // A launch-demo package has measured sentences but no word cues, so the
+  // optional captions.words.vtt must not appear and the sentence VTT is untouched.
+  assert.equal(hasWordCues([{ text: 'No words.', from: 0, to: 30 }]), false);
+  assert.equal(hasWordCues([{ text: 'Hi.', from: 0, to: 30, words: [{ text: 'Hi', from: 0, to: 30 }] }]), true);
+  assert.equal(hasWordCues([]), false);
+
+  const pkg = { id: seed.id };
+  const exportDir = join(runtime, 'exports', pkg.id);
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, 'video.mp4'), 'fake mp4 bytes');
+  const response = await request({ method: 'POST', path: '/api/export', body: { packageId: pkg.id } });
+  assert.equal(response.status, 200, response.text.slice(0, 300));
+  assert.equal(existsSync(join(response.json.dir, 'captions.words.vtt')), false);
 });

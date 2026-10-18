@@ -6,12 +6,17 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { buildCredits, buildPackageZip, isAssetRedistributable } from '../../../packages/sources/dist/src/index.js';
-import { captionsToSrt, captionsToVtt } from '../../../packages/tts/dist/src/index.js';
+import { captionsToSrt, captionsToVtt, captionsToWordVtt } from '../../../packages/tts/dist/src/index.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions } from '../../renderer/scripts/render-package-lib.mjs';
 import { buildSocialPack, SOCIAL_PIXEL_FILES } from './social.mjs';
 
 export const EXPORT_FILE_NAMES = ['video.mp4', 'captions.srt', 'captions.vtt', 'CREDITS.md', 'package.zip'];
+
+/** K1: the word-level VTT is optional; it is written only when cues carry word timings. */
+export function hasWordCues(cues) {
+  return Array.isArray(cues) && cues.some(cue => Array.isArray(cue?.words) && cue.words.length > 0);
+}
 
 function isVector(asset) {
   return asset?.gen?.generator === 'llm-svg' || asset?.kind === 'svg' || asset?.kind === 'vector-anim';
@@ -102,6 +107,11 @@ export function createExporter({ exportsDir, render } = {}) {
     const vttPath = join(dir, 'captions.vtt');
     writeFileSync(srtPath, captionsToSrt(cues, timeline.fps));
     writeFileSync(vttPath, captionsToVtt(cues, timeline.fps));
+    // K1: a word-level VTT is optional and only written when the timeline has
+    // measured word cues. The sentence SRT/VTT above never change.
+    const hasWords = hasWordCues(cues);
+    const wordsVttPath = join(dir, 'captions.words.vtt');
+    if (hasWords) writeFileSync(wordsVttPath, captionsToWordVtt(cues, timeline.fps));
 
     const generatedAt = new Date().toISOString();
     const social = buildSocialPack({ mp4: videoPath, timeline, pkg, outDir: dir, onLog });
@@ -143,6 +153,7 @@ export function createExporter({ exportsDir, render } = {}) {
       { name: 'video.mp4', bytes: statSync(videoPath).size, path: videoPath },
       { name: 'captions.srt', bytes: statSync(srtPath).size, path: srtPath },
       { name: 'captions.vtt', bytes: statSync(vttPath).size, path: vttPath },
+      ...(hasWords ? [{ name: 'captions.words.vtt', bytes: statSync(wordsVttPath).size, path: wordsVttPath }] : []),
       { name: 'CREDITS.md', bytes: statSync(creditsPath).size, path: creditsPath },
       { name: 'package.zip', bytes: statSync(zipPath).size, path: zipPath },
     ];

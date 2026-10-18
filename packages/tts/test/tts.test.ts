@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   captionsToSrt,
   captionsToVtt,
+  captionsToWordVtt,
   compileOptionsFromDurations,
   parseDurations,
   sceneNarrationSeconds,
@@ -137,4 +138,24 @@ test('K1: bad word timings are rejected, not silently repaired', () => {
     () => parseDurations(scene([{ text: '', start: 0, end: 1 }])),
     /no text/,
   );
+});
+
+test('K1: the word-level VTT uses word cues and leaves sentence VTT alone', () => {
+  const cues = [
+    {
+      text: 'Meet Orbit.',
+      from: 0,
+      to: 60,
+      words: [
+        { text: 'Meet', from: 0, to: 15 },
+        { text: 'Orbit.', from: 15, to: 60 },
+      ],
+    },
+  ];
+  const wordVtt = captionsToWordVtt(cues, 30);
+  assert.match(wordVtt, /^WEBVTT\n\nword-1\n00:00:00\.000 --> 00:00:00\.500\nMeet\n/);
+  assert.match(wordVtt, /word-2\n00:00:00\.500 --> 00:00:02\.000\nOrbit\.\n$/);
+  // Sentence output is unchanged whether or not words are present.
+  assert.match(captionsToVtt(cues, 30), /cue-1\n00:00:00\.000 --> 00:00:02\.000\nMeet Orbit\.\n$/);
+  assert.equal(captionsToWordVtt([{ text: 'No words.', from: 0, to: 30 }], 30), 'WEBVTT\n\n');
 });

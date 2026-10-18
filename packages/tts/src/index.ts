@@ -201,3 +201,26 @@ export function captionsToVtt(cues: CaptionCue[], fps = 30): string {
     .join('\n');
   return `WEBVTT\n\n${body}`;
 }
+
+/** K1: a caption cue that also carries measured per-word timings (absolute frames). */
+export interface WordCaptionCue extends CaptionCue {
+  words?: Array<{ text: string; from: number; to: number }>;
+}
+
+/**
+ * K1: an optional word-level WebVTT. Sentence `captions.vtt`/`captions.srt` are
+ * unchanged; this file is only written when the timeline has word cues.
+ */
+export function captionsToWordVtt(cues: WordCaptionCue[], fps = 30): string {
+  const lines: string[] = [];
+  let index = 0;
+  for (const cue of cues) {
+    for (const word of cue.words ?? []) {
+      const from = word.from / fps;
+      const to = Math.max(from + 0.05, word.to / fps);
+      index += 1;
+      lines.push(`word-${index}\n${timestamp(from, false)} --> ${timestamp(to, false)}\n${word.text.trim()}\n`);
+    }
+  }
+  return `WEBVTT\n\n${lines.join('\n')}`;
+}
