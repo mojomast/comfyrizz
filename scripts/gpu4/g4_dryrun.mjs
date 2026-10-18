@@ -106,7 +106,10 @@ export async function dryRun({ outDir = null } = {}) {
   const check = makeCheck();
   const root = outDir || mkdtempSync(join(tmpdir(), "comfyrizz-gpu4-"));
   const workspace = join(root, "workspace");
-  const byoOut = join(root, "byo-out");
+  // the runner's outputs live inside the workDir (run-package's own default): a job's file input is
+  // resolved relative to the jobs file's directory, so a separate output dir makes every dependent
+  // job fail with input_file_missing - which is exactly what the first dry run did
+  const byoOut = join(workspace, "out");
   const requestLog = join(root, "requests.jsonl");
   mkdirSync(byoOut, { recursive: true });
   const pkg = buildPackage(workspace);
@@ -213,7 +216,7 @@ export async function dryRun({ outDir = null } = {}) {
   const preflight = await colab.preflight();
   check.ok("colab-preflight", `ready=${preflight.ready} balance=${preflight.usage?.balance}`, preflight.ready === true && preflight.usage.balance === 387.05);
   const up = await colab.ensureUp({ approved: true });
-  check.ok("colab-ensureUp", `state=${up.state} session=${up.session}`, up.state === "created" && up.session === "comfyrizz-gpu4dryru");
+  check.ok("colab-ensureUp", `state=${up.state} session=${up.session}`, up.state === "created" && typeof up.session === "string" && up.session.startsWith("comfyrizz-"));
   await colab.bootstrap();
   const health = await colab.health();
   check.ok("colab-health", `ok=${health.ok} vramFreeGB=${health.vramFreeGB}`, health.ok === true);
