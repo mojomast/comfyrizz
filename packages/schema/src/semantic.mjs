@@ -44,6 +44,9 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_A2V_NO_AUDIO",
   "SEM_A2V_AUDIO_NOT_AUDIO",
   "SEM_A2V_AUDIO_NOT_READY",
+  "SEM_CAST_REF_UNREADY",
+  "SEM_CAST_UNKNOWN",
+  "SEM_DUPLICATE_CAST_ID",
 ]);
 
 // Published layout contract (PLAN.md A5 / SPEC.md 6.3). The schema holds the loose
@@ -95,6 +98,7 @@ export const FLEXIBLE_CEILING_FRAMES = 2700;
 const SCENE_ID_RE = /^s[A-Za-z0-9_-]{0,63}$/;
 const ASSET_ID_RE = /^a[A-Za-z0-9_-]{0,63}$/;
 const DATASET_ID_RE = /^d[A-Za-z0-9_-]{0,63}$/;
+const CAST_ID_RE = /^c[A-Za-z0-9_-]{0,63}$/;
 const NON_REDISTRIBUTABLE_LICENSE_RE = /(^|[-_ ])(NC|ND|NONCOMMERCIAL|NON-COMMERCIAL|NODERIV|NO-DERIV)([-_ ]|$)/i;
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -147,6 +151,7 @@ export function semanticCheck(doc) {
   checkScenes(scenes, assets, datasets, errors);
   checkAssets(assets, errors);
   checkPresenter(doc, scenes, assets, errors);
+  checkCast(doc, scenes, assets, errors);
   checkDatasets(datasets, errors);
   checkUnusedAssets(doc, scenes, assets, datasets, warnings);
   return { errors: dedupe(errors), warnings: dedupe(warnings) };
@@ -251,7 +256,7 @@ function checkRefs(doc, scenes, assets, datasets, errors) {
   for (const [id, asset] of Object.entries(assets)) {
     if (!isObj(asset) || !isObj(asset.gen) || !isObj(asset.gen.inputs)) continue;
     for (const [key, value] of Object.entries(asset.gen.inputs)) {
-      if (key === "image" || key === "mask" || key === "reference" || key === "audio") {
+      if (key === "image" || key === "mask" || key === "reference" || key === "audio" || /^reference_\d+$/.test(key)) {
         if (isStr(value) && !isObj(assets[value])) {
           errors.push(error("SEM_REF_UNRESOLVED", `/assets/${id}/gen/inputs/${key}`, `unknown asset ${JSON.stringify(value)}`));
         }
@@ -401,6 +406,69 @@ function nonEmpty(v) {
   return isStr(v) && v.trim().length > 0;
 }
 
+/** A presenter portrait that names a cast id rather than an asset (CAST1 hook). */
+function portraitIsCastId(portrait, assets) {
+  return isStr(portrait) && CAST_ID_RE.test(portrait) && !isObj(assets[portrait]);
+}
+
+/**
+ * CAST1: fictional cast members and the ready still each one is conditioned on.
+ *
+ * A package with no cast and no cast references is not judged here. A ref_asset that is missing,
+ * not ready, or not a still is SEM_CAST_REF_UNREADY. A scene, asset, or presenter that names an
+ * unknown cast id is SEM_CAST_UNKNOWN.
+ */
+function checkCast(doc, scenes, assets, errors) {
+  const members = Array.isArray(doc.cast) ? doc.cast.filter(isObj) : [];
+  const byId = new Map();
+  members.forEach((member, i) => {
+    const id = member.id;
+    if (!isStr(id) || !CAST_ID_RE.test(id)) {
+      errors.push(error("SEM_ID_PATTERN", `/cast/${i}/id`, `cast id must match ^c[A-Za-z0-9_-]{0,63}$ (got ${JSON.stringify(id)})`));
+    } else if (byId.has(id)) {
+      errors.push(error("SEM_DUPLICATE_CAST_ID", `/cast/${i}/id`, `duplicate cast id ${id}`));
+    } else {
+      byId.set(id, member);
+    }
+    const ref = member.ref_asset;
+    const asset = isStr(ref) ? assets[ref] : undefined;
+    if (!isStr(ref) || !isObj(asset)) {
+      errors.push(error("SEM_CAST_REF_UNREADY", `/cast/${i}/ref_asset`, `cast ref_asset ${JSON.stringify(ref)} is missing`));
+      return;
+    }
+    const still = asset.kind === "image" || asset.kind === "svg";
+    const ready = asset.status === "ready" && isStr(asset.file) && isStr(asset.sha256);
+    if (!still || !ready) {
+      errors.push(
+        error(
+          "SEM_CAST_REF_UNREADY",
+          `/cast/${i}/ref_asset`,
+          `cast ref_asset ${JSON.stringify(ref)} is not a ready still (kind ${JSON.stringify(asset.kind)}, status ${JSON.stringify(asset.status ?? "pending")}): a Klein reference edit needs an image or svg file and its sha256`,
+        ),
+      );
+    }
+  });
+
+  const requireCast = (id, path) => {
+    if (!isStr(id) || !byId.has(id)) {
+      errors.push(error("SEM_CAST_UNKNOWN", path, `unknown cast ${JSON.stringify(id)}`));
+    }
+  };
+
+  scenes.forEach((scene, i) => {
+    if (!isObj(scene) || !Array.isArray(scene.cast)) return;
+    scene.cast.forEach((id, j) => requireCast(id, `/scenes/${i}/cast/${j}`));
+  });
+  for (const [id, asset] of Object.entries(assets)) {
+    if (isObj(asset) && asset.cast !== undefined) requireCast(asset.cast, `/assets/${id}/cast`);
+  }
+  const presenter = isObj(doc.presenter) ? doc.presenter : null;
+  if (presenter) {
+    if (presenter.cast !== undefined) requireCast(presenter.cast, "/presenter/cast");
+    if (portraitIsCastId(presenter.portrait, assets)) requireCast(presenter.portrait, "/presenter/portrait");
+  }
+}
+
 /**
  * H17: the presenter and its audio-to-video jobs (research section 2.2).
  *
@@ -414,7 +482,7 @@ function checkPresenter(doc, scenes, assets, errors) {
   const sceneIds = new Set(scenes.map((scene) => (isObj(scene) ? scene.id : null)).filter((id) => isStr(id)));
 
   if (presenter) {
-    if (presenter.portrait !== undefined) {
+    if (presenter.portrait !== undefined && !portraitIsCastId(presenter.portrait, assets)) {
       requireAsset(assets, presenter.portrait, "/presenter/portrait", errors);
     }
     if (presenter.enabled === true && !isStr(presenter.portrait)) {
@@ -576,6 +644,9 @@ function checkUnusedAssets(doc, scenes, assets, datasets, warnings) {
   const used = new Set();
   if (isObj(doc.theme) && isStr(doc.theme.logo_asset)) used.add(doc.theme.logo_asset);
   if (isObj(doc.voice) && isStr(doc.voice.ref_asset)) used.add(doc.voice.ref_asset);
+  if (Array.isArray(doc.cast)) {
+    for (const member of doc.cast) if (isObj(member) && isStr(member.ref_asset)) used.add(member.ref_asset);
+  }
   for (const scene of scenes) {
     const bg = scene.background;
     if (isObj(bg) && isStr(bg.asset)) used.add(bg.asset);

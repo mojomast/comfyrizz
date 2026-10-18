@@ -69,6 +69,40 @@ export const MUTATIONS = [
     expect: { schemaOk: true, semantic: ["SEM_A2V_AUDIO_NOT_READY"] },
   },
   {
+    name: "cast-ref-missing",
+    base: "generated-first",
+    ops: [["set", "cast", [{ id: "c_pip", name: "Pip", ref_asset: "a_missing", description: "Fictional mascot." }]]],
+    expect: { schemaOk: true, semantic: ["SEM_CAST_REF_UNREADY"] },
+  },
+  {
+    name: "cast-ref-unready",
+    base: "generated-first",
+    ops: [
+      ["set", "assets.a_sheet", { kind: "image", origin: "upload", status: "pending" }],
+      ["set", "cast", [{ id: "c_pip", name: "Pip", ref_asset: "a_sheet" }]],
+    ],
+    expect: { schemaOk: true, semantic: ["SEM_CAST_REF_UNREADY"] },
+  },
+  {
+    name: "cast-unknown",
+    base: "generated-first",
+    ops: [["set", "scenes.0.cast", ["c_nope"]]],
+    expect: { schemaOk: true, semantic: ["SEM_CAST_UNKNOWN"] },
+  },
+  {
+    name: "duplicate-cast-id",
+    base: "generated-first",
+    ops: [[
+      "set",
+      "cast",
+      [
+        { id: "c_pip", name: "Pip", ref_asset: "a_cutout" },
+        { id: "c_pip", name: "Pip again", ref_asset: "a_cutout" },
+      ],
+    ]],
+    expect: { schemaOk: true, semantic: ["SEM_DUPLICATE_CAST_ID"] },
+  },
+  {
     name: "duplicate-scene-id",
     base: "spec-6.3-example",
     ops: [["set", "scenes.0.id", "s1"], ["push", "scenes", { id: "s1", layout: "title", variant: "outro", preferredFrames: 120, copy: { headline: "Duplicate" } }]],
@@ -444,6 +478,18 @@ export const DERIVED_VALID = [
       ["set", "scenes.2.transitionOut", { type: "zoom", frames: 9, direction: "out" }],
       ["set", "scenes.3.motion", { entry: "pop", spring: "settle" }],
       ["set", "scenes.3.transitionOut", { type: "cut", frames: 0 }],
+    ],
+    expect: { schemaOk: true, semantic: [], warnings: [] },
+  },
+  {
+    // CAST1: a fictional mascot. The portrait hook names the cast id; the ref still is already ready.
+    name: "cast-mascot",
+    base: "generated-first",
+    ops: [
+      ["set", "cast", [{ id: "c_pip", name: "Pip", description: "Fictional round mascot, head and shoulders.", ref_asset: "a_cutout" }]],
+      ["set", "scenes.0.cast", ["c_pip"]],
+      ["set", "assets.a_cutout.cast", "c_pip"],
+      ["set", "presenter", { enabled: false, portrait: "c_pip", cast: "c_pip" }],
     ],
     expect: { schemaOk: true, semantic: [], warnings: [] },
   },

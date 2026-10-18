@@ -329,6 +329,14 @@
     "captions": {
       "$ref": "#/$defs/packageCaptions"
     },
+    "cast": {
+      "type": "array",
+      "maxItems": 8,
+      "description": "CAST1: recurring fictional characters (a mascot). Optional. A package without this array validates, plans and renders exactly as before. v1 is fictional only: no real people and no user photos.",
+      "items": {
+        "$ref": "#/$defs/castMember"
+      }
+    },
     "renders": {
       "type": "array",
       "maxItems": 64,
@@ -472,7 +480,19 @@
           "default": false
         },
         "portrait": {
-          "$ref": "#/$defs/assetId"
+          "description": "The portrait still: an asset id, or a CAST1 cast id whose ready ref_asset is that still. A cast id is the optional hook that lets the portrait be a fictional cast member without requiring any other presenter field.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/assetId"
+            },
+            {
+              "$ref": "#/$defs/castId"
+            }
+          ]
+        },
+        "cast": {
+          "$ref": "#/$defs/castId",
+          "description": "CAST1: this presenter is the fictional cast member. Optional. When portrait is an asset id, jobs for that still append the member's ref_asset. When portrait is a cast id, the portrait is that member's ref_asset."
         },
         "placement": {
           "enum": [
@@ -644,6 +664,39 @@
     "datasetId": {
       "type": "string",
       "pattern": "^d[A-Za-z0-9_-]{0,63}$"
+    },
+    "castId": {
+      "type": "string",
+      "pattern": "^c[A-Za-z0-9_-]{0,63}$",
+      "description": "CAST1 id of a fictional cast member. v1 is a mascot: never a real person."
+    },
+    "castMember": {
+      "type": "object",
+      "description": "CAST1: one recurring fictional character. ref_asset is a ready still (image or svg) the FLUX 3 Klein reference edit conditions on.",
+      "required": [
+        "id",
+        "name",
+        "ref_asset"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/castId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "ref_asset": {
+          "$ref": "#/$defs/assetId",
+          "description": "Ready still of the fictional character. A missing or unready asset is a semantic error."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 400
+        }
+      }
     },
     "number01": {
       "type": "number",
@@ -1157,6 +1210,15 @@
         "notes": {
           "type": "string",
           "maxLength": 512
+        },
+        "cast": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "description": "CAST1: fictional cast members that appear in this scene. Every Klein still the scene names (background or foreground) is planned as a reference edit that includes each member's ref_asset.",
+          "items": {
+            "$ref": "#/$defs/castId"
+          }
         }
       }
     },
@@ -1595,6 +1657,10 @@
         "notes": {
           "type": "string",
           "maxLength": 512
+        },
+        "cast": {
+          "$ref": "#/$defs/castId",
+          "description": "CAST1: this still depicts the fictional cast member. The planner appends that member's ref_asset to the Klein reference-edit inputs."
         }
       }
     }

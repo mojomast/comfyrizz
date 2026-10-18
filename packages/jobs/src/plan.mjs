@@ -5,8 +5,12 @@
 // in the package into one ordered batch *before* any plate (SPEC.md 6.4: one job at a
 // time, stills before plates, one GPU session), resolves LTX dimensions to multiples of
 // 32 and frame counts to 8n+1, and gives each job a cache key over
-// (workflow sha, resolved inputs, model revision, seed, dims, frames).
+// (workflow sha, resolved inputs, model revision, seed, dims, frames). A still that
+// names a cast member also folds the reference file's sha256 into that key.
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { pathProblem } from "../../schema/src/semantic.mjs";
 import { applyMotionRoleDefaults, applyPromptDefaults } from "./defaults.mjs";
 import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
@@ -35,6 +39,39 @@ export const DIM_MULTIPLE_BY_KIND = { still: 16, plate: 64, upscale: 64 };
  * "Prompt outputs failed validation" (GPU test 2, issue 2).
  */
 export const FILE_PARAMS = ["image", "reference", "mask", "audio"];
+
+/**
+ * Klein reference edits take up to 10 reference images. The shipped graph wires image0
+ * (`reference` / `image` on node 10). Further refs are uploaded under `_reference_2` …
+ * `_reference_10` so they stay out of the params map (a name the map does not declare
+ * would be refused) while the cache key and the runner still see the file.
+ */
+export const KLEIN_REF_CAP = 10;
+export const REF_EDIT_WORKFLOW = "workflows/flux3_klein_ref_edit.api.json";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+let refEditWorkflowShaCache = null;
+
+function refEditWorkflowSha() {
+  if (!refEditWorkflowShaCache) {
+    refEditWorkflowShaCache = sha256Hex(readFileSync(join(REPO_ROOT, REF_EDIT_WORKFLOW)));
+  }
+  return refEditWorkflowShaCache;
+}
+
+function extraRefParam(index) {
+  return `_reference_${index + 1}`;
+}
+
+export function isUploadParam(param) {
+  return FILE_PARAMS.includes(param) || /^_reference_(?:[2-9]|10)$/.test(param);
+}
+
+function fileParamNames() {
+  const names = [...FILE_PARAMS];
+  for (let n = 2; n <= KLEIN_REF_CAP; n += 1) names.push(`_reference_${n}`);
+  return names;
+}
 
 /** Which job kind produces the file a file-parameter needs. */
 const FILE_PARAM_KIND = { image: "still", reference: "still", mask: "still", audio: "audio", video: "plate" };
@@ -65,20 +102,22 @@ export function sha256Hex(text) {
   return createHash("sha256").update(text).digest("hex");
 }
 
-export function cacheKeyFor({ workflowSha256, generator, model, modelRevision, params, seed, width, height, frames }) {
-  return sha256Hex(
-    canonical({
-      workflowSha256: workflowSha256 ?? null,
-      generator: generator ?? null,
-      model: model ?? null,
-      modelRevision: modelRevision ?? null,
-      params,
-      seed: seed ?? null,
-      width: width ?? null,
-      height: height ?? null,
-      frames: frames ?? null,
-    }),
-  );
+export function cacheKeyFor({ workflowSha256, generator, model, modelRevision, params, seed, width, height, frames, refSha256 }) {
+  // `refSha256` is omitted unless a cast reference was attached, so a package with no cast
+  // hashes exactly as before.
+  const body = {
+    workflowSha256: workflowSha256 ?? null,
+    generator: generator ?? null,
+    model: model ?? null,
+    modelRevision: modelRevision ?? null,
+    params,
+    seed: seed ?? null,
+    width: width ?? null,
+    height: height ?? null,
+    frames: frames ?? null,
+  };
+  if (refSha256 != null) body.refSha256 = refSha256;
+  return sha256Hex(canonical(body));
 }
 
 function requireRelativePath(value, what, errors) {
@@ -214,7 +253,7 @@ function referenceSizedDims({ params, kind, assets, kinds, format, multiple, ref
 /** Attach the resolved file inputs to a job, and record the job that produces each one. */
 function withFileInputs(job, params, assetId, ctx) {
   const entries = [];
-  for (const name of FILE_PARAMS) {
+  for (const name of fileParamNames()) {
     if (params[name] === undefined || params[name] === null) continue;
     const entry = resolveFileInput({ param: name, value: params[name], assetId, pkg: ctx.pkg, kinds: ctx.kinds, errors: ctx.errors });
     if (!entry) continue;
@@ -255,6 +294,110 @@ function checkSourceAspect({ pkg, plateAssetId, sourceId, dims, format, kinds, e
     return;
   }
   errors.push(message);
+}
+
+function sceneNamesAsset(scene, assetId) {
+  if (!scene || typeof scene !== "object") return false;
+  if (scene.background && scene.background.asset === assetId) return true;
+  if (Array.isArray(scene.foreground) && scene.foreground.some((fg) => fg && fg.asset === assetId)) return true;
+  return false;
+}
+
+/** Cast members a Klein still depicts: its own `cast`, a scene that shows it, or the presenter portrait. */
+function membersForStill(pkg, assetId) {
+  const wanted = new Set();
+  const asset = pkg.assets?.[assetId];
+  if (typeof asset?.cast === "string") wanted.add(asset.cast);
+  for (const scene of Array.isArray(pkg.scenes) ? pkg.scenes : []) {
+    if (!sceneNamesAsset(scene, assetId) || !Array.isArray(scene.cast)) continue;
+    for (const id of scene.cast) if (typeof id === "string") wanted.add(id);
+  }
+  const presenter = pkg.presenter;
+  if (presenter && typeof presenter === "object" && presenter.portrait === assetId && typeof presenter.cast === "string") {
+    wanted.add(presenter.cast);
+  }
+  if (!wanted.size || !Array.isArray(pkg.cast)) return [];
+  const out = [];
+  for (const member of pkg.cast) {
+    if (!member || typeof member.id !== "string" || !wanted.has(member.id)) continue;
+    if (member.ref_asset === assetId) continue;
+    out.push(member);
+  }
+  return out;
+}
+
+function listedRefs(params) {
+  const out = [];
+  if (typeof params.reference === "string" && params.reference) out.push(params.reference);
+  for (let n = 2; n <= KLEIN_REF_CAP; n += 1) {
+    const value = params[`reference_${n}`] ?? params[`_reference_${n}`];
+    if (typeof value === "string" && value) out.push(value);
+  }
+  return out;
+}
+
+function writeRefSlots(params, refs) {
+  delete params.reference;
+  for (let n = 2; n <= KLEIN_REF_CAP; n += 1) {
+    delete params[`reference_${n}`];
+    delete params[`_reference_${n}`];
+  }
+  refs.forEach((value, index) => {
+    if (index === 0) params.reference = value;
+    else params[extraRefParam(index)] = value;
+  });
+}
+
+/**
+ * Append each named cast member's ref_asset to a Klein still's reference list (cap 10,
+ * existing refs first, cast members in `cast[]` order). Returns null when this still
+ * does not name a cast member, so packages without cast keep the same params and cache keys.
+ */
+function applyCastReferences({ pkg, assetId, params, workflow, workflowSha256, errors }) {
+  const members = membersForStill(pkg, assetId);
+  if (!members.length) return null;
+  const ready = [];
+  for (const member of members) {
+    const refId = member.ref_asset;
+    const ref = typeof refId === "string" ? pkg.assets?.[refId] : null;
+    const sha = ref && typeof ref.sha256 === "string" ? ref.sha256 : null;
+    const file = ref && typeof ref.file === "string" ? ref.file : "";
+    const still = ref && (ref.kind === "image" || ref.kind === "svg");
+    if (!ref || !file || !sha || ref.status !== "ready" || !still) {
+      errors.push(
+        `assets.${assetId}: cast ${member.id} ref_asset ${JSON.stringify(refId)} is missing or not ready, so there is no reference file to upload`,
+      );
+      continue;
+    }
+    ready.push({ id: refId, sha });
+  }
+  if (!ready.length) return null;
+
+  const next = listedRefs(params);
+  const attached = [];
+  for (const ref of ready) {
+    if (next.includes(ref.id)) {
+      attached.push(ref);
+      continue;
+    }
+    if (next.length >= KLEIN_REF_CAP) break;
+    next.push(ref.id);
+    attached.push(ref);
+  }
+  if (!attached.length) return null;
+
+  writeRefSlots(params, next);
+  let nextWorkflow = workflow;
+  let nextSha = workflowSha256;
+  if (workflow !== REF_EDIT_WORKFLOW) {
+    nextWorkflow = REF_EDIT_WORKFLOW;
+    nextSha = refEditWorkflowSha();
+  }
+  if (nextWorkflow === REF_EDIT_WORKFLOW) {
+    delete params.width;
+    delete params.height;
+  }
+  return { workflow: nextWorkflow, workflowSha256: nextSha, refSha256: attached.map((ref) => ref.sha) };
 }
 
 /**
@@ -390,6 +533,17 @@ export function planJobs(pkg, opts = {}) {
       promptGuards.push(...motion.applied);
       warnings.push(...motion.warnings);
     }
+    let workflow = gen.workflow;
+    let workflowSha256 = gen.workflow_sha256 ?? null;
+    let castRefSha256 = null;
+    if (kind === "still") {
+      const cast = applyCastReferences({ pkg, assetId, params, workflow, workflowSha256, errors });
+      if (cast) {
+        workflow = cast.workflow;
+        workflowSha256 = cast.workflowSha256;
+        castRefSha256 = cast.refSha256;
+      }
+    }
     const job = {
       id: `${assetId}.${kind}`,
       kind,
@@ -407,8 +561,8 @@ export function planJobs(pkg, opts = {}) {
       scene,
       sceneIndex: sceneIndex >= 0 ? sceneIndex : null,
       generator: gen.generator,
-      workflow: gen.workflow,
-      workflowSha256: gen.workflow_sha256 ?? null,
+      workflow,
+      workflowSha256,
       model: gen.model ?? null,
       modelRevision: gen.model_revision ?? null,
       deps: [],
@@ -590,6 +744,7 @@ export function planJobs(pkg, opts = {}) {
         width: job.dims?.width,
         height: job.dims?.height,
         frames: job.frames,
+        ...(castRefSha256 ? { refSha256: castRefSha256 } : {}),
       });
     }
     add(job);
@@ -657,7 +812,7 @@ export function checkJobsDoc(doc) {
         problems.push(`${job.id}: every fileInputs entry must be an object`);
         continue;
       }
-      if (!FILE_PARAMS.includes(entry.param)) problems.push(`${job.id}: fileInputs param ${JSON.stringify(entry.param)} is not one of ${FILE_PARAMS.join(", ")}`);
+      if (!isUploadParam(entry.param)) problems.push(`${job.id}: fileInputs param ${JSON.stringify(entry.param)} is not one of ${FILE_PARAMS.join(", ")} or _reference_2.._reference_10`);
       if (entry.from !== "job" && entry.from !== "package") problems.push(`${job.id}: fileInputs ${entry.param} from ${JSON.stringify(entry.from)} must be job or package`);
       const fileIssue = pathProblem(entry.path);
       if (fileIssue) problems.push(`${job.id}: fileInputs ${entry.param} path ${fileIssue}`);

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_castmascot01",
+  "title": "Pip the mascot",
+  "format": { "width": 1920, "height": 1080, "fps": 30 },
+  "duration": { "mode": "flexible", "flexibleCeilingFrames": 2700 },
+  "theme": { "palette": ["#1b2440", "#6d8cff", "#e6e8ee"], "font": "Inter" },
+  "voice": { "enabled": false, "engine": "none" },
+  "cast": [
+    {
+      "id": "c_pip",
+      "name": "Pip",
+      "description": "Pip is a fictional round mascot, framed head and shoulders. Not a real person.",
+      "ref_asset": "a_pip"
+    }
+  ],
+  "presenter": { "enabled": false, "portrait": "c_pip", "cast": "c_pip", "label": "Pip" },
+  "scenes": [
+    {
+      "id": "s_intro",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": { "headline": "Meet Pip", "sub": "The same mascot in every scene" },
+      "background": { "asset": "a_intro" },
+      "cast": ["c_pip"],
+      "transitionOut": { "type": "fade", "frames": 15 }
+    },
+    {
+      "id": "s_next",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 180,
+      "copy": { "headline": "Pip explains it", "sub": "Head and shoulders, same face" },
+      "background": { "asset": "a_next" },
+      "cast": ["c_pip"],
+      "transitionOut": { "type": "fade", "frames": 15 }
+    }
+  ],
+  "assets": {
+    "a_pip": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/pip.svg",
+      "sha256": "5d5ff27d89b258869449b8493516b917afd34ed9a61a906962532973ea334518",
+      "bytes": 402,
+      "license": { "id": "CC0-1.0" },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": { "ok": true, "version": "1.0.0", "width": 512, "height": 512 },
+        "caption": "Pip, a fictional round mascot, head and shoulders."
+      }
+    },
+    "a_intro": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "pending",
+      "cast": "c_pip",
+      "license": { "id": "CC0-1.0" },
+      "redistributable": true,
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_ref_edit.api.json",
+        "workflow_sha256": "ecf1b281737c8f3bad5afe7be79e76d7aa3595146b97a8df3e8098c21c080e09",
+        "model": "flux-3-klein",
+        "inputs": {
+          "prompt": "Pip, a round blue fictional mascot, head and shoulders, plain backdrop, no text, no letters",
+          "reference": "a_pip",
+          "seed": 7,
+          "steps": 16
+        }
+      }
+    },
+    "a_next": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "pending",
+      "cast": "c_pip",
+      "license": { "id": "CC0-1.0" },
+      "redistributable": true,
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_ref_edit.api.json",
+        "workflow_sha256": "ecf1b281737c8f3bad5afe7be79e76d7aa3595146b97a8df3e8098c21c080e09",
+        "model": "flux-3-klein",
+        "inputs": {
+          "prompt": "Pip, the same round blue fictional mascot, head and shoulders, explaining, plain backdrop, no text, no letters",
+          "reference": "a_pip",
+          "seed": 11,
+          "steps": 16
+        }
+      }
+    }
+  },
+  "compliance": { "open_weights_only": true, "backends_used": [] }
+}

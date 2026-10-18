@@ -4,6 +4,13 @@
   "note": "sha256 values and dates in fixtures are synthetic; they exist to exercise the format, not to describe real files.",
   "fixtures": [
     {
+      "file": "valid/cast-mascot.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
       "file": "valid/defaults-unfilled.json",
       "kind": "valid",
       "schemaOk": true,
@@ -121,6 +128,46 @@
       "schemaCodes": [],
       "semantic": [
         "SEM_A2V_AUDIO_NOT_READY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/cast-ref-missing.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_CAST_REF_UNREADY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/cast-ref-unready.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_CAST_REF_UNREADY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/cast-unknown.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_CAST_UNKNOWN"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/duplicate-cast-id.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_DUPLICATE_CAST_ID"
       ],
       "warnings": null
     },

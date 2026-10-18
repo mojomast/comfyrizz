@@ -77,6 +77,9 @@ SEMANTIC_CODES = (
     "SEM_ASSET_VARIANT_SAME_FILE",
     "SEM_ASSET_VARIANT_PATH",
     "SEM_ASSET_VARIANT_NOT_BIGGER",
+    "SEM_CAST_REF_UNREADY",
+    "SEM_CAST_UNKNOWN",
+    "SEM_DUPLICATE_CAST_ID",
 )
 
 # Published layout contract (PLAN.md A5 / SPEC.md 6.3); the schema holds the loose
@@ -94,6 +97,7 @@ MODEL_GENERATORS = ("flux3-klein", "ltx25", "ltx25-a2v", "kokoro", "qwen3-tts")
 FLEXIBLE_CEILING_FRAMES = 2700
 
 SCENE_ID_RE = re.compile(r"^s[A-Za-z0-9_-]{0,63}$")
+CAST_ID_RE = re.compile(r"^c[A-Za-z0-9_-]{0,63}$")
 ASSET_ID_RE = re.compile(r"^a[A-Za-z0-9_-]{0,63}$")
 DATASET_ID_RE = re.compile(r"^d[A-Za-z0-9_-]{0,63}$")
 NON_REDISTRIBUTABLE_LICENSE_RE = re.compile(
@@ -214,6 +218,7 @@ def semantic_check(doc: Any) -> dict[str, list[dict[str, Any]]]:
     _check_scenes(scenes, assets, datasets, errors)
     _check_assets(assets, errors)
     _check_presenter(doc, scenes, assets, errors)
+    _check_cast(doc, scenes, assets, errors)
     _check_datasets(datasets, errors)
     _check_unused(doc, scenes, assets, datasets, warnings)
     return {"errors": _dedupe(errors), "warnings": _dedupe(warnings)}
@@ -309,7 +314,7 @@ def _check_refs(scenes, assets, datasets, errors) -> None:
         if not _is_obj(inputs):
             continue
         for key, value in inputs.items():
-            if key in ("image", "mask", "reference", "audio") and _is_str(value) and not _is_obj(assets.get(value)):
+            if _is_asset_ref_input(key) and _is_str(value) and not _is_obj(assets.get(value)):
                 errors.append(
                     _err("SEM_REF_UNRESOLVED", f"/assets/{asset_id}/gen/inputs/{key}", f"unknown asset {json.dumps(value)}")
                 )
@@ -455,7 +460,8 @@ def _check_presenter(doc, scenes, assets, errors) -> None:
 
     if presenter is not None:
         portrait = presenter.get("portrait")
-        if portrait is not None and not (isinstance(portrait, str) and _is_obj(assets.get(portrait))):
+        portrait_is_cast = _portrait_is_cast_id(portrait, assets)
+        if portrait is not None and not portrait_is_cast and not (isinstance(portrait, str) and _is_obj(assets.get(portrait))):
             errors.append(_err("SEM_REF_UNRESOLVED", "/presenter/portrait", f"unknown asset {portrait!r}"))
         if presenter.get("enabled") is True and not _is_str(portrait):
             errors.append(
@@ -560,6 +566,75 @@ def _check_assets(assets, errors) -> None:
                 )
 
 
+def _is_asset_ref_input(key: str) -> bool:
+    if key in ("image", "mask", "reference", "audio"):
+        return True
+    if key.startswith("reference_"):
+        return key[len("reference_") :].isdigit()
+    return False
+
+
+def _portrait_is_cast_id(portrait, assets) -> bool:
+    """A presenter portrait that names a cast id rather than an asset (CAST1 hook)."""
+    return isinstance(portrait, str) and CAST_ID_RE.fullmatch(portrait) is not None and not _is_obj(assets.get(portrait))
+
+
+def _check_cast(doc, scenes, assets, errors) -> None:
+    """CAST1: fictional cast members and the ready still each one is conditioned on.
+
+    A package with no cast and no cast references is not judged here. A ref_asset that is missing,
+    not ready, or not a still is SEM_CAST_REF_UNREADY. A scene, asset, or presenter that names an
+    unknown cast id is SEM_CAST_UNKNOWN.
+    """
+    raw = doc.get("cast")
+    members = [member for member in raw if _is_obj(member)] if isinstance(raw, list) else []
+    by_id: dict[str, dict[str, Any]] = {}
+    for index, member in enumerate(members):
+        cast_id = member.get("id")
+        if not _is_str(cast_id) or CAST_ID_RE.fullmatch(cast_id) is None:
+            errors.append(
+                _err("SEM_ID_PATTERN", f"/cast/{index}/id", f"cast id must match ^c[A-Za-z0-9_-]{{0,63}}$ (got {json.dumps(cast_id)})")
+            )
+        elif cast_id in by_id:
+            errors.append(_err("SEM_DUPLICATE_CAST_ID", f"/cast/{index}/id", f"duplicate cast id {cast_id}"))
+        else:
+            by_id[cast_id] = member
+        ref = member.get("ref_asset")
+        asset = assets.get(ref) if _is_str(ref) else None
+        if not _is_str(ref) or not _is_obj(asset):
+            errors.append(_err("SEM_CAST_REF_UNREADY", f"/cast/{index}/ref_asset", f"cast ref_asset {json.dumps(ref)} is missing"))
+            continue
+        still = asset.get("kind") in ("image", "svg")
+        ready = asset.get("status") == "ready" and _is_str(asset.get("file")) and _is_str(asset.get("sha256"))
+        if not still or not ready:
+            errors.append(
+                _err(
+                    "SEM_CAST_REF_UNREADY",
+                    f"/cast/{index}/ref_asset",
+                    f"cast ref_asset {json.dumps(ref)} is not a ready still (kind {json.dumps(asset.get('kind'))}, status {json.dumps(asset.get('status') or 'pending')}): a Klein reference edit needs an image or svg file and its sha256",
+                )
+            )
+
+    def require_cast(cast_id, path) -> None:
+        if not _is_str(cast_id) or cast_id not in by_id:
+            errors.append(_err("SEM_CAST_UNKNOWN", path, f"unknown cast {json.dumps(cast_id)}"))
+
+    for index, scene in enumerate(scenes):
+        if not _is_obj(scene) or not isinstance(scene.get("cast"), list):
+            continue
+        for j, cast_id in enumerate(scene["cast"]):
+            require_cast(cast_id, f"/scenes/{index}/cast/{j}")
+    for asset_id, asset in assets.items():
+        if _is_obj(asset) and "cast" in asset:
+            require_cast(asset.get("cast"), f"/assets/{asset_id}/cast")
+    presenter = doc.get("presenter") if _is_obj(doc.get("presenter")) else None
+    if presenter is not None:
+        if "cast" in presenter:
+            require_cast(presenter.get("cast"), "/presenter/cast")
+        if _portrait_is_cast_id(presenter.get("portrait"), assets):
+            require_cast(presenter.get("portrait"), "/presenter/portrait")
+
+
 def _check_datasets(datasets, errors) -> None:
     for dataset_id, dataset in datasets.items():
         if not _is_obj(dataset):
@@ -578,6 +653,10 @@ def _check_unused(doc, scenes, assets, datasets, warnings) -> None:
     voice = doc.get("voice")
     if _is_obj(voice) and _is_str(voice.get("ref_asset")):
         used.add(voice["ref_asset"])
+    if isinstance(doc.get("cast"), list):
+        for member in doc["cast"]:
+            if _is_obj(member) and _is_str(member.get("ref_asset")):
+                used.add(member["ref_asset"])
     for scene in scenes:
         bg = scene.get("background")
         if _is_obj(bg) and _is_str(bg.get("asset")):

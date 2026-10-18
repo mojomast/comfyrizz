@@ -306,3 +306,94 @@ test('P-fix5: the committed workflow manifest matches the workflow graphs', asyn
   }
   assert.deepEqual(Object.keys(WORKFLOW_SHA256).sort(), names.map((name: string) => `workflows/${name}`));
 });
+
+test('CAST1: a brief that does not ask for the same mascot adds no cast', async () => {
+  const tools = createToolset({ generateSvg: () => ({ svg: SVG }) });
+  const proposed = await tools['storyboard.propose'].run({ brief: 'a mascot', title: 'Mascot' }) as any;
+  assert.equal(proposed.package.cast, undefined);
+  assert.equal(proposed.package.presenter, undefined);
+  const image = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'a mascot' }) as any;
+  assert.equal(image.reference_edit, false);
+  assert.equal(image.asset.cast, undefined);
+  assert.equal(image.asset.gen.workflow, 'workflows/flux3_klein_t2i.api.json');
+});
+
+test('CAST1: "use the same mascot in every scene" adds a fictional cast ref to every still', async () => {
+  const schema = await import(new URL('../../../schema/src/index.mjs', import.meta.url).href);
+  const jobs = await import(new URL('../../../jobs/src/index.mjs', import.meta.url).href);
+  let draft: any;
+  const tools = createToolset({
+    generateSvg: () => ({ svg: SVG, sanitizerVersion: '1.0.0', renderCheck: { ok: true, version: '1.0.0', width: 512, height: 512, opaqueFraction: 0.5, outOfPaletteFraction: 0 } }),
+    onPackageChange: pkg => { draft = pkg; },
+  });
+  const model = new ScriptedModel((step, request) => {
+    if (step === 0) return [{ type: 'tool_call', id: 'c1', name: 'storyboard.propose', args: { brief: 'use the same mascot in every scene', title: 'Pip', scenes: [{ id: 's_intro', layout: 'title', copy: { headline: 'Meet Pip' } }, { id: 's_hero', layout: 'hero', copy: { headline: 'Pip again' } }] } }, { type: 'done' }];
+    if (step === 1) return [{ type: 'tool_call', id: 'c2', name: 'assets.generate_svg', args: { scene_id: 's_intro', kind: 'diagram', intent: 'a simple style sheet', palette: ['#6d8cff'] } }, { type: 'done' }];
+    if (step === 2) {
+      const svgMessage = [...request.messages].reverse().find(message => message.role === 'tool');
+      if (!svgMessage || svgMessage.role !== 'tool') throw new Error('missing svg tool result');
+      const svgId = JSON.parse(svgMessage.content).asset.id as string;
+      return [
+        { type: 'tool_call', id: 'c3', name: 'assets.generate_image', args: { scene_id: 's_intro', intent: 'Pip the mascot, head and shoulders, same face', refs: [svgId] } },
+        { type: 'tool_call', id: 'c4', name: 'assets.generate_image', args: { scene_id: 's_hero', intent: 'Pip the mascot explaining a diagram, same face' } },
+        { type: 'done' },
+      ];
+    }
+    return [{ type: 'text', delta: 'Same fictional mascot in both scenes.' }, { type: 'done' }];
+  });
+  const result = await runAgent({ model, brief: 'use the same mascot in every scene', tools, maxSteps: 6 });
+  assert.equal(result.ok, true, result.error);
+  assert.match(model.requests[0].system ?? '', /use the same mascot in every scene/);
+
+  assert.equal(draft.cast.length, 1);
+  assert.equal(draft.cast[0].id, 'c_pip');
+  assert.equal(draft.cast[0].name, 'Pip');
+  assert.equal(draft.cast[0].ref_asset, 'a_cast_pip');
+  assert.match(draft.cast[0].description, /fictional/);
+  assert.match(draft.cast[0].description, /Not a real person/);
+  assert.equal(draft.assets.a_cast_pip.kind, 'svg');
+  assert.equal(draft.assets.a_cast_pip.status, 'ready');
+  assert.ok(draft.scenes.every((scene: any) => Array.isArray(scene.cast) && scene.cast.includes('c_pip')));
+  assert.equal(draft.presenter.enabled, false);
+  assert.equal(draft.presenter.portrait, 'c_pip');
+  assert.equal(draft.presenter.cast, 'c_pip');
+
+  const intro: any = result.toolCalls.find(call => call.name === 'assets.generate_image' && (call.args as any).scene_id === 's_intro')!.result;
+  const hero: any = result.toolCalls.find(call => call.name === 'assets.generate_image' && (call.args as any).scene_id === 's_hero')!.result;
+  const svgId = (callArgs(result, 'assets.generate_image', 's_intro') as any).refs[0];
+  assert.equal(intro.reference_edit, true);
+  assert.equal(intro.asset.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
+  assert.equal(intro.asset.gen.inputs.reference, svgId);
+  assert.equal(intro.asset.gen.inputs.reference_2, 'a_cast_pip');
+  assert.equal(intro.asset.cast, 'c_pip');
+  assert.equal(hero.reference_edit, true);
+  assert.equal(hero.asset.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
+  assert.equal(hero.asset.gen.inputs.reference, 'a_cast_pip');
+  assert.equal(hero.asset.gen.inputs.reference_2, undefined);
+  assert.equal(hero.asset.cast, 'c_pip');
+
+  const validation = schema.validatePackage(draft);
+  assert.equal(validation.valid, true, JSON.stringify(validation.errors, null, 2));
+
+  const plan = jobs.planJobs(draft);
+  assert.deepEqual(jobs.checkJobsDoc(plan), []);
+  const introJob = plan.jobs.find((job: any) => job.asset === intro.asset.id);
+  const heroJob = plan.jobs.find((job: any) => job.asset === hero.asset.id);
+  assert.equal(introJob.workflow, 'workflows/flux3_klein_ref_edit.api.json');
+  assert.equal(introJob.params.reference, svgId);
+  assert.equal(introJob.params._reference_2, 'a_cast_pip');
+  assert.equal(introJob.params.width, undefined);
+  assert.deepEqual(introJob.fileInputs, [
+    { param: 'reference', from: 'package', path: draft.assets[svgId].file },
+    { param: '_reference_2', from: 'package', path: draft.assets.a_cast_pip.file },
+  ]);
+  assert.equal(heroJob.params.reference, 'a_cast_pip');
+  assert.equal(heroJob.params._reference_2, undefined);
+  assert.deepEqual(heroJob.fileInputs, [{ param: 'reference', from: 'package', path: draft.assets.a_cast_pip.file }]);
+  assert.notEqual(introJob.cacheKey, heroJob.cacheKey);
+});
+
+function callArgs(result: { toolCalls: Array<{ name: string; args: unknown }> }, name: string, sceneId: string): unknown {
+  const call = result.toolCalls.find(entry => entry.name === name && (entry.args as { scene_id?: string }).scene_id === sceneId);
+  return call?.args;
+}
