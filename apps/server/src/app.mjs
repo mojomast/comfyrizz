@@ -176,7 +176,11 @@ export function createApp({
   }
 
   const runs = createRunController({ backendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun });
-  const exporter = createExporter({ exportsDir, render });
+  // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
+  // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
+  // package's working resolution.
+  const exportRender = (packagePath, outputPath, opts = {}) => render(packagePath, outputPath, { ...opts, final: true });
+  const exporter = createExporter({ exportsDir, render: exportRender });
   let activeRender = null;
   let activeExport = null;
   let activeSceneRender = null;

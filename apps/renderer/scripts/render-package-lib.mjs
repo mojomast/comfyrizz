@@ -51,6 +51,68 @@ function needsMediaPublicDir(pkg) {
   return Object.values(pkg.assets ?? {}).some(asset => asset?.kind === 'image' || asset?.kind === 'video' || asset?.kind === 'audio');
 }
 
+/** A9: the final export resolution. The Player preview stays at the package's working size. */
+export const FINAL_WIDTH = 1920;
+export const FINAL_HEIGHT = 1080;
+
+/**
+ * A9: the x2 upscaled variant of a media asset, if the package declares one.
+ * Field agreed with H12 on the board: `assets[<id>].variants.upscaled = { file, width, height }`
+ * (a bare path string is also accepted). Only image/video assets are candidates.
+ */
+export function upscaledVariant(asset) {
+  if (asset?.kind !== 'image' && asset?.kind !== 'video') return null;
+  const variant = asset?.variants?.upscaled ?? asset?.variants?.upscale ?? asset?.variants?.x2;
+  if (typeof variant === 'string' && variant.length > 0) return { file: variant };
+  if (variant && typeof variant === 'object' && typeof variant.file === 'string' && variant.file.length > 0) return variant;
+  return null;
+}
+
+/**
+ * A9: the final render prefers each media asset's upscaled file when this clone has it, and falls
+ * back to the base file (A8 scales it with the real probed size) otherwise. `variants` is a
+ * renderer extension until H12 adds it to the package schema, so this works on a clone and never
+ * mutates the stored package.
+ */
+export function preferUpscaledAssets(pkg, packageDir) {
+  const out = structuredClone(pkg);
+  const used = [];
+  for (const [id, asset] of Object.entries(out.assets ?? {})) {
+    const variant = upscaledVariant(asset);
+    if (!variant) continue;
+    if (!existsSync(join(packageDir, variant.file))) continue;
+    const base = asset.file;
+    asset.file = variant.file;
+    used.push({ id, file: variant.file, base, ...(variant.width && variant.height ? { width: variant.width, height: variant.height } : {}) });
+  }
+  return { pkg: out, used };
+}
+
+/** A9: the package a final export renders — 1920×1080, upscaled media when present. */
+export function applyFinalRender(pkg, packageDir, final = {}) {
+  const width = final.width ?? FINAL_WIDTH;
+  const height = final.height ?? FINAL_HEIGHT;
+  const base = structuredClone(pkg);
+  base.format = { ...(base.format ?? {}), width, height };
+  const { pkg: withMedia, used } = final.preferUpscaled === false ? { pkg: base, used: [] } : preferUpscaledAssets(base, packageDir);
+  return { pkg: withMedia, used, width, height };
+}
+
+/**
+ * A9 transitional: `variants` is a renderer extension until H12 lands its schema field, so drop it
+ * from a copy before schema validation. Remove this when the schema accepts `variants`.
+ */
+function validationView(pkg) {
+  if (!pkg?.assets) return pkg;
+  let view = pkg;
+  for (const [id, asset] of Object.entries(pkg.assets)) {
+    if (!asset || typeof asset !== 'object' || !('variants' in asset)) continue;
+    if (view === pkg) view = structuredClone(pkg);
+    delete view.assets[id].variants;
+  }
+  return view;
+}
+
 /**
  * Measured narration options for the timeline compiler (N7). When the package
  * directory carries an audio/durations.json from a Kokoro run, feed those
@@ -93,15 +155,22 @@ export function preparePublicDir(pkg, packageDir) {
   return temp;
 }
 
-export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0 } = {}) {
-  const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
-  const validation = validatePackage(pkg);
+export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null } = {}) {
+  const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
+  const packageDir = dirname(packagePath);
+  // A9: the final-export option overrides the format to 1920×1080 and prefers upscaled media.
+  const applied = final ? applyFinalRender(raw, packageDir, typeof final === 'boolean' ? {} : final) : null;
+  const pkg = applied?.pkg ?? raw;
+  const validation = validatePackage(validationView(pkg));
   if (!validation.valid) {
     const detail = validation.errors.map(error => `${error.code} ${error.path}: ${error.message}`).join('; ');
     throw new Error(`package invalid: ${detail}`);
   }
-  const packageDir = dirname(packagePath);
   const timeline = compileTimeline(pkg, narrationOptions(packageDir));
+  if (applied) {
+    onLog(`final render ${applied.width}×${applied.height}${applied.used.length > 0 ? `, ${applied.used.length} upscaled variant(s)` : ', no upscaled variants'}`);
+    for (const item of applied.used) onLog(`using upscaled ${item.id}: ${item.file}`);
+  }
   const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
   const missingMedia = missingMediaFiles(pkg, packageDir);
   const mediaDims = collectMediaDims(pkg, packageDir);
@@ -165,6 +234,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
     timeline,
     package: pkg,
     ...(still ? { still: true } : {}),
+    ...(applied ? { final: { width: applied.width, height: applied.height, upscaled: applied.used } } : {}),
     ...(missingMedia.length > 0 ? { missingMedia } : {}),
     ...(dimProblems.length > 0 ? { dimProblems } : {}),
     ...(media ? { media } : {}),
