@@ -229,3 +229,54 @@ test("parseReadyLine only believes a complete verdict (G5-3)", () => {
   assert.equal(parseReadyLine('READY {"v":1,"ok":false}').ok, false);
   assert.ok(READY_WAIT_SECONDS >= 600, "the measured bootstrap alone is 237 s");
 });
+
+test("the packages Comfyrizz adds reach the VM, and the VM list cannot drift (G5-4)", () => {
+  // the shipped tuple, read out of bootstrap.py by python itself (no regexes over the source)
+  const cell = [
+    "import json",
+    "src = open('colab/bootstrap.py').read()",
+    "src = src[: src.rindex('\\n_run()')]",
+    "ns = {'__name__': 'bootstrap_under_test'}",
+    "exec(compile(src, 'colab/bootstrap.py', 'exec'), ns)",
+    "print('VM_EXTRAS', json.dumps(list(ns['VM_EXTRAS'])))",
+  ].join("\n");
+  const run = spawnSync(process.env.PYTHON3 || "python3", ["-c", cell], { cwd: REPO, encoding: "utf8", timeout: 60000 });
+
+  assert.equal(run.status, 0, run.stderr);
+  const extras = JSON.parse((run.stdout.match(/VM_EXTRAS (\[.*\])/) || [])[1] ?? "[]");
+  assert.ok(extras.length >= 4, `bootstrap installs too little: ${JSON.stringify(extras)}`);
+
+  // every package in requirements-vm.txt's Comfyrizz section has to be in that tuple, or the VM's
+  // wheelhouse and the VM's pip disagree about what a session needs
+  const requirements = readFileSync(join(REPO, "colab/requirements-vm.txt"), "utf8");
+  const additions = requirements
+    .split("\n")
+    .slice(requirements.split("\n").findIndex((line) => line.startsWith("# Comfyrizz's own additions")))
+    .filter((line) => line.trim() && !line.startsWith("#"));
+  assert.ok(additions.length >= 4, "requirements-vm.txt has no Comfyrizz section");
+  for (const line of additions) {
+    assert.ok(extras.includes(line.trim()), `${line.trim()} is in requirements-vm.txt but not on the VM`);
+  }
+  // and the three the GPU test 5 run was missing are pinned
+  for (const pin of ["comfy-api-proxy==0.1.6", "comfy-sdk==0.5.0", "jsonschema==4.25.1"]) {
+    assert.ok(extras.includes(pin), `${pin} is not installed on the VM`);
+  }
+});
+
+test("the proxy is started from its installed entry point, not a checkout (G5-4)", () => {
+  const source = readFileSync(join(REPO, "colab/bootstrap.py"), "utf8");
+  const code = source
+    .replace(/"""[\s\S]*?"""/g, "")
+    .split("\n")
+    .map((line) => line.replace(/#.*$/, ""))
+    .join("\n");
+
+  // `comfy_api_proxy` is a src-layout package with no __main__.py: -m cannot import it
+  assert.equal(/"-m",\s*"comfy_api_proxy"/.test(code), false, "the proxy is still started with -m");
+  assert.equal(/git clone[^\n]*comfy-api-proxy/.test(code), false, "the proxy is still cloned from GitHub");
+  assert.equal(/PROXY_PY/.test(code), false, "the checkout directory is still referenced");
+  assert.match(code, /from comfy_api_proxy\.cli import main/, "the installed entry point is not used");
+  // the console script passes --comfyui and --port; so must we
+  assert.match(code, /"--comfyui"/);
+  assert.match(code, /"--port"/);
+});

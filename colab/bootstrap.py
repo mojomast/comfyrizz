@@ -47,6 +47,22 @@ HEARTBEAT_SECONDS = 20
 #: a download that is quiet for a minute is indistinguishable from a hung one.
 DOWNLOAD_PROGRESS_SECONDS = 15
 
+#: The Python packages Comfyrizz adds on top of ComfyUI's own requirements (GPU test 5, G5-4).
+#:
+#: GPU test 5 found the VM without any of them: `pip` installed ComfyUI's requirements,
+#: huggingface_hub and safetensors, and then started the proxy from a git checkout - and
+#: `comfy-api-proxy` has a `src/` layout with no `__main__.py`, so `python -m comfy_api_proxy` cannot
+#: import at all. `colab/requirements-vm.txt` is the same list for the wheelhouse; a test in
+#: `packages/backends/test/h16-gpu5.test.mjs` fails if the two drift apart.
+VM_EXTRAS = (
+    "huggingface_hub[hf_xet]>=1.0",
+    "safetensors",
+    "comfy-api-proxy==0.1.6",
+    "comfy-sdk==0.5.0",
+    "jsonschema==4.25.1",
+)
+
+
 def install_command(requirements: Path, wheelhouse: Path | None, *, offline: bool = False) -> str:
     """The `pip install` command this script runs (inlined from `colab/wheelhouse.py`).
 
@@ -68,7 +84,6 @@ OUT = Path("/content/comfyrizz/out")
 TOKEN = Path("/content/.hf/token")
 PROXY_PORT = 8189
 COMFY_PORT = 8188
-PROXY_PY = ROOT / "comfy-api-proxy"
 #: Where the pinned model list is uploaded to (the backend sends `colab/models.lock.json`).
 LOCK_PATH = Path("/content/comfyrizz/models.lock.json")
 
@@ -247,13 +262,11 @@ def main(argv: list[str] | None = None) -> int:
     if wheelhouse and not (wheelhouse / "manifest.json").is_file():
         raise SystemExit(f"{wheelhouse} has no manifest.json: build it with colab/wheelhouse.py, or drop --wheelhouse")
     started = time.time()
-    if run(f"cd {COMFY} && {install['command']} 'huggingface_hub[hf_xet]>=1.0' safetensors", "requirements") != 0:
+    extras = " ".join(f"'{package}'" for package in VM_EXTRAS)
+    if run(f"cd {COMFY} && {install['command']} {extras}", "requirements") != 0:
         raise SystemExit("installing ComfyUI requirements failed")
     install["seconds"] = round(time.time() - started, 1)
     print(f"INSTALL {json.dumps(install)}", flush=True)
-    if subprocess.run(f"cd {ROOT} && git clone -q --depth 1 https://github.com/Comfy-Org/comfy-api-proxy.git", shell=True).returncode != 0:
-        raise SystemExit("cloning comfy-api-proxy failed")
-
     token = read_token()
     download = download_models(token, plan, lock)
     # the token is used and then removed; it is never exported to ComfyUI or to a node
@@ -297,9 +310,20 @@ def main(argv: list[str] | None = None) -> int:
         start_new_session=True,
     )
     proxy_log = open("/content/proxy.log", "w")  # noqa: SIM115
+    # G5-4: `comfy-api-proxy` is a PyPI package with a `src/` layout and no `__main__.py`, so
+    # `python -m comfy_api_proxy` (and a git checkout of it) cannot import. Its installed entry point
+    # is `comfy_api_proxy.cli:main`, which is what the console script calls.
     subprocess.Popen(
-        [sys.executable, "-m", "comfy_api_proxy", "--comfyui", f"http://127.0.0.1:{COMFY_PORT}", "--port", str(PROXY_PORT)],
-        cwd=str(PROXY_PY),
+        [
+            sys.executable,
+            "-c",
+            "import sys; from comfy_api_proxy.cli import main; sys.exit(main())",
+            "--comfyui",
+            f"http://127.0.0.1:{COMFY_PORT}",
+            "--port",
+            str(PROXY_PORT),
+        ],
+        cwd=str(ROOT),
         stdout=proxy_log,
         stderr=subprocess.STDOUT,
         start_new_session=True,
