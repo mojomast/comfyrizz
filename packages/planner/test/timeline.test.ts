@@ -210,7 +210,7 @@ test('P-pres: all coverage and an explicit id list both resolve, and off removes
 
 test('P-pres: a per-scene clip wins, split moves to the left card, portrait defaults pip-bc', () => {
   const portraitPkg = {
-    ...pkg([scene('s1'), scene('s2', { presenter: 'split', presenter_asset: 'a_clip2', transitionOut: { type: 'none', frames: 0 } })]),
+    ...pkg([scene('s1'), scene('s2', { layout: 'hero', presenter: 'split', presenter_asset: 'a_clip2', transitionOut: { type: 'none', frames: 0 } })]),
     format: { width: 1080, height: 1920, fps: 30 },
     presenter: { enabled: true, portrait: 'a_portrait', scenes: 'all' as const },
   };
@@ -218,6 +218,17 @@ test('P-pres: a per-scene clip wins, split moves to the left card, portrait defa
   assert.deepEqual(timeline.presenters!.map(p => [p.sceneId, p.assetId, p.placement]), [
     ['s1', 'a_portrait', 'pip-bc'],
     ['s2', 'a_clip2', 'split-left'],
+  ]);
+});
+
+test('P-pres: split on a layout with no split card falls back to the package placement', () => {
+  const timeline = compileTimeline({
+    ...pkg([scene('s1'), scene('s2', { presenter: 'split', transitionOut: { type: 'none', frames: 0 } })]),
+    presenter: { enabled: true, portrait: 'a_portrait', placement: 'pip-bl', scenes: 'all' as const },
+  });
+  assert.deepEqual(timeline.presenters!.map(p => [p.sceneId, p.placement]), [
+    ['s1', 'pip-bl'],
+    ['s2', 'pip-bl'],
   ]);
 });
 

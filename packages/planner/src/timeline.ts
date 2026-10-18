@@ -384,8 +384,11 @@ function resolvePresenterTrack(pkg: ComfyrizzPackage, scenes: TimelineScene[]): 
     if (source?.presenter === 'off') continue;
     const assetId = source?.presenter_asset ?? presenter.portrait;
     if (!assetId) continue;
+    // The split-left card is drawn by the hero layout's own copy; every other layout keeps the
+    // package placement, so `split` on a title/chart still shows the presenter instead of vanishing.
+    const wantsSplit = source?.presenter === 'split' && source.layout === 'hero';
     const placement: TimelinePresenter['placement'] =
-      source?.presenter === 'split' ? 'split-left' : presenter.placement ?? (portrait ? 'pip-bc' : 'pip-br');
+      wantsSplit ? 'split-left' : presenter.placement ?? (portrait ? 'pip-bc' : 'pip-br');
     out.push({
       sceneId: scene.id,
       assetId,
