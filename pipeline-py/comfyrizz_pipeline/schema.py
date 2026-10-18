@@ -741,12 +741,16 @@ def validate_package(doc: Any, defaults: bool = False) -> dict[str, Any]:
     semantic = semantic_check(document)
     errors = schema_problems + semantic["errors"]
     errors.sort(key=lambda i: (i["path"], i["code"]))
+    # MS2: advisory motion lint (mirrors index.mjs); it never changes `valid`.
+    from .motion_lint import lint_motion
+
     return {
         "valid": not errors,
         "schemaOk": not schema_problems,
         "errors": errors,
         "warnings": semantic["warnings"],
         "semantic": semantic["errors"],
+        "motion": lint_motion(document),
         "document": document,
     }
 

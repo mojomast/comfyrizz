@@ -32,6 +32,7 @@ def _report(path: str, doc) -> dict:
         "schemaOk": result["schemaOk"],
         "errors": result["errors"],
         "warnings": result["warnings"],
+        "motion": result["motion"],
     }
 
 
@@ -116,6 +117,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  error  {err['code']} {err['path']} - {err['message']}")
             for warn in report["warnings"]:
                 print(f"  warn   {warn['code']} {warn['path']} - {warn['message']}")
+            # MS2: advisory motion lint (never changes the verdict); info findings only in --json.
+            for item in report.get("motion", []):
+                if item["severity"] != "info":
+                    fixable = " [autofix]" if item["autofix"] else ""
+                    print(f"  motion {item['severity']} {item['code']} {item['path']} - {item['message']}{fixable}")
     return 1 if failed else 0
 
 
