@@ -18,7 +18,7 @@
         "type": "object",
         "required": ["name", "jobs"],
         "properties": {
-          "name": { "enum": ["stills", "plates", "upscales", "audio"] },
+          "name": { "enum": ["stills", "plates", "upscales", "audio", "presenters"] },
           "jobs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
         }
       }
@@ -30,12 +30,12 @@
         "required": ["id", "kind", "batch", "deps", "output", "cacheKey"],
         "properties": {
           "id": { "type": "string", "minLength": 1, "maxLength": 200 },
-          "kind": { "enum": ["still", "plate", "upscale", "audio"] },
-          "batch": { "enum": ["stills", "plates", "upscales", "audio"] },
+          "kind": { "enum": ["still", "plate", "upscale", "audio", "presenter"] },
+          "batch": { "enum": ["stills", "plates", "upscales", "audio", "presenters"] },
           "asset": { "type": "string", "minLength": 1 },
           "scene": { "type": ["string", "null"] },
           "sceneIndex": { "type": ["integer", "null"] },
-          "generator": { "enum": ["llm-svg", "flux3-klein", "ltx25", "kokoro"] },
+          "generator": { "enum": ["llm-svg", "flux3-klein", "ltx25", "ltx25-a2v", "kokoro"] },
           "workflow": { "type": "string", "minLength": 1, "maxLength": 512 },
           "workflowSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
           "paramsSource": {

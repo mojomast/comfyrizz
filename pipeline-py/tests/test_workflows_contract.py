@@ -34,6 +34,22 @@ KNOWN_PARAMS = {
     "plate": {"prompt", "image", "reference", "width", "height", "frames", "fps", "seed", "stage2_seed", "stage2_sigmas", "upscale", "strength", "stage2_strength"},
     "upscale": {"prompt", "image", "width", "height", "frames", "fps", "seed", "source", "upscale", "strength", "stage2_strength"},
     "audio": {"text", "voice", "speed", "language", "sample_rate"},
+    # H17: the presenter graph takes the portrait as its first frame and the narration as its audio
+    "presenter": {
+        "prompt",
+        "image",
+        "reference",
+        "audio",
+        "width",
+        "height",
+        "frames",
+        "fps",
+        "seed",
+        "strength",
+        "stage2_seed",
+        "stage2_sigmas",
+        "stage2_strength",
+    },
 }
 
 GRAPH_FILES = sorted(p for p in WORKFLOWS.glob("*.api.json") if not p.name.endswith(".params.json"))
@@ -45,6 +61,7 @@ def test_the_gpu_test_1_workflow_set_is_present():
         "flux3_klein_t2i.api.json",
         "flux3_klein_img2img.api.json",
         "flux3_klein_ref_edit.api.json",
+        "ltx25_a2v_2stage.api.json",
         "ltx25_i2v_2stage.api.json",
         "ltx25_t2v_2stage.api.json",
     }, names

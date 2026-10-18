@@ -1,0 +1,91 @@
+{
+ "files": [
+  "image"
+ ],
+ "generator": "ltx25-a2v",
+ "kind": "presenter",
+ "map": {
+  "audio": [
+   "44",
+   "audio"
+  ],
+  "fps": [
+   [
+    "7",
+    "frame_rate"
+   ],
+   [
+    "42",
+    "fps"
+   ]
+  ],
+  "frames": [
+   [
+    "8",
+    "length"
+   ]
+  ],
+  "height": [
+   [
+    "31",
+    "height",
+    {
+     "mul": 0.5
+    }
+   ],
+   [
+    "8",
+    "height",
+    {
+     "mul": 0.5
+    }
+   ]
+  ],
+  "image": [
+   "30",
+   "image"
+  ],
+  "prompt": [
+   "5",
+   "text"
+  ],
+  "seed": [
+   "11",
+   "noise_seed"
+  ],
+  "stage2_seed": [
+   "23",
+   "noise_seed"
+  ],
+  "stage2_sigmas": [
+   "24",
+   "sigmas"
+  ],
+  "stage2_strength": [
+   "34",
+   "strength"
+  ],
+  "strength": [
+   "33",
+   "strength"
+  ],
+  "width": [
+   [
+    "31",
+    "width",
+    {
+     "mul": 0.5
+    }
+   ],
+   [
+    "8",
+    "width",
+    {
+     "mul": 0.5
+    }
+   ]
+  ]
+ },
+ "note": "Derived from ltx25_i2v_2stage by workflows/build_a2v.py: stage 1's empty audio latent is replaced by the encoded narration (LTXVAudioVAEEncode), which the graph then freezes as the audio half of the AV latent. `audio` is the uploaded WAV's name; the narration is timed and padded host-side (research 2.2), so there are no start/duration params here. The video length still comes from `frames`, and it has to match what the audio encodes to.",
+ "v": 1
+}

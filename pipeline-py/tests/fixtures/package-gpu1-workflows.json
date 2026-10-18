@@ -92,6 +92,40 @@
         "inputs": { "prompt": "endless violet fog, no camera move", "width": 960, "height": 544, "frames": 97, "fps": 24, "seed": 7 }
       }
     }
+,
+    "a_narr": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "audio/s1.wav",
+      "bytes": 24000,
+      "sha256": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      "license": { "id": "LicenseRef-User-Supplied" },
+      "redistributable": false
+    },
+    "a_presenter": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "ltx25-a2v",
+        "workflow": "workflows/ltx25_a2v_2stage.api.json",
+        "workflow_sha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "model": "ltx-2.5-22b-distilled",
+        "inputs": {
+          "prompt": "head-and-shoulders presenter looking at the camera, plain backdrop",
+          "image": "a_still",
+          "audio": "a_narr",
+          "width": 768,
+          "height": 768,
+          "frames": 97,
+          "fps": 24,
+          "seed": 11,
+          "strength": 1.0
+        }
+      }
+    }
   },
+  "presenter": { "enabled": true, "portrait": "a_still", "scenes": "bookends", "placement": "pip-br" },
   "compliance": { "open_weights_only": true, "backends_used": ["colab:G4"] }
 }

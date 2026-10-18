@@ -61,6 +61,16 @@ def main() -> int:
     graph[STAGE1_CONCAT_ID]["inputs"]["audio_latent"] = [AUDIO_ENCODE_ID, 0]
 
     mapping = dict(params["map"])
+    # the plate graph's `frames` maps to the empty-audio node's own length as well; that node is gone
+    # here (the length now comes from the narration), so the mapping drops it rather than pointing at
+    # a node this graph does not have - the contract test checks every target exists
+    def without_removed(entries):
+        rows = entries if isinstance(entries, list) and entries and isinstance(entries[0], list) else [entries]
+        kept = [row for row in rows if str(row[0]) != EMPTY_AUDIO_ID]
+        return kept[0] if len(kept) == 1 and not isinstance(entries[0], list) else kept
+
+    for key, entries in list(mapping.items()):
+        mapping[key] = without_removed(entries)
     mapping["audio"] = [LOAD_AUDIO_ID, "audio"]
     params["map"] = mapping
     params["generator"] = "ltx25-a2v"
