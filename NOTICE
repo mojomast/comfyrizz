@@ -19,6 +19,14 @@ Third-party software (not vendored unless stated; see each package's lockfile):
   motion skills (Apache-2.0, Copyright HeyGen): timing/easing numbers only, re-expressed
   in apps/renderer/src/motion/ for the MS1 motion tokens and entry primitives and the MS3
   transition/kinetic-type grammar (waterfall, highlight sweep, draw-on); no code copied.
+- JetBrains Mono 2.304 (SIL Open Font License 1.1, Copyright 2020 The JetBrains
+  Mono Project Authors). Bundled for the code/terminal layout at
+  apps/renderer/public/fonts/JetBrainsMono-Regular.ttf. Licence text:
+  apps/renderer/public/fonts/JetBrainsMono-OFL.txt.
+- Shiki 1.29.2 (MIT, Copyright (c) 2021 Pine Wu and Shiki contributors), a
+  dependency of @comfyrizz/renderer. The code layout highlights with Shiki's
+  JavaScript regex engine and the grammars and github-dark theme shipped in
+  that package, so a render does not fetch them.
 
 Models are not distributed with this repository. FLUX 3 Image Klein (FLUX
 Kommunity License v1.0), LTX-2.5 (LTX-2.x Community License) and Kokoro-82M

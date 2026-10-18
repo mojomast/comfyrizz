@@ -902,6 +902,12 @@
               "maximum": 3600
             }
           }
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Optional plate label for a split or compare media item."
         }
       }
     },
@@ -947,6 +953,38 @@
             "ken-burns"
           ],
           "default": "none"
+        },
+        "frame": {
+          "type": "string",
+          "enum": [
+            "none",
+            "pip"
+          ],
+          "description": "LP2 inset. pip draws this item in a framed picture-in-picture (placement + mask + ring + shadow). none, and omitting the field, keep the existing panel."
+        },
+        "placement": {
+          "type": "string",
+          "enum": [
+            "pip-br",
+            "pip-bl",
+            "pip-bc",
+            "split-left"
+          ],
+          "description": "Where a pip frame sits. pip-bc is the bottom-centre spot above captions. The same names the presenter overlay uses."
+        },
+        "mask": {
+          "type": "string",
+          "enum": [
+            "circle",
+            "rounded-rect"
+          ],
+          "description": "PiP mask. Omitted means rounded-rect. A 3 px brand ring and soft shadow are drawn by the renderer."
+        },
+        "size": {
+          "type": "number",
+          "minimum": 0.18,
+          "maximum": 0.32,
+          "description": "PiP size as a fraction of the frame's short side (18-32%). Omitted means 0.24. Ignored unless frame is pip."
         }
       }
     },
@@ -968,7 +1006,10 @@
             "hero",
             "stat",
             "chart",
-            "list"
+            "list",
+            "split",
+            "compare",
+            "code"
           ]
         },
         "variant": {
@@ -1034,6 +1075,57 @@
           "maxItems": 12,
           "items": {
             "$ref": "#/$defs/foregroundItem"
+          }
+        },
+        "media": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "LP2: the two plates of a split or compare scene. Each plate is a background (exactly one of asset or procedural) plus an optional label. Optional on every layout; split and compare require it.",
+          "items": {
+            "$ref": "#/$defs/background"
+          }
+        },
+        "code": {
+          "type": "object",
+          "required": [
+            "language",
+            "code"
+          ],
+          "unevaluatedProperties": false,
+          "description": "LP2 code/terminal scene. Typing is characters per second; omitted means about 0.035 s/char. highlights are 1-based line numbers, one accent for the whole scene.",
+          "properties": {
+            "language": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "highlights": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 400
+              }
+            },
+            "typing": {
+              "type": "object",
+              "unevaluatedProperties": false,
+              "properties": {
+                "charsPerSecond": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 120,
+                  "description": "Characters revealed per second. Omitted means 1/0.035 (about 28.57), which is 0.035 s/char."
+                }
+              }
+            }
           }
         },
         "media_only": {

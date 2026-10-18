@@ -18,6 +18,13 @@
       "warnings": []
     },
     {
+      "file": "valid/layout-pack-v2.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
       "file": "valid/media-layer.json",
       "kind": "valid",
       "schemaOk": true,
@@ -592,6 +599,26 @@
         "SCHEMA_UNEVALUATEDPROPERTIES"
       ],
       "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/split-without-media.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LAYOUT_REQUIRES_MEDIA"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/code-without-source.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_CODE_REQUIRED"
+      ],
       "warnings": null
     }
   ]

@@ -13,6 +13,8 @@
  * below (or beside) the text-safe zone. Assets are never cropped or scaled.
  */
 
+import { presenterBox } from './presenter-model.js';
+
 const W = 1920;
 const H = 1080;
 
@@ -65,6 +67,9 @@ export const TEXT_ZONES = {
   stat: [{ x0: 0.07, y0: 0.24, x1: 0.8, y1: 0.78 }],
   chart: [{ x0: 0.07, y0: 0.06, x1: 0.93, y1: 0.94 }],
   list: [{ x0: 0.07, y0: 0.08, x1: 0.7, y1: 0.92 }],
+  split: [{ x0: 0.08, y0: 0.08, x1: 0.92, y1: 0.22 }, { x0: 0.06, y0: 0.62, x1: 0.46, y1: 0.9 }, { x0: 0.54, y0: 0.62, x1: 0.94, y1: 0.9 }],
+  compare: [{ x0: 0.08, y0: 0.08, x1: 0.92, y1: 0.22 }, { x0: 0.06, y0: 0.62, x1: 0.46, y1: 0.9 }, { x0: 0.54, y0: 0.62, x1: 0.94, y1: 0.9 }],
+  code: [{ x0: 0.08, y0: 0.12, x1: 0.92, y1: 0.88 }],
 };
 
 /**
@@ -82,6 +87,9 @@ export const TEXT_ZONES_BY_ASPECT = {
     stat: [{ x0: 0.1, y0: 0.26, x1: 0.9, y1: 0.62 }],
     chart: [{ x0: 0.08, y0: 0.06, x1: 0.92, y1: 0.58 }],
     list: [{ x0: 0.08, y0: 0.08, x1: 0.92, y1: 0.66 }],
+    split: [{ x0: 0.08, y0: 0.28, x1: 0.92, y1: 0.46 }, { x0: 0.08, y0: 0.54, x1: 0.92, y1: 0.72 }],
+    compare: [{ x0: 0.08, y0: 0.28, x1: 0.92, y1: 0.46 }, { x0: 0.08, y0: 0.54, x1: 0.92, y1: 0.72 }],
+    code: [{ x0: 0.08, y0: 0.28, x1: 0.92, y1: 0.72 }],
   },
   '1:1': {
     title: [{ x0: 0.1, y0: 0.26, x1: 0.9, y1: 0.66 }],
@@ -90,6 +98,9 @@ export const TEXT_ZONES_BY_ASPECT = {
     stat: [{ x0: 0.08, y0: 0.24, x1: 0.78, y1: 0.64 }],
     chart: [{ x0: 0.08, y0: 0.06, x1: 0.92, y1: 0.66 }],
     list: [{ x0: 0.08, y0: 0.08, x1: 0.72, y1: 0.66 }],
+    split: [{ x0: 0.08, y0: 0.08, x1: 0.92, y1: 0.2 }, { x0: 0.08, y0: 0.62, x1: 0.46, y1: 0.9 }, { x0: 0.54, y0: 0.62, x1: 0.92, y1: 0.9 }],
+    compare: [{ x0: 0.08, y0: 0.08, x1: 0.92, y1: 0.2 }, { x0: 0.08, y0: 0.62, x1: 0.46, y1: 0.9 }, { x0: 0.54, y0: 0.62, x1: 0.92, y1: 0.9 }],
+    code: [{ x0: 0.1, y0: 0.14, x1: 0.9, y1: 0.86 }],
   },
 };
 
@@ -108,6 +119,9 @@ export const FREE_AREAS = {
     stat: { x0: 0.08, y0: 0.68, x1: 0.92, y1: 0.96 },
     chart: { x0: 0.08, y0: 0.64, x1: 0.92, y1: 0.96 },
     list: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
+    split: { x0: 0.08, y0: 0.74, x1: 0.92, y1: 0.96 },
+    compare: { x0: 0.08, y0: 0.74, x1: 0.92, y1: 0.96 },
+    code: { x0: 0.08, y0: 0.74, x1: 0.92, y1: 0.96 },
   },
   '1:1': {
     title: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
@@ -116,6 +130,9 @@ export const FREE_AREAS = {
     stat: { x0: 0.08, y0: 0.7, x1: 0.92, y1: 0.96 },
     chart: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
     list: { x0: 0.08, y0: 0.72, x1: 0.92, y1: 0.96 },
+    split: { x0: 0.08, y0: 0.92, x1: 0.92, y1: 0.98 },
+    compare: { x0: 0.08, y0: 0.92, x1: 0.92, y1: 0.98 },
+    code: { x0: 0.08, y0: 0.92, x1: 0.92, y1: 0.98 },
   },
 };
 
@@ -199,6 +216,21 @@ export function isDrawnForeground(asset) {
  */
 export function foregroundBox(item, asset, dims, aspect = '16:9') {
   const frame = formatFor(aspect);
+  if (item?.frame === 'pip') {
+    const box = presenterBox({
+      placement: item.placement ?? 'pip-br',
+      shape: item.mask === 'circle' ? 'circle' : 'rounded-rect',
+      size: typeof item.size === 'number' ? item.size : 0.24,
+      width: frame.width,
+      height: frame.height,
+    });
+    return {
+      x0: box.left / frame.width,
+      y0: box.top / frame.height,
+      x1: (box.left + box.width) / frame.width,
+      y1: (box.top + box.height) / frame.height,
+    };
+  }
   const w = item?.w ?? 0.4;
   const h = (w * frame.width) / (assetAspect(asset, dims) * frame.height);
   const cx = item?.x ?? 0.5;
@@ -295,6 +327,7 @@ export function relayoutPackage(pkg, aspect) {
     const free = freeArea(aspect, zoneKey(scene));
     if (!free) continue;
     scene.foreground = scene.foreground.map(item => {
+      if (item?.frame === 'pip') return item;
       const asset = variant.assets?.[item.asset];
       const fitted = fitForeground(item, asset, free, aspect);
       return { ...item, ...fitted };

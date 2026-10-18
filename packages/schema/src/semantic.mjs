@@ -44,6 +44,8 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_A2V_NO_AUDIO",
   "SEM_A2V_AUDIO_NOT_AUDIO",
   "SEM_A2V_AUDIO_NOT_READY",
+  "SEM_LAYOUT_REQUIRES_MEDIA",
+  "SEM_CODE_REQUIRED",
 ]);
 
 // Published layout contract (PLAN.md A5 / SPEC.md 6.3). The schema holds the loose
@@ -55,6 +57,11 @@ export const LAYOUTS = Object.freeze({
   stat: { variants: [], requiresData: true, requiresHeadline: true, limits: { headline: 48, sub: 90, body: 40 } },
   chart: { variants: ["bar"], requiresData: true, limits: { headline: 64, sub: 120, footnote: 120 } },
   list: { variants: ["bullets", "quote"], limits: { headline: 64, quote: 200, attribution: 80 } },
+  // LP2: two plates (media length 2). Copy is optional; a headline, when present, stays short.
+  split: { variants: [], requiresMedia: 2, limits: { headline: 48, sub: 90 } },
+  compare: { variants: [], requiresMedia: 2, limits: { headline: 48, sub: 90 } },
+  // LP2: a typed code block. No headline. Overflow is a layout lint, not a copy-length error.
+  code: { variants: [], requiresCode: true, limits: { headline: 64 } },
 });
 
 export const GENERATED_OUTPUT_LICENSE = Object.freeze({ id: "CC0-1.0", redistributable: true });
@@ -235,6 +242,11 @@ function checkRefs(doc, scenes, assets, datasets, errors) {
         if (isObj(fg)) requireAsset(assets, fg.asset, `/scenes/${i}/foreground/${j}/asset`, errors);
       });
     }
+    if (Array.isArray(scene.media)) {
+      scene.media.forEach((plate, j) => {
+        if (isObj(plate) && plate.asset !== undefined) requireAsset(assets, plate.asset, `/scenes/${i}/media/${j}/asset`, errors);
+      });
+    }
     if (isObj(scene.data) && scene.data.dataset !== undefined) {
       if (!isStr(scene.data.dataset) || !isObj(datasets[scene.data.dataset])) {
         errors.push(error("SEM_REF_UNRESOLVED", `/scenes/${i}/data/dataset`, `unknown dataset ${JSON.stringify(scene.data.dataset)}`));
@@ -336,6 +348,15 @@ function checkScenes(scenes, assets, datasets, errors) {
       if (layout === "list" && scene.variant === "quote" && !nonEmpty(copy.quote)) {
         errors.push(error("SEM_COPY_REQUIRED", `${at}/copy/quote`, "list variant quote requires copy.quote"));
       }
+      if (spec.requiresMedia && (!Array.isArray(scene.media) || scene.media.length !== spec.requiresMedia)) {
+        errors.push(error("SEM_LAYOUT_REQUIRES_MEDIA", `${at}/media`, `layout ${layout} requires media with ${spec.requiresMedia} plates`));
+      }
+      if (spec.requiresCode) {
+        const block = isObj(scene.code) ? scene.code : {};
+        if (!nonEmpty(block.language) || !nonEmpty(block.code)) {
+          errors.push(error("SEM_CODE_REQUIRED", `${at}/code`, `layout ${layout} requires code.language and code.code`));
+        }
+      }
       for (const [field, limit] of Object.entries(spec.limits || {})) {
         const value = copy[field];
         if (isStr(value) && value.length > limit) {
@@ -356,6 +377,16 @@ function checkScenes(scenes, assets, datasets, errors) {
       if (hasAsset === hasProcedural) {
         errors.push(error("SEM_BACKGROUND_AMBIGUOUS", `${at}/background`, "background must set exactly one of asset or procedural"));
       }
+    }
+    if (Array.isArray(scene.media)) {
+      scene.media.forEach((plate, j) => {
+        if (!isObj(plate)) return;
+        const hasAsset = plate.asset !== undefined;
+        const hasProcedural = isObj(plate.procedural);
+        if (hasAsset === hasProcedural) {
+          errors.push(error("SEM_BACKGROUND_AMBIGUOUS", `${at}/media/${j}`, "media plate must set exactly one of asset or procedural"));
+        }
+      });
     }
     if (Array.isArray(scene.foreground)) {
       // asset resolution for foreground items is reported by checkRefs, which owns
@@ -565,6 +596,9 @@ function checkUnusedAssets(doc, scenes, assets, datasets, warnings) {
     if (isObj(bg) && isStr(bg.asset)) used.add(bg.asset);
     if (Array.isArray(scene.foreground)) {
       for (const fg of scene.foreground) if (isObj(fg) && isStr(fg.asset)) used.add(fg.asset);
+    }
+    if (Array.isArray(scene.media)) {
+      for (const plate of scene.media) if (isObj(plate) && isStr(plate.asset)) used.add(plate.asset);
     }
     if (isStr(scene.narration_asset)) used.add(scene.narration_asset);
   }

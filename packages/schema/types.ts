@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 3354298b9885deab1c6c7eaf17d224a67312b7c353e312c44fd67522604df008
+// Schema sha256: 7885329f61cc260b9d06f2df0507e822afb8e7cdeb6a6e5bf48f0a427bd7c2cb
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -347,6 +347,11 @@ export interface Background {
     startSeconds: number;
     endSeconds?: number;
     };
+  /**
+   * Optional plate label for a split or compare media item.
+   * [minLength 1, maxLength 40]
+   */
+  label?: string;
   }
 
 export interface ForegroundItem {
@@ -357,11 +362,32 @@ export interface ForegroundItem {
   h?: number;
   z?: number;
   anim?: "none" | "fade-in" | "slide-in" | "parallax-in" | "zoom-in" | "ken-burns";
+  /**
+   * LP2 inset. pip draws this item in a framed picture-in-picture (placement + mask + ring +
+   * shadow). none, and omitting the field, keep the existing panel.
+   */
+  frame?: "none" | "pip";
+  /**
+   * Where a pip frame sits. pip-bc is the bottom-centre spot above captions. The same names the
+   * presenter overlay uses.
+   */
+  placement?: "pip-br" | "pip-bl" | "pip-bc" | "split-left";
+  /**
+   * PiP mask. Omitted means rounded-rect. A 3 px brand ring and soft shadow are drawn by the
+   * renderer.
+   */
+  mask?: "circle" | "rounded-rect";
+  /**
+   * PiP size as a fraction of the frame's short side (18-32%). Omitted means 0.24. Ignored unless
+   * frame is pip.
+   * [min 0.18, max 0.32]
+   */
+  size?: number;
   }
 
 export interface Scene {
   id: SceneId;
-  layout: "title" | "hero" | "stat" | "chart" | "list";
+  layout: "title" | "hero" | "stat" | "chart" | "list" | "split" | "compare" | "code";
   variant?: "centered" | "outro" | "full-bleed" | "split" | "bar" | "bullets" | "quote";
   preferredFrames?: number;
   copy?: Copy;
@@ -371,6 +397,29 @@ export interface Scene {
     };
   background?: null | Background;
   foreground?: Array<ForegroundItem>;
+  /**
+   * LP2: the two plates of a split or compare scene. Each plate is a background (exactly one of
+   * asset or procedural) plus an optional label. Optional on every layout; split and compare require
+   * it.
+   * [minItems 2, maxItems 2]
+   */
+  media?: Array<Background>;
+  /**
+   * LP2 code/terminal scene. Typing is characters per second; omitted means about 0.035 s/char.
+   * highlights are 1-based line numbers, one accent for the whole scene.
+   */
+  code?: {
+    language: string;
+    code: string;
+    highlights?: Array<number>;
+    typing?: {
+      /**
+       * Characters revealed per second. Omitted means 1/0.035 (about 28.57), which is 0.035 s/char.
+       * [min 1, max 120]
+       */
+      charsPerSecond?: number;
+      };
+    };
   /**
    * Skip this scene's layout and draw only the media layer (background media + scrim + foreground
    * panels + lower_third). Requires a media background or a foreground item (P-fix1).

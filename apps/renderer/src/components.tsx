@@ -8,9 +8,12 @@ import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, palette, textColors, useFont
 import { proceduralStyle } from './background-model.js';
 import { statLines } from './stat-model.js';
 import { chartSeries } from './chart-model.js';
-import { LowerThird, MediaFill, MediaPanel, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
+import { LowerThird, MediaFill, MediaPanel, MissingMediaPlaceholder, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
 import { PresenterClip } from './presenter';
 import { PRESENTER_LABEL_DEFAULT, presenterAssetId } from './presenter-model.js';
+import { InsetFrame } from './inset-frame';
+import { SplitCompareLayout } from './split-layout';
+import { CodeLayout } from './code-scene';
 import { STAGGER_SECONDS, countUp, fadeUp, maskRise, pop, prog, staggerFrames } from './motion/primitives.js';
 import { energyProfile } from './motion/index.js';
 import { highlightSweep, canDrawOn, drawOnSvg, splitHighlight, waterfallEntry, waterfallPlan } from './motion/kinetic.js';
@@ -160,6 +163,20 @@ function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame
     <>
       {(scene.foreground ?? []).map((item, index) => {
         const asset = pkg.assets?.[item.asset];
+        if (item.frame === 'pip') {
+          const colors = palette(pkg);
+          let inner: React.ReactNode = <MissingMediaPlaceholder assetId={item.asset} asset={asset} pkg={pkg} />;
+          if (asset && (asset.kind === 'svg' || asset.kind === 'vector-anim')) {
+            inner = <VectorAsset assetId={item.asset} frame={frame - index * 3} entry={item.anim ?? scene.motion?.entry} />;
+          } else if (asset && isRenderableMedia(asset)) {
+            inner = <MediaFill asset={asset} assetId={item.asset} pkg={pkg} sceneFrames={durationInFrames} fit="cover" />;
+          }
+          return (
+            <InsetFrame key={`${item.asset}-${index}`} placement={item.placement} mask={item.mask} size={item.size} ringColor={colors[2]}>
+              {inner}
+            </InsetFrame>
+          );
+        }
         if (asset && asset.kind !== 'svg' && asset.kind !== 'vector-anim') {
           if (!isRenderableMedia(asset)) return null;
           return <MediaPanel key={`${item.asset}-${index}`} asset={asset} assetId={item.asset} item={item} pkg={pkg} sceneFrames={durationInFrames} />;
@@ -615,6 +632,8 @@ export function SceneView({ scene, pkg, media }: { scene: Scene; pkg: PackageV1;
       {scene.layout === 'stat' ? <StatLayout {...props} /> : null}
       {scene.layout === 'chart' ? <ChartLayout {...props} /> : null}
       {scene.layout === 'list' ? <ListLayout {...props} /> : null}
+      {scene.layout === 'split' || scene.layout === 'compare' ? <SplitCompareLayout {...props} /> : null}
+      {scene.layout === 'code' ? <CodeLayout {...props} /> : null}
       {resolved.lowerThird ? <LowerThird {...resolved.lowerThird} pkg={pkg} /> : null}
     </CopyGuard>
   );

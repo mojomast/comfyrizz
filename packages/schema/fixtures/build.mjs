@@ -379,6 +379,18 @@ export const MUTATIONS = [
     expect: { schemaOk: false, semantic: [] },
     schemaCodes: ["SCHEMA_UNEVALUATEDPROPERTIES"],
   },
+  {
+    name: "split-without-media",
+    base: "layout-pack-v2",
+    ops: [["del", "scenes.0.media"]],
+    expect: { schemaOk: true, semantic: ["SEM_LAYOUT_REQUIRES_MEDIA"] },
+  },
+  {
+    name: "code-without-source",
+    base: "layout-pack-v2",
+    ops: [["del", "scenes.2.code"]],
+    expect: { schemaOk: true, semantic: ["SEM_CODE_REQUIRED"] },
+  },
 ];
 
 /** Warnings each hand-written valid fixture is expected to raise (advisory only). */
@@ -389,6 +401,7 @@ const VALID_WARNINGS = {
   "spec-6.3-example.json": ["WARN_DATASET_UNUSED"],
   "generated-first.json": [],
   "defaults-unfilled.json": [],
+  "layout-pack-v2.json": [],
 };
 
 /** Derived valid fixtures (warnings are not errors). */

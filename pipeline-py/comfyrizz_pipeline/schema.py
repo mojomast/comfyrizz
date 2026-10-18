@@ -77,6 +77,8 @@ SEMANTIC_CODES = (
     "SEM_ASSET_VARIANT_SAME_FILE",
     "SEM_ASSET_VARIANT_PATH",
     "SEM_ASSET_VARIANT_NOT_BIGGER",
+    "SEM_LAYOUT_REQUIRES_MEDIA",
+    "SEM_CODE_REQUIRED",
 )
 
 # Published layout contract (PLAN.md A5 / SPEC.md 6.3); the schema holds the loose
@@ -87,6 +89,11 @@ LAYOUTS: dict[str, dict[str, Any]] = {
     "stat": {"variants": [], "requiresData": True, "requiresHeadline": True, "limits": {"headline": 48, "sub": 90, "body": 40}},
     "chart": {"variants": ["bar"], "requiresData": True, "limits": {"headline": 64, "sub": 120, "footnote": 120}},
     "list": {"variants": ["bullets", "quote"], "limits": {"headline": 64, "quote": 200, "attribution": 80}},
+    # LP2: two plates (media length 2). Copy is optional; a headline, when present, stays short.
+    "split": {"variants": [], "requiresMedia": 2, "limits": {"headline": 48, "sub": 90}},
+    "compare": {"variants": [], "requiresMedia": 2, "limits": {"headline": 48, "sub": 90}},
+    # LP2: a typed code block. No headline. Overflow is a layout lint, not a copy-length error.
+    "code": {"variants": [], "requiresCode": True, "limits": {"headline": 64}},
 }
 
 GENERATED_OUTPUT_LICENSE = {"id": "CC0-1.0", "redistributable": True}
@@ -295,6 +302,11 @@ def _check_refs(scenes, assets, datasets, errors) -> None:
             for j, fg in enumerate(fg_list):
                 if _is_obj(fg):
                     _require_asset(assets, fg.get("asset"), f"/scenes/{i}/foreground/{j}/asset", errors)
+        media = scene.get("media")
+        if isinstance(media, list):
+            for j, plate in enumerate(media):
+                if _is_obj(plate) and "asset" in plate:
+                    _require_asset(assets, plate.get("asset"), f"/scenes/{i}/media/{j}/asset", errors)
         data = scene.get("data")
         if _is_obj(data) and "dataset" in data:
             if not _is_str(data.get("dataset")) or not _is_obj(datasets.get(data.get("dataset"))):
@@ -402,6 +414,14 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
                     )
             if layout == "list" and scene.get("variant") == "quote" and not _non_empty(copy.get("quote")):
                 errors.append(_err("SEM_COPY_REQUIRED", f"{at}/copy/quote", "list variant quote requires copy.quote"))
+            if spec.get("requiresMedia") and (not isinstance(scene.get("media"), list) or len(scene.get("media")) != spec["requiresMedia"]):
+                errors.append(
+                    _err("SEM_LAYOUT_REQUIRES_MEDIA", f"{at}/media", f"layout {layout} requires media with {spec['requiresMedia']} plates")
+                )
+            if spec.get("requiresCode"):
+                block = scene.get("code") if _is_obj(scene.get("code")) else {}
+                if not _non_empty(block.get("language")) or not _non_empty(block.get("code")):
+                    errors.append(_err("SEM_CODE_REQUIRED", f"{at}/code", f"layout {layout} requires code.language and code.code"))
             for field, limit in (spec.get("limits") or {}).items():
                 value = copy.get(field)
                 if _is_str(value) and len(value) > limit:
@@ -419,6 +439,17 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
             has_procedural = _is_obj(bg.get("procedural"))
             if has_asset == has_procedural:
                 errors.append(_err("SEM_BACKGROUND_AMBIGUOUS", f"{at}/background", "background must set exactly one of asset or procedural"))
+        media = scene.get("media")
+        if isinstance(media, list):
+            for j, plate in enumerate(media):
+                if not _is_obj(plate):
+                    continue
+                has_asset = "asset" in plate
+                has_procedural = _is_obj(plate.get("procedural"))
+                if has_asset == has_procedural:
+                    errors.append(
+                        _err("SEM_BACKGROUND_AMBIGUOUS", f"{at}/media/{j}", "media plate must set exactly one of asset or procedural")
+                    )
         # Media layer (H-fix1, from Pi's P-fix1 proposal): a scene can skip its layout and show
         # only media, with an optional lower third. Two ways that goes wrong, both caught here.
         lower_third = scene.get("lower_third")
@@ -574,6 +605,10 @@ def _check_unused(doc, scenes, assets, datasets, warnings) -> None:
             for fg in scene["foreground"]:
                 if _is_obj(fg) and _is_str(fg.get("asset")):
                     used.add(fg["asset"])
+        if isinstance(scene.get("media"), list):
+            for plate in scene["media"]:
+                if _is_obj(plate) and _is_str(plate.get("asset")):
+                    used.add(plate["asset"])
         if _is_str(scene.get("narration_asset")):
             used.add(scene["narration_asset"])
     for asset in assets.values():
