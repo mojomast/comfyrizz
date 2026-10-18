@@ -154,6 +154,26 @@ export async function dryRun({ outDir = null } = {}) {
   const appliedStill = run.package.assets.a_still;
   check.ok("N4-media", `media ${appliedStill.media.width}x${appliedStill.media.height}`, appliedStill.media.width === stillEntry.outputs[0].measured.width && appliedStill.media.height === stillEntry.outputs[0].measured.height);
 
+  // H12: an upscaled plate arrives as a base file plus an x2 variant the 1080p export can prefer
+  const appliedPlate = run.package.assets.a_plate1;
+  const upscaleEntry = run.manifest.jobs.find((entry) => entry.job === "a_plate1.upscale");
+  const upscaleOutput = upscaleEntry?.outputs?.[0];
+  const upscaleJob = jobsDoc.jobs.find((job) => job.id === "a_plate1.upscale");
+  // the variant's size is what the file measured, and the plan's dims only when nothing could measure
+  // it (the fake serves video bytes, not a readable mp4, so here it is the planned 1920x1080)
+  const upscaleDims = upscaleOutput?.measured ?? upscaleJob?.dims;
+  const dimsSource = upscaleOutput?.measured ? "measured" : "planned";
+  check.ok(
+    "H12-variant",
+    `a_plate1 file=${appliedPlate.file} variant=${appliedPlate.variants?.upscaled?.file} ${appliedPlate.variants?.upscaled?.width}x${appliedPlate.variants?.upscaled?.height} (${dimsSource} ${upscaleDims?.width}x${upscaleDims?.height})`,
+    appliedPlate.file === "assets/a_plate1.mp4" &&
+      appliedPlate.variants?.upscaled?.file === "assets/a_plate1@2x.mp4" &&
+      appliedPlate.variants.upscaled.scale === 2 &&
+      appliedPlate.variants.upscaled.width > appliedPlate.media.width &&
+      appliedPlate.variants.upscaled.height > appliedPlate.media.height &&
+      appliedPlate.variants.upscaled.width === upscaleDims?.width,
+  );
+
   // N6: string ids, and a package that still validates after apply
   check.ok("N6-ids", `job_id=${typeof stillEntry.job_id} attempt_id=${typeof stillEntry.attempt_id}`, typeof stillEntry.job_id === "string" && typeof stillEntry.attempt_id === "string");
   check.ok("N6-apply", "the applied package validates", validatePackage(run.package).errors.length === 0);
