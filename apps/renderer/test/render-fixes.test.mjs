@@ -50,3 +50,9 @@ test('N10: an image background is wrapped so it cannot push layout copy out of f
   assert.match(imageLine, /<Img\b/, 'the image branch must still render <Img>');
   assert.doesNotMatch(imageLine, /OffthreadVideo/, 'the video path must stay separate');
 });
+
+test('N11: captions sit above scene scrims and foreground panels', () => {
+  const body = functionBody(source('captions.tsx'), 'CaptionOverlay');
+  assert.match(body, /zIndex:\s*100/, 'the caption overlay needs zIndex 100 to clear scrims (z 2) and panels (z 5-8)');
+  assert.doesNotMatch(body, /zIndex:\s*(?:[0-9]|[1-9][0-9])\b(?!\d)/, 'no caption z-index below 100');
+});

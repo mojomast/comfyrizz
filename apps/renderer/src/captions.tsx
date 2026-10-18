@@ -12,7 +12,7 @@ export function CaptionOverlay({ captions }: { captions: TimelineCaption[] }) {
   const cue = captions.find(item => frame >= item.from && frame < item.to);
   if (!cue) return null;
   return (
-    <AbsoluteFill style={{ pointerEvents: 'none' }}>
+    <AbsoluteFill style={{ pointerEvents: 'none', zIndex: 100 }}>
       <div
         style={{
           position: 'absolute',
