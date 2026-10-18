@@ -190,6 +190,17 @@ clone) falls back to the declared size with no warning.
 `apps/renderer/.cache/<pkg.id>/`, so an unchanged scene is reused and a one-scene
 edit only re-renders the affected segment (plus the fade before it).
 
+## Final export (A9)
+
+`renderPackage(path, out, { final: true })` — and therefore the server's `POST /api/export`
+bundle — renders the final at **1920×1080**. For every image/video asset it prefers the x2 upscaled
+file when the package declares `assets[<id>].variants.upscaled = { file, width, height }` (the field
+agreed with H12); assets without a variant keep A8's behaviour and the base file is scaled with
+`object-fit: cover` centred, never stretched. `preferUpscaledAssets` only uses a variant this clone
+actually has and never mutates the stored package. `POST /api/render` and the Player preview stay at
+the package's working resolution. Until H12 adds `variants` to the package schema, `renderPackage`
+validates a copy with the renderer-only field removed (`validationView`).
+
 | Example | Frames | Duration | CPU render | Reuse probe |
 |---|---|---|---|---|
 | `examples/data-story` | 1320 | 44.000 s | **125.5 s** (7 rendered, 0 reused) | `rendered 0, reused 7` |
@@ -204,7 +215,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 
 | Check | Result |
 |---|---|
-| `npm test` | 58/58 pass (incl. P-fix3 freshness, N7/N8 narration, P-fix4 missing-media placeholder, A8 real-dims) |
+| `npm test` | 61/61 pass (incl. P-fix3 freshness, N7/N8 narration, P-fix4 missing-media placeholder, A8 real-dims, A9 final-render) |
 | `node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json` | `VALID` |
 | `timeline.json` | 1095 frames @ 30 fps = 36.50 s, 6 scenes, hash `a5cd2d9b…3447` |
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
@@ -222,6 +233,7 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 | Missing media (P-fix4) | `showcase-gpu3` still rendered through `renderPackage` with `assets/` + `audio/` removed: labelled placeholder, silent, committed captions, `missing-media.test.mjs` 2/2 + 2 `media.test.mjs` unit cases |
 | Real media dims (A8) | `media-dims.test.mjs` 5/5: PNG/JPEG/GIF header reads, a 960x512 video plate and a 1024x1024 still declared 1920x1080 cover-fit centred with a uniform scale (no stretch), mismatch warnings, `foregroundBox` from the real aspect |
 | A8 gpu3 re-render | `examples/showcase-gpu3` incremental after A8: 1920x1080 30/1 H.264 + AAC, **1092 frames**, 36.496 s, hash `fb4792fb…9184`, 6 rendered; no declared/real mismatch; CPU 141.0 s |
+| Final export (A9) | `final-render.test.mjs` 3/3: preview stays 960×544 with the red base file; with and without an upscaled variant the final is 1920×1080 H.264 with ffprobe frames == compiled timeline; when the variant is present the lime upscaled file is the one on screen |
 
 The MP4 is not committed (`*.mp4`/`out/` are gitignored); the report is
 reproducible with `npm run render:example`.

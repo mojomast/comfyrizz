@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { validatePackage } from '../../../packages/schema/src/index.mjs';
+import { validatePackage, loadSchema } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
@@ -99,11 +99,21 @@ export function applyFinalRender(pkg, packageDir, final = {}) {
 }
 
 /**
- * A9 transitional: `variants` is a renderer extension until H12 lands its schema field, so drop it
- * from a copy before schema validation. Remove this when the schema accepts `variants`.
+ * A9 transitional: until the package schema knows `variants` (H12), a package carrying an upscaled
+ * variant would fail structural validation, so drop the renderer-only field from a copy before
+ * validating. Once `$defs.asset.properties.variants` exists the shim is inert and the package is
+ * validated unchanged — including H12's variant semantics (same file, relative path, bigger).
  */
+function schemaKnowsVariants() {
+  try {
+    return Boolean(loadSchema()?.$defs?.asset?.properties?.variants);
+  } catch {
+    return false;
+  }
+}
+
 function validationView(pkg) {
-  if (!pkg?.assets) return pkg;
+  if (schemaKnowsVariants() || !pkg?.assets) return pkg;
   let view = pkg;
   for (const [id, asset] of Object.entries(pkg.assets)) {
     if (!asset || typeof asset !== 'object' || !('variants' in asset)) continue;
@@ -158,14 +168,16 @@ export function preparePublicDir(pkg, packageDir) {
 export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
-  // A9: the final-export option overrides the format to 1920×1080 and prefers upscaled media.
-  const applied = final ? applyFinalRender(raw, packageDir, typeof final === 'boolean' ? {} : final) : null;
-  const pkg = applied?.pkg ?? raw;
-  const validation = validatePackage(validationView(pkg));
+  // A9: validate the package as stored — the base `file` and `variants` are checked before the final
+  // render swaps in a variant, so the variant semantics see a different base file.
+  const validation = validatePackage(validationView(raw));
   if (!validation.valid) {
     const detail = validation.errors.map(error => `${error.code} ${error.path}: ${error.message}`).join('; ');
     throw new Error(`package invalid: ${detail}`);
   }
+  // A9: the final-export option overrides the format to 1920×1080 and prefers upscaled media.
+  const applied = final ? applyFinalRender(raw, packageDir, typeof final === 'boolean' ? {} : final) : null;
+  const pkg = applied?.pkg ?? raw;
   const timeline = compileTimeline(pkg, narrationOptions(packageDir));
   if (applied) {
     onLog(`final render ${applied.width}×${applied.height}${applied.used.length > 0 ? `, ${applied.used.length} upscaled variant(s)` : ', no upscaled variants'}`);

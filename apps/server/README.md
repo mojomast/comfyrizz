@@ -110,7 +110,10 @@ in the response headers (`x-comfyrizz-revision`) together with the timeline hash
 ### C10: export bundle
 
 `POST /api/export` compiles the same timeline the Player shows, renders (or reuses) the final MP4,
-and writes a redistribution-ready directory under `out/export/<package-id>/`:
+and writes a redistribution-ready directory under `out/export/<package-id>/`. The export render is
+the **final** one (A9): 1920×1080, preferring each image/video asset's `assets[<id>].variants.upscaled`
+x2 file when the package declares it and falling back to the base media scaled by A8's real size.
+`POST /api/render` and the Player preview keep the package's working resolution.
 
 | File | Source |
 | --- | --- |
