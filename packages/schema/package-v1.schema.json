@@ -301,6 +301,9 @@
     "motion": {
       "$ref": "#/$defs/packageMotion"
     },
+    "presenter": {
+      "$ref": "#/$defs/presenter"
+    },
     "renders": {
       "type": "array",
       "maxItems": 64,
@@ -433,6 +436,67 @@
         "out"
       ],
       "description": "MS2: direction of a transition. left/right/up/down for slide, push and wipe; in/out for zoom (in = deeper, out = arrival) and iris (in = closes, out = opens)."
+    },
+    "presenter": {
+      "type": "object",
+      "description": "H17: the AI presenter, generated with LTX-2.5 audio-to-video from a portrait still and each scene's narration. Opt-in per video: a package without this renders exactly as before, and `enabled: false` means the same thing as leaving it out. `scenes` is what the presenter covers - bookends (intro plus outro) is the intended default when it is on.",
+      "unevaluatedProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "portrait": {
+          "$ref": "#/$defs/assetId"
+        },
+        "placement": {
+          "enum": [
+            "pip-br",
+            "pip-bl",
+            "pip-bc",
+            "split-left"
+          ],
+          "default": "pip-br"
+        },
+        "shape": {
+          "enum": [
+            "circle",
+            "rounded-rect"
+          ],
+          "default": "circle"
+        },
+        "size": {
+          "type": "number",
+          "minimum": 0.18,
+          "maximum": 0.32,
+          "description": "the presenter's width as a fraction of the frame's short side (research 2.2: 18-32 %)"
+        },
+        "scenes": {
+          "description": "which scenes show the presenter: both bookends, every scene, or the scene ids the agent chose (the cheap knob is coverage, not stitching)",
+          "oneOf": [
+            {
+              "enum": [
+                "all",
+                "bookends"
+              ]
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          ]
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "the corner chip's text, when one is drawn"
+        }
+      }
     },
     "packageMotion": {
       "type": "object",
@@ -1012,6 +1076,17 @@
         "narration_asset": {
           "$ref": "#/$defs/assetId"
         },
+        "presenter_asset": {
+          "$ref": "#/$defs/assetId"
+        },
+        "presenter": {
+          "enum": [
+            "off",
+            "pip",
+            "split"
+          ],
+          "description": "H17: this scene's own answer about the AI presenter - off, picture-in-picture, or the intro/outro split layout. The package's `presenter.scenes` decides the default."
+        },
         "narration_duration_frames": {
           "type": "integer",
           "minimum": 0,
@@ -1208,9 +1283,10 @@
             "llm-svg",
             "flux3-klein",
             "ltx25",
+            "ltx25-a2v",
             "kokoro"
           ],
-          "description": "llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein stills; ltx25 = LTX-2.5 plates; kokoro = narration audio."
+          "description": "llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by a scene's narration WAV); kokoro = narration audio."
         },
         "workflow": {
           "$ref": "#/$defs/relativePath"

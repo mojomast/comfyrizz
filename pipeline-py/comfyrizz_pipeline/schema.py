@@ -85,7 +85,7 @@ LAYOUTS: dict[str, dict[str, Any]] = {
 }
 
 GENERATED_OUTPUT_LICENSE = {"id": "CC0-1.0", "redistributable": True}
-MODEL_GENERATORS = ("flux3-klein", "ltx25", "kokoro")
+MODEL_GENERATORS = ("flux3-klein", "ltx25", "ltx25-a2v", "kokoro")
 FLEXIBLE_CEILING_FRAMES = 2700
 
 SCENE_ID_RE = re.compile(r"^s[A-Za-z0-9_-]{0,63}$")
@@ -442,7 +442,7 @@ def _check_assets(assets, errors) -> None:
         generator = gen.get("generator")
         if asset.get("origin") == "generated" and not _is_str(generator):
             errors.append(
-                _err("SEM_GEN_MISSING_GENERATOR", f"{at}/gen/generator", "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | kokoro)")
+                _err("SEM_GEN_MISSING_GENERATOR", f"{at}/gen/generator", "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | kokoro)")
             )
         if asset.get("origin") == "generated" and ready:
             license_obj = asset.get("license") if _is_obj(asset.get("license")) else {}

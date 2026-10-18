@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: be60e78df82749b43b453f5516cad2c3c3acaf2d6e63f0ef00f4c984be6bfd51
+// Schema sha256: 41151f03c2eb45d84c07e45348295cb59b87e374ecba49b0fe48ca682ffdadd3
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -98,6 +98,7 @@ export interface PackageV1 {
     warnings?: Array<NonEmptyString>;
     };
   motion?: PackageMotion;
+  presenter?: Presenter;
   renders?: Array<{
     mode: "preview" | "draft" | "final";
     file: RelativePath;
@@ -147,6 +148,28 @@ export type TransitionType = "none" | "cut" | "fade" | "blur" | "slide" | "push"
  * = deeper, out = arrival) and iris (in = closes, out = opens).
  */
 export type TransitionDirection = "left" | "right" | "up" | "down" | "in" | "out";
+
+export interface Presenter {
+  enabled?: boolean;
+  portrait?: AssetId;
+  placement?: "pip-br" | "pip-bl" | "pip-bc" | "split-left";
+  shape?: "circle" | "rounded-rect";
+  /**
+   * the presenter's width as a fraction of the frame's short side (research 2.2: 18-32 %)
+   * [min 0.18, max 0.32]
+   */
+  size?: number;
+  /**
+   * which scenes show the presenter: both bookends, every scene, or the scene ids the agent chose
+   * (the cheap knob is coverage, not stitching)
+   */
+  scenes?: "all" | "bookends" | Array<string>;
+  /**
+   * the corner chip's text, when one is drawn
+   * [maxLength 64]
+   */
+  label?: string;
+  }
 
 export interface PackageMotion {
   energy?: MotionEnergy;
@@ -368,6 +391,12 @@ export interface Scene {
   motion?: SceneMotion;
   narration?: string;
   narration_asset?: AssetId;
+  presenter_asset?: AssetId;
+  /**
+   * H17: this scene's own answer about the AI presenter - off, picture-in-picture, or the
+   * intro/outro split layout. The package's `presenter.scenes` decides the default.
+   */
+  presenter?: "off" | "pip" | "split";
   narration_duration_frames?: number;
   locked?: boolean;
   notes?: string;
@@ -417,9 +446,10 @@ export interface AssetSource {
 export interface Gen {
   /**
    * llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein
-   * stills; ltx25 = LTX-2.5 plates; kokoro = narration audio.
+   * stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by
+   * a scene's narration WAV); kokoro = narration audio.
    */
-  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "kokoro";
+  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "kokoro";
   workflow?: RelativePath;
   workflow_sha256?: Sha256Hex;
   model?: string;

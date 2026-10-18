@@ -53,7 +53,7 @@ export const LAYOUTS = Object.freeze({
 });
 
 export const GENERATED_OUTPUT_LICENSE = Object.freeze({ id: "CC0-1.0", redistributable: true });
-export const MODEL_GENERATORS = Object.freeze(["flux3-klein", "ltx25", "kokoro"]);
+export const MODEL_GENERATORS = Object.freeze(["flux3-klein", "ltx25", "ltx25-a2v", "kokoro"]);
 
 /**
  * The licence of each model the pipeline can run, as the shipped example packages record it.
@@ -382,7 +382,7 @@ function checkAssets(assets, errors) {
     const ready = asset.status === "ready";
     if (asset.origin === "generated") {
       if (!isObj(asset.gen) || !isStr(asset.gen.generator)) {
-        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | kokoro)"));
+        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | kokoro)"));
       }
       if (ready && !isStr(asset.license?.id)) {
         errors.push(error("SEM_LICENSE_MISSING", `${at}/license/id`, "a ready generated asset needs an output licence; generated output defaults to CC0-1.0"));

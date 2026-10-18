@@ -23,7 +23,7 @@ test("types.ts is byte-identical to a fresh generation (it is generated, not han
 test("the generated types carry the generated-first fields", () => {
   const types = readFileSync(join(pkgDir, "types.ts"), "utf8");
   assert.match(types, /kind: "image" \| "video" \| "audio" \| "svg" \| "vector-anim"/);
-  assert.match(types, /generator\?: "llm-svg" \| "flux3-klein" \| "ltx25" \| "kokoro"/);
+  assert.match(types, /generator\?: "llm-svg" \| "flux3-klein" \| "ltx25" \| "ltx25-a2v" \| "kokoro"/);
   assert.match(types, /sanitizer_version\?: string/);
   assert.match(types, /render_check\?: \{/);
   assert.match(types, /cutout\?: boolean/);
