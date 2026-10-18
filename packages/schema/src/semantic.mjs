@@ -58,7 +58,7 @@ export const LAYOUTS = Object.freeze({
 });
 
 export const GENERATED_OUTPUT_LICENSE = Object.freeze({ id: "CC0-1.0", redistributable: true });
-export const MODEL_GENERATORS = Object.freeze(["flux3-klein", "ltx25", "ltx25-a2v", "kokoro"]);
+export const MODEL_GENERATORS = Object.freeze(["flux3-klein", "ltx25", "ltx25-a2v", "kokoro", "qwen3-tts"]);
 
 /**
  * The licence of each model the pipeline can run, as the shipped example packages record it.
@@ -84,6 +84,10 @@ export const MODEL_LICENSES = Object.freeze({
   kokoro: Object.freeze({
     id: "Apache-2.0",
     url: "https://huggingface.co/hexgrad/Kokoro-82M",
+  }),
+  "qwen3-tts": Object.freeze({
+    id: "Apache-2.0",
+    url: "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base",
   }),
 });
 export const FLEXIBLE_CEILING_FRAMES = 2700;
@@ -306,8 +310,13 @@ function checkDuration(doc, errors) {
 function checkVoice(doc, errors) {
   const v = doc.voice;
   if (!isObj(v) || v.enabled !== true) return;
-  if (v.engine !== "kokoro" || !isStr(v.voice) || v.voice.length === 0) {
-    errors.push(error("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro and a non-empty voice"));
+  const voiced = v.engine === "kokoro" || v.engine === "qwen3-tts";
+  if (!voiced || !isStr(v.voice) || v.voice.length === 0) {
+    errors.push(error("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro or qwen3-tts and a non-empty voice"));
+  }
+  const assets = isObj(doc.assets) ? doc.assets : {};
+  if (isStr(v.ref_asset) && !isObj(assets[v.ref_asset])) {
+    errors.push(error("SEM_REF_UNRESOLVED", "/voice/ref_asset", `unknown asset ${JSON.stringify(v.ref_asset)}`));
   }
 }
 
@@ -348,6 +357,12 @@ function checkScenes(scenes, assets, datasets, errors) {
     }
     if ("narration" in scene && isStr(scene.narration) && scene.narration.trim().length === 0) {
       errors.push(error("SEM_NARRATION_EMPTY", `${at}/narration`, "narration is present but blank"));
+    }
+    if ("narration_spoken" in scene && isStr(scene.narration_spoken) && scene.narration_spoken.trim().length === 0) {
+      errors.push(error("SEM_NARRATION_EMPTY", `${at}/narration_spoken`, "narration_spoken is present but blank"));
+    }
+    if ("spoken_text" in scene && isStr(scene.spoken_text) && scene.spoken_text.trim().length === 0) {
+      errors.push(error("SEM_NARRATION_EMPTY", `${at}/spoken_text`, "spoken_text is present but blank"));
     }
     const bg = scene.background;
     if (isObj(bg)) {
@@ -460,7 +475,7 @@ function checkAssets(assets, errors) {
     const ready = asset.status === "ready";
     if (asset.origin === "generated") {
       if (!isObj(asset.gen) || !isStr(asset.gen.generator)) {
-        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | kokoro)"));
+        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | kokoro | qwen3-tts)"));
       }
       if (ready && !isStr(asset.license?.id)) {
         errors.push(error("SEM_LICENSE_MISSING", `${at}/license/id`, "a ready generated asset needs an output licence; generated output defaults to CC0-1.0"));
@@ -560,6 +575,7 @@ function checkDatasets(datasets, errors) {
 function checkUnusedAssets(doc, scenes, assets, datasets, warnings) {
   const used = new Set();
   if (isObj(doc.theme) && isStr(doc.theme.logo_asset)) used.add(doc.theme.logo_asset);
+  if (isObj(doc.voice) && isStr(doc.voice.ref_asset)) used.add(doc.voice.ref_asset);
   for (const scene of scenes) {
     const bg = scene.background;
     if (isObj(bg) && isStr(bg.asset)) used.add(bg.asset);

@@ -90,7 +90,7 @@ LAYOUTS: dict[str, dict[str, Any]] = {
 }
 
 GENERATED_OUTPUT_LICENSE = {"id": "CC0-1.0", "redistributable": True}
-MODEL_GENERATORS = ("flux3-klein", "ltx25", "ltx25-a2v", "kokoro")
+MODEL_GENERATORS = ("flux3-klein", "ltx25", "ltx25-a2v", "kokoro", "qwen3-tts")
 FLEXIBLE_CEILING_FRAMES = 2700
 
 SCENE_ID_RE = re.compile(r"^s[A-Za-z0-9_-]{0,63}$")
@@ -368,8 +368,13 @@ def _check_voice(doc, errors) -> None:
     if not _is_obj(voice) or voice.get("enabled") is not True:
         return
     voice_id = voice.get("voice")
-    if voice.get("engine") != "kokoro" or not _is_str(voice_id) or voice_id == "":
-        errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro and a non-empty voice"))
+    voiced = voice.get("engine") in ("kokoro", "qwen3-tts")
+    if not voiced or not _is_str(voice_id) or voice_id == "":
+        errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro or qwen3-tts and a non-empty voice"))
+    assets = doc.get("assets") if _is_obj(doc.get("assets")) else {}
+    ref_asset = voice.get("ref_asset")
+    if _is_str(ref_asset) and not _is_obj(assets.get(ref_asset)):
+        errors.append(_err("SEM_REF_UNRESOLVED", "/voice/ref_asset", f"unknown asset {ref_asset!r}"))
 
 
 def _non_empty(value: Any) -> bool:
@@ -413,6 +418,10 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
             errors.append(_err("SEM_COPY_REQUIRED", f"{at}/copy/headline", "copy.headline must not be blank"))
         if "narration" in scene and _is_str(scene.get("narration")) and scene["narration"].strip() == "":
             errors.append(_err("SEM_NARRATION_EMPTY", f"{at}/narration", "narration is present but blank"))
+        if "narration_spoken" in scene and _is_str(scene.get("narration_spoken")) and scene["narration_spoken"].strip() == "":
+            errors.append(_err("SEM_NARRATION_EMPTY", f"{at}/narration_spoken", "narration_spoken is present but blank"))
+        if "spoken_text" in scene and _is_str(scene.get("spoken_text")) and scene["spoken_text"].strip() == "":
+            errors.append(_err("SEM_NARRATION_EMPTY", f"{at}/spoken_text", "spoken_text is present but blank"))
         bg = scene.get("background")
         if _is_obj(bg):
             has_asset = "asset" in bg
@@ -510,7 +519,7 @@ def _check_assets(assets, errors) -> None:
         generator = gen.get("generator")
         if asset.get("origin") == "generated" and not _is_str(generator):
             errors.append(
-                _err("SEM_GEN_MISSING_GENERATOR", f"{at}/gen/generator", "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | kokoro)")
+                _err("SEM_GEN_MISSING_GENERATOR", f"{at}/gen/generator", "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | kokoro | qwen3-tts)")
             )
         if asset.get("origin") == "generated" and ready:
             license_obj = asset.get("license") if _is_obj(asset.get("license")) else {}
@@ -566,6 +575,9 @@ def _check_unused(doc, scenes, assets, datasets, warnings) -> None:
     theme = doc.get("theme")
     if _is_obj(theme) and _is_str(theme.get("logo_asset")):
         used.add(theme["logo_asset"])
+    voice = doc.get("voice")
+    if _is_obj(voice) and _is_str(voice.get("ref_asset")):
+        used.add(voice["ref_asset"])
     for scene in scenes:
         bg = scene.get("background")
         if _is_obj(bg) and _is_str(bg.get("asset")):

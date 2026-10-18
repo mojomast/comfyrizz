@@ -84,6 +84,20 @@ def main() -> int:
     if not 0.5 <= speed <= 2.0:
         raise SystemExit(f"speed {speed} outside Kokoro's 0.5-2.0 range")
 
+    # R3: Qwen3-TTS is optional. A package that does not select it never imports
+    # that backend, so Kokoro's outputs stay what they are today. A missing
+    # Qwen runtime falls through to the Kokoro block below unless voice.strict.
+    fallback_reason = None
+    if voice_cfg.get("engine") == "qwen3-tts":
+        from narrate_qwen import FallbackToKokoro, narrate_qwen
+
+        try:
+            narrate_qwen(package, args.out, gap=args.gap, padding=args.padding)
+            return 0
+        except FallbackToKokoro as exc:
+            fallback_reason = str(exc)
+            print(f"qwen3-tts unavailable ({exc}); using Kokoro")
+
     model = args.model_dir / "kokoro-v1.0.onnx"
     voices = args.model_dir / "voices-v1.0.bin"
     for path in (model, voices):
@@ -170,6 +184,10 @@ def main() -> int:
     report["totalSeconds"] = round(read_wav_seconds(narration_path), 4)
     report["synthesisSeconds"] = round(time.time() - started, 2)
     report["file"] = "narration.raw.wav"
+    if fallback_reason:
+        report["requestedEngine"] = "qwen3-tts"
+        report["engineFallback"] = "kokoro"
+        report["engineFallbackReason"] = fallback_reason
     (args.out / "durations.json").write_text(json.dumps(report, indent=2) + "\n")
 
     print(

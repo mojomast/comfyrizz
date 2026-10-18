@@ -1,0 +1,86 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_qwen3voice01",
+  "title": "Qwen3 narration fields",
+  "createdAt": "2026-10-17T09:00:00-04:00",
+  "format": { "width": 1920, "height": 1080, "fps": 30 },
+  "duration": { "mode": "target", "targetFrames": 150 },
+  "theme": {
+    "palette": ["#0d0f14", "#6d8cff"],
+    "font": "Inter",
+    "logo_asset": "a_logo"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "qwen3-tts",
+    "voice": "af_heart",
+    "speed": 1.0,
+    "language": "en-us",
+    "lang": "en",
+    "persona": "warm narrator, measured pace",
+    "ref_asset": "a_voice_ref",
+    "strict": false
+  },
+  "scenes": [
+    {
+      "id": "s1",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": { "headline": "Meet Comfyrizz", "sub": "Generated-first motion graphics" },
+      "background": { "procedural": { "pattern": "gradient", "palette": ["#0d0f14", "#6d8cff"] } },
+      "narration": "Comfyrizz turns a brief into a video.",
+      "narration_spoken": "Comfy rizz turns a brief into a video.",
+      "spoken_text": "Comfy rizz turns a brief into a video.",
+      "narration_style": "calm, slightly amused",
+      "transitionOut": { "type": "fade", "frames": 15 }
+    }
+  ],
+  "assets": {
+    "a_logo": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_logo.svg",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "bytes": 4096,
+      "license": { "id": "CC0-1.0" },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 512,
+          "at": "2026-10-17T09:01:00-04:00"
+        }
+      }
+    },
+    "a_voice_ref": {
+      "kind": "audio",
+      "origin": "generated",
+      "status": "ready",
+      "file": "audio/voice-ref.wav",
+      "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "bytes": 96000,
+      "media": { "durationSeconds": 2.0, "audio": "present", "codec": "pcm_s16le" },
+      "license": { "id": "CC0-1.0" },
+      "redistributable": true,
+      "model_license": {
+        "id": "Apache-2.0",
+        "url": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+      },
+      "gen": {
+        "generator": "qwen3-tts",
+        "model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "caption": "Designed reference clip for the package narrator."
+      }
+    }
+  },
+  "compliance": { "open_weights_only": true, "backends_used": [] }
+}

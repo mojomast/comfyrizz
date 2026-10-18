@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 3354298b9885deab1c6c7eaf17d224a67312b7c353e312c44fd67522604df008
+// Schema sha256: 1bc31974b1757bd8ba2b2ef94ba744cf39825a572fa3922a3b05acf5b8dd9011
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -74,10 +74,37 @@ export interface PackageV1 {
     };
   voice?: {
     enabled: boolean;
-    engine?: "kokoro" | "none";
+    /**
+     * kokoro (default) is the CPU narrator. qwen3-tts is the optional Qwen3-TTS 1.7B backend; when its
+     * runtime is missing the pipeline falls back to kokoro unless voice.strict is true. none disables
+     * narration.
+     */
+    engine?: "kokoro" | "qwen3-tts" | "none";
     voice?: string;
     speed?: number;
     language?: string;
+    /**
+     * Optional short language tag for Qwen3-TTS (en or fr). When it is omitted, voice.language is
+     * used. Kokoro keeps using voice.language.
+     * [minLength 2, maxLength 16]
+     */
+    lang?: string;
+    /**
+     * Natural-language narrator description. Qwen3-TTS VoiceDesign uses it once per package to build
+     * the cloned voice.
+     * [minLength 1, maxLength 400]
+     */
+    persona?: string;
+    /**
+     * Designed reference clip for the package narrator (CC0, because we generated it). Optional; the
+     * synth caches a voice_clone_prompt either way.
+     */
+    ref_asset?: AssetId;
+    /**
+     * When true, a selected qwen3-tts runtime that is unavailable fails the run. When false or
+     * omitted, the run falls back to Kokoro.
+     */
+    strict?: boolean;
     };
   datasets?: {
     [key: string]: Dataset;
@@ -400,6 +427,22 @@ export interface Scene {
     };
   motion?: SceneMotion;
   narration?: string;
+  /**
+   * Respelling sent to the synthesizer (for example Comfyrizz -> Comfy rizz). Captions keep
+   * narration. Optional; otherwise pronounce.py is applied.
+   * [maxLength 600]
+   */
+  narration_spoken?: string;
+  /**
+   * Alias of narration_spoken. narration_spoken wins when both are set.
+   * [maxLength 600]
+   */
+  spoken_text?: string;
+  /**
+   * Per-scene emotion instruction for Qwen3-TTS (for example "calm, slightly amused").
+   * [maxLength 240]
+   */
+  narration_style?: string;
   narration_asset?: AssetId;
   presenter_asset?: AssetId;
   /**
@@ -457,9 +500,10 @@ export interface Gen {
   /**
    * llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein
    * stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by
-   * a scene's narration WAV); kokoro = narration audio.
+   * a scene's narration WAV); kokoro = Kokoro narration audio; qwen3-tts = optional Qwen3-TTS 1.7B
+   * narration audio (Apache-2.0).
    */
-  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "kokoro";
+  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "kokoro" | "qwen3-tts";
   workflow?: RelativePath;
   workflow_sha256?: Sha256Hex;
   model?: string;
