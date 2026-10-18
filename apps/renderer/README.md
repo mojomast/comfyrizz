@@ -135,6 +135,29 @@ transition vocabulary on the committed timing; `TimelinePlayer` calls it
 whenever a caller does not pass merged scenes, so a bare `timeline.json` can
 never silently drop its transitions (and truncate the run).
 
+## Presenter (P-pres)
+
+The presenter is opt-in (`presenter.enabled`); when it is on, `bookends`
+(intro + outro) is the default coverage and `scene.presenter` overrides per
+scene (`off` removes it, `split` moves it to the hero's left card, `pip` keeps
+the package placement). `packages/planner` resolves that into a `presenters`
+track on the timeline (only emitted when non-empty, so packages without a
+presenter keep their exact timeline hash).
+
+`src/presenter-model.js` is the pure geometry/opacity: `presenterBox` places the
+clip (bottom-corner PiP, bottom-centre for portrait above the captions, or the
+split-left card), and `presenterOpacity` cross-dissolves the outgoing and
+incoming clips across the scene-transition overlap on one inclusive window, so
+their opacities sum to 1 and the pose jump is hidden. `src/presenter.tsx` draws
+`PresenterOverlay` above the scene stack and below the captions (z 100), plus
+the shared `PresenterClip` (clip + on-by-default "AI presenter" chip). A
+flat-cartoon or paper-cut portrait is an inline, pre-sanitized SVG (the same A5
+check as `VectorAsset`), so the CPU demo shows a presenter with no GPU. The
+clip's own audio is never mixed.
+
+`examples/presenter-demo` is the CPU reference: four scenes with the presenter
+on, the split card on the hero, and a flat-cartoon SVG portrait.
+
 ## Commands
 
 ```bash
@@ -214,6 +237,11 @@ submission video: 566 frames @ 30 fps (18.867 s), layouts
 first-party SVG/`vector-anim` assets and measured Kokoro narration with
 committed captions. It carries no GPU media, so the whole thing exports on CPU
 from a clean clone as H.264 + AAC 1920×1080 (see `CREDITS.md`).
+
+`examples/presenter-demo` (P-pres) is the CPU presenter reference: 675 frames @
+30 fps (22.5 s), four scenes with the presenter on (pip-br) and the hero's
+split-left card, plus a flat-cartoon SVG portrait. It has no GPU media, so the
+overlay, the split card and the seam dissolve export on CPU from a clean clone.
 
 ### Media in a clean clone (P-fix4)
 
