@@ -39,6 +39,11 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_ASSET_VARIANT_NOT_BIGGER",
   "SEM_LOWER_THIRD_EMPTY",
   "SEM_CUTOUT_KIND",
+  "SEM_PRESENTER_NO_PORTRAIT",
+  "SEM_PRESENTER_UNKNOWN_SCENE",
+  "SEM_A2V_NO_AUDIO",
+  "SEM_A2V_AUDIO_NOT_AUDIO",
+  "SEM_A2V_AUDIO_NOT_READY",
 ]);
 
 // Published layout contract (PLAN.md A5 / SPEC.md 6.3). The schema holds the loose
@@ -68,6 +73,11 @@ export const MODEL_LICENSES = Object.freeze({
     url: "https://huggingface.co/black-forest-labs/flux-3-image-klein",
   }),
   ltx25: Object.freeze({
+    id: "LicenseRef-LTX-2.5",
+    url: "https://huggingface.co/Lightricks/LTX-2.5",
+  }),
+  // the presenter is the same weights, the same licence, a different graph (H17)
+  "ltx25-a2v": Object.freeze({
     id: "LicenseRef-LTX-2.5",
     url: "https://huggingface.co/Lightricks/LTX-2.5",
   }),
@@ -132,6 +142,7 @@ export function semanticCheck(doc) {
   checkVoice(doc, errors);
   checkScenes(scenes, assets, datasets, errors);
   checkAssets(assets, errors);
+  checkPresenter(doc, scenes, assets, errors);
   checkDatasets(datasets, errors);
   checkUnusedAssets(doc, scenes, assets, datasets, warnings);
   return { errors: dedupe(errors), warnings: dedupe(warnings) };
@@ -373,6 +384,73 @@ function checkScenes(scenes, assets, datasets, errors) {
 
 function nonEmpty(v) {
   return isStr(v) && v.trim().length > 0;
+}
+
+/**
+ * H17: the presenter and its audio-to-video jobs (research section 2.2).
+ *
+ * The presenter is opt-in, so a package without it is not judged here at all. What is checked when it
+ * is on: it has the portrait everything is conditioned on, the scene ids it names exist, and every
+ * a2v asset it asks for has the *ready* audio it is generated from - an a2v job with no narration is
+ * a talking head with nothing to say, and the GPU would find that out after the session started.
+ */
+function checkPresenter(doc, scenes, assets, errors) {
+  const presenter = isObj(doc.presenter) ? doc.presenter : null;
+  const sceneIds = new Set(scenes.map((scene) => (isObj(scene) ? scene.id : null)).filter((id) => isStr(id)));
+
+  if (presenter) {
+    if (presenter.portrait !== undefined) {
+      requireAsset(assets, presenter.portrait, "/presenter/portrait", errors);
+    }
+    if (presenter.enabled === true && !isStr(presenter.portrait)) {
+      errors.push(
+        error(
+          "SEM_PRESENTER_NO_PORTRAIT",
+          "/presenter/portrait",
+          "a presenter needs the portrait still its clips are conditioned on (research 2.2: the same portrait at strength 1.0 holds the identity)",
+        ),
+      );
+    }
+    if (Array.isArray(presenter.scenes)) {
+      presenter.scenes.forEach((id, i) => {
+        if (!sceneIds.has(id)) {
+          errors.push(error("SEM_PRESENTER_UNKNOWN_SCENE", `/presenter/scenes/${i}`, `unknown scene ${JSON.stringify(id)}`));
+        }
+      });
+    }
+  }
+
+  scenes.forEach((scene, i) => {
+    if (!isObj(scene)) return;
+    if (scene.presenter_asset !== undefined) requireAsset(assets, scene.presenter_asset, `/scenes/${i}/presenter_asset`, errors);
+  });
+
+  for (const [id, asset] of Object.entries(assets)) {
+    if (!isObj(asset) || !isObj(asset.gen) || asset.gen.generator !== "ltx25-a2v") continue;
+    const inputs = isObj(asset.gen.inputs) ? asset.gen.inputs : {};
+    const audio = inputs.audio;
+    if (!isStr(audio)) {
+      errors.push(
+        error("SEM_A2V_NO_AUDIO", `/assets/${id}/gen/inputs/audio`, "an ltx25-a2v asset is generated from a scene's narration: gen.inputs.audio has to name it"),
+      );
+      continue;
+    }
+    const source = assets[audio];
+    if (!isObj(source)) continue; // the unknown-asset error is already recorded by checkRefs
+    if (source.kind !== "audio") {
+      errors.push(
+        error("SEM_A2V_AUDIO_NOT_AUDIO", `/assets/${id}/gen/inputs/audio`, `${JSON.stringify(audio)} is a ${source.kind ?? "?"} asset, not audio`),
+      );
+    } else if (source.status !== "ready") {
+      errors.push(
+        error(
+          "SEM_A2V_AUDIO_NOT_READY",
+          `/assets/${id}/gen/inputs/audio`,
+          `${JSON.stringify(audio)} is ${source.status ?? "pending"}: the narration is synthesized before the presenter is generated (research 2.2, timing)`,
+        ),
+      );
+    }
+  }
 }
 
 function checkAssets(assets, errors) {

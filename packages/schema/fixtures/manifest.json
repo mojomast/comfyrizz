@@ -68,6 +68,56 @@
       ]
     },
     {
+      "file": "invalid/presenter-without-portrait.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_PRESENTER_NO_PORTRAIT"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/presenter-unknown-scene.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_PRESENTER_UNKNOWN_SCENE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/a2v-without-audio.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_A2V_NO_AUDIO"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/a2v-audio-not-audio.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_A2V_AUDIO_NOT_AUDIO"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/a2v-audio-not-ready.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_A2V_AUDIO_NOT_READY"
+      ],
+      "warnings": null
+    },
+    {
       "file": "invalid/duplicate-scene-id.json",
       "kind": "invalid",
       "schemaOk": true,

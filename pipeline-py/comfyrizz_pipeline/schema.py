@@ -53,6 +53,11 @@ SEMANTIC_CODES = (
     "SEM_LICENSE_MISSING",
     "SEM_LICENSE_CONFLICT",
     "SEM_MODEL_LICENSE_MISSING",
+    "SEM_PRESENTER_NO_PORTRAIT",
+    "SEM_PRESENTER_UNKNOWN_SCENE",
+    "SEM_A2V_NO_AUDIO",
+    "SEM_A2V_AUDIO_NOT_AUDIO",
+    "SEM_A2V_AUDIO_NOT_READY",
     "SEM_SVG_PROVENANCE",
     "SEM_RENDER_CHECK_FAILED",
     "SEM_GEN_MISSING_GENERATOR",
@@ -208,6 +213,7 @@ def semantic_check(doc: Any) -> dict[str, list[dict[str, Any]]]:
     _check_voice(doc, errors)
     _check_scenes(scenes, assets, datasets, errors)
     _check_assets(assets, errors)
+    _check_presenter(doc, scenes, assets, errors)
     _check_datasets(datasets, errors)
     _check_unused(doc, scenes, assets, datasets, warnings)
     return {"errors": _dedupe(errors), "warnings": _dedupe(warnings)}
@@ -430,6 +436,68 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
                         "foreground item; this scene would render an empty frame",
                     )
                 )
+
+
+def _check_presenter(doc, scenes, assets, errors) -> None:
+    """H17: the presenter and its audio-to-video jobs (research section 2.2), byte-for-byte the rules
+    `packages/schema/src/semantic.mjs` applies - the conformance test compares the two verdicts."""
+    presenter = doc.get("presenter") if _is_obj(doc.get("presenter")) else None
+    scene_ids = {scene.get("id") for scene in scenes if _is_obj(scene) and _is_str(scene.get("id"))}
+
+    if presenter is not None:
+        portrait = presenter.get("portrait")
+        if portrait is not None and not (isinstance(portrait, str) and _is_obj(assets.get(portrait))):
+            errors.append(_err("SEM_REF_UNRESOLVED", "/presenter/portrait", f"unknown asset {portrait!r}"))
+        if presenter.get("enabled") is True and not _is_str(portrait):
+            errors.append(
+                _err(
+                    "SEM_PRESENTER_NO_PORTRAIT",
+                    "/presenter/portrait",
+                    "a presenter needs the portrait still its clips are conditioned on (research 2.2: the same portrait at strength 1.0 holds the identity)",
+                )
+            )
+        chosen = presenter.get("scenes")
+        if isinstance(chosen, list):
+            for index, scene_id in enumerate(chosen):
+                if scene_id not in scene_ids:
+                    errors.append(_err("SEM_PRESENTER_UNKNOWN_SCENE", f"/presenter/scenes/{index}", f"unknown scene {scene_id!r}"))
+
+    for index, scene in enumerate(scenes):
+        if not _is_obj(scene):
+            continue
+        asset_id = scene.get("presenter_asset")
+        if asset_id is None:
+            continue
+        if not (isinstance(asset_id, str) and _is_obj(assets.get(asset_id))):
+            errors.append(_err("SEM_REF_UNRESOLVED", f"/scenes/{index}/presenter_asset", f"unknown asset {asset_id!r}"))
+
+    for asset_id, asset in assets.items():
+        if not _is_obj(asset):
+            continue
+        gen = asset.get("gen") if _is_obj(asset.get("gen")) else {}
+        if gen.get("generator") != "ltx25-a2v":
+            continue
+        inputs = gen.get("inputs") if _is_obj(gen.get("inputs")) else {}
+        audio = inputs.get("audio")
+        at = f"/assets/{asset_id}/gen/inputs/audio"
+        if not _is_str(audio):
+            errors.append(
+                _err("SEM_A2V_NO_AUDIO", at, "an ltx25-a2v asset is generated from a scene's narration: gen.inputs.audio has to name it")
+            )
+            continue
+        source = assets.get(audio)
+        if not _is_obj(source):
+            continue  # the unknown-asset error is already recorded by _check_refs
+        if source.get("kind") != "audio":
+            errors.append(_err("SEM_A2V_AUDIO_NOT_AUDIO", at, f"{audio!r} is a {source.get('kind') or '?'} asset, not audio"))
+        elif source.get("status") != "ready":
+            errors.append(
+                _err(
+                    "SEM_A2V_AUDIO_NOT_READY",
+                    at,
+                    f"{audio!r} is {source.get('status') or 'pending'}: the narration is synthesized before the presenter is generated (research 2.2, timing)",
+                )
+            )
 
 
 def _check_assets(assets, errors) -> None:

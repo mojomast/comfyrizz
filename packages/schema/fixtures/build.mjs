@@ -21,6 +21,53 @@ const INF_MARKER = "__COMFYRIZZ_INFINITY__";
 
 /** Every invalid fixture: one declared rule violation over a valid base. */
 export const MUTATIONS = [
+  // H17: the presenter, and the audio-to-video jobs it is made of
+  {
+    name: "presenter-without-portrait",
+    base: "generated-first",
+    ops: [["set", "presenter", { enabled: true, scenes: "bookends" }]],
+    expect: { schemaOk: true, semantic: ["SEM_PRESENTER_NO_PORTRAIT"] },
+  },
+  {
+    name: "presenter-unknown-scene",
+    base: "generated-first",
+    ops: [["set", "presenter", { enabled: true, portrait: "a_cutout", scenes: ["s2", "s99"] }], ["set", "scenes.2.presenter", "pip"]],
+    expect: { schemaOk: true, semantic: ["SEM_PRESENTER_UNKNOWN_SCENE"] },
+  },
+  {
+    name: "a2v-without-audio",
+    base: "generated-first",
+    ops: [
+      ["set", "presenter", { enabled: true, portrait: "a_cutout", scenes: "bookends" }],
+      ["set", "assets.a_presenter", { kind: "video", origin: "generated", status: "pending", gen: { generator: "ltx25-a2v", inputs: { image: "a_cutout", frames: 97 } } }],
+    ],
+    expect: { schemaOk: true, semantic: ["SEM_A2V_NO_AUDIO"] },
+  },
+  {
+    name: "a2v-audio-not-audio",
+    base: "generated-first",
+    ops: [
+      ["set", "presenter", { enabled: true, portrait: "a_cutout", scenes: "bookends" }],
+      ["set", "assets.a_presenter", { kind: "video", origin: "generated", status: "pending", gen: { generator: "ltx25-a2v", inputs: { image: "a_cutout", audio: "a_anim_bars", frames: 97 } } }],
+    ],
+    expect: { schemaOk: true, semantic: ["SEM_A2V_AUDIO_NOT_AUDIO"] },
+  },
+  {
+    name: "a2v-audio-not-ready",
+    base: "generated-first",
+    ops: [
+      ["set", "presenter", { enabled: true, portrait: "a_cutout", scenes: "bookends" }],
+      ["set", "assets.a_presenter", {
+      kind: "video",
+      origin: "generated",
+      status: "pending",
+      gen: { generator: "ltx25-a2v", inputs: { image: "a_cutout", audio: "a_narr", frames: 97 } },
+    }],
+      ["set", "assets.a_narr.status", "pending"],
+      ["del", "assets.a_narr.file"],
+    ],
+    expect: { schemaOk: true, semantic: ["SEM_A2V_AUDIO_NOT_READY"] },
+  },
   {
     name: "duplicate-scene-id",
     base: "spec-6.3-example",
