@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import {
   rgbToGray, lumaStats, frameDiff, findStaticRuns, findFlashes, runQa,
   checkVideo, qaJson, analyzeVideo, BLACK_MEAN_MAX, STATIC_SECONDS,
+  relativeLuminance, contrastRatio, contrastThreshold, marginEnergy, sampleBackground,
+  sceneTextBox, checkContrasts, extractRgbFrame,
 } from '../scripts/frame-qa.mjs';
 
 const W = 8;
@@ -124,7 +126,74 @@ test('checkVideo clears the committed launch-demo render with no errors', () => 
   const mp4 = '/home/box/comfyrizz/examples/launch-demo/out/launch-demo.mp4';
   if (!existsSync(mp4)) return; // render is gitignored; skip when absent
   const timeline = JSON.parse(readFileSync('/home/box/comfyrizz/examples/launch-demo/timeline.json', 'utf8'));
-  const report = checkVideo({ mp4, timeline });
+  const pkg = JSON.parse(readFileSync('/home/box/comfyrizz/examples/launch-demo/package.json', 'utf8'));
+  const report = checkVideo({ mp4, timeline, pkg });
   const errors = report.findings.filter(item => item.severity === 'error');
   assert.deepEqual(errors, [], JSON.stringify(errors));
+});
+
+test('contrastRatio follows WCAG and the threshold switches at large text', () => {
+  assert.equal(Math.round(contrastRatio('#000000', '#ffffff')), 21);
+  assert.equal(contrastRatio('#123456', '#123456'), 1);
+  assert.ok(relativeLuminance('#ffffff') > relativeLuminance('#808080'));
+  assert.equal(contrastThreshold(false), 4.5);
+  assert.equal(contrastThreshold(true), 3);
+});
+
+test('sampleBackground reads the composition behind the text box', () => {
+  const w = 4;
+  const h = 10;
+  const rgb = new Uint8Array(w * h * 3);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const value = y === 4 || y === 5 ? 255 : 20; // a bright text line in the middle
+      const offset = (y * w + x) * 3;
+      rgb[offset] = value;
+      rgb[offset + 1] = value;
+      rgb[offset + 2] = value;
+    }
+  }
+  const background = sampleBackground(rgb, w, h, { x0: 0, y0: 0, x1: 1, y1: 1 });
+  assert.equal(background, '#141414');
+});
+
+test('marginEnergy separates a calm frame from content in the margin', () => {
+  const w = 40;
+  const h = 20;
+  const flat = new Uint8Array(w * h).fill(100);
+  assert.equal(marginEnergy(flat, w, h, { sourceWidth: w, sourceHeight: h, xMargin: 4, yMargin: 2 }), 0);
+  const busy = Uint8Array.from(flat);
+  for (let y = 0; y < h; y += 1) for (let x = 0; x < 4; x += 1) busy[y * w + x] = (x + y) % 2 ? 0 : 255;
+  assert.ok(marginEnergy(busy, w, h, { sourceWidth: w, sourceHeight: h, xMargin: 4, yMargin: 2 }) > 24);
+});
+
+test('runQa warns when detail escapes the safe area', () => {
+  const w = 40;
+  const h = 20;
+  const busy = new Uint8Array(w * h).fill(100);
+  for (let y = 0; y < h; y += 1) for (let x = 0; x < 4; x += 1) busy[y * w + x] = (x + y) % 2 ? 0 : 255;
+  const frames = Array.from({ length: 60 }, (_, i) => (i === 9 ? Uint8Array.from(busy) : new Uint8Array(w * h).fill(100)));
+  const report = runQa(frames, { fps: 30, durationInFrames: 60, width: w, height: h, sourceWidth: w, sourceHeight: h, scenes: [{ id: 's_a', from: 0, durationInFrames: 60 }] });
+  const safe = report.findings.find(item => item.code === 'QA_SAFE_AREA');
+  assert.ok(safe, JSON.stringify(report.findings));
+  assert.equal(safe.severity, 'warning');
+});
+
+test('checkContrasts flags light copy on a light plate, passes dark copy', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ms4-contrast-'));
+  try {
+    const mp4 = join(dir, 'light.mp4');
+    ffmpeg(['-f', 'lavfi', '-i', 'color=0xdddddd:s=64x36:r=30:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-y', mp4]);
+    const timeline = { fps: 30, width: 1920, height: 1080, durationInFrames: 60, scenes: [{ id: 's_a', layout: 'title', variant: 'centered', from: 0, durationInFrames: 60, transitionInFrames: 0, transitionOutFrames: 0 }] };
+    const lowContrast = checkContrasts({ mp4, timeline, pkg: { theme: { palette: ['#dddddd', '#dddddd', '#dddddd'], text: '#e6e8ee' } } });
+    assert.ok(lowContrast.some(item => item.code === 'QA_CONTRAST'), JSON.stringify(lowContrast));
+    assert.equal(lowContrast[0].severity, 'warning');
+    const highContrast = checkContrasts({ mp4, timeline, pkg: { theme: { palette: ['#dddddd', '#dddddd', '#dddddd'], text: '#101010' } } });
+    assert.deepEqual(highContrast, []);
+    const sample = extractRgbFrame({ mp4, timeSeconds: 0.5, sampleWidth: 64 });
+    assert.equal(sample.width, 64);
+    assert.equal(sceneTextBox(timeline.scenes[0], '16:9').x1, 0.93);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

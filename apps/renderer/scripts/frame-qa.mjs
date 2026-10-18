@@ -11,6 +11,8 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { textZones } from '../src/layout-model.js';
+import { textColors } from '../src/theme-model.js';
 
 export const QA_SEVERITY = { error: 'error', warning: 'warning' };
 /** A first frame this dark, with this little detail, is a black thumbnail. */
@@ -22,6 +24,14 @@ export const STATIC_SECONDS = 3;
 /** A flash frame jumps away from both neighbours while they stay close. */
 export const FLASH_DIFF_MIN = 18;
 export const FLASH_NEIGHBOUR_RATIO = 0.4;
+/** Safe-area margins from the Remotion blueprint, measured at 1920x1080. */
+export const SAFE_AREA_MARGIN_X = 80;
+export const SAFE_AREA_MARGIN_Y = 100;
+/** Detail in the margin band above this is content escaping the safe area. */
+export const SAFE_AREA_EDGES_MAX = 24;
+/** WCAG AA: 4.5:1 normal text, 3:1 large text. */
+export const CONTRAST_NORMAL = 4.5;
+export const CONTRAST_LARGE = 3;
 
 export function rgbToGray(rgb) {
   const gray = new Uint8Array(rgb.length / 3);
@@ -99,11 +109,145 @@ function finding(severity, code, frame, timeSeconds, scene, message) {
   return { severity, code, frame, timeSeconds, sceneId: scene?.id ?? null, message };
 }
 
+function parseHex(value) {
+  const match = /^#([0-9a-f]{6})$/i.exec(String(value ?? '').trim());
+  if (!match) return null;
+  const int = Number.parseInt(match[1], 16);
+  return [(int >> 16) & 255, (int >> 8) & 255, int & 255];
+}
+
+/** WCAG relative luminance of an sRGB hex colour. */
+export function relativeLuminance(value) {
+  const rgb = parseHex(value) ?? [0, 0, 0];
+  const channel = c => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+}
+
+/** WCAG contrast ratio (1..21) between two hex colours. */
+export function contrastRatio(a, b) {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+export function contrastThreshold(large = false) {
+  return large ? CONTRAST_LARGE : CONTRAST_NORMAL;
+}
+
+/** Detail (mean gradient) inside the margin band: content outside the safe area. */
+export function marginEnergy(gray, width, height, options = {}) {
+  const sourceWidth = options.sourceWidth ?? width;
+  const sourceHeight = options.sourceHeight ?? height;
+  const xMargin = Math.max(1, Math.round((options.xMargin ?? SAFE_AREA_MARGIN_X) * (width / sourceWidth)));
+  const yMargin = Math.max(1, Math.round((options.yMargin ?? SAFE_AREA_MARGIN_Y) * (height / sourceHeight)));
+  let sum = 0;
+  let count = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const inMargin = x < xMargin || x >= width - xMargin || y < yMargin || y >= height - yMargin;
+      if (!inMargin) continue;
+      const value = gray[y * width + x];
+      if (x > 0) {
+        sum += Math.abs(value - gray[y * width + x - 1]);
+        count += 1;
+      }
+      if (y > 0) {
+        sum += Math.abs(value - gray[(y - 1) * width + x]);
+        count += 1;
+      }
+    }
+  }
+  return count ? sum / count : 0;
+}
+
+/** Average colour of a normalised box, sampled from its top/bottom stripes. */
+export function sampleBackground(rgb, width, height, box, options = {}) {
+  const band = options.band ?? 0.18;
+  const x0 = Math.max(0, Math.floor(box.x0 * width));
+  const x1 = Math.min(width, Math.ceil(box.x1 * width));
+  const y0 = Math.max(0, Math.floor(box.y0 * height));
+  const y1 = Math.min(height, Math.ceil(box.y1 * height));
+  const bandHeight = Math.max(1, Math.round((y1 - y0) * band));
+  const rows = [...Array(bandHeight)].flatMap((_, i) => [y0 + i, y1 - 1 - i]);
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let count = 0;
+  for (const y of rows) {
+    if (y < 0 || y >= height) continue;
+    for (let x = x0; x < x1; x += 1) {
+      const offset = (y * width + x) * 3;
+      r += rgb[offset];
+      g += rgb[offset + 1];
+      b += rgb[offset + 2];
+      count += 1;
+    }
+  }
+  if (!count) return '#000000';
+  const hex = value => Math.round(value / count).toString(16).padStart(2, '0');
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+/** Union of the scene's text zones in normalised coordinates. */
+export function sceneTextBox(scene, aspect = '16:9') {
+  const zones = textZones(scene, aspect);
+  if (zones.length === 0) return { x0: 0.07, y0: 0.1, x1: 0.93, y1: 0.9 };
+  return zones.reduce((box, zone) => ({
+    x0: Math.min(box.x0, zone.x0),
+    y0: Math.min(box.y0, zone.y0),
+    x1: Math.max(box.x1, zone.x1),
+    y1: Math.max(box.y1, zone.y1),
+  }), { ...zones[0] });
+}
+
+/** Layouts whose copy is large enough for the 3:1 threshold. */
+export const LARGE_TEXT_LAYOUTS = ['title', 'hero', 'stat', 'list'];
+
+/** One RGB frame at `timeSeconds`, scaled to `sampleWidth`. */
+export function extractRgbFrame({ mp4, timeSeconds, sampleWidth = 160, maxBuffer = 32 * 1024 * 1024 }) {
+  const raw = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-ss', String(timeSeconds), '-i', mp4, '-frames:v', '1', '-vf', `scale=${sampleWidth}:-2`, '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], { maxBuffer, encoding: 'buffer' });
+  if (raw.status !== 0) throw new Error(`ffmpeg rgb frame failed: ${raw.stderr?.toString()}`);
+  const probe = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', mp4], { encoding: 'utf8' });
+  const stream = JSON.parse(probe.stdout || '{}').streams?.[0] ?? { width: 1920, height: 1080 };
+  const height = Math.max(2, Math.round((stream.height / stream.width) * sampleWidth / 2) * 2);
+  const size = sampleWidth * height * 3;
+  if (raw.stdout.length < size) throw new Error('ffmpeg rgb frame was truncated');
+  return { rgb: raw.stdout.subarray(0, size), width: sampleWidth, height };
+}
+
+/**
+ * WCAG contrast of each scene's copy colour against its rendered background.
+ * Background is sampled behind the scene's text box; the copy colour comes from
+ * the package theme. Findings are warnings, never render failures.
+ */
+export function checkContrasts({ mp4, timeline, pkg, sampleWidth = 160, settleSeconds = 0.3, onLog = () => {} }) {
+  const findings = [];
+  const fps = timeline.fps || 30;
+  const text = textColors(pkg ?? {});
+  const aspect = timeline.width && timeline.height ? (timeline.height > timeline.width ? '9:16' : timeline.height === timeline.width ? '1:1' : '16:9') : '16:9';
+  for (const scene of timeline.scenes ?? []) {
+    const frame = scene.from + Math.round(settleSeconds * fps);
+    const { rgb, width, height } = extractRgbFrame({ mp4, timeSeconds: frame / fps, sampleWidth });
+    const background = sampleBackground(rgb, width, height, sceneTextBox(scene, aspect));
+    const large = LARGE_TEXT_LAYOUTS.includes(scene.layout);
+    const ratio = contrastRatio(text.primary, background);
+    const threshold = contrastThreshold(large);
+    if (ratio < threshold) {
+      findings.push(finding('warning', 'QA_CONTRAST', frame, frame / fps, scene, `copy ${text.primary} on ${background} is ${ratio.toFixed(2)}:1 (need ${threshold}:1)`));
+    }
+  }
+  onLog(`contrast: ${findings.length} finding(s)`);
+  return findings;
+}
+
 /**
  * Structural QA over per-frame gray arrays (index = frame number).
  * Returns { ok, findings, checked }.
  */
-export function runQa(frames, { fps, durationInFrames, width, height, scenes = [], onLog = () => {} }) {
+export function runQa(frames, { fps, durationInFrames, width, height, sourceWidth, sourceHeight, scenes = [], onLog = () => {} }) {
   const findings = [];
   if (frames.length === 0) {
     findings.push(finding('error', 'QA_NO_FRAMES', 0, 0, null, 'the analysis pass produced no frames'));
@@ -123,6 +267,15 @@ export function runQa(frames, { fps, durationInFrames, width, height, scenes = [
   }
   for (const frame of findFlashes(frames)) {
     findings.push(finding('error', 'QA_FLASH', frame, frame / fps, sceneForFrame(scenes, frame), 'one-frame flash (frame differs from both neighbours)'));
+  }
+  if (sourceWidth && sourceHeight) {
+    for (const scene of scenes) {
+      const frame = Math.min(frames.length - 1, scene.from + Math.round(0.3 * fps));
+      const energy = marginEnergy(frames[frame], width, height, { sourceWidth, sourceHeight });
+      if (energy > SAFE_AREA_EDGES_MAX) {
+        findings.push(finding('warning', 'QA_SAFE_AREA', frame, frame / fps, scene, `margin detail ${energy.toFixed(1)} > ${SAFE_AREA_EDGES_MAX}; content may sit outside the safe area`));
+      }
+    }
   }
   const ok = findings.every(item => item.severity !== 'error');
   onLog(`qa: ${frames.length} frames, ${findings.length} finding(s), ok=${ok}`);
@@ -148,11 +301,13 @@ export function analyzeVideo({ mp4, sampleWidth = 160, maxBuffer = 256 * 1024 * 
   return { frames, width: sampleWidth, height, sourceWidth, sourceHeight, declaredFrames: stream.nb_frames ? Number(stream.nb_frames) : null };
 }
 
-export function checkVideo({ mp4, timeline, sampleWidth = 160, onLog = () => {} }) {
-  const { frames, width, height } = analyzeVideo({ mp4, sampleWidth });
+export function checkVideo({ mp4, timeline, pkg, sampleWidth = 160, onLog = () => {} }) {
+  const { frames, width, height, sourceWidth, sourceHeight } = analyzeVideo({ mp4, sampleWidth });
   const fps = timeline.fps || 30;
-  const report = runQa(frames, { fps, durationInFrames: timeline.durationInFrames, width, height, scenes: timeline.scenes ?? [], onLog });
-  return { ...report, width, height, mp4, fps };
+  const report = runQa(frames, { fps, durationInFrames: timeline.durationInFrames, width, height, sourceWidth, sourceHeight, scenes: timeline.scenes ?? [], onLog });
+  const contrast = checkContrasts({ mp4, timeline, pkg, sampleWidth, onLog });
+  const findings = [...report.findings, ...contrast];
+  return { ...report, findings, ok: findings.every(item => item.severity !== 'error'), width, height, mp4, fps };
 }
 
 export function qaJson({ mp4, timeline, report }) {
@@ -177,10 +332,12 @@ function main() {
   const args = process.argv.slice(2);
   const mp4 = argValue(args, '--mp4');
   const timelinePath = argValue(args, '--timeline');
-  if (!mp4 || !timelinePath) throw new Error('usage: frame-qa.mjs --mp4 <file> --timeline <timeline.json> [--out <qa.json>]');
+  const pkgPath = argValue(args, '--package');
+  if (!mp4 || !timelinePath) throw new Error('usage: frame-qa.mjs --mp4 <file> --timeline <timeline.json> [--package <package.json>] [--out <qa.json>]');
   const timeline = JSON.parse(readFileSync(timelinePath, 'utf8'));
+  const pkg = pkgPath ? JSON.parse(readFileSync(pkgPath, 'utf8')) : undefined;
   const out = argValue(args, '--out') ?? mp4.replace(/\.mp4$/, '.qa.json');
-  const report = checkVideo({ mp4, timeline, onLog: line => process.stdout.write(`  ${line}\n`) });
+  const report = checkVideo({ mp4, timeline, pkg, onLog: line => process.stdout.write(`  ${line}\n`) });
   const json = qaJson({ mp4, timeline, report });
   writeFileSync(out, `${JSON.stringify(json, null, 2)}\n`);
   for (const item of report.findings) process.stdout.write(`  [${item.severity}] ${item.code} frame ${item.frame} (${item.timeSeconds.toFixed(2)}s) ${item.sceneId ?? '-'}: ${item.message}\n`);
