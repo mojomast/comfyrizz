@@ -229,7 +229,8 @@ would overlap body copy or a caption (`findLayoutOverlaps`).
 | Stills | 15/15 rendered on CPU (5 layouts × frame 0/mid/last) |
 | MP4 export | 1920×1080, H.264 High, 30/1 fps, **1095 frames**, 36.500 s, no audio (voice off), 2.63 MB |
 | CPU render time | **78.7 s** for 36.5 s of video (~2.2× realtime, concurrency 2, Node 22.23.3, `/usr/bin/google-chrome`) |
-| ffprobe | `codec_name=h264`, `nb_frames=1095`, `r_frame_rate=30/1`, `pix_fmt=yuvj420p`; audio stream count 0 |
+| ffprobe | `codec_name=h264`, `nb_frames=1095`, `r_frame_rate=30/1`, `pix_fmt=yuv420p` (bt709, limited range); audio stream count 0 |
+| Colour (Kyle's nit) | `remotion.config.ts` sets `Config.setColorSpace('bt709')` so H.264 is tagged limited-range and `ffprobe` reports `yuv420p`; without it Remotion's default `bt470bg` full-range tag made ffprobe say `yuvj420p`, which some players shade differently. All CLI renders (`renderPackage`, examples, narrated, incremental) inherit the config. |
 | Narrated export (A4) | 1312 frames, 43.733 s, H.264 + AAC 48 kHz stereo, 14 captions, hash `1a428083…a284`; CPU 96.4 s |
 | renderPackage narration (N7) | `examples/showcase-gpu3` via `PackageDemo`/`renderPackage`, 1920×1080 H.264 + AAC 48 kHz stereo, **1092 frames = 36.400 s** (not 30.5 s silent), 15.2 MB, hash `fb4792fb…9184`; CPU 113.8 s |
 | media_only/lower_third (N8) | `compileTimeline` now emits `mediaOnly`/`lowerThird`; `resolveSceneMedia` gives identical results from the timeline and the `media.json` sidecar for all 6 showcase-gpu3 scenes |
