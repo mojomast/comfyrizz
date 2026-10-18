@@ -67,6 +67,32 @@ def scene_seed(scene_id: str, text: str) -> int:
     return int.from_bytes(digest[:4], "big") % 1_000_000
 
 
+def spoken_for_scene(scene: dict, sentences: list[str]) -> tuple[str, list[str]]:
+    """Text to synthesise, plus one spoken string per display sentence.
+
+    ``narration_spoken`` wins over ``spoken_text``. Either replaces the
+    pronunciation map for the audio. Captions keep the display sentences.
+    When the respelling does not split into the same number of sentences, the
+    whole string is still one synthesis call and each chunk's ``spoken`` falls
+    back to the map (a single-sentence scene keeps the respelling on the chunk).
+    """
+    custom = ""
+    for key in ("narration_spoken", "spoken_text"):
+        value = scene.get(key)
+        if isinstance(value, str) and value.strip():
+            custom = value.strip()
+            break
+    if not custom:
+        parts = [pronounce(sentence) for sentence in sentences]
+        return " ".join(parts), parts
+    parts = split_sentences(custom)
+    if len(parts) == len(sentences):
+        return " ".join(parts), parts
+    if len(sentences) == 1:
+        return custom, [custom]
+    return custom, [pronounce(sentence) for sentence in sentences]
+
+
 def _syllable_weight(sentence: str) -> int:
     words = sentence.split()
     return sum(count_syllables(word) for word in words) or 1
@@ -254,8 +280,7 @@ def narrate_qwen(
         if not display:
             continue
         sentences = split_sentences(display)
-        spoken_sentences = [pronounce(sentence) for sentence in sentences]
-        spoken = " ".join(spoken_sentences)
+        spoken, spoken_sentences = spoken_for_scene(scene, sentences)
         instruct = scene.get("narration_style") if isinstance(scene.get("narration_style"), str) and scene.get("narration_style").strip() else None
         seed = scene_seed(str(scene.get("id", "")), spoken)
         try:
