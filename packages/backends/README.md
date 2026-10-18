@@ -11,6 +11,11 @@ Owner: **Hermes** (WS-B, B3). The two backends of SPEC.md §6.5, behind one `Bac
 node --test test/*.test.mjs        # or: npm test
 ```
 
+From a fresh clone (Node 20 or 22, pnpm): `pnpm install --no-frozen-lockfile` at the repository
+root, then `cd packages/backends && npm test` — 60 cases in about 10 s. A fresh `git clone` of HEAD
+is what `scripts/clean-clone-b-side.sh` runs, with the credential-shaped environment variables
+unset: the suites allocate nothing, reach nothing but loopback, and call the fake `colab` CLI.
+
 ## What is copied from Orbit, and why
 
 | File | Origin |

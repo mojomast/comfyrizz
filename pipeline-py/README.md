@@ -27,6 +27,11 @@ cd pipeline-py && ../.venv/bin/python -m pytest
 The schema files are read from `packages/schema/` (override the package schema with
 `COMFYRIZZ_SCHEMA`). Validation needs no network.
 
+From a fresh clone, the same three commands work in place: the venv is created at the repository
+root and `pipeline-py/requirements-dev.txt` is the only dependency list. `scripts/clean-clone-b-side.sh`
+runs it that way against a fresh `git clone` of HEAD (jsonschema, pytest and comfy-sdk from PyPI, so
+that step needs the network; everything it then tests runs on loopback against the fakes).
+
 ## Running jobs (local ComfyUI, an API proxy, or a Google Colab VM)
 
 ```bash

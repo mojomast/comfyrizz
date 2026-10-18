@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -128,7 +128,10 @@ test("the package validator is not a no-op on the repo's own example layout", ()
   const result = validatePackage(doc);
   assert.equal(result.valid, false);
   assert.ok(result.errors.some((e) => e.code === "SCHEMA_ENUM"));
-  assert.ok(repo.endsWith("comfyrizz"));
+  // the root this test resolves is the checkout the test file lives in, and it is identified by what
+  // is *in* it: a fresh clone lands in whatever directory the person chose (H11 clean-clone check),
+  // so a directory name is not a property of this repo
+  assert.ok(existsSync(join(repo, "examples", "launch-demo", "package.json")), `no example package under ${repo}`);
 });
 
 test("SEMANTIC_CODES is exported and stable-sized", () => {

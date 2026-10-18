@@ -6,8 +6,12 @@ Owner: **Hermes** (WS-B). `comfyrizz.package/v1` in, an ordered hashed job graph
 ```bash
 node bin/plan-jobs.mjs ../../examples/launch-demo/package.json --out jobs.json
 node bin/plan-jobs.mjs <package.json> --out jobs.json --check   # fail if stale
-node --test test/*.test.mjs
+node --test test/*.test.mjs        # or: npm test
 ```
+
+From a fresh clone (Node 20 or 22, pnpm): `pnpm install --no-frozen-lockfile` at the repository
+root, then `cd packages/jobs && npm test`. No key, no network and no Google Colab runtime is
+needed — `scripts/clean-clone-b-side.sh` does exactly this from a fresh `git clone` of HEAD.
 
 ## What it plans
 
@@ -19,7 +23,7 @@ render-check (PLAN.md A5), reported in `skipped[]` with the reason.
 | generator | kind | workflow | output |
 |---|---|---|---|
 | `flux3-klein` | `still` | `gen.workflow` | `assets/<id>.png` |
-| `ltx25` | `plate` (+ `upscale` when `gen.inputs.upscale` is set) | `gen.workflow` | plate: `out/intermediates/<id>.plate.mp4`, upscale: `assets/<id>.mp4` |
+| `ltx25` | `plate` (+ `upscale` when `gen.inputs.upscale` is set) | `gen.workflow` | plate: `assets/<id>.mp4` (the asset's own file); upscale: `assets/<id>@2x.mp4`, applied as `assets.<id>.variants.upscaled` (H12) |
 | `kokoro` | `audio` | `gen.workflow` | `assets/<id>.wav` |
 
 ## The rules baked in
