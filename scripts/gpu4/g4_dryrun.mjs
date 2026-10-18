@@ -246,6 +246,15 @@ export async function dryRun({ outDir = null } = {}) {
   // H13: the real CLI creates no directories and downloads no directories; the dry run drives both
   // paths, so it fails here if either regresses
   const tokenUpload = readLog(fake.logPath).find((entry) => entry.argv[0] === "upload" && entry.argv.some((arg) => String(arg).includes("token")));
+  // H13: `colab download` takes single files, so the tree is listed on the VM and fetched file by
+  // file. A download of the directory itself is exactly what used to look fine against a fake that
+  // copied directories.
+  const downloads = readLog(fake.logPath).filter((entry) => entry.argv[0] === "download").map((entry) => String(entry.argv[3]));
+  check.ok(
+    "H13-per-file",
+    `downloads: ${downloads.map((remote) => remote.replace("/content/comfyrizz/out/", "")).join(", ") || "none"}`,
+    downloads.length > 0 && !downloads.includes("/content/comfyrizz/out") && downloads.every((remote) => remote.startsWith("/content/comfyrizz/out/")),
+  );
   check.ok(
     "H13-token-path",
     `token upload remote=${tokenUpload?.argv?.[4] ?? "none"}`,
