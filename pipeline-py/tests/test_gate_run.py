@@ -158,3 +158,41 @@ def test_the_cli_prints_a_report_and_exits_nonzero_when_the_package_is_not_ok(tm
         encoding="utf-8",
     )
     assert main(["--package", str(good_path), "--out", str(tmp_path), "--json", "--quiet"]) == 0
+
+
+def test_audio_is_named_and_left_alone(tmp_path: Path) -> None:
+    """A real run's package carries the narration too (GPU test 5: a .wav under a still kind)."""
+    (tmp_path / "audio").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "audio" / "narration.norm.wav").write_bytes(b"RIFF....WAVEfmt ")
+    still(tmp_path / "assets" / "a_panel.png")
+    report = evaluate_run(
+        package(
+            assets={
+                "a_panel": {"kind": "svg", "file": "assets/a_panel.png"},
+                "a_narration": {"kind": "audio", "file": "audio/narration.norm.wav"},
+            },
+            width=96,
+            height=64,
+        ),
+        out_dir=tmp_path,
+    )
+
+    assert report["assets"]["a_narration"]["status"] == "not-judged"
+    assert report["assets"]["a_narration"]["ok"] is None, "not judged is not a pass"
+    assert report["not_judged"] == ["a_narration"]
+    assert report["ok"] is True, report["failures"]
+
+
+def test_a_render_that_cannot_be_read_is_a_failure_not_a_crash(tmp_path: Path) -> None:
+    broken = tmp_path / "assets" / "a_panel.png"
+    broken.parent.mkdir(parents=True, exist_ok=True)
+    broken.write_bytes(b"this is not a png")
+
+    report = evaluate_run(
+        package(assets={"a_panel": {"kind": "svg", "file": "assets/a_panel.png"}}, width=96, height=64),
+        out_dir=tmp_path,
+    )
+
+    assert report["ok"] is False
+    assert report["assets"]["a_panel"]["status"] == "unreadable"
+    assert any(failure["code"] == "GATE_ASSET_UNREADABLE" for failure in report["failures"])

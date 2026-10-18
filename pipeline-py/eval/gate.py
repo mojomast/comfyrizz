@@ -556,10 +556,13 @@ def evaluate_still(
         "score": round(sum(1 for check in judged if check["ok"]) / len(judged), 4) if judged else None,
     }
 
-#: What a run's assets are checked against, per asset kind.
+#: What a run's assets are checked against, per asset kind. Everything else (audio above all - the
+#: narration has its own report from the TTS and the aligner) is named and left alone: the gate says
+#: "not judged", it does not pass it.
 RUN_SUFFIXES = {
     "still": (".png", ".jpg", ".jpeg", ".webp"),
     "plate": (".mp4", ".mov", ".webm", ".mkv"),
+    "audio": (".wav", ".mp3", ".m4a", ".aac", ".flac"),
 }
 
 
@@ -572,12 +575,24 @@ def load_rgb(path: str | Path) -> np.ndarray:
 
 
 def _asset_kind(asset: dict) -> str:
+    """How to judge this asset, from its file first and its declared kind second.
+
+    The file is the better witness: GPU test 5's package carried a `.wav` under a `kind` the schema
+    calls a still, and loading it as an image is how the first real `evaluate_run` crashed.
+    """
+    file = str(asset.get("file") or "").lower()
+    if file.endswith(".svg"):
+        return "source"
+    for kind, suffixes in RUN_SUFFIXES.items():
+        if file.endswith(suffixes):
+            return kind
     kind = str(asset.get("kind") or "")
-    file = str(asset.get("file") or "")
     if kind in ("video", "plate"):
         return "plate"
-    if any(file.lower().endswith(suffix) for suffix in RUN_SUFFIXES["plate"]):
-        return "plate"
+    if kind in ("audio", "narration"):
+        return "audio"
+    if kind == "svg":
+        return "source"
     return "still"
 
 
@@ -624,7 +639,7 @@ def evaluate_run(
             }
             continue
         path = base / str(relative)
-        if str(relative).lower().endswith(".svg"):
+        if _asset_kind(asset) == "source":
             # an SVG is the *source* the renderers were given (and the reference the still is compared
             # with), not something this gate judges: raster fidelity is checked against its boxes, which
             # the caller passes in `elements`.
@@ -637,10 +652,21 @@ def evaluate_run(
                 "detail": "an SVG is the source artwork; the gate judges the render, not the source",
             }
             continue
+        kind = _asset_kind(asset)
+        if kind not in ("still", "plate"):
+            reports[asset_id] = {
+                "asset": asset_id,
+                "kind": kind,
+                "status": "not-judged",
+                "file": str(path),
+                "ok": None,
+                "detail": f"the gate judges stills and plates; a {kind} asset is judged by its own report",
+            }
+            continue
         if not path.is_file():
             reports[asset_id] = {
                 "asset": asset_id,
-                "kind": _asset_kind(asset),
+                "kind": kind,
                 "status": "missing",
                 "ok": False,
                 "code": "GATE_ASSET_MISSING",
@@ -650,8 +676,20 @@ def evaluate_run(
             failures.append({"asset": asset_id, "code": "GATE_ASSET_MISSING", "path": str(path)})
             continue
 
-        kind = _asset_kind(asset)
-        media = probe(str(path))
+        try:
+            media = probe(str(path))
+        except Exception as error:  # noqa: BLE001 - a probe that cannot read the file is a failure to state
+            reports[asset_id] = {
+                "asset": asset_id,
+                "kind": kind,
+                "status": "unreadable",
+                "file": str(path),
+                "ok": False,
+                "code": "GATE_ASSET_UNREADABLE",
+                "detail": f"{type(error).__name__}: {error}",
+            }
+            failures.append({"asset": asset_id, "code": "GATE_ASSET_UNREADABLE", "detail": str(error)})
+            continue
         if kind == "plate":
             planned_frames = asset.get("media", {}).get("frames") or asset.get("plannedFrames")
             report = evaluate_plate(
@@ -662,8 +700,22 @@ def evaluate_run(
                 loops=bool(asset.get("loops")),
             )
         else:
+            try:
+                image = loader(path)
+            except Exception as error:  # noqa: BLE001 - an unreadable render is a failure, not a crash
+                reports[asset_id] = {
+                    "asset": asset_id,
+                    "kind": kind,
+                    "status": "unreadable",
+                    "file": str(path),
+                    "ok": False,
+                    "code": "GATE_ASSET_UNREADABLE",
+                    "detail": f"{type(error).__name__}: {error}",
+                }
+                failures.append({"asset": asset_id, "code": "GATE_ASSET_UNREADABLE", "detail": str(error)})
+                continue
             report = evaluate_still(
-                loader(path),
+                image,
                 elements=(elements or {}).get(asset_id),
                 theme_palette=palette or None,
                 safe_zones=(safe_zones or {}).get(asset_id),
@@ -678,6 +730,9 @@ def evaluate_run(
                 failures.append({"asset": asset_id, "code": check.get("code"), "check": check.get("id"), "detail": check.get("detail")})
 
     judged = [report for report in reports.values() if report.get("ok") is not None]
+    untouched = sorted(
+        asset_id for asset_id, report in reports.items() if report.get("status") in ("source", "not-judged")
+    )
     return {
         "gate": GATE_VERSION,
         "package": package.get("id"),
@@ -685,6 +740,7 @@ def evaluate_run(
         "assets": reports,
         "failures": failures,
         "judged": len(judged),
+        "not_judged": untouched,
         "ok": bool(judged) and all(report["ok"] for report in judged) and not any(report.get("status") == "missing" for report in reports.values()),
     }
 
