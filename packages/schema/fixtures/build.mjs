@@ -307,6 +307,8 @@ export const MUTATIONS = [
 
 /** Warnings each hand-written valid fixture is expected to raise (advisory only). */
 const VALID_WARNINGS = {
+  // H12: an x2 variant on the spec-6.3 plate; it inherits that fixture's unused dataset
+  "variants.json": ["WARN_DATASET_UNUSED"],
   "minimal.json": [],
   "spec-6.3-example.json": ["WARN_DATASET_UNUSED"],
   "generated-first.json": [],
@@ -421,7 +423,7 @@ export function build() {
             kind: "valid",
             schemaOk: true,
             semantic: [],
-            warnings: derived ? derived.expect.warnings : VALID_WARNINGS[f],
+            warnings: derived ? derived.expect.warnings : (VALID_WARNINGS[f] ?? []),
           };
         }),
       ...MUTATIONS.map((m) => ({

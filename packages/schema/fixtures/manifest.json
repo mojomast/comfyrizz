@@ -46,7 +46,10 @@
       "file": "valid/variants.json",
       "kind": "valid",
       "schemaOk": true,
-      "semantic": []
+      "semantic": [],
+      "warnings": [
+        "WARN_DATASET_UNUSED"
+      ]
     },
     {
       "file": "valid/warnings-unused-asset.json",
