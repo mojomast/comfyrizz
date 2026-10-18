@@ -211,7 +211,12 @@ export function parseTreeListing(output) {
     const parts = relative.split("/");
     if (parts.some((part) => part === "" || part === "." || part === "..")) continue;
     const bytes = Number(parsed.bytes);
-    entries.push({ path: relative, bytes: Number.isFinite(bytes) ? bytes : null });
+    const mtime = Number(parsed.mtime);
+    entries.push({
+      path: relative,
+      bytes: Number.isFinite(bytes) ? bytes : null,
+      mtime: Number.isFinite(mtime) ? mtime : null,
+    });
   }
   return entries;
 }

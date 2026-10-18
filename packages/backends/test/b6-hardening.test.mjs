@@ -166,11 +166,18 @@ test("a collect that fails says so, and the VM is still stopped", async (t) => {
   const collect = backend.inspect().events.filter((event) => event.type === "collect").at(-1);
   assert.equal(collect.fetched, 0, JSON.stringify(collect));
   assert.ok(collect.problems.length >= 1 || collect.complete === false);
-  const execsBefore = readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec").length;
+  // G5-13: teardown itself execs drop_token.py before stopping, so count the *batch* executions: a
+  // collect failure never resubmits, and the failed run is still on record
+  const batchExecs = (log) =>
+    log.filter(
+      (entry) =>
+        entry.argv[0] === "exec" &&
+        ["run_jobs.py", "reconcile.py"].some((name) => String(entry.argv[entry.argv.indexOf("-f") + 1]) === name),
+    ).length;
+  const execsBefore = batchExecs(readLog(fake.logPath));
   const teardown = await backend.teardown("error");
   assert.equal(teardown.state, "stopped");
-  // a collect failure never resubmits: no further exec ran, and the failed run is still on record
-  assert.equal(readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec").length, execsBefore);
+  assert.equal(batchExecs(readLog(fake.logPath)), execsBefore, "the batch was resubmitted after a failed collect");
   assert.ok(
     backend.inspect().events.some((event) => event.type === "collect_failed" || event.type === "collect"),
     JSON.stringify(backend.inspect().events.map((event) => event.type)),

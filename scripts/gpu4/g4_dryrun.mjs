@@ -199,7 +199,9 @@ export async function dryRun({ outDir = null } = {}) {
       scripts: {
         // H13: the backend execs this before uploading the token, because the real `colab upload`
         // does not create directories and the CLI has no mkdir
-        "hf_token_dir.py": { mkdirs: ["/content/.hf"], output: "hf token dir /content/.hf mode 700" },
+        // the fake's built-in spec already makes every directory the real script makes; only the output
+        // is worth pinning here
+        "hf_token_dir.py": { output: "vm dirs ready: /content/.hf mode 700, /content/comfyrizz and /content/comfyrizz/out present" },
         "bootstrap.py": { output: "bootstrap done", files: [{ path: "/content/comfyrizz/out/ready.json", content: '{"ok":true,"comfyui":"0.41.0"}' }] },
         "health.py": { output: "health done", files: [{ path: "/content/comfyrizz/out/health.json", content: JSON.stringify({ ok: true, detail: "g4 dry run", vramFreeGB: 82.1 }) }] },
         "run_jobs.py": {

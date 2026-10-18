@@ -125,7 +125,7 @@ export function createColabBackend({
   tokenDirScript = join(REPO, "colab", "hf_token_dir.py"),
   listScript = join(REPO, "colab", "list_out.py"),
   modelsLock = join(REPO, "colab", "models.lock.json"),
-  smokeGraph = join(REPO, "workflows", "smoke.api.json"),
+  smokeGraph = join(REPO, "colab", "smoke.api.json"),
   healthScript = join(REPO, "colab", "health.py"),
   runJobsScript = join(REPO, "colab", "run_jobs.py"),
   reconcileScript = join(REPO, "colab", "reconcile.py"),
@@ -157,6 +157,9 @@ export function createColabBackend({
     lastAdmission: null,
     watchdog: null,
     events: [],
+    // G5-14: what this session has already fetched, keyed by remote path, so a later collect does not
+    // pay for the same files again
+    downloaded: new Map(),
   };
 
   const emit = (onEvent, event) => {
@@ -523,14 +526,15 @@ export function createColabBackend({
       emit(onEvent, { type: "models_lock", path: modelsLock, revisions: lockRevisions(modelsLock) });
       // G5-12: health.py submits a 256 px smoke job to prove the proxy reaches ComfyUI, but nothing
       // ever put a graph at the path it reads, so the check reported "skipped" on every real run and
-      // the only evidence was the proxy's own health endpoint. `workflows/build_smoke.py` derives the
-      // graph from the still generator the pipeline runs.
+      // the only evidence was the proxy's own health endpoint. `colab/build_smoke.py` derives the graph
+      // from the still generator the pipeline runs (it lives in colab/ because every graph under
+      // workflows/ is one a package plans, and this one is a wiring check).
       if (smokeGraph && existsSync(smokeGraph)) {
         const smokeUpload = await step(argvUpload({ session, localPath: smokeGraph, remotePath: `${REMOTE_ROOT}/workflows/smoke.api.json` }), {
           label: "upload-smoke",
           wallMs: 120000,
         });
-        if (smokeUpload.code !== 0) throw new ColabCliError(`uploading workflows/smoke.api.json failed (exit ${smokeUpload.code})`);
+        if (smokeUpload.code !== 0) throw new ColabCliError(`uploading colab/smoke.api.json failed (exit ${smokeUpload.code})`);
         emit(onEvent, { type: "smoke_graph", path: smokeGraph });
       }
       const result = await execScript(bootstrapScript, {
@@ -825,7 +829,7 @@ export function createColabBackend({
    * file is fetched by its own remote path. Asking the CLI for the directory used to look correct only
    * because the fake copied directories; on a real VM it fails.
    */
-  async function downloadTree({ remoteDir, localDir, onEvent = null, timeout = 300 }) {
+  async function downloadTree({ remoteDir, localDir, onEvent = null, timeout = 300, remember = null }) {
     const listed = await execScript(listScript, { step: "list-out", timeout, onEvent });
     const listOutcome = execOutcome(listed, "list-out");
     emit(onEvent, { type: "list_out", code: listed.code, lost: isLost(listed), sentinel: listOutcome.ok });
@@ -838,21 +842,43 @@ export function createColabBackend({
       return { ok: false, files: 0, listed: listed.code, detail: error.message };
     }
     let fetched = 0;
+    let skipped = 0;
     const missing = [];
     for (const entry of entries) {
       const remote = `${remoteDir}/${entry.path}`;
       const local = join(localDir, ...entry.path.split("/"));
+      // G5-14: every collect saw the whole tree (the last batch was collected twice in GPU test 5, and
+      // each collect re-fetched every earlier batch's files - about 45 s of billed time). A file whose
+      // size and mtime are the ones this run already fetched does not need fetching again.
+      // what has to match is the *VM's* listing now against the listing this run already fetched - not
+      // the local file's own size, or a file the VM has changed would be skipped because our copy
+      // still matches our own record of it
+      const seen = remember?.get(remote);
+      const unchanged =
+        seen &&
+        seen.bytes !== null &&
+        seen.bytes === entry.bytes &&
+        (seen.mtime === null || entry.mtime === null || seen.mtime === entry.mtime) &&
+        existsSync(local);
+      if (unchanged) {
+        skipped += 1;
+        continue;
+      }
       const result = await download({ remote, local, optional: true, onEvent });
-      if (result.ok) fetched += 1;
-      else missing.push(entry.path);
+      if (result.ok) {
+        fetched += 1;
+        if (remember) remember.set(remote, { bytes: entry.bytes, mtime: entry.mtime });
+      } else {
+        missing.push(entry.path);
+      }
     }
-    emit(onEvent, { type: "download_tree", files: entries.length, fetched, missing: missing.length, remoteDir });
-    return { ok: fetched === entries.length, files: entries.length, fetched, missing, entries };
+    emit(onEvent, { type: "download_tree", files: entries.length, fetched, skipped, missing: missing.length, remoteDir });
+    return { ok: fetched + skipped === entries.length, files: entries.length, fetched, skipped, missing, entries };
   }
 
   async function collectOut({ onEvent = null, expectComplete = true } = {}) {
     const localOut = join(scratch, "out");
-    const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent });
+    const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent, remember: state.downloaded });
     const manifestPath = join(localOut, "manifest.json");
     // G5-7: the manifest is the run's verdict and it lands with the rest of the tree. Requiring the
     // *whole* collect to have succeeded before reading it threw the verdict away whenever one sibling
@@ -874,6 +900,7 @@ export function createColabBackend({
       // G5-7: a collect the UI can explain: what the VM listed, what arrived, and what did not
       files: result.files ?? 0,
       fetched: result.fetched ?? 0,
+      skipped: result.skipped ?? 0,
       missing: result.missing ?? [],
       manifest: manifest ? "collected" : "missing",
     });
@@ -887,6 +914,7 @@ export function createColabBackend({
       missing: result.missing ?? [],
       files: result.files ?? 0,
       fetched: result.fetched ?? 0,
+      skipped: result.skipped ?? 0,
     };
   }
 

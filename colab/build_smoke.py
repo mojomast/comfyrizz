@@ -16,11 +16,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-SOURCE = ROOT / "flux3_klein_t2i.api.json"
-PARAMS = ROOT / "flux3_klein_t2i.api.params.json"
-OUT_GRAPH = ROOT / "smoke.api.json"
-OUT_PARAMS = ROOT / "smoke.api.params.json"
+REPO = Path(__file__).resolve().parent.parent
+WORKFLOWS = REPO / "workflows"
+#: The graph lives with the other Colab-side artifacts, not in `workflows/`: that directory is the
+#: pipeline's, and every graph in it is planned by a package (pipeline-py/tests/test_workflows_contract.py).
+#: This one belongs to `colab/health.py`, which submits it over the proxy to prove the wiring.
+SOURCE = WORKFLOWS / "flux3_klein_t2i.api.json"
+PARAMS = WORKFLOWS / "flux3_klein_t2i.api.params.json"
+OUT_GRAPH = REPO / "colab" / "smoke.api.json"
+OUT_PARAMS = REPO / "colab" / "smoke.api.params.json"
 
 #: Small enough to be a wiring test rather than a GPU test: 256 px and a handful of steps.
 SMOKE = {"width": 256, "height": 256, "steps": 4}
@@ -34,7 +38,7 @@ def main() -> int:
         node, key = mapping[field]
         graph[node]["inputs"][key] = value
     # the graph ComfyUI is handed carries its own marker, so a run log says what was submitted
-    graph["comfyrizz_smoke"] = {"v": 1, "derivedFrom": SOURCE.name, "sizes": SMOKE}
+    assert "comfyrizz_smoke" not in graph
 
     OUT_GRAPH.write_text(json.dumps(graph, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     OUT_PARAMS.write_text(

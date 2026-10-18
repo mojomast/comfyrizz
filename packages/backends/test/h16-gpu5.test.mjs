@@ -511,12 +511,12 @@ test("both model hosts download at the same time, not one after the other (G5-11
 });
 
 test("the smoke graph the health check submits is on the VM, and is derived not hand-written (G5-12)", async () => {
-  const graph = JSON.parse(readFileSync(join(REPO, "workflows/smoke.api.json"), "utf8"));
-  const params = JSON.parse(readFileSync(join(REPO, "workflows/smoke.api.params.json"), "utf8"));
+  const graph = JSON.parse(readFileSync(join(REPO, "colab/smoke.api.json"), "utf8"));
+  const params = JSON.parse(readFileSync(join(REPO, "colab/smoke.api.params.json"), "utf8"));
 
   // it is the pipeline's own still graph, shrunk: same nodes, smoke sizes
   const source = JSON.parse(readFileSync(join(REPO, "workflows/flux3_klein_t2i.api.json"), "utf8"));
-  assert.deepEqual(Object.keys(graph).filter((key) => !key.startsWith("comfyrizz")).sort(), Object.keys(source).sort());
+  assert.deepEqual(Object.keys(graph).sort(), Object.keys(source).sort());
   for (const [field, expected] of Object.entries({ width: 256, height: 256, steps: 4 })) {
     const [node, key] = params.map[field];
     assert.equal(graph[node].inputs[key], expected, `${field} is not the smoke value`);
@@ -567,4 +567,34 @@ test("a bootstrap that died early leaves no token behind either (G5-13)", async 
   assert.equal(existsSync(onVm), true, "the token was uploaded before the crash");
   await backend.teardown("error");
   assert.equal(existsSync(onVm), false, "the token from the crashed bootstrap stayed on the VM");
+});
+
+test("a second collect fetches only what changed, not the whole tree again (G5-14)", async () => {
+  const { fake, backend, work } = setup();
+  vmWithTree(fake);
+  const manifest = { v: 1, packageId: "pkg_h16", complete: true, counts: { succeeded: 2 }, jobs: [] };
+  const remote = join(fake.tmpDir, "remote", "out");
+  writeFileSync(join(remote, "manifest.json"), JSON.stringify(manifest));
+
+  const downloadsBefore = () => readLog(fake.logPath).filter((entry) => entry.argv[0] === "download").length;
+
+  const first = await backend.collectOut({ expectComplete: true });
+  const afterFirst = downloadsBefore();
+  const second = await backend.collectOut({ expectComplete: true });
+  const afterSecond = downloadsBefore();
+
+  assert.equal(first.fetched, 3, "the first collect takes the whole tree");
+  assert.equal(first.skipped, 0);
+  assert.equal(afterFirst, 3, `the first collect downloaded 3 files, the log says ${afterFirst}`);
+  assert.equal(second.fetched, 0, "the second collect re-downloaded files it already had");
+  assert.equal(second.skipped, 3);
+  assert.equal(afterSecond - afterFirst, 0, "not one download was issued the second time");
+  assert.equal(second.manifest?.complete, true, "and the manifest is still read from what is on disk");
+
+  // a file that changed is fetched again
+  writeFileSync(join(remote, "assets", "a_still.png"), "png-bytes-changed");
+  const third = await backend.collectOut({ expectComplete: true });
+  assert.equal(third.fetched, 1, "the changed file has to come down again");
+  assert.equal(third.skipped, 2);
+  assert.equal(readFileSync(join(work, "scratch", "out", "assets", "a_still.png"), "utf8"), "png-bytes-changed");
 });

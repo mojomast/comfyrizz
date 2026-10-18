@@ -31,7 +31,11 @@ def main() -> int:
         if path.is_dir() or path.is_symlink():
             continue
         relative = path.relative_to(OUT_ROOT).as_posix()
-        print(json.dumps({"path": relative, "bytes": path.stat().st_size}), flush=True)
+        info = path.stat()
+        # G5-14: the host collects the tree after every batch, and re-downloading the files that did
+        # not change is billed time (about 45 s of the GPU test 5 run). Size and mtime are what make
+        # "the copy I already have is this file" checkable.
+        print(json.dumps({"path": relative, "bytes": info.st_size, "mtime": round(info.st_mtime, 3)}), flush=True)
         count += 1
     print(f"{count} files under {OUT_ROOT}", file=sys.stderr, flush=True)
     return 0
