@@ -29,8 +29,10 @@ NODE = shutil.which("node")
 #: documented node-specific extra), so a typo cannot silently become a dead entry.
 KNOWN_PARAMS = {
     "still": {"prompt", "image", "reference", "mask", "audio", "width", "height", "seed", "steps", "denoise", "megapixels", "cutout"},
-    "plate": {"prompt", "image", "reference", "width", "height", "frames", "fps", "seed", "stage2_seed", "stage2_sigmas", "upscale"},
-    "upscale": {"prompt", "image", "width", "height", "frames", "fps", "seed", "source", "upscale"},
+    # R1: `strength` (stage-1 LTXVImgToVideoInplace) and `stage2_strength` (the stage-2 one) are the
+    # knobs that hold a UI/diagram frame still; the graph's own default is 0.7
+    "plate": {"prompt", "image", "reference", "width", "height", "frames", "fps", "seed", "stage2_seed", "stage2_sigmas", "upscale", "strength", "stage2_strength"},
+    "upscale": {"prompt", "image", "width", "height", "frames", "fps", "seed", "source", "upscale", "strength", "stage2_strength"},
     "audio": {"text", "voice", "speed", "language", "sample_rate"},
 }
 
