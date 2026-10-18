@@ -66,6 +66,12 @@ SEMANTIC_CODES = (
     "SEM_MEDIA_ONLY_NO_MEDIA",
     "SEM_LOWER_THIRD_EMPTY",
     "SEM_CUTOUT_KIND",
+    "SEM_ASSET_VARIANT_SHAPE",
+    "SEM_ASSET_VARIANT_NAME",
+    "SEM_ASSET_VARIANT_NO_FILE",
+    "SEM_ASSET_VARIANT_SAME_FILE",
+    "SEM_ASSET_VARIANT_PATH",
+    "SEM_ASSET_VARIANT_NOT_BIGGER",
 )
 
 # Published layout contract (PLAN.md A5 / SPEC.md 6.3); the schema holds the loose
@@ -139,6 +145,11 @@ def _is_str(value: Any) -> bool:
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_int(value: Any) -> bool:
+    """An integer, and not a bool (JSON true is not a width). Mirrors Number.isInteger in TS."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def path_problem(value: Any) -> str | None:
@@ -461,6 +472,7 @@ def _check_assets(assets, errors) -> None:
                 errors.append(
                     _err("SEM_MODEL_LICENSE_MISSING", f"{at}/model_license/id", f"generator {generator} needs model_license (separate from the output licence)")
                 )
+        _check_asset_variants(asset, at, errors)
         if asset.get("redistributable") is True:
             license_obj = asset.get("license") if _is_obj(asset.get("license")) else {}
             license_id = license_obj.get("id")
@@ -737,3 +749,56 @@ def validate_package(doc: Any, defaults: bool = False) -> dict[str, Any]:
         "semantic": semantic["errors"],
         "document": document,
     }
+
+def _check_asset_variants(asset, at: str, errors) -> None:
+    """H12: `assets.<id>.variants.upscaled` is the x2 upscale a 1920x1080 export prefers.
+
+    Mirrors packages/schema/src/semantic.mjs `checkAssetVariants` code for code, because the
+    conformance test runs both validators over the same fixtures and compares the codes:
+      - a variant needs the base file to be a variant *of*;
+      - it is a different file from the base, and a package-relative one;
+      - it is bigger than the base media (that is the only reason to keep both, and it catches an
+        applied run whose measured upscale came out no larger than the file it was made from).
+    """
+    variants = asset.get("variants")
+    if variants is None:
+        return
+    if not _is_obj(variants):
+        errors.append(_err("SEM_ASSET_VARIANT_SHAPE", f"{at}/variants", "variants must be an object of named renditions (upscaled)"))
+        return
+    if not _is_str(asset.get("file")):
+        errors.append(_err("SEM_ASSET_VARIANT_NO_FILE", at, "an asset with variants needs its own file: a variant is an alternate of it"))
+    media = asset.get("media") if _is_obj(asset.get("media")) else None
+    for name, variant in variants.items():
+        variant_at = f"{at}/variants/{name}"
+        if name != "upscaled":
+            errors.append(_err("SEM_ASSET_VARIANT_NAME", variant_at, f'unknown variant {json.dumps(name)} (only "upscaled" is defined)'))
+            continue
+        width = variant.get("width") if _is_obj(variant) else None
+        height = variant.get("height") if _is_obj(variant) else None
+        if (
+            not _is_obj(variant)
+            or not _is_str(variant.get("file"))
+            or not _is_int(width)
+            or not _is_int(height)
+        ):
+            errors.append(_err("SEM_ASSET_VARIANT_SHAPE", variant_at, "an upscaled variant needs file, width and height"))
+            continue
+        file_name = variant["file"]
+        if _is_str(asset.get("file")) and file_name == asset["file"]:
+            errors.append(
+                _err("SEM_ASSET_VARIANT_SAME_FILE", f"{variant_at}/file", "a variant must be a different file from the asset it belongs to")
+            )
+        if file_name.startswith("/") or ".." in file_name.split("/"):
+            errors.append(_err("SEM_ASSET_VARIANT_PATH", f"{variant_at}/file", f"variant files are relative to the package (got {json.dumps(file_name)})"))
+        if media is not None and _is_int(media.get("width")) and _is_int(media.get("height")):
+            if width <= media["width"] or height <= media["height"]:
+                errors.append(
+                    _err(
+                        "SEM_ASSET_VARIANT_NOT_BIGGER",
+                        variant_at,
+                        f"an upscaled variant must be larger than the asset's media "
+                        f"({media['width']}x{media['height']}, got {width}x{height})",
+                    )
+                )
+

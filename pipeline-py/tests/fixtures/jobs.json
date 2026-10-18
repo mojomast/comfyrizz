@@ -108,7 +108,7 @@
       "deps": [
         "a_plate1_still.still"
       ],
-      "output": "out/intermediates/a_plate1.plate.mp4",
+      "output": "assets/a_plate1.mp4",
       "outputKind": "video",
       "cacheKey": "ec2f8632ab503e4b7fab9fe372f8906bee1e70b68fec5bd8c13293ddccc3df6f",
       "dims": {
@@ -173,8 +173,9 @@
         "a_plate1.plate",
         "a_plate1_still.still"
       ],
-      "output": "assets/a_plate1.mp4",
+      "output": "assets/a_plate1@2x.mp4",
       "outputKind": "video",
+      "variant": "upscaled",
       "params": {
         "image": "a_plate1_still",
         "prompt": "slow drift through a soft blue nebula, no text, no letters, no words, no logos, no watermarks, static camera, gentle motion, no cuts",
@@ -185,7 +186,7 @@
         "upscale": "x2+crop",
         "seed": 42
       },
-      "source": "out/intermediates/a_plate1.plate.mp4",
+      "source": "assets/a_plate1.mp4",
       "dims": {
         "width": 1920,
         "height": 1080
@@ -200,6 +201,7 @@
         "left": 0,
         "right": 0
       },
+      "scale": 2,
       "frames": 97,
       "fps": 24,
       "stage1Dims": {
@@ -259,5 +261,5 @@
     }
   ],
   "warnings": [],
-  "hash": "45cacf945bb7a5f00cf58df7d08e893221b37c685071f5752a400070d2b36295"
+  "hash": "3e03b93577ab93b17a25d14899c893c1e74aeeb2c398acfb73494676d5f3e2b8"
 }
