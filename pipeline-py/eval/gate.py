@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -555,3 +556,165 @@ def evaluate_still(
         "score": round(sum(1 for check in judged if check["ok"]) / len(judged), 4) if judged else None,
     }
 
+#: What a run's assets are checked against, per asset kind.
+RUN_SUFFIXES = {
+    "still": (".png", ".jpg", ".jpeg", ".webp"),
+    "plate": (".mp4", ".mov", ".webm", ".mkv"),
+}
+
+
+def load_rgb(path: str | Path) -> np.ndarray:
+    """A still as an RGB array. PIL only - the gate never needs a GPU or a model."""
+    from PIL import Image  # noqa: PLC0415 - only the still path needs PIL
+
+    with Image.open(path) as image:
+        return np.asarray(image.convert("RGB"))
+
+
+def _asset_kind(asset: dict) -> str:
+    kind = str(asset.get("kind") or "")
+    file = str(asset.get("file") or "")
+    if kind in ("video", "plate"):
+        return "plate"
+    if any(file.lower().endswith(suffix) for suffix in RUN_SUFFIXES["plate"]):
+        return "plate"
+    return "still"
+
+
+def evaluate_run(
+    package: dict,
+    *,
+    package_dir: str | Path | None = None,
+    out_dir: str | Path | None = None,
+    elements: dict | None = None,
+    safe_zones: dict | None = None,
+    frames: dict | None = None,
+    probe: Any = probe_media,
+    loader: Any = load_rgb,
+) -> dict[str, Any]:
+    """Judge the assets a package says it produced (R1, research section 1.7).
+
+    This is the entry point the run path calls: `evaluate_still` and `evaluate_plate` judge one image
+    or one plate at a time, and this walks the package, finds each asset's file, and reports per asset.
+    A file that is not there is a failure with its own code - a package that claims an asset it cannot
+    show is the one thing a quality gate must never pass silently.
+
+    CPU only: numpy and PIL. `frames` (asset id -> decoded plate frames) is optional; without it a
+    plate is still checked for its measured dimensions and length, and says the motion checks were
+    skipped rather than pretending they passed.
+    """
+    base = Path(out_dir) if out_dir is not None else (Path(package_dir) if package_dir is not None else Path("."))
+    theme = package.get("theme") or {}
+    palette = [str(colour) for colour in (theme.get("palette") or [])]
+    fmt = package.get("format") or {}
+    planned_dims = {"width": int(fmt.get("width") or 0), "height": int(fmt.get("height") or 0)} or None
+
+    reports: dict[str, Any] = {}
+    failures: list[dict[str, Any]] = []
+    for asset_id, asset in (package.get("assets") or {}).items():
+        asset = asset or {}
+        relative = asset.get("file")
+        if not relative:
+            reports[asset_id] = {
+                "asset": asset_id,
+                "kind": _asset_kind(asset),
+                "status": "no-file",
+                "ok": None,
+                "detail": "the asset names no file, so there is nothing to judge",
+            }
+            continue
+        path = base / str(relative)
+        if str(relative).lower().endswith(".svg"):
+            # an SVG is the *source* the renderers were given (and the reference the still is compared
+            # with), not something this gate judges: raster fidelity is checked against its boxes, which
+            # the caller passes in `elements`.
+            reports[asset_id] = {
+                "asset": asset_id,
+                "kind": "source",
+                "status": "source",
+                "file": str(path),
+                "ok": None,
+                "detail": "an SVG is the source artwork; the gate judges the render, not the source",
+            }
+            continue
+        if not path.is_file():
+            reports[asset_id] = {
+                "asset": asset_id,
+                "kind": _asset_kind(asset),
+                "status": "missing",
+                "ok": False,
+                "code": "GATE_ASSET_MISSING",
+                "path": str(path),
+                "detail": "the package names this file but it is not here",
+            }
+            failures.append({"asset": asset_id, "code": "GATE_ASSET_MISSING", "path": str(path)})
+            continue
+
+        kind = _asset_kind(asset)
+        media = probe(str(path))
+        if kind == "plate":
+            planned_frames = asset.get("media", {}).get("frames") or asset.get("plannedFrames")
+            report = evaluate_plate(
+                list((frames or {}).get(asset_id) or ()),
+                media=media,
+                planned_dims=planned_dims,
+                planned_frames=planned_frames,
+                loops=bool(asset.get("loops")),
+            )
+        else:
+            report = evaluate_still(
+                loader(path),
+                elements=(elements or {}).get(asset_id),
+                theme_palette=palette or None,
+                safe_zones=(safe_zones or {}).get(asset_id),
+                image_path=str(path),
+                media=media,
+                planned_dims=planned_dims,
+            )
+        report = {**report, "asset": asset_id, "path": str(path), "status": "ran"}
+        reports[asset_id] = report
+        for check in report.get("checks", []):
+            if check.get("ok") is False:
+                failures.append({"asset": asset_id, "code": check.get("code"), "check": check.get("id"), "detail": check.get("detail")})
+
+    judged = [report for report in reports.values() if report.get("ok") is not None]
+    return {
+        "gate": GATE_VERSION,
+        "package": package.get("id"),
+        "base": str(base),
+        "assets": reports,
+        "failures": failures,
+        "judged": len(judged),
+        "ok": bool(judged) and all(report["ok"] for report in judged) and not any(report.get("status") == "missing" for report in reports.values()),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m eval.gate --package <package.json> [--out <dir>] [--package-dir <dir>] [--json]`."""
+    import argparse  # noqa: PLC0415
+
+    parser = argparse.ArgumentParser(prog="eval.gate", description="judge the assets a package produced (research 1.7)")
+    parser.add_argument("--package", required=True, help="the applied package (the one that names the produced files)")
+    parser.add_argument("--out", default=None, help="the run's output directory, when the assets are not next to the package")
+    parser.add_argument("--package-dir", default=None, help="where the package's relative asset paths resolve")
+    parser.add_argument("--json", action="store_true", help="print the whole report as JSON")
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args(argv)
+
+    package_path = Path(args.package)
+    document = json.loads(package_path.read_text(encoding="utf-8"))
+    report = evaluate_run(document, package_dir=args.package_dir or package_path.parent, out_dir=args.out)
+
+    if args.json:
+        print(json.dumps(report, indent=1))
+    elif not args.quiet:
+        for asset_id, asset_report in report["assets"].items():
+            state = "ok" if asset_report.get("ok") else asset_report.get("status", "failed")
+            print(f"{asset_id}: {state}")
+        for failure in report["failures"]:
+            print(f"  {failure['asset']} {failure.get('code')}: {failure.get('detail') or failure.get('check')}")
+    return 0 if report["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

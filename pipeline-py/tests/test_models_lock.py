@@ -150,9 +150,12 @@ def test_the_download_command_carries_the_pinned_revision(tmp_path: Path, lock: 
 
     calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
     assert len(calls) == 2
-    for call, host in zip(calls, ("klein", "ltx"), strict=True):
+    # G5-11: the hosts download at the same time now, so the log order is not the lock's order - find
+    # each host's own call by its repo instead of assuming which finished first
+    by_repo = {call[1]: call for call in calls}
+    for host in ("klein", "ltx"):
+        call = by_repo[lock["hosts"][host]["repo"]]
         assert call[0] == "download"
-        assert call[1] == lock["hosts"][host]["repo"]
         assert call[call.index("--revision") + 1] == lock["hosts"][host]["revision"]
         assert call[call.index("--local-dir") + 1] == lock["hosts"][host]["localDir"]
     assert results["klein"]["revision"] == lock["hosts"]["klein"]["revision"]

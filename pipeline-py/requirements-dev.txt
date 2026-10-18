@@ -7,3 +7,6 @@ pytest==8.4.2
 # found it installed in the working venv but missing from this list, so a fresh clone could not even
 # collect tests/test_legibility.py and tests/test_svgguide.py
 numpy==2.5.4
+# The R1 quality gate's still path loads a produced PNG with PIL (eval.gate.load_rgb), and
+# the legibility checks need it too: the suite has to be able to collect them from a fresh clone.
+Pillow>=10
