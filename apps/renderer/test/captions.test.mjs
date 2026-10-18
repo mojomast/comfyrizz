@@ -82,3 +82,33 @@ test('K1: captions.tsx draws all four styles and keeps the sentence default', ()
   assert.match(source, /karaoke/, 'the karaoke highlight branch is present');
   assert.match(source, /zIndex: 100/, 'N11: captions still sit above scrims and panels');
 });
+
+test('K1: renderPackage narration options carry measured word timings', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { narrationOptions } = await import('../scripts/render-package-lib.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'comfyrizz-k1-'));
+  try {
+    mkdirSync(join(dir, 'audio'), { recursive: true });
+    writeFileSync(join(dir, 'audio', 'durations.json'), JSON.stringify({
+      gapSeconds: 0.15,
+      paddingSeconds: 0.25,
+      scenes: {
+        s1: {
+          chunks: [
+            { text: 'Meet Orbit.', seconds: 2, words: [{ text: 'Meet', start: 0, end: 0.5 }, { text: 'Orbit.', start: 0.5, end: 2 }] },
+            { text: 'No words here.', seconds: 1 },
+          ],
+        },
+      },
+    }));
+    const options = narrationOptions(dir);
+    assert.deepEqual(options.narration.s1[0].words, [
+      { text: 'Meet', start: 0, end: 0.5 },
+      { text: 'Orbit.', start: 0.5, end: 2 },
+    ]);
+    assert.equal(options.narration.s1[1].words, undefined, 'a chunk without words stays plain');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

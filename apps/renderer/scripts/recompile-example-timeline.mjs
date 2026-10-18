@@ -31,7 +31,11 @@ const { compileTimeline } = await import(join(plannerDir, 'dist', 'src', 'index.
 function optionsFromDurations(durations) {
   const narration = {};
   for (const [sceneId, scene] of Object.entries(durations.scenes ?? {})) {
-    narration[sceneId] = scene.chunks.map(chunk => ({ text: chunk.text, seconds: chunk.seconds }));
+    narration[sceneId] = scene.chunks.map(chunk =>
+      chunk.words && chunk.words.length > 0
+        ? { text: chunk.text, seconds: chunk.seconds, words: chunk.words }
+        : { text: chunk.text, seconds: chunk.seconds },
+    );
   }
   return { narration, narrationGapSeconds: durations.gapSeconds, narrationPaddingSeconds: durations.paddingSeconds };
 }
