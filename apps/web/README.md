@@ -168,6 +168,24 @@ Evidence: the probe saw 4 chips on each of 6 cards, tapped **Warmer** on `s_titl
 log showed `palette warmed (#1f1505, #2d2a31, #7f92f0)` → saved revision → `Scene re-render
 finished: s_title`.
 
+### Step 5c (C-pres): the AI presenter toolbar
+
+The storyboard now starts with a **presenter toolbar**: the coverage
+chips **None** (default) / **Intro + outro** / **All scenes**, quick presets **Intro/outro**, **All
+scenes**, **None**, a **Placement** picker (`pip-br|pip-bl|pip-bc|split-left`) and an “AI presenter”
+label toggle. Each scene card also has a per-scene **Presenter** select (`default|off|pip|split`).
+Every change posts to `POST /api/presenter/set` (the same pure `applyPresenterSet` the agent tool
+uses), validates + saves a new revision, and returns the recompiled `presenters` track so the Player
+preview updates immediately. The presenter is **off by default** and clips are planned, not run. The
+brief card gained a **Presenter** chip (`No presenter (default)` / `Intro + outro` / `All scenes`);
+the vocabulary is `WEB_PRESENTER_COVERAGES`, kept in sync with the agent's `PRESENTER_COVERAGES` by
+`test/presenter-ui.test.mjs`.
+
+Evidence: `apps/web` typecheck is clean and `test/presenter-ui.test.mjs` (2/2) checks the toolbar
+hooks, the `/api/presenter/set` POST and the brief chip against the agent vocabulary; the server
+route is covered by `apps/server/test/scene.test.mjs` (4/4). No browser screenshot was taken — this
+was verified by source + API tests, not by inspection of a rendered page.
+
 ## C6 backend run (spend card + run panel)
 
 The top bar's **Backend** picker now offers `BYO ComfyUI` and `Google Colab G4` alongside `CPU`.

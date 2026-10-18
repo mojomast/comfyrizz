@@ -32,6 +32,7 @@ illustration of a nebula" becomes one SVG route and one FLUX route.
 | `assets.generate_image` | Plans a FLUX still + expanded caption; never submits a GPU job (`requires_approval: spend`) |
 | `assets.sketch_to_render` | SVG base through A5 **plus** a planned Klein reference edit (`refs: [svg_id]`, ref-edit workflow, GPU test 2 template); icons stay SVG-only |
 | `assets.search` / `assets.attach` | Fallback metadata; attach requires approval |
+| `presenter.set` | Opt-in AI presenter (C-pres): coverage `none|bookends|all`, per-scene `off|pip|split`, placement/shape/size/label; returns `portrait_prompt` for `assets.generate_image` + advisory `presenter_fixes` |
 
 `createToolset({generateSvg, planImage, initialPackage})` injects the real generator.
 Wire A5's loop as:
@@ -108,12 +109,25 @@ each scene /10 on readability, rhythm, continuity and brand, fixes only scenes a
 7 or below, leaves 9 or above alone, and stops after 2 rounds. It stays off unless
 the provider sets `imageInput: true` (DeepSeek v4.1 and the scripted model do not).
 
+## Presenter (C-pres)
+
+`src/presenter.ts` is the pure presenter layer (no model, network or GPU) shared by the agent tool,
+the brief chip and the web storyboard. The presenter is **opt-in and off by default**; when on, the
+default coverage is `bookends` (intro + outro). `PRESENTER_COVERAGES = BRIEF_PRESENTERS` so the brief
+chip and the tool cannot drift. `presenter.set` sets coverage/preset first, then block fields
+(`placement` `pip-br|pip-bl|pip-bc|split-left`, `shape`, `size` 0.18–0.32, `label`), then per-scene
+values keyed by scene id or 1-based index. `split` only works on the `hero` layout; `lintPresenter`
+keeps the presenter off chart/stat scenes (`PRESENTER_ON_READ_ONLY_SCENE`) and returns advisory
+`presenter_fixes`. `presenterPortraitPrompt` emits a **fictional person** portrait prompt
+("Fictional person, no real identity").
+
 ## Evidence
 
 ```bash
 npm test                         # router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render,
                                  # R2 brief/outline/presets/scene-chips, B1 brand kit, L1 language variants,
-                                 # D1 CSV/chart scenes, MS5 motion prompt / lint fixes / critique rubric
+                                 # D1 CSV/chart scenes, MS5 motion prompt / lint fixes / critique rubric,
+                                 # C-pres presenter controls / brief chip / portrait prompt / lint
 node scripts/m4-live.mjs         # live OpenCode Go: propose → edit → 2 routes → SVG through A5
 node scripts/m4-two-providers.mjs # same loop against a local OpenAI-compatible endpoint
 ```

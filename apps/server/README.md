@@ -181,6 +181,14 @@ Each storyboard card has two actions that work on the draft the Player shows:
   unchanged and the storyboard's **Re-render scene** only rebuilds that one segment. The validating
   store rejects any edit that would break the package schema; a stale `baseRevision` is a 409. No
   model, network or GPU is involved.
+- **Presenter** (C-pres): `GET /api/presenter/chips` lists the coverage chips (`none`, `bookends`,
+  `all`) and quick presets; `POST /api/presenter/set` applies the same pure `applyPresenterSet` the
+  agent's `presenter.set` tool uses (coverage/preset, block fields, per-scene `off|pip|split`),
+  validates + saves a new revision, publishes a `presenter.set` SSE event and returns the recompiled
+  `presenters` track plus the `portrait_prompt` and advisory `presenter_fixes`. The presenter is
+  opt-in and off by default; a scene plan (`sceneAssetIds`) includes the presenter track's asset and
+  the scene's `presenter_asset`, so **Re-render scene** rebuilds the right segment. No model, network
+  or GPU is involved.
 - **Brand kit** (B1): `POST /api/brand` normalises a loose kit (palette hexes, fonts with a licence,
   tone words, optional base64 logo) and writes an uploaded SVG/PNG into the runtime package assets.
   The same `brand` payload is accepted by `/api/brief`, `/api/brief/outline` and `/api/agent`, so the
