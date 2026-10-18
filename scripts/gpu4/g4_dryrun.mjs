@@ -255,15 +255,22 @@ export async function dryRun({ outDir = null } = {}) {
   // against its own cwd), and the exec's success is the sentinel its script prints last - so each of
   // the scripts the flow runs must appear exactly once, from the right directory.
   const execEntries = readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec");
+  if (execEntries.some((entry) => !entry.cwd)) throw new Error("the fake log has no cwd for an exec; the parity check cannot run");
   const execScripts = execEntries.map((entry) => basename(String(entry.argv[entry.argv.indexOf("-f") + 1])));
-  const wrongCwd = execEntries.filter((entry) => dirname(String(entry.argv[entry.argv.indexOf("-f") + 1])) !== COLAB_DIR || entry.cwd !== COLAB_DIR);
+  // the argv carries only the basename (that is what the real CLI takes) and cwd carries the folder:
+  // the check is that every exec ran *from* the scripts' folder, which is what makes the basename resolve
+  const wrongCwd = execEntries.filter((entry) => entry.cwd !== COLAB_DIR);
   check.ok(
     "H14-exec-contract",
     `execs: ${execScripts.join(", ")} (cwd ${execEntries[0]?.cwd ?? "none"})`,
     execEntries.length >= 4 &&
       wrongCwd.length === 0 &&
       ["hf_token_dir.py", "bootstrap.py", "health.py", "run_jobs.py", "list_out.py"].every((name) => execScripts.includes(name)) &&
-      execScripts.filter((name) => name === "run_jobs.py").length === 1,
+      // one run_jobs.py per batch, each followed by a listing: the collection is per batch, so a later
+      // failure never discards an earlier batch's work
+      execScripts.filter((name) => name === "run_jobs.py").length >= 1 &&
+      execScripts.filter((name, index) => name === "run_jobs.py" && execScripts[index + 1] === "list_out.py").length ===
+        execScripts.filter((name) => name === "run_jobs.py").length,
   );
   // H15: the VM directories exist before anything is uploaded (G4-4), the token and the model lock are
   // on the VM before the bootstrap reads them, and the bootstrap runs before anything asks the box to
