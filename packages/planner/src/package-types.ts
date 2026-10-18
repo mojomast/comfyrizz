@@ -145,9 +145,19 @@ export interface ComfyrizzPackage {
 }
 
 /** Measured narration chunks, one entry per spoken sentence/utterance. */
+export interface NarrationWord {
+  text: string;
+  /** seconds from the start of the sentence (chunk) */
+  start: number;
+  /** seconds from the start of the sentence (chunk) */
+  end: number;
+}
+
 export interface NarrationChunk {
   text: string;
   seconds: number;
+  /** K1: optional per-word timings inside this sentence (seconds, sentence-relative). */
+  words?: NarrationWord[];
 }
 
 export interface CompileOptions {

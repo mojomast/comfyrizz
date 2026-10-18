@@ -2,13 +2,24 @@
  * Captions and measured narration (spec 6.8).
  *
  * Kokoro synthesises one sentence at a time. `synth.py` writes the measured
- * seconds per chunk; this module turns them into compiler options and exports
- * SRT/VTT from the *same* cues the player uses. No word timestamps are invented.
+ * seconds per chunk and, since K1, a `words[]` list inside each chunk. A real
+ * aligner can supply those words; otherwise `synth.py`'s syllable fallback fills
+ * the sentence. This module turns them into compiler options and exports SRT/VTT
+ * from the *same* cues the player uses.
  */
+
+export interface NarrationWord {
+  text: string;
+  /** seconds from the start of the sentence (chunk) */
+  start: number;
+  /** seconds from the start of the sentence (chunk) */
+  end: number;
+}
 
 export interface NarrationChunk {
   text: string;
   seconds: number;
+  words?: NarrationWord[];
 }
 
 export interface SceneNarration {
@@ -51,6 +62,8 @@ export interface CompileNarrationOptions {
 
 const DEFAULT_GAP = 0.15;
 const DEFAULT_PADDING = 0.25;
+/** K1: allow an aligner's rounding when checking that words fill their sentence. */
+const WORD_TOLERANCE = 0.02;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -72,7 +85,7 @@ export function parseDurations(input: unknown): NarrationDurations {
         throw new Error(`scene ${sceneId} chunk ${index} is invalid`);
       }
       if (!(chunk.seconds > 0)) throw new Error(`scene ${sceneId} chunk ${index} has no duration`);
-      return { text: chunk.text, seconds: chunk.seconds };
+      return { text: chunk.text, seconds: chunk.seconds, words: parseWords(chunk.words, chunk.seconds, sceneId, index) };
     });
     const seconds = typeof value.seconds === 'number' ? value.seconds : 0;
     scenes[sceneId] = {
@@ -102,11 +115,39 @@ export function parseDurations(input: unknown): NarrationDurations {
   };
 }
 
+/** K1: validate the optional per-word timings; they must fill the measured sentence. */
+function parseWords(input: unknown, seconds: number, sceneId: string, chunkIndex: number): NarrationWord[] | undefined {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input)) throw new Error(`scene ${sceneId} chunk ${chunkIndex} words must be an array`);
+  const where = `scene ${sceneId} chunk ${chunkIndex}`;
+  let previousStart = 0;
+  const words = input.map((word, index) => {
+    if (!isRecord(word) || typeof word.text !== 'string' || !word.text.trim()) {
+      throw new Error(`${where} word ${index} has no text`);
+    }
+    if (typeof word.start !== 'number' || typeof word.end !== 'number') {
+      throw new Error(`${where} word ${index} needs numeric start/end`);
+    }
+    if (word.start < previousStart - WORD_TOLERANCE || word.end < word.start) {
+      throw new Error(`${where} word ${index} is not monotonic`);
+    }
+    if (word.start < -WORD_TOLERANCE || word.end > seconds + WORD_TOLERANCE) {
+      throw new Error(`${where} word ${index} falls outside the ${seconds}s sentence`);
+    }
+    previousStart = word.start;
+    return { text: word.text, start: word.start, end: word.end };
+  });
+  if (words.length > 0 && Math.abs(words[words.length - 1].end - seconds) > WORD_TOLERANCE) {
+    throw new Error(`${where} words end at ${words[words.length - 1].end}s, sentence is ${seconds}s`);
+  }
+  return words;
+}
+
 /** Options for `compileTimeline` — measured durations only, so not provisional. */
 export function compileOptionsFromDurations(durations: NarrationDurations): CompileNarrationOptions {
   const narration: Record<string, NarrationChunk[]> = {};
   for (const [sceneId, scene] of Object.entries(durations.scenes)) {
-    narration[sceneId] = scene.chunks.map(chunk => ({ text: chunk.text, seconds: chunk.seconds }));
+    narration[sceneId] = scene.chunks.map(chunk => (chunk.words && chunk.words.length > 0 ? { text: chunk.text, seconds: chunk.seconds, words: chunk.words } : { text: chunk.text, seconds: chunk.seconds }));
   }
   return {
     narration,

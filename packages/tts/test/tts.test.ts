@@ -83,3 +83,58 @@ test('bad durations are rejected, not silently repaired', () => {
     /sample rate/,
   );
 });
+
+test('K1: per-word timings ride along with the measured chunks', () => {
+  const withWords = parseDurations({
+    version: 1,
+    sampleRate: 24000,
+    scenes: {
+      s1: {
+        chunks: [
+          {
+            text: 'One package.',
+            seconds: 1.2,
+            words: [
+              { text: 'One', start: 0, end: 0.4 },
+              { text: 'package.', start: 0.4, end: 1.2 },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  const options = compileOptionsFromDurations(withWords);
+  assert.deepEqual(options.narration.s1[0].words, [
+    { text: 'One', start: 0, end: 0.4 },
+    { text: 'package.', start: 0.4, end: 1.2 },
+  ]);
+});
+
+test('K1: a chunk with no words stays exactly as before', () => {
+  const options = compileOptionsFromDurations(durations);
+  assert.equal(options.narration.s_title[0].words, undefined);
+});
+
+test('K1: bad word timings are rejected, not silently repaired', () => {
+  const scene = (words: unknown) => ({
+    version: 1,
+    sampleRate: 24000,
+    scenes: { s1: { chunks: [{ text: 'One two', seconds: 1, words }] } },
+  });
+  assert.throws(
+    () => parseDurations(scene([{ text: 'One', start: 0.6, end: 0.5 }])),
+    /monotonic/,
+  );
+  assert.throws(
+    () => parseDurations(scene([{ text: 'One', start: 0, end: 2 }])),
+    /outside/,
+  );
+  assert.throws(
+    () => parseDurations(scene([{ text: 'One', start: 0, end: 0.5 }])),
+    /sentence is 1s/,
+  );
+  assert.throws(
+    () => parseDurations(scene([{ text: '', start: 0, end: 1 }])),
+    /no text/,
+  );
+});

@@ -22,6 +22,7 @@ import type {
   ComfyrizzPackage,
   LayoutId,
   NarrationChunk,
+  NarrationWord,
   Scene,
   SceneLowerThird,
 } from './package-types.js';
@@ -76,6 +77,15 @@ export interface TimelineCaption {
   to: number;
   sceneId: string;
   estimated: boolean;
+  /** K1: per-word cues inside this sentence (absolute frames). Absent when unmeasured. */
+  words?: TimelineWord[];
+}
+
+/** K1: one word inside a caption cue, in absolute frames. */
+export interface TimelineWord {
+  text: string;
+  from: number;
+  to: number;
 }
 
 /**
@@ -310,7 +320,11 @@ function buildCaptions(plans: TimelineScene[], pkg: ComfyrizzPackage, options: C
       let cursor = scene.from;
       for (const chunk of chunks) {
         const frames = frameSecondsToFrames(chunk.seconds, fps);
-        captions.push({ text: chunk.text, from: cursor, to: cursor + frames, sceneId: scene.id, estimated: false });
+        const to = cursor + frames;
+        const caption: TimelineCaption = { text: chunk.text, from: cursor, to, sceneId: scene.id, estimated: false };
+        const words = cueWords(chunk.words, cursor, to, fps);
+        if (words) caption.words = words;
+        captions.push(caption);
         cursor += frames + frameSecondsToFrames(gap, fps);
       }
       continue;
@@ -332,6 +346,19 @@ function buildCaptions(plans: TimelineScene[], pkg: ComfyrizzPackage, options: C
     warnings.push(`Captions for ${scene.id} are estimated until narration audio is measured.`);
   }
   return { captions, warnings };
+}
+
+/** K1: map sentence-relative word seconds into absolute caption frames, clamped inside the cue. */
+function cueWords(words: NarrationWord[] | undefined, from: number, to: number, fps: number): TimelineWord[] | undefined {
+  if (!words || words.length === 0) return undefined;
+  const out: TimelineWord[] = [];
+  for (const [index, word] of words.entries()) {
+    const wordFrom = Math.max(from, from + Math.round(word.start * fps));
+    const isLast = index === words.length - 1;
+    const wordTo = isLast ? to : Math.min(to, Math.max(wordFrom + 1, from + Math.round(word.end * fps)));
+    out.push({ text: word.text, from: wordFrom, to: wordTo });
+  }
+  return out;
 }
 
 function plateRetimes(pkg: ComfyrizzPackage, fps: number): PlateRetime[] {

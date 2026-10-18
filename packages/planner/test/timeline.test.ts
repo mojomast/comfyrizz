@@ -260,3 +260,41 @@ test('P-pres: size is clamped to the schema range and the seam dissolve follows 
   assert.equal(timeline.presenters![1].dissolveInFrames, 5);
   assert.equal(timeline.presenters![1].dissolveOutFrames, 0);
 });
+
+test('K1: measured word timings become caption word cues inside the sentence', () => {
+  const narrated = pkg([scene('s1', { narration: 'Meet Orbit.', transitionOut: { type: 'none', frames: 0 } })]);
+  narrated.voice = { enabled: true, engine: 'kokoro', voice: 'af_heart', speed: 1 };
+  const timeline = compileTimeline(narrated, {
+    narration: {
+      s1: [
+        {
+          text: 'Meet Orbit.',
+          seconds: 2,
+          words: [
+            { text: 'Meet', start: 0, end: 0.5 },
+            { text: 'Orbit.', start: 0.5, end: 2 },
+          ],
+        },
+      ],
+    },
+  });
+  const cue = timeline.captions[0];
+  assert.equal(cue.text, 'Meet Orbit.');
+  assert.equal(cue.from, 0);
+  assert.equal(cue.to, 60);
+  assert.deepEqual(cue.words, [
+    { text: 'Meet', from: 0, to: 15 },
+    { text: 'Orbit.', from: 15, to: 60 },
+  ]);
+  // monotonic and inside the sentence span
+  for (const word of cue.words ?? []) {
+    assert.ok(word.from >= cue.from && word.to <= cue.to && word.to > word.from);
+  }
+});
+
+test('K1: a sentence without words keeps the old caption shape', () => {
+  const narrated = pkg([scene('s1', { narration: 'Meet Orbit.', transitionOut: { type: 'none', frames: 0 } })]);
+  narrated.voice = { enabled: true, engine: 'kokoro', voice: 'af_heart', speed: 1 };
+  const timeline = compileTimeline(narrated, { narration: { s1: [{ text: 'Meet Orbit.', seconds: 2 }] } });
+  assert.equal(timeline.captions[0].words, undefined);
+});
