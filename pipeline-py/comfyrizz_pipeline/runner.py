@@ -134,6 +134,11 @@ class Runner:
             raise ValueError(f"{self.config.jobs_file} is not a valid comfyrizz.jobs/v1 document:\n{detail}")
         if self.config.batch:
             raw = self._filter_batch(raw, self.config.batch)
+        else:
+            # the plan's job list is a listing, not an execution order: a job that uploads a sibling's
+            # output has to be submitted after the sibling (H9, GPU test 4 dry run)
+            jobs = raw.get("jobs", [])
+            raw = {**raw, "jobs": self._order_by_dependencies(jobs, jobs)}
         self.jobs_doc = raw
         return raw
 
@@ -151,9 +156,41 @@ class Runner:
             if blocked:
                 job = {**job, "_blockedBy": blocked}
             kept.append(job)
+        kept = self._order_by_dependencies(kept, doc.get("jobs", []))
         filtered = {**doc, "jobs": kept, "batch": batch, "batches": [entry for entry in doc.get("batches", []) if entry["name"] in (batch,)]}
         filtered["hash"] = doc.get("hash")
         return filtered
+
+    @staticmethod
+    def _order_by_dependencies(jobs: list[dict[str, Any]], all_jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Producers before consumers, inside one batch (H9/GPU test 4 dry run).
+
+        The plan's ``batches[].jobs`` is a *listing*, not necessarily an execution order: the GPU test 4
+        dry run planned ``["a_ref.still", "a_i2i.still", "a_still.still"]`` in one batch, and the two
+        consumers upload ``assets/a_still.png`` as their reference, so submitting in list order failed
+        them with ``input_file_missing``. A batch is submitted in list order, so the runner orders the
+        batch: depth first by ``deps`` among jobs of this batch, and the incoming order for anything
+        whose deps are outside it or are equal. A cycle keeps the written order (the job's own
+        dependency check is what refuses it, not this pass).
+        """
+        by_id = {job["id"]: job for job in all_jobs}
+        order: list[str] = []
+        state: dict[str, str] = {}
+
+        def visit(job_id: str) -> None:
+            if job_id in state or job_id not in by_id:
+                return
+            state[job_id] = "open"
+            for dep in by_id[job_id].get("deps") or []:
+                if state.get(dep) != "open":  # a cycle: leave it to the dependency check
+                    visit(dep)
+            state[job_id] = "done"
+            order.append(job_id)
+
+        for job in jobs:
+            visit(job["id"])
+        rank = {job_id: index for index, job_id in enumerate(order)}
+        return sorted(jobs, key=lambda job: rank.get(job["id"], len(rank)))
 
     def _jobs_by_id(self) -> dict[str, dict[str, Any]]:
         return {job["id"]: job for job in self.jobs_doc.get("jobs", [])}
