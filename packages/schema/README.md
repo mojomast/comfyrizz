@@ -14,6 +14,7 @@ tested against each other.
 | `scripts/gen-types.mjs` | The generator; `--check` fails if `types.ts` is stale. |
 | `src/index.mjs` | `validatePackage()`, `schemaErrors()`, `compile()`, `parse()`. |
 | `src/semantic.mjs` | The semantic rules (`SEM_*`), the layout contract, `applyDefaults()`, `pathProblem()`. |
+| `src/motion.mjs` | MS2: the motion vocabulary, `lintMotion()`, `applyMotionFixes()`, `autofixMotion()`. |
 | `bin/comfyrizz-validate.mjs` | CLI: `node bin/comfyrizz-validate.mjs <pkg.json \| -> [--json] [--defaults]`. |
 | `fixtures/valid/*.json` | Hand-written good packages (§6.3 example, minimal, generated-first, defaults). |
 | `fixtures/invalid/*.json` | **Generated** from the good ones by `fixtures/build.mjs` (one declared violation each). |
@@ -51,8 +52,51 @@ loose syntax bound, the semantic layer holds the readability bound.
 Scene ids are `s…`, asset ids `a…`, dataset ids `d…` (`^s[A-Za-z0-9_-]{0,63}$` etc.).
 `background` sets **exactly one** of `asset` (a plate/still) or `procedural`
 (`gradient | grid | dots | grain | mesh`) — procedural backgrounds are the fallback when no
-plate exists. `transitionOut` is `{ "type": "none"|"fade"|"slide"|"wipe", "frames": 0–120 }`;
+plate exists. `transitionOut` is `{ "type", "frames": 0–120, "direction"? }` (types below);
 the default (missing) is `{"type":"fade","frames":15}`.
+
+## Motion (MS2)
+
+All motion fields are optional and a package without them is unchanged. The names are
+**exactly** the renderer's MS1 token names (`apps/renderer/src/motion/`), so the renderer looks
+them up directly; `test/motion.test.mjs` fails if the two drift.
+
+| Field | Values |
+|---|---|
+| `motion.energy` (package) | `calm \| medium \| high` (= `ENERGY_PROFILES`; default `medium`) |
+| `motion.direction` (package) | `left \| right \| up \| down`: the film's one current (default `left`; `up` = conclusion) |
+| `scenes[].motion.entry` | `none \| fadeUp \| maskRise \| pop \| countUp` (MS1 primitives) `\| waterfall \| drawOn` (MS3); omitted = layout default |
+| `scenes[].motion.ease` | `enter \| exit \| move \| land \| linear` (= `EASING_TOKENS`) |
+| `scenes[].motion.spring` | `settle \| heavy \| snap \| pop \| elastic` (= `SPRING_PRESETS`) |
+| `scenes[].motion.stagger` | `none \| word \| listItem \| dot` (= `STAGGER_SECONDS`) |
+| `scenes[].motion.emphasis` / `highlight` | `none \| keyword \| hero`; `highlight` = the phrase of the copy a keyword emphasis marks |
+| `scenes[].motion.energy` | per-scene override of the package energy |
+| `transitionOut.type` | `none \| cut \| fade \| blur` (no direction) `\| slide \| push \| wipe` (left/right/up/down) `\| zoom \| iris` (in/out) |
+| `transitionOut.direction` | omitted on a directional type = package `motion.direction` (planar) or `in` (zoom/iris) |
+
+`lintMotion(doc, { fps?, timeline? })` is pure and advisory: `validatePackage()` returns it as
+`motion` (it never changes `valid`), the CLI prints error/warning findings as `motion …` lines and
+the full list in `--json`. Each finding is `{ code, severity, scene, path, message, autofix }`;
+`autofix` is `null` or `{ description, ops: [{op:"set"|"delete", path, value?}] }`.
+`autofixMotion(doc)` lints → fixes → re-lints (≤ 5 passes) and returns `{ document, applied, remaining }`.
+Pass the compiled `timeline` when you have it; otherwise scene length is `preferredFrames`.
+The Python mirror is `comfyrizz_pipeline.motion_lint` (`lint_motion`, `autofix_motion`), compared case by case.
+
+| Code | Severity | Rule (autofix) |
+|---|---|---|
+| `MOTION_CUT_HAS_FRAMES` | error | a cut has frames 0 (→ 0) |
+| `MOTION_DIRECTION_AXIS` | error | zoom/iris go in/out, slide/push/wipe go left/right/up/down (→ current or `in`) |
+| `MOTION_HIGHLIGHT_MISSING` / `_NOT_IN_COPY` | error | keyword emphasis needs a highlight that is in the copy (→ drop it) |
+| `MOTION_DIRECTION_UNUSED` | warning | direction on none/cut/fade/blur (→ delete) |
+| `MOTION_TRANSITION_DURATION` | warning | frames inside the type's band: fade 0.3–0.8 s, blur 0.4–0.8, slide/push/wipe 0.25–0.6, zoom 0.15–0.4, iris 0.25–0.45 (→ clamp) |
+| `MOTION_TRANSITION_BUDGET` | warning | ≤ 3 transition types per film, none/cut excluded (→ primary type) |
+| `MOTION_DIRECTION_PINGPONG` | warning | consecutive transitions never reverse direction (→ previous direction) |
+| `MOTION_HERO_MULTIPLE` | warning | one `hero` per film; the last is kept (→ others `none`) |
+| `MOTION_ELASTIC_REPEAT` | warning | `elastic` spring once per film (→ `pop`) |
+| `MOTION_LINEAR_ENTRY` | warning | no linear entrances (→ `enter`) |
+| `MOTION_ENTRY_MISMATCH` | warning | countUp needs `data.dataset`, drawOn needs an svg/vector-anim asset (→ layout default) |
+| `MOTION_READING_HOLD` / `MOTION_FINAL_HOLD` | warning | after settling, copy holds ≥ 1 s + 0.25 s per word beyond 3; the last scene ≥ 2 s (→ longer `preferredFrames`) |
+| `MOTION_AGAINST_CURRENT`, `MOTION_HERO_EARLY`, `MOTION_NO_HERO`, `MOTION_ENERGY_MISMATCH` | info | advisory, no autofix |
 
 ## Generated-first fields (PLAN.md, Kyle's direction)
 

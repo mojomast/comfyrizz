@@ -7,6 +7,7 @@ Owner: **Hermes** (WS-B). Python side of Comfyrizz: the `comfy-sdk` runner that 
 |---|---|
 | `comfyrizz_pipeline/schema.py` | `comfyrizz.package/v1` + `comfyrizz.jobs/v1` validation (`jsonschema` + the shared `SEM_*` rules). Mirrors `packages/schema/src/semantic.mjs`. |
 | `comfyrizz_pipeline/validate.py` | CLI: `python -m comfyrizz_pipeline.validate <file> [--json]`. |
+| `comfyrizz_pipeline/motion_lint.py` | MS2: `lint_motion()` / `autofix_motion()`, the advisory motion lint; mirrors `packages/schema/src/motion.mjs` (see packages/schema/README.md "Motion"). |
 | `comfyrizz_pipeline/atomic.py` | tmp-file + `os.replace` writes; canonical JSON + hashing (same canonical form as the TS planner). |
 | `comfyrizz_pipeline/attempts.py` | Attempt records (`attempts/<attempt_id>.json`), states, open-attempt lookup. |
 | `comfyrizz_pipeline/manifest.py` | `out/manifest.json` build/write/read and the "manifest decides success" verdict. |
