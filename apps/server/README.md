@@ -56,7 +56,7 @@ The missing step for a true stranger is a committed `pnpm-lock.yaml`, which live
 | `POST` | `/api/brief/outline` | R2 step 4: `{brief}` → `{mode, complete: true, brief, outline}`. Completes an edited Brief card and returns a fresh script-first outline; a cleared field falls back to its preset default |
 | `GET` | `/api/brief/presets` | R2 step 5: `{presets}` — the six bundled looks with their palette, font, attributes and an inline 160×90 CPU/SVG `thumbnail`. `/api/brief` and `/api/brief/outline` also carry it so the picker renders without a second round-trip |
 | `POST` | `/api/render` | `{packageId, baseRevision}`, or a C1-style `{package}` draft; returns `video/mp4` |
-| `POST` | `/api/export` | C10 bundle: `{packageId, baseRevision, force?}` or `{package}` draft. Renders (or reuses) the MP4 and writes `out/export/<package-id>/{video.mp4,captions.srt,captions.vtt,CREDITS.md,package.zip}`; `package.zip` ships only assets the v0.1 rights policy allows and lists every refusal with its licence reason |
+| `POST` | `/api/export` | C10 bundle: `{packageId, baseRevision, force?}` or `{package}` draft. Renders (or reuses) the MP4 and writes `out/export/<package-id>/{video.mp4,captions.srt,captions.vtt,CREDITS.md,package.zip}`; `package.zip` ships only assets the v0.1 rights policy allows and lists every refusal with its licence reason. L1: add `variants: {languages?, aspects?, translations?}` to export `out/export/<variant-id>/` per language/aspect + a `variants.json` manifest |
 | `POST` | `/api/run` | C6 backend run: `{backendId, jobs, budgetUnits, approved?, comfyuiUrl?}`. Returns the estimate + `planHash`; a Colab run without approval returns `approvalRequired:true` and starts nothing |
 | `GET` | `/api/run` | C6 run status: active run, `spentEstimate`, approvals and run list |
 | `POST` | `/api/run/approve` | `{planHash}`; approves exactly that plan (hardware + budget), so a changed plan needs a new card |
@@ -140,6 +140,18 @@ x2 file when the package declares it and falling back to the base media scaled b
 | `CREDITS.md` | `packages/sources` `buildCredits`, including a "Not redistributable" section with each refusal's licence and source URL |
 | `package.zip` | `packages/sources` `buildPackageZip`: package + timeline + workflows + credits + only assets the v0.1 rights policy allows; NC/ND/SA/unknown and byte-less assets are listed in `manifest.json` with a reason |
 
+### L1: language + aspect variant bundles
+
+`POST /api/export` accepts a `variants` object: `{languages?: string[], aspects?: ('16:9'|'9:16'|'1:1')[], translations?}`.
+`apps/server/src/variant.mjs` builds one package per pair — a non-English variant runs
+`applyLanguageVariant` (translated copy + narration, `voice.language` set), a non-16:9 variant runs the
+renderer's `relayoutPackage` (moved foreground, never cropped). Each variant is written as a sidecar in
+the package dir (so relative asset paths resolve), exported to `out/export/<variant-id>/`, and listed in
+`out/export/<base-id>/variants.json` with language, aspect, frame size, scene count, frames and files.
+A language variant passes `narration: {}`, so its captions are re-estimated from the translated
+`scene.narration` instead of reusing the base language's measured cues. `apps/server/test/variant.test.mjs`
+covers this with a stub renderer (no Google Colab runtime).
+
 The example seed copies `examples/launch-demo/assets` into `<runtime>/packages/assets` so the
 seeded demo can render and export its SVG vectors. `apps/server/test/export.test.mjs` is the e2e
 acceptance: it renders `examples/launch-demo` on the real CPU path and asserts ffprobe frames ==
@@ -221,7 +233,7 @@ fallback (`x-comfyrizz-full-render: 1`, reason `scene durations changed`).
 npm test          # host/token/origin, revisions/conflict, invalid package, render + SSE, replay,
                   # traversal, the C5/C8 agent end-to-end renders, the C10 export-bundle e2e,
                   # C11 per-scene re-run, C13 changed-scenes-only and the R2 plan-mode brief
-                  # (54 tests; real CPU render, ~4 min — the agent e2e is slow, run it alone under load)
+                  # (57 tests; real CPU render, ~4 min — the agent e2e is slow, run it alone under load)
 ```
 
 Real end-to-end check (2026-10-17): built web served by this server, opened with the fragment

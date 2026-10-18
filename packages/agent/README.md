@@ -72,11 +72,20 @@ with a file **and** one of `OFL-1.1`, `Apache-2.0`, `MIT`, `CC0-1.0`, `UFL-1.0`,
 
 See `examples/brand-kit/` for a kit, a logo and a package whose theme is the normalised result.
 
+## Language variants (L1)
+
+`src/language.ts` builds a translated variant of a package. `translatableStrings(pkg)` lists every
+scene copy string, list item and `narration`; `translationPrompt(strings, language)` is the JSON-in/
+JSON-out instruction for the agent LLM (names, URLs and numbers stay exact); `translateStrings` and
+`applyLanguageVariant(pkg, {language, translations})` produce a new `...-fr` package with translated
+copy + narration and `voice.language` set (Kokoro reads it), leaving the source package untouched.
+The translator is injected, so tests and offline examples use `dictionaryTranslator`.
+
 ## Evidence
 
 ```bash
-npm test                         # 45 tests: router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render,
-                                 # R2 brief/outline/presets/scene-chips and B1 brand kit
+npm test                         # 51 tests: router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render,
+                                 # R2 brief/outline/presets/scene-chips, B1 brand kit and L1 language variants
 node scripts/m4-live.mjs         # live OpenCode Go: propose → edit → 2 routes → SVG through A5
 node scripts/m4-two-providers.mjs # same loop against a local OpenAI-compatible endpoint
 ```

@@ -39,6 +39,16 @@ draws `theme.logo_asset` top-left on the title/outro layouts and hides itself on
 failing the render. `preparePublicDir` copies the brand-font top-level directory alongside the image
 assets, so a clean-clone render finds it (`apps/renderer/test/brand.test.mjs`).
 
+## Aspect re-layout (L1)
+
+`src/layout-model.js` is aspect-aware. `TEXT_ZONES_BY_ASPECT` / `FREE_AREAS` plus `textZones(scene, aspect)`,
+`foregroundBox(item, asset, dims, aspect)` and `findLayoutOverlaps(pkg, {aspect})` (aspect inferred from
+`pkg.format`) validate the safe zone at 16:9, 9:16 and 1:1. `relayoutPackage(pkg, aspect)` / `relayoutVariants(pkg)`
+re-lay-out a package by moving each foreground asset into its layout's free area — **not cropping**, and the
+asset table is untouched — while 16:9 is the identity transform. In portrait a split hero stacks copy-over-media
+and the bar chart shrinks to the safe area (`components.tsx`), so a vertical render is a real re-layout rather than a
+centre crop. `apps/renderer/test/relayout.test.mjs` checks both aspects for wide/square/tall assets.
+
 ## Media layer (P-fix1)
 
 Raster/video assets can fill the frame or sit in a framed panel:
