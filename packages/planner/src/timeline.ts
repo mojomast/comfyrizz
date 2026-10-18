@@ -125,6 +125,19 @@ export class TimelineError extends Error {
   }
 }
 
+/**
+ * X1: frames for a cutdown target (6 / 15 / 30 s). The cutdown tool writes
+ * `duration.mode = "target"` with this count; target mode then holds the film
+ * on it. Rounding matches `packages/agent` `targetFramesForSeconds`.
+ */
+export function targetFramesForSeconds(seconds: number, fps: number = DEFAULT_FPS): number {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new TimelineError('bad-target', 'A target duration needs a positive number of seconds.');
+  }
+  const rate = Number.isFinite(fps) && fps > 0 ? Math.floor(fps) : DEFAULT_FPS;
+  return Math.max(1, Math.round(seconds * rate));
+}
+
 const DEFAULT_NARRATION_GAP_SECONDS = 0.15;
 const DEFAULT_NARRATION_PADDING_SECONDS = 0.25;
 

@@ -5,10 +5,11 @@
 // licence reason in CREDITS.md and manifest.json. No network and no keys.
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { buildCredits, buildPackageZip } from '../../../packages/sources/dist/src/index.js';
+import { buildCredits, buildPackageZip, isAssetRedistributable } from '../../../packages/sources/dist/src/index.js';
 import { captionsToSrt, captionsToVtt } from '../../../packages/tts/dist/src/index.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions } from '../../renderer/scripts/render-package-lib.mjs';
+import { buildSocialPack, SOCIAL_PIXEL_FILES } from './social.mjs';
 
 export const EXPORT_FILE_NAMES = ['video.mp4', 'captions.srt', 'captions.vtt', 'CREDITS.md', 'package.zip'];
 
@@ -21,6 +22,29 @@ function isVector(asset) {
  * the declared file when it exists in this checkout. Assets without bytes are
  * listed by `buildPackageZip` with a reason instead of shipping a broken entry.
  */
+/**
+ * A rendered frame shows every asset a scene places. Those pixels may not ship
+ * in the social pack when one of them fails the v0.1 rights filter.
+ */
+export function blockedSceneAsset(pkg) {
+  const ids = [];
+  for (const scene of pkg.scenes ?? []) {
+    if (scene?.background?.asset) ids.push(scene.background.asset);
+    for (const item of scene?.foreground ?? []) if (item?.asset) ids.push(item.asset);
+  }
+  for (const id of ids) {
+    const asset = pkg.assets?.[id];
+    if (!asset || isAssetRedistributable(asset)) continue;
+    return {
+      assetId: id,
+      ...(asset.license?.id ? { licenseId: asset.license.id } : {}),
+      reason: asset.license?.blocked_reason
+        ?? (asset.license?.blocked ? 'licence policy blocked this asset' : 'not marked redistributable under the v0.1 licence policy'),
+    };
+  }
+  return null;
+}
+
 export function collectAssetBytes(pkg, packageDir) {
   const assets = {};
   for (const [id, asset] of Object.entries(pkg.assets ?? {})) {
@@ -80,7 +104,32 @@ export function createExporter({ exportsDir, render } = {}) {
     writeFileSync(vttPath, captionsToVtt(cues, timeline.fps));
 
     const generatedAt = new Date().toISOString();
-    const zip = buildPackageZip({ package: pkg, timeline, assets: collectAssetBytes(pkg, packageDir), generatedAt });
+    const social = buildSocialPack({ mp4: videoPath, timeline, pkg, outDir: dir, onLog });
+    const blocked = blockedSceneAsset(pkg);
+    const extras = [];
+    const extraExcluded = [];
+    for (const file of social) {
+      const pixels = SOCIAL_PIXEL_FILES.includes(file.name);
+      if (pixels && blocked) {
+        extraExcluded.push({
+          assetId: file.name,
+          file: file.name,
+          ...(blocked.licenseId ? { licenseId: blocked.licenseId } : {}),
+          reason: `derived from ${blocked.assetId}: ${blocked.reason}`,
+        });
+        onLog(`rights: ${file.name} refused (${blocked.assetId})`);
+        continue;
+      }
+      extras.push({ path: file.name, data: readFileSync(file.path) });
+    }
+    const zip = buildPackageZip({
+      package: pkg,
+      timeline,
+      assets: collectAssetBytes(pkg, packageDir),
+      generatedAt,
+      extras,
+      extraExcluded,
+    });
     const zipPath = join(dir, 'package.zip');
     writeFileSync(zipPath, zip.bytes);
 
@@ -108,6 +157,9 @@ export function createExporter({ exportsDir, render } = {}) {
       reused,
       timelineHash: timeline.hash,
       captions: cues.length,
+      social: social
+        .filter(file => !extraExcluded.some(item => item.assetId === file.name))
+        .map(file => ({ name: file.name, bytes: file.bytes, path: file.path })),
       complete: zip.complete,
       included: zip.included,
       excluded: zip.excluded.map(item => ({
@@ -171,8 +223,10 @@ export function createExporter({ exportsDir, render } = {}) {
         format: { width: variant.package.format?.width, height: variant.package.format?.height },
         scenes: variant.package.scenes?.length ?? 0,
         frames: result.frames,
+        durationSeconds: variant.durationSeconds ?? null,
         timelineHash: result.timelineHash,
         files: result.files.map(file => file.name),
+        social: (result.social ?? []).map(file => file.name),
       })),
     };
     const manifestPath = join(exportsDir, pkg.id, 'variants.json');

@@ -150,6 +150,13 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
     included.push(assetId);
   }
 
+  for (const extra of input.extraExcluded ?? []) {
+    excluded.push(extra);
+  }
+  for (const extra of input.extras ?? []) {
+    entries.push({ path: safePath(extra.path), data: extra.data });
+  }
+
   const credits = input.credits ?? buildCredits(input.package, { generatedAt, policy, excluded });
   entries.push({ path: 'credits.json', data: `${JSON.stringify({ ...credits, markdown: undefined }, null, 2)}\n` });
   entries.push({ path: 'CREDITS.md', data: credits.markdown });

@@ -8,6 +8,7 @@ import { brandStyleBlock, brandTheme, type BrandKit } from './brand.js';
 import type { StylePreset } from './brief.js';
 import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
+import { cutdownPackage, type VoiceFn } from './cutdown.js';
 
 export interface AgentTool {
   definition: ToolDef;
@@ -49,6 +50,11 @@ export interface ToolsetOptions {
   onPackageChange?: (pkg: Record<string, any>) => void;
   /** Clock injection so tests are deterministic. */
   now?: () => string;
+  /**
+   * X1: CPU voice for `variant.cutdown`. Defaults to the word-timing stub
+   * (no Kokoro weights, no model). Must be synchronous. Never a GPU call.
+   */
+  voice?: VoiceFn;
   /**
    * B1: a normalised brand kit. `storyboard.propose` merges its theme over the
    * defaults, so the palette every image caption and SVG follows is the brand
@@ -141,6 +147,10 @@ const searchSchema = z.object({
 });
 
 const attachSchema = z.object({ scene_id: z.string().min(1), candidate_id: z.string().min(1) });
+
+export const cutdownSchema = z.object({
+  target_s: z.union([z.literal(6), z.literal(15), z.literal(30)]),
+});
 
 const tool = (name: string, description: string, parameters: Record<string, unknown>, schema: z.ZodTypeAny, run: AgentTool['run']): AgentTool => ({
   definition: { name, description, parameters },
@@ -604,6 +614,28 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       baseParameters({ scene_id: { type: 'string' }, candidate_id: { type: 'string' } }, ['scene_id', 'candidate_id']),
       attachSchema,
       (args: z.infer<typeof attachSchema>) => ({ scene_id: args.scene_id, candidate_id: args.candidate_id, requires_approval: true }),
+    ),
+    'variant.cutdown': tool(
+      'variant.cutdown',
+      'Cut the current package to 6, 15 or 30 seconds. Keeps a scene subset, rewrites narration to fit, and re-voices on CPU. Presenter clips are planned only for scenes whose narration changed, and are never run.',
+      baseParameters({ target_s: { type: 'number', enum: [6, 15, 30] } }, ['target_s']),
+      cutdownSchema,
+      (args: z.infer<typeof cutdownSchema>) => {
+        if (!state.package) throw new Error('variant.cutdown needs a package; call storyboard.propose first');
+        const cut = cutdownPackage(state.package, args.target_s, { ...(options.voice ? { voice: options.voice } : {}) });
+        state.package = cut.package;
+        touch();
+        return {
+          target_s: cut.targetSeconds,
+          targetFrames: cut.targetFrames,
+          frames: cut.frames,
+          seconds: Number((cut.frames / (state.package.format?.fps || 30)).toFixed(3)),
+          sceneIds: cut.sceneIds,
+          voiced: cut.voiced,
+          presenter: cut.presenter,
+          package: cut.package,
+        };
+      },
     ),
   };
 }

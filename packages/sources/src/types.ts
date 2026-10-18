@@ -124,6 +124,13 @@ export interface PackageZipInput {
   generatedAt?: string;
   credits?: Credits;
   licensePolicy?: LicensePolicy;
+  /**
+   * X1: extra bundle files (thumb, gif, card, chapters) the caller has already
+   * cleared through the rights filter. Refused ones are listed in extraExcluded
+   * and are not shipped.
+   */
+  extras?: ZipEntry[];
+  extraExcluded?: ExcludedAsset[];
 }
 
 export interface ZipEntry {

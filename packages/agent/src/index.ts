@@ -12,7 +12,18 @@ export {
   generateSvgSchema,
   generateImageSchema,
   sketchToRenderSchema,
+  cutdownSchema,
 } from './tools.js';
+export {
+  CUTDOWN_SECONDS,
+  cutdownPackage,
+  fitNarration,
+  isCutdownSeconds,
+  pickCutdownScenes,
+  stubVoice,
+  targetFramesForSeconds,
+} from './cutdown.js';
+export type { CutdownResult, CutdownSeconds, PresenterPlan, VoiceFn, VoiceInput, VoiceResult } from './cutdown.js';
 export type { AgentTool, PlannedImage, SvgAssetResult, ToolsetOptions } from './tools.js';
 export { runAgent } from './agent.js';
 export { runCpuSlice, defaultCpuScript } from './cpu-slice.js';
