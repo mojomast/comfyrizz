@@ -88,4 +88,31 @@ export type { Dataset, DatasetValue, DatasetParseOptions, DatasetParseResult, Cs
 export { CHART_SCENE_KINDS, formatValue, sourceCaption, proposeChartScenes, proposalValues } from './chart-scenes.js';
 export type { ChartSceneKind, ChartSceneProposal, ProposeChartScenesOptions } from './chart-scenes.js';
 export type { AgentEvent, RunAgentOptions, RunAgentResult, ToolRecord } from './agent.js';
-export type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ToolCall, ToolDef } from './types.js';
+export {
+  STYLE_PRESET_ENERGY,
+  MOTION_CRITIQUE_FIX_AT_OR_BELOW,
+  MOTION_CRITIQUE_LEAVE_AT_OR_ABOVE,
+  MOTION_CRITIQUE_MAX_ROUNDS,
+  motionVocabulary,
+  motionSystemSection,
+  lintPackageMotion,
+  motionFixInstructions,
+  normalizeSceneMotion,
+  normalizePackageMotion,
+  normalizeTransitionOut,
+  providerDeclaresImageInput,
+  critiqueRubricPrompt,
+  parseCritiqueReply,
+  runMotionCritique,
+} from './prompts/motion.js';
+export type {
+  MotionVocabulary,
+  MotionLintFinding,
+  MotionFixInstruction,
+  CritiqueSceneInput,
+  CritiqueSceneScore,
+  CritiqueRubric,
+  MotionCritiqueResult,
+  ImageInputDeclaration,
+} from './prompts/motion.js';
+export type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ImagePart, ToolCall, ToolDef } from './types.js';

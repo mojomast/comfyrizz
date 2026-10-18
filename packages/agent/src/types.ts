@@ -11,8 +11,15 @@ export interface ToolCall {
   args: unknown;
 }
 
+/** An MS4 contact sheet the critique judge may read. The builder's tool loop never sets this. */
+export interface ImagePart {
+  path: string;
+  mediaType?: 'image/png';
+}
+
 export type ChatMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string; images?: ImagePart[] }
   | { role: 'assistant'; content?: string | null; tool_calls?: ToolCall[] }
   | { role: 'tool'; content: string; tool_call_id: string };
 
@@ -33,5 +40,11 @@ export interface ChatRequest {
 
 export interface ChatModel {
   id: string;
+  /**
+   * Set true only when this provider accepts image input. Absent or false means
+   * text-only (DeepSeek v4.1, the scripted model): the motion critique stays off.
+   */
+  imageInput?: boolean;
+  capabilities?: { imageInput?: boolean };
   stream(request: ChatRequest): AsyncIterable<ChatChunk>;
 }
