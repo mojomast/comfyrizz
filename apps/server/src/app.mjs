@@ -7,7 +7,7 @@ import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
-import { planBrief } from './brief.mjs';
+import { planBrief, refreshBrief } from './brief.mjs';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -335,6 +335,20 @@ export function createApp({
       try {
         const result = planBrief(body);
         events.publish({ type: 'brief.planned', mode: result.mode, complete: result.complete, questions: result.questions.map(question => question.id) });
+        return sendJson(response, 200, result);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, {
+          error: error.message,
+          ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
+        });
+      }
+    }
+
+    if (url.pathname === '/api/brief/outline' && request.method === 'POST') {
+      const body = await readJson(request);
+      try {
+        const result = refreshBrief(body);
+        events.publish({ type: 'brief.outline', beats: result.outline.beats.length, seconds: result.outline.estimatedSeconds });
         return sendJson(response, 200, result);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {

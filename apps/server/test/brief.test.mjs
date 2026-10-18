@@ -142,3 +142,36 @@ test('express mode skips the questions and returns a validated brief', async () 
   assert.equal(french.json.brief.audience.language, 'fr');
   assert.equal(french.json.brief.voice.lang, 'fr');
 });
+
+test('POST /api/brief returns a script-first outline once complete', async () => {
+  const response = await request({ method: 'POST', path: '/api/brief', body: { prompt: RICH, mode: 'express' } });
+  assert.equal(response.status, 200);
+  const { outline } = response.json;
+  assert.deepEqual(outline.beats.map(beat => beat.id), ['s_title', 's_point', 's_proof', 's_outro']);
+  assert.equal(outline.targetSeconds, 45);
+  assert.ok(outline.estimatedSeconds > outline.narrationSeconds, 'the estimate adds the per-beat gaps');
+  assert.equal(outline.language, 'en');
+  assert.ok(outline.notes.some(note => /visible placeholder/.test(note)), 'no facts is called out');
+});
+
+test('POST /api/brief/outline refreshes an edited brief', async () => {
+  const plan = await request({ method: 'POST', path: '/api/brief', body: { prompt: RICH, mode: 'express' } });
+  const edited = { ...plan.json.brief, key_message: 'Ship the CPU renderer today.', length_s: 20, cta: 'book a demo' };
+  const response = await request({ method: 'POST', path: '/api/brief/outline', body: { brief: edited } });
+  assert.equal(response.status, 200);
+  assert.equal(response.json.brief.key_message, 'Ship the CPU renderer today.');
+  assert.equal(response.json.brief.length_s, 20);
+  assert.equal(response.json.outline.targetSeconds, 20);
+  assert.match(response.json.outline.beats[0].headline, /Ship the CPU renderer/);
+  assert.match(response.json.outline.beats.at(-1).narration, /book a demo/);
+  assert.equal(app.events.replay(0).at(-1).type, 'brief.outline');
+});
+
+test('POST /api/brief/outline is authenticated and defaults a partial brief', async () => {
+  assert.equal((await request({ method: 'POST', path: '/api/brief/outline', token: null, body: {} })).status, 401);
+  const response = await request({ method: 'POST', path: '/api/brief/outline', body: {} });
+  assert.equal(response.status, 200);
+  assert.equal(response.json.brief.style.preset, 'cinematic-dark');
+  assert.equal(response.json.brief.style.font, 'Inter');
+  assert.equal(response.json.outline.beats.length, 4);
+});
