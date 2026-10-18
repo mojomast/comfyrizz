@@ -285,5 +285,24 @@ test('runCpuSlice builds a six-scene package with four SVG assets and one GPU pl
   assert.ok(slice.package.scenes.every((scene: any) => scene.background?.procedural));
   const withForeground = slice.package.scenes.filter((scene: any) => (scene.foreground ?? []).length > 0);
   assert.equal(withForeground.length, 4);
-  assert.ok(Object.values(slice.package.assets).some((asset: any) => asset.status === 'pending' && asset.gen?.generator === 'flux3-klein'));
+  const pending = Object.values(slice.package.assets).find((asset: any) => asset.status === 'pending' && asset.gen?.generator === 'flux3-klein') as any;
+  assert.ok(pending, 'a pending flux3-klein asset is planned');
+  // P-fix5: without a caller plan the tool still stamps the workflow hash, or Run on
+  // backend rejects the package with 400 `gen.workflow_sha256 is required`.
+  assert.match(pending.gen.workflow_sha256, /^[0-9a-f]{64}$/);
+});
+
+test('P-fix5: the committed workflow manifest matches the workflow graphs', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const { WORKFLOW_SHA256 } = await import('../src/workflow-manifest.js');
+  const dir = new URL('../../../../workflows/', import.meta.url);
+  const names = readdirSync(dir).filter((name: string) => name.endsWith('.api.json')).sort();
+  assert.ok(names.length >= 3, `expected workflow graphs, found ${names.length}`);
+  for (const name of names) {
+    const key = `workflows/${name}`;
+    const sha = createHash('sha256').update(readFileSync(new URL(name, dir))).digest('hex');
+    assert.equal(WORKFLOW_SHA256[key], sha, `${key} manifest hash is stale; run node scripts/workflow-manifest.mjs`);
+  }
+  assert.deepEqual(Object.keys(WORKFLOW_SHA256).sort(), names.map((name: string) => `workflows/${name}`));
 });

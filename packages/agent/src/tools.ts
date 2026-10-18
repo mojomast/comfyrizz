@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { routeAsset, type AssetNeed, type RouteDecision } from './router.js';
 import { foregroundFor } from './package.js';
 import { expandFluxCaption, expandReferenceEditCaption, aspectFromSize, sourceDims, type Aspect } from './caption.js';
+import { WORKFLOW_SHA256 } from './workflow-manifest.js';
 import { brandStyleBlock, brandTheme, type BrandKit } from './brand.js';
 import type { StylePreset } from './brief.js';
 import type { SvgIntentLike } from './svg.js';
@@ -445,6 +446,11 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         }));
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
     const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
+    // P-fix5: the jobs planner requires `gen.workflow_sha256`, so a package built by the
+    // agent must stamp it. A caller-provided plan wins; otherwise the committed manifest
+    // supplies the hash for the workflow this tool is about to name.
+    const workflow = planned.workflow ?? defaultWorkflow;
+    const workflowSha256 = planned.workflowSha256 ?? WORKFLOW_SHA256[workflow];
     // The package schema only allows scalar gen.inputs values, and ReferenceMultiLatent
     // wires image0, so the first ref is the reference raster; extras are recorded only.
     const extraRefs = isRefEdit && refs.length > 1
@@ -470,8 +476,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         : 'pending-GPU: procedural background is the CPU fallback until a spend is approved',
       gen: {
         generator: 'flux3-klein',
-        workflow: planned.workflow ?? defaultWorkflow,
-        ...(planned.workflowSha256 ? { workflow_sha256: planned.workflowSha256 } : {}),
+        workflow,
+        ...(workflowSha256 ? { workflow_sha256: workflowSha256 } : {}),
         model: planned.model ?? 'flux-3-klein',
         inputs: planned.inputs ?? defaultInputs,
         backend: planned.backend ?? 'colab:G4',
