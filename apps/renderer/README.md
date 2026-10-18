@@ -99,8 +99,41 @@ state** (`CopyGuard`), never silent clipping.
 Media backgrounds and panels use `<OffthreadVideo>` (the stable looping-capable
 component in the pinned 4.0.536 build). The CPU slice has no video assets, so
 `LaunchDemo`/`NarratedDemo` remain procedural; `examples/showcase-gpu2` exercises
-the media layer end to end. `@remotion/transitions` fades are used for the
-compiled transitions.
+the media layer end to end. Compiled transitions use the MS2 vocabulary through
+`src/motion/presentations.tsx` (push/slide/zoom/iris/wipe/fade/blur), and the
+kinetic entries use `src/motion/kinetic.js` (waterfall, countUp, highlight
+sweep, SVG draw-on).
+
+## Motion (MS1 + MS3)
+
+`src/motion/index.js` holds the deterministic tokens: `EASING_TOKENS`,
+`SPRING_PRESETS`, `ENERGY_PROFILES`, `STAGGER_SECONDS` (capped at
+`MAX_STAGGER_SECONDS = 0.5`), plus `cubicBezier`, `ease`, `prog`,
+`staggerFrames`, `exitDuration`, `springValue`, `seededRandom`.
+`src/motion/primitives.js` builds `enterExit`, `fadeUp`, `maskRise`, `pop`,
+`countUp`, `exitFade` from those tokens; every primitive is a pure function of
+the local frame, so a still is a valid frame and the committed timelines stay
+fresh.
+
+`src/motion/transitions.js` is the pure transition maths. `transitionStyle(type,
+progress, options)` returns the frame's styles for both sides; `player.tsx`
+wraps each compiled overlap in `TransitionSeries.Transition` via
+`presentationFor()` (`none`/`cut` stay hard cuts). A push moves both scenes on
+one shared ease so the seam stays closed; energy picks the duration
+(calm 0.5–0.8 s, medium 0.3–0.5 s, high 0.15–0.3 s).
+
+`src/motion/kinetic.js` splits a headline into words (`waterfallPlan`),
+staggers their entries (`waterfallEntry`), runs one `highlightSweep` per scene
+(`motion.highlight`), and turns a foreground SVG into draw-on strokes:
+`drawOnSvg` adds `pathLength="1"`, animates `stroke-dashoffset` 1→0 in
+`data-draw-order` (then document order), and fades fills in afterwards.
+Non-path strokes, empty SVGs and unsafe markup fall back to `fadeUp`, keeping
+the A5 sanitizer/resvg check as the gate.
+
+`mergeScenes()` in `src/timeline-model.js` overlays the package's copy and
+transition vocabulary on the committed timing; `TimelinePlayer` calls it
+whenever a caller does not pass merged scenes, so a bare `timeline.json` can
+never silently drop its transitions (and truncate the run).
 
 ## Commands
 

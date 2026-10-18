@@ -22,7 +22,9 @@ import { proceduralStyle } from './background-model.js';
 import { statLines } from './stat-model.js';
 import { chartSeries } from './chart-model.js';
 import { LowerThird, MediaFill, MediaPanel, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
-import { STAGGER_SECONDS, fadeUp, pop, prog, staggerFrames } from './motion/primitives.js';
+import { STAGGER_SECONDS, countUp, fadeUp, maskRise, pop, prog, staggerFrames } from './motion/primitives.js';
+import { energyProfile } from './motion/index.js';
+import { highlightSweep, canDrawOn, drawOnSvg, splitHighlight, waterfallEntry, waterfallPlan } from './motion/kinetic.js';
 
 /* ------------------------------------------------------------------ *
  * Motion: the eased entry tokens live in ./motion (MS1). Every layout uses
@@ -133,15 +135,21 @@ function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media
  * motion (spec A5: no SMIL wall clock).
  * ------------------------------------------------------------------ */
 
-function VectorAsset({ assetId, frame, animation }: { assetId: string; frame: number; animation?: string }) {
+function VectorAsset({ assetId, frame, entry }: { assetId: string; frame: number; entry?: string }) {
   const assets = useContext(GeneratedAssetsContext);
   const { fps } = useVideoConfig();
   const asset = assets[assetId];
   if (!asset) return null;
-  const local = fadeUp({ frame, fps, delay: 4, duration: 20 });
-  const scale = animation === 'zoom-in' ? pop({ frame, fps, delay: 6, preset: 'pop' }).scale : 1;
-  const drift = animation === 'parallax-in' ? (1 - Math.min(1, frame / 40)) * 30 : 0;
+  const drawOn = entry === 'drawOn' && canDrawOn(asset.svg);
+  const local = drawOn ? { opacity: 1, translateY: 0 } : fadeUp({ frame, fps, delay: 4, duration: 20 });
+  const scale = !drawOn && entry === 'zoom-in' ? pop({ frame, fps, delay: 6, preset: 'pop' }).scale : 1;
+  const drift = !drawOn && entry === 'parallax-in' ? (1 - Math.min(1, frame / 40)) * 30 : 0;
   const isAnim = asset.kind === 'vector-anim';
+  let svg = asset.svg;
+  if (drawOn) {
+    // VectorAsset's caller already checked canDrawOn; drawOnSvg is a no-op when it is unsafe.
+    svg = drawOnSvg(asset.svg, { frame, fps, delay: 4, duration: 30 });
+  }
   return (
     <div
       style={{
@@ -150,8 +158,9 @@ function VectorAsset({ assetId, frame, animation }: { assetId: string; frame: nu
         opacity: local.opacity,
         transform: `translateY(${local.translateY + drift}px) scale(${scale * (isAnim ? 0.9 + Math.min(1, frame / 30) * 0.1 : 1)})`,
       }}
-      // The markup passed sanitizeSvg + renderCheck at build time (see generated-assets.ts).
-      dangerouslySetInnerHTML={{ __html: asset.svg }}
+      // The markup passed sanitizeSvg + renderCheck at build time (see generated-assets.ts). Draw-on
+      // only adds pathLength/dash attributes to safe <path> elements; the A5 check runs on the source.
+      dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
 }
@@ -178,7 +187,7 @@ function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame
               zIndex: item.z ?? 5,
             }}
           >
-            <VectorAsset assetId={item.asset} frame={frame - index * 3} animation={item.anim} />
+            <VectorAsset assetId={item.asset} frame={frame - index * 3} entry={item.anim ?? scene.motion?.entry} />
           </div>
         );
       })}
@@ -253,6 +262,114 @@ function Kicker({ text }: { text?: string }) {
 }
 
 /**
+ * MS3 emphasis: exactly one highlight sweep per scene, behind the `motion.highlight` phrase.
+ * A scene with no emphasis (or a phrase that is not in the copy) renders its children unchanged.
+ */
+function HighlightBand({ scene, pkg, frame, fps, children }: { scene: Scene; pkg: PackageV1; frame: number; fps: number; children: React.ReactNode }) {
+  const colors = palette(pkg);
+  const emphasis = scene.motion?.emphasis;
+  if (!emphasis || emphasis === 'none') return <>{children}</>;
+  const sweep = highlightSweep({ frame, fps, at: 12 });
+  return (
+    <span style={{ position: 'relative', display: 'inline-block', zIndex: 0 }}>
+      <span
+        aria-hidden
+        style={{
+          position: 'absolute',
+          left: '-0.1em',
+          right: '-0.1em',
+          top: '0.06em',
+          bottom: '0.12em',
+          background: colors[2],
+          borderRadius: 6,
+          transform: `scaleX(${sweep.progress})`,
+          transformOrigin: 'left center',
+          opacity: sweep.opacity,
+          zIndex: -1,
+        }}
+      />
+      {children}
+    </span>
+  );
+}
+
+/**
+ * The scene's headline entry (MS3). Waterfall splits copy into staggered words; maskRise, pop
+ * and the default fadeUp come straight from the MS1 primitives. `motion.entry` absent keeps the
+ * layout's historical default exactly.
+ */
+function AnimatedHeadline({
+  scene, pkg, frame, text, style, delay = 2, duration = 22, distance = 42,
+}: { scene: Scene; pkg: PackageV1; frame: number; text?: string; style?: React.CSSProperties; delay?: number; duration?: number; distance?: number }) {
+  const { fps } = useVideoConfig();
+  const entry = scene.motion?.entry;
+  const energy = energyProfile(scene.motion?.energy ?? pkg.motion?.energy);
+  const dist = distance * energy.distanceScale;
+  const highlight = scene.motion?.emphasis && scene.motion.emphasis !== 'none' ? scene.motion.highlight : undefined;
+  const content = typeof text === 'string' ? text : '';
+
+  if (entry === 'waterfall') {
+    const plan = waterfallPlan(content, highlight);
+    return (
+      <div style={{ ...style, display: 'flex', flexWrap: 'wrap', gap: '0 0.28em', alignItems: 'baseline' }}>
+        {plan.map((word, index) => {
+          const anim = waterfallEntry({ frame, fps, index, anchor: word.anchor, delay, distance: dist });
+          const inner = word.highlight
+            ? <HighlightBand scene={scene} pkg={pkg} frame={frame} fps={fps}>{word.word}</HighlightBand>
+            : word.word;
+          return (
+            <span key={`${word.word}-${index}`} style={{ display: 'inline-block', opacity: anim.opacity, transform: `translateY(${anim.translateY}px) rotate(${anim.rotate}deg)` }}>
+              {inner}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  let anim: React.CSSProperties;
+  if (entry === 'maskRise') {
+    const rise = maskRise({ frame, fps, delay, duration: duration + 4 });
+    anim = { opacity: rise.opacity, transform: `translateY(${rise.translateYPercent}%) rotate(${rise.rotate}deg)` };
+  } else if (entry === 'pop') {
+    const springy = pop({ frame, fps, delay, duration: duration + 4, preset: scene.motion?.spring ?? 'pop' });
+    anim = { opacity: springy.opacity, transform: `scale(${springy.scale})`, transformOrigin: 'left center' };
+  } else {
+    const settle = fadeUp({ frame, fps, delay, duration, distance: dist });
+    anim = { opacity: settle.opacity, transform: `translateY(${settle.translateY}px)` };
+  }
+
+  const split = splitHighlight(content, highlight);
+  const body = split.found
+    ? <>{split.before}<HighlightBand scene={scene} pkg={pkg} frame={frame} fps={fps}>{split.match}</HighlightBand>{split.after}</>
+    : content;
+
+  if (entry === 'maskRise') {
+    return (
+      <div style={{ overflow: 'hidden', ...style }}>
+        <div style={anim}>{body}</div>
+      </div>
+    );
+  }
+  return <div style={{ ...style, ...anim }}>{body}</div>;
+}
+
+/** A stat value that counts up when `motion.entry` is `countUp`, else springs in as before. */
+function StatNumber({ scene, frame, fps, value, style }: { scene: Scene; frame: number; fps: number; value: string; style: React.CSSProperties }) {
+  if (scene.motion?.entry === 'countUp') {
+    const match = String(value).match(/^(\D*)([\d][\d,]*)(.*)$/);
+    const target = match ? Number(match[2].replace(/,/g, '')) : NaN;
+    if (match && Number.isFinite(target)) {
+      const { value: current } = countUp({ frame, fps, delay: 4, duration: 30, to: target });
+      const formatted = match[2].includes(',') ? current.toLocaleString('en-US') : String(current);
+      return <div style={style}>{match[1]}{formatted}{match[3]}</div>;
+    }
+  }
+  const springy = pop({ frame, fps, delay: 4, duration: 30, preset: 'pop' });
+  return <div style={{ ...style, transform: `scale(${springy.scale})`, transformOrigin: 'left center' }}>{value}</div>;
+}
+
+/**
  * B1: the owner's uploaded logo, placed on title/outro scenes. `theme.logo_asset`
  * is a validated asset reference (upload origin); a missing or broken file hides
  * the mark instead of failing the render.
@@ -277,7 +394,6 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
-  const headline = fadeUp({ frame, fps, delay: 2, duration: 22 });
   const sub = fadeUp({ frame, fps, delay: 10, duration: 22 });
   const cta = pop({ frame, fps, delay: 22, duration: 24, preset: 'pop' });
   const outro = scene.variant === 'outro';
@@ -287,9 +403,7 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
       <BrandLogo pkg={pkg} />
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', gap: 26, alignItems: 'center' }}>
         <Kicker text={copy.kicker} />
-        <div style={{ fontSize: outro ? TYPE_SCALE.headlineLg : TYPE_SCALE.headlineXl, fontWeight: 800, letterSpacing: -2, opacity: headline.opacity, transform: `translateY(${headline.translateY}px)` }}>
-          {copy.headline}
-        </div>
+        <AnimatedHeadline scene={scene} pkg={pkg} frame={frame} text={copy.headline} delay={2} duration={22} style={{ fontSize: outro ? TYPE_SCALE.headlineLg : TYPE_SCALE.headlineXl, fontWeight: 800, letterSpacing: -2 }} />
         {copy.sub ? (
           <div style={{ fontSize: TYPE_SCALE.sub, color: text.muted, maxWidth: 1100, opacity: sub.opacity, transform: `translateY(${sub.translateY}px)` }}>{copy.sub}</div>
         ) : null}
@@ -326,7 +440,6 @@ function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const split = scene.variant !== 'full-bleed';
   const stacked = split && portrait;
-  const head = fadeUp({ frame, fps, delay: 2, duration: 22 });
   const body = fadeUp({ frame, fps, delay: 12, duration: 22 });
   return (
     <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
@@ -347,9 +460,7 @@ function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
       >
         <div style={{ flex: split ? (stacked ? '0 0 auto' : '0 0 52%') : '1 1 auto', maxWidth: split ? (stacked ? '100%' : 900) : 1400, display: 'flex', flexDirection: 'column', gap: 24, textAlign: split ? 'left' : 'center' }}>
           <Kicker text={copy.kicker} />
-          <div style={{ fontSize: TYPE_SCALE.headlineLg, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.05, opacity: head.opacity, transform: `translateY(${head.translateY}px)` }}>
-            {copy.headline}
-          </div>
+          <AnimatedHeadline scene={scene} pkg={pkg} frame={frame} text={copy.headline} delay={2} duration={22} style={{ fontSize: TYPE_SCALE.headlineLg, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.05 }} />
           {copy.sub ? <div style={{ fontSize: 30, color: text.muted }}>{copy.sub}</div> : null}
           {copy.body ? (
             <div style={{ fontSize: TYPE_SCALE.body, color: text.primary, opacity: 0.86 * body.opacity, transform: `translateY(${body.translateY}px)` }}>{copy.body}</div>
@@ -371,7 +482,6 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
   const dataset = datasetId ? pkg.datasets?.[datasetId] : undefined;
   const first = dataset?.values?.[0];
   const value = copy.body ?? (first ? `${first.value}${dataset?.unit ? ` ${dataset.unit}` : ''}` : '—');
-  const number = pop({ frame, fps, delay: 4, duration: 30, preset: 'pop' }).scale;
   // N12: kicker falls back to the headline; only an example dataset is tagged
   // "example data", and the scene footnote (source line) is kept.
   const lines = statLines(copy, dataset);
@@ -380,9 +490,7 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
       <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%', padding: `0 ${SAFE_AREA.x}px`, gap: 18 }}>
         <Kicker text={lines.kicker} />
-        <div style={{ fontSize: TYPE_SCALE.stat, fontWeight: 800, letterSpacing: -6, lineHeight: 1, color: colors[2], transform: `scale(${number})`, transformOrigin: 'left center' }}>
-          {value}
-        </div>
+        <StatNumber scene={scene} frame={frame} fps={fps} value={value} style={{ fontSize: TYPE_SCALE.stat, fontWeight: 800, letterSpacing: -6, lineHeight: 1, color: colors[2] }} />
         {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.primary, opacity: 0.85 }}>{copy.sub}</div> : null}
         {lines.sourceLine ? <div style={{ fontSize: TYPE_SCALE.footnote, color: text.primary, opacity: 0.6 }}>{lines.sourceLine}</div> : null}
         {lines.footnote ? <div style={{ fontSize: TYPE_SCALE.footnote, color: text.primary, opacity: 0.6 }}>{lines.footnote}</div> : null}
@@ -412,7 +520,7 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
     <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, gap: 22 }}>
-        <div style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800 }}>{copy.headline}</div>
+        <AnimatedHeadline scene={scene} pkg={pkg} frame={frame} text={copy.headline} delay={2} duration={22} style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800 }} />
         {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.muted }}>{copy.sub}</div> : null}
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ marginTop: 12 }}>
           {values.map((item, index) => {
@@ -451,7 +559,7 @@ function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
     <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 7, width: '100%', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, display: 'flex', flexDirection: 'column', gap: 30 }}>
-        <div style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800, maxWidth: 1100 }}>{copy.headline}</div>
+        <AnimatedHeadline scene={scene} pkg={pkg} frame={frame} text={typeof copy.headline === 'string' ? copy.headline : undefined} delay={2} duration={22} style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800, maxWidth: 1100 }} />
         {quote ? (
           <div style={{ fontSize: 52, lineHeight: 1.25, maxWidth: 1300 }}>
             “{copy.quote}”

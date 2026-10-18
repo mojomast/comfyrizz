@@ -4,7 +4,7 @@
   "width": 1920,
   "height": 1080,
   "mode": "flexible",
-  "durationInFrames": 1095,
+  "durationInFrames": 1100,
   "scenes": [
     {
       "id": "s_title",
@@ -70,8 +70,7 @@
           "asset": "a_diagram_flow",
           "x": 0.79,
           "y": 0.5,
-          "w": 0.4,
-          "anim": "slide-in"
+          "w": 0.4
         }
       ],
       "mediaOnly": false,
@@ -85,7 +84,7 @@
       "from": 360,
       "durationInFrames": 180,
       "transitionInFrames": 15,
-      "transitionOutFrames": 15,
+      "transitionOutFrames": 10,
       "copy": {
         "headline": "CPU time for a 40 s launch video",
         "sub": "Measured on the box, no GPU and no network.",
@@ -119,9 +118,9 @@
       "id": "s_chart",
       "layout": "chart",
       "variant": "bar",
-      "from": 525,
+      "from": 530,
       "durationInFrames": 240,
-      "transitionInFrames": 15,
+      "transitionInFrames": 10,
       "transitionOutFrames": 15,
       "copy": {
         "headline": "Where the launch minutes went",
@@ -148,7 +147,7 @@
       "id": "s_list",
       "layout": "list",
       "variant": "bullets",
-      "from": 750,
+      "from": 755,
       "durationInFrames": 210,
       "transitionInFrames": 15,
       "transitionOutFrames": 15,
@@ -186,7 +185,7 @@
       "id": "s_outro",
       "layout": "title",
       "variant": "outro",
-      "from": 945,
+      "from": 950,
       "durationInFrames": 150,
       "transitionInFrames": 15,
       "transitionOutFrames": 0,
@@ -226,13 +225,13 @@
   "plates": [],
   "target": {
     "requested": null,
-    "actual": 1095,
+    "actual": 1100,
     "deviationFrames": 0,
     "requiresAcceptance": false
   },
   "provisional": false,
   "warnings": [],
   "proposals": [],
-  "sourceHash": "9fa32fc7c29265e1e9d02270e4f8b97c8936e2472570f0387c3d5dfa57e40158",
-  "hash": "a5cd2d9bf933a005bbbb8b933a0a26cbeddc63304cd87c65ca107273cc753447"
+  "sourceHash": "4fe1dda31989867ef0311395ae94653a086593518ae36f2ad4fa1b18e7338398",
+  "hash": "617fbf8f18a782a2d10faf6c3a9b45141cfb071984bfcfa4a415a62910201a8f"
 }

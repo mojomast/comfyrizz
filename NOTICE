@@ -17,7 +17,8 @@ Third-party software (not vendored unless stated; see each package's lockfile):
   and Kokoro-82M voices (see their notices).
 - whaleyxbt/claude-motion (MIT, Copyright (c) 2026 whaleyxbt) and the HyperFrames
   motion skills (Apache-2.0, Copyright HeyGen): timing/easing numbers only, re-expressed
-  in apps/renderer/src/motion/ for the MS1 motion tokens and entry primitives; no code copied.
+  in apps/renderer/src/motion/ for the MS1 motion tokens and entry primitives and the MS3
+  transition/kinetic-type grammar (waterfall, highlight sweep, draw-on); no code copied.
 
 Models are not distributed with this repository. FLUX 3 Image Klein (FLUX
 Kommunity License v1.0), LTX-2.5 (LTX-2.x Community License) and Kokoro-82M
