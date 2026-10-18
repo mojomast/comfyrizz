@@ -21,6 +21,12 @@ import { repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
 const TOKEN = 'c9-token-0123456789abcdef';
+// H16/G4-1: runPackage bootstraps the VM, and bootstrap refuses (correctly, before spending anything)
+// when the Hugging Face token file is not there. The deployment hands it over with this env var; the
+// test writes one the same way, 0600, into its temp dir.
+const HF_TOKEN_FILE = join(mkdtempSync(join(tmpdir(), 'comfyrizz-c9-hf-')), 'hf-token');
+writeFileSync(HF_TOKEN_FILE, 'hf_c9TESTTOKEN0123456789ABCDEF', { mode: 0o600 });
+process.env.COMFYRIZZ_HF_TOKEN_FILE = HF_TOKEN_FILE;
 const PYTHON = join(repoRoot, '.venv', 'bin', 'python');
 const FAKE_COMFY = join(repoRoot, 'pipeline-py', 'tests', 'fake_comfy_server.py');
 const HAS_PYTHON = existsSync(PYTHON);
@@ -190,7 +196,7 @@ test('colab: brief -> package -> spend confirm -> run -> collected plate -> MP4 
     assert.equal(finished.status, 'done');
     assert.equal(finished.teardown.state, 'stopped', 'the VM was stopped and verified');
     const phases = finished.events.filter((event) => event.event === 'run_phase').map((event) => event.phase);
-    assert.deepEqual(phases, ['planned', 'up', 'ran', 'applied', 'teardown']);
+    assert.deepEqual(phases, ['planned', 'up', 'bootstrapped', 'ran', 'applied', 'teardown']);
     assert.equal(finished.applied.length, 1);
     assert.equal(finished.applied[0].asset, 'a_data_still');
 
