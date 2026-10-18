@@ -1,5 +1,6 @@
 import { runAgent, type AgentEvent, type RunAgentResult, type ToolRecord } from './agent.js';
 import type { BrandKit } from './brand.js';
+import type { StylePreset } from './brief.js';
 import { defaultCpuDatasets, defaultCpuScenes, titleFor } from './package.js';
 import { createScriptedModel, type ScriptedCall } from './scripted-model.js';
 import { createToolset, type PlannedImage, type SvgAssetResult, type ToolsetOptions } from './tools.js';
@@ -19,6 +20,8 @@ export interface CpuSliceOptions {
   onEvent?: (event: AgentEvent) => void;
   /** B1: brand kit whose theme overrides the default palette/font/logo. */
   brand?: Partial<BrandKit>;
+  /** B1: uploaded logo assets the brand theme references. */
+  brandAssets?: Record<string, unknown>;
 }
 
 export interface CpuSliceResult {
@@ -56,12 +59,15 @@ export function defaultCpuScript(brief: string): ScriptedCall[] {
  */
 export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceResult> {
   let draft: Record<string, any> | undefined;
+  const stylePreset = /Look:\s*([a-z-]+)/i.exec(options.brief)?.[1] as StylePreset | undefined;
   const tools = createToolset({
     generateSvg: options.generateSvg,
     ...(options.persistSvg ? { persistSvg: options.persistSvg } : {}),
     ...(options.planImage ? { planImage: options.planImage } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.brand ? { brand: options.brand } : {}),
+    ...(options.brandAssets ? { brandAssets: options.brandAssets } : {}),
+    ...(stylePreset ? { stylePreset } : {}),
     onPackageChange: pkg => {
       draft = pkg;
     },

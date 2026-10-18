@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { routeAsset, type AssetNeed, type RouteDecision } from './router.js';
 import { foregroundFor } from './package.js';
 import { expandFluxCaption, expandReferenceEditCaption, aspectFromSize, sourceDims, type Aspect } from './caption.js';
-import { brandTheme, type BrandKit } from './brand.js';
+import { brandStyleBlock, brandTheme, type BrandKit } from './brand.js';
+import type { StylePreset } from './brief.js';
 import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
 
@@ -53,6 +54,10 @@ export interface ToolsetOptions {
    * palette from the first tool call.
    */
   brand?: Partial<BrandKit>;
+  /** B1: uploaded logo/font assets referenced by the brand kit's theme. */
+  brandAssets?: Record<string, unknown>;
+  /** B1: the look the generation STYLE_BLOCK is written from (default cinematic-dark). */
+  stylePreset?: StylePreset;
 }
 
 const sceneSchema = z.object({
@@ -306,7 +311,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       voice: { enabled: false, engine: 'none' },
       datasets: args.datasets ?? {},
       scenes,
-      assets: {},
+      assets: { ...(options.brandAssets ?? {}) },
       compliance: { open_weights_only: true },
       renders: [],
     };
@@ -416,6 +421,11 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
     const refs = args.refs ?? [];
     const isRefEdit = refs.length > 0;
+    // B1: the same STYLE_BLOCK goes on every image job, so a run does not drift
+    // from the owner's palette/attributes after the first call.
+    const styleBlock = options.brand
+      ? brandStyleBlock(options.stylePreset ?? 'cinematic-dark', options.brand)
+      : undefined;
     const caption = planned.caption ?? (isRefEdit
       ? expandReferenceEditCaption({
           intent: args.intent,
@@ -426,6 +436,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       : expandFluxCaption({
           intent: args.intent,
           ...(args.style ? { style: args.style } : {}),
+          ...(palette ? { palette } : {}),
+          ...(styleBlock ? { styleBlock } : {}),
           ...(args.cutout ? { cutout: true } : {}),
           ...(args.text ? { text: true } : {}),
           ...(args.labelled ? { labelled: true } : {}),

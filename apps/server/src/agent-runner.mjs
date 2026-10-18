@@ -45,12 +45,14 @@ function createLlmSvgGenerator(model, sessionId) {
 export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOString(), providers = {} } = {}) {
   const packagesDir = join(runtimeDir, 'packages');
   const assetsDir = join(packagesDir, 'assets');
-  return async function runCpuAgent({ brief, provider, model: modelName, sessionId = 'cpu-slice', onEvent } = {}) {
+  return async function runCpuAgent({ brief, brand, provider, model: modelName, sessionId = 'cpu-slice', onEvent } = {}) {
     if (typeof brief !== 'string' || brief.trim().length === 0) {
       const error = new Error('brief is required');
       error.status = 400;
       throw error;
     }
+    const brandKit = brand?.kit ?? null;
+    const brandAssets = brand?.assets ?? null;
     const { runCpuSlice } = await import('../../../packages/agent/dist/src/index.js');
     const vector = await import('../../../packages/vector/dist/src/index.js');
     let agentModel;
@@ -116,6 +118,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       runCpuSlice({
         brief,
         ...(model ? { model } : {}),
+        ...(brandKit ? { brand: brandKit } : {}),
+        ...(brandAssets ? { brandAssets } : {}),
         generateSvg,
         persistSvg,
         sessionId,

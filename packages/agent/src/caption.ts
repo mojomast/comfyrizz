@@ -21,6 +21,8 @@ export interface CaptionInput {
   text?: boolean;
   /** The still feeds a labelled diagram/animation: keep labels and lock the camera. */
   labelled?: boolean;
+  /** B1: the per-package generation STYLE_BLOCK appended after the framing. */
+  styleBlock?: string;
 }
 
 /** Default negative prompt. "no letters" is explicit: Klein writes stray words otherwise. */
@@ -67,7 +69,8 @@ export function expandFluxCaption(input: CaptionInput): string {
   const cutout = input.cutout ? 'isolated subject on a transparent background, clean silhouette' : 'full-bleed scene';
   const camera = input.labelled ? `; ${STATIC_CAMERA}` : '';
   const text = input.text || input.labelled ? KEEP_TEXT : NEGATIVE;
-  return `${input.intent.trim().replace(/[.!?]+$/, '')}. ${style}; ${palette}; ${framing}; ${cutout}${camera}; ${text}.`;
+  const styleBlock = input.styleBlock ? `; ${input.styleBlock.replace(/[.;]+$/, '')}` : '';
+  return `${input.intent.trim().replace(/[.!?]+$/, '')}. ${style}; ${palette}; ${framing}; ${cutout}${camera}; ${text}${styleBlock}.`;
 }
 
 export interface ReferenceEditCaptionInput {

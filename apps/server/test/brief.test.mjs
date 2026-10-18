@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
@@ -192,4 +192,58 @@ test('the brief responses carry the look cards for the picker', async () => {
   const response = await request({ method: 'POST', path: '/api/brief', body: { prompt: RICH } });
   assert.equal(response.json.presets.length, 6);
   assert.equal((await request({ path: '/api/brief/presets', token: null })).status, 401);
+});
+
+const BRAND = {
+  palette: ['#112233', '#445566'],
+  fonts: [{ family: 'Söhne', file: 'assets/brand/soehne.woff2', license: 'OFL-1.1' }],
+  tone: ['bold', 'clear', 'warm'],
+};
+
+// 1×1 transparent PNG.
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+test('B1: a brand kit on the brief overrides the palette and font', async () => {
+  const response = await request({ method: 'POST', path: '/api/brief', body: { prompt: RICH, mode: 'express', brand: BRAND } });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.json.brief.style.palette, ['#112233', '#445566']);
+  assert.equal(response.json.brief.style.font, 'Söhne');
+  assert.deepEqual(response.json.brand.theme.palette, ['#112233', '#445566']);
+  assert.equal(response.json.brand.theme.font, 'Söhne');
+  assert.deepEqual(response.json.brand.warnings, []);
+
+  const outline = await request({ method: 'POST', path: '/api/brief/outline', body: { brief: { style: { preset: 'clay' } }, brand: BRAND } });
+  assert.deepEqual(outline.json.brief.style.palette, ['#112233', '#445566']);
+  assert.equal(outline.json.brief.style.font, 'Söhne');
+});
+
+test('B1: an unsafe font licence falls back to Inter and reports a warning', async () => {
+  const response = await request({
+    method: 'POST',
+    path: '/api/brief',
+    body: { prompt: RICH, mode: 'express', brand: { palette: ['#112233'], fonts: [{ family: 'Unsafe', file: 'assets/x.woff2', license: 'CC-BY-NC-4.0' }] } },
+  });
+  assert.equal(response.json.brief.style.font, 'Inter');
+  assert.ok(response.json.brand.warnings.some(warning => warning.code === 'BRAND_FONT_UNSAFE_LICENSE'));
+});
+
+test('B1: POST /api/brand normalises a kit and stores an uploaded logo', async () => {
+  const response = await request({
+    method: 'POST',
+    path: '/api/brand',
+    body: { brand: { ...BRAND, logo: { filename: 'logo.png', dataBase64: PNG } } },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.json.kit.palette, ['#112233', '#445566']);
+  assert.equal(response.json.kit.fonts.length, 1);
+  const [assetId] = Object.keys(response.json.assets);
+  assert.match(assetId, /^a_logo_/);
+  assert.equal(response.json.kit.logo_asset, assetId);
+  assert.equal(response.json.theme.logo_asset, assetId);
+  const asset = response.json.assets[assetId];
+  assert.equal(asset.kind, 'image');
+  assert.equal(asset.origin, 'upload');
+  assert.equal(asset.license.id, 'user-provided');
+  assert.ok(existsSync(join(runtime, 'packages', 'assets', `${assetId}.png`)));
+  assert.equal(app.events.replay(0).at(-1).type, 'brand.prepared');
 });

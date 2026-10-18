@@ -8,6 +8,7 @@ import { createExporter } from './export.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
+import { prepareBrand } from './brand.mjs';
 import { applySceneChip, sceneChipList } from '../../../packages/agent/dist/src/index.js';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
@@ -334,9 +335,12 @@ export function createApp({
         return sendJson(response, 400, { error: 'prompt is required' });
       }
       try {
-        const result = planBrief(body);
+        // B1: a brand kit on the request overrides the brief's palette/font; the
+        // logo bytes are written here so the asset exists before any agent run.
+        const brand = body.brand ? prepareBrand(body.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : null;
+        const result = planBrief({ ...body, brand: brand?.kit ?? null });
         events.publish({ type: 'brief.planned', mode: result.mode, complete: result.complete, questions: result.questions.map(question => question.id) });
-        return sendJson(response, 200, result);
+        return sendJson(response, 200, { ...result, brand: brand ? { theme: brand.theme, assets: Object.keys(brand.assets), warnings: brand.warnings } : null });
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -349,12 +353,20 @@ export function createApp({
       return sendJson(response, 200, briefPresets());
     }
 
+    if (url.pathname === '/api/brand' && request.method === 'POST') {
+      const body = await readJson(request);
+      const prepared = prepareBrand(body.brand ?? body, { assetsDir: join(runtimeDir, 'packages', 'assets') });
+      events.publish({ type: 'brand.prepared', palette: prepared.kit.palette.length, fonts: prepared.kit.fonts.length, logo: Boolean(prepared.kit.logo_asset) });
+      return sendJson(response, 200, { kit: prepared.kit, theme: prepared.theme, assets: prepared.assets, warnings: prepared.warnings });
+    }
+
     if (url.pathname === '/api/brief/outline' && request.method === 'POST') {
       const body = await readJson(request);
       try {
-        const result = refreshBrief(body);
+        const brand = body.brand ? prepareBrand(body.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : null;
+        const result = refreshBrief({ ...body, brand: brand?.kit ?? null });
         events.publish({ type: 'brief.outline', beats: result.outline.beats.length, seconds: result.outline.estimatedSeconds });
-        return sendJson(response, 200, result);
+        return sendJson(response, 200, { ...result, brand: brand ? { theme: brand.theme, assets: Object.keys(brand.assets), warnings: brand.warnings } : null });
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -368,8 +380,10 @@ export function createApp({
       const body = await readJson(request);
       events.publish({ type: 'agent.started', brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });
       try {
+        const brand = body.brand ? prepareBrand(body.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : null;
         const result = await agentRunner({
           brief: body.brief,
+          ...(brand ? { brand } : {}),
           provider: body.provider,
           model: body.model,
           sessionId: body.sessionId,

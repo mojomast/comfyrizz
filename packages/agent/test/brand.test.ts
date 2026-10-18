@@ -116,3 +116,11 @@ test('B1: a completed brief and a proposed package both take the brand theme', (
   assert.equal(result.package.theme.logo_asset, 'a_logo');
   assert.deepEqual(result.package.theme.fonts, [{ family: 'Söhne', file: 'brand/soehne.woff2', license: { id: 'OFL-1.1' } }]);
 });
+
+test('B1: an image job caption carries the brand style block and palette', () => {
+  const { kit } = normalizeBrandKit({ palette: ['#112233', '#445566'], attributes: 'flat print look' });
+  const tools = createToolset({ brand: kit, stylePreset: 'editorial-flat' });
+  const image = tools['assets.generate_image']!.run({ scene_id: 's_hero', kind: 'illustration', intent: 'a soft nebula texture' }) as { caption: string };
+  assert.match(image.caption, /palette #112233, #445566/);
+  assert.match(image.caption, /Flat print look; palette #112233, #445566; every surface is blank and unmarked\./);
+});

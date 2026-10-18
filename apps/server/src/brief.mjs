@@ -9,6 +9,7 @@
  */
 import {
   applyDecisions,
+  brandBriefStyle,
   buildOutline,
   completeBrief,
   draftKeyMessages,
@@ -28,9 +29,14 @@ function normalizeMode(mode) {
   return mode === 'express' ? 'express' : 'plan';
 }
 
+/** B1: a normalised brand kit overrides the brief's palette and font. */
+function styleFor(draft, brand) {
+  return brand ? brandBriefStyle(draft.style ?? {}, brand) : undefined;
+}
+
 /** Complete a draft and attach its outline. */
-function finished(mode, draft) {
-  const brief = completeBrief(draft);
+function finished(mode, draft, brand) {
+  const brief = completeBrief(draft, styleFor(draft, brand));
   return { mode, complete: true, questions: [], brief, outline: buildOutline(brief), presets: stylePresets() };
 }
 
@@ -45,6 +51,7 @@ function finished(mode, draft) {
  */
 export function planBrief(input = {}) {
   const mode = normalizeMode(input.mode);
+  const brand = input.brand ?? null;
   const prompt = typeof input.prompt === 'string' ? input.prompt : '';
   const draft = extractBrief(prompt, { mode, attachments: input.attachments });
   const options = draftKeyMessages(prompt);
@@ -55,18 +62,18 @@ export function planBrief(input = {}) {
     // One round of at most three questions (research §2.4): once the user has
     // answered them, the agent decides anything still open.
     if (input.askMore !== true || remaining.length === 0 || mode === 'express') {
-      return finished(mode, answered);
+      return finished(mode, answered, brand);
     }
     return { mode, complete: false, questions: remaining, brief: answered, presets: stylePresets() };
   }
 
   if (mode === 'express') {
-    return finished(mode, draft);
+    return finished(mode, draft, brand);
   }
 
   const questions = missingQuestions(draft, MAX_QUESTIONS, options);
   if (questions.length === 0) {
-    return finished(mode, draft);
+    return finished(mode, draft, brand);
   }
   return { mode, complete: false, questions, brief: draft, presets: stylePresets() };
 }
@@ -80,6 +87,6 @@ export function planBrief(input = {}) {
 export function refreshBrief(input = {}) {
   const draft = input.brief && typeof input.brief === 'object' ? input.brief : {};
   const mode = normalizeMode(draft.mode);
-  const brief = completeBrief({ ...draft, mode });
+  const brief = completeBrief({ ...draft, mode }, styleFor(draft, input.brand));
   return { mode, complete: true, questions: [], brief, outline: buildOutline(brief), presets: stylePresets() };
 }

@@ -76,6 +76,39 @@ const briefState: {
   presets: PresetCard[];
 } = { pending: [], choices: {}, prompt: '', busy: false, brief: null, outline: null, presets: [] };
 
+// B1: the optional brand kit staged in the Brief card. The server normalises it
+// (licence check, Inter fallback, uploaded-logo asset) and every generation
+// request carries it so the palette and font are followed from the first call.
+type BrandWarning = { code: string; message: string };
+type BrandState = {
+  palette: string;
+  fontFamily: string;
+  fontFile: string;
+  fontLicense: string;
+  tone: string;
+  logoName: string;
+  logoDataBase64: string;
+  logoAssetId: string;
+  kit: Record<string, unknown> | null;
+  warnings: BrandWarning[];
+  busy: boolean;
+};
+const brandState: BrandState = { palette: '', fontFamily: '', fontFile: '', fontLicense: '', tone: '', logoName: '', logoDataBase64: '', logoAssetId: '', kit: null, warnings: [], busy: false };
+
+/** Assemble the loose kit the server normalises, or null when nothing is set. */
+function brandPayload(): Record<string, unknown> | null {
+  const palette = brandState.palette.split(/[\s,;]+/).map(hex => hex.trim()).filter(Boolean);
+  const fonts = brandState.fontFamily.trim() && brandState.fontFile.trim()
+    ? [{ family: brandState.fontFamily.trim(), file: brandState.fontFile.trim(), ...(brandState.fontLicense.trim() ? { license: brandState.fontLicense.trim() } : {}) }]
+    : [];
+  const tone = brandState.tone.split(/[\s,;]+/).map(word => word.trim()).filter(Boolean);
+  const logo = brandState.logoDataBase64
+    ? { filename: brandState.logoName, dataBase64: brandState.logoDataBase64 }
+    : brandState.logoAssetId ? { assetId: brandState.logoAssetId } : undefined;
+  if (palette.length === 0 && fonts.length === 0 && tone.length === 0 && !logo) return null;
+  return { palette, fonts, tone, ...(logo ? { logo } : {}) };
+}
+
 let player: PlayerRef | null = null;
 let scrub: HTMLInputElement;
 
@@ -898,7 +931,7 @@ function renderBriefCard(panel: HTMLElement): void {
     : 'outline unavailable';
   const notes = (outline?.notes ?? []).map(note => `<li>${esc(note)}</li>`).join('');
   panel.innerHTML = `<div class="brief-head">Brief · edit anything, then build.</div>
-    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${field('voice.persona', 'Narration')}${presetPicker}</div>
+    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${field('voice.persona', 'Narration')}${presetPicker}${brandCard()}</div>
     <ol class="brief-outline">${beats}</ol>
     <div class="brief-actions"><span class="hint">${esc(summary)}</span><button type="button" id="brief-refresh" ${briefState.busy ? 'disabled' : ''}>Update outline</button><button type="button" id="brief-build" ${briefState.busy ? 'disabled' : ''}>Build video</button></div>
     ${notes ? `<ul class="brief-notes">${notes}</ul>` : ''}`;
@@ -910,8 +943,86 @@ function renderBriefCard(panel: HTMLElement): void {
       panel.querySelectorAll('[data-brief-preset]').forEach(other => other.classList.toggle('selected', other === button));
     });
   });
+  panel.querySelectorAll<HTMLInputElement>('[data-brand-field]').forEach(input => {
+    input.addEventListener('input', () => {
+      (brandState as unknown as Record<string, string>)[input.getAttribute('data-brand-field') as string] = input.value.trim();
+    });
+  });
+  const logoInput = panel.querySelector<HTMLInputElement>('#brand-logo');
+  logoInput?.addEventListener('change', () => void readLogoFile(logoInput));
+  $('brand-save')?.addEventListener('click', () => void saveBrand());
   $('brief-refresh').addEventListener('click', () => void refreshBriefOutline());
   $('brief-build').addEventListener('click', () => void buildFromCard());
+}
+
+/** B1: the optional brand-kit section of the Brief card. */
+function brandCard(): string {
+  const kit = brandState.kit;
+  const swatches = Array.isArray(kit?.palette)
+    ? `<div class="brief-brand-swatches">${(kit.palette as string[]).map(hex => `<span style="background:${esc(hex)}" title="${esc(hex)}"></span>`).join('')}${kit.font ? `<em>${esc(String(kit.font))}</em>` : ''}${kit.logo_asset ? '<em>logo</em>' : ''}</div>`
+    : '';
+  const warnings = brandState.warnings.length
+    ? `<ul class="brief-notes">${brandState.warnings.map(warning => `<li>${esc(warning.message)}</li>`).join('')}</ul>`
+    : '';
+  return `<details class="brief-brand" ${kit ? 'open' : ''}>
+    <summary>Brand kit ${kit ? '· applied' : '· optional'}</summary>
+    <div class="brief-brand-grid">
+      <label>Palette hexes<input data-brand-field="palette" value="${esc(brandState.palette)}" placeholder="#0d0f14, #6d8cff" /></label>
+      <label>Font family<input data-brand-field="fontFamily" value="${esc(brandState.fontFamily)}" placeholder="Söhne" /></label>
+      <label>Font file<input data-brand-field="fontFile" value="${esc(brandState.fontFile)}" placeholder="assets/brand/soehne.woff2" /></label>
+      <label>Font licence<input data-brand-field="fontLicense" value="${esc(brandState.fontLicense)}" placeholder="OFL-1.1" /></label>
+      <label>Tone words<input data-brand-field="tone" value="${esc(brandState.tone)}" placeholder="bold, warm" /></label>
+      <label>Logo (SVG/PNG)<input type="file" id="brand-logo" accept=".svg,.png,.jpg,.jpeg" /></label>
+    </div>
+    <div class="brief-brand-actions"><button type="button" id="brand-save" ${brandState.busy ? 'disabled' : ''}>Save brand kit</button><span class="hint">${brandState.logoName ? `logo: ${esc(brandState.logoName)}` : 'Palette and font flow into the brief and every generated style block.'}</span></div>
+    ${swatches}${warnings}</details>`;
+}
+
+/** Stage an uploaded logo as base64 (the server writes the asset). */
+async function readLogoFile(input: HTMLInputElement): Promise<void> {
+  const file = input.files?.[0];
+  if (!file) return;
+  if (file.size > 1_500_000) {
+    logActivity('Brand logo is too large (max 1.5 MB)');
+    return;
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+  brandState.logoName = file.name;
+  brandState.logoDataBase64 = btoa(binary);
+  brandState.logoAssetId = '';
+  logActivity(`Brand logo staged: ${file.name}`);
+  renderBriefPanel();
+}
+
+/** POST the loose kit to `/api/brand` to preview the normalised theme + warnings. */
+async function saveBrand(): Promise<void> {
+  if (brandState.busy) return;
+  const brand = brandPayload();
+  if (!brand) {
+    logActivity('Brand kit: add a palette, font or logo first');
+    return;
+  }
+  brandState.busy = true;
+  renderBriefPanel();
+  try {
+    const response = await apiFetch('/api/brand', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ brand }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+    brandState.kit = body.kit as Record<string, unknown>;
+    brandState.warnings = (body.warnings ?? []) as BrandWarning[];
+    if (typeof body.kit?.logo_asset === 'string' && body.kit.logo_asset) brandState.logoAssetId = body.kit.logo_asset;
+    logActivity(`Brand kit saved: ${(body.kit.palette as string[]).length} colour(s), ${(body.kit.fonts as unknown[]).length} font(s)${body.kit.logo_asset ? ', logo' : ''}${body.warnings.length ? ` · ${body.warnings.length} warning(s)` : ''}`);
+  } catch (error) {
+    logActivity(`Brand kit failed: ${(error as Error).message}`);
+  }
+  brandState.busy = false;
+  renderBriefPanel();
 }
 
 function renderBriefPanel(): void {
@@ -930,7 +1041,7 @@ async function requestBrief(prompt: string, decisions?: Record<string, string | 
   const response = await apiFetch('/api/brief', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt, mode: briefMode, ...(decisions ? { decisions } : {}) }),
+    body: JSON.stringify({ prompt, mode: briefMode, ...(decisions ? { decisions } : {}), ...(brandPayload() ? { brand: brandPayload() } : {}) }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
@@ -947,7 +1058,7 @@ async function refreshBriefOutline(): Promise<void> {
     const response = await apiFetch('/api/brief/outline', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ brief: briefState.brief }),
+      body: JSON.stringify({ brief: briefState.brief, ...(brandPayload() ? { brand: brandPayload() } : {}) }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
@@ -1035,7 +1146,7 @@ async function runBrief(brief: string): Promise<void> {
     const response = await apiFetch('/api/agent', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ brief, ...(useProvider ? { provider } : {}) }),
+      body: JSON.stringify({ brief, ...(useProvider ? { provider } : {}), ...(brandPayload() ? { brand: brandPayload() } : {}) }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
