@@ -10,6 +10,7 @@ import { GeneratedAssetsProvider, SceneView, type InlineAsset } from './componen
 import type { MediaSidecar } from './media';
 import { MediaDimsProvider, MissingMediaProvider, type MediaDimsMap } from './media';
 import { CaptionOverlay } from './captions';
+import { FontFamilyContext, brandFontFamily, ensureBrandFonts } from './theme';
 
 /**
  * Composes the compiled timeline. Each scene is a TransitionSeries sequence; the
@@ -40,6 +41,10 @@ export function TimelinePlayer({
   const list = (scenes ?? timeline.scenes) as unknown as Array<
     Scene & { durationInFrames: number; transitionOutFrames: number }
   >;
+  // B1: load any brand fonts before measuring, and typeset the whole run with
+  // the kit's first family (Inter when the kit has none).
+  ensureBrandFonts(pkg);
+  const fontFamily = brandFontFamily(pkg);
   const children: React.ReactNode[] = [];
   list.forEach((scene, index) => {
     children.push(
@@ -59,10 +64,10 @@ export function TimelinePlayer({
     }
   });
   const series = (
-    <>
+    <FontFamilyContext.Provider value={fontFamily}>
       <TransitionSeries>{children}</TransitionSeries>
       {captions && <CaptionOverlay captions={captions} />}
-    </>
+    </FontFamilyContext.Provider>
   );
   return generatedAssets ? (
     <GeneratedAssetsProvider assets={generatedAssets}>

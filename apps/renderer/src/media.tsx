@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 import { AbsoluteFill, Img, Loop, OffthreadVideo, interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Asset, ForegroundItem, PackageV1 } from '../../../packages/schema/types';
-import { fontFamily, palette, textColors } from './theme';
+import { palette, textColors, useFontFamily } from './theme';
 import { isMissingMedia } from './media-model.js';
 
 export type { MediaSidecar, LowerThirdContent, ResolvedSceneMedia } from './media-model.js';
@@ -42,6 +42,7 @@ export function useMediaDims(): MediaDimsMap {
 
 /** Labelled stand-in drawn when a declared media file is not in this clone. */
 export function MissingMediaPlaceholder({ assetId, asset, pkg, style }: { assetId?: string; asset?: Asset; pkg: PackageV1; style?: React.CSSProperties }) {
+  const family = useFontFamily();
   const colors = palette(pkg);
   const text = textColors(pkg);
   return (
@@ -56,7 +57,7 @@ export function MissingMediaPlaceholder({ assetId, asset, pkg, style }: { assetI
         gap: 12,
         padding: 28,
         textAlign: 'center',
-        fontFamily: fontFamily(),
+        fontFamily: family,
         color: text.primary,
         background: `linear-gradient(135deg, ${colors[1]}, ${colors[0]})`,
         boxShadow: 'inset 0 0 0 3px rgba(255,255,255,0.16)',
@@ -176,6 +177,7 @@ export function MediaPanel({ asset, assetId, item, pkg, sceneFrames }: { asset: 
 
 /** Lower-third/kicker overlay for full-bleed and media-only scenes. */
 export function LowerThird({ kicker, text, pkg }: { kicker?: string; text: string; pkg: PackageV1 }) {
+  const family = useFontFamily();
   const frame = useCurrentFrame();
   const t = interpolate(frame, [8, 28], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
   const colors = textColors(pkg);
@@ -190,7 +192,7 @@ export function LowerThird({ kicker, text, pkg }: { kicker?: string; text: strin
         flexDirection: 'column',
         gap: 10,
         alignItems: 'center',
-        fontFamily: fontFamily(),
+        fontFamily: family,
         opacity: t,
         transform: `translateY(${(1 - t) * 24}px)`,
         zIndex: 8,

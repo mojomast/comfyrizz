@@ -9,6 +9,9 @@
 /** @type {readonly string[]} */
 export const DEFAULT_PALETTE = ['#0d0f14', '#6d8cff', '#e6e8ee'];
 
+/** B1: the bundled fallback face; matches the Inter loaded by `theme.ts`. */
+export const DEFAULT_FONT_FAMILY = 'Inter';
+
 /**
  * @param {PackageV1} pkg
  * @returns {string[]}
@@ -80,4 +83,40 @@ export function textColors(pkg) {
     muted: themed(theme?.text_muted, muted),
     onAccent: themed(theme?.text_on_accent, isOpaqueColor(colors[0]) ? colors[0] : contrastText(colors[2])),
   };
+}
+
+/**
+ * B1: the brand fonts a package declares, in order. A font only counts when it
+ * has both a family and a file; the kit's licence check already dropped the
+ * rest, so anything here is safe to load.
+ * @param {PackageV1} pkg
+ * @returns {Array<{ family: string, file: string, weight?: number }>}
+ */
+export function brandFontEntries(pkg) {
+  const fonts = pkg?.theme?.fonts;
+  if (!Array.isArray(fonts)) return [];
+  const entries = [];
+  for (const font of fonts) {
+    if (!font || typeof font.family !== 'string' || !font.family.trim()) continue;
+    if (typeof font.file !== 'string' || !font.file.trim()) continue;
+    entries.push({
+      family: font.family.trim(),
+      file: font.file.trim(),
+      ...(typeof font.weight === 'number' ? { weight: font.weight } : {}),
+    });
+  }
+  return entries;
+}
+
+/**
+ * B1: the family the renderer should typeset with — the first declared brand
+ * font, or `theme.font` when it has no file (Inter is always bundled), or Inter.
+ * @param {PackageV1} pkg
+ * @returns {string}
+ */
+export function brandFontFamily(pkg) {
+  const first = brandFontEntries(pkg)[0];
+  if (first) return first.family;
+  const font = pkg?.theme?.font;
+  return typeof font === 'string' && font.trim() ? font.trim() : DEFAULT_FONT_FAMILY;
 }

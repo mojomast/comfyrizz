@@ -1,5 +1,5 @@
-import React, { createContext, useContext } from 'react';
-import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
+import React, { createContext, useContext, useState } from 'react';
+import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import { GENERATED_ASSETS } from './generated-assets';
 
@@ -17,7 +17,7 @@ const GeneratedAssetsContext = createContext<Record<string, InlineAsset>>(GENERA
 export function GeneratedAssetsProvider({ assets, children }: { assets: Record<string, InlineAsset>; children: React.ReactNode }) {
   return <GeneratedAssetsContext.Provider value={assets}>{children}</GeneratedAssetsContext.Provider>;
 }
-import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, fontFamily, palette, textColors } from './theme';
+import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, palette, textColors, useFontFamily } from './theme';
 import { proceduralStyle } from './background-model.js';
 import { statLines } from './stat-model.js';
 import { LowerThird, MediaFill, MediaPanel, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
@@ -197,6 +197,7 @@ function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame
  * ------------------------------------------------------------------ */
 
 function CopyGuard({ scene, children }: { scene: Scene; children: React.ReactNode }) {
+  const family = useFontFamily();
   const limits = COPY_LIMITS[scene.layout] ?? {};
   const copy = (scene.copy ?? {}) as Record<string, unknown>;
   const violations: string[] = [];
@@ -224,7 +225,7 @@ function CopyGuard({ scene, children }: { scene: Scene; children: React.ReactNod
           borderRadius: 14,
           background: '#b00020',
           color: '#ffffff',
-          fontFamily: fontFamily(),
+          fontFamily: family,
           fontSize: 26,
           fontWeight: 700,
           zIndex: 50,
@@ -248,15 +249,36 @@ interface LayoutProps {
 }
 
 function Kicker({ text }: { text?: string }) {
+  const family = useFontFamily();
   if (!text) return null;
   return (
-    <div style={{ color: '#6d8cff', fontFamily: fontFamily(), fontSize: TYPE_SCALE.kicker, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase' }}>
+    <div style={{ color: '#6d8cff', fontFamily: family, fontSize: TYPE_SCALE.kicker, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase' }}>
       {text}
     </div>
   );
 }
 
+/**
+ * B1: the owner's uploaded logo, placed on title/outro scenes. `theme.logo_asset`
+ * is a validated asset reference (upload origin); a missing or broken file hides
+ * the mark instead of failing the render.
+ */
+function BrandLogo({ pkg }: { pkg: PackageV1 }) {
+  const [failed, setFailed] = useState(false);
+  const logoId = pkg.theme?.logo_asset;
+  const asset = logoId ? pkg.assets?.[logoId] : undefined;
+  if (failed || !asset?.file) return null;
+  return (
+    <Img
+      src={staticFile(asset.file)}
+      onError={() => setFailed(true)}
+      style={{ position: 'absolute', top: SAFE_AREA.y - 16, left: SAFE_AREA.x, height: 72, width: 'auto', maxWidth: 360, objectFit: 'contain', zIndex: 8 }}
+    />
+  );
+}
+
 function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
+  const family = useFontFamily();
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
@@ -264,8 +286,9 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
   const sub = reveal(frame, 10, 22);
   const outro = scene.variant === 'outro';
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary, justifyContent: 'center', alignItems: 'center', padding: SAFE_AREA.y, textAlign: 'center' }}>
+    <AbsoluteFill style={{ fontFamily: family, color: text.primary, justifyContent: 'center', alignItems: 'center', padding: SAFE_AREA.y, textAlign: 'center' }}>
       <Background scene={scene} pkg={pkg} media={media} />
+      <BrandLogo pkg={pkg} />
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', gap: 26, alignItems: 'center' }}>
         <Kicker text={copy.kicker} />
         <div style={{ fontSize: outro ? TYPE_SCALE.headlineLg : TYPE_SCALE.headlineXl, fontWeight: 800, letterSpacing: -2, opacity: headline.opacity, transform: `translateY(${headline.translateY}px)` }}>
@@ -297,13 +320,14 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
 }
 
 function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
+  const family = useFontFamily();
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const split = scene.variant !== 'full-bleed';
   const head = reveal(frame, 2, 22);
   const body = reveal(frame, 12, 22);
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
+    <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
       <div
         style={{
@@ -335,6 +359,7 @@ function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
 }
 
 function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
+  const family = useFontFamily();
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
@@ -347,7 +372,7 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
   // "example data", and the scene footnote (source line) is kept.
   const lines = statLines(copy, dataset);
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
+    <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%', padding: `0 ${SAFE_AREA.x}px`, gap: 18 }}>
         <Kicker text={lines.kicker} />
@@ -364,6 +389,7 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
 }
 
 function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
+  const family = useFontFamily();
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
@@ -376,7 +402,7 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
   const gap = 42;
   const barWidth = values.length > 0 ? (width - gap * (values.length - 1)) / values.length : width;
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
+    <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, gap: 22 }}>
         <div style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800 }}>{copy.headline}</div>
@@ -389,10 +415,10 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
             return (
               <g key={item.label}>
                 <rect x={x} y={height - 40 - barHeight * grow} width={barWidth} height={barHeight * grow} rx={10} fill={index === values.length - 1 ? colors[3] : colors[2]} />
-                <text x={x + barWidth / 2} y={height - 14} fill={text.primary} fontSize={24} textAnchor="middle" fontFamily={fontFamily()}>
+                <text x={x + barWidth / 2} y={height - 14} fill={text.primary} fontSize={24} textAnchor="middle" fontFamily={family}>
                   {item.label}
                 </text>
-                <text x={x + barWidth / 2} y={height - 52 - barHeight * grow} fill={text.primary} fontSize={26} fontWeight={700} textAnchor="middle" fontFamily={fontFamily()}>
+                <text x={x + barWidth / 2} y={height - 52 - barHeight * grow} fill={text.primary} fontSize={26} fontWeight={700} textAnchor="middle" fontFamily={family}>
                   {item.value}
                 </text>
               </g>
@@ -407,13 +433,14 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
 }
 
 function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
+  const family = useFontFamily();
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined | string[]>;
   const quote = scene.variant === 'quote';
   const items = Array.isArray(copy.items) ? (copy.items as string[]) : [];
   return (
-    <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
+    <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 7, width: '100%', height: '100%', padding: `${SAFE_AREA.y}px ${SAFE_AREA.x}px`, display: 'flex', flexDirection: 'column', gap: 30 }}>
         <div style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800, maxWidth: 1100 }}>{copy.headline}</div>

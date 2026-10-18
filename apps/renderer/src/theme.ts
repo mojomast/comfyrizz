@@ -1,15 +1,27 @@
+import { createContext, useContext } from 'react';
 import { staticFile } from 'remotion';
 import { loadFont } from '@remotion/fonts';
-import type { Scene } from '../../../packages/schema/types';
-import { DEFAULT_PALETTE, color, palette, textColors } from './theme-model.js';
+import type { Scene, PackageV1 } from '../../../packages/schema/types';
+import {
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_PALETTE,
+  brandFontEntries,
+  brandFontFamily,
+  color,
+  palette,
+  textColors,
+} from './theme-model.js';
 
-export { DEFAULT_PALETTE, color, palette, textColors };
+export { DEFAULT_PALETTE, color, palette, textColors, brandFontEntries, brandFontFamily };
 
 /**
  * One design system (spec 6.9): a pinned local font, an 8px spacing scale, a type
  * scale and a small animation vocabulary. Nothing here reads the clock or network.
+ *
+ * B1: `Inter` is always bundled; a package's brand fonts are loaded on top and
+ * its first declared family becomes the typeset family for the whole run.
  */
-export const FONT_FAMILY = 'Inter';
+export const FONT_FAMILY = DEFAULT_FONT_FAMILY;
 
 // Awaited by Remotion's delayRender before any measurement or still is taken.
 void loadFont({
@@ -46,5 +58,40 @@ export const TYPE_SCALE = {
 export const SAFE_AREA = { x: 144, y: 96 } as const;
 
 export function fontFamily(): string {
-  return `'${FONT_FAMILY}', system-ui, -apple-system, 'Segoe UI', sans-serif`;
+  return fontStack(FONT_FAMILY);
+}
+
+/** The CSS family stack: the brand face first, then the bundled Inter and system faces. */
+export function fontStack(family: string): string {
+  const brand = family && family !== FONT_FAMILY ? `'${family}', ` : '';
+  return `${brand}'${FONT_FAMILY}', system-ui, -apple-system, 'Segoe UI', sans-serif`;
+}
+
+/** Shared with `TimelinePlayer`; a scene reads it to typeset with the brand face. */
+export const FontFamilyContext = createContext<string>(FONT_FAMILY);
+
+export function useFontFamily(): string {
+  return fontStack(useContext(FontFamilyContext));
+}
+
+const loadedBrandFonts = new Set<string>();
+
+/**
+ * B1: load each declared brand font once. `loadFont` holds a Remotion
+ * `delayRender` until the face is ready, so measuring and stills never race the
+ * download. A missing file makes Remotion fail loudly rather than fall back
+ * silently.
+ */
+export function ensureBrandFonts(pkg?: PackageV1): void {
+  for (const font of brandFontEntries(pkg as PackageV1)) {
+    const key = `${font.family}:${font.file}:${font.weight ?? ''}`;
+    if (loadedBrandFonts.has(key)) continue;
+    loadedBrandFonts.add(key);
+    void loadFont({
+      family: font.family,
+      url: staticFile(font.file),
+      weight: String(font.weight ?? '400'),
+      display: 'block',
+    });
+  }
 }

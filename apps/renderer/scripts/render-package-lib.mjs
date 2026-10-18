@@ -39,11 +39,15 @@ export function inlineGeneratedAssets(pkg, packageDir) {
 
 function assetDirs(pkg) {
   const dirs = new Set();
-  for (const asset of Object.values(pkg.assets ?? {})) {
-    if (typeof asset?.file !== 'string') continue;
-    const [top] = asset.file.split('/');
-    if (top && top !== asset.file) dirs.add(top);
-  }
+  const add = file => {
+    if (typeof file !== 'string') return;
+    const [top] = file.split('/');
+    if (top && top !== file) dirs.add(top);
+  };
+  for (const asset of Object.values(pkg.assets ?? {})) add(asset?.file);
+  // B1: a brand font lives in `theme.fonts[].file`, not in `assets`, but the
+  // renderer still loads it through `staticFile`, so its directory must be copied.
+  for (const font of pkg.theme?.fonts ?? []) add(font?.file);
   return [...dirs];
 }
 
