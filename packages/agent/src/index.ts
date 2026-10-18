@@ -40,5 +40,7 @@ export {
   buildOutline,
 } from './brief.js';
 export type { Brief, BriefDraft, Question, BriefDecisions, StylePreset, ExtractBriefOptions, Outline, OutlineBeat, OutlineOptions } from './brief.js';
+export { stylePresets, STYLE_PRESET_LABELS } from './style-presets.js';
+export type { StylePresetCard } from './style-presets.js';
 export type { AgentEvent, RunAgentOptions, RunAgentResult, ToolRecord } from './agent.js';
 export type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ToolCall, ToolDef } from './types.js';
