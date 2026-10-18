@@ -114,6 +114,15 @@ let scrub: HTMLInputElement;
 
 type RunEvent = { type?: string; event?: string; [key: string]: unknown };
 type RunRender = { url: string; frames?: number; bytes?: number; timeline_sha256?: string };
+type QaFinding = { severity: string; code: string; frame: number; timeSeconds: number; sceneId: string | null; message: string };
+// MS4: the last frame-QA report, so the storyboard can show the contact sheet and
+// per-scene findings the server produced for the newest render.
+const qaState = {
+  renderId: null as string | null,
+  ok: true,
+  findings: [] as QaFinding[],
+  sheet: false,
+};
 const runState = {
   active: null as null | { runId: string; backendId: string; status: string },
   events: [] as RunEvent[],
@@ -122,8 +131,7 @@ const runState = {
   spend: null as null | { planHash: string; backendId: string; estimate: Record<string, unknown>; budget: Record<string, unknown>; jobs: number },
 };
 
-type ExportRefusal = { assetId: string; file?: string; licenseId?: string; reason?: string };
-const exportState = {
+type ExportRefusal = { assetId: string; file?: string; licenseId?: string; reason?: string };const exportState = {
   running: false,
   exportId: null as string | null,
   log: [] as string[],
@@ -402,8 +410,42 @@ function renderRunPanel(): void {
   if (video) video.addEventListener('click', () => void downloadRunVideo());
 }
 
-/** The rendered run MP4 needs the token header, so it is fetched and downloaded, not a bare link. */
-async function downloadRunVideo(): Promise<void> {
+/** MS4: the frame-QA gate badge and contact sheet for the most recent render. */
+function renderQaPanel(): void {
+  const host = $<HTMLElement>('qa-panel');
+  if (!host) return;
+  if (!qaState.renderId) {
+    host.hidden = true;
+    return;
+  }
+  host.hidden = false;
+  const errors = qaState.findings.filter(item => item.severity === 'error').length;
+  const badge = qaState.ok ? '<span class="chip qa-ok">QA pass</span>' : `<span class="chip qa-bad">QA ${errors} error${errors === 1 ? '' : 's'}</span>`;
+  const rows = qaState.findings
+    .slice(0, 5)
+    .map(item => `<div class="event"><b>${esc(item.severity)}</b> ${esc(item.code)}${item.sceneId ? ` · ${esc(item.sceneId)}` : ''} — ${esc(item.message)}</div>`)
+    .join('');
+  const more = qaState.findings.length > 5 ? `<div class="hint">+${qaState.findings.length - 5} more</div>` : '';
+  const sheet = qaState.sheet
+    ? `<img class="qa-sheet" src="/api/qa/sheet?renderId=${encodeURIComponent(qaState.renderId)}&token=${encodeURIComponent(token ?? '')}" alt="contact sheet" />`
+    : '';
+  host.innerHTML = `<div class="pane-head"><b>Frame QA</b>${badge}<span class="hint">${qaState.findings.length} finding${qaState.findings.length === 1 ? '' : 's'}</span></div>${sheet}${rows || '<div class="event">No findings — layout, contrast and motion checks cleared.</div>'}${more}`;
+}
+
+async function loadQa(renderId: string): Promise<void> {
+  try {
+    const response = await apiFetch(`/api/qa?renderId=${encodeURIComponent(renderId)}`);
+    if (!response.ok) return;
+    const data = (await response.json()) as { findings?: QaFinding[]; sheet?: string | null };
+    qaState.findings = Array.isArray(data.findings) ? data.findings : [];
+    qaState.sheet = Boolean(data.sheet);
+    renderQaPanel();
+  } catch {
+    // the badge simply stays as the SSE summary reported it
+  }
+}
+
+/** The rendered run MP4 needs the token header, so it is fetched and downloaded, not a bare link. */async function downloadRunVideo(): Promise<void> {
   const url = runState.render?.url;
   if (!url) return;
   const button = $<HTMLButtonElement>('run-video');
@@ -1235,6 +1277,20 @@ function init(): void {
     stream.addEventListener('render.failed', event => {
       const data = JSON.parse((event as MessageEvent).data) as { message: string };
       logActivity(`Render failed: ${data.message}`);
+    });
+    stream.addEventListener('qa.result', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { renderId: string; ok: boolean; findings: number; sheet?: string | null };
+      qaState.renderId = data.renderId;
+      qaState.ok = data.ok;
+      qaState.sheet = Boolean(data.sheet);
+      qaState.findings = [];
+      renderQaPanel();
+      logActivity(`Frame QA ${data.ok ? 'passed' : 'found errors'}: ${data.findings} finding(s)`);
+      void loadQa(data.renderId);
+    });
+    stream.addEventListener('qa.failed', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { message: string };
+      logActivity(`Frame QA could not run: ${data.message}`);
     });
     stream.addEventListener('export.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { exportId: string };

@@ -510,6 +510,13 @@ export function createApp({
       if (!result) return sendJson(response, 404, { error: 'no qa result' });
       return sendJson(response, 200, result);
     }
+    if (url.pathname === '/api/qa/sheet' && request.method === 'GET') {
+      const result = qa.lookup({ renderId: url.searchParams.get('renderId') ?? undefined, packageId: url.searchParams.get('packageId') ?? undefined });
+      if (!result?.sheet || !existsSync(result.sheet)) return sendJson(response, 404, { error: 'no contact sheet' });
+      response.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' });
+      createReadStream(result.sheet).pipe(response);
+      return;
+    }
 
     if (url.pathname === '/api/export' && request.method === 'POST') {
       if (activeExport) return sendJson(response, 409, { error: 'export busy', exportId: activeExport });

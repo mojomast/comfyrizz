@@ -71,6 +71,9 @@ test('the render path runs the QA gate and serves it from /api/qa', async () => 
     assert.equal(qa.json.ok, true);
     assert.ok(Array.isArray(qa.json.findings));
     assert.ok(existsSync(join(runtime, 'renders', `${renderId}.qa.json`)));
+    const sheet = await request({ port, method: 'GET', path: `/api/qa/sheet?renderId=${renderId}` });
+    assert.equal(sheet.status, 200);
+    assert.equal(sheet.headers['content-type'], 'image/png');
   } finally {
     app.close();
     await new Promise(resolve => server.close(resolve));
