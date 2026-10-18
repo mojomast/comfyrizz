@@ -112,6 +112,39 @@ export function applyManifestToPackage(pkg, { manifest, jobsDoc, outDir, backend
     };
     if (asset.cutout === true || job?.cutout === true) next.cutout = true;
 
+    // H12: an upscale job's file is not the asset's own file: it is the asset's x2 *variant*, which a
+    // 1920x1080 export prefers over scaling the 1x file up again. So it does not touch file/media/
+    // status - the plate owns those - and it only attaches when the base file is there, because a
+    // variant is an alternate *of* something (a variant without a base fails the package schema).
+    if (job?.variant === "upscaled") {
+      const width = output.measured?.width ?? job.dims?.width ?? null;
+      const height = output.measured?.height ?? job.dims?.height ?? null;
+      if (!asset.file) {
+        untouched.push({ job: entry.job, reason: "the x2 upscale landed but the asset has no base file yet; nothing to attach it to" });
+        continue;
+      }
+      if (!Number.isInteger(width) || !Number.isInteger(height)) {
+        untouched.push({ job: entry.job, reason: "the x2 upscale's size is unknown (no measured size and no planned dims), so it was not recorded as a variant" });
+        continue;
+      }
+      copy.assets[assetId] = {
+        ...asset,
+        variants: {
+          ...(asset.variants || {}),
+          upscaled: {
+            file: relative,
+            width,
+            height,
+            ...(job?.scale ? { scale: job.scale } : {}),
+            ...(output.sha256 ? { sha256: output.sha256 } : {}),
+            ...(output.bytes ? { bytes: output.bytes } : {}),
+          },
+        },
+      };
+      applied.push({ job: entry.job, asset: assetId, file: relative, sha256: output.sha256, status: entry.status, variant: "upscaled", width, height });
+      continue;
+    }
+
     const alreadyApproved = asset.status === "ready" && asset.file && asset.sha256 && asset.sha256 !== output.sha256;
     if (alreadyApproved) {
       candidates.push({
