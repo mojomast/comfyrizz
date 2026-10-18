@@ -7,7 +7,7 @@
  * types; the compiler itself only needs the fields below.
  */
 
-export type LayoutId = 'title' | 'hero' | 'stat' | 'chart' | 'list';
+export type LayoutId = 'title' | 'hero' | 'stat' | 'chart' | 'list' | 'split' | 'compare' | 'code';
 
 export interface PackageFormat {
   width: number;

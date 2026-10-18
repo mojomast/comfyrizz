@@ -44,6 +44,10 @@ export const LAYOUT_LIMITS: Record<LayoutId, LayoutLimit> = {
   stat: { min: 30, max: 300 },
   chart: { min: 45, max: 450 },
   list: { min: 45, max: 600 },
+  // Same readable window the compiler used when these layouts fell through to hero.
+  split: { min: 45, max: 600 },
+  compare: { min: 45, max: 600 },
+  code: { min: 45, max: 600 },
 };
 
 export interface TimelineTransition {

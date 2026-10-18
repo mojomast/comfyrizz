@@ -4,6 +4,7 @@ import { loadFont } from '@remotion/fonts';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import {
   CODE_MIN_FONT_PX,
+  DEFAULT_CHARS_PER_SECOND,
   caretVisible,
   codeExitStart,
   codeFontPx,
@@ -38,7 +39,7 @@ export function CodeLayout({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1
   const { width, height, fps } = useVideoConfig();
   const source = scene.code?.code ?? '';
   const language = scene.code?.language ?? 'text';
-  const rate = scene.code?.typing?.charsPerSecond;
+  const rate = scene.code?.typing?.charsPerSecond ?? DEFAULT_CHARS_PER_SECOND;
   const highlights = new Set(scene.code?.highlights ?? []);
   const [lines, setLines] = useState<TokenLine[] | null>(null);
   const colors = palette(pkg);
