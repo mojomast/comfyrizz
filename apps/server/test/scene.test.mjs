@@ -146,6 +146,64 @@ function postScenePlan(server, body) {
   return post(server, '/api/scene/plan', body);
 }
 
+test('a scene chip is a fixed scene-local edit that saves a new revision', async () => {
+  const runtime = mkdtempSync(join(tmpdir(), 'comfyrizz-c11-chip-'));
+  scratch.push(runtime);
+  const pkg = JSON.parse(readFileSync(join(TINY, 'package.json'), 'utf8'));
+  const app = createApp({ token: TOKEN, runtimeDir: runtime, render: async () => ({ output: 'x', bytes: 0, frames: 0, hash: 'x' }) });
+  app.store.write(pkg);
+  const server = createServer(app.handler);
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  try {
+    const list = await get(server, '/api/scene/chips');
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.json.chips.map((chip) => chip.id), ['warmer', 'calmer-motion', 'more-depth', 'less-busy']);
+
+    const applied = await post(server, '/api/scene/chip', { packageId: pkg.id, baseRevision: pkg.revision, sceneId: 's_stat', chip: 'more-depth' });
+    assert.equal(applied.status, 200, JSON.stringify(applied.json));
+    assert.equal(applied.json.changed, true);
+    assert.equal(applied.json.revision, pkg.revision + 1);
+    assert.match(applied.json.summary, /parallax/i);
+    assert.equal(applied.json.package.scenes[1].foreground[0].anim, 'parallax-in');
+
+    // The save went through the validating store and only the target scene moved.
+    const saved = app.store.read(pkg.id);
+    assert.equal(saved.revision, pkg.revision + 1);
+    assert.equal(saved.scenes[1].foreground[0].anim, 'parallax-in');
+    assert.deepEqual(saved.scenes[0], pkg.scenes[0]);
+    assert.deepEqual(saved.scenes[2], pkg.scenes[2]);
+    assert.equal(lastEvent(app, 'scene.chip.applied').chip, 'more-depth');
+
+    assert.equal((await post(server, '/api/scene/chip', { packageId: pkg.id, sceneId: 'nope', chip: 'warmer' })).status, 404);
+    assert.equal((await post(server, '/api/scene/chip', { packageId: pkg.id, sceneId: 's_stat', chip: 'zoom' })).status, 400);
+    // A stale base revision is refused, not silently overwritten.
+    assert.equal((await post(server, '/api/scene/chip', { packageId: pkg.id, baseRevision: pkg.revision, sceneId: 's_stat', chip: 'warmer' })).status, 409);
+  } finally {
+    app.close();
+    await new Promise((done) => server.close(done));
+    rmSync(runtime, { recursive: true, force: true });
+  }
+});
+
+function get(server, path) {
+  const port = server.address().port;
+  return new Promise((resolvePromise, reject) => {
+    const request = httpRequest(
+      { hostname: '127.0.0.1', port, path, method: 'GET', headers: { 'x-comfyrizz-token': TOKEN, origin: `http://127.0.0.1:${port}`, host: `127.0.0.1:${port}` } },
+      (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          resolvePromise({ status: response.statusCode, headers: response.headers, json: text ? JSON.parse(text) : {} });
+        });
+      },
+    );
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 function post(server, path, body) {
   const port = server.address().port;
   const payload = JSON.stringify(body);

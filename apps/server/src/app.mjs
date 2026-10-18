@@ -8,6 +8,7 @@ import { createExporter } from './export.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
+import { applySceneChip, sceneChipList } from '../../../packages/agent/dist/src/index.js';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -587,6 +588,68 @@ export function createApp({
         activeRender = null;
       }
       return;
+    }
+
+    // R2 step 5: the per-scene edit chips. "Warmer / Calmer motion / More depth / Less busy" are
+    // fixed, deterministic scene-local edits (packages/agent scene-chips) — no model, no network,
+    // no GPU. Saving validates the package; the web then re-runs only that scene via C11/A6.
+    if (url.pathname === '/api/scene/chips' && request.method === 'GET') {
+      return sendJson(response, 200, { chips: sceneChipList() });
+    }
+
+    if (url.pathname === '/api/scene/chip' && request.method === 'POST') {
+      let body;
+      try {
+        body = await readJson(request);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, { error: error.message });
+      }
+      if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
+      let target;
+      try {
+        target = resolveRenderTarget(body, `chip_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, {
+          error: error.message,
+          ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
+        });
+      }
+      let result;
+      try {
+        result = applySceneChip(target.pkg, body.sceneId, body.chip);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, { error: error.message });
+      }
+      const inline = Boolean(body.package);
+      let revision = target.revision;
+      if (!inline && result.changed) {
+        try {
+          const saved = store.save(body.packageId, result.package, body.baseRevision ?? target.pkg.revision);
+          revision = saved.revision;
+        } catch (error) {
+          return sendJson(response, error.status ?? 400, {
+            error: error.message,
+            ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
+          });
+        }
+      }
+      events.publish({
+        type: 'scene.chip.applied',
+        packageId: result.package.id ?? body.packageId ?? null,
+        sceneId: result.sceneId,
+        chip: result.chip,
+        changed: result.changed,
+        revision,
+      });
+      return sendJson(response, 200, {
+        packageId: result.package.id ?? body.packageId ?? null,
+        revision,
+        sceneId: result.sceneId,
+        chip: result.chip,
+        summary: result.summary,
+        changed: result.changed,
+        package: result.package,
+      });
     }
 
     // C11: a dry-run jobs plan for one scene's generated assets. Nothing is sent to Google Colab

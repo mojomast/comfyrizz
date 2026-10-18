@@ -161,6 +161,13 @@ Each storyboard card has two actions that work on the draft the Player shows:
 - **Regenerate media** (`POST /api/scene/plan`) returns a **dry run**: a jobs plan (`planJobs`,
   B2) narrowed to that scene's own assets. It reports `dryRun: true` and `metered: false` and the
   storyboard shows it on the spend card; nothing is sent to Google Colab and no VM is started.
+- **Edit chips** (R2 step 5): `GET /api/scene/chips` lists the four fixed edits (`warmer`,
+  `calmer-motion`, `more-depth`, `less-busy`) and `POST /api/scene/chip` applies one to a single
+  scene. The edit is deterministic and scene-local (`packages/agent` `applySceneChip`): it never
+  touches `theme`, `preferredFrames` or the format, so the segment cache key of every other scene is
+  unchanged and the storyboard's **Re-render scene** only rebuilds that one segment. The validating
+  store rejects any edit that would break the package schema; a stale `baseRevision` is a 409. No
+  model, network or GPU is involved.
 
 `apps/server/test/scene.test.mjs` is the acceptance: a one-scene re-render of the tiny renderer
 fixture proves the untouched segments' cache files are not rewritten (mtime) and ffprobe frames ==
