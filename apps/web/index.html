@@ -43,8 +43,16 @@
           <div class="pane-head"><b>Chat</b><span class="hint">brief → local agent → package</span></div>
           <div id="messages"></div>
           <form id="composer">
+            <div id="brief-panel" class="brief-panel" hidden></div>
             <textarea id="prompt" rows="2" placeholder="Describe a video brief… (the agent builds a CPU package)"></textarea>
-            <div class="composer-row"><span class="hint" id="composer-hint">Enter to send · keys stay on the server</span><button type="submit" id="composer-send">Send</button></div>
+            <div class="composer-row">
+              <span class="mode-toggle" role="group" aria-label="Planning mode">
+                <button type="button" id="mode-plan" class="mode active" data-mode="plan">Plan</button>
+                <button type="button" id="mode-express" class="mode" data-mode="express">Express</button>
+              </span>
+              <span class="hint" id="composer-hint">Enter to send · keys stay on the server</span>
+              <button type="submit" id="composer-send">Send</button>
+            </div>
           </form>
         </section>
 

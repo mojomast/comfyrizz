@@ -6,7 +6,7 @@ the island only receives the compiled timeline and playhead.
 
 ## What is here
 
-- **Chat pane** — local transcript, `esc()`/`md()` subset, composer. Submitting a brief posts to `POST /api/agent` on the server, which runs the local or live model and returns the compiled package; the browser never holds a provider key. A streaming bubble shows while the request is in flight, and server `agent.*` SSE events are mirrored into Activity.
+- **Chat pane** — local transcript, `esc()`/`md()` subset, composer with a **Plan/Express** toggle. Submitting a brief posts to `POST /api/agent` on the server, which runs the local or live model and returns the compiled package; the browser never holds a provider key. A streaming bubble shows while the request is in flight, and server `agent.*` SSE events are mirrored into Activity.
 - **Preview** — `@remotion/player` mounted with the same `TimelinePlayer` composition the MP4
   renderer uses. Edit a headline, a chart value or the palette: the preview updates on the next
   frame; the storyboard marks the timeline as a draft because the browser does not re-hash.
@@ -102,6 +102,21 @@ Live SVG *markup* is opt-in via `COMFYRIZZ_LIVE_SVG=1`. By default the SVG asset
 deterministic A5 stub even on a live run: each live SVG is a full reasoning stream (~60 s each),
 which pushed one live run past the client's 300 s headers timeout. The live model still builds the
 package draft (the C5-live goal); `COMFYRIZZ_LIVE_SVG=1` restores model-written markup.
+
+## R2 plan mode (brief before building)
+
+The composer has a **Plan / Express** toggle. **Plan** sends the prompt to `POST /api/brief` first:
+the server runs the deterministic extractor in `packages/agent` (no model, no spend) and returns a
+draft brief plus the top **≤3** research-§2.4 questions, each with tappable chips and a **Decide for
+me** default. The `#brief-panel` renders those chips above the textarea; nothing is built until
+**Looks right**, which posts the chosen answers back and then hands the completed brief (serialised
+by `briefToPrompt`) to the normal `/api/agent` build. **Express** skips the questions and builds the
+raw prompt immediately. Plan mode falls back to a direct build if `/api/brief` is unavailable.
+
+Evidence (headless Chrome 1440×900, `docs/ui/r2-plan-mode.png`): one brief produced two questions
+(`look` + `data`) with their chips; clicking a chip per question and **Looks right** then built a
+package (`agent package · 4 SVG assets · scripted model`) with the panel hidden again. Express built
+directly with no panel. No model, network or GPU is used to plan.
 
 ## C6 backend run (spend card + run panel)
 

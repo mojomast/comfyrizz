@@ -51,6 +51,17 @@ const state = {
   activity: [] as Array<{ at: string; text: string }>,
 };
 
+type BriefMode = 'plan' | 'express';
+type BriefQuestion = { id: string; field: string; prompt: string; chips: string[]; decide: string };
+type BriefPlan = { mode: BriefMode; complete: boolean; questions: BriefQuestion[]; brief: Record<string, unknown> };
+let briefMode: BriefMode = 'plan';
+const briefState: {
+  pending: BriefQuestion[];
+  choices: Record<string, string | undefined>;
+  prompt: string;
+  busy: boolean;
+} = { pending: [], choices: {}, prompt: '', busy: false };
+
 let player: PlayerRef | null = null;
 let scrub: HTMLInputElement;
 
@@ -741,6 +752,111 @@ async function exportMp4(): Promise<void> {
   }
 }
 
+function briefToPrompt(brief: Record<string, unknown>): string {
+  const audience = (brief.audience ?? {}) as { who?: string; language?: string };
+  const style = (brief.style ?? {}) as { preset?: string; palette?: string[] };
+  const voice = (brief.voice ?? {}) as { engine?: string; persona?: string };
+  const music = (brief.music ?? {}) as { enabled?: boolean; mood?: string };
+  const tone = Array.isArray(brief.tone) ? (brief.tone as string[]).join(', ') : '';
+  const mustInclude = Array.isArray(brief.must_include) ? (brief.must_include as string[]) : [];
+  const avoid = Array.isArray(brief.avoid) ? (brief.avoid as string[]) : [];
+  return [
+    String(brief.key_message ?? ''),
+    `Goal: ${brief.goal ?? 'launch'}.`,
+    `Audience: ${audience.who ?? 'developers'} (${audience.language ?? 'en'}).`,
+    brief.length_s ? `Length: about ${brief.length_s} seconds.` : '',
+    brief.aspect ? `Aspect: ${brief.aspect}.` : '',
+    tone ? `Tone: ${tone}.` : '',
+    style.preset ? `Look: ${style.preset}${style.palette?.length ? ` (palette ${style.palette.join(' ')})` : ''}.` : '',
+    voice.persona ? `Narration (${voice.engine ?? 'kokoro'}): ${voice.persona}.` : 'No narration.',
+    music.enabled ? `Music: ${music.mood ?? 'instrumental bed'}.` : 'No music.',
+    brief.cta ? `End with: ${brief.cta}.` : '',
+    mustInclude.length ? `Must include: ${mustInclude.join(', ')}.` : '',
+    avoid.length ? `Avoid: ${avoid.join(', ')}.` : '',
+  ].filter(Boolean).join(' ');
+}
+
+function renderBriefPanel(): void {
+  const panel = $('brief-panel');
+  if (briefState.pending.length === 0) {
+    panel.hidden = true;
+    panel.innerHTML = '';
+    return;
+  }
+  panel.hidden = false;
+  const questions = briefState.pending.map(question => {
+    const selected = briefState.choices[question.id];
+    const chips = question.chips.map(chip =>
+      `<button type="button" data-brief-q="${esc(question.id)}" data-brief-value="${esc(chip)}" class="${selected === chip ? 'selected' : ''}">${esc(chip)}</button>`,
+    ).join('');
+    return `<div class="brief-question"><span class="q">${esc(question.prompt)}</span><div class="brief-chips">${chips}<button type="button" class="decide ${selected === undefined ? 'selected' : ''}" data-brief-q="${esc(question.id)}" data-brief-decide="1">Decide for me</button></div></div>`;
+  }).join('');
+  panel.innerHTML = `<div class="brief-head">Plan mode · answer up to ${briefState.pending.length} question(s), or let the agent decide.</div>${questions}<div class="brief-actions"><span class="hint">${briefState.busy ? 'planning…' : 'Nothing is built until you confirm.'}</span><button type="button" id="brief-apply">Looks right</button></div>`;
+  panel.querySelectorAll<HTMLButtonElement>('[data-brief-q]').forEach(button => {
+    button.addEventListener('click', () => {
+      const id = button.getAttribute('data-brief-q') as string;
+      briefState.choices[id] = button.hasAttribute('data-brief-decide') ? undefined : (button.getAttribute('data-brief-value') as string);
+      renderBriefPanel();
+    });
+  });
+  $('brief-apply').addEventListener('click', () => void resolveBrief());
+}
+
+async function requestBrief(prompt: string, decisions?: Record<string, string | undefined>): Promise<BriefPlan> {
+  const response = await apiFetch('/api/brief', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt, mode: briefMode, ...(decisions ? { decisions } : {}) }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+  return body as BriefPlan;
+}
+
+async function planBriefFlow(text: string): Promise<void> {
+  briefState.busy = true;
+  $('composer-hint').textContent = 'planning the brief…';
+  try {
+    const plan = await requestBrief(text);
+    if (plan.complete) {
+      briefState.pending = [];
+      renderBriefPanel();
+      logActivity('Plan mode: brief already complete, building');
+      await runBrief(briefToPrompt(plan.brief));
+      return;
+    }
+    briefState.pending = plan.questions;
+    briefState.choices = {};
+    briefState.prompt = text;
+    renderBriefPanel();
+    logActivity(`Plan mode: ${plan.questions.length} question(s) to confirm`);
+  } catch (error) {
+    logActivity(`Plan mode failed: ${(error as Error).message}`);
+    await runBrief(text);
+  } finally {
+    briefState.busy = false;
+    $('composer-hint').textContent = 'Enter to send · keys stay on the server';
+    renderBriefPanel();
+  }
+}
+
+async function resolveBrief(): Promise<void> {
+  if (briefState.busy || briefState.pending.length === 0) return;
+  briefState.busy = true;
+  renderBriefPanel();
+  try {
+    const plan = await requestBrief(briefState.prompt, briefState.choices);
+    briefState.pending = [];
+    renderBriefPanel();
+    logActivity('Plan mode: brief confirmed, building');
+    await runBrief(briefToPrompt(plan.brief));
+  } catch (error) {
+    logActivity(`Plan mode failed: ${(error as Error).message}`);
+  }
+  briefState.busy = false;
+  renderBriefPanel();
+}
+
 async function runBrief(brief: string): Promise<void> {
   const composer = $<HTMLButtonElement>('composer-send');
   if (composer) composer.disabled = true;
@@ -788,6 +904,7 @@ function init(): void {
   renderRunPanel();
   renderExportPanel();
   renderSpendCard();
+  renderBriefPanel();
   void loadProviders();
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: 'Loaded examples/launch-demo package + compiled timeline' }];
   renderActivity();
@@ -815,6 +932,13 @@ function init(): void {
   $('render').addEventListener('click', () => void exportMp4());
   $('run-backend').addEventListener('click', () => void runOnBackend(false));
   $('render-changes').addEventListener('click', () => void renderChangedScenes());
+  document.querySelectorAll<HTMLButtonElement>('.mode-toggle .mode').forEach(button => {
+    button.addEventListener('click', () => {
+      briefMode = (button.getAttribute('data-mode') as BriefMode) ?? 'plan';
+      document.querySelectorAll('.mode-toggle .mode').forEach(other => other.classList.toggle('active', other === button));
+      logActivity(`Composer mode: ${briefMode}`);
+    });
+  });
 
   if (token) {
     const stream = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
@@ -974,6 +1098,10 @@ function init(): void {
 
   $<HTMLFormElement>('composer').addEventListener('submit', event => {
     event.preventDefault();
+    if (briefState.pending.length > 0) {
+      void resolveBrief();
+      return;
+    }
     const prompt = $<HTMLTextAreaElement>('prompt');
     const text = prompt.value.trim();
     if (!text) return;
@@ -981,7 +1109,8 @@ function init(): void {
     renderMessages();
     $('messages').scrollTop = $('messages').scrollHeight;
     prompt.value = '';
-    void runBrief(text);
+    if (briefMode === 'plan' && token) void planBriefFlow(text);
+    else void runBrief(text);
   });
 }
 
