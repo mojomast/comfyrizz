@@ -99,7 +99,7 @@ if grep -qE '[0-9]+ skipped' "$WORK/pytest.log"; then
   echo "pytest skipped cases on a fresh clone"
   exit 1
 fi
-SUMMARY+=("pipeline-py: $(tail -1 "$WORK/pytest.log" | sed 's/ in .*//')")
+SUMMARY+=("pipeline-py: $(grep -E '[0-9]+ (passed|failed|error)' "$WORK/pytest.log" | tail -1 | sed 's/ in .*//')")
 
 log "PASS: fresh clone -> install -> schema, jobs, backends and pipeline-py suites, nothing skipped"
 printf '%s\n' "${SUMMARY[@]}"
