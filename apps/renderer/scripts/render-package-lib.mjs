@@ -142,7 +142,7 @@ export function preparePublicDir(pkg, packageDir) {
   return temp;
 }
 
-export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null } = {}) {
+export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
   // A9: validate the package as stored — the base `file` and `variants` are checked (H12 variant
@@ -155,7 +155,11 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   // A9: the final-export option overrides the format to 1920×1080 and prefers upscaled media.
   const applied = final ? applyFinalRender(raw, packageDir, typeof final === 'boolean' ? {} : final) : null;
   const pkg = applied?.pkg ?? raw;
-  const timeline = compileTimeline(pkg, narrationOptions(packageDir));
+  // L1: a language variant has its own narration text, so callers pass the
+  // variant's measured durations (or `{}` to re-estimate from the translated
+  // `scene.narration`) instead of the base package's English durations.
+  const compileOptions = narration !== undefined ? narration : narrationOptions(packageDir);
+  const timeline = compileTimeline(pkg, compileOptions);
   if (applied) {
     onLog(`final render ${applied.width}×${applied.height}${applied.used.length > 0 ? `, ${applied.used.length} upscaled variant(s)` : ', no upscaled variants'}`);
     for (const item of applied.used) onLog(`using upscaled ${item.id}: ${item.file}`);

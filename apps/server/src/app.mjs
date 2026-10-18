@@ -5,6 +5,7 @@ import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
+import { buildVariants } from './variant.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
@@ -508,6 +509,27 @@ export function createApp({
           revision = pkg.revision;
         }
         events.publish({ type: 'export.started', exportId, packageId: pkg.id, revision });
+        if (body.variants && typeof body.variants === 'object') {
+          // L1: one bundle per language/aspect variant plus a variants.json manifest.
+          const plan = buildVariants(pkg, body.variants);
+          const result = await exporter.variants({
+            pkg,
+            packagePath,
+            variants: plan,
+            force: body.force === true,
+            onLog: line => events.publish({ type: 'export.log', exportId, line }),
+          });
+          events.publish({
+            type: 'export.finished',
+            exportId,
+            packageId: pkg.id,
+            revision,
+            kind: 'variants',
+            dir: result.dir,
+            variants: result.manifest.variants.length,
+          });
+          return sendJson(response, 200, { exportId, packageId: pkg.id, dir: result.dir, manifestPath: result.manifestPath, manifest: result.manifest });
+        }
         const result = await exporter({
           pkg,
           packagePath,

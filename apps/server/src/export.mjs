@@ -3,7 +3,7 @@
 // captions.vtt, CREDITS.md and package.zip. package.zip carries only assets the
 // v0.1 rights policy allows; everything else is listed with its source and
 // licence reason in CREDITS.md and manifest.json. No network and no keys.
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { buildCredits, buildPackageZip } from '../../../packages/sources/dist/src/index.js';
 import { captionsToSrt, captionsToVtt } from '../../../packages/tts/dist/src/index.js';
@@ -45,7 +45,7 @@ export function createExporter({ exportsDir, render } = {}) {
   if (!exportsDir) throw new Error('createExporter needs an exportsDir');
   if (typeof render !== 'function') throw new Error('createExporter needs a render function');
 
-  return async function exportPackage({ pkg, packagePath, revision = null, force = false, onLog = () => {} } = {}) {
+  async function exportPackage({ pkg, packagePath, revision = null, force = false, onLog = () => {}, narration } = {}) {
     if (!pkg || typeof pkg !== 'object') throw new Error('exportPackage needs a package');
     if (!packagePath) throw new Error('exportPackage needs a packagePath');
     const packageDir = dirname(packagePath);
@@ -54,7 +54,10 @@ export function createExporter({ exportsDir, render } = {}) {
 
     // The exporter compiles the same timeline the Player shows, so captions and
     // frames come from the player's own cues (measured narration when present).
-    const timeline = compileTimeline(pkg, narrationOptions(packageDir));
+    // L1: a language variant passes its own narration (`{}` re-estimates from
+    // the translated `scene.narration`) so captions never show the base language.
+    const compileOptions = narration !== undefined ? narration : narrationOptions(packageDir);
+    const timeline = compileTimeline(pkg, compileOptions);
     if (timeline.provisional) onLog('warning: narration is not measured; the timeline is provisional');
 
     const videoPath = join(dir, 'video.mp4');
@@ -66,7 +69,7 @@ export function createExporter({ exportsDir, render } = {}) {
       onLog(`reusing ${videoPath} (${video.bytes} bytes)`);
     } else {
       onLog(`rendering ${videoPath}`);
-      video = await render(packagePath, videoPath, { onLog });
+      video = await render(packagePath, videoPath, { onLog, ...(narration !== undefined ? { narration } : {}) });
       if (!existsSync(videoPath)) throw new Error('render finished without writing an MP4');
     }
 
@@ -115,5 +118,71 @@ export function createExporter({ exportsDir, render } = {}) {
         reason: item.reason,
       })),
     };
-  };
+  }
+
+  /**
+   * L1: export a bundle for every variant. Each variant package is written as a
+   * sidecar in the base package dir (so its relative asset paths resolve), then
+   * exported as its own `exports/<variant-id>/` bundle, and a `variants.json`
+   * manifest is written into the base bundle listing language, aspect, frame
+   * size, scene count and files. A language variant passes `narration: {}` so
+   * its captions are re-estimated from the translated copy.
+   *
+   * `variants` items: `{ package, language, aspect, slug, isBase, narration? }`.
+   */
+  async function exportVariantSet({ pkg, packagePath, variants, force = false, onLog = () => {}, generatedAt = new Date().toISOString() } = {}) {
+    if (!pkg || typeof pkg !== 'object') throw new Error('exportVariantSet needs a package');
+    if (!packagePath) throw new Error('exportVariantSet needs a packagePath');
+    if (!Array.isArray(variants) || variants.length === 0) throw new Error('exportVariantSet needs variants');
+    const packageDir = dirname(packagePath);
+    const sidecars = new Set();
+    const results = [];
+    try {
+      for (const variant of variants) {
+        if (!variant?.package || !variant.slug) throw new Error('each variant needs a package and slug');
+        const variantPath = join(packageDir, `${variant.slug}.variant.json`);
+        sidecars.add(variantPath);
+        writeFileSync(variantPath, `${JSON.stringify(variant.package, null, 2)}\n`);
+        onLog(`variant ${variant.slug}: ${variant.package.id} ${variant.package.format?.width}x${variant.package.format?.height}`);
+        const result = await exportPackage({
+          pkg: variant.package,
+          packagePath: variantPath,
+          revision: variant.package.revision ?? null,
+          force,
+          onLog,
+          ...(variant.narration !== undefined ? { narration: variant.narration } : {}),
+        });
+        results.push({ variant, result });
+      }
+    } finally {
+      for (const sidecar of sidecars) rmSync(sidecar, { force: true });
+    }
+
+    const manifest = {
+      packageId: pkg.id,
+      generatedAt,
+      variants: results.map(({ variant, result }) => ({
+        id: variant.package.id,
+        language: variant.language,
+        aspect: variant.aspect,
+        slug: variant.slug,
+        isBase: variant.isBase === true,
+        dir: result.dir,
+        format: { width: variant.package.format?.width, height: variant.package.format?.height },
+        scenes: variant.package.scenes?.length ?? 0,
+        frames: result.frames,
+        timelineHash: result.timelineHash,
+        files: result.files.map(file => file.name),
+      })),
+    };
+    const manifestPath = join(exportsDir, pkg.id, 'variants.json');
+    mkdirSync(dirname(manifestPath), { recursive: true });
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    onLog(`wrote ${manifestPath} (${manifest.variants.length} variant(s))`);
+
+    return { packageId: pkg.id, dir: join(exportsDir, pkg.id), manifestPath, manifest, variants: results };
+  }
+
+  exportPackage.variants = exportVariantSet;
+  return exportPackage;
 }
