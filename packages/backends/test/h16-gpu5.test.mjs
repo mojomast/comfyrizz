@@ -5,7 +5,7 @@
 // read that argv with argparse, raised SystemExit 2 before its first step, and the host could only
 // report "no sentinel" 2 s into a session.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,7 @@ import test from "node:test";
 
 import { spawnSync } from "node:child_process";
 
-import { createColabBackend, BOOTSTRAP_SILENCE_MS, READY_WAIT_SECONDS } from "../src/colab-backend.mjs";
+import { createBundle, createColabBackend, BOOTSTRAP_SILENCE_MS, READY_WAIT_SECONDS } from "../src/colab-backend.mjs";
 import { parseReadyLine } from "../src/colab-plan.mjs";
 import { installFakeColab, makeCli, readLog } from "./helpers.mjs";
 
@@ -279,4 +279,38 @@ test("the proxy is started from its installed entry point, not a checkout (G5-4)
   // the console script passes --comfyui and --port; so must we
   assert.match(code, /"--comfyui"/);
   assert.match(code, /"--port"/);
+});
+
+test("jobs.zip carries the runner package and the schemas the VM imports (G5-5)", () => {
+  const work = mkdtempSync(join(tmpdir(), "comfyrizz-h16-bundle-"));
+  const packageDir = join(work, "pkg");
+  mkdirSync(join(packageDir, "workflows"), { recursive: true });
+  writeFileSync(join(packageDir, "workflows", "still.api.json"), "{}");
+  writeFileSync(join(packageDir, "package.json"), '{"id":"pkg_h16_bundle"}');
+  const jobsFile = join(work, "jobs.json");
+  writeFileSync(jobsFile, JSON.stringify({ v: 1, packageId: "pkg_h16_bundle", jobs: [], hash: "a".repeat(64) }));
+
+  const bundle = createBundle({ jobsFile, packageDir, scratch: work });
+  const listed = spawnSync(
+    process.env.PYTHON3 || "python3",
+    ["-c", "import sys, zipfile; print('\\n'.join(zipfile.ZipFile(sys.argv[1]).namelist()))", bundle],
+    { encoding: "utf8", timeout: 60000 },
+  );
+  assert.equal(listed.status, 0, listed.stderr);
+  const names = listed.stdout.split("\n").map((name) => name.trim()).filter(Boolean);
+
+  // the VM runs `python -m comfyrizz_pipeline.runner` from the unpacked bundle
+  const modules = readdirSync(join(REPO, "pipeline-py/comfyrizz_pipeline")).filter((name) => name.endsWith(".py"));
+  for (const module of modules) {
+    assert.ok(names.includes(`comfyrizz_pipeline/${module}`), `jobs.zip has no comfyrizz_pipeline/${module}`);
+  }
+  // and schema.py validates jobs.json against the repo's own schemas
+  const schemas = readdirSync(join(REPO, "packages/schema")).filter((name) => name.endsWith("-v1.schema.json"));
+  assert.ok(schemas.length > 0);
+  for (const schema of schemas) {
+    assert.ok(names.includes(`packages/schema/${schema}`), `jobs.zip has no packages/schema/${schema}`);
+  }
+  // the bundle still is a bundle
+  assert.ok(names.includes("jobs.json"), "the jobs file itself has to be in it");
+  assert.ok(names.some((name) => name.includes("workflows")), "the workflows have to be in it");
 });
