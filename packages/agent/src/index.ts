@@ -42,6 +42,23 @@ export {
 export type { Brief, BriefDraft, Question, BriefDecisions, StylePreset, ExtractBriefOptions, Outline, OutlineBeat, OutlineOptions } from './brief.js';
 export { stylePresets, STYLE_PRESET_LABELS } from './style-presets.js';
 export type { StylePresetCard } from './style-presets.js';
+export {
+  BRAND_FALLBACK_FONT,
+  BRAND_MAX_PALETTE,
+  BRAND_MAX_FONTS,
+  BRAND_MAX_TONE,
+  BRAND_SAFE_FONT_LICENSES,
+  brandFontSchema,
+  brandKitSchema,
+  isSafeFontLicense,
+  effectiveFont,
+  normalizeBrandKit,
+  brandTheme,
+  applyBrandKit,
+  brandBriefStyle,
+  brandStyleBlock,
+} from './brand.js';
+export type { BrandFont, BrandKit, BrandKitInput, BrandTheme, BrandWarning } from './brand.js';
 export { SCENE_CHIPS, applySceneChip, isSceneChip, sceneChip, sceneChipList, warmHex } from './scene-chips.js';
 export type { SceneChip, SceneChipResult, ChipPackage, ChipScene } from './scene-chips.js';
 export type { AgentEvent, RunAgentOptions, RunAgentResult, ToolRecord } from './agent.js';
