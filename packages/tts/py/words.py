@@ -7,8 +7,9 @@ crude syllable count. It needs no model, no network and no extra install, and it
 always produces a monotonic list that exactly fills the sentence.
 
 A real aligner can supersede the fallback without changing the contract: pass
-``tokens`` (``[{text, start, end}, ...]`` in seconds, relative to the sentence)
-and this module validates and returns them unchanged. The PyTorch ``KPipeline``
+``tokens`` (``[{text, start, end}, ...]`` in seconds, relative to the sentence;
+``start_ts`` / ``end_ts`` are accepted as aliases) and this module validates
+them and returns ``{text, start, end}``. The PyTorch ``KPipeline``
 ``tokens[].start_ts/end_ts`` and R3's Qwen3 forced aligner both plug in here.
 """
 from __future__ import annotations
@@ -55,8 +56,10 @@ def validate_tokens(tokens: list[dict], seconds: float) -> list[dict]:
     previous = 0.0
     for token in tokens:
         text = str(token.get("text", "")).strip()
-        start = float(token.get("start", 0.0))
-        end = float(token.get("end", 0.0))
+        # Kokoro's KPipeline uses start_ts/end_ts; the Qwen3 aligner may too.
+        # The words[] we return always use start/end.
+        start = float(token["start"] if "start" in token else token.get("start_ts", 0.0))
+        end = float(token["end"] if "end" in token else token.get("end_ts", 0.0))
         if not text:
             raise ValueError("word token has no text")
         if start < previous - TOLERANCE or end < start:

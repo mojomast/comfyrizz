@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://comfyrizz.example/schema/package-v1.json",
   "title": "comfyrizz.package/v1",
-  "description": "Comfyrizz package document (SPEC.md 6.3). A package is the deterministic input of the timeline compiler and the renderer, and the record of how every asset was obtained. Structural rules live here; cross-field rules (unique ids, resolvable refs, relative paths only, licence/rights separation, layout limits) live in the shared semantic validator implemented identically in TypeScript (src/semantic.mjs) and Python (pipeline-py/comfyrizz_pipeline/schema.py). Generated-first assets (PLAN.md 'Generated-first assets'): asset kind svg / vector-anim, gen.generator in llm-svg | flux3-klein | ltx25 | kokoro, gen.sanitizer_version, gen.render_check, output licence defaults to CC0-1.0 with redistributable true.",
+  "description": "Comfyrizz package document (SPEC.md 6.3). A package is the deterministic input of the timeline compiler and the renderer, and the record of how every asset was obtained. Structural rules live here; cross-field rules (unique ids, resolvable refs, relative paths only, licence/rights separation, layout limits) live in the shared semantic validator implemented identically in TypeScript (src/semantic.mjs) and Python (pipeline-py/comfyrizz_pipeline/schema.py). Generated-first assets (PLAN.md 'Generated-first assets'): asset kind svg / vector-anim, gen.generator in llm-svg | flux3-klein | ltx25 | kokoro | qwen3-tts, gen.sanitizer_version, gen.render_check, output licence defaults to CC0-1.0 with redistributable true.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -190,8 +190,10 @@
           "type": "string",
           "enum": [
             "kokoro",
+            "qwen3-tts",
             "none"
-          ]
+          ],
+          "description": "kokoro (default) is the CPU narrator. qwen3-tts is the optional Qwen3-TTS 1.7B backend; when its runtime is missing the pipeline falls back to kokoro unless voice.strict is true. none disables narration."
         },
         "voice": {
           "type": "string",
@@ -208,6 +210,26 @@
           "type": "string",
           "minLength": 2,
           "maxLength": 16
+        },
+        "lang": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16,
+          "description": "Optional short language tag for Qwen3-TTS (en or fr). When it is omitted, voice.language is used. Kokoro keeps using voice.language."
+        },
+        "persona": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400,
+          "description": "Natural-language narrator description. Qwen3-TTS VoiceDesign uses it once per package to build the cloned voice."
+        },
+        "ref_asset": {
+          "$ref": "#/$defs/assetId",
+          "description": "Designed reference clip for the package narrator (CC0, because we generated it). Optional; the synth caches a voice_clone_prompt either way."
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "When true, a selected qwen3-tts runtime that is unavailable fails the run. When false or omitted, the run falls back to Kokoro."
         }
       }
     },
@@ -1094,6 +1116,21 @@
           "type": "string",
           "maxLength": 600
         },
+        "narration_spoken": {
+          "type": "string",
+          "maxLength": 600,
+          "description": "Respelling sent to the synthesizer (for example Comfyrizz -> Comfy rizz). Captions keep narration. Optional; otherwise pronounce.py is applied."
+        },
+        "spoken_text": {
+          "type": "string",
+          "maxLength": 600,
+          "description": "Alias of narration_spoken. narration_spoken wins when both are set."
+        },
+        "narration_style": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Per-scene emotion instruction for Qwen3-TTS (for example \"calm, slightly amused\")."
+        },
         "narration_asset": {
           "$ref": "#/$defs/assetId"
         },
@@ -1305,9 +1342,10 @@
             "flux3-klein",
             "ltx25",
             "ltx25-a2v",
-            "kokoro"
+            "kokoro",
+            "qwen3-tts"
           ],
-          "description": "llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by a scene's narration WAV); kokoro = narration audio."
+          "description": "llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by a scene's narration WAV); kokoro = Kokoro narration audio; qwen3-tts = optional Qwen3-TTS 1.7B narration audio (Apache-2.0)."
         },
         "workflow": {
           "$ref": "#/$defs/relativePath"

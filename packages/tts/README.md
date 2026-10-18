@@ -63,6 +63,52 @@ A small pronunciation map (`py/pronounce.py`) covers product names and acronyms
 (Comfyrizz, Kokoro, SVG, CPU, GPU, LLM, LUFS, dBTP, LTX). It changes only the
 synthesised text; captions keep the original spelling.
 
+## Optional Qwen3-TTS (R3)
+
+Kokoro stays the default and the no-GPU fallback. Set `voice.engine` to
+`qwen3-tts` to use Qwen3-TTS 1.7B instead. With no engine change, `synth.py`
+does not import that backend.
+
+`py/qwen.py` is a thin adapter. VoiceDesign runs once per package from
+`voice.persona` and caches a `voice_clone_prompt`; every scene is then one
+Base clone of that prompt (the scene's sentences in a single call, with
+`narration_style` as the emotion instruct). `voice.lang` or `voice.language`
+selects English or French. `torch`, `qwen-tts` and the weights are imported
+only inside the real adapter, and they are not in `py/requirements.txt`.
+
+If that runtime is missing, the run falls back to Kokoro and records
+`engineFallback`. `voice.strict: true` stops the run instead of falling back.
+
+Word timings stay on the K1 hook. `Qwen3-ForcedAligner-0.6B` returns tokens
+(`start`/`end`, or `start_ts`/`end_ts`) to `word_timings()`. Tokens that do not
+fit the measured take are rejected and the syllable fallback fills the same
+`words[]` list, which the timeline compiler already turns into caption
+highlights.
+
+`narration_spoken` (alias `spoken_text`) is the line that is synthesised.
+Captions keep `narration`. When neither field is set, `pronounce.py` still
+respells. After each take, an ASR pass (Qwen3-ASR-0.6B, or a scripted fake in
+tests) computes word error rate against the spoken form and regenerates with
+the next seed when that rate is above 5% or a pronunciation-map phrase is
+missing. Retries stop at three; the best take is kept and `qa.flagged` is set.
+
+Tests never download weights and never start a GPU or a Google Colab runtime.
+They pass a fake synth (a tone of known length), a fake aligner (known tokens)
+and a fake ASR (a known transcript). A real GPU run still has to confirm the
+`qwen-tts` / `qwen-asr` call names, which are marked [unverified] in `py/qwen.py`.
+
+Optional install, separate from the default venv:
+
+```bash
+pip install qwen-tts
+# Qwen3-ASR is a further optional import (`qwen_asr`); the package name is [unverified].
+```
+
+**VoxCPM2** (2B, Apache-2.0, 48 kHz, voice design with style prefixes) is a
+documented alternative only. There is no VoxCPM2 code in this repository. A
+listening comparison against Qwen3-TTS would be a later GPU job, including on
+Google Colab, and is not part of this package.
+
 ## Commands
 
 ```bash
@@ -79,7 +125,7 @@ node packages/tts/scripts/narrate.mjs --example examples/narrated-demo
 
 # checks
 npm --prefix packages/tts test          # 11 tests (unit + narrated acceptance)
-.venv/bin/python -m pytest packages/tts/py -q   # pronunciation map + voice.language mapping
+.venv/bin/python -m pytest packages/tts/py -q   # pronunciation map, voice.language, Qwen3 fakes
 cd apps/renderer && npm run render:narrated
 ```
 

@@ -41,6 +41,13 @@
       "warnings": []
     },
     {
+      "file": "valid/qwen3-voice.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
       "file": "valid/spec-6.3-example.json",
       "kind": "valid",
       "schemaOk": true,
