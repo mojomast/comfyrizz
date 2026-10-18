@@ -21,6 +21,7 @@ import {
   redactForLog,
   resolveColabBinary,
   parseHealthLine,
+  parseReadyLine,
   parseTreeListing,
   REMOTE_ROOT,
   argvDownload,
@@ -96,6 +97,15 @@ export const BOOTSTRAP_OVERHEAD_MINUTES = 4;
  */
 export const BOOTSTRAP_SILENCE_MS = 180000;
 
+/**
+ * How long a lost bootstrap may still turn into a usable box (GPU test 5, G5-3).
+ *
+ * The measured bootstrap is 237 s, most of it two model downloads, and losing the CLI does not stop
+ * any of it; a session that is already paid for is worth waiting out. `colab/wait_ready.py` polls
+ * `out/ready.json` for this long, printing a line every 15 s so the host's silence timeout stays quiet.
+ */
+export const READY_WAIT_SECONDS = 600;
+
 export function createColabBackend({
   cli = null,
   packageId,
@@ -110,6 +120,7 @@ export function createColabBackend({
   reserveMinutes = COLLECT_AND_STOP_RESERVE_MINUTES,
   warnFraction = WARN_FRACTION,
   bootstrapScript = join(REPO, "colab", "bootstrap.py"),
+  waitReadyScript = join(REPO, "colab", "wait_ready.py"),
   tokenDirScript = join(REPO, "colab", "hf_token_dir.py"),
   listScript = join(REPO, "colab", "list_out.py"),
   modelsLock = join(REPO, "colab", "models.lock.json"),
@@ -216,6 +227,28 @@ export function createColabBackend({
       silenceMs: silenceMs ?? null,
     });
     return result;
+  }
+
+  /**
+   * Wait for `out/ready.json` on the VM, after a bootstrap exec was lost (GPU test 5, G5-3).
+   *
+   * The cell keeps running after the CLI is killed, so "the exec did not report" says nothing about
+   * the bootstrap. This runs `colab/wait_ready.py`, which polls for bootstrap.py's own verdict, and
+   * reports what it found: `{ok, ready}` when the box is usable, `{ok:false, note}` otherwise.
+   */
+  async function waitForReady({ onEvent = null } = {}) {
+    const waited = await execScript(waitReadyScript, {
+      step: "wait-ready",
+      timeout: READY_WAIT_SECONDS + 60,
+      wallMs: (READY_WAIT_SECONDS + 120) * 1000,
+      onEvent,
+      silenceMs: BOOTSTRAP_SILENCE_MS,
+    });
+    const waitedOutcome = execOutcome(waited, "wait-ready");
+    const ready = parseReadyLine(waited.output);
+    if (ready?.ok) return { ok: true, ready };
+    const said = ready ? `ready.json said ok=${ready.ok} (comfyui=${ready.comfyui}, proxy=${ready.proxy})` : waitedOutcome.note;
+    return { ok: false, note: said, raw: redactTail(waited) };
   }
 
   /** The line a script prints last to say it finished: the only evidence `colab exec` can give. */
@@ -491,7 +524,17 @@ export function createColabBackend({
       });
       emit(onEvent, { type: "bootstrap", code: result.code, lost: isLost(result), token: hfTokenPlan({ localTokenPath: hfTokenPath }) });
       const outcome = execOutcome(result, "bootstrap");
-      if (outcome.lost) return { lost: true, note: outcome.note };
+      if (outcome.lost) {
+        // G5-3: the CLI's kill does not kill the cell - the VM is usually still downloading, and the
+        // work is worth minutes of session time. Ask the box for its own verdict before giving up.
+        emit(onEvent, { type: "bootstrap_lost", note: outcome.note });
+        const recovered = await waitForReady({ onEvent });
+        if (recovered.ok) {
+          emit(onEvent, { type: "bootstrap_recovered", ready: recovered.ready });
+          return { code: 0, recovered: true, ready: recovered.ready };
+        }
+        return { lost: true, note: `${outcome.note}; the box never reported ready (${recovered.note})` };
+      }
       if (!outcome.ok) throw new ColabCliError(`colab bootstrap.py: ${outcome.note}\n${redactTail(result)}`);
       return { code: result.code };
     },

@@ -280,3 +280,30 @@ export function redactRuntimeUrl(text) {
 export function redactForLog(text) {
   return redactRuntimeUrl(redactAll(text));
 }
+
+/**
+ * Read `ready.json` out of a `wait_ready.py` run (GPU test 5, G5-3).
+ *
+ * A lost bootstrap exec is not a failed bootstrap: the VM keeps running the cell after the CLI is
+ * killed, and the only way to learn the outcome is the verdict bootstrap.py writes. Returns null when
+ * the script never got that far.
+ */
+export function parseReadyLine(output) {
+  let found = null;
+  for (const line of String(output ?? "").split("\n")) {
+    const text = line.trim();
+    if (!text.startsWith("READY ")) continue;
+    try {
+      found = JSON.parse(text.slice("READY ".length));
+    } catch {
+      /* a truncated line is not a verdict */
+    }
+  }
+  if (!found || typeof found !== "object" || Array.isArray(found)) return null;
+  return {
+    ok: found.ok === true,
+    comfyui: found.comfyui ?? null,
+    proxy: found.proxy ?? null,
+    source: "ready-json",
+  };
+}

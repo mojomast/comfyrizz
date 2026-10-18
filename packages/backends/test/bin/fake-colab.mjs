@@ -153,6 +153,7 @@ const SENTINELS = {
   "run_jobs.py": "run",
   "reconcile.py": "reconcile",
   "list_out.py": "list-out",
+  "wait_ready.py": "wait-ready",
   "hf_token_dir.py": "hf-token-dir",
 };
 

@@ -13,7 +13,8 @@ import test from "node:test";
 
 import { spawnSync } from "node:child_process";
 
-import { createColabBackend, BOOTSTRAP_SILENCE_MS } from "../src/colab-backend.mjs";
+import { createColabBackend, BOOTSTRAP_SILENCE_MS, READY_WAIT_SECONDS } from "../src/colab-backend.mjs";
+import { parseReadyLine } from "../src/colab-plan.mjs";
 import { installFakeColab, makeCli, readLog } from "./helpers.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -146,4 +147,85 @@ test("the bootstrap step runs with a silence window a download cannot trip (G5-2
     assert.equal(event.silenceMs, null, `${event.step} should not inherit the bootstrap's long leash`);
   }
   await backend.teardown("done");
+});
+
+test("a lost bootstrap waits for the VM's own verdict instead of throwing the session away (G5-3)", async () => {
+  const events = [];
+  const { fake, backend } = setup({
+    scripts: {
+      // the CLI was killed mid-bootstrap (the 60 s silence timeout, GPU test 5 run 2) ...
+      "bootstrap.py": { lost: true },
+      // ... and the cell kept going: ready.json turns up while wait_ready.py is polling
+      "wait_ready.py": { output: 'READY {"v":1,"ok":true,"comfyui":"0.41.0","proxy":200}' },
+    },
+  });
+  const onEvent = (event) => events.push(event);
+
+  await backend.ensureUp({ approved: true, onEvent });
+  const bootstrapped = await backend.bootstrap({ onEvent });
+
+  assert.equal(bootstrapped.recovered, true, "a lost exec is not a lost bootstrap");
+  assert.equal(bootstrapped.code, 0);
+  assert.equal(bootstrapped.ready.ok, true);
+  const scripts = readLog(fake.logPath)
+    .filter((entry) => entry.argv[0] === "exec")
+    .map((entry) => String(entry.argv[entry.argv.indexOf("-f") + 1]));
+  assert.equal(scripts.filter((name) => name === "wait_ready.py").length, 1, "it asks exactly once");
+  assert.ok(events.some((event) => event.type === "bootstrap_lost"));
+  assert.ok(events.some((event) => event.type === "bootstrap_recovered"));
+  await backend.teardown("done");
+});
+
+test("a lost bootstrap that never becomes ready is still a failure, and says why (G5-3)", async () => {
+  const { fake, backend } = setup({
+    scripts: {
+      "bootstrap.py": { lost: true },
+      "wait_ready.py": { output: "no ready.json after 600s", noSentinel: true },
+    },
+  });
+
+  await backend.ensureUp({ approved: true });
+  // a lost bootstrap is reported, not thrown: runPackage is the layer that decides it is fatal (H15),
+  // and it needs the note to say what was tried
+  const bootstrapped = await backend.bootstrap();
+  assert.equal(bootstrapped.lost, true);
+  assert.match(bootstrapped.note, /never reported ready/);
+  assert.match(bootstrapped.note, /did not report|never printed "COMFYRIZZ_OK wait-ready"/);
+  assert.equal(readLog(fake.logPath).filter((e) => e.argv.includes("wait_ready.py")).length, 1);
+  await backend.teardown("error");
+});
+
+test("wait_ready.py gives up loudly in a kernel cell, with no argv of its own (G5-3)", () => {
+  const cell = [
+    "import runpy, sys",
+    "sys.argv = ['ipykernel_launcher.py', '-f', '/root/.local/share/jupyter/runtime/kernel-h16.json']",
+    "runpy.run_path('colab/wait_ready.py', run_name='__main__')",
+  ].join("\n");
+  // this host has no /content/comfyrizz/out/ready.json and no time to wait for one
+  const run = spawnSync(process.env.PYTHON3 || "python3", ["-c", cell], {
+    cwd: REPO,
+    encoding: "utf8",
+    timeout: 60000,
+    env: { ...process.env, COMFYRIZZ_READY_WAIT_SECONDS: "0" },
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.doesNotMatch(run.stdout + run.stderr, /unrecognized arguments/);
+  assert.match(run.stdout, /COMFYRIZZ_FAIL wait-ready/);
+  assert.match(run.stderr, /no ready.json after 0s/);
+});
+
+test("parseReadyLine only believes a complete verdict (G5-3)", () => {
+  assert.deepEqual(parseReadyLine('READY {"v":1,"ok":true,"comfyui":"0.41.0","proxy":200}'), {
+    ok: true,
+    comfyui: "0.41.0",
+    proxy: 200,
+    source: "ready-json",
+  });
+  assert.equal(parseReadyLine("WAITING ready.json 15s"), null);
+  assert.equal(parseReadyLine('READY {"v":1'), null);
+  assert.equal(parseReadyLine('READY "ok"'), null);
+  assert.equal(parseReadyLine(""), null);
+  assert.equal(parseReadyLine('READY {"v":1,"ok":false}').ok, false);
+  assert.ok(READY_WAIT_SECONDS >= 600, "the measured bootstrap alone is 237 s");
 });

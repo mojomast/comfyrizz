@@ -127,6 +127,7 @@ test("every exec'd script is self-contained and prints its sentinel last (G4-5, 
   const scripts = {
     "hf_token_dir.py": "hf-token-dir",
     "list_out.py": "list-out",
+    "wait_ready.py": "wait-ready",
     "bootstrap.py": "bootstrap",
     "health.py": "health",
     "run_jobs.py": "run",
