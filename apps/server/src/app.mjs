@@ -8,6 +8,7 @@ import { createExporter } from './export.mjs';
 import { buildVariants } from './variant.mjs';
 import { buildDataset } from './dataset.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
+import { runFrameQa, createQaRegistry } from './qa.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
@@ -114,6 +115,7 @@ export function createApp({
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
   const rendersDir = join(runtimeDir, 'renders');
+  const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const events = new EventLog();
@@ -502,6 +504,13 @@ export function createApp({
       return;
     }
 
+    // MS4: the last frame-QA result for a render (or the latest for a package).
+    if (url.pathname === '/api/qa' && request.method === 'GET') {
+      const result = qa.lookup({ renderId: url.searchParams.get('renderId') ?? undefined, packageId: url.searchParams.get('packageId') ?? undefined });
+      if (!result) return sendJson(response, 404, { error: 'no qa result' });
+      return sendJson(response, 200, result);
+    }
+
     if (url.pathname === '/api/export' && request.method === 'POST') {
       if (activeExport) return sendJson(response, 409, { error: 'export busy', exportId: activeExport });
       const body = await readJson(request);
@@ -626,6 +635,17 @@ export function createApp({
           frames: result.frames,
           timeline_sha256: result.hash,
         });
+        // MS4: the "look at your own frames" gate. Non-fatal: a QA failure is
+        // reported, never a reason to lose a render the owner asked for.
+        if (result.timeline) {
+          try {
+            const qaResult = runFrameQa({ mp4: result.output, timeline: result.timeline, pkg, outDir: rendersDir });
+            qa.record(renderId, pkg.id, qaResult);
+            events.publish({ type: 'qa.result', renderId, packageId: pkg.id, ok: qaResult.ok, findings: qaResult.findings.length, sheet: qaResult.sheet ?? null });
+          } catch (error) {
+            events.publish({ type: 'qa.failed', renderId, packageId: pkg.id, message: error.message });
+          }
+        }
         response.writeHead(200, {
           'content-type': 'video/mp4',
           'content-length': result.bytes,
