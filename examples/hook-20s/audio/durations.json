@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "engine": "kokoro-onnx",
+  "engineVersion": "0.4.9",
+  "model": "kokoro-v1.0.onnx",
+  "voices": "voices-v1.0.bin",
+  "voice": "af_heart",
+  "speed": 1.05,
+  "sampleRate": 24000,
+  "gapSeconds": 0.15,
+  "paddingSeconds": 0.25,
+  "loadSeconds": 1.284,
+  "scenes": {
+    "s_title": {
+      "chunks": [
+        {
+          "text": "Comfyrizz turns one short brief into a finished, narrated launch video.",
+          "spoken": "Comfy rizz turns one short brief into a finished, narrated launch video.",
+          "seconds": 4.2027,
+          "samples": 100864
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 4.4527,
+      "file": "audio/narration/s_title.wav"
+    },
+    "s_chart": {
+      "chunks": [
+        {
+          "text": "Every scene is compiled into integer frames, and every asset is drawn as code.",
+          "spoken": "Every scene is compiled into integer frames, and every asset is drawn as code.",
+          "seconds": 4.7573,
+          "samples": 114176
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 5.0073,
+      "file": "audio/narration/s_chart.wav"
+    },
+    "s_list": {
+      "chunks": [
+        {
+          "text": "No GPU, no cloud, and no network calls while it renders locally.",
+          "spoken": "No G P U, no cloud, and no network calls while it renders locally.",
+          "seconds": 4.5867,
+          "samples": 110080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 4.8367,
+      "file": "audio/narration/s_list.wav"
+    },
+    "s_outro": {
+      "chunks": [
+        {
+          "text": "Comfyrizz is open source under the MIT license.",
+          "spoken": "Comfy rizz is open source under the MIT license.",
+          "seconds": 3.3707,
+          "samples": 80896
+        },
+        {
+          "text": "Clone it, run it, and remix it.",
+          "spoken": "Clone it, run it, and remix it.",
+          "seconds": 1.728,
+          "samples": 41472
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 5.4987,
+      "file": "audio/narration/s_outro.wav"
+    }
+  },
+  "totalSeconds": 20.1953,
+  "synthesisSeconds": 5.78,
+  "file": "narration.raw.wav"
+}

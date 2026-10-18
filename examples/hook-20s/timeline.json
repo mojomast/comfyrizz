@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 566,
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 134,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 10,
+      "copy": {
+        "kicker": "Open-source AI motion graphics",
+        "headline": "Ship a launch video from one brief",
+        "sub": "Comfyrizz — generated-first, CPU only."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#080a12",
+            "#141c36",
+            "#8b5cf6"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_icon_check",
+          "x": 0.5,
+          "y": 0.87,
+          "w": 0.07,
+          "anim": "fade-in"
+        }
+      ],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": "Comfyrizz turns one short brief into a finished, narrated launch video.",
+      "provisional": false
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "from": 124,
+      "durationInFrames": 151,
+      "transitionInFrames": 10,
+      "transitionOutFrames": 10,
+      "copy": {
+        "headline": "From brief to MP4",
+        "sub": "Six minutes on the CPU. No GPU.",
+        "footnote": "Example data for the hook."
+      },
+      "data": {
+        "dataset": "d_times",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 3
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": "Every scene is compiled into integer frames, and every asset is drawn as code.",
+      "provisional": false
+    },
+    {
+      "id": "s_list",
+      "layout": "list",
+      "variant": "bullets",
+      "from": 265,
+      "durationInFrames": 146,
+      "transitionInFrames": 10,
+      "transitionOutFrames": 10,
+      "copy": {
+        "headline": "No GPU. No cloud. No network.",
+        "items": [
+          "Procedural backgrounds drawn per frame",
+          "Kokoro narration and captions on CPU",
+          "MIT licensed, runs from a clean clone"
+        ]
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 2
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_diagram_flow",
+          "x": 0.83,
+          "y": 0.5,
+          "w": 0.3,
+          "anim": "slide-in"
+        }
+      ],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": "No GPU, no cloud, and no network calls while it renders locally.",
+      "provisional": false
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "from": 401,
+      "durationInFrames": 165,
+      "transitionInFrames": 10,
+      "transitionOutFrames": 0,
+      "copy": {
+        "headline": "Comfyrizz",
+        "sub": "Open source, MIT.",
+        "cta": "github.com/comfyrizz"
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 23,
+          "palette": [
+            "#080a12",
+            "#141c36",
+            "#8b5cf6"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_anim_bars",
+          "x": 0.5,
+          "y": 0.87,
+          "w": 0.24,
+          "anim": "slide-in"
+        }
+      ],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": "Comfyrizz is open source under the MIT license. Clone it, run it, and remix it.",
+      "provisional": false
+    }
+  ],
+  "captions": [
+    {
+      "text": "Comfyrizz turns one short brief into a finished, narrated launch video.",
+      "from": 0,
+      "to": 127,
+      "sceneId": "s_title",
+      "estimated": false
+    },
+    {
+      "text": "Every scene is compiled into integer frames, and every asset is drawn as code.",
+      "from": 124,
+      "to": 267,
+      "sceneId": "s_chart",
+      "estimated": false
+    },
+    {
+      "text": "No GPU, no cloud, and no network calls while it renders locally.",
+      "from": 265,
+      "to": 403,
+      "sceneId": "s_list",
+      "estimated": false
+    },
+    {
+      "text": "Comfyrizz is open source under the MIT license.",
+      "from": 401,
+      "to": 503,
+      "sceneId": "s_outro",
+      "estimated": false
+    },
+    {
+      "text": "Clone it, run it, and remix it.",
+      "from": 508,
+      "to": 560,
+      "sceneId": "s_outro",
+      "estimated": false
+    }
+  ],
+  "plates": [],
+  "target": {
+    "requested": null,
+    "actual": 566,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [],
+  "proposals": [],
+  "sourceHash": "3f469269635b81cb0d426be7f2fce7454c0b7ea3aea4b5063f45b9536f5d458d",
+  "hash": "0451bac5c4a3577f59b62fe7f5ff1852691d795832be2f0f13a5eecb1b1311ae"
+}

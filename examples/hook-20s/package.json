@@ -92,7 +92,9 @@
         "type": "fade",
         "frames": 10
       },
-      "narration": "Comfyrizz turns one short brief into a finished, narrated launch video."
+      "narration": "Comfyrizz turns one short brief into a finished, narrated launch video.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 134
     },
     {
       "id": "s_chart",
@@ -118,7 +120,9 @@
         "type": "fade",
         "frames": 10
       },
-      "narration": "Every scene is compiled into integer frames, and every asset is drawn as code."
+      "narration": "Every scene is compiled into integer frames, and every asset is drawn as code.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 150
     },
     {
       "id": "s_list",
@@ -152,7 +156,9 @@
         "type": "fade",
         "frames": 10
       },
-      "narration": "No GPU, no cloud, and no network calls while it renders locally."
+      "narration": "No GPU, no cloud, and no network calls while it renders locally.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 145
     },
     {
       "id": "s_outro",
@@ -184,7 +190,9 @@
           "anim": "slide-in"
         }
       ],
-      "narration": "Comfyrizz is open source under the MIT license. Clone it, run it, and remix it."
+      "narration": "Comfyrizz is open source under the MIT license. Clone it, run it, and remix it.",
+      "narration_asset": "a_narration",
+      "narration_duration_frames": 165
     }
   ],
   "assets": {
@@ -261,6 +269,39 @@
           "palette_ok": true
         },
         "caption": "Five keyframed bars; the Remotion frame drives the grow-in animation."
+      }
+    },
+    "a_narration": {
+      "kind": "audio",
+      "origin": "generated",
+      "status": "ready",
+      "file": "audio/narration.norm.wav",
+      "sha256": "9db6b8063d42f4611a06fdf03a5420d31fbaf5403adf70718bd81ea92f6caac5",
+      "bytes": 905694,
+      "media": {
+        "durationSeconds": 18.867,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "model_license": {
+        "id": "Apache-2.0",
+        "url": "https://huggingface.co/hexgrad/Kokoro-82M",
+        "note": "Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md."
+      },
+      "gen": {
+        "generator": "kokoro",
+        "model": "kokoro-v1.0.onnx",
+        "inputs": {
+          "voice": "af_heart",
+          "speed": 1.05,
+          "sample_rate": 24000,
+          "chunks": 5
+        },
+        "caption": "Six-sentence-level-scene narration synthesized locally on CPU from the package narration text."
       }
     }
   },

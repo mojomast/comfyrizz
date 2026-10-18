@@ -1,0 +1,47 @@
+{
+  "timelineHash": "0451bac5c4a3577f59b62fe7f5ff1852691d795832be2f0f13a5eecb1b1311ae",
+  "durationInFrames": 566,
+  "seconds": 18.867,
+  "scenes": [
+    {
+      "id": "s_title",
+      "frames": 134,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_chart",
+      "frames": 151,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_list",
+      "frames": 146,
+      "narrationFrames": true
+    },
+    {
+      "id": "s_outro",
+      "frames": 165,
+      "narrationFrames": true
+    }
+  ],
+  "captions": 5,
+  "narration": {
+    "voice": "af_heart",
+    "sampleRate": 24000,
+    "seconds": 18.867,
+    "audioCodec": "pcm_s16le",
+    "audioChannels": 1,
+    "audioDuration": 18.867
+  },
+  "loudness": {
+    "inputIntegratedLufs": -22.66,
+    "inputTruePeakDbtp": -1.2,
+    "outputIntegratedLufs": -16.36,
+    "outputTruePeakDbtp": -1
+  },
+  "checks": {
+    "notProvisional": true,
+    "captionsMatchScenes": true,
+    "audioDurationMatchesTimeline": true
+  }
+}

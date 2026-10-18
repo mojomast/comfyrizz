@@ -1,0 +1,19 @@
+1
+00:00:00,000 --> 00:00:04,233
+Comfyrizz turns one short brief into a finished, narrated launch video.
+
+2
+00:00:04,133 --> 00:00:08,900
+Every scene is compiled into integer frames, and every asset is drawn as code.
+
+3
+00:00:08,833 --> 00:00:13,433
+No GPU, no cloud, and no network calls while it renders locally.
+
+4
+00:00:13,367 --> 00:00:16,767
+Comfyrizz is open source under the MIT license.
+
+5
+00:00:16,933 --> 00:00:18,667
+Clone it, run it, and remix it.

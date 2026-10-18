@@ -1,0 +1,14 @@
+{
+  "target": {
+    "integratedLufs": -16,
+    "truePeakDbtp": -1,
+    "rangeLu": 11
+  },
+  "measured": {
+    "inputIntegratedLufs": -22.66,
+    "inputTruePeakDbtp": -1.2,
+    "outputIntegratedLufs": -16.36,
+    "outputTruePeakDbtp": -1
+  },
+  "file": "narration.norm.wav"
+}
