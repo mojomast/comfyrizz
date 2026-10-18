@@ -77,6 +77,10 @@ export interface Scene {
   media_only?: boolean;
   /** Lower-third overlay content for full-bleed and media-only scenes. */
   lower_third?: SceneLowerThird;
+  /** H17: this scene's own presenter answer - off, picture-in-picture, or the split layout. */
+  presenter?: 'off' | 'pip' | 'split';
+  /** H17: the ltx25-a2v clip generated for this scene (falls back to the package portrait). */
+  presenter_asset?: string;
   locked?: boolean;
 }
 
@@ -113,6 +117,19 @@ export interface Voice {
   speed?: number;
 }
 
+/** H17 presenter block (schema v1 `presenter`). Opt-in per video. */
+export interface Presenter {
+  enabled?: boolean;
+  portrait?: string;
+  placement?: 'pip-br' | 'pip-bl' | 'pip-bc' | 'split-left';
+  shape?: 'circle' | 'rounded-rect';
+  /** width as a fraction of the frame's short side, 0.18-0.32. */
+  size?: number;
+  /** which scenes show the presenter: both bookends, every scene, or explicit scene ids. */
+  scenes?: 'all' | 'bookends' | string[];
+  label?: string;
+}
+
 export interface ComfyrizzPackage {
   id?: string;
   title?: string;
@@ -123,6 +140,7 @@ export interface ComfyrizzPackage {
   voice?: Voice;
   theme?: { palette?: string[]; font?: string; logo_asset?: string };
   datasets?: Record<string, unknown>;
+  presenter?: Presenter;
   [key: string]: unknown;
 }
 

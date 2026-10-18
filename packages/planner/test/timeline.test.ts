@@ -170,3 +170,64 @@ test('empty or duplicate scene ids fail closed', () => {
     (error: unknown) => error instanceof TimelineError && error.code === 'duplicate-scene-id',
   );
 });
+
+/* P-pres: the presenter track (H17 presenter block + per-scene override). */
+
+test('P-pres: no presenter block means no presenter track, and the hash is untouched', () => {
+  const timeline = compileTimeline(pkg());
+  assert.equal(timeline.presenters, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(timeline, 'presenters'), false);
+});
+
+test('P-pres: bookends is the default coverage and pip-br the landscape placement', () => {
+  const withPresenter = { ...pkg(), presenter: { enabled: true, portrait: 'a_portrait' } };
+  const timeline = compileTimeline(withPresenter);
+  assert.ok(timeline.presenters);
+  assert.deepEqual(timeline.presenters!.map(p => p.sceneId), ['s1', 's6']);
+  const first = timeline.presenters![0];
+  assert.equal(first.placement, 'pip-br');
+  assert.equal(first.shape, 'circle');
+  assert.equal(first.size, 0.24);
+  assert.equal(first.label, 'AI presenter');
+  assert.equal(first.assetId, 'a_portrait');
+  assert.equal(first.from, 0);
+  assert.equal(first.durationInFrames, 150);
+});
+
+test('P-pres: all coverage and an explicit id list both resolve, and off removes a scene', () => {
+  const all = compileTimeline({ ...pkg(), presenter: { enabled: true, portrait: 'a_portrait', scenes: 'all' as const } });
+  assert.equal(all.presenters!.length, 6);
+  const picked = compileTimeline({
+    ...pkg([
+      scene('s1'),
+      scene('s2', { presenter: 'off' }),
+      scene('s3', { transitionOut: { type: 'none', frames: 0 } }),
+    ]),
+    presenter: { enabled: true, portrait: 'a_portrait', scenes: ['s1', 's2', 's3'] },
+  });
+  assert.deepEqual(picked.presenters!.map(p => p.sceneId), ['s1', 's3']);
+});
+
+test('P-pres: a per-scene clip wins, split moves to the left card, portrait defaults pip-bc', () => {
+  const portraitPkg = {
+    ...pkg([scene('s1'), scene('s2', { presenter: 'split', presenter_asset: 'a_clip2', transitionOut: { type: 'none', frames: 0 } })]),
+    format: { width: 1080, height: 1920, fps: 30 },
+    presenter: { enabled: true, portrait: 'a_portrait', scenes: 'all' as const },
+  };
+  const timeline = compileTimeline(portraitPkg);
+  assert.deepEqual(timeline.presenters!.map(p => [p.sceneId, p.assetId, p.placement]), [
+    ['s1', 'a_portrait', 'pip-bc'],
+    ['s2', 'a_clip2', 'split-left'],
+  ]);
+});
+
+test('P-pres: size is clamped to the schema range and the seam dissolve follows the transition', () => {
+  const timeline = compileTimeline({
+    ...pkg([scene('s1', { transitionOut: { type: 'fade', frames: 12 } }), scene('s2', { transitionOut: { type: 'none', frames: 0 } })]),
+    presenter: { enabled: true, portrait: 'a_portrait', size: 0.9, scenes: 'all' as const },
+  });
+  assert.equal(timeline.presenters![0].size, 0.32);
+  assert.equal(timeline.presenters![0].dissolveOutFrames, 5);
+  assert.equal(timeline.presenters![1].dissolveInFrames, 5);
+  assert.equal(timeline.presenters![1].dissolveOutFrames, 0);
+});

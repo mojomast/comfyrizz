@@ -78,6 +78,28 @@ export interface TimelineCaption {
   estimated: boolean;
 }
 
+/**
+ * P-pres: one presenter clip placed over a scene (H17 schema `presenter`). The track carries the
+ * absolute frame window so the overlay layer can sit outside the TransitionSeries (above the scene
+ * layers, below captions) and cross-dissolve at seams instead of riding the scene transition.
+ */
+export interface TimelinePresenter {
+  sceneId: string;
+  /** the ltx25-a2v clip, or the package portrait still until the clip exists. */
+  assetId: string;
+  placement: 'pip-br' | 'pip-bl' | 'pip-bc' | 'split-left';
+  shape: 'circle' | 'rounded-rect';
+  /** width as a fraction of the frame's short side (0.18-0.32). */
+  size: number;
+  label: string | null;
+  from: number;
+  durationInFrames: number;
+  /** frames of cross-dissolve into this scene's clip (0 = hard cut). */
+  dissolveInFrames: number;
+  /** frames of cross-dissolve out of this scene's clip (0 = hard cut / last scene). */
+  dissolveOutFrames: number;
+}
+
 export interface PlateRetime {
   assetId: string;
   sourceFps: number;
@@ -101,6 +123,8 @@ export interface Timeline {
   scenes: TimelineScene[];
   captions: TimelineCaption[];
   plates: PlateRetime[];
+  /** Present only when the package turns the presenter on (H17). */
+  presenters?: TimelinePresenter[];
   target: {
     requested: number | null;
     actual: number;
@@ -124,6 +148,11 @@ export class TimelineError extends Error {
     this.sceneId = sceneId;
   }
 }
+
+/** P-pres: the longest seam cross-dissolve, in frames (research 2.2: 4-6). */
+export const PRESENTER_DISSOLVE_FRAMES = 5;
+/** P-pres: presenter width as a fraction of the short side when the package does not say. */
+export const PRESENTER_SIZE_DEFAULT = 0.24;
 
 const DEFAULT_NARRATION_GAP_SECONDS = 0.15;
 const DEFAULT_NARRATION_PADDING_SECONDS = 0.25;
@@ -321,6 +350,58 @@ function plateRetimes(pkg: ComfyrizzPackage, fps: number): PlateRetime[] {
   return out.sort((a, b) => a.assetId.localeCompare(b.assetId));
 }
 
+/**
+ * P-pres: which scenes show the presenter and where (H17 `presenter` + per-scene override).
+ *
+ * The presenter is opt-in: `enabled: true` is the only gate. Coverage is the cheap knob, not
+ * stitching (research 2.2) - `bookends` (intro + outro) is the default, `all` and an explicit id
+ * list are the alternatives. `scene.presenter` wins per scene: `off` removes it, `split` moves it to
+ * the split-left card, `pip` keeps the package placement. The clip is the scene's a2v asset, with
+ * the package portrait as a still fallback until the a2v jobs have run.
+ */
+function resolvePresenterTrack(pkg: ComfyrizzPackage, scenes: TimelineScene[]): TimelinePresenter[] {
+  const presenter = pkg.presenter;
+  if (!presenter || presenter.enabled !== true || scenes.length === 0) return [];
+  const byId = new Map(pkg.scenes.map(scene => [scene.id, scene]));
+  const coverage = presenter.scenes ?? 'bookends';
+  const covered = new Set<string>();
+  if (coverage === 'all') {
+    for (const scene of scenes) covered.add(scene.id);
+  } else if (Array.isArray(coverage)) {
+    for (const id of coverage) covered.add(id);
+  } else {
+    covered.add(scenes[0].id);
+    covered.add(scenes[scenes.length - 1].id);
+  }
+  const portrait = pkg.format.height > pkg.format.width;
+  const size = isFiniteNumber(presenter.size) ? clamp(presenter.size, 0.18, 0.32) : PRESENTER_SIZE_DEFAULT;
+  const shape = presenter.shape ?? 'circle';
+  const label = presenter.label ?? 'AI presenter';
+  const out: TimelinePresenter[] = [];
+  for (const scene of scenes) {
+    if (!covered.has(scene.id)) continue;
+    const source = byId.get(scene.id);
+    if (source?.presenter === 'off') continue;
+    const assetId = source?.presenter_asset ?? presenter.portrait;
+    if (!assetId) continue;
+    const placement: TimelinePresenter['placement'] =
+      source?.presenter === 'split' ? 'split-left' : presenter.placement ?? (portrait ? 'pip-bc' : 'pip-br');
+    out.push({
+      sceneId: scene.id,
+      assetId,
+      placement,
+      shape,
+      size,
+      label,
+      from: scene.from,
+      durationInFrames: scene.durationInFrames,
+      dissolveInFrames: Math.min(PRESENTER_DISSOLVE_FRAMES, scene.transitionInFrames),
+      dissolveOutFrames: scene.transitionOutFrames > 0 ? Math.min(PRESENTER_DISSOLVE_FRAMES, scene.transitionOutFrames) : 0,
+    });
+  }
+  return out;
+}
+
 export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions = {}): Timeline {
   if (!pkg || !Array.isArray(pkg.scenes) || pkg.scenes.length === 0) {
     throw new TimelineError('empty-package', 'A package needs at least one scene.');
@@ -389,6 +470,8 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
   const { captions, warnings: captionWarnings } = buildCaptions(scenes, pkg, options, fps);
   warnings.push(...captionWarnings);
 
+  const presenters = resolvePresenterTrack(pkg, scenes);
+
   const withoutHash: Omit<Timeline, 'hash'> = {
     version: TIMELINE_VERSION,
     fps,
@@ -399,6 +482,8 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
     scenes,
     captions,
     plates: plateRetimes(pkg, fps),
+    // Only emitted when the presenter is on, so packages without one keep their exact timeline hash.
+    ...(presenters.length > 0 ? { presenters } : {}),
     target,
     provisional,
     warnings,
