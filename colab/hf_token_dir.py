@@ -31,5 +31,20 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def _run() -> None:
+    """Print the sentinel the backend looks for (GPU test 4, G4-6)."""
+    try:
+        code = main()
+    except Exception:  # noqa: BLE001 - colab exec reports a kernel crash as exit 0
+        import traceback
+
+        traceback.print_exc()
+        print("COMFYRIZZ_FAIL hf-token-dir", flush=True)
+        return
+    if code != 0:
+        print("COMFYRIZZ_FAIL hf-token-dir", flush=True)
+        return
+    print("COMFYRIZZ_OK hf-token-dir", flush=True)
+
+
+_run()

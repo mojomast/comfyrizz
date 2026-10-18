@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import {
   HF_TOKEN_REMOTE_PATH,
+  parseHealthLine,
   parseTreeListing,
   REMOTE_ROOT,
   argvDownload,
@@ -171,6 +172,54 @@ export function createColabBackend({
       );
     }
     return result;
+  }
+
+  /**
+   * Run one `colab exec -f <script>` (GPU test 4).
+   *
+   * G4-3: the CLI resolves `-f` against its *own* cwd, so every exec is spawned with the script's
+   * folder as its cwd; passing only the basename without that is `FileNotFoundError` on the VM.
+   * G4-6: `colab exec` runs the file as a kernel cell, so an exception inside the script prints a
+   * traceback and the CLI still exits 0 - success is therefore the *sentinel line* the script prints
+   * last (`COMFYRIZZ_OK <step>`), never the exit code.
+   */
+  async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null } = {}) {
+    const result = await step(argvExec({ session, file: script, timeout }), {
+      label: stepName,
+      wallMs: wallMs ?? (timeout + 60) * 1000,
+      cwd: dirname(script),
+    });
+    emit(onEvent, { type: "exec", step: stepName, code: result.code, lost: isLost(result), sentinel: sentinelLine(stepName) });
+    return result;
+  }
+
+  /** The line a script prints last to say it finished: the only evidence `colab exec` can give. */
+  function sentinelLine(stepName) {
+    return `COMFYRIZZ_OK ${stepName}`;
+  }
+
+  /**
+   * Did the step really finish? A missing sentinel is a failure even with exit code 0, and the
+   * report says which of the two happened, because "crashed in a kernel" and "ran and failed" need
+   * different follow-ups.
+   */
+  function execOutcome(result, stepName) {
+    const sentinel = sentinelLine(stepName);
+    if (isLost(result)) return { ok: false, lost: true, note: `${stepName}: the exec did not report; reconcile before assuming the VM did anything` };
+    const output = String(result.output || "");
+    const printed = new RegExp(`^${sentinel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m").test(output);
+    if (!printed) {
+      return {
+        ok: false,
+        sentinelMissing: true,
+        code: result.code,
+        note:
+          `${stepName} never printed "${sentinel}" (exit code ${result.code}). colab exec runs the script as a kernel cell, ` +
+          "so a crashed script still exits 0: read the traceback above rather than the code",
+      };
+    }
+    if (result.code !== 0) return { ok: false, code: result.code, note: `${stepName} printed its sentinel but the CLI exited ${result.code}` };
+    return { ok: true };
   }
 
   async function usage() {
@@ -391,10 +440,11 @@ export function createColabBackend({
       // `${REMOTE_ROOT}/.hf-token`, so on a real VM the bootstrap would have found no token at all.
       // The directory has to exist *before* the upload: `colab upload` does not create parents and
       // the CLI has no mkdir, so a one-purpose script makes /content/.hf as 0700 first.
-      const dir = await step(argvExec({ session, file: tokenDirScript, timeout: 120 }), { label: "hf-token-dir", wallMs: 240000 });
+      const dir = await execScript(tokenDirScript, { step: "hf-token-dir", timeout: 120, wallMs: 240000, onEvent });
       emit(onEvent, { type: "hf_token_dir", code: dir.code, dir: HF_TOKEN_REMOTE_PATH.replace(/\/token$/, "") });
-      if (isLost(dir)) return { lost: true, note: "the hf-token-dir exec did not report; reconcile before assuming the VM is ready" };
-      if (dir.code !== 0) throw new ColabCliError(`colab hf_token_dir.py exited ${dir.code}: ${redactTail(dir)}`);
+      const dirOutcome = execOutcome(dir, "hf-token-dir");
+      if (dirOutcome.lost) return { lost: true, note: dirOutcome.note };
+      if (!dirOutcome.ok) throw new ColabCliError(`colab hf_token_dir.py: ${dirOutcome.note}\n${redactTail(dir)}`);
       const upload = await step(argvUpload({ session, localPath: hfTokenPath, remotePath: HF_TOKEN_REMOTE_PATH }), {
         label: "upload-token",
         wallMs: 120000,
@@ -408,17 +458,24 @@ export function createColabBackend({
       });
       if (lockUpload.code !== 0) throw new ColabCliError(`uploading colab/models.lock.json failed (exit ${lockUpload.code})`);
       emit(onEvent, { type: "models_lock", path: modelsLock, revisions: lockRevisions(modelsLock) });
-      const result = await step(argvExec({ session, file: bootstrapScript, timeout }), { label: "bootstrap", wallMs: (timeout + 60) * 1000 });
+      const result = await execScript(bootstrapScript, { step: "bootstrap", timeout, onEvent });
       emit(onEvent, { type: "bootstrap", code: result.code, lost: isLost(result), token: hfTokenPlan({ localTokenPath: hfTokenPath }) });
-      if (isLost(result)) return { lost: true, note: "the bootstrap exec did not report; reconcile before assuming the VM is ready" };
-      if (result.code !== 0) throw new ColabCliError(`colab bootstrap exited ${result.code}: ${redactTail(result)}`);
+      const outcome = execOutcome(result, "bootstrap");
+      if (outcome.lost) return { lost: true, note: outcome.note };
+      if (!outcome.ok) throw new ColabCliError(`colab bootstrap.py: ${outcome.note}\n${redactTail(result)}`);
       return { code: result.code };
     },
 
     async health({ onEvent = null } = {}) {
-      const result = await step(argvExec({ session, file: healthScript, timeout: 300 }), { label: "health", wallMs: 360000 });
-      if (isLost(result) || result.code !== 0) {
-        return { ok: false, detail: `health exec did not report (exit ${result.code}${isLost(result) ? ", lost" : ""})`, raw: redactTail(result) };
+      const result = await execScript(healthScript, { step: "health", timeout: 300, wallMs: 360000, onEvent });
+      const outcome = execOutcome(result, "health");
+      if (!outcome.ok) {
+        // G4-7: health.py writes out/health.json even when a check fails, and it prints a HEALTH line
+        // either way. Without a sentinel the script crashed in its kernel, so the line is the only
+        // evidence there is - say exactly that instead of "health.py ran but nothing was collected".
+        const printed = parseHealthLine(result.output);
+        if (printed) return { ...printed, note: outcome.note };
+        return { ok: false, detail: outcome.note, raw: redactTail(result) };
       }
       const downloaded = await download({ remote: `${REMOTE_ROOT}/out/health.json`, local: join(scratch, "out", "health.json"), optional: true, onEvent });
       if (!downloaded.ok) return { ok: false, detail: "health.py ran but out/health.json was not collected" };
@@ -482,9 +539,11 @@ export function createColabBackend({
           emit(onEvent, { type: "batch_start", batch: name, jobs: subset.length });
         }
 
-        const exec = await step(argvExec({ session, file: runJobsScript, timeout: 3600 }), {
-          label: name ? `run-jobs-${name}` : "run-jobs",
+        const exec = await execScript(runJobsScript, {
+          step: "run",
+          timeout: 3600,
           wallMs: 3660000,
+          onEvent: null,
           onLog: (text) => {
             for (const line of text.split("\n")) {
               const trimmed = line.trim();
@@ -497,11 +556,17 @@ export function createColabBackend({
             }
           },
         });
-        ran.push({ batch: name, code: exec.code, lost: isLost(exec), timedOut: Boolean(exec.timedOut) });
-        state.lastExec = { code: exec.code, lost: isLost(exec), timedOut: Boolean(exec.timedOut), batch: name };
-        emit(onEvent, { type: "run_exec", batch: name, code: exec.code, lost: isLost(exec), timedOut: Boolean(exec.timedOut) });
+        // G4-6: a batch's verdict is the manifest (downloaded and verified below), but a *missing
+        // sentinel* means the batch script itself did not reach its end, which is the same situation
+        // as a lost exec: reconcile instead of believing the exit code.
+        const runOutcome = execOutcome(exec, "run");
+        const lostBatch = isLost(exec) || runOutcome.sentinelMissing === true;
+        if (runOutcome.sentinelMissing) emit(onEvent, { type: "run_sentinel_missing", batch: name, detail: runOutcome.note });
+        ran.push({ batch: name, code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut), sentinel: runOutcome.ok });
+        state.lastExec = { code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut), batch: name };
+        emit(onEvent, { type: "run_exec", batch: name, code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut) });
 
-        if (isLost(exec)) {
+        if (lostBatch) {
           const reconciled = await backend.reconcile(state.runId, { onEvent });
           return { lost: true, batchesRun: ran, manifest: reconciled.manifest, reconcile: reconciled };
         }
@@ -524,9 +589,10 @@ export function createColabBackend({
       let downloaded = await collectOut({ onEvent, expectComplete: false });
       let execs = 0;
       if (!downloaded.manifest || downloaded.manifest.complete !== true) {
-        const result = await step(argvExec({ session, file: reconcileScript, timeout: 900 }), { label: "reconcile", wallMs: 960000 });
+        const result = await execScript(reconcileScript, { step: "reconcile", timeout: 900, wallMs: 960000, onEvent });
         execs = 1;
-        emit(onEvent, { type: "reconcile_exec", code: result.code, lost: isLost(result) });
+        const reconcileOutcome = execOutcome(result, "reconcile");
+        emit(onEvent, { type: "reconcile_exec", code: result.code, lost: isLost(result), sentinel: reconcileOutcome.ok });
         downloaded = await collectOut({ onEvent, expectComplete: false });
       }
       return {
@@ -642,9 +708,10 @@ export function createColabBackend({
    * because the fake copied directories; on a real VM it fails.
    */
   async function downloadTree({ remoteDir, localDir, onEvent = null, timeout = 300 }) {
-    const listed = await step(argvExec({ session, file: listScript, timeout }), { label: "list-out", wallMs: (timeout + 60) * 1000 });
-    emit(onEvent, { type: "list_out", code: listed.code, lost: isLost(listed) });
-    if (isLost(listed) || listed.code !== 0) return { ok: false, files: 0, listed: listed.code };
+    const listed = await execScript(listScript, { step: "list-out", timeout, onEvent });
+    const listOutcome = execOutcome(listed, "list-out");
+    emit(onEvent, { type: "list_out", code: listed.code, lost: isLost(listed), sentinel: listOutcome.ok });
+    if (!listOutcome.ok) return { ok: false, files: 0, listed: listed.code, detail: listOutcome.note };
     let entries;
     try {
       entries = parseTreeListing(listed.output);

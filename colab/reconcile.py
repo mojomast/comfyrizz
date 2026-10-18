@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 REMOTE_ROOT = Path("/content/comfyrizz")
@@ -43,5 +44,20 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def _run() -> None:
+    """Run main() and print the sentinel the backend looks for (GPU test 4, G4-6).
+
+    `colab exec` runs this file as a kernel cell: a crash prints a traceback and the CLI still exits
+    0, so the backend needs this positive line - and for the runner the manifest stays the verdict.
+    """
+    try:
+        _ = main()
+    except Exception:  # noqa: BLE001 - the traceback is the evidence
+        traceback.print_exc()
+        print("COMFYRIZZ_FAIL reconcile", flush=True)
+        return
+    print("COMFYRIZZ_OK reconcile", flush=True)
+
+
+_run()
+

@@ -135,9 +135,24 @@ if (command === "ls") {
   if (!fs.existsSync(dir)) out("[colab] Error: no such directory", 1);
   out(fs.readdirSync(dir).map((name) => (fs.statSync(path.join(dir, name)).isDirectory() ? `${name}/` : name)).join("\n"));
 }
+//: the sentinel each real script prints last - `colab exec` gives no reliable exit code (G4-6)
+const SENTINELS = {
+  "bootstrap.py": "bootstrap",
+  "health.py": "health",
+  "run_jobs.py": "run",
+  "reconcile.py": "reconcile",
+  "list_out.py": "list-out",
+  "hf_token_dir.py": "hf-token-dir",
+};
+
 if (command === "exec") {
   const file = argv[argv.indexOf("-f") + 1];
   const script = path.basename(String(file));
+  // G4-3 parity: the real CLI resolves the script against *its own* working directory, so a bare
+  // basename sent from somewhere else is FileNotFoundError on the VM. The backend spawns every exec
+  // with cwd = the script's folder, and this check is what would catch it if it stopped.
+  const resolved = path.isAbsolute(String(file)) ? String(file) : path.resolve(process.cwd(), String(file));
+  if (!fs.existsSync(resolved)) out(`FileNotFoundError: '${file}'`, 1);
   // H13: the two scripts the backend always sends from the local repository with `-f` exist on a real
   // VM by definition - `colab exec -f` sends the file it is given. Modelling that here keeps every
   // existing test honest without boilerplate in each of them.
@@ -163,6 +178,8 @@ if (command === "exec") {
     if (fs.existsSync(root)) visit(root, "");
     if (lines.length) process.stdout.write(`${lines.join("\n")}\n`);
     process.stderr.write(`${lines.length} files under ${spec.walk}\n`);
+    // the real list_out.py prints its sentinel after the listing (G4-6)
+    process.stdout.write(`COMFYRIZZ_OK ${SENTINELS["list_out.py"]}\n`);
     process.exit(spec.code ?? 0);
   }
   for (const dir of spec.mkdirs || []) {
@@ -176,6 +193,18 @@ if (command === "exec") {
   }
   if (spec.lost) process.exit(spec.code ?? 1); // a killed exec: no output, no evidence
   if (spec.output) process.stdout.write(spec.output.endsWith("\n") ? spec.output : `${spec.output}\n`);
+  if (spec.kernelCrash) {
+    // G4-5/G4-6 parity: `colab exec` runs the file's source as a kernel cell, so an exception inside
+    // the script prints a traceback and the CLI still exits 0. A fake that returned a non-zero code
+    // here let a crashed bootstrap look like a successful one in every test.
+    process.stdout.write(`---------------------------------------------------------------------------\n${spec.kernelCrash}\n`);
+    process.exit(0);
+  }
+  const sentinel = SENTINELS[script] || script.replace(/\.py$/, "");
+  if (spec.noSentinel !== true) {
+    // every real script ends with this line; the backend requires it (G4-6)
+    process.stdout.write(`COMFYRIZZ_OK ${sentinel}\n`);
+  }
   process.exit(spec.code ?? 0);
 }
 out(`[colab] Error: unsupported command ${command}`, 2);

@@ -57,23 +57,28 @@ export class ColabCli {
     return { ...colabEnvironment(this.bin, this.home), ...this.extraEnv };
   }
 
-  /** Run one `colab` argv array. Never uses a shell. */
-  run(args, { silenceMs = 60000, wallMs = 180000, detached = this.detached, label = "colab" } = {}) {
+  /**
+   * Run one `colab` argv array. Never uses a shell.
+   *
+   * `cwd` matters for `colab exec -f <script>`: the real CLI resolves the script against *its own*
+   * working directory, so the caller passes the script's folder (GPU test 4, G4-3).
+   */
+  run(args, { silenceMs = 60000, wallMs = 180000, detached = this.detached, label = "colab", cwd = null } = {}) {
     assertNoSecrets(args);
     const id = `${String(label).replace(/[^A-Za-z0-9_-]/g, "_")}-${randomUUID().slice(0, 8)}`;
     const log = join(this.logDir, `${id}.log`);
     const exitFile = join(this.logDir, `${id}.exit.json`);
     const startedAt = Date.now();
-    const step = { id, label, argv: [...args], log, exitFile, startedAt };
+    const step = { id, label, argv: [...args], log, exitFile, startedAt, cwd: cwd || null };
     this.steps.push(step);
 
     if (!detached) {
-      return this.#runInline(step, args, { silenceMs, wallMs });
+      return this.#runInline(step, args, { silenceMs, wallMs, cwd });
     }
     const specPath = join(this.logDir, `${id}.spec.json`);
     writeFileSync(
       specPath,
-      JSON.stringify({ bin: this.bin, args, log, exit: exitFile, silenceMs, wallMs, env: this.environment() }, null, 2),
+      JSON.stringify({ bin: this.bin, args, log, exit: exitFile, silenceMs, wallMs, env: this.environment(), cwd: cwd || undefined }, null, 2),
       { mode: 0o600 },
     );
     const child = spawn(process.execPath, [WORKER, specPath], { detached: true, stdio: "ignore", windowsHide: true });
@@ -99,10 +104,10 @@ export class ColabCli {
     }
   }
 
-  #runInline(step, args, { silenceMs, wallMs }) {
+  #runInline(step, args, { silenceMs, wallMs, cwd = null }) {
     return new Promise((resolve) => {
       const chunks = [];
-      const child = spawn(this.bin, args, { shell: false, windowsHide: true, env: this.environment(), stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawn(this.bin, args, { shell: false, windowsHide: true, env: this.environment(), cwd: cwd || undefined, stdio: ["pipe", "pipe", "pipe"] });
       let lastOutput = Date.now();
       let timedOut = false;
       const watchdog = setInterval(() => {

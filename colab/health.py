@@ -16,6 +16,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import traceback
 from pathlib import Path
 
 COMFY_URL = "http://127.0.0.1:8188"
@@ -102,10 +103,40 @@ def main() -> int:
     hard = [name for name, check in report["checks"].items() if not check.get("ok")]
     report["ok"] = not hard
     report["detail"] = "all checks passed" if report["ok"] else f"failing checks: {', '.join(hard)}"
-    (OUT / "health.json").write_text(json.dumps(report, indent=2))
+    write_report(report)
     print("HEALTH", json.dumps(report)[:600], flush=True)
     return 0 if report["ok"] else 1
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def write_report(report: dict) -> None:
+    """Write `out/health.json` - before anything can go wrong (GPU test 4, G4-7).
+
+    The file is what the backend collects, so it has to exist even when the health check itself
+    fails, or the host can only say "health.py ran but nothing was collected". `colab exec` runs this
+    as a kernel cell, so `sys.exit` from here would be a warning rather than an exit.
+    """
+    try:
+        OUT.mkdir(parents=True, exist_ok=True)
+        (OUT / "health.json").write_text(json.dumps(report, indent=2))
+    except Exception as error:  # noqa: BLE001 - never let the reporting break the report
+        print(f"could not write {OUT / 'health.json'}: {error}", file=sys.stderr, flush=True)
+
+
+def _run() -> None:
+    """Run main() and always produce a health.json plus the sentinel (G4-6, G4-7)."""
+    report = {"v": 1, "ok": False, "detail": "health.py did not finish", "checks": {}}
+    try:
+        code = main()
+        if code != 0:
+            print("COMFYRIZZ_OK health", flush=True)  # the script ran; health.json says what it found
+            return
+    except Exception:  # noqa: BLE001 - the traceback goes to the log, the report goes to the host
+        traceback.print_exc()
+        report["detail"] = f"health.py raised: {traceback.format_exc().strip().splitlines()[-1]}"
+        write_report(report)
+        print("COMFYRIZZ_FAIL health", flush=True)
+        return
+    print("COMFYRIZZ_OK health", flush=True)
+
+
+_run()

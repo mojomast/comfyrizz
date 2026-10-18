@@ -106,7 +106,8 @@ test("the fake refuses an upload into a directory that does not exist, like the 
   assert.match(refused.output, /no such file or directory/);
 
   // …and the same upload works once a VM-side script has created the directory
-  const created = await cli.run(["exec", "-s", "comfyrizz-x", "-f", "hf_token_dir.py", "--timeout", "120"]);
+  const scriptPath = new URL("../../../colab/hf_token_dir.py", import.meta.url).pathname;
+  const created = await cli.run(["exec", "-s", "comfyrizz-x", "-f", scriptPath, "--timeout", "120"]);
   assert.equal(created.code, 0, created.output);
   const accepted = await cli.run(["upload", "-s", "comfyrizz-x", local, `${REMOTE_ROOT}/missing-dir/file.txt`]);
   assert.equal(accepted.code, 0, accepted.output);

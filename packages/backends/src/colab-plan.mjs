@@ -214,3 +214,30 @@ export function parseTreeListing(output) {
   }
   return entries;
 }
+
+/**
+ * Read health.py's `HEALTH {...}` line out of an exec's output (GPU test 4, G4-7).
+ *
+ * health.py writes `out/health.json` and prints the same report, because `colab exec` gives no
+ * reliable exit code: when the file could not be collected, this line is the only evidence of what
+ * the VM found. Returns null when the script never got that far.
+ */
+export function parseHealthLine(output) {
+  let found = null;
+  for (const line of String(output ?? "").split("\n")) {
+    const text = line.trim();
+    if (!text.startsWith("HEALTH ")) continue;
+    try {
+      found = JSON.parse(text.slice("HEALTH ".length));
+    } catch {
+      /* a truncated line is not a report */
+    }
+  }
+  if (!found || typeof found !== "object") return null;
+  return {
+    ok: found.ok === true,
+    detail: typeof found.detail === "string" ? found.detail : "health.py reported a result",
+    checks: found.checks ?? null,
+    source: "health-line",
+  };
+}

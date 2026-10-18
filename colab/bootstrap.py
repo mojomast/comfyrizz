@@ -30,11 +30,24 @@ import os
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # so `import wheelhouse` works from /content/colab
 
-from wheelhouse import install_command  # noqa: E402 - a sibling module, imported after the path fix
+def install_command(requirements: Path, wheelhouse: Path | None, *, offline: bool = False) -> str:
+    """The `pip install` command this script runs (inlined from `colab/wheelhouse.py`).
+
+    `colab exec -f` runs a file's source as an IPython kernel cell: `__file__` does not exist there and
+    a sibling module is not on the VM unless it was uploaded and imported from an explicit path, so
+    every script the backend execs has to be self-contained (GPU test 4, G4-5). The host-side
+    `wheelhouse.py` keeps the same function for building the cache; this copy is the VM's.
+    """
+    base = f"pip install -q -r {requirements}"
+    if wheelhouse is None:
+        return base
+    command = f"{base} --find-links {wheelhouse}"
+    return f"{command} --no-index" if offline else command
+
 
 ROOT = Path("/content")
 COMFY = ROOT / "ComfyUI"
@@ -295,3 +308,22 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def _run() -> None:
+    """Run main() and print the sentinel the backend looks for (GPU test 4, G4-6).
+
+    `colab exec` runs this file as a kernel cell, so an exception inside it prints a traceback and the
+    CLI still exits 0. The backend therefore requires the positive `COMFYRIZZ_OK bootstrap` line, and
+    a crash prints FAIL plus the traceback instead.
+    """
+    try:
+        main()
+    except Exception:  # noqa: BLE001 - the traceback is the evidence, and the CLI will not report it
+        traceback.print_exc()
+        print("COMFYRIZZ_FAIL bootstrap", flush=True)
+        return
+    print("COMFYRIZZ_OK bootstrap", flush=True)
+
+
+_run()

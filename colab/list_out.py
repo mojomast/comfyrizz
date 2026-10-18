@@ -37,5 +37,20 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def _run() -> None:
+    """Print the listing, then the sentinel the backend looks for (GPU test 4, G4-6).
+
+    The sentinel is a plain line, never a JSON object, so the backend's JSON-lines parser skips it.
+    """
+    try:
+        main()
+    except Exception:  # noqa: BLE001 - colab exec reports a kernel crash as exit 0
+        import traceback
+
+        traceback.print_exc()
+        print("COMFYRIZZ_FAIL list-out", flush=True)
+        return
+    print("COMFYRIZZ_OK list-out", flush=True)
+
+
+_run()
