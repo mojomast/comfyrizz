@@ -63,7 +63,8 @@ type Outline = {
   notes: string[];
   language: string;
 };
-type BriefPlan = { mode: BriefMode; complete: boolean; questions: BriefQuestion[]; brief: Record<string, unknown>; outline?: Outline };
+type PresetCard = { id: string; label: string; palette: string[]; font: string; attributes: string; thumbnail: string };
+type BriefPlan = { mode: BriefMode; complete: boolean; questions: BriefQuestion[]; brief: Record<string, unknown>; outline?: Outline; presets?: PresetCard[] };
 let briefMode: BriefMode = 'plan';
 const briefState: {
   pending: BriefQuestion[];
@@ -72,7 +73,8 @@ const briefState: {
   busy: boolean;
   brief: Record<string, unknown> | null;
   outline: Outline | null;
-} = { pending: [], choices: {}, prompt: '', busy: false, brief: null, outline: null };
+  presets: PresetCard[];
+} = { pending: [], choices: {}, prompt: '', busy: false, brief: null, outline: null, presets: [] };
 
 let player: PlayerRef | null = null;
 let scrub: HTMLInputElement;
@@ -846,6 +848,14 @@ function renderBriefCard(panel: HTMLElement): void {
     const opts = options.map(option => `<option value="${esc(option)}" ${option === current ? 'selected' : ''}>${esc(option)}</option>`).join('');
     return `<label>${esc(label)}<select data-brief-field="${path}">${opts}</select></label>`;
   };
+  // R2 step 5: the six looks as CPU/SVG thumbnails. A hidden select keeps the
+  // card's form-reading code unchanged; the grid is what the owner taps.
+  const currentPreset = briefValue(brief, 'style.preset');
+  const presetIds = briefState.presets.length ? briefState.presets.map(card => card.id) : WEB_STYLE_PRESETS;
+  const presetCards: PresetCard[] = briefState.presets.length
+    ? briefState.presets
+    : presetIds.map(id => ({ id, label: id, palette: [], font: '', attributes: '', thumbnail: '' }));
+  const presetPicker = `<div class="brief-presets">${presetCards.map(card => `<button type="button" class="preset ${card.id === currentPreset ? 'selected' : ''}" data-brief-preset="${esc(card.id)}" title="${esc(card.attributes)}">${card.thumbnail}<span>${esc(card.label)}</span></button>`).join('')}<select data-brief-field="style.preset" hidden>${presetIds.map(id => `<option value="${esc(id)}" ${id === currentPreset ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></div>`;
   const beats = (outline?.beats ?? []).map(beat =>
     `<li class="${beat.placeholder ? 'placeholder' : ''}"><span class="role">${esc(beat.role)}</span><strong>${esc(beat.headline)}</strong><span class="narration">${esc(beat.narration)}</span><span class="secs">${beat.seconds.toFixed(1)} s</span></li>`,
   ).join('');
@@ -854,10 +864,18 @@ function renderBriefCard(panel: HTMLElement): void {
     : 'outline unavailable';
   const notes = (outline?.notes ?? []).map(note => `<li>${esc(note)}</li>`).join('');
   panel.innerHTML = `<div class="brief-head">Brief · edit anything, then build.</div>
-    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${select('style.preset', 'Look', WEB_STYLE_PRESETS)}${field('voice.persona', 'Narration')}</div>
+    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${field('voice.persona', 'Narration')}${presetPicker}</div>
     <ol class="brief-outline">${beats}</ol>
     <div class="brief-actions"><span class="hint">${esc(summary)}</span><button type="button" id="brief-refresh" ${briefState.busy ? 'disabled' : ''}>Update outline</button><button type="button" id="brief-build" ${briefState.busy ? 'disabled' : ''}>Build video</button></div>
     ${notes ? `<ul class="brief-notes">${notes}</ul>` : ''}`;
+  panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
+    button.addEventListener('click', () => {
+      const id = button.getAttribute('data-brief-preset') as string;
+      const selectEl = panel.querySelector<HTMLSelectElement>('select[data-brief-field="style.preset"]');
+      if (selectEl) selectEl.value = id;
+      panel.querySelectorAll('[data-brief-preset]').forEach(other => other.classList.toggle('selected', other === button));
+    });
+  });
   $('brief-refresh').addEventListener('click', () => void refreshBriefOutline());
   $('brief-build').addEventListener('click', () => void buildFromCard());
 }
@@ -901,6 +919,7 @@ async function refreshBriefOutline(): Promise<void> {
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
     briefState.brief = (body as BriefPlan).brief;
     briefState.outline = (body as BriefPlan).outline ?? null;
+    if ((body as BriefPlan).presets?.length) briefState.presets = (body as BriefPlan).presets as PresetCard[];
     logActivity(`Outline updated: ${briefState.outline?.beats.length ?? 0} beat(s), ≈ ${briefState.outline?.estimatedSeconds ?? 0} s`);
   } catch (error) {
     logActivity(`Outline refresh failed: ${(error as Error).message}`);
@@ -927,6 +946,7 @@ async function planBriefFlow(text: string): Promise<void> {
   try {
     const plan = await requestBrief(text);
     briefState.prompt = text;
+    if (plan.presets?.length) briefState.presets = plan.presets;
     if (plan.complete) {
       briefState.pending = [];
       briefState.brief = plan.brief;
@@ -960,6 +980,7 @@ async function resolveBrief(): Promise<void> {
     briefState.pending = [];
     briefState.brief = plan.brief;
     briefState.outline = plan.outline ?? null;
+    if (plan.presets?.length) briefState.presets = plan.presets;
     renderBriefPanel();
     logActivity('Plan mode: brief ready to review');
   } catch (error) {

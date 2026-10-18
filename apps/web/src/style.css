@@ -103,6 +103,11 @@ main {
 .brief-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .brief-card label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
 .brief-card input, .brief-card select { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 5px 7px; font-size: 12px; width: 100%; }
+.brief-presets { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.brief-presets .preset { display: flex; flex-direction: column; gap: 4px; align-items: stretch; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px; cursor: pointer; color: var(--muted); font-size: 11px; }
+.brief-presets .preset.selected { border-color: var(--accent); color: var(--accent-2); }
+.brief-presets .preset svg { width: 100%; height: auto; display: block; border-radius: 6px; }
+.brief-presets .preset span { text-align: center; }
 .brief-outline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .brief-outline li { display: grid; grid-template-columns: 48px 1fr auto; grid-template-areas: 'role head secs' 'role narr narr'; gap: 2px 8px; border-left: 2px solid var(--line); padding-left: 8px; }
 .brief-outline li.placeholder { border-left-style: dashed; }

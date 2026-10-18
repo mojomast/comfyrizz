@@ -129,6 +129,19 @@ Evidence: the step-4 probe drove one brief through Plan → chips → card (7 fi
 45 s / `short`), edited the key message and length (target 12 s / `long`, new headline + narration),
 refreshed the outline, then built (`timeline 00:36`) and the panel hid. No model, network or GPU.
 
+### Step 5: the six style presets (CPU/SVG thumbnails)
+
+The Brief card's Look picker is now a grid of six tappable CPU/SVG thumbnails
+(`docs/ui/r2-style-presets.png`) instead of a `<select>`. Each is a 160×90 deterministic SVG built
+from its preset's palette in `packages/agent` (`stylePresets()`), served by `GET /api/brief/presets`
+and inlined in every `/api/brief` reply so the picker needs no extra round-trip. A hidden
+`style.preset` select keeps `readBriefCard` unchanged; tapping a thumbnail selects it and updates the
+field. The look is locked before any GPU spend; GPU-rendered moodboards can swap in later.
+
+Evidence: the step-5 probe answered the chips, saw 6 thumbnails (`viewBox 0 0 160 90`), tapped
+**Cinematic dark** and confirmed both the `.selected` class and the hidden `style.preset` value moved
+to `cinematic-dark`.
+
 ## C6 backend run (spend card + run panel)
 
 The top bar's **Backend** picker now offers `BYO ComfyUI` and `Google Colab G4` alongside `CPU`.
