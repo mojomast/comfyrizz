@@ -159,6 +159,7 @@ const SENTINELS = {
   "reconcile.py": "reconcile",
   "list_out.py": "list-out",
   "wait_ready.py": "wait-ready",
+  "drop_token.py": "drop-token",
   "hf_token_dir.py": "hf-token-dir",
 };
 
@@ -176,6 +177,7 @@ if (command === "exec") {
   const builtIn = {
     "hf_token_dir.py": { mkdirs: ["/content/.hf", "/content/comfyrizz", "/content/comfyrizz/out", "/content/comfyrizz/workflows"], output: "vm dirs ready: /content/.hf mode 700, /content/comfyrizz and /content/comfyrizz/out present" },
     "list_out.py": { walk: "/content/comfyrizz/out" },
+    "drop_token.py": { remove: ["/content/.hf/token"], output: "token file removed: True (it was there: True)" },
   };
   const spec = { ...builtIn[script], ...(state.scripts || {})[script] };
   if (!spec || Object.keys(spec).length === 0) out(`[colab] Error: no such file on the VM: ${file}`, 1);
@@ -198,6 +200,11 @@ if (command === "exec") {
     // the real list_out.py prints its sentinel after the listing (G4-6)
     process.stdout.write(`COMFYRIZZ_OK ${SENTINELS["list_out.py"]}\n`);
     process.exit(spec.code ?? 0);
+  }
+  for (const entry of spec.remove || []) {
+    // what `colab/drop_token.py` does on the VM: unlink a file it names
+    const target = remoteToLocal(entry);
+    if (fs.existsSync(target)) fs.rmSync(target, { force: true });
   }
   for (const dir of spec.mkdirs || []) {
     // what a VM-side script can do and the CLI cannot: create a directory (H13 token dir)

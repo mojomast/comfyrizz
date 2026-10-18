@@ -121,6 +121,7 @@ export function createColabBackend({
   warnFraction = WARN_FRACTION,
   bootstrapScript = join(REPO, "colab", "bootstrap.py"),
   waitReadyScript = join(REPO, "colab", "wait_ready.py"),
+  dropTokenScript = join(REPO, "colab", "drop_token.py"),
   tokenDirScript = join(REPO, "colab", "hf_token_dir.py"),
   listScript = join(REPO, "colab", "list_out.py"),
   modelsLock = join(REPO, "colab", "models.lock.json"),
@@ -713,11 +714,20 @@ export function createColabBackend({
       return verifyAgainstManifest(manifest, destDir);
     },
 
-    /** Verified teardown, else `stop_unconfirmed` (SPEC.md 6.7.2 step 8). */
+    /**
+     * Verified teardown, else `stop_unconfirmed` (SPEC.md 6.7.2 step 8).
+     *
+     * G5-13: the token file goes first. bootstrap.py deletes it when it finishes, but a bootstrap that
+     * died early leaves a live read token on a VM that is about to be stopped - GPU test 5 run 1 hit
+     * exactly that, and the file was still there at the end of the session.
+     */
     async teardown(reason) {
       if (!owns() && !state.createdByUs) {
         return { state: "not_owned", evidence: `no session registry entry for ${session}; nothing was stopped` };
       }
+      const dropped = await execScript(dropTokenScript, { step: "drop-token", timeout: 120, wallMs: 180000 });
+      const droppedOutcome = execOutcome(dropped, "drop-token");
+      emit(null, { type: "drop_token", ok: droppedOutcome.ok, note: droppedOutcome.ok ? null : droppedOutcome.note });
       let lastEvidence = "";
       for (let attempt = 1; attempt <= teardownRetries; attempt += 1) {
         const stopped = await step(argvStop({ session }), { label: `stop-${attempt}`, wallMs: 90000 });

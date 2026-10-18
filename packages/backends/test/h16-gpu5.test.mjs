@@ -532,3 +532,39 @@ test("the smoke graph the health check submits is on the VM, and is derived not 
   assert.equal(smoke.argv[4], "/content/comfyrizz/workflows/smoke.api.json", "health.py reads this exact path");
   await backend.teardown("done");
 });
+
+test("teardown deletes the token on the VM before the box is stopped (G5-13)", async () => {
+  const { fake, backend } = setup();
+  await backend.ensureUp({ approved: true });
+  await backend.bootstrap();
+
+  const onVm = join(fake.tmpDir, "remote", "content", ".hf", "token");
+  assert.equal(existsSync(onVm), true, "the bootstrap uploads the token: there is something to delete");
+
+  const teardown = await backend.teardown("done");
+
+  assert.equal(teardown.state, "stopped");
+  assert.equal(existsSync(onVm), false, "a live read token was left on the VM");
+  const commands = readLog(fake.logPath).map((entry) => ({
+    command: String(entry.argv[0]),
+    script: entry.argv.includes("-f") ? String(entry.argv[entry.argv.indexOf("-f") + 1]) : null,
+  }));
+  const dropped = commands.findIndex((entry) => entry.script === "drop_token.py");
+  const stopped = commands.findIndex((entry) => entry.command === "stop");
+  assert.ok(dropped >= 0, `no drop_token.py ran: ${commands.map((entry) => entry.script ?? entry.command).join(", ")}`);
+  assert.ok(dropped < stopped, "the token has to go before the stop, not after it");
+  assert.ok(backend.inspect().events.some((event) => event.type === "drop_token"));
+});
+
+test("a bootstrap that died early leaves no token behind either (G5-13)", async () => {
+  const { fake, backend } = setup({
+    scripts: { "bootstrap.py": { kernelCrash: "NameError: name '__file__' is not defined" } },
+  });
+  await backend.ensureUp({ approved: true });
+  await assert.rejects(() => backend.bootstrap()); // the script crashed before read_token()
+
+  const onVm = join(fake.tmpDir, "remote", "content", ".hf", "token");
+  assert.equal(existsSync(onVm), true, "the token was uploaded before the crash");
+  await backend.teardown("error");
+  assert.equal(existsSync(onVm), false, "the token from the crashed bootstrap stayed on the VM");
+});
