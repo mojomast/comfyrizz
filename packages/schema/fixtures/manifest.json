@@ -4,6 +4,13 @@
   "note": "sha256 values and dates in fixtures are synthetic; they exist to exercise the format, not to describe real files.",
   "fixtures": [
     {
+      "file": "valid/cast-mascot.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
       "file": "valid/defaults-unfilled.json",
       "kind": "valid",
       "schemaOk": true,

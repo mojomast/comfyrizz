@@ -816,7 +816,7 @@ test("a missing cast ref_asset cannot be planned", () => {
 });
 
 test("the mascot example plans a ref-edit upload of the synthetic sheet", () => {
-  const pkg = schemaFixture("../../examples/cast-mascot/package.json");
+  const pkg = JSON.parse(readFileSync(join(here, "..", "..", "..", "examples", "cast-mascot", "package.json"), "utf8"));
   const result = validatePackage(pkg);
   assert.deepEqual(result.errors, [], JSON.stringify(result.errors, null, 2));
   const doc = planJobs(pkg);
