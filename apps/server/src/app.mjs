@@ -580,6 +580,7 @@ export function createApp({
           revision,
           dir: result.dir,
           files: result.files.map(file => file.name),
+          social: (result.social ?? []).map(file => file.name),
           frames: result.frames,
           captions: result.captions,
           complete: result.complete,

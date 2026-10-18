@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileTimeline, hashTimeline, LAYOUT_LIMITS, MAX_FLEXIBLE_FRAMES, TimelineError, type ComfyrizzPackage } from '../src/index.js';
+import { compileTimeline, hashTimeline, LAYOUT_LIMITS, MAX_FLEXIBLE_FRAMES, targetFramesForSeconds, TimelineError, type ComfyrizzPackage } from '../src/index.js';
 
 function scene(id: string, extra: Record<string, unknown> = {}) {
   return {
@@ -58,6 +58,24 @@ test('a transition longer than either neighbour fails with a usable error', () =
 test('a transition on the last scene fails', () => {
   const broken = pkg([scene('s1'), { ...scene('s2'), transitionOut: { type: 'fade', frames: 15 } }]);
   assert.throws(() => compileTimeline(broken), (error: unknown) => error instanceof TimelineError && error.code === 'transition-out-of-range');
+});
+
+test('targetFramesForSeconds is the cutdown target at the package fps', () => {
+  assert.equal(targetFramesForSeconds(6, 30), 180);
+  assert.equal(targetFramesForSeconds(15, 30), 450);
+  assert.equal(targetFramesForSeconds(30, 30), 900);
+  assert.throws(() => targetFramesForSeconds(0, 30), (error: unknown) => error instanceof TimelineError && (error as TimelineError).code === 'bad-target');
+});
+
+test('target mode holds a 6 s cutdown whose scene is already the target length', () => {
+  const cut = compileTimeline({
+    ...pkg([scene('s1', { preferredFrames: 180, transitionOut: { type: 'none', frames: 0 } })]),
+    duration: { mode: 'target', targetFrames: targetFramesForSeconds(6, 30) },
+  });
+  assert.equal(cut.mode, 'target');
+  assert.equal(cut.durationInFrames, 180);
+  assert.ok(Math.abs(cut.durationInFrames / cut.fps - 6) <= 0.5);
+  assert.equal(cut.target.requiresAcceptance, false);
 });
 
 test('target mode grows toward targetFrames and reports a deviation it cannot reach', () => {

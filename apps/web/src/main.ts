@@ -487,7 +487,7 @@ function renderExportPanel(): void {
   const refused = exportState.refused.length
     ? `<div class="export-refused">${exportState.refused.map(item => `<div class="event">refused <b>${esc(item.assetId)}</b>${item.licenseId ? ` · ${esc(item.licenseId)}` : ''} — ${esc(item.reason ?? 'not redistributable')}</div>`).join('')}</div>`
     : '';
-  host.innerHTML = `<div class="export-head"><button id="export-bundle"${exportState.running ? ' disabled' : ''}>${exportState.running ? 'Exporting…' : 'Export bundle'}</button><span class="hint" id="export-state">${esc(exportState.label || 'video · captions · credits · zip')}</span></div>${log}${files}${refused}`;
+  host.innerHTML = `<div class="export-head"><button id="export-bundle"${exportState.running ? ' disabled' : ''}>${exportState.running ? 'Exporting…' : 'Export bundle'}</button><span class="hint" id="export-state">${esc(exportState.label || 'video · captions · credits · zip')}</span></div><div class="hint">Social pack: thumb.jpg · preview.gif · card.png (1200×630) · chapters.txt</div>${log}${files}${refused}`;
   $('export-bundle').addEventListener('click', () => void exportBundle());
 }
 
@@ -524,7 +524,9 @@ async function exportBundle(): Promise<void> {
     const result = (await response.json().catch(() => ({}))) as Record<string, any>;
     if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
     exportState.exportId = result.exportId ?? null;
-    exportState.files = Array.isArray(result.files) ? result.files : [];
+    const shipped = Array.isArray(result.files) ? result.files : [];
+    const social = Array.isArray(result.social) ? result.social : [];
+    exportState.files = [...shipped, ...social];
     exportState.refused = Array.isArray(result.excluded) ? result.excluded : [];
     exportState.complete = result.complete === true;
     exportState.label = `${result.frames ?? '?'} frames · ${result.captions ?? 0} captions · ${result.complete ? 'complete archive' : 'incomplete archive'}`;
@@ -1315,10 +1317,13 @@ function init(): void {
       renderExportPanel();
     });
     stream.addEventListener('export.finished', event => {
-      const data = JSON.parse((event as MessageEvent).data) as { exportId: string; files: string[]; captions: number; complete: boolean; excluded?: ExportRefusal[] };
+      const data = JSON.parse((event as MessageEvent).data) as { exportId: string; files: string[]; social?: string[]; captions: number; complete: boolean; excluded?: ExportRefusal[] };
       exportState.running = false;
       exportState.label = `${data.captions ?? 0} captions · ${data.complete ? 'complete archive' : 'incomplete archive'}`;
-      if (exportState.files.length === 0 && Array.isArray(data.files)) exportState.files = data.files.map(name => ({ name, bytes: 0 }));
+      if (exportState.files.length === 0 && Array.isArray(data.files)) {
+        const social = Array.isArray(data.social) ? data.social : [];
+        exportState.files = [...data.files, ...social].map(name => ({ name, bytes: 0 }));
+      }
       if (exportState.refused.length === 0 && Array.isArray(data.excluded)) exportState.refused = data.excluded;
       renderExportPanel();
     });
