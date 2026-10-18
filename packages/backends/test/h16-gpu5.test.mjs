@@ -442,3 +442,32 @@ test("the batches' manifests become one, and it is the plan's verdict (G5-8)", (
   const retried = { run_id: "run_3", complete: true, jobs: [{ job: "a_city_still", status: "failed" }], counts: { failed: 1 } };
   assert.equal(mergeBatchManifests([stills, retried], jobs).jobs.find((entry) => entry.job === "a_city_still").status, "failed");
 });
+
+test("the runner's progress lines reach the caller while the batch runs (G5-9)", async () => {
+  const events = [];
+  const { backend, work } = setup({
+    scripts: {
+      "run_jobs.py": {
+        output: [
+          '{"v":1,"event":"batch_start","batch":"stills"}',
+          '{"v":1,"event":"job_start","job":"a_still","attempt":"attempt_1"}',
+          '{"v":1,"event":"job_done","job":"a_still","status":"succeeded","seconds":2.1}',
+        ].join("\n"),
+      },
+    },
+  });
+  const jobsFile = join(work, "jobs.json");
+  writeFileSync(jobsFile, JSON.stringify({ v: 1, packageId: "pkg_h16", jobs: [], batches: [], hash: "a".repeat(64) }));
+
+  await backend.ensureUp({ approved: true });
+  // no manifest is staged, so the run ends in the loud G5-7 failure: the events are what this asserts
+  await backend.run(jobsFile, (event) => events.push(event)).catch(() => null);
+
+  // the runner's own lines travel through as they are (they carry `event`, not `type`)
+  const types = events.map((event) => event.event ?? event.type);
+  assert.ok(types.includes("job_start"), `no per-job progress reached the caller: ${types.join(", ")}`);
+  assert.ok(types.includes("job_done"));
+  const started = types.indexOf("job_start");
+  const collected = types.indexOf("collect");
+  assert.ok(started < collected, "the progress has to arrive *during* the batch, before its collect");
+});

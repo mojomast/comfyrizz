@@ -63,7 +63,7 @@ export class ColabCli {
    * `cwd` matters for `colab exec -f <script>`: the real CLI resolves the script against *its own*
    * working directory, so the caller passes the script's folder (GPU test 4, G4-3).
    */
-  run(args, { silenceMs = 60000, wallMs = 180000, detached = this.detached, label = "colab", cwd = null } = {}) {
+  run(args, { silenceMs = 60000, wallMs = 180000, detached = this.detached, label = "colab", cwd = null, onLog = null } = {}) {
     assertNoSecrets(args);
     const id = `${String(label).replace(/[^A-Za-z0-9_-]/g, "_")}-${randomUUID().slice(0, 8)}`;
     const log = join(this.logDir, `${id}.log`);
@@ -73,7 +73,7 @@ export class ColabCli {
     this.steps.push(step);
 
     if (!detached) {
-      return this.#runInline(step, args, { silenceMs, wallMs, cwd });
+      return this.#runInline(step, args, { silenceMs, wallMs, cwd, onLog: onLog ?? this.onLog });
     }
     const specPath = join(this.logDir, `${id}.spec.json`);
     writeFileSync(
@@ -104,7 +104,7 @@ export class ColabCli {
     }
   }
 
-  #runInline(step, args, { silenceMs, wallMs, cwd = null }) {
+  #runInline(step, args, { silenceMs, wallMs, cwd = null, onLog = null }) {
     return new Promise((resolve) => {
       const chunks = [];
       const child = spawn(this.bin, args, { shell: false, windowsHide: true, env: this.environment(), cwd: cwd || undefined, stdio: ["pipe", "pipe", "pipe"] });
@@ -124,7 +124,8 @@ export class ColabCli {
         lastOutput = Date.now();
         const text = redactForLog(stripAnsi(chunk.toString("utf8")));
         chunks.push(text);
-        if (this.onLog) this.onLog(text, { step });
+        const sink = onLog ?? this.onLog;
+        if (sink) sink(text, { step });
       };
       child.stdout.on("data", push);
       child.stderr.on("data", push);

@@ -211,12 +211,15 @@ export function createColabBackend({
    * traceback and the CLI still exits 0 - success is therefore the *sentinel line* the script prints
    * last (`COMFYRIZZ_OK <step>`), never the exit code.
    */
-  async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null, silenceMs = null } = {}) {
+  async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null, silenceMs = null, onLog = null } = {}) {
     const result = await step(argvExec({ session, file: script, timeout }), {
       label: stepName,
       wallMs: wallMs ?? (timeout + 60) * 1000,
       cwd: dirname(script),
       ...(silenceMs ? { silenceMs } : {}),
+      // G5-9: the CLI can stream a step's output as it arrives; the backend's run() turns the runner's
+      // JSON progress lines into events, so a batch shows its jobs while it runs instead of at the end
+      ...(onLog ? { onLog } : {}),
     });
     emit(onEvent, {
       type: "exec",
