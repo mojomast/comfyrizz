@@ -52,6 +52,7 @@ The missing step for a true stranger is a committed `pnpm-lock.yaml`, which live
 | `GET` | `/api/package/:id` | `{package, revision}` |
 | `PATCH` | `/api/package/:id` | `{baseRevision, package}`; mismatch → `409 {currentRevision}`; invalid → `422 {details}` |
 | `POST` | `/api/agent` | C5 agent slice: `{brief, provider?, model?, sessionId?}`. Runs `runCpuSlice` (scripted offline, the live model when `provider` is set), validates and returns `{package, revision, timeline, generatedAssets, routes, pendingGpu, svgAssets, live, fallback, provider, model}` |
+| `POST` | `/api/brief` | R2 plan-mode brief: `{prompt, mode?: "plan"\|"express", decisions?, askMore?, attachments?}` → `{mode, complete, brief, questions}`. No model/network: the deterministic extractor in `@comfyrizz/agent` fills the §2.3 brief, then the response carries the top ≤3 §2.4 questions (chips + a Decide-for-me default); sending `decisions` applies them and completes |
 | `POST` | `/api/render` | `{packageId, baseRevision}`, or a C1-style `{package}` draft; returns `video/mp4` |
 | `POST` | `/api/export` | C10 bundle: `{packageId, baseRevision, force?}` or `{package}` draft. Renders (or reuses) the MP4 and writes `out/export/<package-id>/{video.mp4,captions.srt,captions.vtt,CREDITS.md,package.zip}`; `package.zip` ships only assets the v0.1 rights policy allows and lists every refusal with its licence reason |
 | `POST` | `/api/run` | C6 backend run: `{backendId, jobs, budgetUnits, approved?, comfyuiUrl?}`. Returns the estimate + `planHash`; a Colab run without approval returns `approvalRequired:true` and starts nothing |
@@ -106,6 +107,21 @@ MP4 to a temp dir before ffprobe; it skips cleanly when the chosen provider has 
 The web shell persists an edit with a base revision before rendering, so a stale `PATCH` gets a
 conflict instead of silently overwriting an accepted edit. A render records the revision it used
 in the response headers (`x-comfyrizz-revision`) together with the timeline hash and frame count.
+
+### R2: plan-mode brief flow
+
+`POST /api/brief` is the cheap first half of the agent: it fills the research §2.3 brief from the
+prompt with a deterministic extractor (`packages/agent/src/brief.ts` — goal, key message, audience,
+length, aspect, tone, CTA, language, must-include/avoid; it never invents facts), then asks the top
+≤3 unanswered §2.4 questions. Each question carries tappable chips and a *Decide for me* default.
+`mode:"express"` skips the questions and returns a completed brief. Sending `decisions` (question id
+→ chip / typed answer, `undefined` = Decide for me) applies the answers and completes; `askMore:true`
+keeps asking instead. The response brief is validated against the zod schema and always has exactly
+three tones and a preset palette/font (Inter until the B1 brand kit overrides it).
+
+No model, no network and no GPU: the two agent runs (extraction, narration estimate) are pure text,
+so a plan round costs nothing and the flow is fully testable. `estimateNarrationSeconds` (2.5 words/s
+English, 2.1 French) is the script-first outline's per-scene time budget.
 
 ### C10: export bundle
 
@@ -189,8 +205,8 @@ fallback (`x-comfyrizz-full-render: 1`, reason `scene durations changed`).
 ```bash
 npm test          # host/token/origin, revisions/conflict, invalid package, render + SSE, replay,
                   # traversal, the C5/C8 agent end-to-end renders, the C10 export-bundle e2e,
-                  # C11 per-scene re-run and C13 changed-scenes-only (35 tests; real CPU render,
-                  # ~2 min)
+                  # C11 per-scene re-run, C13 changed-scenes-only and the R2 plan-mode brief
+                  # (41 tests; real CPU render, ~2 min)
 ```
 
 Real end-to-end check (2026-10-17): built web served by this server, opened with the fragment
