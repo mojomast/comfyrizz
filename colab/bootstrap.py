@@ -28,11 +28,24 @@ import argparse
 import json
 import os
 import subprocess
+import threading
 import sys
 import time
 import traceback
 from pathlib import Path
 
+
+#: How often `_run` tells the host it is alive (GPU test 5, G5-2).
+#:
+#: `ColabCli.run` kills a child that has printed nothing for 60 s (its `silenceMs` default), and
+#: bootstrap is silent by nature: `pip -q` prints nothing, and `hf download` used to be a
+#: `subprocess.run(capture_output=True)`, so the LTX download - 117 s of the 237 s the step takes -
+#: tripped it. The CLI was SIGTERMed 130 s in and the session was thrown away with the work in it.
+HEARTBEAT_SECONDS = 20
+
+#: How often a model download reports its progress. Well under HEARTBEAT_SECONDS' own margin, because
+#: a download that is quiet for a minute is indistinguishable from a hung one.
+DOWNLOAD_PROGRESS_SECONDS = 15
 
 def install_command(requirements: Path, wheelhouse: Path | None, *, offline: bool = False) -> str:
     """The `pip install` command this script runs (inlined from `colab/wheelhouse.py`).
@@ -146,6 +159,17 @@ def read_token() -> str:
     return value
 
 
+def _heartbeat(stop: "threading.Event", started: float) -> None:
+    """Say the bootstrap is alive every HEARTBEAT_SECONDS (G5-2).
+
+    Runs as a daemon thread for the whole step: any single step inside can be quiet for minutes (a
+    model download, a pip resolve, the ComfyUI start), and the host's silence timeout counts the
+    *step's* silence, not its progress.
+    """
+    while not stop.wait(HEARTBEAT_SECONDS):
+        print(f"HEARTBEAT bootstrap {time.time() - started:.0f}s", flush=True)
+
+
 def download_models(token: str, plan: dict[str, tuple[str, list[str]]], lock: dict) -> dict:
     env = dict(os.environ)
     env["HF_TOKEN"] = token
@@ -161,14 +185,23 @@ def download_models(token: str, plan: dict[str, tuple[str, list[str]]], lock: di
             # the pin: `hf download --revision` also writes the resolved revision into the local
             # cache, so a re-run cannot quietly pick up a newer file under the same name
             command += ["--revision", revision]
-        process = subprocess.run(command, capture_output=True, text=True, env=env)
+        # G5-2: poll instead of a silent blocking run, so a download never looks like a hang - and so
+        # the host's silence timeout (and a human reading the step log) can tell the two apart
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=env)
+        stderr = ""
+        while True:
+            try:
+                _, stderr = process.communicate(timeout=DOWNLOAD_PROGRESS_SECONDS)
+                break
+            except subprocess.TimeoutExpired:
+                print(f"DOWNLOADING {name} {time.time() - started:.0f}s", flush=True)
         results[name] = {
             "repo": repo,
             "revision": revision,
             "files": len(files),
             "rc": process.returncode,
             "seconds": round(time.time() - started, 1),
-            "error": process.stderr[-400:] if process.returncode else "",
+            "error": stderr[-400:] if process.returncode else "",
         }
         print(f"DOWNLOAD {name} {json.dumps(results[name])}", flush=True)
     return results
@@ -324,13 +357,18 @@ def _run() -> None:
     backend therefore requires the positive `COMFYRIZZ_OK bootstrap` line, and every other outcome has
     to say FAIL - a non-zero return included, because that is ready.json saying the box is not usable.
     """
+    # G5-2: the host kills a step that is silent for 60 s, so this step is never silent
+    stop = threading.Event()
+    threading.Thread(target=_heartbeat, args=(stop, time.time()), daemon=True).start()
     try:
         # G5-1: never the kernel's argv
         code = main(NO_ARGS)
     except (Exception, SystemExit):  # noqa: BLE001 - SystemExit too: `raise SystemExit(msg)` refuses
+        stop.set()
         traceback.print_exc()
         print("COMFYRIZZ_FAIL bootstrap", flush=True)
         return
+    stop.set()
     if code != 0:
         print(f"COMFYRIZZ_FAIL bootstrap (main returned {code}: ready.json says the box is not ready)", flush=True)
         return

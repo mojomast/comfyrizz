@@ -85,6 +85,17 @@ export const MEASURED_JOB_MINUTES = { still: 0.15, plate: 0.5, upscale: 0.5, aud
  */
 export const BOOTSTRAP_OVERHEAD_MINUTES = 4;
 
+/**
+ * How long the bootstrap may stay quiet before the host gives up on it (GPU test 5, G5-2).
+ *
+ * `ColabCli.run` kills a child that has printed nothing for 60 s. bootstrap.py heartbeats every 20 s
+ * precisely so that never happens, but a heartbeat thread can be starved (a C-level call, a
+ * `pip` that buffers its own output), and 60 s is far too short a leash for a step that spends 237 s
+ * downloading 30 GB: the LTX download alone is 117 s. Losing this step costs a whole session, so the
+ * leash is long and the script's own heartbeat is what keeps the two honest.
+ */
+export const BOOTSTRAP_SILENCE_MS = 180000;
+
 export function createColabBackend({
   cli = null,
   packageId,
@@ -189,13 +200,21 @@ export function createColabBackend({
    * traceback and the CLI still exits 0 - success is therefore the *sentinel line* the script prints
    * last (`COMFYRIZZ_OK <step>`), never the exit code.
    */
-  async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null } = {}) {
+  async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null, silenceMs = null } = {}) {
     const result = await step(argvExec({ session, file: script, timeout }), {
       label: stepName,
       wallMs: wallMs ?? (timeout + 60) * 1000,
       cwd: dirname(script),
+      ...(silenceMs ? { silenceMs } : {}),
     });
-    emit(onEvent, { type: "exec", step: stepName, code: result.code, lost: isLost(result), sentinel: sentinelLine(stepName) });
+    emit(onEvent, {
+      type: "exec",
+      step: stepName,
+      code: result.code,
+      lost: isLost(result),
+      sentinel: sentinelLine(stepName),
+      silenceMs: silenceMs ?? null,
+    });
     return result;
   }
 
@@ -464,7 +483,12 @@ export function createColabBackend({
       });
       if (lockUpload.code !== 0) throw new ColabCliError(`uploading colab/models.lock.json failed (exit ${lockUpload.code})`);
       emit(onEvent, { type: "models_lock", path: modelsLock, revisions: lockRevisions(modelsLock) });
-      const result = await execScript(bootstrapScript, { step: "bootstrap", timeout, onEvent });
+      const result = await execScript(bootstrapScript, {
+        step: "bootstrap",
+        timeout,
+        onEvent,
+        silenceMs: BOOTSTRAP_SILENCE_MS,
+      });
       emit(onEvent, { type: "bootstrap", code: result.code, lost: isLost(result), token: hfTokenPlan({ localTokenPath: hfTokenPath }) });
       const outcome = execOutcome(result, "bootstrap");
       if (outcome.lost) return { lost: true, note: outcome.note };
