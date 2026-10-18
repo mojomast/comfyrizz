@@ -42,6 +42,90 @@ export const UNRELIABLE_MOTION = [
 ];
 
 /**
+ * Roles whose frame must not move at all, and the settings that held it still.
+ *
+ * EXAMPLES.md (the overnight GPU run) measured this: LTX-2.5 i2v ignored a "static, locked-off
+ * camera" prompt and pushed in on the UI, diagram and flow plates at strength 0.7-0.9 with 145
+ * frames. Re-running them at strength 1.0 with 97 frames, plus an explicit "the frame and framing
+ * never change" sentence, fixed the board, the flow and the farm plate and mostly fixed the hive
+ * plate. So these defaults are measured, not taste.
+ */
+export const STATIC_MOTION_ROLES = ["ui", "diagram", "chart", "background"];
+
+/** The sentence that did the work; "static camera" alone did not (EXAMPLES.md). */
+export const FRAMING_LOCK = "the frame and framing never change";
+export const FRAMING_LOCK_PRESENT = /frame and framing never change/i;
+
+/** Stage-1 i2v strength. The graph ships 0.7, which still drifted. */
+export const STATIC_ROLE_STRENGTH = 1;
+/** 4 s at 24 fps, the length the redos used (already 8n+1, so it stays 97). */
+export const STATIC_ROLE_FRAMES = 97;
+
+/**
+ * Apply the motion-role defaults a plate needs, in place.
+ *
+ * `role` is a planner control (`gen.inputs.role`), not a graph param: nothing here travels into
+ * `params` except `strength` and `frames`, which the LTX params map does declare (N1: an unmapped
+ * param is refused on the VM).
+ *
+ * @param {object} params                 the job's params (mutated)
+ * @param {object} opts
+ * @param {string|null} [opts.role]       the asset's motion role (`ui`, `diagram`, `chart`, `background`, `hero`, ...)
+ * @param {"still"|"plate"} opts.kind
+ * @param {boolean} [opts.hasSourceImage] an i2v plate (the graph gets a first frame)
+ * @param {boolean} [opts.textFrames]     the first frame carries labels
+ * @param {string|null} [opts.asset]
+ * @returns {{applied: object[], warnings: object[]}}
+ */
+export function applyMotionRoleDefaults(params, { role = null, kind, hasSourceImage = false, textFrames = false, asset = null } = {}) {
+  const applied = [];
+  const warnings = [];
+  if (kind !== "plate") return { applied, warnings };
+  const staticRole = STATIC_MOTION_ROLES.includes(String(role ?? "").toLowerCase());
+
+  if (staticRole) {
+    if (params.strength === undefined) {
+      params.strength = STATIC_ROLE_STRENGTH;
+      applied.push({
+        guard: "motion_strength",
+        value: STATIC_ROLE_STRENGTH,
+        because: `role ${role}: LTX i2v pushed in at strength 0.7-0.9 even with "static camera" in the prompt, and strength 1.0 held the frame (EXAMPLES.md)`,
+      });
+    }
+    if (params.frames === undefined) {
+      params.frames = STATIC_ROLE_FRAMES;
+      applied.push({
+        guard: "motion_frames",
+        value: STATIC_ROLE_FRAMES,
+        because: `role ${role}: the redos that held the framing were 4 s (97 frames at 24 fps)`,
+      });
+    } else if (Number(params.frames) > STATIC_ROLE_FRAMES) {
+      warnings.push({
+        asset,
+        code: "PLAN_STATIC_ROLE_LONG",
+        message:
+          `a ${role} plate holds its framing at about 4 s (97 frames) and this one asks for ${params.frames}: the push-ins ` +
+          "appeared on the longer runs (EXAMPLES.md). Shorten it, or move the motion into the subject",
+      });
+    }
+  }
+
+  // The framing sentence is about *this class of frame*: a static-role plate, or any plate whose first
+  // frame carries labels the camera would push out of view.
+  if (hasSourceImage && (staticRole || textFrames) && !FRAMING_LOCK_PRESENT.test(String(params.prompt ?? ""))) {
+    const prompt = String(params.prompt ?? "").trim();
+    params.prompt = prompt ? `${prompt} ${FRAMING_LOCK}` : FRAMING_LOCK;
+    applied.push({
+      guard: "motion_framing_lock",
+      value: FRAMING_LOCK,
+      because:
+        'LTX i2v ignored "static, locked-off camera"; the explicit framing sentence is what fixed the board, flow and farm plates (EXAMPLES.md)',
+    });
+  }
+  return { applied, warnings };
+}
+
+/**
  * Append the prompt guards a job needs, in place, and describe what was changed.
  *
  * The guards are returned rather than pushed into the document's `warnings[]`: they are routine, and

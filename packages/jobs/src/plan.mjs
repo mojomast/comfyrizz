@@ -8,7 +8,7 @@
 // (workflow sha, resolved inputs, model revision, seed, dims, frames).
 import { createHash } from "node:crypto";
 import { pathProblem } from "../../schema/src/semantic.mjs";
-import { applyPromptDefaults } from "./defaults.mjs";
+import { applyMotionRoleDefaults, applyPromptDefaults } from "./defaults.mjs";
 import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
 
 export const JOBS_VERSION = 1;
@@ -367,6 +367,25 @@ export function planJobs(pkg, opts = {}) {
       });
       promptGuards = applied.applied;
       warnings.push(...applied.warnings);
+    }
+
+    // The motion role (optional, R1): a UI board, a diagram, a chart backdrop or a background loop
+    // must not move the frame at all, and that decides the i2v strength, the length and the framing
+    // sentence. Like `text`, `role` is a planner control: it never travels into `params`, because the
+    // LTX params map does not declare it and an unmapped param is refused on the VM (GPU test 3, N1).
+    const roleInputs = (typeof inputs.image === "string" && assets[inputs.image]?.gen?.inputs) || {};
+    const motionRole = typeof inputs.role === "string" ? inputs.role : typeof roleInputs.role === "string" ? roleInputs.role : null;
+    delete params.role;
+    if (kind === "plate") {
+      const motion = applyMotionRoleDefaults(params, {
+        role: motionRole,
+        kind,
+        hasSourceImage: typeof inputs.image === "string" && inputs.image !== "",
+        textFrames: textAllowed || roleInputs.text === true || roleInputs.allowText === true,
+        asset: assetId,
+      });
+      promptGuards.push(...motion.applied);
+      warnings.push(...motion.warnings);
     }
     const job = {
       id: `${assetId}.${kind}`,
