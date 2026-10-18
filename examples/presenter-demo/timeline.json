@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 675,
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 150,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 15,
+      "copy": {
+        "kicker": "Presenter track",
+        "headline": "A face for the video",
+        "sub": "Opt in once, get an intro and outro presenter."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 31,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_intro",
+      "layout": "hero",
+      "variant": "split",
+      "from": 135,
+      "durationInFrames": 210,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Meet your presenter",
+        "sub": "The same portrait becomes a talking clip on the GPU track.",
+        "body": "On the CPU slice the presenter is a flat-cartoon still, so the layout, the split card and the seam dissolve all render with no network and no GPU."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 7
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "from": 330,
+      "durationInFrames": 210,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 15,
+      "copy": {
+        "headline": "Hours saved with a presenter pass",
+        "sub": "Shorter is better.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "data": {
+        "dataset": "d_review",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 19
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": null,
+      "provisional": false
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "from": 525,
+      "durationInFrames": 150,
+      "transitionInFrames": 15,
+      "transitionOutFrames": 0,
+      "copy": {
+        "headline": "Your turn",
+        "sub": "Opt in per video; off by default.",
+        "cta": "github.example/comfyrizz"
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 43,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": null,
+      "provisional": false
+    }
+  ],
+  "captions": [],
+  "plates": [],
+  "presenters": [
+    {
+      "sceneId": "s_title",
+      "assetId": "a_presenter_face",
+      "placement": "pip-br",
+      "shape": "circle",
+      "size": 0.26,
+      "label": "AI presenter",
+      "from": 0,
+      "durationInFrames": 150,
+      "dissolveInFrames": 0,
+      "dissolveOutFrames": 5
+    },
+    {
+      "sceneId": "s_intro",
+      "assetId": "a_presenter_face",
+      "placement": "split-left",
+      "shape": "circle",
+      "size": 0.26,
+      "label": "AI presenter",
+      "from": 135,
+      "durationInFrames": 210,
+      "dissolveInFrames": 5,
+      "dissolveOutFrames": 5
+    },
+    {
+      "sceneId": "s_chart",
+      "assetId": "a_presenter_face",
+      "placement": "pip-br",
+      "shape": "circle",
+      "size": 0.26,
+      "label": "AI presenter",
+      "from": 330,
+      "durationInFrames": 210,
+      "dissolveInFrames": 5,
+      "dissolveOutFrames": 5
+    },
+    {
+      "sceneId": "s_outro",
+      "assetId": "a_presenter_face",
+      "placement": "pip-br",
+      "shape": "circle",
+      "size": 0.26,
+      "label": "AI presenter",
+      "from": 525,
+      "durationInFrames": 150,
+      "dissolveInFrames": 5,
+      "dissolveOutFrames": 0
+    }
+  ],
+  "target": {
+    "requested": null,
+    "actual": 675,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [],
+  "proposals": [],
+  "sourceHash": "9f26e0b53cc83a9af6e2a2092fafb816172a0d07114e9c0745e4d3b56df1f716",
+  "hash": "f6af9bf49ca87e50b6f7d45b4cde2931535fd00d945b85f4ad319f3c3bce536d"
+}

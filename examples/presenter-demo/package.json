@@ -1,0 +1,214 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_presenterdemo01",
+  "title": "Comfyrizz presenter demo",
+  "createdAt": "2025-10-18T00:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#0d0f14",
+      "#1b2440",
+      "#6d8cff",
+      "#e6e8ee"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": false,
+    "engine": "none"
+  },
+  "presenter": {
+    "enabled": true,
+    "portrait": "a_presenter_face",
+    "placement": "pip-br",
+    "shape": "circle",
+    "size": 0.26,
+    "scenes": "all",
+    "label": "AI presenter"
+  },
+  "datasets": {
+    "d_review": {
+      "unit": "hours",
+      "label": "Hours to ship a launch video",
+      "values": [
+        {
+          "label": "Agent draft",
+          "value": 2
+        },
+        {
+          "label": "Owner review",
+          "value": 3
+        },
+        {
+          "label": "CPU render",
+          "value": 1
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "Invented numbers for the CPU slice; labelled as an example on the chart."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "Presenter track",
+        "headline": "A face for the video",
+        "sub": "Opt in once, get an intro and outro presenter."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 31,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "motion": {
+        "entry": "waterfall",
+        "stagger": "word"
+      }
+    },
+    {
+      "id": "s_intro",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 210,
+      "copy": {
+        "headline": "Meet your presenter",
+        "sub": "The same portrait becomes a talking clip on the GPU track.",
+        "body": "On the CPU slice the presenter is a flat-cartoon still, so the layout, the split card and the seam dissolve all render with no network and no GPU."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 7
+        }
+      },
+      "presenter": "split",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "motion": {
+        "entry": "fadeUp"
+      }
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "preferredFrames": 210,
+      "copy": {
+        "headline": "Hours saved with a presenter pass",
+        "sub": "Shorter is better.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "data": {
+        "dataset": "d_review",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 19
+        }
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "motion": {
+        "emphasis": "hero"
+      }
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Your turn",
+        "sub": "Opt in per video; off by default.",
+        "cta": "github.example/comfyrizz"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 43,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      }
+    }
+  ],
+  "assets": {
+    "a_presenter_face": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_presenter_face.svg",
+      "sha256": "d1c012ae405222bc9874956a18fddd147f9f831aad9e478eaf680e4cf5d699e1",
+      "bytes": 709,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 512,
+          "palette_ok": true
+        },
+        "caption": "Flat-cartoon head-and-shoulders presenter in the theme palette."
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "llm-svg",
+      "weights": "open"
+    },
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "The presenter portrait is a flat-cartoon placeholder, not a person.",
+      "This package uses no LLM, GPU or network calls at render time."
+    ]
+  },
+  "motion": {
+    "energy": "medium",
+    "direction": "left"
+  }
+}

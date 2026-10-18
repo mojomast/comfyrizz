@@ -1,0 +1,4 @@
+# The presenter demo is CPU-only; commit the flat-cartoon portrait SVG and the
+# compiled timeline, ignore the rendered output.
+public/
+out/
