@@ -5,7 +5,9 @@ import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
+import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
+import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
 const MAX_BODY = 5 * 1024 * 1024;
@@ -96,6 +98,7 @@ export function createApp({
   exportsDir = join(runtimeDir, 'out', 'export'),
   webDist = join(root, 'apps', 'web', 'dist'),
   render = defaultRenderPackage,
+  renderScene = defaultRenderScene,
   agentRunner = null,
   providers = providerAvailability(),
   backendFactory = defaultBackendFactory,
@@ -176,6 +179,42 @@ export function createApp({
   const exporter = createExporter({ exportsDir, render });
   let activeRender = null;
   let activeExport = null;
+  let activeSceneRender = null;
+
+  const sceneCacheDir = (packageId) => join(runtimeDir, 'scene-cache', packageId);
+
+  /**
+   * Resolve a render target the same way for every render route: an in-memory draft is written to
+   * a throwaway file (C1 compatibility, never mutating the stored package); otherwise the stored
+   * package is read and the base revision is checked.
+   */
+  function resolveRenderTarget(body, suffix) {
+    if (body.package && typeof body.package === 'object') {
+      const pkg = body.package;
+      const packagePath = join(rendersDir, `${suffix}.package.json`);
+      writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
+      return { pkg, packagePath, revision: Number.isFinite(pkg.revision) ? pkg.revision : null };
+    }
+    const id = body.packageId;
+    if (!id) {
+      const error = new Error('packageId or package required');
+      error.status = 400;
+      throw error;
+    }
+    const pkg = store.read(id);
+    if (!pkg) {
+      const error = new Error('package not found');
+      error.status = 404;
+      throw error;
+    }
+    if (body.baseRevision != null && Number(body.baseRevision) !== pkg.revision) {
+      const error = new Error('conflict');
+      error.status = 409;
+      error.currentRevision = pkg.revision;
+      throw error;
+    }
+    return { pkg, packagePath: store.path(id), revision: pkg.revision };
+  }
 
   async function readJson(request) {
     let size = 0;
@@ -520,6 +559,102 @@ export function createApp({
       return;
     }
 
+    // C11: a dry-run jobs plan for one scene's generated assets. Nothing is sent to Google Colab
+    // and no VM is started; the storyboard shows it on the spend card.
+    if (url.pathname === '/api/scene/plan' && request.method === 'POST') {
+      let body;
+      try {
+        body = await readJson(request);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, { error: error.message });
+      }
+      let target;
+      try {
+        target = resolveRenderTarget(body, `plan_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, {
+          error: error.message,
+          ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
+        });
+      }
+      try {
+        const plan = sceneJobsPlan(target.pkg, body.sceneId, { includeReady: body.includeReady !== false });
+        return sendJson(response, 200, {
+          packageId: target.pkg.id,
+          revision: target.revision,
+          dryRun: true,
+          metered: false,
+          ...plan,
+        });
+      } catch (error) {
+        return sendJson(response, error.status ?? 500, { error: error.message });
+      }
+    }
+
+    // C11: re-render just one scene. The renderer's incremental renderer reuses every cached
+    // segment whose key did not change (A6), then re-stitches and muxes; the response is the
+    // full-length MP4.
+    if (url.pathname === '/api/scene/render' && request.method === 'POST') {
+      if (activeSceneRender) return sendJson(response, 409, { error: 'scene render busy', renderId: activeSceneRender });
+      const body = await readJson(request);
+      const renderId = `sr_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      let target;
+      try {
+        target = resolveRenderTarget(body, renderId);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, {
+          error: error.message,
+          ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
+        });
+      }
+      if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
+      const assets = sceneAssetIds(target.pkg, body.sceneId);
+      if (assets === null) return sendJson(response, 404, { error: `unknown scene ${body.sceneId}` });
+      activeSceneRender = renderId;
+      const output = join(rendersDir, `${renderId}.mp4`);
+      const cacheDir = sceneCacheDir(target.pkg.id);
+      events.publish({ type: 'scene.render.started', renderId, packageId: target.pkg.id, revision: target.revision, sceneId: body.sceneId, assets });
+      try {
+        const result = await renderScene(target.packagePath, output, {
+          cacheDir,
+          force: body.force === true,
+          onLog: line => events.publish({ type: 'scene.render.log', renderId, sceneId: body.sceneId, line }),
+        });
+        events.publish({
+          type: 'scene.render.finished',
+          renderId,
+          packageId: target.pkg.id,
+          revision: target.revision,
+          sceneId: body.sceneId,
+          bytes: result.bytes,
+          frames: result.frames,
+          timeline_sha256: result.timelineHash,
+          rendered: result.rendered,
+          reused: result.reused,
+        });
+        response.writeHead(200, {
+          'content-type': 'video/mp4',
+          'content-length': result.bytes,
+          'cache-control': 'no-store',
+          'content-disposition': `attachment; filename="comfyrizz-${renderId}.mp4"`,
+          'x-comfyrizz-render-id': renderId,
+          'x-comfyrizz-scene-id': String(body.sceneId),
+          'x-comfyrizz-timeline-sha256': result.timelineHash,
+          'x-comfyrizz-frames': String(result.frames),
+          'x-comfyrizz-rendered': String(result.rendered.length),
+          'x-comfyrizz-reused': String(result.reused.length),
+          ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
+        });
+        createReadStream(result.output).pipe(response);
+      } catch (error) {
+        events.publish({ type: 'scene.render.failed', renderId, packageId: target.pkg.id, sceneId: body.sceneId, message: error.message });
+        sendJson(response, 500, { error: error.message, renderId });
+      } finally {
+        activeSceneRender = null;
+      }
+      return;
+    }
+
     return sendJson(response, 404, { error: 'not found' });
   }
 
@@ -538,6 +673,7 @@ export function createApp({
     runs,
     rendersDir,
     exportsDir,
+    sceneCacheDir,
     webDist,
     close: () => events.closeAll(),
   };
