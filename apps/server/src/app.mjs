@@ -6,6 +6,7 @@ import { EventLog } from './events.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
+import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -184,6 +185,10 @@ export function createApp({
   let activeRender = null;
   let activeExport = null;
   let activeSceneRender = null;
+  // C13: the last successfully rendered timeline per package, so an edit can be diffed
+  // against what the frame grid actually was. In-memory: a server restart just makes the
+  // next edit a first render (the A6 cache still reuses unchanged segments).
+  const lastRendered = new Map();
 
   const sceneCacheDir = (packageId) => join(runtimeDir, 'scene-cache', packageId);
 
@@ -652,6 +657,104 @@ export function createApp({
         createReadStream(result.output).pipe(response);
       } catch (error) {
         events.publish({ type: 'scene.render.failed', renderId, packageId: target.pkg.id, sceneId: body.sceneId, message: error.message });
+        sendJson(response, 500, { error: error.message, renderId });
+      } finally {
+        activeSceneRender = null;
+      }
+      return;
+    }
+
+    // C13: an agent edit only re-renders the scenes whose compiled segment changed. The new
+    // package is diffed against the last rendered timeline; a scene-local change goes through
+    // the A6 incremental cache, a timing change falls back to a full render with a reason.
+    if (url.pathname === '/api/render/edited' && request.method === 'POST') {
+      if (activeSceneRender) return sendJson(response, 409, { error: 'scene render busy', renderId: activeSceneRender });
+      let body;
+      try {
+        body = await readJson(request);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, { error: error.message });
+      }
+      const renderId = `er_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      let target;
+      try {
+        target = resolveRenderTarget(body, renderId);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, {
+          error: error.message,
+          ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
+        });
+      }
+      const previous = lastRendered.get(target.pkg.id) ?? null;
+      const nextTimeline = packageTimeline(target.packagePath, target.pkg);
+      const fullReason = timingChangeReason(previous?.timeline ?? null, nextTimeline);
+      const full = Boolean(fullReason);
+      activeSceneRender = renderId;
+      const output = join(rendersDir, `${renderId}.mp4`);
+      const cacheDir = sceneCacheDir(target.pkg.id);
+      events.publish({
+        type: 'edit.render.started',
+        renderId,
+        packageId: target.pkg.id,
+        revision: target.revision,
+        previousRevision: previous?.revision ?? null,
+        full,
+        reason: fullReason,
+      });
+      try {
+        let result;
+        let renderedSceneIds;
+        let reusedSceneIds;
+        if (full) {
+          result = await render(target.packagePath, output, { onLog: line => events.publish({ type: 'edit.render.log', renderId, line }) });
+          renderedSceneIds = (nextTimeline.scenes ?? []).map(scene => scene.id);
+          reusedSceneIds = [];
+        } else {
+          result = await renderScene(target.packagePath, output, {
+            cacheDir,
+            force: false,
+            onLog: line => events.publish({ type: 'edit.render.log', renderId, line }),
+          });
+          const renderedKeys = new Set(result.rendered);
+          const reusedKeys = new Set(result.reused);
+          renderedSceneIds = result.segments.filter(segment => renderedKeys.has(segment.key)).map(segment => segment.sceneId);
+          reusedSceneIds = result.segments.filter(segment => reusedKeys.has(segment.key)).map(segment => segment.sceneId);
+        }
+        lastRendered.set(target.pkg.id, { timeline: nextTimeline, revision: target.revision, at: Date.now() });
+        const timelineHash = result.timelineHash ?? result.hash ?? null;
+        const reason = fullReason ?? (previous ? 'content changes only' : 'first render');
+        events.publish({
+          type: 'edit.render.finished',
+          renderId,
+          packageId: target.pkg.id,
+          revision: target.revision,
+          full,
+          reason,
+          bytes: result.bytes,
+          frames: result.frames,
+          timeline_sha256: timelineHash,
+          rendered: renderedSceneIds,
+          reused: reusedSceneIds,
+        });
+        response.writeHead(200, {
+          'content-type': 'video/mp4',
+          'content-length': result.bytes,
+          'cache-control': 'no-store',
+          'content-disposition': `attachment; filename="comfyrizz-${renderId}.mp4"`,
+          'x-comfyrizz-render-id': renderId,
+          'x-comfyrizz-full-render': full ? '1' : '0',
+          'x-comfyrizz-full-reason': fullReason ?? '',
+          'x-comfyrizz-rendered': renderedSceneIds.join(','),
+          'x-comfyrizz-rendered-count': String(renderedSceneIds.length),
+          'x-comfyrizz-reused': reusedSceneIds.join(','),
+          'x-comfyrizz-reused-count': String(reusedSceneIds.length),
+          'x-comfyrizz-timeline-sha256': String(timelineHash ?? ''),
+          'x-comfyrizz-frames': String(result.frames),
+          ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
+        });
+        createReadStream(result.output ?? output).pipe(response);
+      } catch (error) {
+        events.publish({ type: 'edit.render.failed', renderId, packageId: target.pkg.id, message: error.message });
         sendJson(response, 500, { error: error.message, renderId });
       } finally {
         activeSceneRender = null;

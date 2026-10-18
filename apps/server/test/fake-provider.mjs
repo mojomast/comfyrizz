@@ -18,7 +18,8 @@ function safeName(name) {
  * @param {Array<{ name: string, args: unknown }>} calls
  * @returns {Promise<{ url: string, calls: number, close: () => Promise<void> }>}
  */
-export function replayProvider(calls, { finalText = 'The package draft is ready.', model = 'local-compatible' } = {}) {
+export function replayProvider(initialCalls, { finalText = 'The package draft is ready.', model = 'local-compatible' } = {}) {
+  let calls = initialCalls;
   let index = 0;
   const server = createServer((request, response) => {
     let raw = '';
@@ -68,6 +69,11 @@ export function replayProvider(calls, { finalText = 'The package draft is ready.
         url: `http://127.0.0.1:${server.address().port}/v1`,
         get calls() {
           return index;
+        },
+        /** C13: reuse the same loopback URL for a second `/api/agent` run with a new script. */
+        setCalls(nextCalls) {
+          calls = nextCalls;
+          index = 0;
         },
         close: () => new Promise(done => server.close(() => done())),
       });
