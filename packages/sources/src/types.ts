@@ -121,6 +121,8 @@ export interface PackageZipInput {
   timeline?: unknown;
   assets?: Record<string, Uint8Array | Buffer | string>;
   workflows?: Record<string, Uint8Array | Buffer | string>;
+  /** API-format graphs captured next to generated stills and plates (W1). Paths are relative, like `assets/<id>.workflow.api.json`. */
+  capturedWorkflows?: Record<string, Uint8Array | Buffer | string>;
   generatedAt?: string;
   credits?: Credits;
   licensePolicy?: LicensePolicy;

@@ -390,12 +390,18 @@ def classify_metadata_refusal(outcome: SubmitOutcome) -> bool:
 
 @dataclass
 class SubmitOutcome:
-    """``kind`` is one of submitted | ambiguous | refused | duplicate_key."""
+    """``kind`` is one of submitted | ambiguous | refused | duplicate_key.
+
+    ``workflow`` is the API graph passed to the SDK, when injection succeeded.
+    It is the exact submitted graph (seeds, prompts, models, parameters). The
+    runner redacts secrets before writing it to disk; this object is not logged.
+    """
 
     kind: str
     job_id: str | None = None
     idempotency_key: str | None = None
     error: dict[str, Any] | None = None
+    workflow: dict[str, Any] | None = None
 
     @property
     def submitted(self) -> bool:
@@ -764,6 +770,7 @@ class ComfyClient:
         validation error after the job was billed.
         """
         params = dict(params)
+        submitted_graph: dict[str, Any] | None = None
         try:
             if file_inputs:
                 declared = set(load_file_params(workflow_path, params_source))
@@ -788,15 +795,34 @@ class ComfyClient:
             workflow = self.load_workflow(workflow_path)
             mapping = load_params_map(workflow_path, params_source)
             inject_params(workflow.json, mapping, params)
+            # The SDK submits this object (asset handles substituted, which these
+            # graphs do not use). Snapshot it before the request so a refusal
+            # still knows what would have been sent, and a success can save it.
+            try:
+                submitted_graph = json.loads(json.dumps(workflow.json))
+            except (TypeError, ValueError):
+                submitted_graph = None
             handle = self.client.submit(workflow, idempotency_key=idempotency_key, metadata=metadata)
-            return SubmitOutcome("submitted", job_id=handle.id, idempotency_key=idempotency_key)
+            return SubmitOutcome(
+                "submitted",
+                job_id=handle.id,
+                idempotency_key=idempotency_key,
+                workflow=submitted_graph,
+            )
         except UploadError as exc:
             # nothing reached the job API: this is a refusal, not an ambiguous submit
-            return SubmitOutcome("refused", idempotency_key=idempotency_key, error=exc.as_error())
+            return SubmitOutcome("refused", idempotency_key=idempotency_key, error=exc.as_error(), workflow=submitted_graph)
         except ValueError as exc:  # local validation (params mapping, UI-format graph)
-            return SubmitOutcome("refused", idempotency_key=idempotency_key, error={"code": "invalid_workflow", "message": str(exc)})
+            return SubmitOutcome(
+                "refused",
+                idempotency_key=idempotency_key,
+                error={"code": "invalid_workflow", "message": str(exc)},
+                workflow=submitted_graph,
+            )
         except Exception as exc:  # noqa: BLE001 - classified, never swallowed
-            return classify_submit_error(exc, idempotency_key)
+            outcome = classify_submit_error(exc, idempotency_key)
+            outcome.workflow = submitted_graph
+            return outcome
 
     # -- observation ---------------------------------------------------------------
     def _snapshot(self, handle: Any) -> JobSnapshot:

@@ -1,6 +1,6 @@
 import './style.css';
 import type { PlayerRef } from '@remotion/player';
-import type { PackageV1 } from '../../../packages/schema/types';
+import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
@@ -365,6 +365,60 @@ function assetIcon(asset: { kind?: string }): string {
   return asset.kind === 'svg' ? '◇' : asset.kind === 'vector-anim' ? '◈' : asset.kind === 'audio' ? '♪' : '▣';
 }
 
+const COMFY_WORKFLOW_GENERATORS = new Set(['flux3-klein', 'ltx25', 'ltx25-a2v']);
+
+/** Generated stills and plates. SVG and narration are not Comfy graphs. */
+function showsComfyWorkflow(asset: Asset): boolean {
+  if (asset.origin !== 'generated') return false;
+  if (asset.kind !== 'image' && asset.kind !== 'video') return false;
+  const generator = asset.gen?.generator;
+  if (generator === 'kokoro' || generator === 'llm-svg') return false;
+  if (generator && !COMFY_WORKFLOW_GENERATORS.has(generator)) return false;
+  return true;
+}
+
+function workflowControls(id: string, asset: Asset): string {
+  if (!showsComfyWorkflow(asset)) return '';
+  const ready = (asset.status === 'ready' || asset.status === 'candidate') && Boolean(asset.file);
+  const disabled = ready ? '' : ' disabled';
+  const title = ready
+    ? 'Download the API-format workflow that was submitted. ComfyUI drag-and-drop needs UI format, which is not generated.'
+    : 'The workflow is saved next to this still or plate after the ComfyUI job succeeds.';
+  const upscale =
+    asset.variants?.upscaled?.file
+      ? `<button type="button" data-asset-action="workflow" data-asset-id="${esc(id)}" data-workflow-format="api" data-workflow-variant="upscaled"${disabled} title="${esc(title)}">×2 workflow</button>`
+      : '';
+  return `<span class="asset-end"><button type="button" data-asset-action="workflow" data-asset-id="${esc(id)}" data-workflow-format="api"${disabled} title="${esc(title)}">Open in ComfyUI</button><button type="button" data-asset-action="workflow" data-asset-id="${esc(id)}" data-workflow-format="readme"${disabled} title="How to open this API-format workflow in ComfyUI">How to open</button>${upscale}</span>`;
+}
+
+async function downloadWorkflow(assetId: string, format: 'api' | 'readme', variant?: string): Promise<void> {
+  const params = new URLSearchParams();
+  if (format === 'readme') params.set('format', 'readme');
+  if (variant) params.set('variant', variant);
+  const query = params.toString();
+  const response = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}/assets/${encodeURIComponent(assetId)}/workflow${query ? `?${query}` : ''}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    logActivity(`Open in ComfyUI: ${(body as { reason?: string; error?: string }).reason ?? (body as { error?: string }).error ?? response.status}`);
+    return;
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const match = /filename="([^"]+)"/.exec(disposition);
+  const filename = match?.[1] ?? (format === 'readme' ? `${assetId}.workflow.md` : `${assetId}.workflow.api.json`);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+  const limitation =
+    response.headers.get('x-comfyrizz-ui-format') === 'unavailable' && format === 'api'
+      ? ' API format only: ComfyUI drag-and-drop needs a UI workflow, which is not reliable to convert, so it is not included.'
+      : '';
+  logActivity(`Downloaded ${filename} for ${assetId}.${limitation}`);
+}
+
 function renderAssets(): void {
   const host = $('assets');
   const entries = Object.entries(pkg.assets ?? {});
@@ -380,7 +434,7 @@ function renderAssets(): void {
       const chip = pending
         ? '<span class="chip warn">pending gpu</span>'
         : `<span class="chip">${esc(asset.license?.id ?? asset.status)}</span>`;
-      return `<div class="asset${pending ? ' pending' : ''}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div><b>${esc(id)}</b><span>${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${chip}</div>`;
+      return `<div class="asset${pending ? ' pending' : ''}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy"><b>${esc(id)}</b><span>${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}${chip}</div>`;
     })
     .join('');
   renderGpuQueue();
@@ -1352,6 +1406,14 @@ function init(): void {
     logActivity('Remotion Player ready: compiled timeline mounted');
   });
 
+  $('assets').addEventListener('click', event => {
+    const button = (event.target as HTMLElement).closest('button[data-asset-action="workflow"]');
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return;
+    const assetId = button.dataset.assetId;
+    if (!assetId) return;
+    const format = button.dataset.workflowFormat === 'readme' ? 'readme' : 'api';
+    void downloadWorkflow(assetId, format, button.dataset.workflowVariant);
+  });
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   $('render').addEventListener('click', () => void exportMp4());

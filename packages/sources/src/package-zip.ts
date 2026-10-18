@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { buildCredits } from './credits.js';
 import { DEFAULT_LICENSE_POLICY, isAssetRedistributable } from './licenses.js';
+import { OPEN_IN_COMFYUI_MARKDOWN } from './open-comfyui.js';
+import { redactWorkflowDocument } from './secrets.js';
 import type { ExcludedAsset, PackageAssetLike, PackageZipInput, PackageZipResult, ZipEntry } from './types.js';
 
 const CRC_TABLE = (() => {
@@ -121,6 +123,20 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
   for (const [name, data] of Object.entries(input.workflows ?? {})) {
     entries.push({ path: safePath(name.startsWith('workflows/') ? name : `workflows/${name}`), data });
   }
+  const capturedPaths: string[] = [];
+  const capturedEntries = Object.entries(input.capturedWorkflows ?? {}).sort(([left], [right]) => left.localeCompare(right));
+  for (const [name, data] of capturedEntries) {
+    const path = safePath(name);
+    if (!path.endsWith('.workflow.api.json') && !path.endsWith('.workflow.md')) {
+      throw new Error(`unexpected captured workflow path: ${path}`);
+    }
+    const text = toBytes(data).toString('utf8');
+    entries.push({ path, data: redactWorkflowDocument(text) });
+    capturedPaths.push(path);
+  }
+  if (capturedPaths.length > 0) {
+    entries.push({ path: 'OPEN-IN-COMFYUI.md', data: OPEN_IN_COMFYUI_MARKDOWN });
+  }
 
   for (const [assetId, asset] of Object.entries(input.package.assets ?? {})) {
     if (!isAssetRedistributable(asset, policy)) {
@@ -170,6 +186,13 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
     included,
     excluded,
     note: 'Only assets marked redistributable under the v0.1 licence policy are included. Excluded assets are listed with source URL and hash; fetch them again before reproducing the edit. No keys, signed URLs or model weights.',
+    ...(capturedPaths.length > 0
+      ? {
+          capturedWorkflows: [...capturedPaths].sort(),
+          workflowNote:
+            'Captured workflows are the API-format graphs that were submitted, with secret-shaped strings removed. UI-format drag-and-drop files are not included; see OPEN-IN-COMFYUI.md.',
+        }
+      : {}),
   };
   entries.push({ path: 'manifest.json', data: `${JSON.stringify(manifest, null, 2)}\n` });
   if (!complete) {

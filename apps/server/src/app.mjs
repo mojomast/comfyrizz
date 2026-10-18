@@ -8,6 +8,7 @@ import { createExporter } from './export.mjs';
 import { buildVariants } from './variant.mjs';
 import { buildDataset } from './dataset.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
+import { loadAssetWorkflow } from './workflow.mjs';
 import { runFrameQa, createQaRegistry } from './qa.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
@@ -43,6 +44,17 @@ function sendJson(response, status, value, extraHeaders = {}) {
     ...extraHeaders,
   });
   response.end(body);
+}
+
+function sendBytes(response, status, body, headers = {}) {
+  const buffer = Buffer.from(body);
+  response.writeHead(status, {
+    'content-length': buffer.length,
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    ...headers,
+  });
+  response.end(buffer);
 }
 
 function safeTokenEqual(given, expected) {
@@ -312,6 +324,49 @@ export function createApp({
     // never receives a key and never needs one (U1).
     if (url.pathname === '/api/providers' && request.method === 'GET') {
       return sendJson(response, 200, { providers });
+    }
+
+    // W1: download the API-format workflow saved next to a generated still or plate.
+    // UI format is not offered: converting it is not reliable (see OPEN-IN-COMFYUI.md).
+    const workflowMatch = /^\/api\/package\/([^/]+)\/assets\/([^/]+)\/workflow$/.exec(url.pathname);
+    if (workflowMatch) {
+      if (request.method !== 'GET' && request.method !== 'HEAD') return sendJson(response, 405, { error: 'method not allowed' });
+      let packageId;
+      let assetId;
+      try {
+        packageId = decodeURIComponent(workflowMatch[1]);
+        assetId = decodeURIComponent(workflowMatch[2]);
+      } catch {
+        return sendJson(response, 400, { error: 'bad path' });
+      }
+      let pkg;
+      try {
+        pkg = store.read(packageId);
+      } catch (error) {
+        if (error.message === 'invalid package id') return sendJson(response, 400, { error: error.message });
+        throw error;
+      }
+      if (!pkg) return sendJson(response, 404, { error: 'package not found' });
+      const loaded = loadAssetWorkflow({
+        packageDir: dirname(store.path(packageId)),
+        pkg,
+        assetId,
+        format: url.searchParams.get('format') || 'api',
+        variant: url.searchParams.get('variant'),
+      });
+      if (loaded.status !== 200) return sendJson(response, loaded.status, { error: loaded.error, ...(loaded.reason ? { reason: loaded.reason } : {}) });
+      const headers = {
+        'content-type': loaded.contentType,
+        'content-disposition': `attachment; filename="${loaded.filename}"`,
+        'x-comfyrizz-workflow-format': loaded.format,
+        // The canvas Load button needs UI format. We ship the API graph instead.
+        'x-comfyrizz-ui-format': 'unavailable',
+      };
+      if (request.method === 'HEAD') {
+        response.writeHead(200, { ...headers, 'content-length': Buffer.byteLength(loaded.body), 'cache-control': 'no-store' });
+        return response.end();
+      }
+      return sendBytes(response, 200, loaded.body, headers);
     }
 
     const packageMatch = /^\/api\/package\/([^/]+)$/.exec(url.pathname);

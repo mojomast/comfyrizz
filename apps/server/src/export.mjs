@@ -10,6 +10,7 @@ import { captionsToSrt, captionsToVtt, captionsToWordVtt } from '../../../packag
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions } from '../../renderer/scripts/render-package-lib.mjs';
 import { buildSocialPack, SOCIAL_PIXEL_FILES } from './social.mjs';
+import { collectCapturedWorkflows } from './workflow.mjs';
 
 export const EXPORT_FILE_NAMES = ['video.mp4', 'captions.srt', 'captions.vtt', 'CREDITS.md', 'package.zip'];
 
@@ -132,10 +133,12 @@ export function createExporter({ exportsDir, render } = {}) {
       }
       extras.push({ path: file.name, data: readFileSync(file.path) });
     }
+    const capturedWorkflows = collectCapturedWorkflows(pkg, packageDir);
     const zip = buildPackageZip({
       package: pkg,
       timeline,
       assets: collectAssetBytes(pkg, packageDir),
+      capturedWorkflows,
       generatedAt,
       extras,
       extraExcluded,
