@@ -95,6 +95,15 @@ const sceneState = {
   planError: '',
 };
 
+// C13: which scenes the last agent edit re-rendered vs reused, shown on each card. A timing
+// change falls back to a full render and the storyboard marks every scene re-rendered.
+const editState = {
+  running: false,
+  status: new Map<string, 'rendered' | 'reused'>(),
+  full: false,
+  reason: '',
+};
+
 function logActivity(text: string): void {
   state.activity.unshift({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), text });
   renderActivity();
@@ -161,8 +170,9 @@ function renderStoryboard(): void {
             )
             .join('')}</div>`
         : '';
-      return `<div class="scene-card" data-scene-id="${esc(scene.id)}">
-        <div class="scene-top"><span class="idx">${index + 1}</span><b>${esc(scene.id)}</b><span class="layout">${esc(scene.layout)}${scene.variant ? ` · ${esc(scene.variant)}` : ''}</span></div>
+      const editStatus = editState.status.get(scene.id);
+      return `<div class="scene-card" data-scene-id="${esc(scene.id)}"${editStatus ? ` data-render-status="${editStatus}"` : ''}>
+        <div class="scene-top"><span class="idx">${index + 1}</span><b>${esc(scene.id)}</b><span class="layout">${esc(scene.layout)}${scene.variant ? ` · ${esc(scene.variant)}` : ''}</span>${editStatus ? `<span class="render-status ${editStatus}">${editStatus === 'rendered' ? 're-rendered' : 'reused'}</span>` : ''}</div>
         <label>Headline</label>
         <input type="text" data-scene="${esc(scene.id)}" data-field="headline" value="${esc(copy.headline ?? '')}" placeholder="Add a headline…" maxlength="64" />
         <label>Sub / body</label>
@@ -635,6 +645,56 @@ async function planSceneMedia(sceneId: string): Promise<void> {
   }
 }
 
+/** C13: re-render only the scenes the last edit changed and mark re-rendered vs reused. */
+async function renderChangedScenes(): Promise<void> {
+  if (editState.running) return;
+  editState.running = true;
+  const button = $<HTMLButtonElement>('render-changes');
+  const label = $('render-changes-state');
+  if (button) button.disabled = true;
+  if (label) label.textContent = 'rendering changes…';
+  logActivity('Render changes requested (only scenes whose compiled segment changed)');
+  try {
+    const body = await persistDraft();
+    const response = await apiFetch('/api/render/edited', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${response.status}`);
+    const rendered = (response.headers.get('x-comfyrizz-rendered') ?? '').split(',').filter(Boolean);
+    const reused = (response.headers.get('x-comfyrizz-reused') ?? '').split(',').filter(Boolean);
+    const full = response.headers.get('x-comfyrizz-full-render') === '1';
+    const reason = response.headers.get('x-comfyrizz-full-reason') ?? '';
+    applySceneRenderStatus(rendered, reused, full, reason);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'comfyrizz-changes.mp4';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    if (label) label.textContent = full ? `full render (${reason})` : `${rendered.length} re-rendered · ${reused.length} reused`;
+    logActivity(`Render changes finished: ${rendered.length} scene(s) re-rendered, ${reused.length} reused${full ? ` (full render: ${reason})` : ''}`);
+  } catch (error) {
+    if (label) label.textContent = `failed: ${(error as Error).message}`;
+    logActivity(`Render changes failed: ${(error as Error).message}`);
+  } finally {
+    editState.running = false;
+    if (button) button.disabled = false;
+    renderStoryboard();
+  }
+}
+
+function applySceneRenderStatus(rendered: string[], reused: string[], full: boolean, reason: string): void {
+  editState.status.clear();
+  for (const id of rendered) editState.status.set(id, 'rendered');
+  for (const id of reused) editState.status.set(id, 'reused');
+  editState.full = full;
+  editState.reason = reason;
+  renderStoryboard();
+}
+
 async function exportMp4(): Promise<void> {
   const button = $<HTMLButtonElement>('render');
   const label = $('render-state');
@@ -754,6 +814,7 @@ function init(): void {
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   $('render').addEventListener('click', () => void exportMp4());
   $('run-backend').addEventListener('click', () => void runOnBackend(false));
+  $('render-changes').addEventListener('click', () => void renderChangedScenes());
 
   if (token) {
     const stream = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
@@ -876,6 +937,20 @@ function init(): void {
       sceneState.log = [`failed: ${data.message}`];
       logActivity(`Server: scene ${data.sceneId} re-render failed — ${data.message}`);
       if (sceneState.rendering === data.sceneId) renderStoryboard();
+    });
+    stream.addEventListener('edit.render.started', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { full: boolean; reason?: string | null };
+      logActivity(data.full ? `Server: timing changed (${data.reason ?? 'timing'}) — full render` : 'Server: rendering only the changed scenes');
+    });
+    stream.addEventListener('edit.render.finished', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { rendered?: string[]; reused?: string[]; full: boolean; reason: string };
+      applySceneRenderStatus(data.rendered ?? [], data.reused ?? [], data.full, data.reason);
+      const label = $('render-changes-state');
+      if (label) label.textContent = data.full ? `full render (${data.reason})` : `${(data.rendered ?? []).length} re-rendered · ${(data.reused ?? []).length} reused`;
+    });
+    stream.addEventListener('edit.render.failed', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { message: string };
+      logActivity(`Server: render changes failed — ${data.message}`);
     });
     stream.addEventListener('agent.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { brief?: string };

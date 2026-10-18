@@ -148,6 +148,32 @@ Each storyboard card has two actions that work on the draft the Player shows:
 fixture proves the untouched segments' cache files are not rewritten (mtime) and ffprobe frames ==
 compiled timeline, and a `showcase-gpu3` plan for one scene contains only that scene's jobs.
 
+## Agent edit → changed scenes only (C13)
+
+`POST /api/render/edited` is the demo-beat-6 path: after an agent tool edit (or a storyboard
+edit) the server diffs the new package against the **last timeline it rendered** for that
+package (`apps/server/src/edit.mjs`). A scene-local change (copy, dataset, background,
+foreground, referenced media, palette override) goes through the A6 incremental renderer with
+the per-package cache, so only the segments whose content key changed are rendered again and
+every other scene's cached segment is reused untouched. A change that moves the frame grid
+(scene durations, scene order, fps, narration, caption cues) invalidates every segment's frame
+range, so the endpoint falls back to a full render and reports why.
+
+The response headers say what happened:
+
+- `x-comfyrizz-rendered` — comma-separated ids of the scenes that re-rendered (all of them on a
+  full fallback); `x-comfyrizz-rendered-count` is the count.
+- `x-comfyrizz-reused` / `x-comfyrizz-reused-count` — the scenes taken from cache.
+- `x-comfyrizz-full-render` (`1`/`0`) and `x-comfyrizz-full-reason` (e.g. `scene durations changed`).
+
+The storyboard has a **Render changes** button and marks each card `re-rendered` or `reused`;
+progress is published as `edit.render.started`/`log`/`finished`/`failed` over `/api/events`.
+`apps/server/test/edit.test.mjs` is the acceptance: a loopback stub LLM provider builds the
+package, a first render fills the cache, a second stub run applies one `storyboard.edit`
+("scene 1 warmer") and only `s_title`'s segment is rewritten (other cache mtimes unchanged,
+ffprobe frames == compiled timeline), while a `preferredFrames` edit forces the full-render
+fallback (`x-comfyrizz-full-render: 1`, reason `scene durations changed`).
+
 ## Security checks
 
 - Host must be `127.0.0.1`, `localhost` or `[::1]` (any port) — DNS-rebinding hosts get `403`.
@@ -162,8 +188,9 @@ compiled timeline, and a `showcase-gpu3` plan for one scene contains only that s
 
 ```bash
 npm test          # host/token/origin, revisions/conflict, invalid package, render + SSE, replay,
-                  # traversal, the C5/C8 agent end-to-end renders and the C10 export-bundle e2e
-                  # (29 tests; real CPU render, ~2 min)
+                  # traversal, the C5/C8 agent end-to-end renders, the C10 export-bundle e2e,
+                  # C11 per-scene re-run and C13 changed-scenes-only (35 tests; real CPU render,
+                  # ~2 min)
 ```
 
 Real end-to-end check (2026-10-17): built web served by this server, opened with the fragment
