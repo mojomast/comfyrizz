@@ -10,6 +10,7 @@ the `u1-after*.jpg` shots are the U1 polish pass.
 | `u1-after.jpg` | U1: agent-facing copy, server-side provider status (`OpenCode Go · configured`), GPU queue + empty states, scene card selection. |
 | `u1-after-agent.jpg` | U1 after submitting a brief: the composer ran the local agent, the storyboard/assets refreshed, and the GPU-pending asset is carded with its procedural fallback and `pending spend` chip. |
 | `r2-plan-mode.png` | R2 Plan mode: the composer asked two chip questions (look + real numbers) before building anything; every chip has a **Decide for me** default. |
+| `r2-brief-card.png` | R2 step 4: the editable Brief card after those chips — seven fields plus the script-first outline (hook/point/proof/CTA with per-beat seconds, the target and the fit), with **Update outline** and **Build video**. |
 
 Reproduce:
 
@@ -33,3 +34,13 @@ the send button; Plan posts the prompt to `POST /api/brief` (no model, no spend)
 ≤3 chip questions with a **Decide for me** default per question. Nothing is built until **Looks
 right** is pressed; Express skips the questions and builds immediately. The screenshot was captured
 the same way as the U1 shots (headless Chrome 1440×900 against the production build).
+
+### Step 4: the editable Brief card and the script-first outline
+
+Once the chips are answered, `r2-brief-card.png` is what the composer shows: an editable Brief card
+(key message, audience, seconds, CTA, aspect, look, narration) above a script-first outline. Each
+outline beat shows its role, headline, narration line and estimated spoken seconds, followed by the
+on-screen estimate, the target and a `short`/`on-target`/`long` fit plus honest notes (a missing
+fact is a visible placeholder; a missing CTA still closes). **Update outline** re-posts the edited
+brief to `POST /api/brief/outline`; **Build video** serialises the card into the existing
+`POST /api/agent` brief. Express still builds straight from the prompt.

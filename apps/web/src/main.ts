@@ -53,14 +53,26 @@ const state = {
 
 type BriefMode = 'plan' | 'express';
 type BriefQuestion = { id: string; field: string; prompt: string; chips: string[]; decide: string };
-type BriefPlan = { mode: BriefMode; complete: boolean; questions: BriefQuestion[]; brief: Record<string, unknown> };
+type OutlineBeat = { id: string; role: string; layout: string; headline: string; narration: string; seconds: number; placeholder: boolean };
+type Outline = {
+  beats: OutlineBeat[];
+  narrationSeconds: number;
+  targetSeconds: number;
+  estimatedSeconds: number;
+  fit: 'short' | 'on-target' | 'long';
+  notes: string[];
+  language: string;
+};
+type BriefPlan = { mode: BriefMode; complete: boolean; questions: BriefQuestion[]; brief: Record<string, unknown>; outline?: Outline };
 let briefMode: BriefMode = 'plan';
 const briefState: {
   pending: BriefQuestion[];
   choices: Record<string, string | undefined>;
   prompt: string;
   busy: boolean;
-} = { pending: [], choices: {}, prompt: '', busy: false };
+  brief: Record<string, unknown> | null;
+  outline: Outline | null;
+} = { pending: [], choices: {}, prompt: '', busy: false, brief: null, outline: null };
 
 let player: PlayerRef | null = null;
 let scrub: HTMLInputElement;
@@ -776,14 +788,35 @@ function briefToPrompt(brief: Record<string, unknown>): string {
   ].filter(Boolean).join(' ');
 }
 
-function renderBriefPanel(): void {
-  const panel = $('brief-panel');
-  if (briefState.pending.length === 0) {
-    panel.hidden = true;
-    panel.innerHTML = '';
-    return;
+const WEB_STYLE_PRESETS = ['clay', 'glass', 'editorial-flat', 'isometric-tech', 'paper-cut', 'cinematic-dark'];
+const WEB_ASPECTS = ['16:9', '9:16', '1:1'];
+
+/** Read a dotted path (`audience.who`) out of the brief as a string. */
+function briefValue(brief: Record<string, unknown>, path: string): string {
+  let value: unknown = brief;
+  for (const part of path.split('.')) value = (value as Record<string, unknown> | undefined)?.[part];
+  if (value === undefined || value === null) return '';
+  return Array.isArray(value) ? value.join(', ') : String(value);
+}
+
+/** Merge the Brief card's inputs back into a brief object (cleared fields become undefined). */
+function readBriefCard(): Record<string, unknown> {
+  const brief = structuredClone(briefState.brief ?? {});
+  for (const input of document.querySelectorAll<HTMLInputElement | HTMLSelectElement>('#brief-panel [data-brief-field]')) {
+    const path = input.getAttribute('data-brief-field') as string;
+    const parts = path.split('.');
+    let target: Record<string, unknown> = brief;
+    for (const part of parts.slice(0, -1)) {
+      target[part] = target[part] && typeof target[part] === 'object' ? target[part] : {};
+      target = target[part] as Record<string, unknown>;
+    }
+    const raw = input.value.trim();
+    target[parts[parts.length - 1]] = raw === '' ? undefined : path === 'length_s' ? Number(raw) : raw;
   }
-  panel.hidden = false;
+  return brief;
+}
+
+function renderBriefQuestions(panel: HTMLElement): void {
   const questions = briefState.pending.map(question => {
     const selected = briefState.choices[question.id];
     const chips = question.chips.map(chip =>
@@ -802,6 +835,45 @@ function renderBriefPanel(): void {
   $('brief-apply').addEventListener('click', () => void resolveBrief());
 }
 
+/** Step 4: the editable Brief card plus the script-first outline with estimated seconds. */
+function renderBriefCard(panel: HTMLElement): void {
+  const brief = briefState.brief ?? {};
+  const outline = briefState.outline;
+  const field = (path: string, label: string, type = 'text') =>
+    `<label>${esc(label)}<input data-brief-field="${path}" type="${type}" value="${esc(briefValue(brief, path))}" /></label>`;
+  const select = (path: string, label: string, options: string[]) => {
+    const current = briefValue(brief, path);
+    const opts = options.map(option => `<option value="${esc(option)}" ${option === current ? 'selected' : ''}>${esc(option)}</option>`).join('');
+    return `<label>${esc(label)}<select data-brief-field="${path}">${opts}</select></label>`;
+  };
+  const beats = (outline?.beats ?? []).map(beat =>
+    `<li class="${beat.placeholder ? 'placeholder' : ''}"><span class="role">${esc(beat.role)}</span><strong>${esc(beat.headline)}</strong><span class="narration">${esc(beat.narration)}</span><span class="secs">${beat.seconds.toFixed(1)} s</span></li>`,
+  ).join('');
+  const summary = outline
+    ? `≈ ${outline.estimatedSeconds.toFixed(1)} s on screen · target ${outline.targetSeconds} s · ${outline.fit}`
+    : 'outline unavailable';
+  const notes = (outline?.notes ?? []).map(note => `<li>${esc(note)}</li>`).join('');
+  panel.innerHTML = `<div class="brief-head">Brief · edit anything, then build.</div>
+    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${select('style.preset', 'Look', WEB_STYLE_PRESETS)}${field('voice.persona', 'Narration')}</div>
+    <ol class="brief-outline">${beats}</ol>
+    <div class="brief-actions"><span class="hint">${esc(summary)}</span><button type="button" id="brief-refresh" ${briefState.busy ? 'disabled' : ''}>Update outline</button><button type="button" id="brief-build" ${briefState.busy ? 'disabled' : ''}>Build video</button></div>
+    ${notes ? `<ul class="brief-notes">${notes}</ul>` : ''}`;
+  $('brief-refresh').addEventListener('click', () => void refreshBriefOutline());
+  $('brief-build').addEventListener('click', () => void buildFromCard());
+}
+
+function renderBriefPanel(): void {
+  const panel = $('brief-panel');
+  if (briefState.pending.length === 0 && !briefState.brief) {
+    panel.hidden = true;
+    panel.innerHTML = '';
+    return;
+  }
+  panel.hidden = false;
+  if (briefState.pending.length > 0) renderBriefQuestions(panel);
+  else renderBriefCard(panel);
+}
+
 async function requestBrief(prompt: string, decisions?: Record<string, string | undefined>): Promise<BriefPlan> {
   const response = await apiFetch('/api/brief', {
     method: 'POST',
@@ -813,21 +885,60 @@ async function requestBrief(prompt: string, decisions?: Record<string, string | 
   return body as BriefPlan;
 }
 
+/** POST the edited card to `/api/brief/outline` and re-render with fresh beats. */
+async function refreshBriefOutline(): Promise<void> {
+  if (briefState.busy) return;
+  briefState.brief = readBriefCard();
+  briefState.busy = true;
+  renderBriefPanel();
+  try {
+    const response = await apiFetch('/api/brief/outline', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ brief: briefState.brief }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+    briefState.brief = (body as BriefPlan).brief;
+    briefState.outline = (body as BriefPlan).outline ?? null;
+    logActivity(`Outline updated: ${briefState.outline?.beats.length ?? 0} beat(s), ≈ ${briefState.outline?.estimatedSeconds ?? 0} s`);
+  } catch (error) {
+    logActivity(`Outline refresh failed: ${(error as Error).message}`);
+  }
+  briefState.busy = false;
+  renderBriefPanel();
+}
+
+async function buildFromCard(): Promise<void> {
+  if (briefState.busy) return;
+  const brief = readBriefCard();
+  briefState.brief = brief;
+  briefState.pending = [];
+  logActivity('Plan mode: brief confirmed, building');
+  await runBrief(briefToPrompt(brief));
+  briefState.brief = null;
+  briefState.outline = null;
+  renderBriefPanel();
+}
+
 async function planBriefFlow(text: string): Promise<void> {
   briefState.busy = true;
   $('composer-hint').textContent = 'planning the brief…';
   try {
     const plan = await requestBrief(text);
+    briefState.prompt = text;
     if (plan.complete) {
       briefState.pending = [];
+      briefState.brief = plan.brief;
+      briefState.outline = plan.outline ?? null;
       renderBriefPanel();
-      logActivity('Plan mode: brief already complete, building');
-      await runBrief(briefToPrompt(plan.brief));
+      logActivity('Plan mode: brief ready to review');
       return;
     }
     briefState.pending = plan.questions;
     briefState.choices = {};
-    briefState.prompt = text;
+    briefState.brief = null;
+    briefState.outline = null;
     renderBriefPanel();
     logActivity(`Plan mode: ${plan.questions.length} question(s) to confirm`);
   } catch (error) {
@@ -847,9 +958,10 @@ async function resolveBrief(): Promise<void> {
   try {
     const plan = await requestBrief(briefState.prompt, briefState.choices);
     briefState.pending = [];
+    briefState.brief = plan.brief;
+    briefState.outline = plan.outline ?? null;
     renderBriefPanel();
-    logActivity('Plan mode: brief confirmed, building');
-    await runBrief(briefToPrompt(plan.brief));
+    logActivity('Plan mode: brief ready to review');
   } catch (error) {
     logActivity(`Plan mode failed: ${(error as Error).message}`);
   }

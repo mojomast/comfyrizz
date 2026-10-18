@@ -109,14 +109,25 @@ The composer has a **Plan / Express** toggle. **Plan** sends the prompt to `POST
 the server runs the deterministic extractor in `packages/agent` (no model, no spend) and returns a
 draft brief plus the top **≤3** research-§2.4 questions, each with tappable chips and a **Decide for
 me** default. The `#brief-panel` renders those chips above the textarea; nothing is built until
-**Looks right**, which posts the chosen answers back and then hands the completed brief (serialised
-by `briefToPrompt`) to the normal `/api/agent` build. **Express** skips the questions and builds the
+**Looks right**, which posts the chosen answers back. **Express** skips the questions and builds the
 raw prompt immediately. Plan mode falls back to a direct build if `/api/brief` is unavailable.
 
 Evidence (headless Chrome 1440×900, `docs/ui/r2-plan-mode.png`): one brief produced two questions
-(`look` + `data`) with their chips; clicking a chip per question and **Looks right** then built a
-package (`agent package · 4 SVG assets · scripted model`) with the panel hidden again. Express built
-directly with no panel. No model, network or GPU is used to plan.
+(`look` + `data`) with their chips; clicking a chip per question and **Looks right** then showed the
+Brief card. Express built directly with no panel. No model, network or GPU is used to plan.
+
+### Step 4: the editable Brief card + script-first outline
+
+After the chips, `#brief-panel` shows the **Brief card** (`docs/ui/r2-brief-card.png`): editable
+`key_message`, `audience.who`, `length_s`, `cta`, `aspect`, `style.preset` and `voice.persona`, above
+the script-first outline from `buildOutline` (hook/point/proof/CTA beats with a headline, narration
+line and estimated spoken seconds) and a summary line (`≈ s on screen · target s · fit`). **Update
+outline** posts the edited brief to `POST /api/brief/outline` and re-renders; **Build video**
+serialises the card through `briefToPrompt` into the normal `/api/agent` build and hides the panel.
+
+Evidence: the step-4 probe drove one brief through Plan → chips → card (7 fields, 4 beats, target
+45 s / `short`), edited the key message and length (target 12 s / `long`, new headline + narration),
+refreshed the outline, then built (`timeline 00:36`) and the panel hid. No model, network or GPU.
 
 ## C6 backend run (spend card + run panel)
 
