@@ -59,6 +59,19 @@ export {
   brandStyleBlock,
 } from './brand.js';
 export type { BrandFont, BrandKit, BrandKitInput, BrandTheme, BrandWarning } from './brand.js';
+export {
+  SUPPORTED_LANGUAGES,
+  LANGUAGE_LABELS,
+  LANGUAGE_TAGS,
+  VOICE_LANGUAGES,
+  translatableStrings,
+  variantPackageId,
+  dictionaryTranslator,
+  translateStrings,
+  translationPrompt,
+  applyLanguageVariant,
+} from './language.js';
+export type { SupportedLanguage, TranslatableString, SceneTranslation, LanguageVariantOptions } from './language.js';
 export { SCENE_CHIPS, applySceneChip, isSceneChip, sceneChip, sceneChipList, warmHex } from './scene-chips.js';
 export type { SceneChip, SceneChipResult, ChipPackage, ChipScene } from './scene-chips.js';
 export type { AgentEvent, RunAgentOptions, RunAgentResult, ToolRecord } from './agent.js';
