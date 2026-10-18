@@ -53,7 +53,7 @@ test('missingQuestions: priority order, cap of three, answered fields skipped', 
   assert.deepEqual(bare.map(question => question.id), ['audience', 'length', 'look']);
   assert.equal(bare.length, 3, 'never asks more than three');
 
-  const bank = missingQuestions({}, 7);
+  const bank = missingQuestions({}, QUESTION_BANK.length);
   assert.deepEqual(bank.map(question => question.id), QUESTION_BANK.map(question => question.id));
 });
 
@@ -186,4 +186,28 @@ test('buildOutline: fit reports short, on-target and long against the requested 
   const gap = (outline.targetSeconds - outline.narrationSeconds) / outline.beats.length;
   assert.equal(buildOutline(base, { gapSeconds: gap }).fit, 'on-target');
   assert.equal(buildOutline({ ...base, length_s: 8 }).fit, 'long');
+});
+
+test('extractBrief: the presenter is off unless the prompt asks for one', () => {
+  assert.equal(extractBrief(RICH).presenter, 'none');
+  assert.ok(extractBrief(RICH).decided_by_agent?.includes('presenter'));
+  assert.equal(extractBrief('A launch video with an AI presenter on the intro and outro.').presenter, 'bookends');
+  assert.equal(extractBrief('A presenter on every scene of the launch video.').presenter, 'all');
+  assert.equal(extractBrief('A launch video with no presenter.').presenter, 'none');
+});
+
+test('applyDecisions + completeBrief: the presenter chip round-trips', () => {
+  const draft = extractBrief('Make a video about our app.');
+  const all = applyDecisions(draft, { presenter: 'all scenes' });
+  assert.equal(all.presenter, 'all');
+  assert.equal(completeBrief(all).presenter, 'all');
+  assert.equal(completeBrief({}).presenter, 'none', 'default is off');
+  assert.equal(completeBrief(applyDecisions(draft, { presenter: 'intro + outro' })).presenter, 'bookends');
+});
+
+test('buildOutline: a presenter adds an opt-in note', () => {
+  const on = buildOutline(completeBrief({ ...extractBrief(RICH), presenter: 'bookends' }));
+  assert.ok(on.notes.some(note => /Presenter: intro and outro/.test(note)));
+  const off = buildOutline(completeBrief(extractBrief(RICH)));
+  assert.ok(!off.notes.some(note => /Presenter/.test(note)));
 });

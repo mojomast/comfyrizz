@@ -18,6 +18,8 @@ export const BRIEF_GOALS = ['launch', 'explain', 'teach', 'pitch', 'recap'] as c
 export const BRIEF_MODES = ['plan', 'express'] as const;
 export const BRIEF_LANGUAGES = ['en', 'fr'] as const;
 export const BRIEF_ASPECTS = ['16:9', '9:16', '1:1'] as const;
+/** C-pres: presenter coverage is a brief-level choice, off by default (Kyle, Oct 18). */
+export const BRIEF_PRESENTERS = ['none', 'bookends', 'all'] as const;
 
 /** The six bundled looks (research §2.2 step 4). Thumbnails land later (CPU/SVG). */
 export const STYLE_PRESETS = ['clay', 'glass', 'editorial-flat', 'isometric-tech', 'paper-cut', 'cinematic-dark'] as const;
@@ -49,6 +51,8 @@ export const briefSchema = z.object({
   cta: z.string().min(1).max(200).optional(),
   length_s: z.number().positive().max(600).optional(),
   aspect: z.enum(BRIEF_ASPECTS),
+  /** The AI presenter: none (default), bookends (intro + outro), or all scenes. */
+  presenter: z.enum(BRIEF_PRESENTERS).default('none'),
   tone: z.array(z.string().min(1)).length(3),
   style: z.object({
     preset: z.enum(STYLE_PRESETS),
@@ -91,6 +95,7 @@ export interface BriefDraft {
   cta?: string;
   length_s?: number;
   aspect?: Brief['aspect'];
+  presenter?: Brief['presenter'];
   tone?: string[];
   style?: StyleDraft;
   voice?: VoiceDraft;
@@ -166,6 +171,13 @@ export const QUESTION_BANK: Question[] = [
     chips: ['star the repo', 'book a demo', 'sign up for the beta', 'none'],
     decide: 'none',
   },
+  {
+    id: 'presenter',
+    field: 'presenter',
+    prompt: 'Should an AI presenter host it?',
+    chips: ['none', 'intro + outro', 'all scenes'],
+    decide: 'none',
+  },
 ];
 
 /** Example prompts offered in the composer (research §2.2 step 1). */
@@ -219,6 +231,15 @@ function detectAspect(text: string): Brief['aspect'] | undefined {
   return undefined;
 }
 
+/** C-pres: an explicit presenter ask. No mention means off (the default). */
+function detectPresenter(text: string): Brief['presenter'] | undefined {
+  if (/\b(no|without|skip)\s+(?:an?\s+)?(?:ai\s+)?(?:presenter|talking head|avatar|host|face to camera)\b/i.test(text)) return 'none';
+  const wants = /\b(presenter|talking head|avatar|face to camera|on camera|host(?:ed)?\s+by|intro and outro presenter)\b/i.test(text);
+  if (!wants) return undefined;
+  if (/\b(every|all|whole|entire)\s+(?:scene|video|clip)/i.test(text)) return 'all';
+  return 'bookends';
+}
+
 function detectTone(text: string): string[] {
   const lower = text.toLowerCase();
   const found = TONE_WORDS.filter(word => new RegExp(`\\b${word}\\b`, 'i').test(lower));
@@ -264,6 +285,11 @@ export function extractBrief(prompt: string, options: ExtractBriefOptions = {}):
   const aspect = detectAspect(prompt);
   if (aspect) draft.aspect = aspect;
   else { draft.aspect = '16:9'; decided.push('aspect'); }
+
+  // C-pres: the presenter is opt-in; detect an explicit ask and otherwise leave it off.
+  const presenter = detectPresenter(text);
+  draft.presenter = presenter ?? 'none';
+  if (!presenter) decided.push('presenter');
 
   const tone = detectTone(prompt);
   const toneDefaults = ['clear', 'confident', 'calm'];
@@ -320,6 +346,7 @@ export function missingQuestions(draft: BriefDraft, max = 3, keyMessageOptions: 
       case 'voice': return !draft.voice?.persona;
       case 'data': return draft.facts === undefined;
       case 'cta': return !draft.cta;
+      case 'presenter': return draft.presenter === undefined;
       default: return false;
     }
   });
@@ -384,6 +411,11 @@ export function applyDecisions(draft: BriefDraft, decisions: BriefDecisions): Br
         if (/^none$/i.test(String(value))) delete next.cta;
         else next.cta = String(value);
         break;
+      case 'presenter': {
+        const text = String(value).toLowerCase();
+        next.presenter = text.includes('all') ? 'all' : text.includes('intro') || text.includes('outro') || text.includes('bookend') ? 'bookends' : 'none';
+        break;
+      }
       default:
         break;
     }
@@ -406,6 +438,7 @@ export function completeBrief(draft: BriefDraft, style?: Partial<StyleDraft>): B
     ...(draft.cta ? { cta: draft.cta } : {}),
     ...(draft.length_s !== undefined ? { length_s: draft.length_s } : {}),
     aspect: draft.aspect ?? '16:9',
+    presenter: draft.presenter ?? 'none',
     tone,
     style: {
       preset,
@@ -563,6 +596,7 @@ export function buildOutline(brief: Brief, options: OutlineOptions = {}): Outlin
   if (!brief.cta) notes.push('No CTA in the brief; the outro just closes.');
   if (brief.avoid.length > 0) notes.push(`Avoid: ${brief.avoid.join(', ')}.`);
   if (!brief.facts.length) notes.push('No source facts; the proof beat shows a visible placeholder.');
+  if (brief.presenter !== 'none') notes.push(`Presenter: ${brief.presenter === 'all' ? 'every scene' : 'intro and outro'} (opt-in; clips are planned, not run).`);
   if (fit === 'short') notes.push(`About ${(targetSeconds - estimatedSeconds).toFixed(1)} s of headroom left; add a beat or slow the pace.`);
   if (fit === 'long') notes.push(`About ${(estimatedSeconds - targetSeconds).toFixed(1)} s over; trim the point or drop the proof.`);
 

@@ -7,9 +7,9 @@
  * size, the portrait prompt, and the lint rule that keeps the presenter off chart and
  * stat scenes. No model, no network, no GPU.
  */
-import { STYLE_PRESET_DEFAULTS, type StylePreset } from './brief.js';
+import { BRIEF_PRESENTERS, STYLE_PRESET_DEFAULTS, type StylePreset } from './brief.js';
 
-export const PRESENTER_COVERAGES = ['none', 'bookends', 'all'] as const;
+export const PRESENTER_COVERAGES = BRIEF_PRESENTERS;
 export type PresenterCoverage = (typeof PRESENTER_COVERAGES)[number];
 
 export const PRESENTER_PRESETS = ['intro-outro', 'all', 'none'] as const;
