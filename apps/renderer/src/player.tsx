@@ -3,10 +3,11 @@ import {
   TransitionSeries,
   linearTiming,
 } from '@remotion/transitions';
-import { slide } from '@remotion/transitions/slide';
+import { useVideoConfig } from 'remotion';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline, TimelineCaption } from '../../../packages/planner/dist/src/index.js';
 import { GeneratedAssetsProvider, SceneView, type InlineAsset } from './components';
+import { presentationFor } from './motion/presentations';
 import type { MediaSidecar } from './media';
 import { MediaDimsProvider, MissingMediaProvider, type MediaDimsMap } from './media';
 import { CaptionOverlay } from './captions';
@@ -41,6 +42,7 @@ export function TimelinePlayer({
   const list = (scenes ?? timeline.scenes) as unknown as Array<
     Scene & { durationInFrames: number; transitionOutFrames: number }
   >;
+  const { width, height } = useVideoConfig();
   // B1: load any brand fonts before measuring, and typeset the whole run with
   // the kit's first family (Inter when the kit has none).
   ensureBrandFonts(pkg);
@@ -53,11 +55,12 @@ export function TimelinePlayer({
       </TransitionSeries.Sequence>,
     );
     const transition = scene.transitionOutFrames ?? 0;
-    if (index < list.length - 1 && transition > 0) {
+    const presentation = presentationFor(scene.transitionOut, pkg.motion?.direction, width, height);
+    if (index < list.length - 1 && transition > 0 && presentation) {
       children.push(
         <TransitionSeries.Transition
           key={`${scene.id}-transition`}
-          presentation={slide({ direction: 'from-right' })}
+          presentation={presentation}
           timing={linearTiming({ durationInFrames: transition })}
         />,
       );

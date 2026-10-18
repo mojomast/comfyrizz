@@ -198,7 +198,7 @@ function planScenes(pkg: ComfyrizzPackage, options: CompileOptions, fps: number)
     // Provisional scenes use preferred length but never below the readable floor.
     const base = spoken === null ? preferred : Math.max(preferred, spoken);
     const duration = clamp(base, limit.min, limit.max);
-    const transitionOut = scene.transitionOut?.type && scene.transitionOut.type !== 'none'
+    const transitionOut = scene.transitionOut?.type && scene.transitionOut.type !== 'none' && scene.transitionOut.type !== 'cut'
       ? Math.max(0, Math.floor(scene.transitionOut.frames || 0))
       : 0;
     return { scene, duration, transitionOut, narrationFrames: spoken, provisional, min: limit.min, max: limit.max };

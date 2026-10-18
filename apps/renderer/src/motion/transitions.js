@@ -143,6 +143,15 @@ export function transitionStyle(type, progress, options = {}) {
       const radius = irisRadius(width, height, { focal, scale }) * clamp(progress);
       return { kind: 'iris', direction, radius, outgoing: {}, entering: { clipPath: `circle(${radius}px at ${(focal?.x ?? 0.5) * 100}% ${(focal?.y ?? 0.5) * 100}%)` } };
     }
+    case 'wipe': {
+      const t = clamp(progress);
+      const rest = (1 - t) * 100;
+      const clip = direction === 'right' ? `inset(0 ${rest}% 0 0)`
+        : direction === 'up' ? `inset(${rest}% 0 0 0)`
+          : direction === 'down' ? `inset(0 0 ${rest}% 0)`
+            : `inset(0 0 0 ${rest}%)`;
+      return { kind: 'wipe', direction, outgoing: {}, entering: { clipPath: clip } };
+    }
     case 'blur': {
       const { outgoing, entering } = fadeOpacity(progress);
       const blur = blurAmount(progress);

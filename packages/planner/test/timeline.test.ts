@@ -34,6 +34,16 @@ test('six 150-frame scenes with five 15-frame fades compile to 825 frames', () =
   assert.deepEqual(timeline.scenes.map(s => s.transitionOutFrames), [15, 15, 15, 15, 15, 0]);
 });
 
+test('a cut is a hard cut even if it carries frames', () => {
+  const timeline = compileTimeline(pkg([
+    scene('s1', { transitionOut: { type: 'cut', frames: 15 } }),
+    scene('s2', { transitionOut: { type: 'cut', frames: 0 } }),
+  ]));
+  assert.deepEqual(timeline.scenes.map(s => s.transitionOutFrames), [0, 0]);
+  assert.deepEqual(timeline.scenes.map(s => s.transitionInFrames), [0, 0]);
+  assert.equal(timeline.durationInFrames, timeline.scenes.reduce((acc, s) => acc + s.durationInFrames, 0));
+});
+
 test('a transition longer than either neighbour fails with a usable error', () => {
   const broken = pkg([
     scene('s1', { transitionOut: { type: 'fade', frames: 40 } }),

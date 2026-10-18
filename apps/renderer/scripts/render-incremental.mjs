@@ -23,7 +23,7 @@ import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 
 /** Bump when a renderer change can alter rendered frames. */
-export const RENDERER_VERSION = 3;
+export const RENDERER_VERSION = 4;
 
 const BROWSER = process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome';
 

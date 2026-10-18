@@ -115,6 +115,12 @@ test('transitionStyle maps the maths to frame-sized styles', () => {
   assert.equal(push.entering.transform, 'translate(1920px, 0px)');
   const slide = transitionStyle('slide', 0, { direction: 'left' });
   assert.equal(slide.outgoing.transform, 'translate(0px, 0px)');
+  const wipe = transitionStyle('wipe', 0.25, { direction: 'left' });
+  assert.equal(wipe.kind, 'wipe');
+  assert.equal(wipe.entering.clipPath, 'inset(0 0 0 75%)');
+  assert.equal(transitionStyle('wipe', 0.25, { direction: 'right' }).entering.clipPath, 'inset(0 75% 0 0)');
+  assert.equal(transitionStyle('wipe', 0.25, { direction: 'up' }).entering.clipPath, 'inset(75% 0 0 0)');
+  assert.equal(transitionStyle('wipe', 0.25, { direction: 'down' }).entering.clipPath, 'inset(0 0 75% 0)');
   const iris = transitionStyle('iris', 0.5, { width: 1920, height: 1080 });
   assert.ok(iris.radius > 0 && iris.radius < irisRadius(1920, 1080));
   assert.match(iris.entering.clipPath, /^circle\(/);
