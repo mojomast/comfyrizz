@@ -127,3 +127,38 @@ export type {
   ImageInputDeclaration,
 } from './prompts/motion.js';
 export type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ImagePart, ToolCall, ToolDef } from './types.js';
+export {
+  PRESENTER_COVERAGES,
+  PRESENTER_PRESETS,
+  PRESENTER_PLACEMENTS,
+  PRESENTER_SHAPES,
+  PRESENTER_SCENE_VALUES,
+  PRESENTER_LABEL_DEFAULT,
+  PRESENTER_SIZE_DEFAULT,
+  PRESENTER_SIZE_MIN,
+  PRESENTER_SIZE_MAX,
+  presenterChips,
+  presenterPresets,
+  presenterPortraitPrompt,
+  presenterSystemSection,
+  coveredSceneIds,
+  sceneShowsPresenter,
+  lintPresenter,
+  applyPresenterCoverage,
+  applyPresenterScene,
+  applyPresenterPreset,
+  applyPresenterSet,
+} from './presenter.js';
+export type {
+  PresenterCoverage,
+  PresenterPreset,
+  PresenterPlacement,
+  PresenterShape,
+  PresenterSceneValue,
+  PresenterScene,
+  PresenterBlock,
+  PresenterPackage,
+  PresenterSetArgs,
+  PresenterSetResult,
+  PresenterFinding,
+} from './presenter.js';

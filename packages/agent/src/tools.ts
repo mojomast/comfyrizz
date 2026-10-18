@@ -7,6 +7,14 @@ import { WORKFLOW_SHA256 } from './workflow-manifest.js';
 import { brandStyleBlock, brandTheme, type BrandKit } from './brand.js';
 import type { StylePreset } from './brief.js';
 import {
+  applyPresenterSet,
+  PRESENTER_COVERAGES,
+  PRESENTER_PLACEMENTS,
+  PRESENTER_PRESETS,
+  PRESENTER_SCENE_VALUES,
+  PRESENTER_SHAPES,
+} from './presenter.js';
+import {
   lintPackageMotion,
   mergeScenePatch,
   motionFixInstructions,
@@ -160,6 +168,21 @@ export const sketchToRenderSchema = z.object({
   aspect: z.enum(['16:9', '1:1', '4:5', '9:16']).optional(),
 });
 
+export const presenterSetSchema = z.object({
+  enabled: z.boolean().optional(),
+  coverage: z.enum(PRESENTER_COVERAGES).optional(),
+  preset: z.enum(PRESENTER_PRESETS).optional(),
+  // scene id or 1-based index → off | pip | split; null clears the per-scene override.
+  scenes: z.record(z.union([z.enum(PRESENTER_SCENE_VALUES), z.null()])).optional(),
+  placement: z.enum(PRESENTER_PLACEMENTS).optional(),
+  shape: z.enum(PRESENTER_SHAPES).optional(),
+  size: z.number().min(0.18).max(0.32).optional(),
+  label: z.string().max(64).nullable().optional(),
+  portrait: z.string().min(1).max(120).optional(),
+  preset_style: z.string().max(80).optional(),
+  backdrop: z.string().max(120).optional(),
+});
+
 const searchSchema = z.object({
   query: z.string().min(1),
   orientation: z.enum(['landscape', 'portrait', 'square']).optional(),
@@ -191,7 +214,7 @@ type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 const SCENE_KEYS = new Set([
   'id', 'layout', 'variant', 'preferredFrames', 'copy', 'data', 'background', 'foreground',
   'media_only', 'lower_third', 'transitionOut', 'motion', 'narration', 'narration_asset',
-  'narration_duration_frames', 'locked', 'notes',
+  'narration_duration_frames', 'locked', 'notes', 'presenter', 'presenter_asset',
 ]);
 const COPY_KEYS = new Set(['headline', 'kicker', 'sub', 'body', 'quote', 'attribution', 'footnote', 'cta', 'items']);
 const COPY_LIMITS: Record<SceneLayout, Record<string, number>> = {
@@ -305,6 +328,8 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   if (transitionOut) scene.transitionOut = transitionOut;
   const motion = normalizeSceneMotion(source.motion);
   if (motion) scene.motion = motion;
+  if ((PRESENTER_SCENE_VALUES as readonly string[]).includes(source.presenter)) scene.presenter = source.presenter;
+  if (typeof source.presenter_asset === 'string' && assetIds.has(source.presenter_asset)) scene.presenter_asset = source.presenter_asset;
   const narration = clampText(source.narration, 600);
   if (narration) scene.narration = narration;
   if (typeof source.notes === 'string') scene.notes = clampText(source.notes, 512);
@@ -595,6 +620,45 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     };
   };
 
+  /**
+   * C-pres: the presenter controls. Pure package mutation (H17 schema); no model,
+   * network or GPU. Returns the portrait prompt the agent should pass to
+   * assets.generate_image, plus advisory presenter_fixes.
+   */
+  const presenterSet = (args: z.infer<typeof presenterSetSchema>) => {
+    if (!state.package) throw new Error('presenter.set needs a package; call storyboard.propose first');
+    const result = applyPresenterSet(state.package, {
+      ...(args.enabled !== undefined ? { enabled: args.enabled } : {}),
+      ...(args.coverage !== undefined ? { coverage: args.coverage } : {}),
+      ...(args.preset !== undefined ? { preset: args.preset } : {}),
+      ...(args.scenes ? { scenes: args.scenes } : {}),
+      ...(args.placement !== undefined ? { placement: args.placement } : {}),
+      ...(args.shape !== undefined ? { shape: args.shape } : {}),
+      ...(args.size !== undefined ? { size: args.size } : {}),
+      ...(args.label !== undefined ? { label: args.label } : {}),
+      ...(args.portrait !== undefined ? { portrait: args.portrait } : {}),
+      ...(args.preset_style !== undefined ? { presetStyle: args.preset_style as StylePreset } : {}),
+      ...(args.backdrop !== undefined ? { backdrop: args.backdrop } : {}),
+    });
+    state.package = { ...result.package, revision: Number(result.package.revision ?? 0) + 1 };
+    touch();
+    const findings = result.findings ?? [];
+    return withMotionFixes(
+      {
+        package: state.package,
+        revision: state.package.revision,
+        summary: result.summary,
+        presenter: state.package.presenter ?? null,
+        scenes: (Array.isArray(state.package.scenes) ? state.package.scenes : []).map((scene: any) => ({ id: scene.id, presenter: scene.presenter ?? null, presenter_asset: scene.presenter_asset ?? null })),
+        portrait_prompt: result.portrait_prompt,
+        ...(findings.length
+          ? { presenter_fixes: findings.map(finding => (finding.fix ? `${finding.message}; set scenes {${finding.fix.sceneId}: "${finding.fix.presenter}"}` : finding.message)) }
+          : {}),
+      },
+      state.package,
+    );
+  };
+
   return {
     'storyboard.propose': tool(
       'storyboard.propose',
@@ -663,6 +727,28 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       baseParameters({ scene_id: { type: 'string' }, candidate_id: { type: 'string' } }, ['scene_id', 'candidate_id']),
       attachSchema,
       (args: z.infer<typeof attachSchema>) => ({ scene_id: args.scene_id, candidate_id: args.candidate_id, requires_approval: true }),
+    ),
+    'presenter.set': tool(
+      'presenter.set',
+      'Turn the AI presenter on/off and shape it: coverage (none/bookends/all), a per-scene value (off/pip/split) keyed by scene id or 1-based index, placement, shape, size and label. Returns the portrait prompt for assets.generate_image and advisory presenter_fixes.',
+      baseParameters(
+        {
+          enabled: { type: 'boolean' },
+          coverage: { type: 'string', enum: [...PRESENTER_COVERAGES] },
+          preset: { type: 'string', enum: [...PRESENTER_PRESETS] },
+          scenes: { type: 'object', additionalProperties: { type: ['string', 'null'], enum: [...PRESENTER_SCENE_VALUES, null] } },
+          placement: { type: 'string', enum: [...PRESENTER_PLACEMENTS] },
+          shape: { type: 'string', enum: [...PRESENTER_SHAPES] },
+          size: { type: 'number' },
+          label: { type: ['string', 'null'] },
+          portrait: { type: 'string' },
+          preset_style: { type: 'string' },
+          backdrop: { type: 'string' },
+        },
+        [],
+      ),
+      presenterSetSchema,
+      presenterSet,
     ),
     'variant.cutdown': tool(
       'variant.cutdown',
