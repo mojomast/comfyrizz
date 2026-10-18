@@ -50,7 +50,7 @@ test('directional types fall back to the package current, scale types to in', ()
   assert.equal(resolvedDirection('fade', 'left'), null);
 });
 
-test('push moves both scenes the same distance with mirrored easing', () => {
+test('push moves both scenes together on one shared ease', () => {
   const start = pushOffset(0, 'left');
   const end = pushOffset(1, 'left');
   assert.deepEqual(start.outgoing, { x: 0, y: 0 });
@@ -58,8 +58,9 @@ test('push moves both scenes the same distance with mirrored easing', () => {
   assert.deepEqual(end.outgoing, { x: -1, y: 0 });
   assert.deepEqual(end.entering, { x: 0, y: 0 });
   for (const p of [0.2, 0.5, 0.8]) {
-    assert.ok(near(pushOffset(p, 'left').outgoing.x, -ease('exit', p)));
-    assert.ok(near(pushOffset(p, 'left').entering.x, 1 - ease('enter', p)));
+    assert.ok(near(pushOffset(p, 'left').outgoing.x, -ease('move', p)));
+    // The seam never opens: the incoming scene is exactly one width to the right.
+    assert.ok(near(pushOffset(p, 'left').entering.x - pushOffset(p, 'left').outgoing.x, 1));
   }
   // right is the mirror of left; down uses the y axis.
   assert.deepEqual(pushOffset(0.5, 'right').outgoing, { x: -pushOffset(0.5, 'left').outgoing.x, y: 0 });

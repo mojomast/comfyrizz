@@ -68,16 +68,17 @@ export function transitionProgress(frame, durationInFrames) {
 }
 
 /**
- * Push: both scenes travel the same distance along one axis. The outgoing scene accelerates
- * away (`exit` ease) and the entering scene decelerates in (`enter` ease), so the two halves are
- * mirrors and the cross-over lands mid-motion. Offsets are in scene widths/heights.
+ * Push: both scenes travel together along one axis, rigidly attached. Both halves share one ease
+ * (`move`), so the seam between them stays a single moving edge and the incoming scene never
+ * slides over the outgoing one: `entering - outgoing` is always exactly one frame width.
+ * Offsets are in scene widths/heights.
  * @returns {{ outgoing: {x:number,y:number}, entering: {x:number,y:number}, axis: 'x'|'y' }}
  */
 export function pushOffset(progress, direction = 'left') {
   const { axis, sign } = DIRECTION_AXIS[direction] ?? DIRECTION_AXIS.left;
-  const t = clamp(progress);
-  const outgoing = (sign * ease('exit', t)) || 0;
-  const entering = (-sign * (1 - ease('enter', t))) || 0;
+  const t = ease('move', clamp(progress));
+  const outgoing = (sign * t) || 0;
+  const entering = (-sign * (1 - t)) || 0;
   return axis === 'x'
     ? { outgoing: { x: outgoing, y: 0 }, entering: { x: entering, y: 0 }, axis }
     : { outgoing: { x: 0, y: outgoing }, entering: { x: 0, y: entering }, axis };

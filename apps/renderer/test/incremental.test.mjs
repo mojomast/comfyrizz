@@ -45,6 +45,14 @@ test('mergeScenes keeps committed timing but takes current package content', () 
   assert.equal(merged[1].foreground[0].x, 0.11, 'placement comes from the package');
   assert.equal(merged[1].from, timeline.scenes[1].from, 'timing stays committed');
   assert.equal(merged[1].durationInFrames, timeline.scenes[1].durationInFrames, 'duration stays committed');
+  // Regression (MS3): the transition vocabulary and motion live only in the package, so a
+  // player fed the bare timeline would drop every transition and truncate the tail.
+  assert.deepEqual(merged[1].transitionOut, pkg.scenes[1].transitionOut, 'the package transition survives the merge');
+  edited.scenes[1].transitionOut = { type: 'push', direction: 'left', frames: 12 };
+  edited.scenes[1].motion = { entry: 'waterfall' };
+  const withTransition = mergeScenes(edited, timeline);
+  assert.deepEqual(withTransition[1].transitionOut, { type: 'push', direction: 'left', frames: 12 });
+  assert.deepEqual(withTransition[1].motion, { entry: 'waterfall' });
 });
 
 test('planSegments keys package content, not just the committed timeline', () => {

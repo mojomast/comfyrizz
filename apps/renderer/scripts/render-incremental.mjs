@@ -21,9 +21,12 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
+import { mergeScenes } from '../src/timeline-model.js';
+
+export { mergeScenes };
 
 /** Bump when a renderer change can alter rendered frames. */
-export const RENDERER_VERSION = 4;
+export const RENDERER_VERSION = 6;
 
 const BROWSER = process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome';
 
@@ -56,32 +59,6 @@ function packageSceneById(pkg, id) {
   const scenes = pkg.scenes;
   if (Array.isArray(scenes)) return scenes.find(scene => scene.id === id) ?? null;
   return scenes?.[id] ?? null;
-}
-
-/**
- * Merge committed timeline timing with current package content. The committed
- * timeline is the timing source of truth (measured narration durations), but
- * the package owns copy/foreground/background, so a content edit must show up
- * and invalidate a segment without recompiling a narrated timeline.
- * @param {any} pkg
- * @param {any} timeline
- * @returns {any[]}
- */
-export function mergeScenes(pkg, timeline) {
-  return timeline.scenes.map(scene => {
-    const raw = packageSceneById(pkg, scene.id);
-    if (!raw) return scene;
-    return {
-      ...scene,
-      ...raw,
-      id: scene.id,
-      from: scene.from,
-      durationInFrames: scene.durationInFrames,
-      transitionInFrames: scene.transitionInFrames,
-      transitionOutFrames: scene.transitionOutFrames,
-      provisional: scene.provisional,
-    };
-  });
 }
 
 /**

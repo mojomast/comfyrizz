@@ -7,6 +7,7 @@ import { useVideoConfig } from 'remotion';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline, TimelineCaption } from '../../../packages/planner/dist/src/index.js';
 import { GeneratedAssetsProvider, SceneView, type InlineAsset } from './components';
+import { mergeScenes } from './timeline-model.js';
 import { presentationFor } from './motion/presentations';
 import type { MediaSidecar } from './media';
 import { MediaDimsProvider, MissingMediaProvider, type MediaDimsMap } from './media';
@@ -39,7 +40,10 @@ export function TimelinePlayer({
   missingMedia?: string[];
   mediaDims?: MediaDimsMap;
 }) {
-  const list = (scenes ?? timeline.scenes) as unknown as Array<
+  // Merge the package's copy/transition vocabulary over the committed timing. The
+  // timeline alone has overlap frames but no transition types, so without this every
+  // export would silently drop its transitions and truncate the tail.
+  const list = (scenes ?? mergeScenes(pkg, timeline)) as unknown as Array<
     Scene & { durationInFrames: number; transitionOutFrames: number }
   >;
   const { width, height } = useVideoConfig();

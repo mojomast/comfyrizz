@@ -54,7 +54,7 @@ function NarratedDemo() {
  * plays the package's measured narration and, when the timeline has measured
  * (non-estimated) captions, burns them in (N7).
  */
-function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, generatedAssets, media, missingMedia, mediaDims }: Partial<DemoProps>) {
+function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAssets, media, missingMedia, mediaDims }: Partial<DemoProps>) {
   const resolvedPkg = demoPkg ?? pkg;
   const resolvedTimeline = demoTimeline ?? timeline;
   const audio = narrationAudio(resolvedPkg);
@@ -66,6 +66,7 @@ function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, generatedAssets, me
       <TimelinePlayer
         pkg={resolvedPkg}
         timeline={resolvedTimeline}
+        {...(scenes ? { scenes } : {})}
         generatedAssets={generatedAssets}
         media={media}
         missingMedia={missingMedia}
