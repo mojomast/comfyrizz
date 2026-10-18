@@ -248,3 +248,36 @@ test("a package fixture that is written by hand still validates", () => {
   writeFileSync(path, JSON.stringify(fixture()));
   assert.ok(existsSync(path));
 });
+
+// H-fix7: the assets a Google Colab run produces have to carry the tag the schema accepts
+// (`colab:<hardware>`), not the backend's bare id. Pi hit this in C9: `runPackage` passed "colab",
+// the applied package was rejected, and the server had to normalise it afterwards.
+test("a Google Colab run tags applied assets colab:<hardware>", async () => {
+  const backend = stubBackend();
+  backend.id = "colab";
+  backend.ensureUp = async () => ({ state: "created", session: "comfyrizz-h8", hardware: "G4", evidence: "stub" });
+  backend.appliedBackendId = ({ up }) => `colab:${up?.hardware ?? "G4"}`;
+
+  const result = await runPackage(backend, fixture(), { workDir: workdir(), outDir: workdir() });
+
+  assert.equal(result.backend.id, "colab");
+  assert.equal(result.backend.appliedId, "colab:G4");
+  const asset = result.package.assets.a_h8_still;
+  assert.equal(asset.gen.backend, "colab:G4");
+  assert.equal(asset.status, "ready");
+  assert.ok(result.package.compliance.backends_used.includes("colab:G4"), JSON.stringify(result.package.compliance.backends_used));
+  assert.deepEqual(validatePackage(result.package).errors, []);
+});
+
+test("a BYO run keeps byo-comfyui, and the backend that says nothing gets its plain id", async () => {
+  const byo = await runPackage(stubBackend(), fixture(), { workDir: workdir(), outDir: workdir() });
+  assert.equal(byo.package.assets.a_h8_still.gen.backend, "byo-comfyui");
+  assert.equal(byo.backend.appliedId, "byo-comfyui");
+
+  // no appliedBackendId method: the id itself is the tag (the pre-H-fix7 behaviour, kept for stubs)
+  const silent = stubBackend();
+  silent.id = "some-other-backend";
+  const result = await runPackage(silent, fixture(), { workDir: workdir(), outDir: workdir() });
+  assert.equal(result.backend.appliedId, "some-other-backend");
+  assert.equal(result.package.assets.a_h8_still.gen.backend, "some-other-backend");
+});

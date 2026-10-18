@@ -45,7 +45,7 @@ Job facts — every one is about the *files* and the manifest, which is why a fa
 - **N9** a plate is on the 64 lattice, its stage 1 on the 32 lattice, and its first frame follows it.
 
 Run facts (H8): the phase order `planned -> up -> ran -> applied -> teardown`, `ok` with 6/6
-succeeded, teardown `stopped`, and the Colab estimate above.
+succeeded, teardown `stopped`, and the Google Colab estimate above.
 
 Lifecycle facts (against the fake CLI): preflight ready with a parsed balance, `ensureUp` created a
 session named `comfyrizz-*`, bootstrap/health/run/teardown in order, `version,usage,sessions` first

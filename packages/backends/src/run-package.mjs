@@ -84,6 +84,8 @@ export async function runPackage(backend, pkg, opts = {}) {
   const result = {
     backend: {
       id: backend.id ?? null,
+      // the tag applied assets carry: usually the id, `colab:<hardware>` on a Google Colab session
+      appliedId: null,
       label: described?.label ?? null,
       costVisibility: described?.costVisibility ?? null,
     },
@@ -127,11 +129,18 @@ export async function runPackage(backend, pkg, opts = {}) {
     emit("ran", { counts: result.counts });
 
     if (apply) {
+      // the tag the schema accepts for the assets this run produced: the backend decides, because
+      // "colab:G4" needs the session's hardware and "byo-comfyui" needs nothing (H-fix7)
+      const appliedId =
+        typeof backend.appliedBackendId === "function"
+          ? await backend.appliedBackendId({ up: result.up })
+          : (backend.id ?? null);
+      result.backend.appliedId = appliedId;
       const applied = applyManifestToPackage(pkg, {
         manifest: result.manifest,
         jobsDoc,
         outDir,
-        backend: backend.id ?? null,
+        backend: appliedId,
       });
       result.package = applied.package;
       result.applied = applied.applied;

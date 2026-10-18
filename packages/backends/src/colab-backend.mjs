@@ -303,6 +303,16 @@ export function createColabBackend({
   const backend = {
     id: "colab",
 
+    /**
+     * The compliance tag an applied asset gets: `colab:<hardware>` (the schema's spelling, and what
+     * `colab-plan.mjs` and the server's normaliser use). The hardware comes from the session when the
+     * CLI reported it, and falls back to the configured accelerator. H-fix7: `runPackage` used to pass
+     * `backend.id` ("colab"), which the schema rejects.
+     */
+    appliedBackendId({ up = null } = {}) {
+      return `colab:${up?.hardware || gpu}`;
+    },
+
     async describe() {
       return {
         label: `Google Colab (${gpu}) — account-level estimate`,

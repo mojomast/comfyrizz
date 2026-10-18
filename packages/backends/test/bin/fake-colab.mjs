@@ -1,17 +1,22 @@
 // B3: fake `colab` executable for tests. It implements the subcommands Comfyrizz plans,
 // logs every invocation as JSON-lines, and takes its behaviour from a JSON state file:
 //
-//   FAKE_COLAB_STATE  path to the state JSON (default: ./fake-colab-state.json)
-//   FAKE_COLAB_LOG    path to append {argv,cwd,at} lines to (default: ./fake-colab-log.jsonl)
+//   FAKE_COLAB_STATE  path to the state JSON (default: <tmp>/comfyrizz-fake-colab-state.json)
+//   FAKE_COLAB_LOG    path to append {argv,cwd,at} lines to (default: <tmp>/comfyrizz-fake-colab-log.jsonl)
+//
+// H-fix7: the defaults used to be relative to the cwd, so a spawn without these env vars wrote a log
+// file into whatever directory it happened to run from - which put a test log inside the repo.
+// Nothing writes into the working tree now; the temp defaults are per-machine, not per-repo.
 //
 // State knobs: version, usage, sessions, scripts (per-script {code,output,files,lost}),
 // remoteDir (the "VM filesystem" root), allowNew, failStop, keepAfterStop, stopped.
 // NO REAL GOOGLE COLAB CALL HAPPENS: this file never touches the network.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-const STATE_PATH = process.env.FAKE_COLAB_STATE || "./fake-colab-state.json";
-const LOG_PATH = process.env.FAKE_COLAB_LOG || "./fake-colab-log.jsonl";
+const STATE_PATH = process.env.FAKE_COLAB_STATE || path.join(os.tmpdir(), "comfyrizz-fake-colab-state.json");
+const LOG_PATH = process.env.FAKE_COLAB_LOG || path.join(os.tmpdir(), "comfyrizz-fake-colab-log.jsonl");
 
 function load() {
   try {
