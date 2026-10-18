@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
-import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Img, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import { GENERATED_ASSETS } from './generated-assets';
 
@@ -22,21 +22,13 @@ import { proceduralStyle } from './background-model.js';
 import { statLines } from './stat-model.js';
 import { chartSeries } from './chart-model.js';
 import { LowerThird, MediaFill, MediaPanel, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
+import { STAGGER_SECONDS, fadeUp, pop, prog, staggerFrames } from './motion/primitives.js';
 
 /* ------------------------------------------------------------------ *
- * Animation vocabulary: reveal, stagger, emphasis, exit. Deterministic
- * functions of the local frame only (no CSS time animation).
+ * Motion: the eased entry tokens live in ./motion (MS1). Every layout uses
+ * them so an entrance is a curve, never a linear ramp, and nothing starts at
+ * partial opacity. Deterministic functions of the local frame only.
  * ------------------------------------------------------------------ */
-
-function reveal(frame: number, delay = 0, duration = 18): { opacity: number; translateY: number } {
-  const progress = interpolate(frame, [delay, delay + duration], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  return { opacity: 0.18 + progress * 0.82, translateY: (1 - progress) * 42 };
-}
-
-function emphasis(frame: number, delay = 0): number {
-  const progress = interpolate(frame, [delay, delay + 24], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  return 0.92 + progress * 0.08;
-}
 
 /* ------------------------------------------------------------------ *
  * Procedural backgrounds (spec 6.3: fallback when no plate exists).
@@ -143,10 +135,11 @@ function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media
 
 function VectorAsset({ assetId, frame, animation }: { assetId: string; frame: number; animation?: string }) {
   const assets = useContext(GeneratedAssetsContext);
+  const { fps } = useVideoConfig();
   const asset = assets[assetId];
   if (!asset) return null;
-  const local = reveal(frame, 4, 20);
-  const scale = animation === 'zoom-in' ? emphasis(frame, 6) : 1;
+  const local = fadeUp({ frame, fps, delay: 4, duration: 20 });
+  const scale = animation === 'zoom-in' ? pop({ frame, fps, delay: 6, preset: 'pop' }).scale : 1;
   const drift = animation === 'parallax-in' ? (1 - Math.min(1, frame / 40)) * 30 : 0;
   const isAnim = asset.kind === 'vector-anim';
   return (
@@ -280,11 +273,13 @@ function BrandLogo({ pkg }: { pkg: PackageV1 }) {
 
 function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
   const family = useFontFamily();
+  const { fps } = useVideoConfig();
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
-  const headline = reveal(frame, 2, 22);
-  const sub = reveal(frame, 10, 22);
+  const headline = fadeUp({ frame, fps, delay: 2, duration: 22 });
+  const sub = fadeUp({ frame, fps, delay: 10, duration: 22 });
+  const cta = pop({ frame, fps, delay: 22, duration: 24, preset: 'pop' });
   const outro = scene.variant === 'outro';
   return (
     <AbsoluteFill style={{ fontFamily: family, color: text.primary, justifyContent: 'center', alignItems: 'center', padding: SAFE_AREA.y, textAlign: 'center' }}>
@@ -308,7 +303,8 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
               color: text.onAccent,
               fontSize: TYPE_SCALE.body,
               fontWeight: 700,
-              opacity: emphasis(frame, 22),
+              opacity: cta.opacity,
+              transform: `scale(${cta.scale})`,
             }}
           >
             {copy.cta}
@@ -323,15 +319,15 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
 function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
   const family = useFontFamily();
   const text = textColors(pkg);
-  const { width: frameWidth, height: frameHeight } = useVideoConfig();
+  const { width: frameWidth, height: frameHeight, fps } = useVideoConfig();
   // L1 re-layout: a split hero stacks (copy on top, media below) in portrait
   // instead of cropping, matching textZones('9:16', 'hero-split').
   const portrait = frameHeight > frameWidth;
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const split = scene.variant !== 'full-bleed';
   const stacked = split && portrait;
-  const head = reveal(frame, 2, 22);
-  const body = reveal(frame, 12, 22);
+  const head = fadeUp({ frame, fps, delay: 2, duration: 22 });
+  const body = fadeUp({ frame, fps, delay: 12, duration: 22 });
   return (
     <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
@@ -367,6 +363,7 @@ function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
 
 function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
   const family = useFontFamily();
+  const { fps } = useVideoConfig();
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
@@ -374,7 +371,7 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
   const dataset = datasetId ? pkg.datasets?.[datasetId] : undefined;
   const first = dataset?.values?.[0];
   const value = copy.body ?? (first ? `${first.value}${dataset?.unit ? ` ${dataset.unit}` : ''}` : '—');
-  const number = emphasis(frame, 4);
+  const number = pop({ frame, fps, delay: 4, duration: 30, preset: 'pop' }).scale;
   // N12: kicker falls back to the headline; only an example dataset is tagged
   // "example data", and the scene footnote (source line) is kept.
   const lines = statLines(copy, dataset);
@@ -397,6 +394,7 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
 
 function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
   const family = useFontFamily();
+  const { width: frameWidth, fps } = useVideoConfig();
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
@@ -405,7 +403,6 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
   const values = chartSeries(dataset);
   // L1 re-layout: the bar chart shrinks to the safe area instead of overflowing
   // a 1080-wide portrait/square frame. Landscape keeps the authored 1180 px.
-  const { width: frameWidth } = useVideoConfig();
   const width = Math.min(1180, Math.max(320, frameWidth - 2 * SAFE_AREA.x));
   const height = 420;
   const max = Math.max(1, ...values.map(item => item.value));
@@ -419,7 +416,7 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
         {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.muted }}>{copy.sub}</div> : null}
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ marginTop: 12 }}>
           {values.map((item, index) => {
-            const grow = interpolate(frame, [10 + index * 5, 40 + index * 5], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+            const grow = prog(frame, 10 + staggerFrames(index, 0.08, fps, 0.4), 26, 'enter');
             const barHeight = (item.value / max) * (height - 70);
             const x = index * (barWidth + gap);
             return (
@@ -444,6 +441,7 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
 
 function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
   const family = useFontFamily();
+  const { fps } = useVideoConfig();
   const colors = palette(pkg);
   const text = textColors(pkg);
   const copy = (scene.copy ?? {}) as Record<string, string | undefined | string[]>;
@@ -462,7 +460,7 @@ function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 1180 }}>
             {items.map((item, index) => {
-              const row = reveal(frame, 8 + index * 6, 18);
+              const row = fadeUp({ frame, fps, delay: 8 + staggerFrames(index, STAGGER_SECONDS.listItem, fps), duration: 18 });
               return (
                 <div key={item} style={{ display: 'flex', gap: 20, alignItems: 'center', opacity: row.opacity, transform: `translateY(${row.translateY}px)` }}>
                   <div style={{ width: 44, height: 44, borderRadius: 999, background: colors[2], color: text.onAccent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24 }}>
