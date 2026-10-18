@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import {
   HF_TOKEN_REMOTE_PATH,
+  parseTreeListing,
   REMOTE_ROOT,
   argvDownload,
   argvExec,
@@ -94,6 +95,8 @@ export function createColabBackend({
   reserveMinutes = COLLECT_AND_STOP_RESERVE_MINUTES,
   warnFraction = WARN_FRACTION,
   bootstrapScript = join(REPO, "colab", "bootstrap.py"),
+  tokenDirScript = join(REPO, "colab", "hf_token_dir.py"),
+  listScript = join(REPO, "colab", "list_out.py"),
   modelsLock = join(REPO, "colab", "models.lock.json"),
   healthScript = join(REPO, "colab", "health.py"),
   runJobsScript = join(REPO, "colab", "run_jobs.py"),
@@ -383,9 +386,16 @@ export function createColabBackend({
       if (!hfTokenPath || !existsSync(hfTokenPath)) {
         throw new ColabCliError("Refusing to bootstrap without the Hugging Face token file (see preflight).");
       }
-      // bootstrap.py creates /content/.hf as 0700 and chmods the uploaded file to 0600,
-      // reads it once, and deletes it after the downloads (SPEC.md 6.7.2).
-      const upload = await step(argvUpload({ session, localPath: hfTokenPath, remotePath: `${REMOTE_ROOT}/.hf-token` }), {
+      // H13: the token goes to HF_TOKEN_REMOTE_PATH (/content/.hf/token) - the path bootstrap.py
+      // reads, and the one the standalone GPU-test scripts used. The upload used to write it to
+      // `${REMOTE_ROOT}/.hf-token`, so on a real VM the bootstrap would have found no token at all.
+      // The directory has to exist *before* the upload: `colab upload` does not create parents and
+      // the CLI has no mkdir, so a one-purpose script makes /content/.hf as 0700 first.
+      const dir = await step(argvExec({ session, file: tokenDirScript, timeout: 120 }), { label: "hf-token-dir", wallMs: 240000 });
+      emit(onEvent, { type: "hf_token_dir", code: dir.code, dir: HF_TOKEN_REMOTE_PATH.replace(/\/token$/, "") });
+      if (isLost(dir)) return { lost: true, note: "the hf-token-dir exec did not report; reconcile before assuming the VM is ready" };
+      if (dir.code !== 0) throw new ColabCliError(`colab hf_token_dir.py exited ${dir.code}: ${redactTail(dir)}`);
+      const upload = await step(argvUpload({ session, localPath: hfTokenPath, remotePath: HF_TOKEN_REMOTE_PATH }), {
         label: "upload-token",
         wallMs: 120000,
       });
@@ -530,7 +540,7 @@ export function createColabBackend({
     },
 
     async collect(manifest, destDir) {
-      const downloaded = await download({ remote: `${REMOTE_ROOT}/out`, local: destDir });
+      const downloaded = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: destDir });
       if (!downloaded.ok) throw new ColabCliError("collecting out/ from the VM failed");
       return verifyAgainstManifest(manifest, destDir);
     },
@@ -624,9 +634,38 @@ export function createColabBackend({
     return { ok: true, local };
   }
 
+  /**
+   * Fetch the VM's `out/` tree (H13).
+   *
+   * `colab download` takes one file, so the tree is listed on the VM (`colab/list_out.py`) and every
+   * file is fetched by its own remote path. Asking the CLI for the directory used to look correct only
+   * because the fake copied directories; on a real VM it fails.
+   */
+  async function downloadTree({ remoteDir, localDir, onEvent = null, timeout = 300 }) {
+    const listed = await step(argvExec({ session, file: listScript, timeout }), { label: "list-out", wallMs: (timeout + 60) * 1000 });
+    emit(onEvent, { type: "list_out", code: listed.code, lost: isLost(listed) });
+    if (isLost(listed) || listed.code !== 0) return { ok: false, files: 0, listed: listed.code };
+    let entries;
+    try {
+      entries = parseTreeListing(listed.output);
+    } catch (error) {
+      emit(onEvent, { type: "list_out_unreadable", detail: error.message });
+      return { ok: false, files: 0, listed: listed.code, detail: error.message };
+    }
+    let fetched = 0;
+    for (const entry of entries) {
+      const remote = `${remoteDir}/${entry.path}`;
+      const local = join(localDir, ...entry.path.split("/"));
+      const result = await download({ remote, local, optional: true, onEvent });
+      if (result.ok) fetched += 1;
+    }
+    emit(onEvent, { type: "download_tree", files: entries.length, fetched, remoteDir });
+    return { ok: fetched === entries.length, files: entries.length, fetched, entries };
+  }
+
   async function collectOut({ onEvent = null, expectComplete = true } = {}) {
     const localOut = join(scratch, "out");
-    const result = await download({ remote: `${REMOTE_ROOT}/out`, local: localOut, optional: true, onEvent });
+    const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent });
     const manifestPath = join(localOut, "manifest.json");
     let manifest = null;
     if (result.ok && existsSync(manifestPath)) manifest = JSON.parse(readFileSync(manifestPath, "utf8"));

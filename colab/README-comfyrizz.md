@@ -8,7 +8,9 @@ run separately (docs/tasks/RULES.md rule 1), so they ship untested, marked here.
 
 | File | What it does | Status |
 |---|---|---|
-| `bootstrap.py` | clone ComfyUI, install requirements, download the pinned models with the HF token from a 0600 file, start ComfyUI + `comfy-api-proxy` detached, write `out/ready.json` | draft, adapted from `g1_setup.py` + `s2`–`s4` |
+| `hf_token_dir.py` | **runs before the token upload**: creates `/content/.hf` as 0700, because `colab upload` does not create parent directories and the CLI has no `mkdir` (H13) | new (H13); the fake CLI refuses an upload into a missing directory, like the real one |
+| `list_out.py` | prints the run's `out/` tree as JSON lines, so the backend can fetch it one file at a time - `colab download` takes single files, never a directory (H13) | new (H13); the fake CLI refuses a directory download, like the real one |
+| `bootstrap.py` | clone ComfyUI, install requirements, download the pinned models with the HF token from a 0600 file (`/content/.hf/token`, the path `hf_token_dir.py` prepared), start ComfyUI + `comfy-api-proxy` detached, write `out/ready.json` | draft, adapted from `g1_setup.py` + `s2`–`s4` |
 | `wheelhouse.py` | **host side**: download the pinned wheels (`requirements-vm.txt`) for the VM's platform, hash them into `manifest.json`, and `--check` a cache later; `install_command()` is what `bootstrap.py` installs with | new (H-fix5); CPU only, tested with a fake pip |
 | `requirements-vm.txt` | the pinned install list: ComfyUI's `requirements.txt` at the cloned ref (torch excluded - the G4 image has it), plus `huggingface_hub[hf_xet]`, `comfy-api-proxy`, `comfy-sdk`, `jsonschema` | new (H-fix5) |
 | `health.py` | proxy reachable, `nvidia-smi` free VRAM, node types present, one small smoke job; writes `out/health.json` | draft, adapted from `s6`/`s7` |

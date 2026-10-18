@@ -9,7 +9,9 @@
 // Nothing writes into the working tree now; the temp defaults are per-machine, not per-repo.
 //
 // State knobs: version, usage, sessions, scripts (per-script {code,output,files,lost}),
-// remoteDir (the "VM filesystem" root), allowNew, failStop, keepAfterStop, stopped.
+// remoteDir (the "VM filesystem" root), allowNew, failStop, keepAfterStop, stopped, and the two
+// parity knobs uploadCreatesDirs / downloadDirs (both off: the real CLI creates no directories and
+// downloads single files only - H13).
 // NO REAL GOOGLE COLAB CALL HAPPENS: this file never touches the network.
 import fs from "node:fs";
 import os from "node:os";
@@ -96,7 +98,15 @@ if (command === "stop") {
 if (command === "upload") {
   const [, , , local, remote] = argv;
   const destination = remoteToLocal(remote);
-  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  const parent = path.dirname(destination);
+  // H13 parity: the real CLI does not create parent directories, and it has no mkdir either, so an
+  // upload into a directory that does not exist fails. (state.uploadCreatesDirs restores the old
+  // lenient behaviour for tests that are not about this.) A fake that silently `mkdir -p`-ed let a
+  // broken token path pass every test.
+  if (!fs.existsSync(parent) && state.uploadCreatesDirs !== true) {
+    out(`[colab] Error: upload failed: ${remote}: no such file or directory`, 1);
+  }
+  fs.mkdirSync(parent, { recursive: true });
   if (fs.existsSync(local) && fs.statSync(local).isFile()) fs.copyFileSync(local, destination);
   else fs.mkdirSync(destination, { recursive: true });
   out(`[colab] Uploaded ${local} -> ${remote}`);
@@ -110,6 +120,11 @@ if (command === "download") {
   const [, , , remote, local] = argv;
   const source = remoteToLocal(remote);
   if (!fs.existsSync(source)) out(`[colab] Error: ${remote} not found`, 1);
+  // H13 parity: the real CLI fetches single files. It cannot download a directory, and the backend
+  // used to ask it to. (state.downloadDirs restores the old lenient behaviour.)
+  if (fs.statSync(source).isDirectory() && state.downloadDirs !== true) {
+    out(`[colab] Error: ${remote} is a directory; download takes single files`, 1);
+  }
   fs.rmSync(local, { recursive: true, force: true });
   fs.cpSync(source, local, { recursive: true });
   out(`[colab] Downloaded ${remote} -> ${local}`);
@@ -123,8 +138,37 @@ if (command === "ls") {
 if (command === "exec") {
   const file = argv[argv.indexOf("-f") + 1];
   const script = path.basename(String(file));
-  const spec = (state.scripts || {})[script];
-  if (!spec) out(`[colab] Error: no such file on the VM: ${file}`, 1);
+  // H13: the two scripts the backend always sends from the local repository with `-f` exist on a real
+  // VM by definition - `colab exec -f` sends the file it is given. Modelling that here keeps every
+  // existing test honest without boilerplate in each of them.
+  const builtIn = {
+    "hf_token_dir.py": { mkdirs: ["/content/.hf"], output: "hf token dir /content/.hf mode 700" },
+    "list_out.py": { walk: "/content/comfyrizz/out" },
+  };
+  const spec = { ...builtIn[script], ...(state.scripts || {})[script] };
+  if (!spec || Object.keys(spec).length === 0) out(`[colab] Error: no such file on the VM: ${file}`, 1);
+  if (spec.walk) {
+    // H13: what `colab/list_out.py` does on the VM. The fake walks its own "VM filesystem", so the
+    // listing is real: the backend's per-file collection is tested against a tree it did not bake in.
+    const root = remoteToLocal(spec.walk);
+    const lines = [];
+    const visit = (dir, prefix) => {
+      for (const name of fs.readdirSync(dir).sort()) {
+        const full = path.join(dir, name);
+        const relative = prefix ? `${prefix}/${name}` : name;
+        if (fs.statSync(full).isDirectory()) visit(full, relative);
+        else lines.push(JSON.stringify({ path: relative, bytes: fs.statSync(full).size }));
+      }
+    };
+    if (fs.existsSync(root)) visit(root, "");
+    if (lines.length) process.stdout.write(`${lines.join("\n")}\n`);
+    process.stderr.write(`${lines.length} files under ${spec.walk}\n`);
+    process.exit(spec.code ?? 0);
+  }
+  for (const dir of spec.mkdirs || []) {
+    // what a VM-side script can do and the CLI cannot: create a directory (H13 token dir)
+    fs.mkdirSync(remoteToLocal(dir), { recursive: true });
+  }
   for (const materialised of spec.files || []) {
     const destination = remoteToLocal(materialised.path);
     fs.mkdirSync(path.dirname(destination), { recursive: true });

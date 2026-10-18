@@ -185,3 +185,32 @@ export function hfTokenPlan({ localTokenPath, remoteDir = HF_TOKEN_REMOTE_DIR })
     forbidden: ["colab exec --env HF_TOKEN=...", "argv", "ComfyUI process environment", "logs"],
   };
 }
+
+/**
+ * Parse the JSON-lines listing `colab/list_out.py` prints into relative paths (H13).
+ *
+ * A line looks like `{"path": "assets/a_still.png", "bytes": 12345}`. Anything that is not a plain
+ * relative path below the tree is dropped rather than returned: the listing comes from a VM, and
+ * `../../.ssh/authorized_keys` must never become a local write target. Malformed lines are skipped,
+ * so one bad line cannot make the whole collection fail.
+ */
+export function parseTreeListing(output) {
+  const entries = [];
+  for (const line of String(output ?? "").split("\n")) {
+    const text = line.trim();
+    if (!text.startsWith("{")) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    const relative = parsed && typeof parsed.path === "string" ? parsed.path : null;
+    if (!relative || relative.startsWith("/") || relative.includes("\\")) continue;
+    const parts = relative.split("/");
+    if (parts.some((part) => part === "" || part === "." || part === "..")) continue;
+    const bytes = Number(parsed.bytes);
+    entries.push({ path: relative, bytes: Number.isFinite(bytes) ? bytes : null });
+  }
+  return entries;
+}

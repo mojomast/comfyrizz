@@ -8,6 +8,7 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
+import { HF_TOKEN_REMOTE_PATH } from "../src/colab-plan.mjs";
 import { createColabBackend } from "../src/colab-backend.mjs";
 import { readLog, installFakeColab, makeCli, readState, settleScratchProcesses } from "./helpers.mjs";
 
@@ -72,6 +73,10 @@ function baseState(overrides = {}) {
     usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n",
     sessions: "No active sessions found on server.\n",
     scripts: {
+      // H13: the backend runs this before uploading the token, because `colab upload` does not create
+      // the directory and the CLI has no mkdir. A fake without it fails the bootstrap, as the real VM
+      // would if the directory were missing.
+      "hf_token_dir.py": { mkdirs: ["/content/.hf"], output: "hf token dir /content/.hf mode 700" },
       "bootstrap.py": { output: "bootstrap done", files: [{ path: "/content/comfyrizz/out/ready.json", content: '{"ok":true,"comfyui":"0.41.0"}' }] },
       "health.py": { output: "health done", files: [{ path: "/content/comfyrizz/out/health.json", content: JSON.stringify({ ok: true, detail: "3 node types present", vramFreeGB: 82.1 }) }] },
       "run_jobs.py": {
@@ -151,7 +156,15 @@ test("happy path: preflight, allocate, bootstrap, health, run, verified stop", a
     commands.some((line) => line.includes("exec -s comfyrizz-demo0001 -f bootstrap.py --timeout 900")),
     commands.join("\n"),
   );
-  assert.ok(commands.some((line) => line.includes("upload -s comfyrizz-demo0001") && line.includes("/content/comfyrizz/.hf-token")));
+  // H13: the token goes where bootstrap.py reads it, and the directory is made first (the CLI has no
+  // mkdir and `colab upload` does not create parents). This assertion used to name the buggy path.
+  const dirLine = commands.findIndex((line) => line.includes("exec -s comfyrizz-demo0001 -f hf_token_dir.py"));
+  const tokenLine = commands.findIndex((line) => line.includes("upload -s comfyrizz-demo0001") && line.includes(HF_TOKEN_REMOTE_PATH));
+  const bootstrapLine = commands.findIndex((line) => line.includes("-f bootstrap.py"));
+  assert.ok(tokenLine >= 0, `no upload to ${HF_TOKEN_REMOTE_PATH}:\n${commands.join("\n")}`);
+  assert.ok(!commands.some((line) => line.includes("/content/comfyrizz/.hf-token")), "the token must not go inside the bundle directory");
+  assert.ok(dirLine >= 0 && dirLine < tokenLine, "the token directory has to exist before the upload");
+  assert.ok(tokenLine < bootstrapLine, "the token has to be on the VM before bootstrap.py reads it");
   // H7: the model pin goes with the token, so the VM downloads pinned revisions
   assert.ok(
     commands.some((line) => line.includes("upload -s comfyrizz-demo0001") && line.includes("/content/comfyrizz/models.lock.json")),
@@ -185,7 +198,10 @@ test("a lost exec reconciles on the VM and never re-runs the batch", async () =>
   const execs = readLog(fake.logPath)
     .filter((entry) => entry.argv[0] === "exec")
     .map((entry) => entry.argv[entry.argv.indexOf("-f") + 1]);
-  assert.deepEqual(execs, ["run_jobs.py", "reconcile.py"], "the batch script ran exactly once");
+  // H13: the flow is run -> list the tree (to see whether the batch really finished) -> reconcile ->
+  // list again (to fetch what the reconcile produced). `colab download` takes single files, so the
+  // tree is listed before every collection.
+  assert.deepEqual(execs, ["run_jobs.py", "list_out.py", "reconcile.py", "list_out.py"], "the batch script ran exactly once");
 });
 
 test("a stop the CLI accepts but the session survives is stop_unconfirmed", async () => {

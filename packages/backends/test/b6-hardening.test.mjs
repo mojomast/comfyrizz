@@ -131,7 +131,11 @@ test("a lost exec mid-package reconciles, and the VM is still verifiably stopped
   assert.equal(run.batchesRun.length, 1, "the first batch was the one that was lost");
 
   const execs = readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec").map((entry) => entry.argv[entry.argv.indexOf("-f") + 1]);
-  assert.deepEqual(execs, ["run_jobs.py", "reconcile.py"], "the batch ran once and reconciled once");
+  // H13: after reconciling, the backend lists the VM's out/ tree (colab/list_out.py) and downloads it
+  // file by file, because `colab download` takes single files
+  // H13: run -> list the tree (did the batch really finish?) -> reconcile -> list again (fetch it).
+  // The listing is there because `colab download` fetches single files, not directories.
+  assert.deepEqual(execs, ["run_jobs.py", "list_out.py", "reconcile.py", "list_out.py"], "the batch ran once and reconciled once");
 
   const teardown = await backend.teardown("error");
   assert.equal(teardown.state, "stopped", "a lost exec still ends with a verified stop");

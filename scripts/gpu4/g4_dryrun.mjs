@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { createByoBackend } from "../../packages/backends/src/byo-backend.mjs";
 import { createColabBackend } from "../../packages/backends/src/colab-backend.mjs";
+import { HF_TOKEN_REMOTE_PATH } from "../../packages/backends/src/colab-plan.mjs";
 import { applyManifestToPackage, checkJobsDoc, planJobs } from "../../packages/jobs/src/index.mjs";
 import { validatePackage } from "../../packages/schema/src/index.mjs";
 import { installFakeColab, makeCli, readLog } from "../../packages/backends/test/helpers.mjs";
@@ -195,6 +196,9 @@ export async function dryRun({ outDir = null } = {}) {
       usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n",
       sessions: "No active sessions found on server.\n",
       scripts: {
+        // H13: the backend execs this before uploading the token, because the real `colab upload`
+        // does not create directories and the CLI has no mkdir
+        "hf_token_dir.py": { mkdirs: ["/content/.hf"], output: "hf token dir /content/.hf mode 700" },
         "bootstrap.py": { output: "bootstrap done", files: [{ path: "/content/comfyrizz/out/ready.json", content: '{"ok":true,"comfyui":"0.41.0"}' }] },
         "health.py": { output: "health done", files: [{ path: "/content/comfyrizz/out/health.json", content: JSON.stringify({ ok: true, detail: "g4 dry run", vramFreeGB: 82.1 }) }] },
         "run_jobs.py": {
@@ -239,6 +243,14 @@ export async function dryRun({ outDir = null } = {}) {
   // ---- the harness's own honesty: no token value in any argv, nothing left running --------------
   const leaked = readLog(fake.logPath).filter((entry) => entry.argv.some((arg) => String(arg).includes("hf_FAKETOKEN")));
   check.ok("no-token-in-argv", `argv entries containing the token: ${leaked.length}`, leaked.length === 0);
+  // H13: the real CLI creates no directories and downloads no directories; the dry run drives both
+  // paths, so it fails here if either regresses
+  const tokenUpload = readLog(fake.logPath).find((entry) => entry.argv[0] === "upload" && entry.argv.some((arg) => String(arg).includes("token")));
+  check.ok(
+    "H13-token-path",
+    `token upload remote=${tokenUpload?.argv?.[4] ?? "none"}`,
+    Boolean(tokenUpload) && String(tokenUpload.argv[4]) === HF_TOKEN_REMOTE_PATH,
+  );
   // the estimate the run panel would show for the same job set: real minutes, real Google Colab units
   const colabEstimate = await colab.estimate(jobsDoc.jobs);
   check.ok(
