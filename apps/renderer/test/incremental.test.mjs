@@ -75,6 +75,17 @@ test('editing a scene invalidates only that segment and the fade before it', () 
   assert.notEqual(next[0].key, base[0].key, 'the fade before the edited scene invalidates');
 });
 
+test('a dataset edit invalidates the scene that reads it (chart/stat)', () => {
+  const base = planSegments(pkg, timeline, { generatedAssets });
+  const edited = structuredClone(pkg);
+  edited.datasets.d_tiny.values[0].label = 'Google Colab renders'; // content-only edit, same timing
+  const next = planSegments(edited, timeline, { generatedAssets });
+  assert.notEqual(next[1].key, base[1].key, 'the stat scene that names d_tiny re-renders');
+  // the title fades into the stat scene, so that segment draws it too and must also re-render
+  assert.notEqual(next[0].key, base[0].key, 'the fade before the dataset scene re-renders');
+  assert.equal(next.at(-1).key, base.at(-1).key, 'the untouched outro still reuses');
+});
+
 test('an unchanged incremental export reuses every segment and matches the timeline', { timeout: 300_000 }, () => {
   const work = mkdtempSync(join(tmpdir(), 'comfyrizz-incr-'));
   try {

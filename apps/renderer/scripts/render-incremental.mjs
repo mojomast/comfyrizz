@@ -81,6 +81,13 @@ export function planSegments(pkg, timeline, { generatedAssets = {}, media, compo
     const ids = referencedAssetIds(affected, timeline);
     const assets = ids.map(id => ({ id, vector: generatedAssets[id] ?? null, asset: pkg.assets?.[id] ?? null }));
     const captions = (timeline.captions ?? []).filter(cue => cue.to > start && cue.from <= end);
+    // A chart/stat layout reads its numbers from `pkg.datasets` at render time, so the dataset a
+    // scene names is part of that segment's content. Without this, editing a dataset reused a
+    // stale chart (found while fixing the launch-demo 'Google Colab renders' label).
+    const datasetIds = affected.map(item => item.data?.dataset).filter(Boolean);
+    const datasets = datasetIds.length
+      ? Object.fromEntries(datasetIds.map(id => [id, pkg.datasets?.[id] ?? null]))
+      : undefined;
     const mediaInputs = media
       ? {
           scrim: pick(media.scrim, affected.map(item => item.id)),
@@ -99,6 +106,7 @@ export function planSegments(pkg, timeline, { generatedAssets = {}, media, compo
       end,
       scenes: affected,
       assets,
+      datasets,
       captions,
       media: mediaInputs,
       missing: missingMedia.map(item => item.file),
