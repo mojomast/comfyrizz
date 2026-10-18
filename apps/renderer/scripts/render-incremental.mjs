@@ -26,7 +26,7 @@ import { mergeScenes } from '../src/timeline-model.js';
 export { mergeScenes };
 
 /** Bump when a renderer change can alter rendered frames. */
-export const RENDERER_VERSION = 6;
+export const RENDERER_VERSION = 7;
 
 const BROWSER = process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome';
 

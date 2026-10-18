@@ -79,7 +79,7 @@ export function TimelinePlayer({
       <TransitionSeries>{children}</TransitionSeries>
       {/* P-pres: presenter above the scene stack, captions (z 100) above both. */}
       <PresenterOverlay presenters={presenters ?? timeline.presenters} pkg={pkg} />
-      {captions && <CaptionOverlay captions={captions} />}
+      {captions && <CaptionOverlay captions={captions} pkg={pkg} />}
     </FontFamilyContext.Provider>
   );
   return generatedAssets ? (
