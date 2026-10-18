@@ -60,17 +60,73 @@ know about them, so the extension can never be mistaken for the original.
    stops only the proxy we started (`not_owned` otherwise), and cancels only job ids this backend
    submitted.
 
+## `runPackage`: one path from a package to an applied package
+
+```js
+import { runPackage, withRunPackage, TEARDOWN_MODES } from "@comfyrizz/backends";
+
+const result = await backend.runPackage(pkg, {
+  workDir, outDir, onEvent, signal, budget, approved, apply, dryRun, teardownMode,
+});
+```
+
+`withRunPackage(backend)` attaches it inside both factories, so `backend.runPackage(pkg, opts)` is the
+only call the rest of the product needs: `apps/server`'s run controller (C9) and the web run panel call
+this and nothing else. `runPackage(backend, pkg, opts)` itself calls only the `Backend` typedef, so it
+never branches on the provider.
+
+The phases run in this order, each reported through `onEvent` as `{ event: "run_phase", phase }`:
+`planned` (the job graph, written to `jobsFile`) → `up` (`ensureUp`) → `ran` (the manifest and its
+counts) → `applied` (the manifest lands back on the package) → `teardown`. A throw takes the same route
+as a failure: the box is torn down first, then the error is rethrown with the record attached.
+
+| opt | what it does |
+|---|---|
+| `workDir`, `outDir` (default `<workDir>/out`) | where `jobs.json` is written and where the run's outputs land. Keep `outDir` inside `workDir` (the default): a job's file input resolves under the output dir, so a detached output dir fails every dependent job with `input_file_missing` |
+| `budget`, `approved` | passed to `ensureUp` unchanged — **the spend gate belongs to the backend, never to this function** |
+| `dryRun` | plan and estimate, start nothing. This is what the run panel shows before anyone approves a session |
+| `apply` (default true) | write the manifest back onto the package (`packages/jobs`' `applyManifestToPackage`) |
+| `teardownMode` | `done` (stop, reason `done`) · `idle` (stop, reason `idle`, box kept warm) · `never` (leave it entirely alone: `result.teardown === null`) |
+| `onEvent` | the runner's own JSON lines, plus the `run_phase` events above |
+| `assets`, `includeReady`, `signal` | optional: pre-resolved asset files, jobs whose assets are already ready, an abort signal that also tears the box down |
+
+It returns `{ backend: { id, appliedId, label, costVisibility }, workDir, outDir, jobsFile, jobsDoc,
+estimate, up, health, manifest, counts, ok, package, applied, candidates, untouched, teardown, dryRun }`.
+`ok` means the manifest is complete and nothing failed or was skipped — the manifest decides success,
+never an exit code. `backend.appliedId` is the compliance tag the applied assets carry
+(`colab:<hardware>` / `byo-comfyui`); the backend supplies it through `appliedBackendId({ up })`.
+
+**Both backends, one contract.** Google Colab (`createColabBackend`) allocates a VM, bootstraps it and
+requires a *verified* stop before calling teardown done. BYO (`createByoBackend`) starts
+`comfy-api-proxy` against the user's own ComfyUI and reports `costVisibility: "external-unknown"`. They
+differ in how the box comes up and goes away, and in exactly one number: the Google Colab estimate
+answers real minutes and units from the H7 measured figures, while BYO answers `gpuMinutes: null` and
+says so, because that hardware is not ours to meter.
+
+**The spend gate.** `ensureUp` is the only thing that allocates, and it refuses on its own rules
+(`budget.mjs`: `spent + committed + next_upper + collect_and_stop_reserve ≤ budget`, a warning at 80%, a
+wall-clock cap). `runPackage` passes `budget` and `approved` through and never allocates by itself, so a
+`dryRun` cannot start a session, and a refused allocation never runs a job.
+
+**Fakes.** Every path above is exercised against `test/bin/fake-colab.mjs` (argvs logged, sessions
+created / stopped / lost on demand) and `pipeline-py/tests/fake_comfy_server.py` on loopback: the H8
+orchestration contract in `test/h8-runpackage.test.mjs`, and a full BYO run with the real Python runner
+in `test/b5-integration.test.mjs`. No test allocates a session or reaches the network. The GPU test 4
+harness (`scripts/gpu4/g4_dryrun.mjs`, prepared and dry-run only) drives this same path against the same
+fakes, and the estimate it prints is the one the run panel would show.
+
 ## Tests: fakes only, zero Google Colab calls
 
 * `test/bin/fake-colab.mjs` — a fake `colab` executable, installed as a `sh` shim and executed
   for real. It logs every argv as JSON-lines, keeps its state in a JSON file, and can drop an
   exec's response, keep a session listed after `stop`, or materialise files for a script.
 * `test/bin/v2-stub.mjs` — a local stand-in for `comfy-api-proxy` + ComfyUI.
-* 29 cases: parsers against real CLI output, argv builders, secret refusal, redaction, the budget
-  formula, and the whole lifecycle (happy path, lost exec → reconcile, stop_unconfirmed, budget
-  refusal, wall clock, orphans, not_owned, spend labelling, BYO proxy/health/run/cancel).
+* 60 cases: parsers against real CLI output, argv builders, secret refusal, redaction, the budget
+  formula, the whole lifecycle (happy path, lost exec → reconcile, stop_unconfirmed, budget
+  refusal, wall clock, orphans, not_owned, spend labelling, BYO proxy/health/run/cancel), the
+  `runPackage` orchestration contract, and one end-to-end BYO run with the real Python runner.
 
-Run time is ~4 s; no network beyond loopback; no VM is ever allocated.
+Run time is ~10 s; no network beyond loopback; no VM is ever allocated.
 
 ## Server-side scripts
 

@@ -26,6 +26,11 @@ render-check (PLAN.md A5), reported in `skipped[]` with the reason.
 | `ltx25` | `plate` (+ `upscale` when `gen.inputs.upscale` is set) | `gen.workflow` | plate: `assets/<id>.mp4` (the asset's own file); upscale: `assets/<id>@2x.mp4`, applied as `assets.<id>.variants.upscaled` (H12) |
 | `kokoro` | `audio` | `gen.workflow` | `assets/<id>.wav` |
 
+The plan is executed through `packages/backends`: `backend.runPackage(pkg, opts)` plans, brings the box
+up, runs the batches, applies the manifest back onto the package and tears the box down — its README
+documents the signature, both backends (Google Colab and BYO) and the spend gate. The apply step is
+`src/apply.mjs` here, so that is where a manifest becomes a package edit.
+
 ## The rules baked in
 
 - **Batch order** is always `stills → plates → upscales → audio`: every FLUX still in the
