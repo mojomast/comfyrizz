@@ -12,6 +12,13 @@ export const PACKAGE_ID = "pkg_gpu4dryrun0001";
 
 export function gpu4Package() {
   const pkg = JSON.parse(readFileSync(join(REPO, "pipeline-py", "tests", "fixtures", "package-gpu1-workflows.json"), "utf8"));
+  // H17: that fixture now also carries the presenter (an uploaded narration and the LTX-2.5 a2v asset),
+  // because the workflows contract test requires every graph under workflows/ to be planned by it. This
+  // harness is the GPU test 4 job set - the two halves GPU test 3 measured - so the presenter comes out
+  // here: its own coverage is the a2v graph's contract test and the planner's suites.
+  delete pkg.presenter;
+  delete pkg.assets.a_presenter;
+  delete pkg.assets.a_narr;
   pkg.id = PACKAGE_ID;
   pkg.assets.a_still.gen.inputs.text = true; // N1
   pkg.assets.a_plate1.gen.inputs.upscale = true; // N9
