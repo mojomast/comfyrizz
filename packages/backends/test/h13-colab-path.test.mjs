@@ -125,6 +125,9 @@ test("the fake refuses to download a directory, like the real CLI", async () => 
   assert.notEqual(refused.code, 0, "a directory download must fail, as it does for real");
   assert.match(refused.output, /is a directory/);
 
+  // G5-6: the CLI does not create the local parent, so the caller does - the backend's `download`
+  // makes it with mkdir -p before every fetch. Without the directory the CLI fails with Errno 2.
+  mkdirSync(join(work, "collected"), { recursive: true });
   const file = await cli.run(["download", "-s", "comfyrizz-x", `${REMOTE_ROOT}/out/assets/a.png`, join(work, "collected/a.png")]);
   assert.equal(file.code, 0, file.output);
   assert.equal(readFileSync(join(work, "collected/a.png"), "utf8"), "PNG");

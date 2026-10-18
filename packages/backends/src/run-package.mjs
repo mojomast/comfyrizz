@@ -135,7 +135,13 @@ export async function runPackage(backend, pkg, opts = {}) {
     }
 
     const run = await backend.run(jobsFile, onEvent, signal);
-    result.manifest = run?.manifest ?? run ?? null;
+    // G5-7: this used to be `run?.manifest ?? run`, so a backend that reported no manifest had its own
+    // run object read as one: `counts: null`, "applied 0", ok false, and not a word about why. The
+    // manifest is the verdict or there is no verdict.
+    result.manifest = run?.manifest ?? null;
+    if (!result.manifest) {
+      result.error = run?.lost === true ? "the run never produced a manifest (its exec was lost)" : "the backend returned no manifest for this run";
+    }
     result.counts = result.manifest?.counts ?? null;
     result.ok = result.manifest?.complete === true && !(result.counts?.failed > 0) && !(result.counts?.skipped > 0);
     emit("ran", { counts: result.counts });

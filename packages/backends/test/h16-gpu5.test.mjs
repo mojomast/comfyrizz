@@ -5,7 +5,7 @@
 // read that argv with argparse, raised SystemExit 2 before its first step, and the host could only
 // report "no sentinel" 2 s into a session.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -313,4 +313,88 @@ test("jobs.zip carries the runner package and the schemas the VM imports (G5-5)"
   // the bundle still is a bundle
   assert.ok(names.includes("jobs.json"), "the jobs file itself has to be in it");
   assert.ok(names.some((name) => name.includes("workflows")), "the workflows have to be in it");
+});
+
+/** A fake VM whose out/ tree has the subdirectories a real run writes into. */
+function vmWithTree(fake, { manifest = null, failDownloads = 0 } = {}) {
+  const remote = join(fake.tmpDir, "remote", "out");
+  mkdirSync(join(remote, "assets"), { recursive: true });
+  mkdirSync(join(remote, "intermediates"), { recursive: true });
+  writeFileSync(join(remote, "assets", "a_still.png"), "png-bytes");
+  writeFileSync(join(remote, "intermediates", "a_plate.plate.mp4"), "mp4-bytes");
+  if (manifest) writeFileSync(join(remote, "manifest.json"), JSON.stringify(manifest));
+  const state = JSON.parse(readFileSync(fake.statePath, "utf8"));
+  state.scripts["list_out.py"] = { walk: "/content/comfyrizz/out" };
+  if (failDownloads) state.failDownloads = failDownloads;
+  writeFileSync(fake.statePath, JSON.stringify(state, null, 2));
+  return remote;
+}
+
+test("files in a subdirectory of out/ are collected, not just the ones at the root (G5-6)", async () => {
+  const { fake, backend, work } = setup();
+  vmWithTree(fake);
+  const manifest = { v: 1, packageId: "pkg_h16", complete: true, counts: { succeeded: 2 }, jobs: [] };
+  const dest = join(work, "collected");
+  assert.equal(existsSync(dest), false, "the collect destination does not exist yet: that is the point");
+
+  const result = await backend.collect(manifest, dest);
+
+  assert.equal(existsSync(join(dest, "assets", "a_still.png")), true, "assets/ was not created and collected");
+  assert.equal(existsSync(join(dest, "intermediates", "a_plate.plate.mp4")), true, "intermediates/ was not collected");
+  assert.equal(readFileSync(join(dest, "assets", "a_still.png"), "utf8"), "png-bytes");
+  assert.equal(result.problems.filter((problem) => /not collected/.test(problem)).length, 0);
+});
+
+test("a collect that could not fetch everything still keeps the manifest and names what is missing (G5-7)", async () => {
+  const { fake, backend } = setup();
+  const manifest = { v: 1, packageId: "pkg_h16", complete: true, counts: { succeeded: 2 }, jobs: [] };
+  vmWithTree(fake, { manifest, failDownloads: 1 });
+
+  const result = await backend.collectOut({ expectComplete: true });
+
+  // the manifest landed, so it is the verdict even though one sibling did not arrive
+  assert.equal(result.manifest?.complete, true, "the manifest was thrown away because a sibling failed");
+  assert.equal(result.missing.length, 1, `expected one missing file, got ${JSON.stringify(result.missing)}`);
+  assert.equal(result.ok, false, "the collect is still not a clean collect");
+  assert.equal(result.files, 3);
+  assert.equal(result.fetched, 2);
+});
+
+test("a run whose collect produced no manifest fails loudly instead of reporting nothing (G5-7)", async () => {
+  const { fake, backend, work } = setup({ scripts: { "run_jobs.py": { output: '{"v":1,"event":"job_done"}' } } });
+  const jobsFile = join(work, "jobs.json");
+  writeFileSync(jobsFile, JSON.stringify({ v: 1, packageId: "pkg_h16", jobs: [], batches: [], hash: "a".repeat(64) }));
+  // an empty tree: nothing to download and no manifest anywhere
+  mkdirSync(join(fake.tmpDir, "remote", "out"), { recursive: true });
+  const state = JSON.parse(readFileSync(fake.statePath, "utf8"));
+  state.scripts["list_out.py"] = { walk: "/content/comfyrizz/out" };
+  writeFileSync(fake.statePath, JSON.stringify(state, null, 2));
+
+  await backend.ensureUp({ approved: true });
+  await assert.rejects(() => backend.run(jobsFile), (error) => {
+    assert.match(error.message, /produced no manifest/);
+    assert.match(error.message, /file\(s\) did not download|collected/, error.message);
+    return true;
+  });
+  await backend.teardown("error");
+});
+
+test("a run whose batch exec was lost says so instead of reporting an empty result (G5-7)", async () => {
+  const { fake, backend, work } = setup();
+  const jobsFile = join(work, "jobs.json");
+  writeFileSync(jobsFile, JSON.stringify({ v: 1, packageId: "pkg_h16", jobs: [], batches: [], hash: "a".repeat(64) }));
+  // no output at all from the batch: exit 0 with nothing printed is not evidence the VM ran anything
+  const state = JSON.parse(readFileSync(fake.statePath, "utf8"));
+  state.scripts["run_jobs.py"] = { output: "", noSentinel: true };
+  state.scripts["reconcile.py"] = { output: "" };
+  state.scripts["list_out.py"] = { walk: "/content/comfyrizz/out" };
+  writeFileSync(fake.statePath, JSON.stringify(state, null, 2));
+
+  await backend.ensureUp({ approved: true });
+  const run = await backend.run(jobsFile);
+
+  assert.equal(run.lost, true);
+  assert.equal(run.manifest, null, "no manifest, and the caller must be able to tell");
+  assert.equal(run.reconcile.note, "polled the VM's known job ids; the batch was not resubmitted");
+  await backend.teardown("error");
 });

@@ -136,6 +136,11 @@ if (command === "download") {
   if (fs.statSync(source).isDirectory() && state.downloadDirs !== true) {
     out(`[colab] Error: ${remote} is a directory; download takes single files`, 1);
   }
+  // G5-6 parity: the real CLI writes the file into the directory it is given and does not create that
+  // directory, so a download into `out/assets/...` fails with Errno 2 unless the caller made it first.
+  if (!fs.existsSync(path.dirname(String(local)))) {
+    out(`[colab] Download failed: [Errno 2] No such file or directory: '${local}'`, 1);
+  }
   fs.rmSync(local, { recursive: true, force: true });
   fs.cpSync(source, local, { recursive: true });
   out(`[colab] Downloaded ${remote} -> ${local}`);

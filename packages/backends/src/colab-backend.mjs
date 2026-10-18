@@ -650,7 +650,15 @@ export function createColabBackend({
 
       collect = await collectOut({ onEvent, expectComplete: true });
       manifest = collect.manifest || manifest;
-      return { lost: false, batchesRun: ran, manifest, collect };
+      if (!manifest) {
+        // G5-7: without a manifest there is no verdict to apply, and the run panel used to show a bare
+        // "failed" with no reason. Say what was collected, what was not, and that the tree was listed.
+        const missing = collect.missing.length ? `, ${collect.missing.length} file(s) did not download (${collect.missing.slice(0, 5).join(", ")})` : "";
+        throw new ColabCliError(
+          `the VM's out/ produced no manifest: ${collect.fetched}/${collect.files} file(s) collected${missing}${collect.problems.length ? `; ${collect.problems.slice(0, 3).join("; ")}` : ""}`,
+        );
+      }
+      return { lost: false, batchesRun: ran, manifest, collect, missing: collect.missing };
     },
 
     /**
@@ -760,10 +768,16 @@ export function createColabBackend({
     },
     admit,
     armWatchdog,
+    collectOut,
     state,
   };
 
   async function download({ remote, local, optional = false, onEvent = null }) {
+    // G5-6: `colab download` writes the file and nothing else - it does not create the local parent,
+    // and almost everything under out/ is in a subdirectory (assets/, attempts/, cache/, runs/...,
+    // intermediates/). On a real VM 9 of the 13 files in the first collect failed with
+    // "[Errno 2] No such file or directory", and the run lost the work the GPU had already done.
+    mkdirSync(dirname(local), { recursive: true });
     const result = await step(argvDownload({ session, remotePath: remote, localPath: local }), { label: "download", wallMs: 900000 });
     if (result.code !== 0) {
       emit(onEvent, { type: "download_failed", remote, code: result.code });
@@ -793,22 +807,27 @@ export function createColabBackend({
       return { ok: false, files: 0, listed: listed.code, detail: error.message };
     }
     let fetched = 0;
+    const missing = [];
     for (const entry of entries) {
       const remote = `${remoteDir}/${entry.path}`;
       const local = join(localDir, ...entry.path.split("/"));
       const result = await download({ remote, local, optional: true, onEvent });
       if (result.ok) fetched += 1;
+      else missing.push(entry.path);
     }
-    emit(onEvent, { type: "download_tree", files: entries.length, fetched, remoteDir });
-    return { ok: fetched === entries.length, files: entries.length, fetched, entries };
+    emit(onEvent, { type: "download_tree", files: entries.length, fetched, missing: missing.length, remoteDir });
+    return { ok: fetched === entries.length, files: entries.length, fetched, missing, entries };
   }
 
   async function collectOut({ onEvent = null, expectComplete = true } = {}) {
     const localOut = join(scratch, "out");
     const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent });
     const manifestPath = join(localOut, "manifest.json");
+    // G5-7: the manifest is the run's verdict and it lands with the rest of the tree. Requiring the
+    // *whole* collect to have succeeded before reading it threw the verdict away whenever one sibling
+    // failed - and the host was then left with `counts: null`, "applied 0" and no error text at all.
     let manifest = null;
-    if (result.ok && existsSync(manifestPath)) manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (existsSync(manifestPath)) manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     const attemptsPath = join(localOut, "attempts");
     const attempts = existsSync(attemptsPath)
       ? readdirSync(attemptsPath).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(readFileSync(join(attemptsPath, name), "utf8")))
@@ -821,8 +840,23 @@ export function createColabBackend({
       verified: verification.verified,
       problems: verification.problems,
       expectComplete,
+      // G5-7: a collect the UI can explain: what the VM listed, what arrived, and what did not
+      files: result.files ?? 0,
+      fetched: result.fetched ?? 0,
+      missing: result.missing ?? [],
+      manifest: manifest ? "collected" : "missing",
     });
-    return { ok: result.ok, manifest, attempts, local: localOut, verified: verification.verified, problems: verification.problems };
+    return {
+      ok: result.ok,
+      manifest,
+      attempts,
+      local: localOut,
+      verified: verification.verified,
+      problems: verification.problems,
+      missing: result.missing ?? [],
+      files: result.files ?? 0,
+      fetched: result.fetched ?? 0,
+    };
   }
 
   state.runId = null;

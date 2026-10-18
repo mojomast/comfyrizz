@@ -143,7 +143,7 @@ test("a lost exec mid-package reconciles, and the VM is still verifiably stopped
   assert.ok(!commands(fake).includes("attach"));
 });
 
-test("a collect that fails still stops the VM and keeps the manifest honest", async (t) => {
+test("a collect that fails says so, and the VM is still stopped", async (t) => {
   if (!HAVE_PYTHON) return t.skip("no venv python");
   const dir = workspace();
   const doc = plan(dir);
@@ -155,10 +155,17 @@ test("a collect that fails still stops the VM and keeps the manifest honest", as
 
   const backend = colabBackendFor({ dir, fake });
   await backend.ensureUp({ approved: true });
-  const run = await backend.run(join(dir, "jobs.json"));
-
-  assert.equal(run.manifest, null, "a failed collect cannot produce a manifest");
-  assert.equal(run.collect.ok, false);
+  // G5-7: this used to resolve with `manifest: null` and no explanation, which the run panel showed as
+  // a bare "failed". Nothing to apply is now said out loud, with the paths that did not arrive.
+  await assert.rejects(() => backend.run(join(dir, "jobs.json")), (error) => {
+    assert.match(error.message, /produced no manifest/);
+    assert.match(error.message, /did not download/);
+    return true;
+  });
+  // the collect that produced nothing is still on record, with every file it could not fetch
+  const collect = backend.inspect().events.filter((event) => event.type === "collect").at(-1);
+  assert.equal(collect.fetched, 0, JSON.stringify(collect));
+  assert.ok(collect.problems.length >= 1 || collect.complete === false);
   const execsBefore = readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec").length;
   const teardown = await backend.teardown("error");
   assert.equal(teardown.state, "stopped");
