@@ -93,13 +93,28 @@ if [[ "${SKIP_PY:-0}" == "1" ]]; then
 fi
 
 log "pipeline-py suite with the clone's own interpreter"
-( cd "$CLONE/pipeline-py" && "$CLONE/.venv/bin/python" -m pytest -q > "$WORK/pytest.log" 2>&1 ) || { tail -40 "$WORK/pytest.log"; exit 1; }
-tail -1 "$WORK/pytest.log"
-if grep -qE '[0-9]+ skipped' "$WORK/pytest.log"; then
+# the junit xml carries the counts: this repo's pytest config is quiet, so the log holds the progress
+# dots and any failure detail, but no "N passed" line to read
+( cd "$CLONE/pipeline-py" && "$CLONE/.venv/bin/python" -m pytest -q --junit-xml="$WORK/pytest.xml" > "$WORK/pytest.log" 2>&1 ) || { tail -40 "$WORK/pytest.log"; exit 1; }
+PY_STATS="$("$CLONE/.venv/bin/python" - "$WORK/pytest.xml" <<'XMLCOUNT'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+suite = root if root.tag == "testsuite" else root.find("testsuite")
+attrs = suite.attrib
+print(
+    f"{attrs.get('tests', '?')} tests, {attrs.get('failures', '0')} failed, "
+    f"{attrs.get('errors', '0')} errors, {attrs.get('skipped', '0')} skipped"
+)
+XMLCOUNT
+)"
+echo "$PY_STATS"
+if [[ "$PY_STATS" != *"0 skipped"* ]]; then
   echo "pytest skipped cases on a fresh clone"
   exit 1
 fi
-SUMMARY+=("pipeline-py: $(grep -E '[0-9]+ (passed|failed|error)' "$WORK/pytest.log" | tail -1 | sed 's/ in .*//')")
+SUMMARY+=("pipeline-py: $PY_STATS")
 
 log "PASS: fresh clone -> install -> schema, jobs, backends and pipeline-py suites, nothing skipped"
 printf '%s\n' "${SUMMARY[@]}"
