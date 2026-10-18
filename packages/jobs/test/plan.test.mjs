@@ -663,3 +663,170 @@ test("every generator the pipeline runs has a model licence on record", () => {
     assert.ok(MODEL_LICENSES[generator]?.id, `${generator} has no licence in the map`);
   }
 });
+
+const PIP_SHA = "ab".repeat(32);
+
+function castPlanPackage() {
+  return {
+    schemaVersion: 1,
+    revision: 1,
+    id: "pkg_castplan0001",
+    title: "Cast plan",
+    format: { width: 1024, height: 576, fps: 30 },
+    duration: { mode: "target", targetFrames: 120 },
+    scenes: [
+      {
+        id: "s1",
+        layout: "hero",
+        variant: "full-bleed",
+        copy: { headline: "Pip" },
+        background: { asset: "a_still" },
+        cast: ["c_pip"],
+      },
+    ],
+    cast: [{ id: "c_pip", name: "Pip", description: "Fictional mascot.", ref_asset: "a_pip" }],
+    assets: {
+      a_pip: {
+        kind: "svg",
+        origin: "generated",
+        status: "ready",
+        file: "assets/pip.svg",
+        sha256: PIP_SHA,
+        license: { id: "CC0-1.0" },
+        redistributable: true,
+        gen: { generator: "llm-svg", sanitizer_version: "1.0.0", render_check: { ok: true } },
+      },
+      a_still: {
+        kind: "image",
+        origin: "generated",
+        status: "pending",
+        cast: "c_pip",
+        gen: {
+          generator: "flux3-klein",
+          workflow: "workflows/flux3_klein_t2i.api.json",
+          workflow_sha256: "0".repeat(64),
+          inputs: { prompt: "Pip the mascot, head and shoulders", width: 1024, height: 576, seed: 3, steps: 16 },
+        },
+      },
+    },
+    compliance: { open_weights_only: true },
+  };
+}
+
+test("a package without cast keeps the same jobs and cache keys", () => {
+  const doc = planJobs(fixture("package-pending.json"));
+  const still = doc.jobs.find((job) => job.id === "a_plate1_still.still");
+  assert.equal(still.workflow, "workflows/flux3_klein_t2i.api.json");
+  assert.equal(still.fileInputs, undefined);
+  assert.equal(still.params.reference, undefined);
+  assert.equal(
+    still.cacheKey,
+    cacheKeyFor({
+      workflowSha256: still.workflowSha256,
+      generator: still.generator,
+      model: still.model,
+      modelRevision: still.modelRevision,
+      params: still.params,
+      seed: still.seed,
+      width: still.dims.width,
+      height: still.dims.height,
+      frames: still.frames,
+    }),
+  );
+});
+
+test("a cast still is planned as a Klein reference edit of the ready ref file", () => {
+  const doc = planJobs(castPlanPackage());
+  assert.deepEqual(checkJobsDoc(doc), []);
+  const still = doc.jobs.find((job) => job.asset === "a_still");
+  assert.equal(still.workflow, "workflows/flux3_klein_ref_edit.api.json");
+  assert.equal(still.params.reference, "a_pip");
+  assert.equal(still.params.width, undefined);
+  assert.deepEqual(still.fileInputs, [{ param: "reference", from: "package", path: "assets/pip.svg" }]);
+  const keyArgs = {
+    workflowSha256: still.workflowSha256,
+    generator: still.generator,
+    model: still.model,
+    modelRevision: still.modelRevision,
+    params: still.params,
+    seed: still.seed,
+    width: still.dims.width,
+    height: still.dims.height,
+    frames: still.frames,
+  };
+  assert.equal(still.cacheKey, cacheKeyFor({ ...keyArgs, refSha256: [PIP_SHA] }));
+  assert.notEqual(still.cacheKey, cacheKeyFor(keyArgs), "the ref file sha256 is part of the cache key");
+
+  const changed = castPlanPackage();
+  changed.assets.a_pip.sha256 = "cd".repeat(32);
+  const again = planJobs(changed).jobs.find((job) => job.asset === "a_still");
+  assert.notEqual(again.cacheKey, still.cacheKey);
+});
+
+test("a style ref stays first and the cast ref is appended, up to 10", () => {
+  const pkg = castPlanPackage();
+  pkg.assets.a_style = {
+    kind: "image",
+    origin: "upload",
+    status: "ready",
+    file: "assets/style.png",
+    sha256: "11".repeat(32),
+    license: { id: "CC0-1.0" },
+  };
+  pkg.assets.a_still.gen.workflow = "workflows/flux3_klein_ref_edit.api.json";
+  pkg.assets.a_still.gen.inputs.reference = "a_style";
+  const still = planJobs(pkg).jobs.find((job) => job.asset === "a_still");
+  assert.equal(still.params.reference, "a_style");
+  assert.equal(still.params._reference_2, "a_pip");
+  assert.equal(still.params.reference_2, undefined);
+  assert.deepEqual(still.fileInputs, [
+    { param: "reference", from: "package", path: "assets/style.png" },
+    { param: "_reference_2", from: "package", path: "assets/pip.svg" },
+  ]);
+
+  const full = castPlanPackage();
+  full.assets.a_still.gen.workflow = "workflows/flux3_klein_ref_edit.api.json";
+  const inputs = full.assets.a_still.gen.inputs;
+  inputs.reference = "assets/r0.png";
+  for (let n = 2; n <= 10; n += 1) inputs[`reference_${n}`] = `assets/r${n - 1}.png`;
+  const capped = planJobs(full).jobs.find((job) => job.asset === "a_still");
+  assert.equal(capped.params.reference, "assets/r0.png");
+  assert.equal(capped.params.reference_10, "assets/r9.png");
+  assert.equal(JSON.stringify(capped.params).includes("a_pip"), false);
+  assert.equal(capped.fileInputs.some((entry) => entry.path === "assets/pip.svg"), false);
+
+  const nine = castPlanPackage();
+  nine.assets.a_still.gen.workflow = "workflows/flux3_klein_ref_edit.api.json";
+  const nineInputs = nine.assets.a_still.gen.inputs;
+  nineInputs.reference = "assets/r0.png";
+  for (let n = 2; n <= 9; n += 1) nineInputs[`reference_${n}`] = `assets/r${n - 1}.png`;
+  const room = planJobs(nine).jobs.find((job) => job.asset === "a_still");
+  assert.equal(room.fileInputs.length, 10);
+  assert.equal(room.fileInputs.at(-1).param, "_reference_10");
+  assert.equal(room.fileInputs.at(-1).path, "assets/pip.svg");
+  assert.equal(room.fileInputs[0].path, "assets/r0.png");
+});
+
+test("a missing cast ref_asset cannot be planned", () => {
+  const pkg = castPlanPackage();
+  pkg.assets.a_pip.status = "pending";
+  delete pkg.assets.a_pip.file;
+  delete pkg.assets.a_pip.sha256;
+  assert.throws(() => planJobs(pkg), /not ready/);
+});
+
+test("the mascot example plans a ref-edit upload of the synthetic sheet", () => {
+  const pkg = schemaFixture("../../examples/cast-mascot/package.json");
+  const result = validatePackage(pkg);
+  assert.deepEqual(result.errors, [], JSON.stringify(result.errors, null, 2));
+  const doc = planJobs(pkg);
+  assert.deepEqual(checkJobsDoc(doc), []);
+  const stills = doc.jobs.filter((job) => job.kind === "still");
+  assert.deepEqual(stills.map((job) => job.asset), ["a_intro", "a_next"]);
+  for (const job of stills) {
+    assert.equal(job.workflow, "workflows/flux3_klein_ref_edit.api.json");
+    assert.deepEqual(job.fileInputs, [{ param: "reference", from: "package", path: "assets/pip.svg" }]);
+    assert.equal(job.params.reference, "a_pip");
+  }
+  assert.notEqual(stills[0].cacheKey, stills[1].cacheKey);
+});

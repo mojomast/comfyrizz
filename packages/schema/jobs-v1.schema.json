@@ -95,7 +95,7 @@
               "type": "object",
               "required": ["param", "from", "path"],
               "properties": {
-                "param": { "enum": ["image", "reference", "mask", "audio"] },
+                "param": { "enum": ["image", "reference", "mask", "audio", "_reference_2", "_reference_3", "_reference_4", "_reference_5", "_reference_6", "_reference_7", "_reference_8", "_reference_9", "_reference_10"] },
                 "from": {
                   "enum": ["job", "package"],
                   "description": "job: `path` is relative to the output directory (a dependency's output). package: `path` is relative to the jobs.json directory."

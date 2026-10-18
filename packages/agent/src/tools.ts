@@ -275,7 +275,82 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   const narration = clampText(source.narration, 600);
   if (narration) scene.narration = narration;
   if (typeof source.notes === 'string') scene.notes = clampText(source.notes, 512);
+  if (Array.isArray(source.cast)) {
+    const ids: string[] = [];
+    for (const id of source.cast) {
+      if (typeof id === 'string' && /^c[A-Za-z0-9_-]{0,63}$/.test(id) && !ids.includes(id)) ids.push(id);
+    }
+    if (ids.length) scene.cast = ids.slice(0, 8);
+  }
   return scene;
+}
+
+/** Acceptance phrase for CAST1. Fictional mascot only; never a real person or a user photo. */
+const SHARED_MASCOT_RE = /use the same mascot in every scene/i;
+const KLEIN_REF_CAP = 10;
+const MASCOT_SVG = [
+  '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">',
+  '<rect width="512" height="512" fill="#1b2440"/>',
+  '<circle cx="256" cy="210" r="116" fill="#6d8cff"/>',
+  '<circle cx="214" cy="190" r="16" fill="#0d0f14"/>',
+  '<circle cx="298" cy="190" r="16" fill="#0d0f14"/>',
+  '<path d="M214 246 Q256 286 298 246" fill="none" stroke="#0d0f14" stroke-width="10" stroke-linecap="round"/>',
+  '</svg>',
+].join('');
+
+function briefWantsSharedMascot(brief: string): boolean {
+  return SHARED_MASCOT_RE.test(brief);
+}
+
+function buildSharedMascot() {
+  const sha256 = createHash('sha256').update(MASCOT_SVG).digest('hex');
+  const assetId = 'a_cast_pip';
+  return {
+    member: {
+      id: 'c_pip',
+      name: 'Pip',
+      description: 'Pip is a fictional round mascot, framed head and shoulders. Not a real person.',
+      ref_asset: assetId,
+    },
+    assetId,
+    asset: {
+      kind: 'svg',
+      origin: 'generated',
+      status: 'ready',
+      file: `assets/${assetId}.svg`,
+      sha256,
+      bytes: Buffer.byteLength(MASCOT_SVG),
+      license: { id: 'CC0-1.0' },
+      redistributable: true,
+      gen: {
+        generator: 'llm-svg',
+        sanitizer_version: '1.0.0',
+        render_check: { ok: true, version: '1.0.0', width: 512, height: 512 },
+        caption: 'Pip, a fictional round mascot, head and shoulders.',
+      },
+    },
+  };
+}
+
+function castRefsForScene(pkg: Record<string, any> | undefined, sceneId: string): { ids: string[]; refs: string[] } {
+  const members = (Array.isArray(pkg?.cast) ? pkg.cast : []).filter(
+    (member: any) => member && typeof member.id === 'string' && typeof member.ref_asset === 'string',
+  );
+  if (!members.length) return { ids: [], refs: [] };
+  const scene = (Array.isArray(pkg?.scenes) ? pkg.scenes : []).find((item: any) => item?.id === sceneId);
+  const named = new Set((Array.isArray(scene?.cast) ? scene.cast : []).filter((id: unknown) => typeof id === 'string'));
+  const chosen = named.size ? members.filter((member: any) => named.has(member.id)) : members;
+  return { ids: chosen.map((member: any) => member.id), refs: chosen.map((member: any) => member.ref_asset) };
+}
+
+/** Existing refs first, then cast refs, capped at Klein's 10 reference images. */
+function mergeRefs(userRefs: string[], castRefs: string[]): string[] {
+  const out: string[] = [];
+  for (const ref of [...userRefs, ...castRefs]) {
+    if (!ref || out.includes(ref) || out.length >= KLEIN_REF_CAP) continue;
+    out.push(ref);
+  }
+  return out;
 }
 
 /**
@@ -299,6 +374,10 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const scenes = args.scenes?.length
       ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set()))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }];
+    const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot() : null;
+    if (mascot) {
+      for (const scene of scenes) scene.cast = [mascot.member.id];
+    }
     state.package = {
       $schema: 'https://comfyrizz.example/schema/package-v1.json',
       schemaVersion: 1,
@@ -312,8 +391,10 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       voice: { enabled: false, engine: 'none' },
       datasets: args.datasets ?? {},
       scenes,
-      assets: { ...(options.brandAssets ?? {}) },
+      ...(mascot ? { cast: [mascot.member] } : {}),
+      assets: { ...(options.brandAssets ?? {}), ...(mascot ? { [mascot.assetId]: mascot.asset } : {}) },
       compliance: { open_weights_only: true },
+      ...(mascot ? { presenter: { enabled: false, cast: mascot.member.id, portrait: mascot.member.id } } : {}),
       renders: [],
     };
     touch();
@@ -420,7 +501,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const requestedAspect = (args.aspect as Aspect | undefined) ?? outputAspect;
     const dims = sourceDims(requestedAspect);
     const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
-    const refs = args.refs ?? [];
+    const cast = castRefsForScene(state.package, args.scene_id);
+    const refs = mergeRefs(args.refs ?? [], cast.refs);
     const isRefEdit = refs.length > 0;
     // B1: the same STYLE_BLOCK goes on every image job, so a run does not drift
     // from the owner's palette/attributes after the first call.
@@ -451,8 +533,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     // supplies the hash for the workflow this tool is about to name.
     const workflow = planned.workflow ?? defaultWorkflow;
     const workflowSha256 = planned.workflowSha256 ?? WORKFLOW_SHA256[workflow];
-    // The package schema only allows scalar gen.inputs values, and ReferenceMultiLatent
-    // wires image0, so the first ref is the reference raster; extras are recorded only.
+    // The package schema only allows scalar gen.inputs values. ReferenceMultiLatent wires
+    // image0 from the first ref; further refs are reference_2 … (Klein's cap is 10). The
+    // planner turns those into uploaded `_reference_N` file inputs.
     const extraRefs = isRefEdit && refs.length > 1
       ? Object.fromEntries(refs.slice(1).map((ref, index) => [`reference_${index + 2}`, ref]))
       : {};
@@ -471,6 +554,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       license: { id: 'CC0-1.0' },
       model_license: { id: 'Apache-2.0', url: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell' },
       redistributable: true,
+      ...(cast.ids[0] ? { cast: cast.ids[0] } : {}),
       notes: isRefEdit
         ? 'pending-GPU: ReferenceMultiLatent keeps the source layout/labels while restyling (GPU test 2)'
         : 'pending-GPU: procedural background is the CPU fallback until a spend is approved',
@@ -484,8 +568,18 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       },
     };
     if (state.package) {
+      const scenes = cast.ids.length
+        ? (Array.isArray(state.package.scenes) ? state.package.scenes : []).map((scene: any) => {
+            if (scene?.id !== args.scene_id) return scene;
+            const existing = Array.isArray(scene.cast) ? scene.cast : [];
+            const next = [...existing];
+            for (const castId of cast.ids) if (!next.includes(castId)) next.push(castId);
+            return next.length === existing.length ? scene : { ...scene, cast: next.slice(0, 8) };
+          })
+        : state.package.scenes;
       state.package = {
         ...state.package,
+        scenes,
         assets: { ...(state.package.assets ?? {}), [id]: asset },
         revision: Number(state.package.revision ?? 0) + 1,
       };

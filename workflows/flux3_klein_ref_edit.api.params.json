@@ -2,8 +2,8 @@
   "v": 1,
   "generator": "flux3-klein",
   "kind": "still",
-  "note": "Reference/edit conditioning: LoadImage(10) is reference image 0, ReferenceMultiLatent(12) holds the reference budget. Bounding boxes belong in the prompt (model card). 'files' declares the uploaded parameters: image and reference are two names for the same ability (a package sets whichever word its asset used) and both land on node 10, so a package that sets both to different files would have one silently win - the planner reads gen.inputs and a well-formed asset sets one of them.",
-  "files": ["image", "reference"],
+  "note": "Reference/edit conditioning: LoadImage(10) is reference image 0, ReferenceMultiLatent(12) holds the reference budget (Klein accepts up to 10 reference images). Bounding boxes belong in the prompt (model card). 'files' declares the uploaded parameters: image and reference are two names for the same ability (a package sets whichever word its asset used) and both land on node 10, so a package that sets both to different files would have one silently win - the planner reads gen.inputs and a well-formed asset sets one of them. _reference_2 through _reference_10 are further reference files the planner appends (a style ref stays first; a CAST1 cast ref is appended, then the list is capped at 10). This graph wires image0 only, so those extra files are uploaded and recorded but are not a node input.",
+  "files": ["image", "reference", "_reference_2", "_reference_3", "_reference_4", "_reference_5", "_reference_6", "_reference_7", "_reference_8", "_reference_9", "_reference_10"],
   "map": {
     "prompt": ["4", "text"],
     "image": ["10", "image"],

@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 41151f03c2eb45d84c07e45348295cb59b87e374ecba49b0fe48ca682ffdadd3
+// Schema sha256: a7e9593eebc415e779211b2ef6f179d36e8e30968b7a8f60f2e2dcfe5e1b8955
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -99,6 +99,13 @@ export interface PackageV1 {
     };
   motion?: PackageMotion;
   presenter?: Presenter;
+  /**
+   * CAST1: recurring fictional characters (a mascot). Optional. A package without this array
+   * validates, plans and renders exactly as before. v1 is fictional only: no real people and no user
+   * photos.
+   * [maxItems 8]
+   */
+  cast?: Array<CastMember>;
   renders?: Array<{
     mode: "preview" | "draft" | "final";
     file: RelativePath;
@@ -151,7 +158,18 @@ export type TransitionDirection = "left" | "right" | "up" | "down" | "in" | "out
 
 export interface Presenter {
   enabled?: boolean;
-  portrait?: AssetId;
+  /**
+   * The portrait still: an asset id, or a CAST1 cast id whose ready ref_asset is that still. A cast
+   * id is the optional hook that lets the portrait be a fictional cast member without requiring any
+   * other presenter field.
+   */
+  portrait?: AssetId | CastId;
+  /**
+   * CAST1: this presenter is the fictional cast member. Optional. When portrait is an asset id, jobs
+   * for that still append the member's ref_asset. When portrait is a cast id, the portrait is that
+   * member's ref_asset.
+   */
+  cast?: CastId;
   placement?: "pip-br" | "pip-bl" | "pip-bc" | "split-left";
   shape?: "circle" | "rounded-rect";
   /**
@@ -250,6 +268,22 @@ export type SceneId = string;
  * [pattern ^d[A-Za-z0-9_-]{0,63}$]
  */
 export type DatasetId = string;
+
+/**
+ * CAST1 id of a fictional cast member. v1 is a mascot: never a real person.
+ * [pattern ^c[A-Za-z0-9_-]{0,63}$]
+ */
+export type CastId = string;
+
+export interface CastMember {
+  id: CastId;
+  name: string;
+  /**
+   * Ready still of the fictional character. A missing or unready asset is a semantic error.
+   */
+  ref_asset: AssetId;
+  description?: string;
+  }
 
 /**
  * [min 0, max 1]
@@ -400,6 +434,12 @@ export interface Scene {
   narration_duration_frames?: number;
   locked?: boolean;
   notes?: string;
+  /**
+   * CAST1: fictional cast members that appear in this scene. Every Klein still the scene names
+   * (background or foreground) is planned as a reference edit that includes each member's ref_asset.
+   * [maxItems 8]
+   */
+  cast?: Array<CastId>;
   }
 
 export interface AssetVariants {
@@ -529,4 +569,9 @@ export interface Asset {
   redistributable?: boolean;
   gen?: Gen;
   notes?: string;
+  /**
+   * CAST1: this still depicts the fictional cast member. The planner appends that member's ref_asset
+   * to the Klein reference-edit inputs.
+   */
+  cast?: CastId;
   }

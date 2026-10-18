@@ -118,6 +118,46 @@
       "warnings": null
     },
     {
+      "file": "invalid/cast-ref-missing.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_CAST_REF_UNREADY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/cast-ref-unready.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_CAST_REF_UNREADY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/cast-unknown.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_CAST_UNKNOWN"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/duplicate-cast-id.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_DUPLICATE_CAST_ID"
+      ],
+      "warnings": null
+    },
+    {
       "file": "invalid/duplicate-scene-id.json",
       "kind": "invalid",
       "schemaOk": true,
