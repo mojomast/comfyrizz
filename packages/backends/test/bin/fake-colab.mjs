@@ -97,6 +97,12 @@ if (command === "stop") {
 }
 if (command === "upload") {
   const [, , , local, remote] = argv;
+  // G4-9/G4-8 parity: the real CLI's failure text quotes the whole URL, `colab-runtime-proxy-token`
+  // included. A test can turn that on to prove the host scrubs it before the line reaches a log or an
+  // error message.
+  if (state.uploadErrorUrl) {
+    out(`[colab] Error: upload failed: PUT https://colab-runtime-proxy-${state.uploadErrorUrl}?colab-runtime-proxy-token=FAKEPROXYTOKEN0123456789&alt=media: HTTP 500`, 1);
+  }
   const destination = remoteToLocal(remote);
   const parent = path.dirname(destination);
   // H13 parity: the real CLI does not create parent directories, and it has no mkdir either, so an

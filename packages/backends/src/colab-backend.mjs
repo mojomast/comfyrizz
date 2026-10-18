@@ -88,6 +88,7 @@ export const BOOTSTRAP_OVERHEAD_MINUTES = 4;
 export function createColabBackend({
   cli = null,
   packageId,
+  home = process.env.HOME || null,
   packageDir = process.cwd(),
   scratchDir = null,
   logDir = null,
@@ -120,8 +121,8 @@ export function createColabBackend({
   const registryFile = join(scratch, "sessions.json");
   // G4-2: a `pip install --user` CLI lives at ~/.local/bin/colab, which is not on the PATH the child
   // gets, so "not found" on a machine where it is installed and signed in. Resolve it once here.
-  const resolvedBinary = cli ? null : resolveColabBinary({ home });
-  const client = cli || new ColabCli({ logDir: logs, detached: false, bin: resolvedBinary.bin });
+  const resolvedBinary = cli ? { bin: null, source: "injected" } : resolveColabBinary({ home });
+  const client = cli || new ColabCli({ logDir: logs, detached: false, bin: resolvedBinary.bin, home: home || undefined });
   const state = {
     session,
     createdByUs: false,

@@ -14,7 +14,7 @@
 // usage: node scripts/gpu4/g4_dryrun.mjs [--out <dir>]     (exit code 0 = every check passed)
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -255,8 +255,8 @@ export async function dryRun({ outDir = null } = {}) {
   // against its own cwd), and the exec's success is the sentinel its script prints last - so each of
   // the scripts the flow runs must appear exactly once, from the right directory.
   const execEntries = readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec");
-  const execScripts = execEntries.map((entry) => path.basename(String(entry.argv[entry.argv.indexOf("-f") + 1])));
-  const wrongCwd = execEntries.filter((entry) => path.dirname(String(entry.argv[entry.argv.indexOf("-f") + 1])) !== COLAB_DIR || entry.cwd !== COLAB_DIR);
+  const execScripts = execEntries.map((entry) => basename(String(entry.argv[entry.argv.indexOf("-f") + 1])));
+  const wrongCwd = execEntries.filter((entry) => dirname(String(entry.argv[entry.argv.indexOf("-f") + 1])) !== COLAB_DIR || entry.cwd !== COLAB_DIR);
   check.ok(
     "H14-exec-contract",
     `execs: ${execScripts.join(", ")} (cwd ${execEntries[0]?.cwd ?? "none"})`,
@@ -264,6 +264,43 @@ export async function dryRun({ outDir = null } = {}) {
       wrongCwd.length === 0 &&
       ["hf_token_dir.py", "bootstrap.py", "health.py", "run_jobs.py", "list_out.py"].every((name) => execScripts.includes(name)) &&
       execScripts.filter((name) => name === "run_jobs.py").length === 1,
+  );
+  // H15: the VM directories exist before anything is uploaded (G4-4), the token and the model lock are
+  // on the VM before the bootstrap reads them, and the bootstrap runs before anything asks the box to
+  // be healthy (G4-1). `runPackage` is what calls it in the app, so the dry run's colab half mirrors
+  // that order explicitly.
+  const lifecycle = readLog(fake.logPath).map((entry) => ({
+    command: String(entry.argv[0]),
+    script: entry.argv.includes("-f") ? basename(String(entry.argv[entry.argv.indexOf("-f") + 1])) : null,
+    remote: entry.argv[0] === "upload" ? String(entry.argv[4]) : null,
+  }));
+  const firstIndexOf = (predicate) => lifecycle.findIndex(predicate);
+  const dirsIndex = firstIndexOf((entry) => entry.script === "hf_token_dir.py");
+  const tokenUploadIndex = firstIndexOf((entry) => entry.command === "upload" && entry.remote === "/content/.hf/token");
+  const lockUploadIndex = firstIndexOf((entry) => entry.command === "upload" && String(entry.remote).endsWith("models.lock.json"));
+  const bootstrapIndex = firstIndexOf((entry) => entry.script === "bootstrap.py");
+  const healthIndex = firstIndexOf((entry) => entry.script === "health.py");
+  check.ok(
+    "H15-lifecycle-order",
+    `dirs@${dirsIndex} token@${tokenUploadIndex} lock@${lockUploadIndex} bootstrap@${bootstrapIndex} health@${healthIndex}`,
+    dirsIndex >= 0 &&
+      tokenUploadIndex > dirsIndex &&
+      lockUploadIndex > dirsIndex &&
+      bootstrapIndex > tokenUploadIndex &&
+      healthIndex > bootstrapIndex,
+  );
+  // and the runPackage half really went through the bootstrap (G4-1), rather than skipping to health
+  // BYO has no bootstrap step, so the phase list is a BYO fact; assert the *colab* half's own order
+  check.ok(
+    "H15-runPackage-bootstrap",
+    `BYO phases: ${phases.join(" -> ")} · colab execs: ${lifecycle
+      .filter((entry) => entry.script)
+      .map((entry) => entry.script)
+      .join(" -> ")}`,
+    !phases.includes("bootstrapped") &&
+      bootstrapIndex >= 0 &&
+      lifecycle.filter((entry) => entry.script === "bootstrap.py").length === 1 &&
+      lifecycle.findIndex((entry) => entry.script === "run_jobs.py") > bootstrapIndex,
   );
   check.ok(
     "H13-per-file",
