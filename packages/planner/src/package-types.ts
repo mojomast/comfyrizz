@@ -141,6 +141,8 @@ export interface ComfyrizzPackage {
   theme?: { palette?: string[]; font?: string; logo_asset?: string };
   datasets?: Record<string, unknown>;
   presenter?: Presenter;
+  /** K1: caption presentation (sentence default; 9:16 defaults to big-word when absent). */
+  captions?: { style?: 'sentence' | 'karaoke' | 'word-pop' | 'big-word' };
   [key: string]: unknown;
 }
 

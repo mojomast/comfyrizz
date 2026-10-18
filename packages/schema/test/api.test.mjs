@@ -138,3 +138,17 @@ test("SEMANTIC_CODES is exported and stable-sized", () => {
   assert.ok(Object.isFrozen(LAYOUTS));
   assert.ok(Object.isFrozen(GENERATED_OUTPUT_LICENSE));
 });
+
+test("K1: captions.style is a closed enum and absent by default", () => {
+  const doc = load("valid/minimal.json");
+  assert.equal(validatePackage(doc).valid, true, "a package with no captions block stays valid");
+  for (const style of ["sentence", "karaoke", "word-pop", "big-word"]) {
+    const withStyle = { ...doc, captions: { style } };
+    assert.equal(validatePackage(withStyle).valid, true, `${style} must validate`);
+  }
+  const bad = { ...doc, captions: { style: "shout" } };
+  const result = validatePackage(bad);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => /captions/.test(e.path)));
+  assert.equal(validatePackage({ ...doc, captions: { style: "sentence", extra: 1 } }).valid, false, "unknown caption keys are rejected");
+});

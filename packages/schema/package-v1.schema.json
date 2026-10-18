@@ -304,6 +304,9 @@
     "presenter": {
       "$ref": "#/$defs/presenter"
     },
+    "captions": {
+      "$ref": "#/$defs/packageCaptions"
+    },
     "renders": {
       "type": "array",
       "maxItems": 64,
@@ -512,6 +515,24 @@
         }
       },
       "description": "MS2: film-wide motion direction. Optional; a package without it renders as energy medium, direction left."
+    },
+    "packageCaptions": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "style": {
+          "type": "string",
+          "enum": [
+            "sentence",
+            "karaoke",
+            "word-pop",
+            "big-word"
+          ],
+          "default": "sentence",
+          "description": "K1: caption presentation. sentence is the default; when style is absent a 9:16 video defaults to big-word and everything else to sentence."
+        }
+      },
+      "description": "K1: caption presentation. Optional; absent means sentence, except a 9:16 video defaults to big-word."
     },
     "sceneMotion": {
       "type": "object",

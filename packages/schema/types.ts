@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 41151f03c2eb45d84c07e45348295cb59b87e374ecba49b0fe48ca682ffdadd3
+// Schema sha256: 3354298b9885deab1c6c7eaf17d224a67312b7c353e312c44fd67522604df008
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -99,6 +99,7 @@ export interface PackageV1 {
     };
   motion?: PackageMotion;
   presenter?: Presenter;
+  captions?: PackageCaptions;
   renders?: Array<{
     mode: "preview" | "draft" | "final";
     file: RelativePath;
@@ -174,6 +175,15 @@ export interface Presenter {
 export interface PackageMotion {
   energy?: MotionEnergy;
   direction?: MotionDirection;
+  }
+
+export interface PackageCaptions {
+  /**
+   * K1: caption presentation. sentence is the default; when style is absent a 9:16 video defaults to
+   * big-word and everything else to sentence.
+   * [default "sentence"]
+   */
+  style?: "sentence" | "karaoke" | "word-pop" | "big-word";
   }
 
 export interface SceneMotion {
