@@ -18,6 +18,14 @@ from .controlmaps import (
 )
 from .raster import RASTER_BACKEND, RasterError, rasterize, sanitize_svg
 from .sweeps import APPROACH_GEOMETRY, build_sweep_spec, estimate_units, write_sweep_spec
+from .prompts import (
+    PROMPTS_VERSION,
+    STATIC_ROLES,
+    asset_prompt,
+    build_asset_prompts,
+    element_boxes,
+    package_style_block,
+)
 from .templates import (
     TEMPLATES_VERSION,
     LAYOUT_ROLES,
@@ -44,6 +52,12 @@ from .workflows import (
 
 __all__ = [
     "APPROACHES",
+    "PROMPTS_VERSION",
+    "STATIC_ROLES",
+    "asset_prompt",
+    "build_asset_prompts",
+    "element_boxes",
+    "package_style_block",
     "CONTROLNET_STATUS",
     "CONTROL_MAP_KINDS",
     "LAYOUT_ROLES",
