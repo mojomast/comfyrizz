@@ -57,22 +57,20 @@ export const FINAL_HEIGHT = 1080;
 
 /**
  * A9: the x2 upscaled variant of a media asset, if the package declares one.
- * Field agreed with H12 on the board: `assets[<id>].variants.upscaled = { file, width, height }`
- * (a bare path string is also accepted). Only image/video assets are candidates.
+ * Field agreed with H12: `assets[<id>].variants.upscaled = { file, width, height }`.
+ * Only image/video assets are candidates; a missing or malformed variant returns null.
  */
 export function upscaledVariant(asset) {
   if (asset?.kind !== 'image' && asset?.kind !== 'video') return null;
-  const variant = asset?.variants?.upscaled ?? asset?.variants?.upscale ?? asset?.variants?.x2;
-  if (typeof variant === 'string' && variant.length > 0) return { file: variant };
-  if (variant && typeof variant === 'object' && typeof variant.file === 'string' && variant.file.length > 0) return variant;
-  return null;
+  const variant = asset?.variants?.upscaled;
+  if (!variant || typeof variant !== 'object' || typeof variant.file !== 'string' || variant.file.length === 0) return null;
+  return variant;
 }
 
 /**
  * A9: the final render prefers each media asset's upscaled file when this clone has it, and falls
- * back to the base file (A8 scales it with the real probed size) otherwise. `variants` is a
- * renderer extension until H12 adds it to the package schema, so this works on a clone and never
- * mutates the stored package.
+ * back to the base file (A8 scales it with the real probed size) otherwise. Runs on a clone and
+ * never mutates the stored package.
  */
 export function preferUpscaledAssets(pkg, packageDir) {
   const out = structuredClone(pkg);

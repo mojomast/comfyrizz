@@ -90,7 +90,9 @@ test('upscaledVariant / preferUpscaledAssets choose only existing media variants
   const { dir } = buildFixture();
   assert.equal(upscaledVariant({ kind: 'svg', variants: { upscaled: { file: 'x' } } }), null, 'only image/video assets have upscaled variants');
   assert.equal(upscaledVariant({ kind: 'image' }), null);
-  const pkg = { assets: { a_bg: { kind: 'image', file: 'assets/base.png', variants: { upscaled: { file: 'assets/up.png', width: 1920, height: 1080 } } }, a_gone: { kind: 'image', file: 'assets/base.png', variants: { upscaled: 'assets/missing.png' } } } };
+  assert.equal(upscaledVariant({ kind: 'image', variants: { upscaled: 'assets/x.png' } }), null, 'a bare string is not a variant object');
+  assert.equal(upscaledVariant({ kind: 'image', variants: { upscaled: { file: '' } } }), null);
+  const pkg = { assets: { a_bg: { kind: 'image', file: 'assets/base.png', variants: { upscaled: { file: 'assets/up.png', width: 1920, height: 1080 } } }, a_gone: { kind: 'image', file: 'assets/base.png', variants: { upscaled: { file: 'assets/missing.png', width: 1920, height: 1080 } } } } };
   const { pkg: resolved, used } = preferUpscaledAssets(pkg, dir);
   assert.deepEqual(used, [{ id: 'a_bg', file: 'assets/up.png', base: 'assets/base.png', width: 1920, height: 1080 }]);
   assert.equal(resolved.assets.a_bg.file, 'assets/up.png');
