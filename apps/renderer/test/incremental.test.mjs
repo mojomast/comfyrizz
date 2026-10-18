@@ -36,6 +36,19 @@ test('planSegments splits the timeline into contiguous per-scene segments', () =
   assert.deepEqual(again.map(segment => segment.key), segments.map(segment => segment.key), 'keys are stable');
 });
 
+test('P-pres: a presenter change invalidates exactly the segment that draws it', () => {
+  const withPresenter = structuredClone(pkg);
+  withPresenter.presenter = { enabled: true, portrait: 'a_portrait', scenes: ['s_outro'] };
+  withPresenter.assets = { ...(withPresenter.assets ?? {}), a_portrait: { kind: 'image', origin: 'generated', status: 'ready', file: 'assets/portrait.png' } };
+  const base = planSegments(withPresenter, compileTimeline(withPresenter), { generatedAssets });
+  const moved = structuredClone(withPresenter);
+  moved.presenter.placement = 'pip-bl';
+  const next = planSegments(moved, compileTimeline(moved), { generatedAssets });
+  assert.notEqual(next[2].key, base[2].key, 'the covered scene re-renders');
+  assert.equal(next[0].key, base[0].key, 'the scene before it still reuses');
+  assert.equal(next[1].key, base[1].key, 'the fading scene before it still reuses');
+});
+
 test('mergeScenes keeps committed timing but takes current package content', () => {
   const edited = structuredClone(pkg);
   edited.scenes[1].copy.headline = 'Fresh headline';

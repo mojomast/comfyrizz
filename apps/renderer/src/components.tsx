@@ -1,27 +1,16 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { useState } from 'react';
 import { AbsoluteFill, Img, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
-import { GENERATED_ASSETS } from './generated-assets';
+import { useGeneratedAssets, type InlineAsset } from './generated-assets-context';
 
-/** SVG markup resolved at render time for agent-built packages (C5). */
-export interface InlineAsset {
-  kind: string;
-  svg: string;
-  width?: number;
-  height?: number;
-  sanitizerVersion?: string;
-}
-
-const GeneratedAssetsContext = createContext<Record<string, InlineAsset>>(GENERATED_ASSETS as unknown as Record<string, InlineAsset>);
-
-export function GeneratedAssetsProvider({ assets, children }: { assets: Record<string, InlineAsset>; children: React.ReactNode }) {
-  return <GeneratedAssetsContext.Provider value={assets}>{children}</GeneratedAssetsContext.Provider>;
-}
+export { GeneratedAssetsProvider, type InlineAsset } from './generated-assets-context';
 import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, palette, textColors, useFontFamily } from './theme';
 import { proceduralStyle } from './background-model.js';
 import { statLines } from './stat-model.js';
 import { chartSeries } from './chart-model.js';
 import { LowerThird, MediaFill, MediaPanel, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
+import { PresenterClip } from './presenter';
+import { PRESENTER_LABEL_DEFAULT, presenterAssetId } from './presenter-model.js';
 import { STAGGER_SECONDS, countUp, fadeUp, maskRise, pop, prog, staggerFrames } from './motion/primitives.js';
 import { energyProfile } from './motion/index.js';
 import { highlightSweep, canDrawOn, drawOnSvg, splitHighlight, waterfallEntry, waterfallPlan } from './motion/kinetic.js';
@@ -136,7 +125,7 @@ function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media
  * ------------------------------------------------------------------ */
 
 function VectorAsset({ assetId, frame, entry }: { assetId: string; frame: number; entry?: string }) {
-  const assets = useContext(GeneratedAssetsContext);
+  const assets = useGeneratedAssets();
   const { fps } = useVideoConfig();
   const asset = assets[assetId];
   if (!asset) return null;
@@ -433,13 +422,17 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
 function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
   const family = useFontFamily();
   const text = textColors(pkg);
-  const { width: frameWidth, height: frameHeight, fps } = useVideoConfig();
+  const colors = palette(pkg);
+  const { width: frameWidth, height: frameHeight, fps, durationInFrames: sceneFrames } = useVideoConfig();
   // L1 re-layout: a split hero stacks (copy on top, media below) in portrait
   // instead of cropping, matching textZones('9:16', 'hero-split').
   const portrait = frameHeight > frameWidth;
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const split = scene.variant !== 'full-bleed';
   const stacked = split && portrait;
+  // P-pres: scene.presenter 'split' draws the presenter card left 40% and the copy right.
+  const presenterSplit = scene.presenter === 'split' && pkg.presenter?.enabled === true;
+  const presenterId = presenterSplit ? presenterAssetId(scene, pkg) : null;
   const body = fadeUp({ frame, fps, delay: 12, duration: 22 });
   return (
     <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
@@ -458,7 +451,23 @@ function HeroLayout({ scene, pkg, frame, media }: LayoutProps) {
           justifyContent: split ? 'flex-start' : 'center',
         }}
       >
-        <div style={{ flex: split ? (stacked ? '0 0 auto' : '0 0 52%') : '1 1 auto', maxWidth: split ? (stacked ? '100%' : 900) : 1400, display: 'flex', flexDirection: 'column', gap: 24, textAlign: split ? 'left' : 'center' }}>
+        {presenterSplit && presenterId ? (
+          <div
+            style={{
+              flex: stacked ? '0 0 auto' : '0 0 38%',
+              width: stacked ? '58%' : undefined,
+              maxHeight: stacked ? undefined : '72%',
+              aspectRatio: '1 / 1',
+              position: 'relative',
+              borderRadius: 28,
+              overflow: 'hidden',
+              boxShadow: `0 0 0 3px ${colors[2]}, 0 30px 80px rgba(0,0,0,0.45)`,
+            }}
+          >
+            <PresenterClip assetId={presenterId} label={pkg.presenter?.label ?? PRESENTER_LABEL_DEFAULT} pkg={pkg} frames={sceneFrames} fontSize={24} />
+          </div>
+        ) : null}
+        <div style={{ flex: presenterSplit ? '1 1 auto' : split ? (stacked ? '0 0 auto' : '0 0 52%') : '1 1 auto', maxWidth: split ? (stacked ? '100%' : 900) : 1400, display: 'flex', flexDirection: 'column', gap: 24, textAlign: split ? 'left' : 'center' }}>
           <Kicker text={copy.kicker} />
           <AnimatedHeadline scene={scene} pkg={pkg} frame={frame} text={copy.headline} delay={2} duration={22} style={{ fontSize: TYPE_SCALE.headlineLg, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.05 }} />
           {copy.sub ? <div style={{ fontSize: 30, color: text.muted }}>{copy.sub}</div> : null}

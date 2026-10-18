@@ -7,6 +7,8 @@ import { useVideoConfig } from 'remotion';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import type { Timeline, TimelineCaption } from '../../../packages/planner/dist/src/index.js';
 import { GeneratedAssetsProvider, SceneView, type InlineAsset } from './components';
+import { PresenterOverlay } from './presenter';
+import type { TimelinePresenter } from '../../../packages/planner/dist/src/index.js';
 import { mergeScenes } from './timeline-model.js';
 import { presentationFor } from './motion/presentations';
 import type { MediaSidecar } from './media';
@@ -26,6 +28,7 @@ export function TimelinePlayer({
   timeline,
   scenes,
   captions,
+  presenters,
   generatedAssets,
   media,
   missingMedia,
@@ -35,6 +38,7 @@ export function TimelinePlayer({
   timeline: Timeline;
   scenes?: Scene[];
   captions?: TimelineCaption[];
+  presenters?: TimelinePresenter[];
   generatedAssets?: Record<string, InlineAsset>;
   media?: MediaSidecar;
   missingMedia?: string[];
@@ -73,6 +77,8 @@ export function TimelinePlayer({
   const series = (
     <FontFamilyContext.Provider value={fontFamily}>
       <TransitionSeries>{children}</TransitionSeries>
+      {/* P-pres: presenter above the scene stack, captions (z 100) above both. */}
+      <PresenterOverlay presenters={presenters ?? timeline.presenters} pkg={pkg} />
       {captions && <CaptionOverlay captions={captions} />}
     </FontFamilyContext.Provider>
   );

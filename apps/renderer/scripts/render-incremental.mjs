@@ -78,7 +78,12 @@ export function planSegments(pkg, timeline, { generatedAssets = {}, media, compo
     // A fade after this scene draws the next scene too, so it is part of this segment.
     const affected = [scene];
     if (next && (scene.transitionOutFrames ?? 0) > 0) affected.push(next);
-    const ids = referencedAssetIds(affected, timeline);
+    // P-pres: a presenter clip is drawn over the scene by the overlay layer, so its asset and
+    // placement are part of this segment's frames.
+    const presenters = (timeline.presenters ?? []).filter(
+      entry => entry.from <= end && entry.from + entry.durationInFrames - 1 >= start,
+    );
+    const ids = [...new Set([...referencedAssetIds(affected, timeline), ...presenters.map(entry => entry.assetId)])].sort();
     const assets = ids.map(id => ({ id, vector: generatedAssets[id] ?? null, asset: pkg.assets?.[id] ?? null }));
     const captions = (timeline.captions ?? []).filter(cue => cue.to > start && cue.from <= end);
     // A chart/stat layout reads its numbers from `pkg.datasets` at render time, so the dataset a
@@ -107,6 +112,7 @@ export function planSegments(pkg, timeline, { generatedAssets = {}, media, compo
       scenes: affected,
       assets,
       datasets,
+      presenters,
       captions,
       media: mediaInputs,
       missing: missingMedia.map(item => item.file),
