@@ -15,6 +15,16 @@ import {
   FLEXIBLE_CEILING_FRAMES,
   pathProblem,
 } from "./semantic.mjs";
+import {
+  lintMotion,
+  applyMotionFixes,
+  autofixMotion,
+  MOTION_VOCABULARY,
+  MOTION_LINT_CODES,
+  TRANSITIONS,
+  ENERGY_TRANSITIONS,
+  MOTION_DEFAULTS,
+} from "./motion.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const SCHEMA_PATH = join(here, "..", "package-v1.schema.json");
@@ -58,15 +68,17 @@ export function schemaErrors(doc) {
 
 /**
  * Validate a package document.
- * Returns { valid, schemaOk, errors, warnings, semantic } - errors merge structural
- * (ajv) and semantic findings, each tagged with `source`.
+ * Returns { valid, schemaOk, errors, warnings, semantic, motion } - errors merge structural
+ * (ajv) and semantic findings, each tagged with `source`. `motion` is the advisory
+ * lintMotion() report (MS2); it never changes `valid`.
  */
 export function validatePackage(doc, { defaults = false } = {}) {
   const document = defaults ? applyDefaults(doc, loadSchema()) : doc;
   const schema = schemaErrors(document);
   const { errors: sem, warnings } = semanticCheck(document);
   const errors = [...schema, ...sem].sort((a, b) => (a.path === b.path ? a.code.localeCompare(b.code) : a.path.localeCompare(b.path)));
-  return { valid: errors.length === 0, schemaOk: schema.length === 0, errors, warnings, semantic: sem, document };
+  const motion = lintMotion(document);
+  return { valid: errors.length === 0, schemaOk: schema.length === 0, errors, warnings, semantic: sem, motion, document };
 }
 
 export function parse(text) {
@@ -117,4 +129,12 @@ export {
   MODEL_LICENSES,
   FLEXIBLE_CEILING_FRAMES,
   pathProblem,
+  lintMotion,
+  applyMotionFixes,
+  autofixMotion,
+  MOTION_VOCABULARY,
+  MOTION_LINT_CODES,
+  TRANSITIONS,
+  ENERGY_TRANSITIONS,
+  MOTION_DEFAULTS,
 };

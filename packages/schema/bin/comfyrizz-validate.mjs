@@ -74,6 +74,7 @@ for (const file of files) {
     schemaOk: result.schemaOk,
     errors: result.errors,
     warnings: result.warnings,
+    motion: result.motion,
   });
   if (!result.valid) failed = true;
 }
@@ -87,6 +88,10 @@ if (asJson) {
     console.log(`${status}  ${report.file}${kind}`);
     for (const err of report.errors) console.log(`  error  ${err.code} ${err.path} - ${err.message}`);
     for (const warn of report.warnings) console.log(`  warn   ${warn.code} ${warn.path} - ${warn.message}`);
+    // MS2: advisory motion lint (never changes the verdict); info findings only in --json.
+    for (const item of report.motion || []) {
+      if (item.severity !== "info") console.log(`  motion ${item.severity} ${item.code} ${item.path} - ${item.message}${item.autofix ? " [autofix]" : ""}`);
+    }
   }
 }
 process.exit(failed ? 1 : 0);
