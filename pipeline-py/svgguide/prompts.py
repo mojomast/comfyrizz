@@ -14,7 +14,9 @@ Two rules it will not break:
 
 from __future__ import annotations
 
+import copy
 import re
+import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
@@ -312,6 +314,30 @@ def build_asset_prompts(package: dict, *, elements=None, frame=None, package_dir
         for asset_id, asset in (package.get("assets") or {}).items()
     }
 
+def install_prompts(package: dict, prompts: dict) -> dict:
+    """A copy of the package with each asset's prompt in `gen.inputs.prompt`, where the planner reads it.
+
+    The planner takes an asset's base prompt from its `gen.inputs.prompt` and appends its own guards
+    (the framing sentence for a static role, for instance), so this is the one place a template has to
+    land for a job to carry it. An asset the builder could not place is left exactly as it was.
+    """
+    written = copy.deepcopy(package)
+    for asset_id, entry in prompts.items():
+        text = entry.get("text")
+        asset = (written.get("assets") or {}).get(asset_id)
+        if not text or not isinstance(asset, dict):
+            continue
+        gen = asset.setdefault("gen", {})
+        inputs = gen.setdefault("inputs", {})
+        inputs["prompt"] = text
+        inputs["promptTemplate"] = entry.get("templateId")
+        inputs["promptTemplateVersion"] = entry.get("templateVersion")
+        inputs["promptStyleBlock"] = entry.get("styleBlock")
+        if entry.get("framingLock"):
+            inputs["framingLock"] = True
+    return written
+
+
 def main(argv: list[str] | None = None) -> int:
     """`python -m svgguide.prompts --package <package.json> [--package-dir <dir>] [--json]`.
 
@@ -326,6 +352,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--package", required=True, help="the package to build prompts for")
     parser.add_argument("--package-dir", default=None, help="where its relative asset paths resolve (default: the package's own directory)")
     parser.add_argument("--json", action="store_true", help="print the full result as JSON")
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="write a copy of the package with each asset's prompt installed at gen.inputs.prompt (never in place)",
+    )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(argv)
 
@@ -334,9 +365,20 @@ def main(argv: list[str] | None = None) -> int:
     package_dir = Path(args.package_dir) if args.package_dir else package_path.parent
     prompts = build_asset_prompts(document, package_dir=package_dir)
 
+    if args.out:
+        target = Path(args.out)
+        if target.resolve() == package_path.resolve():
+            print("--out must be a different file: this never rewrites the package it was given", file=sys.stderr)
+            return 2
+        written = install_prompts(document, prompts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(written, indent=1) + "\n", encoding="utf-8")
+        if not args.quiet:
+            print(f"{target}: installed {sum(1 for entry in prompts.values() if entry.get('text'))} prompt(s)")
+
     if args.json:
         print(json.dumps(prompts, indent=1))
-    elif not args.quiet:
+    elif not args.quiet and not args.out:
         for asset_id, entry in prompts.items():
             first_line = (entry.get("text") or "").split(".")[0]
             print(f"{asset_id}: {entry.get('templateId') or 'none'} - {first_line[:100]}")

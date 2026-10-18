@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from svgguide import STATIC_ROLES, build_asset_prompts, element_boxes
-from svgguide.prompts import main as prompts_main
+from svgguide.prompts import install_prompts, main as prompts_main
 from svgguide.templates import FRAMING_LOCK, MOTION_ROLES, REF_EDIT_ROLES
 
 REPO = Path(__file__).resolve().parents[2]
@@ -175,3 +175,42 @@ def test_the_prompts_entry_point_prints_them_and_reports_an_asset_it_cannot_plac
     poor = tmp_path / "poor.json"
     poor.write_text(json.dumps(package(assets={"a_mystery": {"kind": "mesh", "gen": {"role": "not-a-role"}}})), encoding="utf-8")
     assert prompts_main(["--package", str(poor), "--quiet"]) == 1
+
+
+def test_installing_the_prompts_puts_them_where_the_planner_looks(tmp_path: Path) -> None:
+    """`assets.<id>.gen.inputs.prompt` is the base prompt the planner carries (N1's channel)."""
+    doc = package(
+        assets={
+            "a_diagram": {"kind": "svg", "gen": {"role": "diagram", "inputs": {"seed": 4}}, "file": "assets/a_diagram.svg"},
+            "a_plate": {"kind": "video", "gen": {"role": "diagram", "motion": True}},
+        }
+    )
+    prompts = build_asset_prompts(doc)
+    written = install_prompts(doc, prompts)
+
+    diagram = written["assets"]["a_diagram"]["gen"]["inputs"]
+    assert diagram["prompt"] == prompts["a_diagram"]["text"]
+    assert diagram["promptTemplate"].startswith("ref-edit/")
+    assert diagram["promptStyleBlock"] == prompts["a_diagram"]["styleBlock"]
+    assert diagram["seed"] == 4, "what was there stays there"
+
+    plate = written["assets"]["a_plate"]["gen"]["inputs"]
+    assert plate["prompt"] == prompts["a_plate"]["text"]
+    assert plate["framingLock"] is True, "a static role says so, in the package too"
+
+    # the source document is untouched: the write is a copy
+    assert "gen" not in doc["assets"]["a_plate"] or "prompt" not in doc["assets"]["a_plate"].get("gen", {}).get("inputs", {})
+
+
+def test_the_write_mode_refuses_to_rewrite_the_package_it_was_given(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "package.json"
+    path.write_text(json.dumps(package(assets={"a_icon": {"kind": "svg", "gen": {"role": "diagram"}}})), encoding="utf-8")
+
+    assert prompts_main(["--package", str(path), "--out", str(path), "--quiet"]) == 2
+    assert "never rewrites" in capsys.readouterr().err
+
+    target = tmp_path / "with-prompts.json"
+    assert prompts_main(["--package", str(path), "--out", str(target), "--quiet"]) == 0
+    written = json.loads(target.read_text(encoding="utf-8"))
+    assert written["assets"]["a_icon"]["gen"]["inputs"]["prompt"]
+    assert json.loads(path.read_text(encoding="utf-8"))["assets"]["a_icon"]["gen"].get("inputs") is None, "the original is untouched"
