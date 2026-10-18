@@ -804,6 +804,7 @@ export function createApp({
         presenter: result.package.presenter ?? null,
         findings: result.findings ?? [],
         portrait_prompt: result.portrait_prompt ?? null,
+        presenters: compileTimeline(result.package).presenters ?? [],
         package: result.package,
       });
     }

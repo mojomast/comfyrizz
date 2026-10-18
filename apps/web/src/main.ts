@@ -221,9 +221,28 @@ function markDirty(reason: string): void {
   updatePreview(pkg, timeline, generatedAssets);
 }
 
+/** C-pres: the storyboard's presenter toolbar (coverage + quick presets + placement + label). */
+function presenterBar(): string {
+  const presenter = (pkg.presenter ?? {}) as { enabled?: boolean; scenes?: unknown; placement?: string; label?: string };
+  const coverage = presenter.enabled !== true ? 'none' : presenter.scenes === 'all' ? 'all' : 'bookends';
+  const placement = presenter.placement ?? 'pip-br';
+  const labelOn = presenter.label !== '';
+  const coverageButtons = WEB_PRESENTER_COVERAGES.map(option => `<button type="button" data-presenter-coverage="${option.id}" class="${option.id === coverage ? 'selected' : ''}" title="${esc(option.hint)}">${esc(option.label)}</button>`).join('');
+  const presetButtons = WEB_PRESENTER_PRESETS.map(option => `<button type="button" data-presenter-preset="${option.id}" class="preset-small" title="Rewrite every scene's presenter value">${esc(option.label)}</button>`).join('');
+  const placementOptions = WEB_PRESENTER_PLACEMENTS.map(value => `<option value="${value}"${value === placement ? ' selected' : ''}>${esc(value)}</option>`).join('');
+  return `<div class="presenter-bar">
+    <span class="label">AI presenter</span>
+    <div class="presenter-chips">${coverageButtons}</div>
+    <span class="hint">quick:</span><div class="presenter-chips">${presetButtons}</div>
+    <label>Placement <select data-presenter-placement>${placementOptions}</select></label>
+    <label class="toggle"><input type="checkbox" data-presenter-label${labelOn ? ' checked' : ''} /> “AI presenter” label</label>
+    <span class="hint">${presenter.enabled === true ? `on · ${coverage}` : 'off by default'}</span>
+  </div>`;
+}
+
 function renderStoryboard(): void {
   const host = $('storyboard');
-  host.innerHTML = pkg.scenes
+  host.innerHTML = presenterBar() + pkg.scenes
     .map((scene, index) => {
       const copy = (scene.copy ?? {}) as Record<string, unknown>;
       const datasetId = (scene.data as { dataset?: string } | undefined)?.dataset;
@@ -244,6 +263,13 @@ function renderStoryboard(): void {
         <label>Sub / body</label>
         <input type="text" data-scene="${esc(scene.id)}" data-field="${scene.layout === 'hero' ? 'body' : 'sub'}" value="${esc(copy[scene.layout === 'hero' ? 'body' : 'sub'] ?? '')}" placeholder="Add supporting copy…" maxlength="240" />
         ${chart}
+        <label>Presenter</label>
+        <select data-presenter-scene="${esc(scene.id)}">
+          <option value=""${!scene.presenter ? ' selected' : ''}>default</option>
+          <option value="off"${scene.presenter === 'off' ? ' selected' : ''}>off</option>
+          <option value="pip"${scene.presenter === 'pip' ? ' selected' : ''}>pip</option>
+          <option value="split"${scene.presenter === 'split' ? ' selected' : ''}>split (hero only)</option>
+        </select>
         <div class="scene-actions">
           <button type="button" data-scene-action="rerender" data-scene="${esc(scene.id)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${sceneState.rendering === scene.id ? 'Re-rendering…' : 'Re-render scene'}</button>
           <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Regenerate media</button>
@@ -294,6 +320,24 @@ function renderStoryboard(): void {
       else void planSceneMedia(sceneId);
     });
   });
+  // C-pres: the presenter toolbar + the per-scene value. Every change saves a revision;
+  // the presenter is opt-in and clips are planned, never run.
+  host.querySelectorAll<HTMLSelectElement>('select[data-presenter-scene]').forEach(select => {
+    select.addEventListener('change', () => {
+      const sceneId = select.dataset.presenterScene!;
+      void applyPresenterFlow({ scenes: { [sceneId]: select.value || null } }, `${sceneId} → ${select.value || 'default'}`);
+    });
+  });
+  host.querySelectorAll<HTMLButtonElement>('button[data-presenter-coverage]').forEach(button => {
+    button.addEventListener('click', () => void applyPresenterFlow({ coverage: button.dataset.presenterCoverage }, `coverage ${button.dataset.presenterCoverage}`));
+  });
+  host.querySelectorAll<HTMLButtonElement>('button[data-presenter-preset]').forEach(button => {
+    button.addEventListener('click', () => void applyPresenterFlow({ preset: button.dataset.presenterPreset }, `preset ${button.dataset.presenterPreset}`));
+  });
+  const placement = host.querySelector<HTMLSelectElement>('select[data-presenter-placement]');
+  placement?.addEventListener('change', () => void applyPresenterFlow({ placement: placement.value }, `placement ${placement.value}`));
+  const labelToggle = host.querySelector<HTMLInputElement>('input[data-presenter-label]');
+  labelToggle?.addEventListener('change', () => void applyPresenterFlow({ label: labelToggle.checked ? 'AI presenter' : '' }, labelToggle.checked ? 'AI label on' : 'AI label off'));
 }
 
 function renderPalette(): void {
@@ -758,6 +802,39 @@ async function applySceneChipFlow(sceneId: string, chip: string): Promise<void> 
   }
 }
 
+/** C-pres: apply a presenter change (coverage, a per-scene value, placement, label) and refresh. */
+async function applyPresenterFlow(args: Record<string, unknown>, note: string): Promise<void> {
+  logActivity(`Presenter: ${note} (opt-in; clips are planned, not run)`);
+  try {
+    const body = await persistDraft();
+    const response = await apiFetch('/api/presenter/set', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, ...args }),
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      summary?: string;
+      package?: PackageV1;
+      revision?: number;
+      presenters?: Timeline['presenters'];
+      findings?: Array<{ code: string; message: string }>;
+    };
+    if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+    if (result.package) {
+      pkg = result.package;
+      if (result.revision != null) pkg.revision = result.revision;
+      timeline.presenters = result.presenters ?? [];
+      updatePreview(pkg, timeline, generatedAssets);
+      renderStoryboard();
+    }
+    const fix = (result.findings ?? []).find(finding => finding.code === 'PRESENTER_ON_READ_ONLY_SCENE');
+    logActivity(`Presenter: ${result.summary ?? note}${fix ? ` — ${fix.message}` : ''}`);
+  } catch (error) {
+    logActivity(`Presenter change failed: ${(error as Error).message}`);
+  }
+}
+
 /** C11: plan a scene's generated assets as a dry run (nothing is sent to Google Colab). */async function planSceneMedia(sceneId: string): Promise<void> {
   logActivity(`Scene media plan requested: ${sceneId} (dry run, nothing is sent to Google Colab)`);
   try {
@@ -896,6 +973,7 @@ function briefToPrompt(brief: Record<string, unknown>): string {
     style.preset ? `Look: ${style.preset}${style.palette?.length ? ` (palette ${style.palette.join(' ')})` : ''}.` : '',
     voice.persona ? `Narration (${voice.engine ?? 'kokoro'}): ${voice.persona}.` : 'No narration.',
     music.enabled ? `Music: ${music.mood ?? 'instrumental bed'}.` : 'No music.',
+    brief.presenter && brief.presenter !== 'none' ? `Presenter: ${brief.presenter === 'all' ? 'every scene' : 'intro and outro'} (opt-in).` : '',
     brief.cta ? `End with: ${brief.cta}.` : '',
     mustInclude.length ? `Must include: ${mustInclude.join(', ')}.` : '',
     avoid.length ? `Avoid: ${avoid.join(', ')}.` : '',
@@ -911,6 +989,18 @@ const WEB_SCENE_CHIPS: { id: string; label: string; hint: string }[] = [
   { id: 'more-depth', label: 'More depth', hint: 'Parallax + z on the overlay' },
   { id: 'less-busy', label: 'Less busy', hint: 'Trim bullets and overlays' },
 ];
+// C-pres: the presenter controls, kept in sync with packages/agent presenter.ts.
+const WEB_PRESENTER_COVERAGES: { id: string; label: string; hint: string }[] = [
+  { id: 'none', label: 'None', hint: 'Off by default — most videos have none' },
+  { id: 'bookends', label: 'Intro + outro', hint: 'Show the presenter on the first and last scene' },
+  { id: 'all', label: 'All scenes', hint: 'Show the presenter on every scene' },
+];
+const WEB_PRESENTER_PRESETS: { id: string; label: string }[] = [
+  { id: 'intro-outro', label: 'Intro/outro' },
+  { id: 'all', label: 'All scenes' },
+  { id: 'none', label: 'None' },
+];
+const WEB_PRESENTER_PLACEMENTS = ['pip-br', 'pip-bl', 'pip-bc', 'split-left'];
 
 /** Read a dotted path (`audience.who`) out of the brief as a string. */
 function briefValue(brief: Record<string, unknown>, path: string): string {
@@ -975,6 +1065,11 @@ function renderBriefCard(panel: HTMLElement): void {
     ? briefState.presets
     : presetIds.map(id => ({ id, label: id, palette: [], font: '', attributes: '', thumbnail: '' }));
   const presetPicker = `<div class="brief-presets">${presetCards.map(card => `<button type="button" class="preset ${card.id === currentPreset ? 'selected' : ''}" data-brief-preset="${esc(card.id)}" title="${esc(card.attributes)}">${card.thumbnail}<span>${esc(card.label)}</span></button>`).join('')}<select data-brief-field="style.preset" hidden>${presetIds.map(id => `<option value="${esc(id)}" ${id === currentPreset ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></div>`;
+  // C-pres: the presenter chip (off by default). Writes brief.presenter; the build maps it to
+  // package.presenter coverage. Per-scene overrides stay on the storyboard.
+  const presenterOptions: [string, string][] = [['none', 'No presenter (default)'], ['bookends', 'Intro + outro'], ['all', 'All scenes']];
+  const currentPresenter = briefValue(brief, 'presenter') || 'none';
+  const presenterPicker = `<label>Presenter<select data-brief-field="presenter">${presenterOptions.map(([value, label]) => `<option value="${value}"${value === currentPresenter ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
   const beats = (outline?.beats ?? []).map(beat =>
     `<li class="${beat.placeholder ? 'placeholder' : ''}"><span class="role">${esc(beat.role)}</span><strong>${esc(beat.headline)}</strong><span class="narration">${esc(beat.narration)}</span><span class="secs">${beat.seconds.toFixed(1)} s</span></li>`,
   ).join('');
@@ -983,7 +1078,7 @@ function renderBriefCard(panel: HTMLElement): void {
     : 'outline unavailable';
   const notes = (outline?.notes ?? []).map(note => `<li>${esc(note)}</li>`).join('');
   panel.innerHTML = `<div class="brief-head">Brief · edit anything, then build.</div>
-    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${field('voice.persona', 'Narration')}${presetPicker}${brandCard()}</div>
+    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${field('voice.persona', 'Narration')}${presenterPicker}${presetPicker}${brandCard()}</div>
     <ol class="brief-outline">${beats}</ol>
     <div class="brief-actions"><span class="hint">${esc(summary)}</span><button type="button" id="brief-refresh" ${briefState.busy ? 'disabled' : ''}>Update outline</button><button type="button" id="brief-build" ${briefState.busy ? 'disabled' : ''}>Build video</button></div>
     ${notes ? `<ul class="brief-notes">${notes}</ul>` : ''}`;
