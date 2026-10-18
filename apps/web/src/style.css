@@ -108,6 +108,10 @@ main {
 .scene-card input[type="text"] { width: 100%; }
 .chart-values { display: grid; grid-template-columns: 1fr 90px; gap: 6px 8px; align-items: center; }
 .chart-values span { font-size: 12px; color: var(--muted); }
+.scene-actions { display: flex; gap: 6px; margin-top: 10px; }
+.scene-actions button { font-size: 11px; padding: 4px 8px; }
+.scene-log { margin-top: 6px; font-size: 10px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.scene-plan .event { font-size: 12px; }
 .palette { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .palette input[type="color"] { width: 44px; height: 32px; padding: 2px; background: transparent; }
 .palette .hint { margin-left: auto; }

@@ -75,6 +75,26 @@ const exportState = {
   label: '',
 };
 
+// C11: per-scene re-render + regenerate-media state, shown on each storyboard card and
+// in the spend card's dry-run section.
+type ScenePlanJob = { id: string; kind: string; asset: string; scene?: string | null };
+type ScenePlan = {
+  sceneId: string;
+  assets: string[];
+  jobs: number;
+  jobsDoc: { jobs: ScenePlanJob[] };
+  skipped?: Array<{ asset: string; reason: string }>;
+  dryRun: boolean;
+  metered: boolean;
+  error?: string;
+};
+const sceneState = {
+  rendering: null as string | null,
+  log: [] as string[],
+  plan: null as ScenePlan | null,
+  planError: '',
+};
+
 function logActivity(text: string): void {
   state.activity.unshift({ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), text });
   renderActivity();
@@ -148,6 +168,11 @@ function renderStoryboard(): void {
         <label>Sub / body</label>
         <input type="text" data-scene="${esc(scene.id)}" data-field="${scene.layout === 'hero' ? 'body' : 'sub'}" value="${esc(copy[scene.layout === 'hero' ? 'body' : 'sub'] ?? '')}" placeholder="Add supporting copy…" maxlength="240" />
         ${chart}
+        <div class="scene-actions">
+          <button type="button" data-scene-action="rerender" data-scene="${esc(scene.id)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${sceneState.rendering === scene.id ? 'Re-rendering…' : 'Re-render scene'}</button>
+          <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Regenerate media</button>
+        </div>
+        ${sceneState.rendering === scene.id && sceneState.log.length > 0 ? `<div class="scene-log">${sceneState.log.slice(-2).map(line => `<div>${esc(line)}</div>`).join('')}</div>` : ''}
       </div>`;
     })
     .join('');
@@ -171,16 +196,24 @@ function renderStoryboard(): void {
       markDirty(`chart.${dataset.values[index].label}`);
     });
   });
-  // Click a card (but not while editing a field) to jump the Player to that scene.
+  // Click a card (but not while editing a field or pressing a per-scene action) to jump the Player to that scene.
   host.querySelectorAll<HTMLElement>('.scene-card').forEach(card => {
     card.addEventListener('click', event => {
-      if ((event.target as HTMLElement).closest('input, label')) return;
+      if ((event.target as HTMLElement).closest('input, label, button')) return;
       const sceneId = card.dataset.sceneId;
       const scene = timeline.scenes.find(item => item.id === sceneId);
       if (!scene) return;
       player?.seekTo(scene.from);
       for (const other of host.querySelectorAll('.scene-card')) other.classList.toggle('active', other === card);
       card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  });
+  host.querySelectorAll<HTMLButtonElement>('button[data-scene-action]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const sceneId = button.dataset.scene!;
+      if (button.dataset.sceneAction === 'rerender') void reRenderScene(sceneId);
+      else void planSceneMedia(sceneId);
     });
   });
 }
@@ -389,26 +422,42 @@ async function exportBundle(): Promise<void> {
 
 function renderSpendCard(): void {
   const host = $('spend-card');
-  const spend = runState.spend;
-  if (!spend) {
-    host.innerHTML = '';
-    return;
+  const blocks: string[] = [];
+  const plan = sceneState.plan;
+  if (sceneState.planError) {
+    blocks.push(`<div class="spend-card scene-plan"><b>Scene media plan failed</b><p class="hint">${esc(sceneState.planError)}</p></div>`);
+  } else if (plan) {
+    const jobs = plan.jobsDoc?.jobs ?? [];
+    const rows = jobs.length
+      ? jobs.map(job => `<div class="event"><b>${esc(job.id)}</b> ${esc(job.kind)} · ${esc(job.asset)}</div>`).join('')
+      : '<div class="empty">This scene has no generated media to plan.</div>';
+    const skipped = (plan.skipped ?? []).map(item => `<div class="event">skipped <b>${esc(item.asset)}</b> — ${esc(item.reason)}</div>`).join('');
+    blocks.push(`<div class="spend-card scene-plan"><b>Regenerate media · ${esc(plan.sceneId)}</b>
+      <p class="hint">${plan.jobs} job(s) for ${esc(plan.assets.join(', ') || 'no assets')} · dry run, nothing is sent to Google Colab</p>
+      ${rows}${skipped}</div>`);
   }
-  const estimate = spend.estimate as { gpuMinutes?: number; overheadMinutes?: number };
-  const budget = spend.budget as { required?: number; budget?: number; message?: string };
-  const label = spend.backendId === 'colab' ? 'Google Colab G4' : 'Your own ComfyUI';
-  host.innerHTML = `<div class="spend-card">
-    <b>Start ${esc(label)}?</b>
-    <p>${esc(String(estimate.gpuMinutes ?? '?'))} GPU min + ${esc(String(estimate.overheadMinutes ?? 0))} min setup · ${esc(String(budget.required ?? '?'))} of ${esc(String(budget.budget ?? '?'))} units (estimate)</p>
-    <p class="hint">${esc(budget.message ?? '')} Google Colab spend is an account-level estimate.</p>
-    <div class="spend-actions"><button id="spend-start" class="primary">Start</button><button id="spend-cancel">Cancel</button></div>
-  </div>`;
-  $('spend-start').addEventListener('click', () => void runOnBackend(true));
-  $('spend-cancel').addEventListener('click', () => {
-    runState.spend = null;
-    renderSpendCard();
-    logActivity('Spend card cancelled');
-  });
+  const spend = runState.spend;
+  if (spend) {
+    const estimate = spend.estimate as { gpuMinutes?: number; overheadMinutes?: number };
+    const budget = spend.budget as { required?: number; budget?: number; message?: string };
+    const label = spend.backendId === 'colab' ? 'Google Colab G4' : 'Your own ComfyUI';
+    blocks.push(`<div class="spend-card">
+      <b>Start ${esc(label)}?</b>
+      <p>${esc(String(estimate.gpuMinutes ?? '?'))} GPU min + ${esc(String(estimate.overheadMinutes ?? 0))} min setup · ${esc(String(budget.required ?? '?'))} of ${esc(String(budget.budget ?? '?'))} units (estimate)</p>
+      <p class="hint">${esc(budget.message ?? '')} Google Colab spend is an account-level estimate.</p>
+      <div class="spend-actions"><button id="spend-start" class="primary">Start</button><button id="spend-cancel">Cancel</button></div>
+    </div>`);
+  }
+  host.innerHTML = blocks.join('');
+  const start = $('spend-start');
+  if (start) start.addEventListener('click', () => void runOnBackend(true));
+  const cancel = $('spend-cancel');
+  if (cancel)
+    cancel.addEventListener('click', () => {
+      runState.spend = null;
+      renderSpendCard();
+      logActivity('Spend card cancelled');
+    });
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -508,6 +557,81 @@ async function runOnBackend(approved = false): Promise<void> {
     logActivity(`Run request failed: ${(error as Error).message}`);
   } finally {
     button.disabled = false;
+  }
+}
+
+// C11: persist the current draft with a base revision so the server plans/renders exactly what
+// the storyboard shows. Shared by the per-scene actions.
+async function persistDraft(): Promise<Record<string, unknown>> {
+  if (!token) return { package: pkg };
+  const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }),
+  });
+  const savedBody = (await saved.json().catch(() => ({}))) as { revision?: number; error?: string; currentRevision?: number };
+  if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
+  pkg.revision = savedBody.revision!;
+  logActivity(`Saved revision ${savedBody.revision} before the scene action`);
+  return { packageId: pkg.id, baseRevision: savedBody.revision };
+}
+
+/** C11: re-render one scene through the renderer's incremental renderer (A6), then download the full MP4. */
+async function reRenderScene(sceneId: string): Promise<void> {
+  if (sceneState.rendering) return;
+  sceneState.rendering = sceneId;
+  sceneState.log = [];
+  renderStoryboard();
+  logActivity(`Scene re-render started: ${sceneId} (incremental; unchanged scenes reuse their cached segments)`);
+  try {
+    const body = await persistDraft();
+    body.sceneId = sceneId;
+    const response = await apiFetch('/api/scene/render', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${response.status}`);
+    const rendered = response.headers.get('x-comfyrizz-rendered');
+    const reused = response.headers.get('x-comfyrizz-reused');
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `comfyrizz-${sceneId}.mp4`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    logActivity(`Scene re-render finished: ${sceneId} · ${rendered} rebuilt, ${reused} reused`);
+  } catch (error) {
+    logActivity(`Scene re-render failed: ${(error as Error).message}`);
+  } finally {
+    sceneState.rendering = null;
+    renderStoryboard();
+  }
+}
+
+/** C11: plan a scene's generated assets as a dry run (nothing is sent to Google Colab). */
+async function planSceneMedia(sceneId: string): Promise<void> {
+  logActivity(`Scene media plan requested: ${sceneId} (dry run, nothing is sent to Google Colab)`);
+  try {
+    const body = await persistDraft();
+    body.sceneId = sceneId;
+    const response = await apiFetch('/api/scene/plan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = (await response.json().catch(() => ({}))) as ScenePlan & { error?: string };
+    if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+    sceneState.plan = result;
+    sceneState.planError = '';
+    renderSpendCard();
+    logActivity(`Scene media plan: ${result.jobs} job(s) for ${sceneId} — dry run only`);
+  } catch (error) {
+    sceneState.plan = null;
+    sceneState.planError = (error as Error).message;
+    renderSpendCard();
+    logActivity(`Scene media plan failed: ${(error as Error).message}`);
   }
 }
 
@@ -728,6 +852,30 @@ function init(): void {
     stream.addEventListener('run.refused', event => {
       const data = JSON.parse((event as MessageEvent).data) as { budget?: { message?: string } };
       logActivity(`Server refused the run: ${data.budget?.message ?? 'budget too small'}`);
+    });
+    // C11: the per-scene re-render's progress lines arrive over SSE; the card for the scene
+    // being rebuilt shows the last two.
+    stream.addEventListener('scene.render.started', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { sceneId: string; assets?: string[] };
+      sceneState.log = [`planning ${data.sceneId} (${(data.assets ?? []).length} asset(s))`];
+      if (sceneState.rendering === data.sceneId) renderStoryboard();
+    });
+    stream.addEventListener('scene.render.log', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { line: string; sceneId?: string };
+      sceneState.log.push(data.line);
+      if (sceneState.log.length > 20) sceneState.log.shift();
+      if (sceneState.rendering && sceneState.rendering === data.sceneId) renderStoryboard();
+    });
+    stream.addEventListener('scene.render.finished', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { sceneId: string; frames: number; rendered?: string[]; reused?: string[] };
+      sceneState.log = [`${data.rendered?.length ?? 0} rebuilt, ${data.reused?.length ?? 0} reused`];
+      if (sceneState.rendering === data.sceneId) renderStoryboard();
+    });
+    stream.addEventListener('scene.render.failed', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { sceneId: string; message: string };
+      sceneState.log = [`failed: ${data.message}`];
+      logActivity(`Server: scene ${data.sceneId} re-render failed — ${data.message}`);
+      if (sceneState.rendering === data.sceneId) renderStoryboard();
     });
     stream.addEventListener('agent.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { brief?: string };

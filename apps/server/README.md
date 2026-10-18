@@ -102,6 +102,25 @@ compiled timeline and SRT/VTT cue counts == timeline captions, a second call reu
 package with a `CC-BY-NC-4.0` asset has it refused from `package.zip` with its licence reason in
 `CREDITS.md`.
 
+## Per-scene re-run (C11)
+
+Each storyboard card has two actions that work on the draft the Player shows:
+
+- **Re-render scene** (`POST /api/scene/render`) persists the draft with a base revision, then
+  runs `apps/renderer/scripts/render-incremental.mjs` (A6) with a per-package segment cache under
+  `<runtime>/scene-cache/<package-id>`. Only the segments whose content key changed are rendered
+  again; every other scene's cached segment is reused untouched and the re-stitched MP4 still has
+  the full compiled frame count. Progress is published as `scene.render.started`/`log`/`finished`
+  over `/api/events`, and the response is the MP4 (`x-comfyrizz-rendered`/`-reused` say how many
+  segments were rebuilt vs. reused).
+- **Regenerate media** (`POST /api/scene/plan`) returns a **dry run**: a jobs plan (`planJobs`,
+  B2) narrowed to that scene's own assets. It reports `dryRun: true` and `metered: false` and the
+  storyboard shows it on the spend card; nothing is sent to Google Colab and no VM is started.
+
+`apps/server/test/scene.test.mjs` is the acceptance: a one-scene re-render of the tiny renderer
+fixture proves the untouched segments' cache files are not rewritten (mtime) and ffprobe frames ==
+compiled timeline, and a `showcase-gpu3` plan for one scene contains only that scene's jobs.
+
 ## Security checks
 
 - Host must be `127.0.0.1`, `localhost` or `[::1]` (any port) — DNS-rebinding hosts get `403`.
