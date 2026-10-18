@@ -74,5 +74,16 @@ export {
 export type { SupportedLanguage, TranslatableString, SceneTranslation, LanguageVariantOptions } from './language.js';
 export { SCENE_CHIPS, applySceneChip, isSceneChip, sceneChip, sceneChipList, warmHex } from './scene-chips.js';
 export type { SceneChip, SceneChipResult, ChipPackage, ChipScene } from './scene-chips.js';
+export {
+  DATASET_MAX_VALUES,
+  DATASET_MAX_LABEL,
+  parseCsv,
+  parseCsvNumber,
+  datasetFromCsv,
+  validateDataset,
+  datasetValues,
+  datasetHeadline,
+} from './dataset.js';
+export type { Dataset, DatasetValue, DatasetParseOptions, DatasetParseResult, CsvParseResult } from './dataset.js';
 export type { AgentEvent, RunAgentOptions, RunAgentResult, ToolRecord } from './agent.js';
 export type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ToolCall, ToolDef } from './types.js';
