@@ -6,6 +6,7 @@ import {
   STYLE_PRESETS,
   STYLE_PRESET_DEFAULTS,
   applyDecisions,
+  buildOutline,
   completeBrief,
   draftKeyMessages,
   estimateNarrationSeconds,
@@ -131,4 +132,58 @@ test('the bundled example prompts each extract a usable brief', () => {
     assert.ok(brief.key_message.length > 0);
     assert.ok(brief.length_s && brief.length_s > 0);
   }
+});
+
+test('buildOutline: four beats, estimated seconds and the brief in the notes', () => {
+  const brief = completeBrief(applyDecisions(extractBrief(RICH), {}));
+  const outline = buildOutline(brief);
+  assert.deepEqual(outline.beats.map(beat => beat.id), ['s_title', 's_point', 's_proof', 's_outro']);
+  assert.deepEqual(outline.beats.map(beat => beat.role), ['hook', 'point', 'proof', 'cta']);
+  for (const beat of outline.beats) assert.ok(beat.seconds > 0, `${beat.id} has no estimate`);
+  const sum = Number(outline.beats.reduce((total, beat) => total + beat.seconds, 0).toFixed(2));
+  assert.equal(outline.narrationSeconds, sum);
+  assert.equal(outline.estimatedSeconds, Number((sum + 0.4 * 4).toFixed(2)));
+  assert.equal(outline.targetSeconds, brief.length_s);
+  assert.equal(outline.language, 'en');
+  assert.equal(outline.style.preset, brief.style.preset);
+  assert.match(outline.notes[0], /Look: cinematic-dark/);
+  assert.match(outline.beats.find(beat => beat.id === 's_outro')!.narration, /star the repo/);
+});
+
+test('buildOutline: no facts is an honest placeholder, a fact becomes the proof', () => {
+  const bare = completeBrief({ ...extractBrief(RICH), facts: [] });
+  const placeholder = buildOutline(bare);
+  const proof = placeholder.beats.find(beat => beat.id === 's_proof')!;
+  assert.equal(proof.placeholder, true);
+  assert.match(proof.headline, /Add a source/);
+  assert.ok(placeholder.notes.some(note => /visible placeholder/.test(note)));
+
+  const sourced = completeBrief({ ...extractBrief(RICH), facts: [{ claim: 'CPU render takes 6 min', source: 'local benchmark' }] });
+  const withFact = buildOutline(sourced);
+  assert.equal(withFact.beats.find(beat => beat.id === 's_proof')!.placeholder, false);
+  assert.match(withFact.beats.find(beat => beat.id === 's_proof')!.narration, /local benchmark/);
+});
+
+test('buildOutline: missing CTA still closes, French estimates run longer', () => {
+  const noCta = completeBrief({ ...extractBrief(RICH), cta: undefined });
+  const outline = buildOutline(noCta);
+  assert.match(outline.beats.find(beat => beat.id === 's_outro')!.narration, /whole idea/);
+  assert.ok(outline.notes.some(note => /No CTA/.test(note)));
+
+  const english = completeBrief(extractBrief(RICH));
+  const french = completeBrief({ ...extractBrief(RICH), audience: { ...extractBrief(RICH).audience, language: 'fr' } });
+  const en = buildOutline(english);
+  const fr = buildOutline(french);
+  assert.ok(fr.narrationSeconds > en.narrationSeconds, `fr ${fr.narrationSeconds} should beat en ${en.narrationSeconds}`);
+  assert.equal(fr.language, 'fr');
+});
+
+test('buildOutline: fit reports short, on-target and long against the requested length', () => {
+  const base = completeBrief(extractBrief(RICH));
+  const outline = buildOutline(base);
+  assert.equal(outline.fit, 'short', 'four short spoken beats cannot fill a 45 s target');
+  // A gap that lands the on-screen estimate exactly on the target is on-target.
+  const gap = (outline.targetSeconds - outline.narrationSeconds) / outline.beats.length;
+  assert.equal(buildOutline(base, { gapSeconds: gap }).fit, 'on-target');
+  assert.equal(buildOutline({ ...base, length_s: 8 }).fit, 'long');
 });

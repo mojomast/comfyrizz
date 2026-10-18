@@ -434,3 +434,147 @@ export function estimateNarrationSeconds(text: string, language: (typeof BRIEF_L
   if (words === 0) return 0;
   return Number((words / secondsPerWord(language)).toFixed(2));
 }
+
+/** A goal's opener line; keeps the hook in the brief's own tone without a model. */
+const GOAL_OPENERS: Record<Brief['goal'], string> = {
+  launch: "Here's what's new.",
+  explain: "Here's how it works.",
+  teach: "Here's how to do it.",
+  pitch: "Here's the idea.",
+  recap: "Here's the recap.",
+};
+
+/** One script beat; `id` matches the package scene the build will reuse. */
+export interface OutlineBeat {
+  id: string;
+  role: 'hook' | 'point' | 'proof' | 'cta';
+  layout: 'title' | 'hero' | 'stat' | 'list';
+  headline: string;
+  narration: string;
+  /** Estimated spoken seconds for `narration`. */
+  seconds: number;
+  /** True when the beat shows a visible placeholder because a fact is missing. */
+  placeholder: boolean;
+}
+
+/** The script-first outline shown in the editable Brief card (research §2.2 step 5). */
+export interface Outline {
+  beats: OutlineBeat[];
+  /** Sum of the per-beat narration estimates. */
+  narrationSeconds: number;
+  /** Seconds the brief asked for, or the estimate when it did not say. */
+  targetSeconds: number;
+  /** On-screen estimate: narration plus one gap per beat. */
+  estimatedSeconds: number;
+  fit: 'short' | 'on-target' | 'long';
+  notes: string[];
+  style: Brief['style'];
+  voice: Brief['voice'];
+  music: Brief['music'];
+  language: Brief['audience']['language'];
+}
+
+export interface OutlineOptions {
+  /** Extra seconds per beat for the transition gap (default 0.4 s). */
+  gapSeconds?: number;
+  /** Maximum beats to emit (default 4: hook, point, proof, cta). */
+  maxBeats?: number;
+}
+
+function trimHeadline(text: string, max = 48): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > 24 ? cut.slice(0, space) : cut).trim()}…`;
+}
+
+/**
+ * Turn a completed brief into a script-first outline with estimated seconds. Pure
+ * and deterministic: it never invents facts, and a missing CTA or dataset becomes
+ * an honest note plus a visible placeholder instead of made-up copy.
+ */
+export function buildOutline(brief: Brief, options: OutlineOptions = {}): Outline {
+  const language = brief.audience.language;
+  const gapSeconds = options.gapSeconds ?? 0.4;
+  const maxBeats = Math.max(3, options.maxBeats ?? 4);
+  const who = brief.audience.who;
+  const keyMessage = brief.key_message.replace(/\s+/g, ' ').trim();
+  const beats: OutlineBeat[] = [];
+
+  const hook = `${GOAL_OPENERS[brief.goal]} ${keyMessage} Made for ${who}.`;
+  beats.push({
+    id: 's_title',
+    role: 'hook',
+    layout: 'title',
+    headline: trimHeadline(keyMessage),
+    narration: hook,
+    seconds: estimateNarrationSeconds(hook, language),
+    placeholder: false,
+  });
+
+  const points = brief.must_include.length > 0 ? `Along the way we cover ${brief.must_include.join(', ')}.` : `It comes down to one thing: ${keyMessage}`;
+  beats.push({
+    id: 's_point',
+    role: 'point',
+    layout: brief.must_include.length > 0 ? 'list' : 'hero',
+    headline: trimHeadline(brief.must_include[0] ?? keyMessage),
+    narration: points,
+    seconds: estimateNarrationSeconds(points, language),
+    placeholder: false,
+  });
+
+  const fact = brief.facts[0];
+  const proof = fact ? `And the proof: ${fact.claim} (${fact.source}).` : 'The numbers go here once the brief has a source.';
+  beats.push({
+    id: 's_proof',
+    role: 'proof',
+    layout: 'stat',
+    headline: trimHeadline(fact ? fact.claim : 'Add a source for the numbers'),
+    narration: proof,
+    seconds: estimateNarrationSeconds(proof, language),
+    placeholder: !fact,
+  });
+
+  if (maxBeats >= 4) {
+    const ctaLine = brief.cta ? `If that sounds useful, ${brief.cta}.` : 'That is the whole idea.';
+    beats.push({
+      id: 's_outro',
+      role: 'cta',
+      layout: 'title',
+      headline: trimHeadline(brief.cta ?? 'Thanks for watching'),
+      narration: ctaLine,
+      seconds: estimateNarrationSeconds(ctaLine, language),
+      placeholder: false,
+    });
+  }
+
+  const narrationSeconds = Number(beats.reduce((sum, beat) => sum + beat.seconds, 0).toFixed(2));
+  const estimatedSeconds = Number((narrationSeconds + gapSeconds * beats.length).toFixed(2));
+  const targetSeconds = brief.length_s ?? estimatedSeconds;
+  const lower = targetSeconds * 0.85;
+  const upper = targetSeconds * 1.15;
+  const fit: Outline['fit'] = estimatedSeconds < lower ? 'short' : estimatedSeconds > upper ? 'long' : 'on-target';
+
+  const notes = [`Look: ${brief.style.preset} (${(brief.style.palette ?? []).join(' ')}${brief.style.font ? ` on ${brief.style.font}` : ''}).`];
+  if (brief.voice.persona) notes.push(`Voice: ${brief.voice.persona} (${brief.voice.lang}).`);
+  else notes.push('No narration in the brief; the beats are on-screen text only.');
+  if (!brief.cta) notes.push('No CTA in the brief; the outro just closes.');
+  if (brief.avoid.length > 0) notes.push(`Avoid: ${brief.avoid.join(', ')}.`);
+  if (!brief.facts.length) notes.push('No source facts; the proof beat shows a visible placeholder.');
+  if (fit === 'short') notes.push(`About ${(targetSeconds - estimatedSeconds).toFixed(1)} s of headroom left; add a beat or slow the pace.`);
+  if (fit === 'long') notes.push(`About ${(estimatedSeconds - targetSeconds).toFixed(1)} s over; trim the point or drop the proof.`);
+
+  return {
+    beats,
+    narrationSeconds,
+    targetSeconds,
+    estimatedSeconds,
+    fit,
+    notes,
+    style: brief.style,
+    voice: brief.voice,
+    music: brief.music,
+    language,
+  };
+}

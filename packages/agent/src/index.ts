@@ -37,7 +37,8 @@ export {
   completeBrief,
   secondsPerWord,
   estimateNarrationSeconds,
+  buildOutline,
 } from './brief.js';
-export type { Brief, BriefDraft, Question, BriefDecisions, StylePreset, ExtractBriefOptions } from './brief.js';
+export type { Brief, BriefDraft, Question, BriefDecisions, StylePreset, ExtractBriefOptions, Outline, OutlineBeat, OutlineOptions } from './brief.js';
 export type { AgentEvent, RunAgentOptions, RunAgentResult, ToolRecord } from './agent.js';
 export type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ToolCall, ToolDef } from './types.js';
