@@ -19,6 +19,30 @@ requests and as `?token=` only for the SSE `EventSource` (which cannot set heade
 `COMFYRIZZ_TOKEN` fixes the token (tests use this). The generated token is written to
 `.runtime/server-token` with mode `0600`.
 
+## Fresh clone (clean-clone e2e, C12/M8)
+
+A stranger's path from a fresh `git clone` to a finished video needs the workspace dependencies
+first — the package scripts use `npm --prefix` but the workspace is installed with pnpm:
+
+```bash
+pnpm install                 # no lockfile is committed yet, so this resolves fresh
+pnpm -r --if-present run build   # packages/* dist + apps/web dist
+cd apps/server && npm start  # or: node src/index.mjs after the build above
+```
+
+`scripts/clean-clone-e2e.sh` runs that whole path non-interactively and is the M8 acceptance: it
+clones HEAD into a temp dir, installs, builds, starts this server on a free port with the
+**scripted** agent (no API key), sends one brief, renders the MP4, calls `POST /api/export`, checks
+the five export files exist and that `ffprobe` frames equal the compiled timeline, then stops the
+server and removes the temp dir. It needs no key and never starts a Google Colab runtime.
+
+```bash
+bash apps/server/scripts/clean-clone-e2e.sh   # exits 0 in a few minutes; KEEP=1 to inspect
+```
+
+The missing step for a true stranger is a committed `pnpm-lock.yaml`, which lives at the repo root
+(DOLAN-owned); the script works without it using `--no-frozen-lockfile`.
+
 ## API
 
 | Method | Path | Notes |
