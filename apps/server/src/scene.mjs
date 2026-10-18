@@ -6,9 +6,9 @@ import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
 
 /**
- * The asset ids a scene references: background, foregrounds and narration. Reads the
- * compiled timeline so it matches what the renderer actually draws (both `media_only`
- * and `mediaOnly` spellings resolve by then).
+ * The asset ids a scene references: background, foregrounds, narration and the presenter
+ * clip. Reads the compiled timeline so it matches what the renderer actually draws (both
+ * `media_only` and `mediaOnly` spellings resolve by then).
  * @param {any} pkg
  * @param {string} sceneId
  * @returns {string[] | null} null when the scene does not exist
@@ -21,6 +21,13 @@ export function sceneAssetIds(pkg, sceneId) {
   if (scene.background?.asset) ids.add(scene.background.asset);
   for (const item of scene.foreground ?? []) if (item?.asset) ids.add(item.asset);
   if (scene.narration_asset) ids.add(scene.narration_asset);
+  // C-pres: the presenter clip (or the portrait still until the clip exists). The timeline
+  // scene does not carry `presenter_asset`, so read the presenter track and the package scene.
+  for (const presenter of timeline.presenters ?? []) {
+    if (presenter.sceneId === sceneId && presenter.assetId) ids.add(presenter.assetId);
+  }
+  const source = (pkg.scenes ?? []).find((entry) => entry.id === sceneId);
+  if (source?.presenter_asset) ids.add(source.presenter_asset);
   return [...ids].sort();
 }
 

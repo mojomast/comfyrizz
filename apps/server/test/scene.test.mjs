@@ -224,3 +224,48 @@ function post(server, path, body) {
     request.end(payload);
   });
 }
+
+test('the presenter route turns the H17 presenter on and off and saves a revision', async () => {
+  const runtime = mkdtempSync(join(tmpdir(), 'comfyrizz-cpres-'));
+  scratch.push(runtime);
+  const pkg = JSON.parse(readFileSync(join(TINY, 'package.json'), 'utf8'));
+  pkg.presenter = { enabled: true, portrait: 'a_tiny_logo', scenes: 'all' };
+  const app = createApp({ token: TOKEN, runtimeDir: runtime, render: async () => ({ output: 'x', bytes: 0, frames: 0, hash: 'x' }) });
+  app.store.write(pkg);
+  const server = createServer(app.handler);
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  try {
+    const chips = await get(server, '/api/presenter/chips');
+    assert.equal(chips.status, 200);
+    assert.deepEqual(chips.json.chips.map((chip) => chip.id), ['none', 'bookends', 'all']);
+    assert.deepEqual(chips.json.presets.map((preset) => preset.id), ['intro-outro', 'all', 'none']);
+
+    // The presenter clip / portrait is part of the scene's media.
+    assert.ok(sceneAssetIds(pkg, 's_title').includes('a_tiny_logo'));
+
+    const bookends = await post(server, '/api/presenter/set', { packageId: pkg.id, baseRevision: pkg.revision, coverage: 'bookends' });
+    assert.equal(bookends.status, 200, JSON.stringify(bookends.json));
+    assert.equal(bookends.json.revision, pkg.revision + 1);
+    assert.equal(bookends.json.presenter.scenes, 'bookends');
+    assert.match(bookends.json.portrait_prompt, /Fictional person/);
+    assert.equal(lastEvent(app, 'presenter.set').summary, 'presenter on (bookends)');
+
+    // A per-scene override saves too.
+    const saved = app.store.read(pkg.id);
+    const off = await post(server, '/api/presenter/set', { packageId: pkg.id, baseRevision: saved.revision, scenes: { s_stat: 'off' } });
+    assert.equal(off.status, 200, JSON.stringify(off.json));
+    assert.equal(app.store.read(pkg.id).scenes.find((scene) => scene.id === 's_stat').presenter, 'off');
+
+    // The whole-video preset turns it off.
+    const off2 = await post(server, '/api/presenter/set', { packageId: pkg.id, baseRevision: app.store.read(pkg.id).revision, coverage: 'none' });
+    assert.equal(off2.status, 200);
+    assert.equal(app.store.read(pkg.id).presenter.enabled, false);
+
+    assert.equal((await post(server, '/api/presenter/set', { packageId: pkg.id, scenes: { nope: 'pip' } })).status, 404);
+    assert.equal((await post(server, '/api/presenter/set', { packageId: pkg.id, coverage: 'sometimes' })).status, 400);
+  } finally {
+    app.close();
+    await new Promise((done) => server.close(done));
+    rmSync(runtime, { recursive: true, force: true });
+  }
+});

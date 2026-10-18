@@ -14,6 +14,7 @@ import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
 import { prepareBrand } from './brand.mjs';
 import { applySceneChip, sceneChipList } from '../../../packages/agent/dist/src/index.js';
+import { applyPresenterSet, presenterChips, presenterPresets } from '../../../packages/agent/dist/src/index.js';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -732,6 +733,77 @@ export function createApp({
         chip: result.chip,
         summary: result.summary,
         changed: result.changed,
+        package: result.package,
+      });
+    }
+
+    // C-pres: the presenter controls. The brief chip, the storyboard per-scene toggle and the
+    // agent all end up here. Pure package mutation (H17 schema) + save; no model, network or GPU.
+    if (url.pathname === '/api/presenter/chips' && request.method === 'GET') {
+      return sendJson(response, 200, { chips: presenterChips(), presets: presenterPresets() });
+    }
+
+    if (url.pathname === '/api/presenter/set' && request.method === 'POST') {
+      let body;
+      try {
+        body = await readJson(request);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, { error: error.message });
+      }
+      let target;
+      try {
+        target = resolveRenderTarget(body, `presenter_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, {
+          error: error.message,
+          ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
+        });
+      }
+      let result;
+      try {
+        result = applyPresenterSet(target.pkg, {
+          ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+          ...(body.coverage !== undefined ? { coverage: body.coverage } : {}),
+          ...(body.preset !== undefined ? { preset: body.preset } : {}),
+          ...(body.scenes ? { scenes: body.scenes } : {}),
+          ...(body.placement !== undefined ? { placement: body.placement } : {}),
+          ...(body.shape !== undefined ? { shape: body.shape } : {}),
+          ...(body.size !== undefined ? { size: body.size } : {}),
+          ...(body.label !== undefined ? { label: body.label } : {}),
+          ...(body.portrait !== undefined ? { portrait: body.portrait } : {}),
+          ...(body.presetStyle !== undefined ? { presetStyle: body.presetStyle } : {}),
+          ...(body.backdrop !== undefined ? { backdrop: body.backdrop } : {}),
+        });
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, { error: error.message });
+      }
+      const inline = Boolean(body.package);
+      let revision = target.revision;
+      if (!inline && result.changed) {
+        try {
+          const saved = store.save(body.packageId, result.package, body.baseRevision ?? target.pkg.revision);
+          revision = saved.revision;
+        } catch (error) {
+          return sendJson(response, error.status ?? 400, {
+            error: error.message,
+            ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
+          });
+        }
+      }
+      events.publish({
+        type: 'presenter.set',
+        packageId: result.package.id ?? body.packageId ?? null,
+        revision,
+        summary: result.summary,
+      });
+      return sendJson(response, 200, {
+        packageId: result.package.id ?? body.packageId ?? null,
+        revision,
+        summary: result.summary,
+        changed: result.changed,
+        presenter: result.package.presenter ?? null,
+        findings: result.findings ?? [],
+        portrait_prompt: result.portrait_prompt ?? null,
         package: result.package,
       });
     }
