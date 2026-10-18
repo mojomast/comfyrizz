@@ -1,0 +1,6 @@
+# Keep the normalised mix the export uses; ignore the raw/intermediate audio
+# and the Kokoro per-scene chunks.
+audio/narration.raw.wav
+audio/narration.wav
+audio/narration/
+out/

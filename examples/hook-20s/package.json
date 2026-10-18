@@ -1,0 +1,282 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_hook20s0001",
+  "title": "Comfyrizz — 20 second hook",
+  "createdAt": "2025-10-18T00:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#080a12",
+      "#141c36",
+      "#8b5cf6",
+      "#f4f6fb"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 1.05,
+    "language": "en-us"
+  },
+  "datasets": {
+    "d_times": {
+      "unit": "minutes",
+      "label": "Minutes from brief to a finished 20 second hook",
+      "values": [
+        {
+          "label": "Write the brief",
+          "value": 1
+        },
+        {
+          "label": "Storyboard",
+          "value": 2
+        },
+        {
+          "label": "CPU render",
+          "value": 2
+        },
+        {
+          "label": "Export",
+          "value": 1
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "Invented example data, labelled on the chart."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 60,
+      "copy": {
+        "kicker": "Open-source AI motion graphics",
+        "headline": "Ship a launch video from one brief",
+        "sub": "Comfyrizz — generated-first, CPU only."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#080a12",
+            "#141c36",
+            "#8b5cf6"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_icon_check",
+          "x": 0.5,
+          "y": 0.87,
+          "w": 0.07,
+          "anim": "fade-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 10
+      },
+      "narration": "Comfyrizz turns one short brief into a finished, narrated launch video."
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "preferredFrames": 60,
+      "copy": {
+        "headline": "From brief to MP4",
+        "sub": "Six minutes on the CPU. No GPU.",
+        "footnote": "Example data for the hook."
+      },
+      "data": {
+        "dataset": "d_times",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 3
+        }
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 10
+      },
+      "narration": "Every scene is compiled into integer frames, and every asset is drawn as code."
+    },
+    {
+      "id": "s_list",
+      "layout": "list",
+      "variant": "bullets",
+      "preferredFrames": 60,
+      "copy": {
+        "headline": "No GPU. No cloud. No network.",
+        "items": [
+          "Procedural backgrounds drawn per frame",
+          "Kokoro narration and captions on CPU",
+          "MIT licensed, runs from a clean clone"
+        ]
+      },
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 2
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_diagram_flow",
+          "x": 0.83,
+          "y": 0.5,
+          "w": 0.3,
+          "anim": "slide-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 10
+      },
+      "narration": "No GPU, no cloud, and no network calls while it renders locally."
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 60,
+      "copy": {
+        "headline": "Comfyrizz",
+        "sub": "Open source, MIT.",
+        "cta": "github.com/comfyrizz"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 23,
+          "palette": [
+            "#080a12",
+            "#141c36",
+            "#8b5cf6"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_anim_bars",
+          "x": 0.5,
+          "y": 0.87,
+          "w": 0.24,
+          "anim": "slide-in"
+        }
+      ],
+      "narration": "Comfyrizz is open source under the MIT license. Clone it, run it, and remix it."
+    }
+  ],
+  "assets": {
+    "a_icon_check": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_icon_check.svg",
+      "sha256": "1959354d29405d12ab23e7c5b3c713985ffcb10a4e1bd02632b0c8adaab9e37a",
+      "bytes": 276,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 512,
+          "palette_ok": true
+        },
+        "caption": "Flat vector check mark in a ring, drawn from the theme palette."
+      }
+    },
+    "a_diagram_flow": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_diagram_flow.svg",
+      "sha256": "696b61798cd3808efc394b5fcff86375eb7b4d0712d8c573266ded5907823575",
+      "bytes": 752,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 288,
+          "palette_ok": true
+        },
+        "caption": "Three-stage diagram: brief, generated-first router, export."
+      }
+    },
+    "a_anim_bars": {
+      "kind": "vector-anim",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_anim_bars.svg",
+      "sha256": "c0a1a8f107ff5566e3a7f0ccb521ab1e6e46effca5456010f6a50604270cdf72",
+      "bytes": 547,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 288,
+          "palette_ok": true
+        },
+        "caption": "Five keyframed bars; the Remotion frame drives the grow-in animation."
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "llm-svg",
+      "weights": "open"
+    },
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Narration is synthesized locally by Kokoro-82M on CPU; no network at run time.",
+      "Captions are sentence-level and come from the same measured cues as the SRT/VTT export.",
+      "Demo data is invented; no stock assets, no LLM and no GPU are used for this package."
+    ]
+  }
+}
