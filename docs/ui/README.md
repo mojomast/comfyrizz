@@ -12,6 +12,7 @@ the `u1-after*.jpg` shots are the U1 polish pass.
 | `r2-plan-mode.png` | R2 Plan mode: the composer asked two chip questions (look + real numbers) before building anything; every chip has a **Decide for me** default. |
 | `r2-brief-card.png` | R2 step 4: the editable Brief card after those chips — seven fields plus the script-first outline (hook/point/proof/CTA with per-beat seconds, the target and the fit), with **Update outline** and **Build video**. |
 | `r2-style-presets.png` | R2 step 5: the six bundled looks (Clay, Glass, Editorial flat, Isometric tech, Paper cut, Cinematic dark) as CPU/SVG thumbnails in the Brief card, chosen before any GPU spend. |
+| `r2-scene-chips.png` | R2 step 5: the per-scene edit chips (Warmer, Calmer motion, More depth, Less busy) on every storyboard card; a tap applies a fixed scene-local edit and re-runs only that scene. |
 
 Reproduce:
 
@@ -55,3 +56,13 @@ SVGs are generated on the CPU from each preset's own palette in `packages/agent`
 look is chosen and locked **before** any GPU spend. Tapping a thumbnail updates the hidden
 `style.preset` field the card already reads. GPU-rendered moodboards can replace the thumbnails
 later without changing the ids.
+
+### Step 5b: the per-scene edit chips
+
+Every storyboard card now carries four fixed edit chips — **Warmer**, **Calmer motion**, **More
+depth**, **Less busy** (`r2-scene-chips.png`). They map to deterministic, scene-local edits in
+`packages/agent` (`applySceneChip`): warming the scene's procedural palette, softening entrances to a
+fade, adding a parallax drift with a higher `z`, or trimming bullets/overlays/a busy pattern. The
+server (`POST /api/scene/chip`, `GET /api/scene/chips`) saves the edit through the validating store
+and the web then re-runs only that scene through the C11 incremental renderer. Because nothing
+touches `theme`, `preferredFrames` or the format, every other scene keeps its cached segment.

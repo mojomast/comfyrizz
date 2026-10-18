@@ -207,6 +207,7 @@ function renderStoryboard(): void {
           <button type="button" data-scene-action="rerender" data-scene="${esc(scene.id)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${sceneState.rendering === scene.id ? 'Re-rendering…' : 'Re-render scene'}</button>
           <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Regenerate media</button>
         </div>
+        <div class="scene-chips">${WEB_SCENE_CHIPS.map(chip => `<button type="button" data-scene-action="chip" data-chip="${esc(chip.id)}" data-scene="${esc(scene.id)}" title="${esc(chip.hint)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${esc(chip.label)}</button>`).join('')}</div>
         ${sceneState.rendering === scene.id && sceneState.log.length > 0 ? `<div class="scene-log">${sceneState.log.slice(-2).map(line => `<div>${esc(line)}</div>`).join('')}</div>` : ''}
       </div>`;
     })
@@ -248,6 +249,7 @@ function renderStoryboard(): void {
       event.stopPropagation();
       const sceneId = button.dataset.scene!;
       if (button.dataset.sceneAction === 'rerender') void reRenderScene(sceneId);
+      else if (button.dataset.sceneAction === 'chip') void applySceneChipFlow(sceneId, button.dataset.chip!);
       else void planSceneMedia(sceneId);
     });
   });
@@ -645,8 +647,33 @@ async function reRenderScene(sceneId: string): Promise<void> {
   }
 }
 
-/** C11: plan a scene's generated assets as a dry run (nothing is sent to Google Colab). */
-async function planSceneMedia(sceneId: string): Promise<void> {
+/** R2 step 5: apply one fixed scene-local edit, save it, then re-run only that scene (C11/A6). */
+async function applySceneChipFlow(sceneId: string, chip: string): Promise<void> {
+  if (sceneState.rendering) return;
+  logActivity(`Scene chip “${chip}” on ${sceneId} (fixed edit — no model, network or GPU)`);
+  try {
+    const body = await persistDraft();
+    const response = await apiFetch('/api/scene/chip', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, sceneId, chip }),
+    });
+    const result = (await response.json().catch(() => ({}))) as { error?: string; summary?: string; package?: PackageV1; revision?: number; changed?: boolean };
+    if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+    if (result.package) {
+      pkg = result.package;
+      if (result.revision != null) pkg.revision = result.revision;
+      updatePreview(pkg, timeline, generatedAssets);
+      renderStoryboard();
+    }
+    logActivity(`Scene ${sceneId}: ${result.summary ?? chip}${result.changed === false ? ' (already minimal)' : ''}`);
+    if (result.changed) await reRenderScene(sceneId);
+  } catch (error) {
+    logActivity(`Scene chip failed: ${(error as Error).message}`);
+  }
+}
+
+/** C11: plan a scene's generated assets as a dry run (nothing is sent to Google Colab). */async function planSceneMedia(sceneId: string): Promise<void> {
   logActivity(`Scene media plan requested: ${sceneId} (dry run, nothing is sent to Google Colab)`);
   try {
     const body = await persistDraft();
@@ -792,6 +819,13 @@ function briefToPrompt(brief: Record<string, unknown>): string {
 
 const WEB_STYLE_PRESETS = ['clay', 'glass', 'editorial-flat', 'isometric-tech', 'paper-cut', 'cinematic-dark'];
 const WEB_ASPECTS = ['16:9', '9:16', '1:1'];
+// R2 step 5: the per-scene fixed edit chips (kept in sync with packages/agent SCENE_CHIPS).
+const WEB_SCENE_CHIPS: { id: string; label: string; hint: string }[] = [
+  { id: 'warmer', label: 'Warmer', hint: 'Warm this scene’s palette' },
+  { id: 'calmer-motion', label: 'Calmer motion', hint: 'Soften entrances to a fade' },
+  { id: 'more-depth', label: 'More depth', hint: 'Parallax + z on the overlay' },
+  { id: 'less-busy', label: 'Less busy', hint: 'Trim bullets and overlays' },
+];
 
 /** Read a dotted path (`audience.who`) out of the brief as a string. */
 function briefValue(brief: Record<string, unknown>, path: string): string {

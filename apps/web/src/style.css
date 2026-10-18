@@ -143,6 +143,9 @@ main {
 .chart-values span { font-size: 12px; color: var(--muted); }
 .scene-actions { display: flex; gap: 6px; margin-top: 10px; }
 .scene-actions button { font-size: 11px; padding: 4px 8px; }
+.scene-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.scene-chips button { font-size: 10px; padding: 3px 7px; border-radius: 999px; background: transparent; border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
+.scene-chips button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-2); }
 .scene-log { margin-top: 6px; font-size: 10px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
 .scene-plan .event { font-size: 12px; }
 .palette { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

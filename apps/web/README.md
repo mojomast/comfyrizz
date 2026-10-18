@@ -142,6 +142,19 @@ Evidence: the step-5 probe answered the chips, saw 6 thumbnails (`viewBox 0 0 16
 **Cinematic dark** and confirmed both the `.selected` class and the hidden `style.preset` value moved
 to `cinematic-dark`.
 
+### Step 5b: per-scene edit chips
+
+Each storyboard card also shows four fixed edit chips (`docs/ui/r2-scene-chips.png`): **Warmer**,
+**Calmer motion**, **More depth**, **Less busy**. Tapping one posts to `POST /api/scene/chip`, which
+applies a deterministic scene-local edit (`packages/agent` `applySceneChip`), validates + saves a new
+revision, then re-runs that one scene through the normal C11 incremental path. Choose the chip in
+`WEB_SCENE_CHIPS` (kept in sync with the agent's `SCENE_CHIPS`); the buttons are `button[
+ data-scene-action="chip"][data-chip]` on each `.scene-card`.
+
+Evidence: the probe saw 4 chips on each of 6 cards, tapped **Warmer** on `s_title`, and the activity
+log showed `palette warmed (#1f1505, #2d2a31, #7f92f0)` → saved revision → `Scene re-render
+finished: s_title`.
+
 ## C6 backend run (spend card + run panel)
 
 The top bar's **Backend** picker now offers `BYO ComfyUI` and `Google Colab G4` alongside `CPU`.
