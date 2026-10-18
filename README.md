@@ -84,6 +84,7 @@ Stills from example videos rendered with Comfyrizz (FLUX 3 Klein stills and refe
 | 🌍 **Multilingual + aspect variants** | Export per-language and 16:9 / 9:16 / 1:1 variants with re-flowed layouts. |
 | ☁️ **Google Colab backend** | Spins up a G4, bootstraps ComfyUI with pinned models, runs batches, downloads results and stops the runtime, verified against `colab sessions`. Watchdog, budget formula and `stop_unconfirmed` reporting. |
 | 🖥️ **Bring your own ComfyUI** | Point the same jobs at your own ComfyUI (plus `comfy-api-proxy`). Not metered, never called free. |
+| 🔍 **Open in ComfyUI** | Every generated still and plate keeps the API-format graph that was submitted (seed, prompt, models, parameters). Download it from the asset view. Drag-and-drop UI format is not generated; see [Open in ComfyUI](#open-in-comfyui). |
 | 🔁 **Per-scene re-render** | Re-render one scene or regenerate one scene's media; ×2 upscale for final plates. |
 | 📦 **Rights-aware export** | `CREDITS.md` and a `package.zip` that ships only assets whose licence allows it and lists every refusal with its reason. |
 | 🧪 **Deterministic render** | Frame = f(timeline, local assets, frame number). No network in compositions; copy that doesn't fit fails visibly instead of clipping. |
@@ -176,6 +177,27 @@ scripts/setup-local-comfy.sh --comfyui-ref v0.41.3
 
 Run ComfyUI and `comfy-api-proxy`, then pick **BYO ComfyUI** in the app (default `http://127.0.0.1:8188`), or drive the pipeline from the CLI. See [`packages/backends/BYO-COMFYUI.md`](packages/backends/BYO-COMFYUI.md) for health checks and `plan-jobs` → `comfyrizz_pipeline.runner`.
 
+## Open in ComfyUI
+
+When a still, plate or ×2 upscale finishes, Comfyrizz writes the API-format workflow that was actually submitted next to the file:
+
+- `assets/<id>.workflow.api.json` (a plate under `out/intermediates/` uses that same stem)
+- `assets/<id>.workflow.md` explains how to replay it
+
+The graph includes the seed, prompt, model filenames and parameters. Tokens, API keys and signed URLs are removed before the file is written. The same files are copied into `package.zip` (`OPEN-IN-COMFYUI.md` in the archive is the short version).
+
+ComfyUI's drag-and-drop Load button expects the UI workflow format (`nodes`, `links`, and widget values in each node's own order). The API graph does not record that order — it comes from the running install's node definitions — so a converted file would open as a broken graph. Comfyrizz does not generate one. Replay the API file on a ComfyUI that has the same models:
+
+```bash
+curl -sS http://127.0.0.1:8188/prompt \
+  -H 'content-type: application/json' \
+  --data-binary @- <<EOF
+{"prompt": $(cat assets/your-still.workflow.api.json)}
+EOF
+```
+
+The same JSON is the `workflow` body of a Comfy API v2 job (`POST /api/v2/jobs`). In the app, a generated still or plate has **Open in ComfyUI** (downloads the API graph) and **How to open**. `GET /api/package/<id>/assets/<assetId>/workflow` serves the file; `?format=readme` serves the instructions; `?variant=upscaled` serves the ×2 graph.
+
 ## Configuration
 
 All configuration is environment variables read by the local server. Nothing secret is sent to the browser.
@@ -243,7 +265,7 @@ pnpm --filter @comfyrizz/renderer layout:check
 Working now: everything under [Features](#features). In progress or planned:
 
 - [ ] **Qwen3-TTS voices** alongside Kokoro
-- [ ] **Open in ComfyUI**: open any generated asset's exact graph and parameters in ComfyUI
+- [x] **Open in ComfyUI**: each generated still and plate keeps the submitted API-format graph (seed, prompt, models, parameters) next to the asset, in `package.zip`, and behind **Open in ComfyUI** in the asset view. Drag-and-drop UI format is not generated; see [Open in ComfyUI](#open-in-comfyui).
 - [ ] **Music bed and SFX** in the mix
 - [ ] **Motion transitions** (blur, push, zoom, iris): schema vocabulary and motion lint landed, renderer support in progress
 - [ ] Committed `pnpm-lock.yaml` for reproducible installs

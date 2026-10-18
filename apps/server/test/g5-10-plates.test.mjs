@@ -141,6 +141,28 @@ test('G5-10: copyNamedAssets skips missing files and paths that escape the outpu
   assert.equal(existsSync(join(packageDir, 'secret.txt')), false, 'the escaping path was not copied below the package dir');
 });
 
+test('W1: copyNamedAssets also copies the workflow sidecar next to a plate', () => {
+  const root = mkdtempSync(join(tmpdir(), 'comfyrizz-w1-copy-'));
+  scratch.push(root);
+  const outputDir = join(root, 'collected');
+  const packageDir = join(root, 'package');
+  mkdirSync(join(outputDir, 'out', 'intermediates'), { recursive: true });
+  writeFileSync(join(outputDir, 'out', 'intermediates', 'a_ok.plate.mp4'), 'ok');
+  writeFileSync(join(outputDir, 'out', 'intermediates', 'a_ok.plate.workflow.api.json'), '{"1":{"inputs":{"seed":1}}}');
+  writeFileSync(join(outputDir, 'out', 'intermediates', 'a_ok.plate.workflow.md'), 'API format');
+  const copied = copyNamedAssets({
+    pkg: { assets: { a_ok: { file: 'out/intermediates/a_ok.plate.mp4' } } },
+    outputDir,
+    packageDir,
+  });
+  assert.deepEqual(copied, [
+    'out/intermediates/a_ok.plate.mp4',
+    'out/intermediates/a_ok.plate.workflow.api.json',
+    'out/intermediates/a_ok.plate.workflow.md',
+  ]);
+  assert.equal(readFileSync(join(packageDir, 'out', 'intermediates', 'a_ok.plate.workflow.api.json'), 'utf8'), '{"1":{"inputs":{"seed":1}}}');
+});
+
 test('G5-10: isInside rejects absolute paths and .. escapes', () => {
   const root = join(tmpdir(), 'any-root');
   assert.equal(isInside(root, 'out/x.mp4'), true);

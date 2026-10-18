@@ -14,6 +14,8 @@ export type { DownloadCandidateOptions, DownloadedCandidate } from './download.j
 export { buildCredits } from './credits.js';
 export type { BuildCreditsOptions } from './credits.js';
 export { buildPackageZip, createZip, crc32, sha256Hex } from './package-zip.js';
+export { OPEN_IN_COMFYUI_MARKDOWN } from './open-comfyui.js';
+export { isSecretKey, redactSecretText, redactSecrets, redactWorkflowDocument, REDACTED } from './secrets.js';
 export type {
   CreditEntry,
   Credits,
