@@ -95,15 +95,36 @@ function sceneIndexOf(pkg, assetId) {
   return -1;
 }
 
+/**
+ * The upscale strength a package asked for: `upscale: "x2"` (or true) is 2. The file's suffix says
+ * what the upscale was; the *dims* of the variant are whatever the file turned out to be (N4).
+ */
+function upscaleScale(inputs) {
+  const raw = inputs?.upscale;
+  if (raw === undefined || raw === null || raw === false) return 0;
+  const factor = /x\s*(\d+(?:\.\d+)?)/i.exec(String(raw === true ? "x2" : raw));
+  return factor ? Number(factor[1]) : 2;
+}
+
+/** The x2 variant's filename: it says the upscale, never the resulting size. */
+function upscaleFileName(assetId, inputs) {
+  return `assets/${assetId}@${String(upscaleScale(inputs)).replace(/\.0$/, "")}x${OUTPUT_EXT.upscale}`;
+}
+
 /** The job that ends up owning an asset's *file*, with the path that file lands at. */
 function producerOf(pkg, assetId, kind) {
   const asset = (pkg.assets && pkg.assets[assetId]) || {};
   const inputs = (asset.gen && asset.gen.inputs) || {};
   if (kind === "still") return { job: `${assetId}.still`, path: `assets/${assetId}.png` };
   if (kind === "audio") return { job: `${assetId}.audio`, path: `assets/${assetId}.wav` };
-  // a plate that is upscaled is owned by its upscale job; both write assets/<id>.mp4
-  if (kind === "upscale" || inputs.upscale) return { job: `${assetId}.upscale`, path: `assets/${assetId}.mp4` };
-  return { job: `${assetId}.plate`, path: `assets/${assetId}.mp4` };
+  // H12: a plate that is upscaled has two files. The plate is the asset's own file (1x, in the
+  // package's media dir) and the upscale is a *variant* the 1080p export prefers. The upscale job is
+  // therefore not the producer of the asset's file any more - it produces `variants.upscaled`.
+  if (kind === "upscale") return { job: `${assetId}.upscale`, path: upscaleFileName(assetId, inputs), variant: "upscaled" };
+  // an upscaled plate's own file is its plate output; a plain plate is claimed here too (its
+  // intermediate path is what the manifest reports, see the plate branch below)
+  if (inputs.upscale) return { job: `${assetId}.plate`, path: `assets/${assetId}${OUTPUT_EXT.plate}` };
+  return { job: `${assetId}.plate`, path: `assets/${assetId}${OUTPUT_EXT.plate}` };
 }
 
 function looksLikePath(value) {
@@ -444,8 +465,10 @@ export function planJobs(pkg, opts = {}) {
       checkSourceAspect({ pkg, plateAssetId: assetId, sourceId: job.inputAsset, dims, format, kinds, errors, allowed: opts.allowAspectMismatch === true, warnings, sourceMultiple: job.inputAsset ? latticeFor(job.inputAsset) : undefined });
 
       if (params.upscale) {
-        // A plate that will be upscaled is an intermediate; the upscale job owns the asset file.
-        job.output = `out/intermediates/${assetId}.plate.mp4`;
+        // H12: an upscaled plate keeps the plate as the asset's own file (1x, measured), and the
+        // upscale job writes the x2 *variant* next to it. Both live in the package's media dir, so an
+        // export that prefers the variant can resolve it from the package alone.
+        job.output = `assets/${assetId}${OUTPUT_EXT.plate}`;
         const upscaleParams = { ...params, upscale: params.upscale };
         // A package may name a dedicated finals graph; otherwise the upscale stage of the plate
         // graph is reused, and `paramsSource` tells the runner to prefer that stage's map.
@@ -465,13 +488,15 @@ export function planJobs(pkg, opts = {}) {
           model: gen.model ?? null,
           modelRevision: gen.model_revision ?? null,
           deps: [`${assetId}.plate`],
-          output: `assets/${assetId}${OUTPUT_EXT.upscale}`,
+          output: upscaleFileName(assetId, inputs),
           outputKind: "video",
+          // which package field this file belongs to: `assets.<id>.variants.upscaled` (H12)
+          variant: "upscaled",
           params: upscaleParams,
-          source: `out/intermediates/${assetId}.plate.mp4`,
+          // the plate this upscale reads: the asset's own file, one batch earlier
+          source: `assets/${assetId}${OUTPUT_EXT.plate}`,
         };
-        const factor = /x\s*(\d)/i.exec(String(upscaleParams.upscale));
-        const scale = factor ? Number(factor[1]) : 2;
+        const scale = upscaleScale(inputs);
         const target = {
           width: dims.width * scale,
           height: dims.height * scale,
@@ -483,6 +508,7 @@ export function planJobs(pkg, opts = {}) {
         if (cropX || cropY) {
           up.crop = { top: Math.floor(cropY / 2), bottom: Math.ceil(cropY / 2), left: Math.floor(cropX / 2), right: Math.ceil(cropX / 2) };
         }
+        up.scale = scale;
         up.frames = frames;
         up.fps = job.fps;
         // the finals pass renders stage 1 at half the upscale target and the same upsampler doubles it

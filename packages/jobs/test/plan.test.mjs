@@ -144,9 +144,13 @@ test("the plate depends on its still and the upscale depends on the plate and it
   // the finals pass reuses the plate's graph, so it needs the same uploaded start image and
   // names its producer as well as the plate itself
   assert.deepEqual(byId["a_plate1.upscale"].deps, ["a_plate1.plate", "a_plate1_still.still"]);
-  assert.equal(byId["a_plate1.upscale"].source, "out/intermediates/a_plate1.plate.mp4");
-  assert.equal(byId["a_plate1.plate"].output, "out/intermediates/a_plate1.plate.mp4");
-  assert.equal(byId["a_plate1.upscale"].output, "assets/a_plate1.mp4");
+  // H12: an upscaled plate has two files in the package's media dir - the plate is the asset's own
+  // file (1x) and the upscale is its x2 variant, which the 1080p export prefers
+  assert.equal(byId["a_plate1.upscale"].source, "assets/a_plate1.mp4");
+  assert.equal(byId["a_plate1.plate"].output, "assets/a_plate1.mp4");
+  assert.equal(byId["a_plate1.upscale"].output, "assets/a_plate1@2x.mp4");
+  assert.equal(byId["a_plate1.upscale"].variant, "upscaled");
+  assert.equal(byId["a_plate1.upscale"].scale, 2);
   assert.equal(byId["a_narr.audio"].output, "assets/a_narr.wav");
 });
 
