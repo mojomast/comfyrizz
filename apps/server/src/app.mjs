@@ -6,6 +6,7 @@ import { EventLog } from './events.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
 import { buildVariants } from './variant.mjs';
+import { buildDataset } from './dataset.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
@@ -107,6 +108,7 @@ export function createApp({
   agentRunner = null,
   providers = providerAvailability(),
   backendFactory = defaultBackendFactory,
+  datasetFetch = globalThis.fetch,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
@@ -352,6 +354,16 @@ export function createApp({
 
     if (url.pathname === '/api/brief/presets' && request.method === 'GET') {
       return sendJson(response, 200, briefPresets());
+    }
+
+    if (url.pathname === '/api/dataset' && request.method === 'POST') {
+      const body = await readJson(request);
+      try {
+        const result = await buildDataset(body, { fetchImpl: datasetFetch });
+        return sendJson(response, 200, result);
+      } catch (error) {
+        return sendJson(response, error.status ?? 400, { error: error.message });
+      }
     }
 
     if (url.pathname === '/api/brand' && request.method === 'POST') {
