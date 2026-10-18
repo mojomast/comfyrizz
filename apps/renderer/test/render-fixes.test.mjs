@@ -81,3 +81,9 @@ test('N12: the stat layout tags only example datasets and keeps kicker and footn
   assert.match(body, /lines\.footnote/);
   assert.doesNotMatch(body, /· example data/);
 });
+
+test('N13: the lower third uses light text on its fixed dark box', () => {
+  const body = functionBody(source('media.tsx'), 'LowerThird');
+  assert.match(body, /color:\s*'#f4f6fb'/, 'the text on the always-dark box must be light');
+  assert.doesNotMatch(body, /colors\.primary/, 'the theme primary is dark on light themes (clay, editorial) and must not be used here');
+});

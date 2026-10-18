@@ -199,7 +199,7 @@ export function LowerThird({ kicker, text, pkg }: { kicker?: string; text: strin
       {kicker ? (
         <div style={{ color: colors.muted, fontSize: 26, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase' }}>{kicker}</div>
       ) : null}
-      <div style={{ color: colors.primary, fontSize: 46, fontWeight: 800, padding: '14px 34px', borderRadius: 18, background: 'rgba(11,29,46,0.72)' }}>
+      <div style={{ color: '#f4f6fb', fontSize: 46, fontWeight: 800, padding: '14px 34px', borderRadius: 18, background: 'rgba(11,29,46,0.72)' }}>
         {text}
       </div>
     </div>
