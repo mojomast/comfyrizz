@@ -7,6 +7,7 @@ import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
 import { buildVariants } from './variant.mjs';
 import { buildDataset } from './dataset.mjs';
+import { copyNamedAssets } from './run-assets.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
@@ -144,6 +145,13 @@ export function createApp({
     const packageDir = dirname(store.path(id));
     const collectedAssets = join(record.outputDir, 'assets');
     if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
+    // G5-10: the applied package can also name files outside `assets/` (the runner's
+    // non-upscaled plates live at `out/intermediates/<id>.plate.mp4`), so copy every path it
+    // names — otherwise the renderer falls back to placeholders.
+    const copied = copyNamedAssets({ pkg: result.package, outputDir: record.outputDir, packageDir });
+    if (copied.length) {
+      events.publish({ type: 'run.log', runId: record.runId, line: `collected ${copied.length} package file(s): ${copied.join(', ')}` });
+    }
     const current = store.read(id);
     const saved = current ? store.save(id, result.package, pkg.revision) : store.write(result.package);
     events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
