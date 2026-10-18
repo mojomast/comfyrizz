@@ -9,3 +9,7 @@ runs/
 *.mp4
 !examples/**/*.mp4
 .DS_Store
+.runtime/
+.env.*
+!.env.example
+*.log
