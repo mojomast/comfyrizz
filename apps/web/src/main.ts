@@ -371,7 +371,15 @@ function summarizeRunEvent(event: RunEvent): string {
     if (event.phase === 'planned') return `${event.jobs ?? '?'} job(s) planned`;
     if (event.phase === 'up') return `VM up: ${event.state ?? '?'}`;
     if (event.phase === 'ran') return `ran: ${counts.succeeded ?? 0} ok${counts.cached ? `, ${counts.cached} cached` : ''}${counts.failed ? `, ${counts.failed} failed` : ''}`;
+    if (event.phase === 'bootstrapped') return 'box prepared';
     if (event.phase === 'applied') return `${event.assets ?? 0} asset(s) applied${event.candidates ? `, ${event.candidates} candidate(s)` : ''}`;
+    // R1: the quality gate's verdict travels with the phase, so the panel can say what it found
+    if (event.phase === 'gated') {
+      const failures = (event.failures ?? 0) as number;
+      if (event.ok === true) return `quality gate: ${event.judged ?? 0} check(s) passed`;
+      if (event.ok === false) return `quality gate: ${failures} check(s) failed`;
+      return 'quality gate: not run';
+    }
     if (event.phase === 'teardown') return teardownLabel({ state: String(event.state ?? '') });
     if (event.phase === 'failed') return `${event.message ?? ''}${event.teardown ? ` · ${teardownLabel({ state: String(event.teardown) })}` : ''}`;
     return String(event.phase ?? 'phase');

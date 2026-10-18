@@ -196,7 +196,7 @@ test('colab: brief -> package -> spend confirm -> run -> collected plate -> MP4 
     assert.equal(finished.status, 'done');
     assert.equal(finished.teardown.state, 'stopped', 'the VM was stopped and verified');
     const phases = finished.events.filter((event) => event.event === 'run_phase').map((event) => event.phase);
-    assert.deepEqual(phases, ['planned', 'up', 'bootstrapped', 'ran', 'applied', 'teardown']);
+    assert.deepEqual(phases, ['planned', 'up', 'bootstrapped', 'ran', 'applied', 'gated', 'teardown']);
     assert.equal(finished.applied.length, 1);
     assert.equal(finished.applied[0].asset, 'a_data_still');
 
