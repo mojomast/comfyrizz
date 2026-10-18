@@ -343,6 +343,10 @@ function httpRequestRaw(server, method, path, body) {
         port,
         path,
         method,
+        // H16: a colab run keeps the test idle for seconds, and Node's global agent keeps a pooled
+        // socket that the server has already closed (keepAliveTimeout is 5 s): the next call on it
+        // comes back ECONNRESET. One socket per call, with its own close.
+        agent: false,
         headers: {
           'x-comfyrizz-token': TOKEN,
           origin: `http://127.0.0.1:${port}`,
