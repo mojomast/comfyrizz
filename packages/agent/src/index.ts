@@ -85,5 +85,7 @@ export {
   datasetHeadline,
 } from './dataset.js';
 export type { Dataset, DatasetValue, DatasetParseOptions, DatasetParseResult, CsvParseResult } from './dataset.js';
+export { CHART_SCENE_KINDS, formatValue, sourceCaption, proposeChartScenes, proposalValues } from './chart-scenes.js';
+export type { ChartSceneKind, ChartSceneProposal, ProposeChartScenesOptions } from './chart-scenes.js';
 export type { AgentEvent, RunAgentOptions, RunAgentResult, ToolRecord } from './agent.js';
 export type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ToolCall, ToolDef } from './types.js';
