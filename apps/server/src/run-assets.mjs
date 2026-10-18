@@ -8,6 +8,7 @@
 // the intermediate folder.
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { workflowSidecars } from './workflow.mjs';
 
 /** Every relative path a package names, asset `file`s first then variant files, de-duplicated. */
 export function namedAssetFiles(pkg) {
@@ -48,6 +49,20 @@ export function copyNamedAssets({ pkg, outputDir, packageDir }) {
     mkdirSync(dirname(dest), { recursive: true });
     cpSync(source, dest);
     copied.push(file);
+    // W1: the API graph and its instructions sit beside the asset. Plates live
+    // outside `assets/`, so the directory copy in completeRun does not see them.
+    const sidecars = workflowSidecars(file);
+    if (sidecars) {
+      for (const rel of [sidecars.api, sidecars.readme]) {
+        if (!isInside(outputDir, rel)) continue;
+        const side = join(outputDir, rel);
+        if (!existsSync(side)) continue;
+        const sideDest = join(packageDir, rel);
+        mkdirSync(dirname(sideDest), { recursive: true });
+        cpSync(side, sideDest);
+        copied.push(rel);
+      }
+    }
   }
   return copied;
 }

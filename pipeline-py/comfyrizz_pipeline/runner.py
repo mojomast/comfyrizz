@@ -29,6 +29,7 @@ from typing import Any
 
 from .atomic import canonical_hash, ensure_dir, read_json, sha256_file, write_json_atomic
 from .attempts import Attempt, AttemptStore, attempts_jsonl, now_iso
+from .capture import materialize_submitted_graph, save_captured_workflow, should_capture, sidecar_paths
 from .client import (
     ComfyClient,
     UploadError,
@@ -112,6 +113,8 @@ class Runner:
         #: sha256 -> {name, url, at}: what this run has already uploaded, so two jobs that need
         #: the same bytes (a still used as an i2v source twice) upload them once
         self._uploads: dict[str, dict[str, Any]] = {}
+        #: job id -> the API graph this run submitted, so a success can save it verbatim
+        self._pending_graphs: dict[str, dict[str, Any]] = {}
         #: job labels state: None until the server says something, then True/False
         self.labels_ok: bool | None = None
         self.label_note: str | None = None
@@ -582,7 +585,8 @@ class Runner:
             attempt = self.attempts.update(attempt, state="succeeded", outputs=outputs, finished_at=now_iso())
             self._cache_store(job, outputs, attempt.attempt_id, attempt.job_id)
             self.progress.emit("job_done", job=job["id"], attempt=attempt.attempt_id, value=len(outputs))
-            return self._result(job, "succeeded", attempt, outputs=outputs)
+            result = self._result(job, "succeeded", attempt, outputs=outputs)
+            return self._attach_workflow(job, result, self._pending_graphs.pop(job["id"], None))
         state = "canceled" if snapshot.status == "canceled" else "failed"
         error = snapshot.error or {"code": f"job_{snapshot.status}", "message": f"job ended as {snapshot.status}"}
         attempt = self.attempts.update(attempt, state=state, error=error, finished_at=now_iso())
@@ -712,6 +716,8 @@ class Runner:
             # 3. the job id is written the moment we have it, before any progress line
             attempt = self.attempts.update(attempt, state="submitted", job_id=outcome.job_id, submitted_at=now_iso())
             self.progress.emit("submitted", job=job["id"], attempt=attempt_id, value=outcome.job_id)
+            if isinstance(outcome.workflow, dict):
+                self._pending_graphs[job["id"]] = outcome.workflow
             if self.config.kill_after_submit:
                 os._exit(137)
             return self._poll_attempt(job, attempt, timeout=self.config.job_timeout, collecting=True)
@@ -744,6 +750,8 @@ class Runner:
                     events=[{"at": now_iso(), "event": "adopted_after_idempotency_reuse"}],
                 )
                 self.progress.emit("submitted", job=job["id"], attempt=attempt.attempt_id, value=item["id"], recovered=True)
+                if isinstance(getattr(outcome, "workflow", None), dict):
+                    self._pending_graphs[job["id"]] = outcome.workflow
                 return self._poll_attempt(job, attempt, timeout=self.config.job_timeout, collecting=True)
         attempt = self.attempts.update(attempt, state="submission_unknown", error=outcome.error)
         self.progress.emit("submission_unknown", job=job["id"], attempt=attempt.attempt_id, value="idempotency_key_reuse")
@@ -771,6 +779,67 @@ class Runner:
             result["error"] = error
         if reason is not None:
             result["reason"] = reason
+        return result
+
+    # -- captured workflows (W1) ---------------------------------------------------
+    def _materialize_job_graph(self, job: dict[str, Any]) -> dict[str, Any]:
+        """Rebuild the API graph from the plan when this run did not submit it.
+
+        Uploaded filenames come from the upload cache (the name the server gave
+        the bytes). Without that cache the content-addressed name the runner
+        would have uploaded is used, and the readme says the copy was rebuilt.
+        """
+        params = dict(job.get("params") or {})
+        paths, problem = self.file_input_paths(job)
+        if problem is None:
+            cached = self._upload_cache_load()["entries"]
+            for param, path in paths.items():
+                digest = sha256_file(path)
+                entry = self._uploads.get(digest) or cached.get(digest)
+                if entry and entry.get("reference"):
+                    params[param] = entry["reference"]
+                else:
+                    params[param] = f"{Path(path).stem}_{digest[:8]}{Path(path).suffix}"
+        return materialize_submitted_graph(self.workflow_path(job), params, self.job_params_source(job))
+
+    def _save_job_workflow(self, job: dict[str, Any], graph: dict[str, Any] | None) -> dict[str, Any]:
+        api_rel, readme_rel = sidecar_paths(job["output"])
+        if graph is None and (self.config.out_dir / api_rel).is_file():
+            return {"api": api_rel, "readme": readme_rel, "redactions": 0, "kept": True}
+        rebuilt = graph is None
+        if graph is None:
+            graph = self._materialize_job_graph(job)
+        return save_captured_workflow(
+            self.config.out_dir,
+            job["output"],
+            graph,
+            meta={
+                "asset": job.get("asset"),
+                "job": job.get("id"),
+                "kind": job.get("kind"),
+                "generator": job.get("generator"),
+                "model": job.get("model"),
+                "template": job.get("workflow"),
+            },
+            rebuilt=rebuilt,
+        )
+
+    def _attach_workflow(self, job: dict[str, Any], result: dict[str, Any], graph: dict[str, Any] | None) -> dict[str, Any]:
+        """Write the submitted graph next to a finished still or plate. Never fails the job."""
+        if result.get("status") not in ("succeeded", "cached") or not should_capture(job):
+            return result
+        try:
+            saved = self._save_job_workflow(job, graph)
+        except Exception as exc:  # noqa: BLE001 - the asset already landed; the sidecar is extra
+            self.progress.emit("workflow_capture_failed", job=job["id"], value=f"{type(exc).__name__}: {exc}")
+            return result
+        outputs = result.get("outputs") or []
+        if saved and outputs:
+            outputs[0]["workflow"] = saved["api"]
+            outputs[0]["workflow_readme"] = saved["readme"]
+            if saved.get("redactions"):
+                outputs[0]["workflow_redactions"] = saved["redactions"]
+            self.progress.emit("workflow_captured", job=job["id"], value=saved["api"])
         return result
 
     # -- entry points --------------------------------------------------------------
@@ -817,13 +886,17 @@ class Runner:
                 if measured:
                     output["measured"] = measured
                 outputs = [output]
-                self.results[job["id"]] = self._result(
+                self.results[job["id"]] = self._attach_workflow(
                     job,
-                    "cached",
-                    outputs=outputs,
-                    reason=f"cache hit from attempt {cached['attempt_id']}",
-                    attempt_id=cached.get("attempt_id"),
-                    job_id=cached.get("job_id"),
+                    self._result(
+                        job,
+                        "cached",
+                        outputs=outputs,
+                        reason=f"cache hit from attempt {cached['attempt_id']}",
+                        attempt_id=cached.get("attempt_id"),
+                        job_id=cached.get("job_id"),
+                    ),
+                    None,
                 )
                 self.progress.emit("cache_hit", job=job["id"], value=cached["file"])
                 self._write_manifest()

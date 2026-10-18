@@ -9,6 +9,7 @@ import { buildCredits, buildPackageZip } from '../../../packages/sources/dist/sr
 import { captionsToSrt, captionsToVtt } from '../../../packages/tts/dist/src/index.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions } from '../../renderer/scripts/render-package-lib.mjs';
+import { collectCapturedWorkflows } from './workflow.mjs';
 
 export const EXPORT_FILE_NAMES = ['video.mp4', 'captions.srt', 'captions.vtt', 'CREDITS.md', 'package.zip'];
 
@@ -80,7 +81,14 @@ export function createExporter({ exportsDir, render } = {}) {
     writeFileSync(vttPath, captionsToVtt(cues, timeline.fps));
 
     const generatedAt = new Date().toISOString();
-    const zip = buildPackageZip({ package: pkg, timeline, assets: collectAssetBytes(pkg, packageDir), generatedAt });
+    const capturedWorkflows = collectCapturedWorkflows(pkg, packageDir);
+    const zip = buildPackageZip({
+      package: pkg,
+      timeline,
+      assets: collectAssetBytes(pkg, packageDir),
+      capturedWorkflows,
+      generatedAt,
+    });
     const zipPath = join(dir, 'package.zip');
     writeFileSync(zipPath, zip.bytes);
 

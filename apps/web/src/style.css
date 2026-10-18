@@ -171,9 +171,14 @@ main {
 .empty { color: var(--muted); font-size: 12px; line-height: 1.5; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); padding: 14px 12px; }
 .asset { display: flex; gap: 9px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
 .asset.pending { border-style: dashed; }
-.asset .thumb { width: 38px; height: 38px; border-radius: 8px; background: #0a0d14; display: grid; place-items: center; font-size: 18px; }
+.asset .thumb { width: 38px; height: 38px; border-radius: 8px; background: #0a0d14; display: grid; place-items: center; font-size: 18px; flex: none; }
+.asset .asset-copy { min-width: 0; }
 .asset b { display: block; font-size: 12px; }
 .asset span { display: block; font-size: 10px; color: var(--muted); }
+.asset .asset-end { margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.asset .asset-end button { font-size: 10px; padding: 3px 7px; white-space: nowrap; }
+.asset .asset-end button:disabled { cursor: not-allowed; }
+.asset:has(.asset-end) > .chip { margin-left: 8px; }
 .chip { margin-left: auto; font-size: 9px; color: var(--ok); border: 1px solid #2d5a4a; border-radius: 999px; padding: 2px 6px; }
 .chip.warn { color: var(--warn); border-color: #5a4a1a; }
 /* MS4: frame-QA badge + contact sheet under the preview */

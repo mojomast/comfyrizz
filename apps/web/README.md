@@ -18,7 +18,9 @@ the island only receives the compiled timeline and playhead.
 - **Activity** — local events plus server events (agent start/step/finish/fail, run lifecycle).
 - **Assets** — generated-first assets from the package, with generator + licence chips. Assets whose
   generator is GPU-bound (`flux3-klein`, `ltx25`) stay `pending`, and are carded in the **GPU queue**
-  pane with their procedural fallback preview and a `pending spend` chip.
+  pane with their procedural fallback preview and a `pending spend` chip. A generated still or plate
+  has **Open in ComfyUI** (downloads the API-format workflow that was submitted) and **How to open**.
+  The control stays disabled until the job has succeeded. Drag-and-drop UI format is not offered.
 
 ## Run
 

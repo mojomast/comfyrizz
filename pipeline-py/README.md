@@ -153,6 +153,17 @@ test; `tests/fixtures/workflows/*.api.json` + `*.api.params.json` are the graphs
 Not wired here on purpose: the Google Colab lifecycle itself (B3, `packages/backends/` +
 `colab/`).
 
+## Captured workflows (W1)
+
+After a still, plate or ×2 upscale succeeds, the runner writes the API-format graph that was
+submitted next to the output: `<stem>.workflow.api.json` plus `<stem>.workflow.md`. The graph is
+the one passed to the SDK (seed, prompt, model filenames, parameters), with secret-shaped strings
+removed. A cache hit keeps the file from the run that submitted it. Narration audio is not captured.
+
+ComfyUI drag-and-drop needs the UI workflow format. Widget order is not in the API graph, so a
+converted file would not open reliably. The markdown sidecar says how to replay the API file
+(`POST /prompt` or Comfy API v2) and that no UI-format file is written.
+
 ## Input files (uploads)
 
 A graph node that takes a file (`LoadImage` on the i2v, img2img and reference-edit graphs) needs a

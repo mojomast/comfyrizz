@@ -50,6 +50,7 @@ The missing step for a true stranger is a committed `pnpm-lock.yaml`, which live
 | `GET` | `/api/health` | Public, host-checked: `{ok:true, service:"comfyrizz-local"}` |
 | `GET` | `/api/providers` | Auth: `{providers:{openrouter,opencode-go,custom}}` booleans reporting server-key *presence* only — key values never leave the server (U1) |
 | `GET` | `/api/package/:id` | `{package, revision}` |
+| `GET` | `/api/package/:id/assets/:assetId/workflow` | W1: the API-format graph saved next to a generated still or plate (`?format=readme`, `?variant=upscaled`). `x-comfyrizz-ui-format: unavailable` — drag-and-drop UI format is not generated |
 | `PATCH` | `/api/package/:id` | `{baseRevision, package}`; mismatch → `409 {currentRevision}`; invalid → `422 {details}` |
 | `POST` | `/api/agent` | C5 agent slice: `{brief, provider?, model?, sessionId?}`. Runs `runCpuSlice` (scripted offline, the live model when `provider` is set), validates and returns `{package, revision, timeline, generatedAssets, routes, pendingGpu, svgAssets, live, fallback, provider, model}` |
 | `POST` | `/api/brief` | R2 plan-mode brief: `{prompt, mode?: "plan"\|"express", decisions?, askMore?, attachments?}` → `{mode, complete, brief, questions, outline?}`. No model/network: the deterministic extractor in `@comfyrizz/agent` fills the §2.3 brief, then the response carries the top ≤3 §2.4 questions (chips + a Decide-for-me default); sending `decisions` applies them and completes, and a completed response also carries the §2.2 script-first `outline` (beats + estimated seconds) |
