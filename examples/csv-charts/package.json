@@ -1,0 +1,201 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_csvcharts0001",
+  "title": "CSV chart scenes",
+  "createdAt": "2025-10-18T00:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#0d0f14",
+      "#1b2440",
+      "#6d8cff",
+      "#e6e8ee"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": false,
+    "engine": "none"
+  },
+  "datasets": {
+    "d_minutes": {
+      "unit": "minutes",
+      "values": [
+        {
+          "label": "CPU slice",
+          "value": 6
+        },
+        {
+          "label": "Render queue",
+          "value": 19
+        },
+        {
+          "label": "Review edits",
+          "value": 11
+        },
+        {
+          "label": "Waiting",
+          "value": 34
+        }
+      ],
+      "source": "user",
+      "label": "Where the minutes went",
+      "note": "The team planning log for one launch video."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "Data-driven scenes",
+        "headline": "From a CSV to a chart",
+        "sub": "Every label and value is the CSV value."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": [],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_data_minutes_bar",
+      "preferredFrames": 240,
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 85
+        }
+      },
+      "foreground": [],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "layout": "chart",
+      "variant": "bar",
+      "copy": {
+        "headline": "Where the minutes went",
+        "sub": "Unit: minutes",
+        "footnote": "Where the minutes went · The team planning log for one launch video."
+      },
+      "data": {
+        "dataset": "d_minutes",
+        "display": "bar"
+      }
+    },
+    {
+      "id": "s_data_minutes_number",
+      "preferredFrames": 180,
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 87
+        }
+      },
+      "foreground": [],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "layout": "stat",
+      "copy": {
+        "headline": "Where the minutes went",
+        "body": "6 minutes",
+        "sub": "CPU slice",
+        "footnote": "Where the minutes went · The team planning log for one launch video."
+      },
+      "data": {
+        "dataset": "d_minutes",
+        "display": "number"
+      }
+    },
+    {
+      "id": "s_data_minutes_comparison",
+      "preferredFrames": 210,
+      "background": {
+        "procedural": {
+          "pattern": "gradient",
+          "seed": 13
+        }
+      },
+      "foreground": [],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "layout": "list",
+      "variant": "bullets",
+      "copy": {
+        "headline": "Where the minutes went",
+        "items": [
+          "CPU slice: 6 minutes",
+          "Render queue: 19 minutes",
+          "Review edits: 11 minutes",
+          "Waiting: 34 minutes"
+        ],
+        "footnote": "Where the minutes went · The team planning log for one launch video."
+      }
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Your data, rendered",
+        "sub": "Paste a CSV, get accurate charts.",
+        "cta": "github.example/comfyrizz"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 23,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": []
+    }
+  ],
+  "assets": {},
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "csv-charts",
+      "weights": "open"
+    },
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Dataset values come from data.csv; no invented numbers."
+    ]
+  }
+}

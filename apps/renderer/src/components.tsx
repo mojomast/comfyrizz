@@ -20,6 +20,7 @@ export function GeneratedAssetsProvider({ assets, children }: { assets: Record<s
 import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, palette, textColors, useFontFamily } from './theme';
 import { proceduralStyle } from './background-model.js';
 import { statLines } from './stat-model.js';
+import { chartSeries } from './chart-model.js';
 import { LowerThird, MediaFill, MediaPanel, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
 
 /* ------------------------------------------------------------------ *
@@ -401,7 +402,7 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
   const copy = (scene.copy ?? {}) as Record<string, string | undefined>;
   const datasetId = scene.data?.dataset;
   const dataset = datasetId ? pkg.datasets?.[datasetId] : undefined;
-  const values = dataset?.values ?? [];
+  const values = chartSeries(dataset);
   // L1 re-layout: the bar chart shrinks to the safe area instead of overflowing
   // a 1080-wide portrait/square frame. Landscape keeps the authored 1180 px.
   const { width: frameWidth } = useVideoConfig();
