@@ -1,0 +1,376 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_brandkit00001",
+  "title": "Brand kit example",
+  "createdAt": "2025-10-18T00:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#0b1020",
+      "#1b2a4a",
+      "#f2b134",
+      "#f4f6fb"
+    ],
+    "font": "Inter",
+    "logo_asset": "a_brandlogo0001"
+  },
+  "voice": {
+    "enabled": false,
+    "engine": "none"
+  },
+  "datasets": {
+    "d_minutes": {
+      "unit": "minutes",
+      "label": "Minutes of render time saved per launch video",
+      "values": [
+        {
+          "label": "Colab renders",
+          "value": 34
+        },
+        {
+          "label": "Comfyrizz CPU slice",
+          "value": 6
+        },
+        {
+          "label": "Review edits",
+          "value": 11
+        },
+        {
+          "label": "Waiting for queues",
+          "value": 19
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "Invented numbers for the CPU slice; labelled as an example on the chart."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "Brand kit example",
+        "headline": "Your brand, every frame",
+        "sub": "Palette, logo and typography come from the kit."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_icon_check",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.07,
+          "anim": "fade-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_hero",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Generated-first assets",
+        "sub": "Icons, diagrams and pattern backgrounds are SVG written as code.",
+        "body": "The agent sanitizes and render-checks every SVG on CPU, repairs it at most twice, then hands the vector straight to Remotion."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 3
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_diagram_flow",
+          "x": 0.79,
+          "y": 0.5,
+          "w": 0.4,
+          "anim": "slide-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_stat",
+      "layout": "stat",
+      "preferredFrames": 180,
+      "copy": {
+        "headline": "CPU time for a 40 s launch video",
+        "sub": "Measured on the box, no GPU and no network.",
+        "body": "6 min"
+      },
+      "data": {
+        "dataset": "d_minutes",
+        "display": "number"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "gradient",
+          "seed": 5
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_icon_check",
+          "x": 0.13,
+          "y": 0.12,
+          "w": 0.06,
+          "anim": "zoom-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_chart",
+      "layout": "chart",
+      "variant": "bar",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Where the launch minutes went",
+        "sub": "Shorter is better.",
+        "footnote": "Example data, invented for this demo."
+      },
+      "data": {
+        "dataset": "d_minutes",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 17
+        }
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_list",
+      "layout": "list",
+      "variant": "bullets",
+      "preferredFrames": 210,
+      "copy": {
+        "headline": "What the CPU slice does",
+        "items": [
+          "Compiles the timeline in integer frames",
+          "Sanitizes and render-checks every SVG",
+          "Paints procedural backgrounds with no plate",
+          "Shows a red fail state instead of clipping copy"
+        ]
+      },
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 2
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_pattern_dots",
+          "x": 0.86,
+          "y": 0.5,
+          "w": 0.24,
+          "anim": "parallax-in"
+        }
+      ],
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Ready to render",
+        "sub": "Local, deterministic and free.",
+        "cta": "github.example/comfyrizz"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 23,
+          "palette": [
+            "#0d0f14",
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_anim_bars",
+          "x": 0.5,
+          "y": 0.86,
+          "w": 0.24,
+          "anim": "slide-in"
+        }
+      ]
+    }
+  ],
+  "assets": {
+    "a_icon_check": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_icon_check.svg",
+      "sha256": "1959354d29405d12ab23e7c5b3c713985ffcb10a4e1bd02632b0c8adaab9e37a",
+      "bytes": 276,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 512,
+          "palette_ok": true
+        },
+        "caption": "Flat vector check mark in a ring, drawn from the theme palette."
+      }
+    },
+    "a_diagram_flow": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_diagram_flow.svg",
+      "sha256": "696b61798cd3808efc394b5fcff86375eb7b4d0712d8c573266ded5907823575",
+      "bytes": 752,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 288,
+          "palette_ok": true
+        },
+        "caption": "Three-stage diagram: input, generated-first router, output."
+      }
+    },
+    "a_pattern_dots": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_pattern_dots.svg",
+      "sha256": "7a06cea20559489b9d3e6ce4fa29dbf340f0ec6070198fc6d0e62b12f196b500",
+      "bytes": 405,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 288,
+          "palette_ok": true
+        },
+        "caption": "Dotted pattern background tile built from two circle sizes."
+      }
+    },
+    "a_anim_bars": {
+      "kind": "vector-anim",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_anim_bars.svg",
+      "sha256": "c0a1a8f107ff5566e3a7f0ccb521ab1e6e46effca5456010f6a50604270cdf72",
+      "bytes": 547,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 512,
+          "height": 288,
+          "palette_ok": true
+        },
+        "caption": "Five keyframed bars; the Remotion frame drives the grow-in animation."
+      }
+    },
+    "a_brandlogo0001": {
+      "kind": "svg",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/brand/logo.svg",
+      "license": {
+        "id": "user-provided",
+        "approved_by_user": true
+      },
+      "sha256": "014486fc5bd4ff391741828ae4fb276fc86861a822698eac19504c3aec9bba1e",
+      "bytes": 547
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "llm-svg",
+      "weights": "open"
+    },
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Dataset numbers are invented placeholders and are labelled as an example.",
+      "This package uses no LLM, GPU or network calls at render time."
+    ]
+  }
+}

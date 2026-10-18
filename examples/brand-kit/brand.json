@@ -1,0 +1,14 @@
+{
+  "$comment": "B1 brand kit input. This is the loose shape the server/UI accept; POST it to /api/brand to see the normalised theme, or run `prepareBrand` on it. `logo.assetId` references an asset already in a package; the UI instead stages an uploaded SVG/PNG as base64 (`logo.filename` + `logo.dataBase64`).",
+  "palette": ["#0b1020", "#1b2a4a", "#f2b134", "#f4f6fb"],
+  "fonts": [
+    {
+      "family": "Orbit Grotesk",
+      "file": "assets/brand/orbit-grotesk.woff2",
+      "weight": 600,
+      "license": "OFL-1.1"
+    }
+  ],
+  "tone": ["confident", "warm", "plain-spoken"],
+  "logo": { "assetId": "a_brandlogo0001" }
+}
