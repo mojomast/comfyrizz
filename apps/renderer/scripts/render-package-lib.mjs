@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { validatePackage, loadSchema } from '../../../packages/schema/src/index.mjs';
+import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
@@ -97,31 +97,6 @@ export function applyFinalRender(pkg, packageDir, final = {}) {
 }
 
 /**
- * A9 transitional: until the package schema knows `variants` (H12), a package carrying an upscaled
- * variant would fail structural validation, so drop the renderer-only field from a copy before
- * validating. Once `$defs.asset.properties.variants` exists the shim is inert and the package is
- * validated unchanged — including H12's variant semantics (same file, relative path, bigger).
- */
-function schemaKnowsVariants() {
-  try {
-    return Boolean(loadSchema()?.$defs?.asset?.properties?.variants);
-  } catch {
-    return false;
-  }
-}
-
-function validationView(pkg) {
-  if (schemaKnowsVariants() || !pkg?.assets) return pkg;
-  let view = pkg;
-  for (const [id, asset] of Object.entries(pkg.assets)) {
-    if (!asset || typeof asset !== 'object' || !('variants' in asset)) continue;
-    if (view === pkg) view = structuredClone(pkg);
-    delete view.assets[id].variants;
-  }
-  return view;
-}
-
-/**
  * Measured narration options for the timeline compiler (N7). When the package
  * directory carries an audio/durations.json from a Kokoro run, feed those
  * chunk seconds to compileTimeline so scene lengths and captions match the
@@ -166,9 +141,9 @@ export function preparePublicDir(pkg, packageDir) {
 export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
-  // A9: validate the package as stored — the base `file` and `variants` are checked before the final
-  // render swaps in a variant, so the variant semantics see a different base file.
-  const validation = validatePackage(validationView(raw));
+  // A9: validate the package as stored — the base `file` and `variants` are checked (H12 variant
+  // semantics: same file, relative path, bigger) before the final render swaps in a variant.
+  const validation = validatePackage(raw);
   if (!validation.valid) {
     const detail = validation.errors.map(error => `${error.code} ${error.path}: ${error.message}`).join('; ');
     throw new Error(`package invalid: ${detail}`);

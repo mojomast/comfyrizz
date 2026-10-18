@@ -130,26 +130,11 @@ export function createApp({
     if (existsSync(assets)) cpSync(assets, join(workDir, 'assets'), { recursive: true });
   }
 
-  // C9: H8's runPackage tags applied assets with the backend's short id (`colab`); the package
-  // schema accepts only `colab:<hardware>` (e.g. `colab:G4`) or `byo-comfyui`. Normalise here so a
-  // successful run always stores a valid package. Reported as an H8 follow-up on the board.
-  function normalizeBackendTag(pkg, record) {
-    if (record.backendId !== 'colab') return pkg;
-    const tag = `colab:${record.result?.up?.hardware ?? 'G4'}`;
-    for (const asset of Object.values(pkg.assets ?? {})) {
-      if (asset?.gen?.backend === 'colab') asset.gen.backend = tag;
-    }
-    if (Array.isArray(pkg.compliance?.backends_used)) {
-      pkg.compliance.backends_used = pkg.compliance.backends_used.map((entry) => (entry === 'colab' ? tag : entry));
-    }
-    return pkg;
-  }
-
   // C9: after collect, write the applied package back next to its collected plates, then render
-  // the accepted revision to an MP4 the run panel can offer.
+  // the accepted revision to an MP4 the run panel can offer. The applied compliance tag comes from
+  // H8's `runPackage`/`backend.appliedBackendId` (H-fix7), so no server-side normaliser is needed.
   async function completeRun({ pkg, result, record }) {
     if (!result?.package) return { revision: null, render: null };
-    normalizeBackendTag(result.package, record);
     const id = pkg.id;
     const packageDir = dirname(store.path(id));
     const collectedAssets = join(record.outputDir, 'assets');
