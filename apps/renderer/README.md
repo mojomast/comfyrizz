@@ -29,6 +29,16 @@ zero baseline), `List` (bullets/quote). Registered compositions:
 - `Preview-Title`, `Preview-Hero`, `Preview-Stat`, `Preview-Chart`, `Preview-List`
   — one scene each, for frame 0 / mid / last stills
 
+## Brand typography + logo (B1)
+
+`TimelinePlayer` calls `ensureBrandFonts(pkg)` before measuring: each `theme.fonts[]` entry with a
+file is loaded through `@remotion/fonts` `loadFont` (holds `delayRender`, so stills never race the
+download). The first declared brand font becomes the typeset family for every layout and the caption
+overlay via `FontFamilyContext`/`useFontFamily`; `Inter` stays bundled as the fallback. `BrandLogo`
+draws `theme.logo_asset` top-left on the title/outro layouts and hides itself on `onError` instead of
+failing the render. `preparePublicDir` copies the brand-font top-level directory alongside the image
+assets, so a clean-clone render finds it (`apps/renderer/test/brand.test.mjs`).
+
 ## Media layer (P-fix1)
 
 Raster/video assets can fill the frame or sit in a framed panel:

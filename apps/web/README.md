@@ -142,6 +142,19 @@ Evidence: the step-5 probe answered the chips, saw 6 thumbnails (`viewBox 0 0 16
 **Cinematic dark** and confirmed both the `.selected` class and the hidden `style.preset` value moved
 to `cinematic-dark`.
 
+### Step 6 (B1): the brand kit section
+
+The Brief card has a collapsible **Brand kit** section: palette hexes, a font family + file + licence,
+tone words and an SVG/PNG logo file input. **Save brand kit** posts the loose kit to `POST /api/brand`
+and shows the normalised swatches and any warnings (an unsafe font licence or missing file is dropped
+and the kit falls back to Inter). The staged kit rides along on every `/api/brief`,
+`/api/brief/outline` and `/api/agent` request, so the palette, typography and logo are followed from
+the brief into the render. The renderer loads brand fonts through `@remotion/fonts` `loadFont` and
+draws `theme.logo_asset` top-left on the title/outro layouts, hiding it if the file is missing.
+
+See `examples/brand-kit/` for a ready-made kit (`brand.json`) plus a package whose `theme` is the
+normalised result.
+
 ### Step 5b: per-scene edit chips
 
 Each storyboard card also shows four fixed edit chips (`docs/ui/r2-scene-chips.png`): **Warmer**,

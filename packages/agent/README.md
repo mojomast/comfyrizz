@@ -52,10 +52,31 @@ each call is validated before execution, invalid arguments go back to the model 
 max 2 repairs), unknown tools and tool failures become tool results, and the loop stops on
 `max_steps`. Partial streamed arguments never reach a tool.
 
+## Brand kit (B1)
+
+`normalizeBrandKit(input)` (
+`src/brand.ts`) turns a loose owner kit — palette hexes, fonts with a licence, tone words,
+logo — into a `BrandKit` and a list of warnings, and never throws: bad hexes, a font with no
+file or an unsafe licence, duplicates and an invalid logo id are dropped. A font survives only
+with a file **and** one of `OFL-1.1`, `Apache-2.0`, `MIT`, `CC0-1.0`, `UFL-1.0`,
+`BSD-3-Clause`, `ISC`, `MPL-2.0`; anything else falls back to `Inter` (always bundled).
+
+- `brandTheme(kit)` → the package `theme` fragment (`palette`, `font`, `fonts[]`, `logo_asset`).
+- `brandBriefStyle(style, kit)` → the brief's style (brand palette/font win over the preset).
+- `brandStyleBlock(preset, kit)` → the one deterministic per-package generation STYLE_BLOCK
+  reused for every image job.
+- `createToolset({brand, brandAssets, stylePreset})` / `runCpuSlice({brand, brandAssets})` thread
+  the kit through `storyboard.propose` (theme + uploaded logo assets) and into every
+  `assets.generate_image` caption, so a run does not drift from the owner's palette from the
+  first tool call.
+
+See `examples/brand-kit/` for a kit, a logo and a package whose theme is the normalised result.
+
 ## Evidence
 
 ```bash
-npm test                         # 14 tests: router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render
+npm test                         # 45 tests: router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render,
+                                 # R2 brief/outline/presets/scene-chips and B1 brand kit
 node scripts/m4-live.mjs         # live OpenCode Go: propose → edit → 2 routes → SVG through A5
 node scripts/m4-two-providers.mjs # same loop against a local OpenAI-compatible endpoint
 ```

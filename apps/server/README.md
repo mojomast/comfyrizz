@@ -168,6 +168,12 @@ Each storyboard card has two actions that work on the draft the Player shows:
   unchanged and the storyboard's **Re-render scene** only rebuilds that one segment. The validating
   store rejects any edit that would break the package schema; a stale `baseRevision` is a 409. No
   model, network or GPU is involved.
+- **Brand kit** (B1): `POST /api/brand` normalises a loose kit (palette hexes, fonts with a licence,
+  tone words, optional base64 logo) and writes an uploaded SVG/PNG into the runtime package assets.
+  The same `brand` payload is accepted by `/api/brief`, `/api/brief/outline` and `/api/agent`, so the
+  brand palette/font/logo are followed from the brief through every generation style block and the
+  render. A font is kept only with a file **and** a known-safe licence; anything else is dropped with
+  a warning and the kit falls back to Inter.
 
 `apps/server/test/scene.test.mjs` is the acceptance: a one-scene re-render of the tiny renderer
 fixture proves the untouched segments' cache files are not rewritten (mtime) and ffprobe frames ==
@@ -215,7 +221,7 @@ fallback (`x-comfyrizz-full-render: 1`, reason `scene durations changed`).
 npm test          # host/token/origin, revisions/conflict, invalid package, render + SSE, replay,
                   # traversal, the C5/C8 agent end-to-end renders, the C10 export-bundle e2e,
                   # C11 per-scene re-run, C13 changed-scenes-only and the R2 plan-mode brief
-                  # (41 tests; real CPU render, ~2 min)
+                  # (54 tests; real CPU render, ~4 min — the agent e2e is slow, run it alone under load)
 ```
 
 Real end-to-end check (2026-10-17): built web served by this server, opened with the fragment
