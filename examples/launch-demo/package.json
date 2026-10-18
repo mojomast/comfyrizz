@@ -33,7 +33,7 @@
       "label": "Minutes of render time saved per launch video",
       "values": [
         {
-          "label": "Colab renders",
+          "label": "Google Colab renders",
           "value": 34
         },
         {
