@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from pronounce import pronounce
+from words import word_timings
 
 SAMPLE_RATE = 24_000
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -133,12 +134,16 @@ def main() -> int:
                 raise SystemExit(f"unexpected sample rate {sample_rate}")
             audio = np.asarray(audio, dtype=np.float32)
             sentence_samples.append(audio)
+            seconds = round(len(audio) / SAMPLE_RATE, 4)
             chunks.append(
                 {
                     "text": sentence,
                     "spoken": spoken,
-                    "seconds": round(len(audio) / SAMPLE_RATE, 4),
+                    "seconds": seconds,
                     "samples": int(len(audio)),
+                    # K1: word timings inside the measured sentence. The syllable
+                    # fallback needs no model; a real aligner can pass `tokens` later.
+                    "words": word_timings(sentence, seconds),
                 }
             )
         parts: list[np.ndarray] = []
