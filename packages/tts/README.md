@@ -36,7 +36,7 @@ is the graded track used by the example. Per-scene WAVs stay for debugging.
 | `kokoro-v1.0.onnx` | sha256 `7d5df8ec…36a6c5` | 311 MiB; **not committed** |
 | `voices-v1.0.bin` | sha256 `bca610b8…fbf7d` | 27 MiB; **not committed** |
 | phonemizer | `phonemizer-fork` (dependency) | espeak-ng data via `espeakng-loader` |
-| voice | `af_heart`, speed 1.0 | recorded in `durations.json` and the audio asset |
+| voice | `af_heart`, speed 1.0, language `en-us` | recorded in `durations.json` and the audio asset; `voice.language` picks the phonemiser, so French/GB voices are not read as US English |
 
 Fetch the weights into a local cache (outside Git):
 
@@ -70,6 +70,7 @@ node packages/tts/scripts/narrate.mjs --example examples/narrated-demo
 
 # checks
 npm --prefix packages/tts test          # 11 tests (unit + narrated acceptance)
+.venv/bin/python -m pytest packages/tts/py -q   # pronunciation map + voice.language mapping
 cd apps/renderer && npm run render:narrated
 ```
 

@@ -28,6 +28,19 @@ SAMPLE_RATE = 24_000
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 DEFAULT_GAP = 0.15
 DEFAULT_PADDING = 0.25
+DEFAULT_LANGUAGE = "en-us"
+
+
+def resolve_language(voice_cfg: dict) -> str:
+    """Kokoro's language code for the phonemiser (N-fix).
+
+    The package carries it in ``voice.language`` (for example ``fr-fr`` for
+    ff_siwis or ``en-gb``); US English is the fallback, matching the voice
+    default. Hard-coding ``en-us`` phonemised French and GB voices as US
+    English, so a non-English narration sounded wrong.
+    """
+    value = voice_cfg.get("language")
+    return value.strip() if isinstance(value, str) and value.strip() else DEFAULT_LANGUAGE
 
 
 def split_sentences(text: str) -> list[str]:
@@ -66,6 +79,7 @@ def main() -> int:
     voice_cfg = package.get("voice", {})
     voice = args.voice or voice_cfg.get("voice") or "af_heart"
     speed = float(args.speed if args.speed is not None else voice_cfg.get("speed", 1.0))
+    language = resolve_language(voice_cfg)
     if not 0.5 <= speed <= 2.0:
         raise SystemExit(f"speed {speed} outside Kokoro's 0.5-2.0 range")
 
@@ -95,6 +109,7 @@ def main() -> int:
         "model": "kokoro-v1.0.onnx",
         "voices": "voices-v1.0.bin",
         "voice": voice,
+        "language": language,
         "speed": speed,
         "sampleRate": SAMPLE_RATE,
         "gapSeconds": args.gap,
@@ -113,7 +128,7 @@ def main() -> int:
         chunks: list[dict] = []
         for sentence in split_sentences(text):
             spoken = pronounce(sentence)
-            audio, sample_rate = kokoro.create(spoken, voice=voice, speed=speed, lang="en-us")
+            audio, sample_rate = kokoro.create(spoken, voice=voice, speed=speed, lang=language)
             if sample_rate != SAMPLE_RATE:
                 raise SystemExit(f"unexpected sample rate {sample_rate}")
             audio = np.asarray(audio, dtype=np.float32)
