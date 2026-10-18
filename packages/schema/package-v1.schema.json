@@ -884,6 +884,52 @@
         }
       }
     },
+    "assetVariants": {
+      "type": "object",
+      "description": "Alternate renditions of the same asset. The asset's own `file` stays the default; a variant is what a bigger export may prefer (H12: the x2 upscale a 1920x1080 export uses instead of scaling the 1x file up again). Unknown names are left to the semantic pass, which names the rule.",
+      "properties": {
+        "upscaled": {
+          "type": "object",
+          "required": [
+            "file",
+            "width",
+            "height"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "file": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32768
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32768
+            },
+            "scale": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 8
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2000000000
+            }
+          }
+        }
+      }
+    },
     "media": {
       "type": "object",
       "unevaluatedProperties": false,
@@ -1247,6 +1293,9 @@
         },
         "media": {
           "$ref": "#/$defs/media"
+        },
+        "variants": {
+          "$ref": "#/$defs/assetVariants"
         },
         "source": {
           "$ref": "#/$defs/assetSource"

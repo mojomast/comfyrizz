@@ -31,6 +31,12 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_DATASET_UNAPPROVED",
   "SEM_BACKGROUND_AMBIGUOUS",
   "SEM_MEDIA_ONLY_NO_MEDIA",
+  "SEM_ASSET_VARIANT_SHAPE",
+  "SEM_ASSET_VARIANT_NAME",
+  "SEM_ASSET_VARIANT_NO_FILE",
+  "SEM_ASSET_VARIANT_SAME_FILE",
+  "SEM_ASSET_VARIANT_PATH",
+  "SEM_ASSET_VARIANT_NOT_BIGGER",
   "SEM_LOWER_THIRD_EMPTY",
   "SEM_CUTOUT_KIND",
 ]);
@@ -409,6 +415,56 @@ function checkAssets(assets, errors) {
       const blocked = isObj(asset.license) && asset.license.blocked === true;
       if (blocked || (isStr(licId) && NON_REDISTRIBUTABLE_LICENSE_RE.test(licId))) {
         errors.push(error("SEM_LICENSE_CONFLICT", `${at}/redistributable`, `licence ${JSON.stringify(licId)} must not be marked redistributable`));
+      }
+    }
+    checkAssetVariants(asset, at, errors);
+  }
+}
+
+/**
+ * H12: an asset may carry alternates of itself (`variants.upscaled` is the x2 upscale a 1920x1080
+ * export prefers). Three things have to hold, and all three are things a run can get wrong:
+ *   - a variant needs something to be a variant *of*, so the base file must be there;
+ *   - the variant is a different file, never the same path as the base;
+ *   - it is bigger than the base (that is the only reason to keep both), which also catches an
+ *     applied run whose measured x2 came out at or below the 1x file it was made from.
+ */
+function checkAssetVariants(asset, at, errors) {
+  const variants = asset.variants;
+  if (variants === undefined) return;
+  if (!isObj(variants)) {
+    errors.push(error("SEM_ASSET_VARIANT_SHAPE", `${at}/variants`, "variants must be an object of named renditions (upscaled)"));
+    return;
+  }
+  if (!isStr(asset.file)) {
+    errors.push(error("SEM_ASSET_VARIANT_NO_FILE", at, "an asset with variants needs its own file: a variant is an alternate of it"));
+  }
+  for (const [name, variant] of Object.entries(variants)) {
+    const variantAt = `${at}/variants/${name}`;
+    if (name !== "upscaled") {
+      errors.push(error("SEM_ASSET_VARIANT_NAME", variantAt, `unknown variant ${JSON.stringify(name)} (only "upscaled" is defined)`));
+      continue;
+    }
+    if (!isObj(variant) || !isStr(variant.file) || !Number.isInteger(variant.width) || !Number.isInteger(variant.height)) {
+      errors.push(error("SEM_ASSET_VARIANT_SHAPE", variantAt, "an upscaled variant needs file, width and height"));
+      continue;
+    }
+    if (isStr(asset.file) && variant.file === asset.file) {
+      errors.push(error("SEM_ASSET_VARIANT_SAME_FILE", `${variantAt}/file`, "a variant must be a different file from the asset it belongs to"));
+    }
+    if (isStr(variant.file) && (variant.file.startsWith("/") || variant.file.split("/").includes(".."))) {
+      errors.push(error("SEM_ASSET_VARIANT_PATH", `${variantAt}/file`, `variant files are relative to the package (got ${JSON.stringify(variant.file)})`));
+    }
+    const base = isObj(asset.media) ? asset.media : null;
+    if (base && Number.isInteger(base.width) && Number.isInteger(base.height)) {
+      if (variant.width <= base.width || variant.height <= base.height) {
+        errors.push(
+          error(
+            "SEM_ASSET_VARIANT_NOT_BIGGER",
+            variantAt,
+            `an upscaled variant must be larger than the asset's media (${base.width}x${base.height}, got ${variant.width}x${variant.height})`,
+          ),
+        );
       }
     }
   }

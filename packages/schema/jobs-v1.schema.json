@@ -47,6 +47,23 @@
           "deps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
           "output": { "type": "string", "minLength": 1, "maxLength": 512 },
           "outputKind": { "enum": ["image", "video", "audio"] },
+          "variant": {
+            "type": "string",
+            "enum": ["upscaled"],
+            "description": "Which package field this output belongs to when it is not the asset's own file. 'upscaled' writes assets.<id>.variants.upscaled (H12)."
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "How much this pass enlarges its source: an x2 finals stage is 2. The file name says the scale, the measured size says the truth (N4)."
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The file this job reads when it reads one of this run's own outputs (an upscale stage reads the plate's file)."
+          },
           "cacheKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "params": { "type": "object" },
           "dims": {

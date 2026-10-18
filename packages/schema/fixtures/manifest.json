@@ -43,6 +43,12 @@
       ]
     },
     {
+      "file": "valid/variants.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": []
+    },
+    {
       "file": "valid/warnings-unused-asset.json",
       "kind": "valid",
       "schemaOk": true,
@@ -133,6 +139,68 @@
       "schemaCodes": [],
       "semantic": [
         "SEM_PATH_NOT_RELATIVE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/variant-same-file.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_ASSET_VARIANT_SAME_FILE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/variant-not-bigger.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_ASSET_VARIANT_NOT_BIGGER"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/variant-unknown-name.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_ASSET_VARIANT_NAME"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/variant-without-a-file.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_ASSET_VARIANT_NO_FILE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/variant-shape.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_TYPE"
+      ],
+      "semantic": [
+        "SEM_ASSET_VARIANT_SHAPE"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/variant-absolute-path.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_ASSET_VARIANT_PATH"
       ],
       "warnings": null
     },

@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: ecdbe7312db94cf8ac8315750becdc2924635a30eaf480b0133ed9693e620a19
+// Schema sha256: 4ae244aaee1361e83bba354c94a09196e80db5c410d87f40a1c9ed35ad1c7b61
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -288,6 +288,17 @@ export interface Scene {
   notes?: string;
   }
 
+export interface AssetVariants {
+  upscaled?: {
+    file: string;
+    width: number;
+    height: number;
+    scale?: number;
+    sha256?: string;
+    bytes?: number;
+    };
+  }
+
 export interface Media {
   width?: number;
   height?: number;
@@ -393,6 +404,7 @@ export interface Asset {
    */
   cutout?: boolean;
   media?: Media;
+  variants?: AssetVariants;
   source?: AssetSource;
   /**
    * Output rights. Defaults for generated assets: id CC0-1.0 and redistributable true.

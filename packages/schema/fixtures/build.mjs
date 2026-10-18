@@ -72,6 +72,47 @@ export const MUTATIONS = [
     expect: { schemaOk: true, semantic: ["SEM_PATH_NOT_RELATIVE"] },
   },
   {
+    name: "variant-same-file",
+    base: "variants",
+    ops: [["set", "assets.a_plate1.variants.upscaled.file", "assets/a_plate1.mp4"]],
+    expect: { schemaOk: true, semantic: ["SEM_ASSET_VARIANT_SAME_FILE"] },
+  },
+  {
+    name: "variant-not-bigger",
+    base: "variants",
+    ops: [["set", "assets.a_plate1.variants.upscaled.width", 512], ["set", "assets.a_plate1.variants.upscaled.height", 288]],
+    expect: { schemaOk: true, semantic: ["SEM_ASSET_VARIANT_NOT_BIGGER"] },
+  },
+  {
+    name: "variant-unknown-name",
+    base: "variants",
+    ops: [["del", "assets.a_plate1.variants.upscaled"], ["set", "assets.a_plate1.variants.bigger", { file: "assets/a_plate1@2x.mp4", width: 1920, height: 1080 }]],
+    expect: { schemaOk: true, semantic: ["SEM_ASSET_VARIANT_NAME"] },
+  },
+  {
+    name: "variant-without-a-file",
+    base: "variants",
+    ops: [
+      ["del", "assets.a_plate1.file"],
+      ["del", "assets.a_plate1.sha256"],
+      ["set", "assets.a_plate1.status", "pending"],
+    ],
+    expect: { schemaOk: true, semantic: ["SEM_ASSET_VARIANT_NO_FILE"] },
+  },
+  {
+    name: "variant-shape",
+    base: "variants",
+    ops: [["set", "assets.a_plate1.variants.upscaled", "assets/a_plate1@2x.mp4"]],
+    expect: { schemaOk: false, semantic: ["SEM_ASSET_VARIANT_SHAPE"] },
+    schemaCodes: ["SCHEMA_TYPE"],
+  },
+  {
+    name: "variant-absolute-path",
+    base: "variants",
+    ops: [["set", "assets.a_plate1.variants.upscaled.file", "/tmp/a_plate1@2x.mp4"]],
+    expect: { schemaOk: true, semantic: ["SEM_ASSET_VARIANT_PATH"] },
+  },
+  {
     name: "layout-variant",
     base: "generated-first",
     ops: [["set", "scenes.2.variant", "centered"]],
