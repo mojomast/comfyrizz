@@ -193,7 +193,8 @@ export function applyBrandKit<T extends { theme?: Record<string, unknown> }>(pkg
 }
 
 /** The style pieces the brief/outline use; a brand kit's palette and font win. */
-export function brandBriefStyle(preset: StylePreset, style: StyleDraft = {}, kit: Partial<BrandKit> = {}): Required<Pick<StyleDraft, 'preset'>> & StyleDraft {
+export function brandBriefStyle(style: StyleDraft = {}, kit: Partial<BrandKit> = {}): Required<Pick<StyleDraft, 'preset'>> & StyleDraft {
+  const preset: StylePreset = style.preset ?? 'cinematic-dark';
   const defaults = STYLE_PRESET_DEFAULTS[preset];
   return {
     preset,

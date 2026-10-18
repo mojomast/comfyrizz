@@ -6,6 +6,8 @@ import {
   brandBriefStyle,
   brandStyleBlock,
   brandTheme,
+  completeBrief,
+  createToolset,
   effectiveFont,
   isSafeFontLicense,
   normalizeBrandKit,
@@ -75,15 +77,15 @@ test('B1: applying a kit merges into the theme without mutating the package', ()
 
 test('B1: the brand palette and font override the preset, but an explicit draft style wins', () => {
   const { kit } = normalizeBrandKit({ palette: ['#112233'], fonts: [safeFont] });
-  const fromBrand = brandBriefStyle('clay', {}, kit);
+  const fromBrand = brandBriefStyle({ preset: 'clay' }, kit);
   assert.deepEqual(fromBrand.palette, ['#112233']);
   assert.equal(fromBrand.font, 'Söhne');
 
-  const explicit = brandBriefStyle('clay', { palette: ['#abcdef'], font: 'Georgia' }, kit);
+  const explicit = brandBriefStyle({ preset: 'clay', palette: ['#abcdef'], font: 'Georgia' }, kit);
   assert.deepEqual(explicit.palette, ['#abcdef']);
   assert.equal(explicit.font, 'Georgia');
 
-  const presetOnly = brandBriefStyle('clay', {});
+  const presetOnly = brandBriefStyle({ preset: 'clay' });
   assert.equal(presetOnly.font, 'Inter');
   assert.ok((presetOnly.palette ?? []).length > 0);
 });
@@ -98,4 +100,19 @@ test('B1: the generation style block is deterministic and follows the kit palett
 
   const presetBlock = brandStyleBlock('clay');
   assert.match(presetBlock, /palette #f4e9dd, #c98a6b, #6d4b3a, #2b2320/);
+});
+
+test('B1: a completed brief and a proposed package both take the brand theme', () => {
+  const { kit } = normalizeBrandKit({ palette: ['#112233', '#445566'], fonts: [safeFont], logo_asset: 'a_logo' });
+
+  const brief = completeBrief({}, brandBriefStyle({ preset: 'editorial-flat' }, kit));
+  assert.deepEqual(brief.style.palette, ['#112233', '#445566']);
+  assert.equal(brief.style.font, 'Söhne');
+
+  const tools = createToolset({ brand: kit, now: () => '2026-01-01T00:00:00.000Z' });
+  const result = tools['storyboard.propose']!.run({ brief: 'Launch the brand kit' }) as { package: Record<string, any> };
+  assert.deepEqual(result.package.theme.palette, ['#112233', '#445566']);
+  assert.equal(result.package.theme.font, 'Söhne');
+  assert.equal(result.package.theme.logo_asset, 'a_logo');
+  assert.deepEqual(result.package.theme.fonts, [{ family: 'Söhne', file: 'brand/soehne.woff2', license: { id: 'OFL-1.1' } }]);
 });

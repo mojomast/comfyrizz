@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { routeAsset, type AssetNeed, type RouteDecision } from './router.js';
 import { foregroundFor } from './package.js';
 import { expandFluxCaption, expandReferenceEditCaption, aspectFromSize, sourceDims, type Aspect } from './caption.js';
+import { brandTheme, type BrandKit } from './brand.js';
 import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
 
@@ -46,6 +47,12 @@ export interface ToolsetOptions {
   onPackageChange?: (pkg: Record<string, any>) => void;
   /** Clock injection so tests are deterministic. */
   now?: () => string;
+  /**
+   * B1: a normalised brand kit. `storyboard.propose` merges its theme over the
+   * defaults, so the palette every image caption and SVG follows is the brand
+   * palette from the first tool call.
+   */
+  brand?: Partial<BrandKit>;
 }
 
 const sceneSchema = z.object({
@@ -295,7 +302,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       createdAt: (options.now ?? (() => new Date().toISOString()))(),
       format: { width: 1920, height: 1080, fps: 30 },
       duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
-      theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter' },
+      theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) },
       voice: { enabled: false, engine: 'none' },
       datasets: args.datasets ?? {},
       scenes,

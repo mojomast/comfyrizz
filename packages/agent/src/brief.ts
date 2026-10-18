@@ -393,8 +393,9 @@ export function applyDecisions(draft: BriefDraft, decisions: BriefDecisions): Br
 }
 
 /** Fill the remaining defaults and validate; throws a `z.ZodError` when invalid. */
-export function completeBrief(draft: BriefDraft): Brief {
-  const preset: StylePreset = draft.style?.preset ?? 'cinematic-dark';
+export function completeBrief(draft: BriefDraft, style?: Partial<StyleDraft>): Brief {
+  const mergedStyle: StyleDraft = { ...draft.style, ...style };
+  const preset: StylePreset = mergedStyle.preset ?? 'cinematic-dark';
   const presetDefaults = STYLE_PRESET_DEFAULTS[preset];
   const language = draft.audience?.language ?? 'en';
   const tone = (draft.tone && draft.tone.length >= 3 ? draft.tone.slice(0, 3) : [...(draft.tone ?? []), 'clear', 'confident', 'calm']).slice(0, 3);
@@ -408,10 +409,10 @@ export function completeBrief(draft: BriefDraft): Brief {
     tone,
     style: {
       preset,
-      palette: draft.style?.palette ?? presetDefaults.palette,
-      font: draft.style?.font ?? presetDefaults.font,
-      ...(draft.style?.references ? { references: draft.style.references } : {}),
-      attributes: draft.style?.attributes ?? presetDefaults.attributes,
+      palette: mergedStyle.palette ?? presetDefaults.palette,
+      font: mergedStyle.font ?? presetDefaults.font,
+      ...(mergedStyle.references ? { references: mergedStyle.references } : {}),
+      attributes: mergedStyle.attributes ?? presetDefaults.attributes,
     },
     voice: { engine: draft.voice?.engine ?? 'kokoro', ...(draft.voice?.persona ? { persona: draft.voice.persona } : {}), lang: draft.voice?.lang ?? language },
     music: { ...(draft.music?.mood ? { mood: draft.music.mood } : {}), enabled: draft.music?.enabled ?? false },

@@ -1,4 +1,5 @@
 import { runAgent, type AgentEvent, type RunAgentResult, type ToolRecord } from './agent.js';
+import type { BrandKit } from './brand.js';
 import { defaultCpuDatasets, defaultCpuScenes, titleFor } from './package.js';
 import { createScriptedModel, type ScriptedCall } from './scripted-model.js';
 import { createToolset, type PlannedImage, type SvgAssetResult, type ToolsetOptions } from './tools.js';
@@ -16,6 +17,8 @@ export interface CpuSliceOptions {
   maxSteps?: number;
   now?: () => string;
   onEvent?: (event: AgentEvent) => void;
+  /** B1: brand kit whose theme overrides the default palette/font/logo. */
+  brand?: Partial<BrandKit>;
 }
 
 export interface CpuSliceResult {
@@ -58,6 +61,7 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
     ...(options.persistSvg ? { persistSvg: options.persistSvg } : {}),
     ...(options.planImage ? { planImage: options.planImage } : {}),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.brand ? { brand: options.brand } : {}),
     onPackageChange: pkg => {
       draft = pkg;
     },
