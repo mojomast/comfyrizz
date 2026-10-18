@@ -3,3 +3,7 @@
 jsonschema==4.25.1
 comfy-sdk==0.5.0
 pytest==8.4.2
+# numpy is needed by eval/metrics.py and svgguide/ (raster + control maps): the H11 clean-clone check
+# found it installed in the working venv but missing from this list, so a fresh clone could not even
+# collect tests/test_legibility.py and tests/test_svgguide.py
+numpy==2.5.4

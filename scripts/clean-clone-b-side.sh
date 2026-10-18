@@ -4,12 +4,15 @@
 # The back side of the product - the package format, the planner and the two backends - from a
 # stranger's clone, with no API key and no Google Colab runtime anywhere in the loop:
 #
-#   clone HEAD -> pnpm install -> build -> packages/schema, packages/jobs and packages/backends
-#   suites -> a fresh venv with pipeline-py's dev requirements -> pytest
+#   clone HEAD -> pnpm install -> build -> a venv at the clone root (.venv, as the READMEs describe)
+#   -> packages/schema, packages/jobs and packages/backends suites -> pipeline-py pytest
 #
-# Every backend test drives the fake `colab` CLI and the fake Comfy v2 over loopback, so the suites are
-# run with the credential-shaped environment variables explicitly unset: if a suite ever needed a key
-# or a real session, it would fail here instead of on someone's account.
+# The venv goes in *first* on purpose: the backends tests drive the real Python runner through
+# `<repo>/.venv/bin/python`, and the schema conformance test compares the TypeScript and Python
+# validators through it, so without it a fresh clone quietly skips the cases that matter most. The
+# script fails if any suite skips anything. Every backend test drives the fake `colab` CLI and the fake
+# Comfy v2 over loopback, and the credential-shaped environment variables are unset here: if a suite
+# ever needed a key or a real session, it would fail on this clone instead of on an account.
 #
 # Set KEEP=1 to keep the clone, B_SIDE_REPO to clone from somewhere else, and SKIP_PY=1 to stop after
 # the Node suites.
@@ -55,25 +58,49 @@ log "install (pnpm, as the READMEs describe)"
 log "build the workspace packages"
 ( cd "$CLONE" && pnpm -r --if-present run build > "$WORK/build.log" 2>&1 ) || { tail -30 "$WORK/build.log"; exit 1; }
 
+if [[ "${SKIP_PY:-0}" != "1" ]]; then
+  log "the clone's python: $CLONE/.venv (the backends and conformance tests look for it exactly there)"
+  python3 -m venv "$CLONE/.venv"
+  "$CLONE/.venv/bin/pip" install -q --disable-pip-version-check -r "$CLONE/pipeline-py/requirements-dev.txt"
+  "$CLONE/.venv/bin/python" -c 'import jsonschema, numpy, pytest, comfy_sdk; print("installed: jsonschema, numpy, pytest, comfy_sdk")'
+fi
+
+SUMMARY=()
+# a suite that skips is a suite that did not run: a fresh clone has to be able to run every case
+require_no_skips() { # name logfile
+  local name="$1" log="$2" skipped
+  skipped="$(grep -E '^# skipped [0-9]+' "$log" | awk '{print $3}' | tail -1)"
+  skipped="${skipped:-0}"
+  SUMMARY+=("$name: $(grep -E '^# (tests|pass|fail)' "$log" | tr -d '\n' | sed 's/^# //')")
+  if [[ "$skipped" != "0" ]]; then
+    echo "$name skipped $skipped case(s) on a fresh clone:"
+    grep -E '^not ok|# SKIP' "$log" | head -10
+    exit 1
+  fi
+}
+
 for pkg in schema jobs backends; do
   log "packages/$pkg suite"
-  ( cd "$CLONE/packages/$pkg" && npm test > "$WORK/$pkg.log" 2>&1 ) || { tail -30 "$WORK/$pkg.log"; exit 1; }
-  printf '%s: %s\n' "$pkg" "$(grep -E '^# (tests|pass|fail)' "$WORK/$pkg.log" | tr -d '\n' | sed 's/^# //')"
+  ( cd "$CLONE/packages/$pkg" && npm test > "$WORK/$pkg.log" 2>&1 ) || { tail -40 "$WORK/$pkg.log"; exit 1; }
+  require_no_skips "$pkg" "$WORK/$pkg.log"
 done
 
 if [[ "${SKIP_PY:-0}" == "1" ]]; then
-  log "PASS: fresh clone -> install -> schema, jobs and backends suites (python skipped: SKIP_PY=1)"
+  log "PASS: fresh clone -> install -> schema, jobs and backends suites"
+  printf '%s\n' "${SUMMARY[@]}"
   echo "elapsed $((SECONDS - STARTED_AT))s"
   exit 0
 fi
 
-log "pipeline-py suite in a fresh venv"
-(
-  cd "$CLONE/pipeline-py"
-  python3 -m venv "$WORK/venv"
-  "$WORK/venv/bin/pip" install -q --disable-pip-version-check -r requirements-dev.txt
-  "$WORK/venv/bin/python" -m pytest -q
-) 2>&1 | tail -3
+log "pipeline-py suite with the clone's own interpreter"
+( cd "$CLONE/pipeline-py" && "$CLONE/.venv/bin/python" -m pytest -q > "$WORK/pytest.log" 2>&1 ) || { tail -40 "$WORK/pytest.log"; exit 1; }
+tail -1 "$WORK/pytest.log"
+if grep -qE '[0-9]+ skipped' "$WORK/pytest.log"; then
+  echo "pytest skipped cases on a fresh clone"
+  exit 1
+fi
+SUMMARY+=("pipeline-py: $(tail -1 "$WORK/pytest.log" | sed 's/ in .*//')")
 
-log "PASS: fresh clone -> install -> schema, jobs, backends and pipeline-py suites"
+log "PASS: fresh clone -> install -> schema, jobs, backends and pipeline-py suites, nothing skipped"
+printf '%s\n' "${SUMMARY[@]}"
 echo "elapsed $((SECONDS - STARTED_AT))s"
