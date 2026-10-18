@@ -25,6 +25,7 @@ same bytes the timings were measured on. The backend uploads the lock next to th
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import subprocess
@@ -186,12 +187,22 @@ def _heartbeat(stop: "threading.Event", started: float) -> None:
 
 
 def download_models(token: str, plan: dict[str, tuple[str, list[str]]], lock: dict) -> dict:
+    """Download every host's files, all hosts at once (GPU test 5, G5-11).
+
+    The docstring said parallel; the loop was not. GPU test 5 measured Klein at 54 s and LTX at 117 s
+    one after the other - 171 s of the 237 s bootstrap, and 54 s of that is pure waiting. The hosts are
+    independent repositories and the HF client is doing network I/O, so a thread per host downloads
+    both at the same time; the progress lines simply interleave.
+    """
     env = dict(os.environ)
     env["HF_TOKEN"] = token
     env["HF_XET_HIGH_PERFORMANCE"] = "1"
     env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-    results = {}
-    for name, (repo, files) in plan.items():
+    results: dict[str, dict] = {}
+    collected = threading.Lock()
+
+    def fetch(name: str) -> None:
+        repo, files = plan[name]
         host = lock["hosts"][name]
         started = time.time()
         revision = host.get("revision")
@@ -210,7 +221,7 @@ def download_models(token: str, plan: dict[str, tuple[str, list[str]]], lock: di
                 break
             except subprocess.TimeoutExpired:
                 print(f"DOWNLOADING {name} {time.time() - started:.0f}s", flush=True)
-        results[name] = {
+        entry = {
             "repo": repo,
             "revision": revision,
             "files": len(files),
@@ -218,7 +229,12 @@ def download_models(token: str, plan: dict[str, tuple[str, list[str]]], lock: di
             "seconds": round(time.time() - started, 1),
             "error": stderr[-400:] if process.returncode else "",
         }
-        print(f"DOWNLOAD {name} {json.dumps(results[name])}", flush=True)
+        with collected:
+            results[name] = entry
+        print(f"DOWNLOAD {name} {json.dumps(entry)}", flush=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(4, len(plan)))) as pool:
+        list(pool.map(fetch, list(plan)))
     return results
 
 

@@ -471,3 +471,41 @@ test("the runner's progress lines reach the caller while the batch runs (G5-9)",
   const collected = types.indexOf("collect");
   assert.ok(started < collected, "the progress has to arrive *during* the batch, before its collect");
 });
+
+test("both model hosts download at the same time, not one after the other (G5-11)", () => {
+  // Run the shipped downloader with its `subprocess` replaced by one that takes 0.4 s per file: serial
+  // downloads take 0.8 s, parallel ones 0.4 s. GPU test 5 measured 54 s (Klein) then 117 s (LTX).
+  const cell = [
+    "import json, subprocess as real, time",
+    "src = open('colab/bootstrap.py').read()",
+    "src = src[: src.rindex('\\n_run()')]",
+    "ns = {'__name__': 'bootstrap_under_test'}",
+    "exec(compile(src, 'colab/bootstrap.py', 'exec'), ns)",
+    "started_seen = []",
+    "class FakeProc:",
+    "    def __init__(self, command, **kwargs):",
+    "        self.command = command",
+    "        self.returncode = 0",
+    "        started_seen.append(time.time())",
+    "    def communicate(self, timeout=None):",
+    "        time.sleep(0.4)",
+    "        return ('', '')",
+    "class FakeSubprocess:",
+    "    Popen = FakeProc",
+    "    DEVNULL = real.DEVNULL",
+    "    PIPE = real.PIPE",
+    "ns['subprocess'] = FakeSubprocess",
+    "plan = {'klein': ('repo/klein', ['a.safetensors']), 'ltx': ('repo/ltx', ['b.safetensors'])}",
+    "lock = {'hosts': {'klein': {'repo': 'repo/klein', 'localDir': '/tmp/klein', 'revision': 'r1'}, 'ltx': {'repo': 'repo/ltx', 'localDir': '/tmp/ltx', 'revision': 'r2'}}}",
+    "began = time.time()",
+    "results = ns['download_models']('token-value', plan, lock)",
+    "print('PARALLEL', json.dumps({'elapsed': round(time.time() - began, 2), 'names': sorted(results), 'overlap': round(max(started_seen) - min(started_seen), 3)}))",
+  ].join("\n");
+  const run = spawnSync(process.env.PYTHON3 || "python3", ["-c", cell], { cwd: REPO, encoding: "utf8", timeout: 60000 });
+
+  assert.equal(run.status, 0, run.stderr);
+  const reported = JSON.parse((run.stdout.match(/PARALLEL (\{.*\})/) || [])[1] ?? "{}");
+  assert.deepEqual(reported.names, ["klein", "ltx"], `both hosts have to be downloaded: ${run.stdout}`);
+  assert.ok(reported.elapsed < 0.75, `two 0.4 s downloads took ${reported.elapsed}s: they are serial`);
+  assert.ok(reported.overlap < 0.1, `the second download started ${reported.overlap}s after the first`);
+});
