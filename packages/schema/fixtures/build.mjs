@@ -303,6 +303,35 @@ export const MUTATIONS = [
     expect: { schemaOk: false, semantic: [] },
     schemaCodes: ["SCHEMA_PATTERN"],
   },
+  // --- motion (MS2): the vocabulary is closed, like the layouts -----------------------
+  {
+    name: "motion-unknown-transition",
+    base: "generated-first",
+    ops: [["set", "scenes.0.transitionOut", { type: "spin", frames: 12 }]],
+    expect: { schemaOk: false, semantic: [] },
+    schemaCodes: ["SCHEMA_ENUM"],
+  },
+  {
+    name: "motion-unknown-entry",
+    base: "generated-first",
+    ops: [["set", "scenes.1.motion", { entry: "bounce" }]],
+    expect: { schemaOk: false, semantic: [] },
+    schemaCodes: ["SCHEMA_ENUM"],
+  },
+  {
+    name: "motion-unknown-ease",
+    base: "generated-first",
+    ops: [["set", "scenes.1.motion", { entry: "fadeUp", ease: "easeInOutQuad" }]],
+    expect: { schemaOk: false, semantic: [] },
+    schemaCodes: ["SCHEMA_ENUM"],
+  },
+  {
+    name: "motion-extra-property",
+    base: "generated-first",
+    ops: [["set", "motion", { energy: "high", tempo: 120 }]],
+    expect: { schemaOk: false, semantic: [] },
+    schemaCodes: ["SCHEMA_UNEVALUATEDPROPERTIES"],
+  },
 ];
 
 /** Warnings each hand-written valid fixture is expected to raise (advisory only). */
@@ -352,6 +381,24 @@ export const DERIVED_VALID = [
       ["set", "theme.text_on_accent", "#0d0f14"],
     ],
     expect: { schemaOk: true, semantic: [], warnings: ["WARN_DATASET_UNUSED"] },
+  },
+  {
+    // MS2: every motion field in use - package energy + current, per-scene presets, the one hero
+    // moment, a keyword highlight, and directional transitions that obey the vector law.
+    name: "motion-fields",
+    base: "generated-first",
+    ops: [
+      ["set", "motion", { energy: "medium", direction: "left" }],
+      ["set", "scenes.0.motion", { entry: "maskRise", ease: "enter", emphasis: "keyword", highlight: "one box" }],
+      ["set", "scenes.0.transitionOut", { type: "push", frames: 12, direction: "left" }],
+      ["set", "scenes.1.motion", { entry: "fadeUp", stagger: "listItem" }],
+      ["set", "scenes.1.transitionOut", { type: "push", frames: 12, direction: "left" }],
+      ["set", "scenes.2.motion", { entry: "countUp", ease: "move", emphasis: "hero", energy: "high" }],
+      ["set", "scenes.2.transitionOut", { type: "zoom", frames: 9, direction: "out" }],
+      ["set", "scenes.3.motion", { entry: "pop", spring: "settle" }],
+      ["set", "scenes.3.transitionOut", { type: "cut", frames: 0 }],
+    ],
+    expect: { schemaOk: true, semantic: [], warnings: [] },
   },
 ];
 

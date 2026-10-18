@@ -298,6 +298,9 @@
         }
       }
     },
+    "motion": {
+      "$ref": "#/$defs/packageMotion"
+    },
     "renders": {
       "type": "array",
       "maxItems": 64,
@@ -363,6 +366,146 @@
     }
   },
   "$defs": {
+    "easingToken": {
+      "type": "string",
+      "enum": [
+        "enter",
+        "exit",
+        "move",
+        "land",
+        "linear"
+      ],
+      "description": "MS2: a named ease, exactly the keys of EASING_TOKENS in apps/renderer/src/motion/index.js (MS1). `linear` is only for continuous motion, never an entrance."
+    },
+    "springPreset": {
+      "type": "string",
+      "enum": [
+        "settle",
+        "heavy",
+        "snap",
+        "pop",
+        "elastic"
+      ],
+      "description": "MS2: a spring preset, exactly the keys of SPRING_PRESETS (MS1). `elastic` is an accent: at most once per video."
+    },
+    "motionEnergy": {
+      "type": "string",
+      "enum": [
+        "calm",
+        "medium",
+        "high"
+      ],
+      "description": "MS2: an energy profile, exactly the keys of ENERGY_PROFILES (MS1). Scales entries, stagger and travel; picks the transition family."
+    },
+    "motionDirection": {
+      "type": "string",
+      "enum": [
+        "left",
+        "right",
+        "up",
+        "down"
+      ],
+      "description": "MS2: the direction content travels in (vector law). The package direction is the film's one current for ordinary 'next point' cuts; `up` is reserved for a conclusion."
+    },
+    "transitionType": {
+      "type": "string",
+      "enum": [
+        "none",
+        "cut",
+        "fade",
+        "blur",
+        "slide",
+        "push",
+        "wipe",
+        "zoom",
+        "iris"
+      ],
+      "description": "MS2 transition vocabulary. none/cut: no overlap; fade/blur: calm crossfades; slide/push/wipe: directional (medium); zoom/iris: in/out (high). The first four of the original enum (none, fade, slide, wipe) keep their meaning."
+    },
+    "transitionDirection": {
+      "type": "string",
+      "enum": [
+        "left",
+        "right",
+        "up",
+        "down",
+        "in",
+        "out"
+      ],
+      "description": "MS2: direction of a transition. left/right/up/down for slide, push and wipe; in/out for zoom (in = deeper, out = arrival) and iris (in = closes, out = opens)."
+    },
+    "packageMotion": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "energy": {
+          "$ref": "#/$defs/motionEnergy",
+          "default": "medium"
+        },
+        "direction": {
+          "$ref": "#/$defs/motionDirection",
+          "default": "left"
+        }
+      },
+      "description": "MS2: film-wide motion direction. Optional; a package without it renders as energy medium, direction left."
+    },
+    "sceneMotion": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "entry": {
+          "type": "string",
+          "enum": [
+            "none",
+            "fadeUp",
+            "maskRise",
+            "pop",
+            "countUp",
+            "waterfall",
+            "drawOn"
+          ],
+          "description": "Entry preset. fadeUp/maskRise/pop/countUp are the MS1 primitives of the same name (apps/renderer/src/motion/primitives.js); waterfall (kinetic words) and drawOn (SVG stroke draw-on via pathLength) are MS3. Omitted: the layout's own default entry."
+        },
+        "ease": {
+          "$ref": "#/$defs/easingToken",
+          "description": "Ease for the entry; omitted: the preset's own ease (enter for tweens)."
+        },
+        "spring": {
+          "$ref": "#/$defs/springPreset",
+          "description": "Spring for a pop entry; omitted: pop."
+        },
+        "stagger": {
+          "type": "string",
+          "enum": [
+            "none",
+            "word",
+            "listItem",
+            "dot"
+          ],
+          "description": "Stagger family, exactly the keys of STAGGER_SECONDS (MS1); total stagger is capped at 0.5 s."
+        },
+        "emphasis": {
+          "type": "string",
+          "enum": [
+            "none",
+            "keyword",
+            "hero"
+          ],
+          "description": "none; keyword = highlight one word or phrase (needs `highlight`); hero = the film's one hero moment."
+        },
+        "highlight": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The word or phrase of this scene's copy that a keyword emphasis highlights; must appear in the copy."
+        },
+        "energy": {
+          "$ref": "#/$defs/motionEnergy",
+          "description": "Per-scene energy override; omitted: the package motion.energy."
+        }
+      },
+      "description": "MS2: per-scene motion preset and emphasis. Every field is optional and has no schema default, so an absent field means the renderer's layout default."
+    },
     "nonEmptyString": {
       "type": "string",
       "minLength": 1,
@@ -841,26 +984,26 @@
           "unevaluatedProperties": false,
           "properties": {
             "type": {
-              "type": "string",
-              "enum": [
-                "none",
-                "fade",
-                "slide",
-                "wipe"
-              ]
+              "$ref": "#/$defs/transitionType"
             },
             "frames": {
               "type": "integer",
               "minimum": 0,
               "maximum": 120,
               "default": 15
+            },
+            "direction": {
+              "$ref": "#/$defs/transitionDirection"
             }
           },
           "default": {
             "type": "fade",
             "frames": 15
           },
-          "description": "Transition into the next scene (PLAN.md A1: fades). Missing transitionOut means a default fade."
+          "description": "Transition into the next scene (PLAN.md A1: fades; MS2: the motion transition vocabulary). Missing transitionOut means a default fade. `direction` applies to slide | push | wipe (left/right/up/down) and zoom | iris (in/out); when it is omitted on a directional type the renderer uses the package motion.direction (the film's one current) or `in`. `cut` always has frames 0. lintMotion() checks budget, vector law and durations."
+        },
+        "motion": {
+          "$ref": "#/$defs/sceneMotion"
         },
         "narration": {
           "type": "string",

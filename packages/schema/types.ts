@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 4ae244aaee1361e83bba354c94a09196e80db5c410d87f40a1c9ed35ad1c7b61
+// Schema sha256: be60e78df82749b43b453f5516cad2c3c3acaf2d6e63f0ef00f4c984be6bfd51
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -97,6 +97,7 @@ export interface PackageV1 {
     closed_apis_used?: Array<NonEmptyString>;
     warnings?: Array<NonEmptyString>;
     };
+  motion?: PackageMotion;
   renders?: Array<{
     mode: "preview" | "draft" | "final";
     file: RelativePath;
@@ -108,6 +109,84 @@ export interface PackageV1 {
     fps?: 24 | 25 | 30 | 50 | 60;
     at?: string;
     }>;
+  }
+
+/**
+ * MS2: a named ease, exactly the keys of EASING_TOKENS in apps/renderer/src/motion/index.js (MS1).
+ * `linear` is only for continuous motion, never an entrance.
+ */
+export type EasingToken = "enter" | "exit" | "move" | "land" | "linear";
+
+/**
+ * MS2: a spring preset, exactly the keys of SPRING_PRESETS (MS1). `elastic` is an accent: at most
+ * once per video.
+ */
+export type SpringPreset = "settle" | "heavy" | "snap" | "pop" | "elastic";
+
+/**
+ * MS2: an energy profile, exactly the keys of ENERGY_PROFILES (MS1). Scales entries, stagger and
+ * travel; picks the transition family.
+ */
+export type MotionEnergy = "calm" | "medium" | "high";
+
+/**
+ * MS2: the direction content travels in (vector law). The package direction is the film's one
+ * current for ordinary 'next point' cuts; `up` is reserved for a conclusion.
+ */
+export type MotionDirection = "left" | "right" | "up" | "down";
+
+/**
+ * MS2 transition vocabulary. none/cut: no overlap; fade/blur: calm crossfades; slide/push/wipe:
+ * directional (medium); zoom/iris: in/out (high). The first four of the original enum (none, fade,
+ * slide, wipe) keep their meaning.
+ */
+export type TransitionType = "none" | "cut" | "fade" | "blur" | "slide" | "push" | "wipe" | "zoom" | "iris";
+
+/**
+ * MS2: direction of a transition. left/right/up/down for slide, push and wipe; in/out for zoom (in
+ * = deeper, out = arrival) and iris (in = closes, out = opens).
+ */
+export type TransitionDirection = "left" | "right" | "up" | "down" | "in" | "out";
+
+export interface PackageMotion {
+  energy?: MotionEnergy;
+  direction?: MotionDirection;
+  }
+
+export interface SceneMotion {
+  /**
+   * Entry preset. fadeUp/maskRise/pop/countUp are the MS1 primitives of the same name
+   * (apps/renderer/src/motion/primitives.js); waterfall (kinetic words) and drawOn (SVG stroke
+   * draw-on via pathLength) are MS3. Omitted: the layout's own default entry.
+   */
+  entry?: "none" | "fadeUp" | "maskRise" | "pop" | "countUp" | "waterfall" | "drawOn";
+  /**
+   * Ease for the entry; omitted: the preset's own ease (enter for tweens).
+   */
+  ease?: EasingToken;
+  /**
+   * Spring for a pop entry; omitted: pop.
+   */
+  spring?: SpringPreset;
+  /**
+   * Stagger family, exactly the keys of STAGGER_SECONDS (MS1); total stagger is capped at 0.5 s.
+   */
+  stagger?: "none" | "word" | "listItem" | "dot";
+  /**
+   * none; keyword = highlight one word or phrase (needs `highlight`); hero = the film's one hero
+   * moment.
+   */
+  emphasis?: "none" | "keyword" | "hero";
+  /**
+   * The word or phrase of this scene's copy that a keyword emphasis highlights; must appear in the
+   * copy.
+   * [minLength 1, maxLength 60]
+   */
+  highlight?: string;
+  /**
+   * Per-scene energy override; omitted: the package motion.energy.
+   */
+  energy?: MotionEnergy;
   }
 
 /**
@@ -274,13 +353,19 @@ export interface Scene {
     text: string;
     };
   /**
-   * Transition into the next scene (PLAN.md A1: fades). Missing transitionOut means a default fade.
+   * Transition into the next scene (PLAN.md A1: fades; MS2: the motion transition vocabulary).
+   * Missing transitionOut means a default fade. `direction` applies to slide | push | wipe
+   * (left/right/up/down) and zoom | iris (in/out); when it is omitted on a directional type the
+   * renderer uses the package motion.direction (the film's one current) or `in`. `cut` always has
+   * frames 0. lintMotion() checks budget, vector law and durations.
    * [default {"type":"fade","frames":15}]
    */
   transitionOut?: {
-    type: "none" | "fade" | "slide" | "wipe";
+    type: TransitionType;
     frames?: number;
+    direction?: TransitionDirection;
     };
+  motion?: SceneMotion;
   narration?: string;
   narration_asset?: AssetId;
   narration_duration_frames?: number;

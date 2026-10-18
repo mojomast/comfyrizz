@@ -34,6 +34,13 @@
       "warnings": []
     },
     {
+      "file": "valid/motion-fields.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
       "file": "valid/spec-6.3-example.json",
       "kind": "valid",
       "schemaOk": true,
@@ -493,6 +500,46 @@
       "schemaOk": false,
       "schemaCodes": [
         "SCHEMA_PATTERN"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/motion-unknown-transition.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_ENUM"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/motion-unknown-entry.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_ENUM"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/motion-unknown-ease.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_ENUM"
+      ],
+      "semantic": [],
+      "warnings": null
+    },
+    {
+      "file": "invalid/motion-extra-property.json",
+      "kind": "invalid",
+      "schemaOk": false,
+      "schemaCodes": [
+        "SCHEMA_UNEVALUATEDPROPERTIES"
       ],
       "semantic": [],
       "warnings": null
