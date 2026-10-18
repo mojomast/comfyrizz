@@ -311,3 +311,39 @@ def build_asset_prompts(package: dict, *, elements=None, frame=None, package_dir
         asset_id: asset_prompt(asset_id, asset, package, style_block=style_block, elements=resolved.get(asset_id), frame=frame)
         for asset_id, asset in (package.get("assets") or {}).items()
     }
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m svgguide.prompts --package <package.json> [--package-dir <dir>] [--json]`.
+
+    The call site for the app and the agent: the whole package's prompts, one per asset, with the
+    single style block, printed so a caller can write them into the assets before a run - or read them
+    to see what the renderers will actually be told.
+    """
+    import argparse  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    parser = argparse.ArgumentParser(prog="svgguide.prompts", description="build every asset's prompt for a package (research 1.3-1.5)")
+    parser.add_argument("--package", required=True, help="the package to build prompts for")
+    parser.add_argument("--package-dir", default=None, help="where its relative asset paths resolve (default: the package's own directory)")
+    parser.add_argument("--json", action="store_true", help="print the full result as JSON")
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args(argv)
+
+    package_path = Path(args.package)
+    document = json.loads(package_path.read_text(encoding="utf-8"))
+    package_dir = Path(args.package_dir) if args.package_dir else package_path.parent
+    prompts = build_asset_prompts(document, package_dir=package_dir)
+
+    if args.json:
+        print(json.dumps(prompts, indent=1))
+    elif not args.quiet:
+        for asset_id, entry in prompts.items():
+            first_line = (entry.get("text") or "").split(".")[0]
+            print(f"{asset_id}: {entry.get('templateId') or 'none'} - {first_line[:100]}")
+    # a prompt the builder could not build is worth a non-zero exit: a caller writing these into a
+    # package should notice that one asset was left to the caller's own words
+    return 1 if any(entry.get("text") is None for entry in prompts.values()) else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

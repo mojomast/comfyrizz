@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from svgguide import STATIC_ROLES, build_asset_prompts, element_boxes
+from svgguide.prompts import main as prompts_main
 from svgguide.templates import FRAMING_LOCK, MOTION_ROLES, REF_EDIT_ROLES
 
 REPO = Path(__file__).resolve().parents[2]
@@ -160,3 +161,17 @@ def test_an_asset_the_builder_cannot_place_says_so() -> None:
 
     assert prompts["a_mystery"]["text"] is None
     assert "no template" in prompts["a_mystery"]["note"]
+
+
+def test_the_prompts_entry_point_prints_them_and_reports_an_asset_it_cannot_place(tmp_path: Path, capsys) -> None:
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(package(assets={"a_icon": {"kind": "svg", "gen": {"role": "diagram"}}})), encoding="utf-8")
+    assert prompts_main(["--package", str(good), "--json"]) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["a_icon"]["templateId"].startswith("ref-edit/")
+
+    # an asset no template fits is worth a non-zero exit: a caller writing these into a package has to
+    # notice that one asset was left to its own words
+    poor = tmp_path / "poor.json"
+    poor.write_text(json.dumps(package(assets={"a_mystery": {"kind": "mesh", "gen": {"role": "not-a-role"}}})), encoding="utf-8")
+    assert prompts_main(["--package", str(poor), "--quiet"]) == 1

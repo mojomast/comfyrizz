@@ -18,14 +18,6 @@ from .controlmaps import (
 )
 from .raster import RASTER_BACKEND, RasterError, rasterize, sanitize_svg
 from .sweeps import APPROACH_GEOMETRY, build_sweep_spec, estimate_units, write_sweep_spec
-from .prompts import (
-    PROMPTS_VERSION,
-    STATIC_ROLES,
-    asset_prompt,
-    build_asset_prompts,
-    element_boxes,
-    package_style_block,
-)
 from .templates import (
     TEMPLATES_VERSION,
     LAYOUT_ROLES,
@@ -49,6 +41,27 @@ from .workflows import (
     check_sweep_axes,
     write_approach,
 )
+
+#: Imported on first use, not here: `python -m svgguide.prompts` is how the app asks for a package's
+#: prompts, and a module the package imported before `-m` runs it is what makes runpy warn that it is
+#: "found in sys.modules", with output nobody can trust.
+_LAZY = (
+    "PROMPTS_VERSION",
+    "STATIC_ROLES",
+    "asset_prompt",
+    "build_asset_prompts",
+    "element_boxes",
+    "package_style_block",
+)
+
+
+def __getattr__(name: str):
+    if name in _LAZY:
+        from importlib import import_module
+
+        return getattr(import_module(".prompts", __name__), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "APPROACHES",
