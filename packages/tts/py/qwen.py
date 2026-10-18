@@ -22,6 +22,7 @@ SAMPLE_RATE = 24_000
 BASE_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 MODEL_LICENSE = "Apache-2.0"
+ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
 DEFAULT_REFERENCE = "Hello. I will narrate this film."
 # Qwen3-TTS language argument is the English name of the language [unverified].
 _LANG_NAMES = {
@@ -95,6 +96,45 @@ def _import_qwen_tts():
             "qwen-tts is not installed. It is an optional extra and is not part of the default install or the tests."
         ) from exc
     return qwen_tts
+
+
+def coerce_aligner_tokens(result) -> list[dict]:
+    """Normalise an aligner result into dicts. ``word_timings`` reads start/end or start_ts/end_ts."""
+    if isinstance(result, dict):
+        result = result.get("tokens") or result.get("words") or []
+    out = []
+    for token in result or []:
+        if isinstance(token, dict):
+            out.append(token)
+            continue
+        out.append(
+            {
+                "text": getattr(token, "text", ""),
+                "start_ts": getattr(token, "start_ts", getattr(token, "start", None)),
+                "end_ts": getattr(token, "end_ts", getattr(token, "end", None)),
+            }
+        )
+    return out
+
+
+class Qwen3Aligner:
+    """Qwen3-ForcedAligner-0.6B as a token provider for ``word_timings``.
+
+    The call shape is [unverified] until a GPU run. A missing install raises
+    ``QwenRuntimeUnavailable``; the narrator then keeps the syllable fallback.
+    """
+
+    def available(self) -> bool:
+        return importlib.util.find_spec("qwen_tts") is not None
+
+    def align(self, samples: np.ndarray, sample_rate: int, text: str, lang: str) -> list[dict]:
+        qwen_tts = _import_qwen_tts()
+        aligner_cls = getattr(qwen_tts, "Qwen3ForcedAligner", None)
+        if aligner_cls is None:
+            raise QwenRuntimeUnavailable("qwen_tts.Qwen3ForcedAligner is missing")
+        aligner = aligner_cls.from_pretrained(ALIGNER_MODEL)
+        result = aligner.align(audio=np.asarray(samples), sample_rate=sample_rate, text=text, language=lang)
+        return coerce_aligner_tokens(result)
 
 
 class Qwen3Tts:

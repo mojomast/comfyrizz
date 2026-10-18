@@ -159,3 +159,32 @@ test('K1: the word-level VTT uses word cues and leaves sentence VTT alone', () =
   assert.match(captionsToVtt(cues, 30), /cue-1\n00:00:00\.000 --> 00:00:02\.000\nMeet Orbit\.\n$/);
   assert.equal(captionsToWordVtt([{ text: 'No words.', from: 0, to: 30 }], 30), 'WEBVTT\n\n');
 });
+
+test('R3: a qwen3-tts durations file keeps K1 word timings for the compiler', () => {
+  const parsed = parseDurations({
+    version: 1,
+    engine: 'qwen3-tts',
+    sampleRate: 24000,
+    scenes: {
+      s1: {
+        chunks: [
+          {
+            text: 'Meet Orbit.',
+            seconds: 1,
+            words: [
+              { text: 'Meet', start: 0, end: 0.2 },
+              { text: 'Orbit.', start: 0.2, end: 1 },
+            ],
+          },
+        ],
+        seconds: 1.25,
+      },
+    },
+  });
+  const options = compileOptionsFromDurations(parsed);
+  assert.equal(parsed.engine, 'qwen3-tts');
+  assert.deepEqual(options.narration.s1[0].words, [
+    { text: 'Meet', start: 0, end: 0.2 },
+    { text: 'Orbit.', start: 0.2, end: 1 },
+  ]);
+});

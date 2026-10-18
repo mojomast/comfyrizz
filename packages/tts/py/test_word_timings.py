@@ -54,6 +54,17 @@ def test_a_real_aligner_supersedes_the_fallback():
     assert word_timings("Meet Orbit", 0.9, tokens) == tokens
 
 
+def test_aligner_start_ts_fields_are_accepted_and_rewritten():
+    tokens = [
+        {"text": "Meet", "start_ts": 0.0, "end_ts": 0.4},
+        {"text": "Orbit", "start_ts": 0.4, "end_ts": 0.9},
+    ]
+    assert word_timings("Meet Orbit", 0.9, tokens) == [
+        {"text": "Meet", "start": 0.0, "end": 0.4},
+        {"text": "Orbit", "start": 0.4, "end": 0.9},
+    ]
+
+
 def test_a_bad_aligner_result_is_rejected():
     with pytest.raises(ValueError):
         validate_tokens([{"text": "late", "start": 0.5, "end": 0.4}], 1.0)
