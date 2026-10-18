@@ -10,14 +10,74 @@
 // It is deliberately backend-agnostic: it calls only the methods of the `Backend` typedef in
 // `index.mjs`. Apps call `backend.runPackage(pkg, opts)` (each factory attaches it), so the web run
 // panel and `apps/server` do not branch on the provider.
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 import { applyManifestToPackage, checkJobsDoc, planJobs } from "../../jobs/src/index.mjs";
 import { validatePackage } from "../../schema/src/index.mjs";
 
+/** Where the python side of the pipeline lives (the quality gate runs from here). */
+const PIPELINE_DIR = fileURLToPath(new URL("../../../pipeline-py/", import.meta.url));
+
+/** The gate's own command, run the way validate and health are: `python -m eval.gate`. */
+export const DEFAULT_GATE_COMMAND = Object.freeze([process.env.COMFYRIZZ_PYTHON || "python3", "-m", "eval.gate"]);
+
 /** How a finished run leaves the box. `done` stops it, `idle` leaves it for the next run. */
 export const TEARDOWN_MODES = Object.freeze(["done", "idle", "never"]);
+
+/**
+ * Judge what a run produced (R1, research section 1.7): `python -m eval.gate` over the applied package.
+ *
+ * It is deliberately advisory - a run's assets existing is a run's business, and whether they *look*
+ * right is a separate verdict the UI shows next to it - and it never throws: a deployment without
+ * python, or a gate that cannot read the package, comes back as `{ok: null, detail}` rather than
+ * taking the run down with it. `{ok: true/false}` is the gate's own answer, with the failures named.
+ *
+ * @param {object} opts
+ * @param {object} opts.package    the applied package (the one that names the produced files)
+ * @param {string} opts.outDir     the run's output directory
+ * @param {string} [opts.packagePath] where to write the package for the gate (default: next to outDir)
+ * @param {string[]|null} [opts.gateCommand] null disables the gate entirely
+ */
+export function runQualityGate({ package: pkg, outDir, packagePath = null, gateCommand = DEFAULT_GATE_COMMAND, spawn = spawnSync } = {}) {
+  if (!gateCommand) return { ok: null, ran: false, detail: "the quality gate is disabled for this run" };
+  const path = packagePath || join(dirname(outDir), "gate-package.json");
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(pkg, null, 1));
+  } catch (error) {
+    return { ok: null, ran: false, detail: `could not write the package for the gate: ${error.message}` };
+  }
+
+  const result = spawn(gateCommand[0], [...gateCommand.slice(1), "--package", path, "--out", outDir, "--json"], {
+    cwd: PIPELINE_DIR,
+    encoding: "utf8",
+    timeout: 300000,
+  });
+  if (result?.error) return { ok: null, ran: false, detail: `the gate did not run: ${result.error.message}` };
+  let report = null;
+  try {
+    report = JSON.parse(String(result.stdout || ""));
+  } catch {
+    /* the gate prints JSON; anything else is a broken gate, not a broken render */
+  }
+  if (!report || typeof report.ok !== "boolean") {
+    const tail = String(result.stderr || result.stdout || "").trim().split("\n").slice(-3).join(" · ");
+    return { ok: null, ran: false, code: result.status, detail: `the gate produced no report${tail ? `: ${tail}` : ""}` };
+  }
+  return {
+    ok: report.ok,
+    ran: true,
+    gate: report.gate,
+    judged: report.judged,
+    notJudged: report.not_judged,
+    failures: report.failures ?? [],
+    assets: report.assets ?? {},
+    detail: report.ok ? "every judging check passed" : `${(report.failures ?? []).length} check(s) failed`,
+  };
+}
 
 /**
  * @param {object} backend  a backend from createByoBackend/createColabBackend
@@ -53,6 +113,7 @@ export async function runPackage(backend, pkg, opts = {}) {
     apply = true,
     dryRun = false,
     teardownMode = "done",
+  gateCommand = DEFAULT_GATE_COMMAND,
   } = opts;
   if (!workDir) throw new TypeError("runPackage needs opts.workDir (where jobs.json goes)");
   if (!TEARDOWN_MODES.includes(teardownMode)) throw new TypeError(`unknown teardownMode ${teardownMode}`);
@@ -102,6 +163,7 @@ export async function runPackage(backend, pkg, opts = {}) {
     ok: false,
     package: null,
     applied: [],
+    gate: null,
     candidates: [],
     untouched: [],
     teardown: null,
@@ -165,6 +227,13 @@ export async function runPackage(backend, pkg, opts = {}) {
       result.candidates = applied.candidates;
       result.untouched = applied.untouched;
       emit("applied", { assets: applied.applied.length, candidates: applied.candidates.length });
+
+      // R1: the gate runs over what was just applied, the way validate and health already shell out to
+      // python. Advisory: the run record carries the verdict, the run itself is not failed by it.
+      if (gateCommand !== null) {
+        result.gate = runQualityGate({ package: applied.package, outDir, gateCommand });
+        emit("gated", { ok: result.gate.ok, judged: result.gate.judged ?? null, failures: result.gate.failures?.length ?? null });
+      }
     }
   } catch (error) {
     // a half-finished run still has to say what happened to the box

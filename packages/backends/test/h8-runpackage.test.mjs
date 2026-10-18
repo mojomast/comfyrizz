@@ -129,7 +129,10 @@ test("runPackage takes a package through every step and returns the run record",
   assert.deepEqual(validatePackage(result.package).errors, []);
 
   // the caller sees both the runner's own events and the phases, in order
-  assert.deepEqual(events.map((e) => e.phase ?? e.event), ["planned", "up", "job_done", "ran", "applied", "teardown"]);
+  // R1 added the quality gate between applying the manifest and leaving: the run record carries its
+  // verdict, and it is a phase like any other so the panel can show it
+  assert.deepEqual(events.map((e) => e.phase ?? e.event), ["planned", "up", "job_done", "ran", "applied", "gated", "teardown"]);
+  assert.equal(typeof result.gate?.ran, "boolean");
   assert.equal(events.find((e) => e.phase === "planned").jobs, 1);
 });
 

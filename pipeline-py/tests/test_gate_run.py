@@ -51,9 +51,7 @@ def fake_probe(**overrides):
 def test_a_package_whose_stills_match_its_svg_passes(tmp_path: Path) -> None:
     still(tmp_path / "assets" / "a_panel.png")
     report = evaluate_run(
-        # the still is 96x64, so that is what the package says the video is: the dims check compares the
-        # file with the plan, and a plan that disagrees with its own render is exactly what it catches
-        package(assets={"a_panel": {"kind": "svg", "file": "assets/a_panel.png"}}, width=96, height=64),
+        package(assets={"a_panel": {"kind": "svg", "file": "assets/a_panel.png", "media": {"width": 96, "height": 64}}}),
         out_dir=tmp_path,
         elements={"a_panel": ELEMENTS},
     )
@@ -181,6 +179,29 @@ def test_audio_is_named_and_left_alone(tmp_path: Path) -> None:
     assert report["assets"]["a_narration"]["ok"] is None, "not judged is not a pass"
     assert report["not_judged"] == ["a_narration"]
     assert report["ok"] is True, report["failures"]
+
+
+def test_a_still_is_measured_against_what_the_package_records_for_it(tmp_path: Path) -> None:
+    """`format` is the render's frame; a still is generated at its own kind's size (GPU test 5: 1024x576)."""
+    still(tmp_path / "assets" / "a_panel.png")
+    wrong = evaluate_run(
+        package(
+            assets={"a_panel": {"kind": "svg", "file": "assets/a_panel.png", "media": {"width": 1920, "height": 1080}}},
+            width=1920,
+            height=1080,
+        ),
+        out_dir=tmp_path,
+    )
+    assert wrong["ok"] is False
+    assert any(failure["code"] == "GATE_STILL_ASSET_DIMS" for failure in wrong["failures"])
+
+    # and a still the package says nothing about is not judged on its size at all
+    silent = evaluate_run(
+        package(assets={"a_panel": {"kind": "svg", "file": "assets/a_panel.png"}}),
+        out_dir=tmp_path,
+    )
+    ids = {check["id"] for check in silent["assets"]["a_panel"]["checks"]}
+    assert "asset_dims" not in ids and "media_dims" not in ids
 
 
 def test_a_render_that_cannot_be_read_is_a_failure_not_a_crash(tmp_path: Path) -> None:

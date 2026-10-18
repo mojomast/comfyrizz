@@ -714,15 +714,38 @@ def evaluate_run(
                 }
                 failures.append({"asset": asset_id, "code": "GATE_ASSET_UNREADABLE", "detail": str(error)})
                 continue
+            # a still is generated at its own kind's size, not at the video's: comparing it with
+            # `format` (the render's frame) is how a 1024x576 still "fails" a 1920x1080 package. What
+            # can be checked is the size the package records for this asset, which is the size the file
+            # actually had (apply measures it).
+            declared = asset.get("media") or {}
             report = evaluate_still(
                 image,
                 elements=(elements or {}).get(asset_id),
                 theme_palette=palette or None,
                 safe_zones=(safe_zones or {}).get(asset_id),
                 image_path=str(path),
-                media=media,
-                planned_dims=planned_dims,
+                media=None,
+                planned_dims=None,
             )
+            if declared.get("width") and declared.get("height"):
+                measured = (int(image.shape[1]), int(image.shape[0]))
+                wanted = (int(declared["width"]), int(declared["height"]))
+                report["checks"].append(
+                    {
+                        "id": "asset_dims",
+                        "code": "GATE_STILL_ASSET_DIMS",
+                        "ok": measured == wanted,
+                        "image": list(measured),
+                        "declared": list(wanted),
+                        "detail": f"the package records {wanted[0]}x{wanted[1]}, the file is {measured[0]}x{measured[1]}",
+                    }
+                )
+                # the still's own verdict was computed before this check existed: recompute it, or a
+                # mismatched asset would be reported as a pass with a failing check inside it
+                judged = [check for check in report["checks"] if check.get("ok") is not None]
+                report["ok"] = bool(judged) and all(check["ok"] for check in judged)
+                report["score"] = round(sum(1 for check in judged if check["ok"]) / len(judged), 4) if judged else None
         report = {**report, "asset": asset_id, "path": str(path), "status": "ran"}
         reports[asset_id] = report
         for check in report.get("checks", []):
