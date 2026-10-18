@@ -6,6 +6,15 @@ import { expandFluxCaption, expandReferenceEditCaption, aspectFromSize, sourceDi
 import { WORKFLOW_SHA256 } from './workflow-manifest.js';
 import { brandStyleBlock, brandTheme, type BrandKit } from './brand.js';
 import type { StylePreset } from './brief.js';
+import {
+  lintPackageMotion,
+  mergeScenePatch,
+  motionFixInstructions,
+  motionVocabulary,
+  normalizePackageMotion,
+  normalizeSceneMotion,
+  normalizeTransitionOut,
+} from './prompts/motion.js';
 import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
 
@@ -61,6 +70,13 @@ export interface ToolsetOptions {
   stylePreset?: StylePreset;
 }
 
+const motionVocab = motionVocabulary();
+
+function zodEnum(values: readonly string[]) {
+  if (values.length === 0) throw new Error('empty motion enum');
+  return z.enum(values as [string, ...string[]]);
+}
+
 const sceneSchema = z.object({
   id: z.string().min(1),
   layout: z.enum(['title', 'hero', 'stat', 'chart', 'list']).optional(),
@@ -76,6 +92,10 @@ const sceneSchema = z.object({
 export const proposeSchema = z.object({
   brief: z.string().min(1),
   title: z.string().min(1).max(120).optional(),
+  motion: z.object({
+    energy: zodEnum(motionVocab.energies).optional(),
+    direction: zodEnum(motionVocab.directions).optional(),
+  }).strict().optional(),
   scenes: z.array(sceneSchema).max(12).optional(),
   datasets: z.record(z.unknown()).optional(),
 });
@@ -160,7 +180,7 @@ const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list'] as const;
 type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 const SCENE_KEYS = new Set([
   'id', 'layout', 'variant', 'preferredFrames', 'copy', 'data', 'background', 'foreground',
-  'media_only', 'lower_third', 'transitionOut', 'narration', 'narration_asset',
+  'media_only', 'lower_third', 'transitionOut', 'motion', 'narration', 'narration_asset',
   'narration_duration_frames', 'locked', 'notes',
 ]);
 const COPY_KEYS = new Set(['headline', 'kicker', 'sub', 'body', 'quote', 'attribution', 'footnote', 'cta', 'items']);
@@ -271,11 +291,22 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   if (source.lower_third && typeof source.lower_third === 'object' && typeof source.lower_third.text === 'string') {
     scene.lower_third = { ...(typeof source.lower_third.kicker === 'string' ? { kicker: source.lower_third.kicker } : {}), text: source.lower_third.text };
   }
-  if (source.transitionOut && typeof source.transitionOut === 'object' && typeof source.transitionOut.type === 'string') scene.transitionOut = source.transitionOut;
+  const transitionOut = normalizeTransitionOut(source.transitionOut);
+  if (transitionOut) scene.transitionOut = transitionOut;
+  const motion = normalizeSceneMotion(source.motion);
+  if (motion) scene.motion = motion;
   const narration = clampText(source.narration, 600);
   if (narration) scene.narration = narration;
   if (typeof source.notes === 'string') scene.notes = clampText(source.notes, 512);
+  // SCENE_KEYS is the allow-list. `motion` has to be in it or this drops the field.
+  for (const key of Object.keys(scene)) if (!SCENE_KEYS.has(key)) delete scene[key];
   return scene;
+}
+
+function withMotionFixes<T extends Record<string, unknown>>(result: T, pkg: Record<string, any>): T {
+  const fixes = motionFixInstructions(lintPackageMotion(pkg));
+  if (fixes.length === 0) return result;
+  return { ...result, motion_fixes: fixes };
 }
 
 /**
@@ -316,8 +347,13 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       compliance: { open_weights_only: true },
       renders: [],
     };
+    const motion = normalizePackageMotion(args.motion);
+    if (motion) state.package.motion = motion;
     touch();
-    return { package: state.package, revision: state.package.revision, placeholders: scenes.length === 1 && !args.scenes ? ['duration', 'palette'] : [] };
+    return withMotionFixes(
+      { package: state.package, revision: state.package.revision, placeholders: scenes.length === 1 && !args.scenes ? ['duration', 'palette'] : [] },
+      state.package,
+    );
   };
 
   const edit = (args: z.infer<typeof editSchema>) => {
@@ -330,14 +366,15 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const patch = args.patch as Record<string, any>;
     const datasetIds = new Set(Object.keys(draft.datasets ?? {}));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
-    const nextScenes = scenes.map((scene, sceneIndex) => sceneIndex === index ? normalizeScene({
-      ...current,
-      ...patch,
-      ...(patch.copy ? { copy: { ...(current.copy ?? {}), ...patch.copy } } : {}),
-    }, draft.title, datasetIds, assetIds) : scene);
+    const nextScenes = scenes.map((scene, sceneIndex) => sceneIndex === index
+      ? normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds)
+      : scene);
     state.package = { ...draft, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
-    return { package: state.package, revision: state.package.revision, scene_id: args.scene_id };
+    return withMotionFixes(
+      { package: state.package, revision: state.package.revision, scene_id: args.scene_id },
+      state.package,
+    );
   };
 
   const route = (args: z.infer<typeof routeSchema>): RouteDecision =>
@@ -551,14 +588,26 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   return {
     'storyboard.propose': tool(
       'storyboard.propose',
-      'Create a package draft from a brief. Unprovided numbers stay labelled placeholders.',
-      baseParameters({ brief: { type: 'string' }, title: { type: 'string' }, scenes: { type: 'array', items: { type: 'object' } } }, ['brief']),
+      'Create a package draft from a brief. Set package motion and per-scene motion from the system motion vocabulary; never write animation code. Unprovided numbers stay labelled "Example data".',
+      baseParameters({
+        brief: { type: 'string' },
+        title: { type: 'string' },
+        motion: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            energy: { type: 'string', enum: [...motionVocab.energies] },
+            direction: { type: 'string', enum: [...motionVocab.directions] },
+          },
+        },
+        scenes: { type: 'array', items: { type: 'object' } },
+      }, ['brief']),
       proposeSchema,
       propose,
     ),
     'storyboard.edit': tool(
       'storyboard.edit',
-      'Patch one scene (copy, layout, data, background, foreground, narration) by scene id.',
+      'Patch one scene (copy, layout, data, background, foreground, motion, transitionOut, narration) by scene id. Apply each motion_fixes entry from the previous result with this tool.',
       baseParameters({ scene_id: { type: 'string' }, patch: { type: 'object' } }, ['scene_id', 'patch']),
       editSchema,
       edit,

@@ -91,11 +91,29 @@ on bad rows/duplicates and clamps to 64 values. `src/chart-scenes.ts`
 labels and values are the dataset's own — no invented numbers. See
 `examples/csv-charts/`.
 
+## Motion parameters (MS5)
+
+`src/prompts/motion.ts` is the motion section of the agent system prompt. The token
+lists are read from `package-v1.schema.json`, so the model can only pick MS2
+vocabulary (`motion`, `transitionOut`). It does not write animation code.
+`motionFixInstructions()` turns `lintMotion()` errors and warnings into
+`storyboard.edit` calls, and `storyboard.propose` / `storyboard.edit` return them
+as `motion_fixes` for the next turn.
+
+Style presets map to a default `motion.energy`: clay and glass are `calm`,
+editorial-flat, isometric-tech and paper-cut are `medium`, cinematic-dark is `high`.
+
+`runMotionCritique()` is a separate judge call over an MS4 contact sheet. It scores
+each scene /10 on readability, rhythm, continuity and brand, fixes only scenes at
+7 or below, leaves 9 or above alone, and stops after 2 rounds. It stays off unless
+the provider sets `imageInput: true` (DeepSeek v4.1 and the scripted model do not).
+
 ## Evidence
 
 ```bash
-npm test                         # 65 tests: router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render,
-                                 # R2 brief/outline/presets/scene-chips, B1 brand kit, L1 language variants and D1 CSV/chart scenes
+npm test                         # router, zod, repair loop, step cap, A5 bridge, C7 sketch-to-render,
+                                 # R2 brief/outline/presets/scene-chips, B1 brand kit, L1 language variants,
+                                 # D1 CSV/chart scenes, MS5 motion prompt / lint fixes / critique rubric
 node scripts/m4-live.mjs         # live OpenCode Go: propose → edit → 2 routes → SVG through A5
 node scripts/m4-two-providers.mjs # same loop against a local OpenAI-compatible endpoint
 ```
