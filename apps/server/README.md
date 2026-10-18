@@ -138,6 +138,7 @@ x2 file when the package declares it and falling back to the base media scaled b
 | --- | --- |
 | `video.mp4` | the CPU render, or an existing file when `force` is not set |
 | `captions.srt` / `captions.vtt` | `packages/tts` `captionsToSrt`/`captionsToVtt` over the player's own cues (measured narration when `audio/durations.json` is present) |
+| `captions.words.vtt` (optional) | K1: `captionsToWordVtt` over the same cues; written only when a cue carries measured `words[]`, so sentence output and the always-present bundle list are unchanged |
 | `CREDITS.md` | `packages/sources` `buildCredits`, including a "Not redistributable" section with each refusal's licence and source URL |
 | `package.zip` | `packages/sources` `buildPackageZip`: package + timeline + workflows + credits + only assets the v0.1 rights policy allows; NC/ND/SA/unknown and byte-less assets are listed in `manifest.json` with a reason |
 

@@ -30,6 +30,10 @@ npm test         # tsc + node:test
   `plates[]` entry with `speed`, `retimedFrames` and strategy (`retime`, `trim`, `loop`).
 - Captions are sentence-level, from measured chunks when present, otherwise marked
   `estimated: true`.
+- K1: when a measured chunk carries `words[]`, each caption cue also carries
+  `words: [{text, from, to}]` in absolute frames, clamped inside the cue so
+  karaoke stays monotonic. A chunk with no words produces no `cue.words`, so the
+  default sentence output is unchanged.
 - A scene's `media_only` and `lower_third` schema fields survive compilation as
   `TimelineScene.mediaOnly` / `.lowerThird`, so the renderer can draw a full-frame
   media plate with a lower third and skip the layout without a sidecar (P-fix3 N8).

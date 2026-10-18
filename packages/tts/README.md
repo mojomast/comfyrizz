@@ -3,9 +3,18 @@
 Owner: **Pi** (WS-A, task A4). Spec §6.8/§6.9.
 
 This package turns the package's `scenes[].narration` text into measured speech,
-then feeds those measurements into the A2 timeline compiler. There are no
-fabricated word timestamps: Kokoro synthesises one sentence at a time, and each
+then feeds those measurements into the A2 timeline compiler. Sentence captions
+stay measured, not estimated: Kokoro synthesises one sentence at a time, and each
 caption cue is the measured chunk duration plus the fixed gaps.
+
+K1 adds optional per-word timings inside each measured sentence. `py/synth.py`
+writes a `words[]` list (`{text, start, end}`, sentence-relative seconds) next to
+each chunk in `audio/durations.json`; a syllable-proportional fallback spreads the
+measured sentence over its words, and a real aligner (PyTorch `KPipeline`, R3's
+Qwen3-ForcedAligner) can supply exact tokens through `word_timings(text, seconds,
+tokens)`. The words are always monotonic, inside the sentence, and sum to the
+measured sentence duration (tolerance 0.02 s). A package with no `words` compiles
+exactly as before, so the default sentence captions are byte-identical.
 
 ## Pipeline
 

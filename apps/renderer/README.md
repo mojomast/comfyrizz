@@ -39,6 +39,17 @@ draws `theme.logo_asset` top-left on the title/outro layouts and hides itself on
 failing the render. `preparePublicDir` copies the brand-font top-level directory alongside the image
 assets, so a clean-clone render finds it (`apps/renderer/test/brand.test.mjs`).
 
+## Caption styles (K1)
+
+`src/caption-model.js` resolves the caption style from `pkg.captions.style`: `sentence` (default,
+byte-identical to before), `karaoke` (the whole sentence stays up and the spoken word is highlighted),
+`word-pop` (words pop in as they are spoken) and `big-word` (one large word at a time). A 9:16 video
+with no `captions.style` defaults to `big-word`; every other aspect defaults to `sentence`. The styles
+draw from `caption.words` (absolute frames from `packages/planner`); a cue without word cues falls back
+to the whole sentence. `CaptionOverlay` stays above the scene stack (z 100), and `RENDERER_VERSION`
+bumps to 7 so a style change invalidates cached segments. `apps/renderer/test/captions.test.mjs` covers
+the style choice, the active word and the pop curve; `captions.tsx` still passes the N11 source check.
+
 ## Aspect re-layout (L1)
 
 `src/layout-model.js` is aspect-aware. `TEXT_ZONES_BY_ASPECT` / `FREE_AREAS` plus `textZones(scene, aspect)`,
