@@ -23,6 +23,7 @@ import { createColabBackend } from "../../packages/backends/src/colab-backend.mj
 import { applyManifestToPackage, checkJobsDoc, planJobs } from "../../packages/jobs/src/index.mjs";
 import { validatePackage } from "../../packages/schema/src/index.mjs";
 import { installFakeColab, makeCli, readLog } from "../../packages/backends/test/helpers.mjs";
+import { PACKAGE_ID, writeGpu4Package } from "./g4_package.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -87,21 +88,7 @@ function startFake({ port = 0, args = [] } = {}) {
   });
 }
 
-/** The test 4 package: the planner fixture plus the two flags GPU test 4 re-checks (N1 and N9). */
-function buildPackage(dir) {
-  const pkg = JSON.parse(readFileSync(PLANNER_FIXTURE, "utf8"));
-  pkg.id = "pkg_gpu4dryrun0001";
-  // N1: the planner-only text flag must not travel in params
-  pkg.assets.a_still.gen.inputs.text = true;
-  // N9: the upscale stage has to land on the package frame after the x2 crop
-  pkg.assets.a_plate1.gen.inputs.upscale = true;
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "package.json"), JSON.stringify(pkg, null, 2));
-  const workflows = join(dir, "workflows");
-  if (!existsSync(workflows)) symlinkSync(join(REPO, "workflows"), workflows);
-  return pkg;
-}
-
+/** The test 4 package lives in g4_package.mjs so the estimate and this dry run agree on the job set. */
 export async function dryRun({ outDir = null } = {}) {
   const check = makeCheck();
   const root = outDir || mkdtempSync(join(tmpdir(), "comfyrizz-gpu4-"));
@@ -112,7 +99,7 @@ export async function dryRun({ outDir = null } = {}) {
   const byoOut = join(workspace, "out");
   const requestLog = join(root, "requests.jsonl");
   mkdirSync(byoOut, { recursive: true });
-  const pkg = buildPackage(workspace);
+  const pkg = writeGpu4Package(workspace);
   check.ok("package", "the test 4 package validates", validatePackage(pkg).errors.length === 0);
 
   // ---- A. the BYO path, with the real runner against a fake Comfy v2 -----------------------------
@@ -202,7 +189,7 @@ export async function dryRun({ outDir = null } = {}) {
   writeFileSync(tokenPath, "hf_FAKETOKEN0123456789ABCDEF\n", { mode: 0o600 });
   const colab = createColabBackend({
     cli: makeCli(fake),
-    packageId: "pkg_gpu4dryrun0001",
+    packageId: PACKAGE_ID,
     scratchDir: join(ws, "scratch"),
     logDir: join(fake.tmpDir, "logs"),
     packageDir: null,
@@ -230,11 +217,21 @@ export async function dryRun({ outDir = null } = {}) {
   // ---- the harness's own honesty: no token value in any argv, nothing left running --------------
   const leaked = readLog(fake.logPath).filter((entry) => entry.argv.some((arg) => String(arg).includes("hf_FAKETOKEN")));
   check.ok("no-token-in-argv", `argv entries containing the token: ${leaked.length}`, leaked.length === 0);
-  const manifestForNotes = run.manifest;
-  check.ok("estimate", `gpuMinutes=${JSON.stringify(run.estimate.gpuMinutes)}`, run.estimate !== null && run.estimate !== undefined);
-  void manifestForNotes;
+  // the estimate the run panel would show for the same job set: real minutes, real Google Colab units
+  const colabEstimate = await colab.estimate(jobsDoc.jobs);
+  check.ok(
+    "colab-estimate",
+    `${colabEstimate.gpuMinutes} GPU min + ${colabEstimate.overheadMinutes} min bootstrap = ${colabEstimate.units} units of ${budgetUnits}`,
+    colabEstimate.gpuMinutes > 0 && colabEstimate.units > 0 && colabEstimate.units < budgetUnits,
+  );
+  // and the BYO half of the same run is honestly unmetered: it is the user's own hardware
+  check.ok(
+    "byo-unmetered",
+    `BYO gpuMinutes=${JSON.stringify(run.estimate.gpuMinutes)}`,
+    run.estimate.gpuMinutes === null && /user's hardware/.test(run.estimate.note ?? ""),
+  );
 
-  return { root, checks: check.checks, jobs: jobsDoc.jobs.length, run, colabRun, requestLog, proxyLog, teardown: run.teardown };
+  return { root, checks: check.checks, jobs: jobsDoc.jobs.length, run, colabRun, requestLog, proxyLog, teardown: run.teardown, colabEstimate };
 }
 
 export { applyManifestToPackage };
@@ -243,7 +240,7 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLTo
 if (isMain) {
   const outIndex = process.argv.indexOf("--out");
   const outDir = outIndex >= 0 ? resolve(process.argv[outIndex + 1]) : null;
-  const { checks, jobs, run, colabRun, root } = await dryRun({ outDir });
+  const { checks, jobs, run, colabRun, root, colabEstimate } = await dryRun({ outDir });
   const failed = checks.filter((check) => !check.ok);
   const report = {
     harness: "gpu4-dryrun",
@@ -251,6 +248,7 @@ if (isMain) {
     jobs,
     checks: checks.map((check) => `${check.ok ? "PASS" : "FAIL"} ${check.id}: ${check.detail}`),
     counts: run.counts,
+    unitEstimate: { jobs, gpuMinutes: colabEstimate.gpuMinutes, overheadMinutes: colabEstimate.overheadMinutes, units: colabEstimate.units },
     colab: { manifestComplete: colabRun.manifest?.complete, argv: readLogOut(root) },
   };
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
