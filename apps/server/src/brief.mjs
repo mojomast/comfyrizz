@@ -14,9 +14,15 @@ import {
   draftKeyMessages,
   extractBrief,
   missingQuestions,
+  stylePresets,
 } from '../../../packages/agent/dist/src/index.js';
 
 export const MAX_QUESTIONS = 3;
+
+/** R2 step 5: the six look cards (CPU/SVG thumbnails) for the brief picker. */
+export function briefPresets() {
+  return { presets: stylePresets() };
+}
 
 function normalizeMode(mode) {
   return mode === 'express' ? 'express' : 'plan';
@@ -25,7 +31,7 @@ function normalizeMode(mode) {
 /** Complete a draft and attach its outline. */
 function finished(mode, draft) {
   const brief = completeBrief(draft);
-  return { mode, complete: true, questions: [], brief, outline: buildOutline(brief) };
+  return { mode, complete: true, questions: [], brief, outline: buildOutline(brief), presets: stylePresets() };
 }
 
 /**
@@ -51,7 +57,7 @@ export function planBrief(input = {}) {
     if (input.askMore !== true || remaining.length === 0 || mode === 'express') {
       return finished(mode, answered);
     }
-    return { mode, complete: false, questions: remaining, brief: answered };
+    return { mode, complete: false, questions: remaining, brief: answered, presets: stylePresets() };
   }
 
   if (mode === 'express') {
@@ -62,7 +68,7 @@ export function planBrief(input = {}) {
   if (questions.length === 0) {
     return finished(mode, draft);
   }
-  return { mode, complete: false, questions, brief: draft };
+  return { mode, complete: false, questions, brief: draft, presets: stylePresets() };
 }
 
 /**
@@ -75,5 +81,5 @@ export function refreshBrief(input = {}) {
   const draft = input.brief && typeof input.brief === 'object' ? input.brief : {};
   const mode = normalizeMode(draft.mode);
   const brief = completeBrief({ ...draft, mode });
-  return { mode, complete: true, questions: [], brief, outline: buildOutline(brief) };
+  return { mode, complete: true, questions: [], brief, outline: buildOutline(brief), presets: stylePresets() };
 }

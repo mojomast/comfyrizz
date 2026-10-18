@@ -7,7 +7,7 @@ import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
-import { planBrief, refreshBrief } from './brief.mjs';
+import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -342,6 +342,10 @@ export function createApp({
           ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
         });
       }
+    }
+
+    if (url.pathname === '/api/brief/presets' && request.method === 'GET') {
+      return sendJson(response, 200, briefPresets());
     }
 
     if (url.pathname === '/api/brief/outline' && request.method === 'POST') {

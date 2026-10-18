@@ -175,3 +175,21 @@ test('POST /api/brief/outline is authenticated and defaults a partial brief', as
   assert.equal(response.json.brief.style.font, 'Inter');
   assert.equal(response.json.outline.beats.length, 4);
 });
+
+test('GET /api/brief/presets returns the six CPU/SVG look cards', async () => {
+  const response = await request({ path: '/api/brief/presets' });
+  assert.equal(response.status, 200);
+  assert.equal(response.json.presets.length, 6);
+  for (const preset of response.json.presets) {
+    assert.ok(['clay', 'glass', 'editorial-flat', 'isometric-tech', 'paper-cut', 'cinematic-dark'].includes(preset.id));
+    assert.ok(preset.thumbnail.startsWith('<svg'), `${preset.id} needs an SVG thumbnail`);
+    assert.equal(preset.palette.length, 4);
+    assert.equal(preset.font, 'Inter');
+  }
+});
+
+test('the brief responses carry the look cards for the picker', async () => {
+  const response = await request({ method: 'POST', path: '/api/brief', body: { prompt: RICH } });
+  assert.equal(response.json.presets.length, 6);
+  assert.equal((await request({ path: '/api/brief/presets', token: null })).status, 401);
+});
