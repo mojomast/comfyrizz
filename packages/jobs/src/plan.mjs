@@ -12,7 +12,7 @@ import { applyMotionRoleDefaults, applyPromptDefaults } from "./defaults.mjs";
 import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
 
 export const JOBS_VERSION = 1;
-export const BATCH_ORDER = ["stills", "plates", "upscales", "audio"];
+export const BATCH_ORDER = ["stills", "plates", "upscales", "audio", "presenters"];
 
 /**
  * Latent downsampling factor per job kind: plates/upscales follow the LTX rule, stills the Klein
@@ -39,11 +39,14 @@ export const FILE_PARAMS = ["image", "reference", "mask", "audio"];
 /** Which job kind produces the file a file-parameter needs. */
 const FILE_PARAM_KIND = { image: "still", reference: "still", mask: "still", audio: "audio", video: "plate" };
 
-const OUTPUT_EXT = { still: ".png", plate: ".mp4", upscale: ".mp4", audio: ".wav" };
-const OUTPUT_KIND = { still: "image", plate: "video", upscale: "video", audio: "audio" };
+const OUTPUT_EXT = { still: ".png", plate: ".mp4", upscale: ".mp4", audio: ".wav", presenter: ".mp4" };
+const OUTPUT_KIND = { still: "image", plate: "video", upscale: "video", audio: "audio", presenter: "video" };
 const GENERATOR_KIND = {
   "flux3-klein": "still",
   ltx25: "plate",
+  // H17: the presenter is LTX-2.5 audio-to-video - the same weights, a different graph, and its own
+  // batch because it can only run once the narration it is generated from exists
+  "ltx25-a2v": "presenter",
   kokoro: "audio",
   "llm-svg": null, // procedural vector: CPU work, no Comfy job (PLAN.md A5)
 };
@@ -390,7 +393,16 @@ export function planJobs(pkg, opts = {}) {
     const job = {
       id: `${assetId}.${kind}`,
       kind,
-      batch: kind === "still" ? "stills" : kind === "plate" ? "plates" : kind === "upscale" ? "upscales" : "audio",
+      batch:
+        kind === "still"
+          ? "stills"
+          : kind === "plate"
+            ? "plates"
+            : kind === "upscale"
+              ? "upscales"
+              : kind === "presenter"
+                ? "presenters"
+                : "audio",
       asset: assetId,
       scene,
       sceneIndex: sceneIndex >= 0 ? sceneIndex : null,

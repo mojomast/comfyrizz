@@ -120,7 +120,7 @@ test("frame counts resolve to 8n+1 (nearest, ties up)", () => {
   assert.equal(resolveFramesFromSeconds(5.0, 24), 121);
 });
 
-test("all FLUX stills are batched before any plate, then upscales, then audio", () => {
+test("all FLUX stills are batched before any plate, then upscales, then audio, then presenters", () => {
   const doc = planJobs(fixture("package-pending.json"));
   assert.deepEqual(
     doc.batches.map((b) => b.name),
@@ -134,7 +134,7 @@ test("all FLUX stills are batched before any plate, then upscales, then audio", 
     doc.jobs.filter((j) => j.kind === "still").map((j) => j.asset),
     ["a_cutout", "a_plate1_still"],
   );
-  assert.equal(BATCH_ORDER.join(","), "stills,plates,upscales,audio");
+  assert.equal(BATCH_ORDER.join(","), "stills,plates,upscales,audio,presenters");
 });
 
 test("the plate depends on its still and the upscale depends on the plate and its start image", () => {
