@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 // B3: Comfyrizz's own planning around the official Google Colab CLI (`colab`, 0.7.4,
 // Apache-2.0). The parsers and the local-path blocklist come from Orbit's
 // colab-plan.mjs (see ./orbit-colab-plan.mjs, copied verbatim with the MIT relicence
@@ -240,4 +241,42 @@ export function parseHealthLine(output) {
     checks: found.checks ?? null,
     source: "health-line",
   };
+}
+
+/**
+ * Where the `colab` CLI actually is (GPU test 4, G4-2).
+ *
+ * A `pip install --user` puts it at `~/.local/bin/colab`, which is *not* on the PATH the child gets
+ * (`colabEnvironment` clears the environment on purpose), so spawning the bare name fails with
+ * "missing_binary" on a machine where the CLI is installed and signed in. Order: an explicit setting,
+ * then the user's own install, then the bare name (PATH lookup at spawn time).
+ */
+export function resolveColabBinary({ env = process.env, home = env.HOME || "", exists = existsSync } = {}) {
+  const override = String(env.COMFYRIZZ_COLAB_BIN || "").trim();
+  if (override) {
+    if (!exists(override)) throw new Error(`COMFYRIZZ_COLAB_BIN points at ${override}, which does not exist`);
+    return { bin: override, source: "COMFYRIZZ_COLAB_BIN" };
+  }
+  const userInstall = home ? `${home.replace(/\/+$/, "")}/.local/bin/colab` : null;
+  if (userInstall && exists(userInstall)) return { bin: userInstall, source: "~/.local/bin" };
+  return { bin: "colab", source: "PATH" };
+}
+
+/**
+ * Scrub a Colab runtime URL's credentials (GPU test 4, G4-8).
+ *
+ * A failed transfer logs the whole URL, `colab-runtime-proxy-token=...` included - that is a live
+ * credential for the VM, and it was ending up in the step logs this host keeps. `redactSecrets` knows
+ * the provider key shapes but not this query parameter, so it is scrubbed here, on the way into every
+ * log line and every error tail.
+ */
+export function redactRuntimeUrl(text) {
+  return String(text ?? "")
+    .replace(/(colab-runtime-proxy-token=)[^&\s"']+/gi, "$1[REDACTED]")
+    .replace(/([?&](?:token|access_token|key|api_key|apikey|auth|signature)=)[^&\s"']+/gi, "$1[REDACTED]");
+}
+
+/** `redactAll` plus the URL query scrubbing: the single funnel every log line goes through. */
+export function redactForLog(text) {
+  return redactRuntimeUrl(redactAll(text));
 }

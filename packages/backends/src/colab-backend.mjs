@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import {
   HF_TOKEN_REMOTE_PATH,
+  redactForLog,
+  resolveColabBinary,
   parseHealthLine,
   parseTreeListing,
   REMOTE_ROOT,
@@ -116,7 +118,10 @@ export function createColabBackend({
   const logs = logDir || join(scratch, "logs");
   mkdirSync(scratch, { recursive: true });
   const registryFile = join(scratch, "sessions.json");
-  const client = cli || new ColabCli({ logDir: logs, detached: false });
+  // G4-2: a `pip install --user` CLI lives at ~/.local/bin/colab, which is not on the PATH the child
+  // gets, so "not found" on a machine where it is installed and signed in. Resolve it once here.
+  const resolvedBinary = cli ? null : resolveColabBinary({ home });
+  const client = cli || new ColabCli({ logDir: logs, detached: false, bin: resolvedBinary.bin });
   const state = {
     session,
     createdByUs: false,
@@ -776,7 +781,9 @@ export function isLost(result) {
 
 export function redactTail(result, chars = 300) {
   const text = String(result?.output || result?.log || "");
-  return text.slice(-chars);
+  // G4-8: an error tail quotes the failing command's output, which is where the runtime proxy token
+  // shows up; scrub the URL before it reaches a message
+  return redactForLog(text).slice(-chars);
 }
 
 function readJobs(jobsFile) {

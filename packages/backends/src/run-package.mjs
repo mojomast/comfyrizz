@@ -95,6 +95,7 @@ export async function runPackage(backend, pkg, opts = {}) {
     jobsDoc,
     estimate,
     up: null,
+    bootstrap: null,
     health: null,
     manifest: null,
     counts: null,
@@ -117,6 +118,17 @@ export async function runPackage(backend, pkg, opts = {}) {
     up = typeof backend.ensureUp === "function" ? await backend.ensureUp({ budget, approved, signal }) : null;
     emit("up", { state: up?.state ?? null });
     result.up = up ?? null;
+    // G4-1: a freshly created Google Colab session is an empty VM. `ensureUp` only allocates it, so
+    // the bootstrap (clone ComfyUI, install, download the pinned models, start the proxy) has to run
+    // before anything asks the box to be healthy. BYO has no bootstrap step and skips it.
+    if (typeof backend.bootstrap === "function") {
+      const bootstrapped = await backend.bootstrap({ onEvent, signal });
+      result.bootstrap = bootstrapped ?? null;
+      if (bootstrapped?.lost === true) {
+        throw new Error(`the backend never reported its bootstrap: ${bootstrapped.note}`);
+      }
+      emit("bootstrapped", { lost: false, code: bootstrapped?.code ?? null });
+    }
     result.health = typeof backend.health === "function" ? await backend.health() : null;
     if (result.health && result.health.ok === false) {
       throw new Error(`the backend is not healthy: ${result.health.detail}`);

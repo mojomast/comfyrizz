@@ -28,6 +28,7 @@ import { PACKAGE_ID, writeGpu4Package } from "./g4_package.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = resolve(HERE, "..", "..");
+const COLAB_DIR = join(REPO, "colab");
 const PYTHON = join(REPO, ".venv", "bin", "python");
 const FAKE_SERVER = join(REPO, "pipeline-py", "tests", "fake_comfy_server.py");
 const PLANNER_FIXTURE = join(REPO, "pipeline-py", "tests", "fixtures", "package-gpu1-workflows.json");
@@ -250,6 +251,20 @@ export async function dryRun({ outDir = null } = {}) {
   // file. A download of the directory itself is exactly what used to look fine against a fake that
   // copied directories.
   const downloads = readLog(fake.logPath).filter((entry) => entry.argv[0] === "download").map((entry) => String(entry.argv[3]));
+  // H14: every `colab exec` is spawned with the script's folder as cwd (the real CLI resolves `-f`
+  // against its own cwd), and the exec's success is the sentinel its script prints last - so each of
+  // the scripts the flow runs must appear exactly once, from the right directory.
+  const execEntries = readLog(fake.logPath).filter((entry) => entry.argv[0] === "exec");
+  const execScripts = execEntries.map((entry) => path.basename(String(entry.argv[entry.argv.indexOf("-f") + 1])));
+  const wrongCwd = execEntries.filter((entry) => path.dirname(String(entry.argv[entry.argv.indexOf("-f") + 1])) !== COLAB_DIR || entry.cwd !== COLAB_DIR);
+  check.ok(
+    "H14-exec-contract",
+    `execs: ${execScripts.join(", ")} (cwd ${execEntries[0]?.cwd ?? "none"})`,
+    execEntries.length >= 4 &&
+      wrongCwd.length === 0 &&
+      ["hf_token_dir.py", "bootstrap.py", "health.py", "run_jobs.py", "list_out.py"].every((name) => execScripts.includes(name)) &&
+      execScripts.filter((name) => name === "run_jobs.py").length === 1,
+  );
   check.ok(
     "H13-per-file",
     `downloads: ${downloads.map((remote) => remote.replace("/content/comfyrizz/out/", "")).join(", ") || "none"}`,

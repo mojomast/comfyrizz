@@ -13,7 +13,7 @@ import fs from "node:fs";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { redactAll } from "./colab-plan.mjs";
+import { redactForLog } from "./colab-plan.mjs";
 
 const spec = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const silenceMs = Number(spec.silenceMs);
@@ -45,7 +45,7 @@ function bump() {
 }
 function write(chunk) {
   bump();
-  const text = redactAll(decoder.write(chunk));
+  const text = redactForLog(decoder.write(chunk));
   if (text) log.write(text);
 }
 child.stdout.on("data", write);
@@ -78,7 +78,7 @@ if (spec.holdStdin && spec.socket) {
 child.on("close", (code, signal) => {
   clearTimeout(silence);
   clearTimeout(wall);
-  const rest = redactAll(decoder.end());
+  const rest = redactForLog(decoder.end());
   if (rest) log.write(rest);
   log.end(() => {
     fs.writeFileSync(spec.exit, JSON.stringify({ code: code ?? 1, signal: signal || null }), { mode: 0o600 });

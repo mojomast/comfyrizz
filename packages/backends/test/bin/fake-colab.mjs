@@ -157,7 +157,7 @@ if (command === "exec") {
   // VM by definition - `colab exec -f` sends the file it is given. Modelling that here keeps every
   // existing test honest without boilerplate in each of them.
   const builtIn = {
-    "hf_token_dir.py": { mkdirs: ["/content/.hf"], output: "hf token dir /content/.hf mode 700" },
+    "hf_token_dir.py": { mkdirs: ["/content/.hf", "/content/comfyrizz", "/content/comfyrizz/out"], output: "vm dirs ready: /content/.hf mode 700, /content/comfyrizz and /content/comfyrizz/out present" },
     "list_out.py": { walk: "/content/comfyrizz/out" },
   };
   const spec = { ...builtIn[script], ...(state.scripts || {})[script] };

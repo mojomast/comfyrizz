@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { colabEnvironment, stripAnsi } from "./orbit-colab-plan.mjs";
-import { assertNoSecrets, redactAll } from "./colab-plan.mjs";
+import { assertNoSecrets, redactForLog } from "./colab-plan.mjs";
 
 const WORKER = fileURLToPath(new URL("./job-worker.mjs", import.meta.url));
 
@@ -122,7 +122,7 @@ export class ColabCli {
       }, Math.min(200, Math.max(25, Math.floor(silenceMs / 4))));
       const push = (chunk) => {
         lastOutput = Date.now();
-        const text = redactAll(stripAnsi(chunk.toString("utf8")));
+        const text = redactForLog(stripAnsi(chunk.toString("utf8")));
         chunks.push(text);
         if (this.onLog) this.onLog(text, { step });
       };
