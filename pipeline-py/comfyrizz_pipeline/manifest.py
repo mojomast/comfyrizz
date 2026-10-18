@@ -40,7 +40,16 @@ def build_manifest(
     started_at: str,
     run_dir: Path | None = None,
     notes: list[str] | None = None,
+    previous: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build the manifest for this run, carrying over what an earlier run already recorded (G5-8).
+
+    The backend runs the runner once per batch (`--batch stills`, then `--batch plates`), and every run
+    writes this same file. Rewriting it from just this run's jobs means `out/manifest.json` describes
+    the *last* batch only: GPU test 5's final manifest said `{succeeded: 2}` for the two plates while
+    the three finished stills were nowhere, so they were never applied. Entries from this run win; the
+    ones already there are kept, and the counts and `complete` describe the whole set.
+    """
     jobs = []
     counts: dict[str, int] = {status: 0 for status in JOB_STATUSES}
     for job in jobs_doc.get("jobs", []):
@@ -53,6 +62,25 @@ def build_manifest(
                 entry[key] = result[key]
         entry["outputs"] = result.get("outputs", [])
         jobs.append(entry)
+    carried = manifest_status_map(previous)
+    # G5-8: a re-run of one batch must not erase the other jobs' verdicts either. A job this run did
+    # not touch comes back as "pending" (there is no result for it), which would quietly reset a
+    # succeeded or cached job; the entry already on the VM is the better answer for it.
+    settled = {"pending", "skipped"}
+    this_run = {entry["job"]: entry for entry in jobs}
+    merged: list[dict[str, Any]] = []
+    for job_id, before in carried.items():
+        entry = this_run.pop(job_id, None)
+        if entry is None or (entry["status"] in settled and before["status"] not in settled):
+            merged.append(before)
+        else:
+            merged.append(entry)
+    # the order is the plan's: what the earlier batches recorded, then the jobs only this run knows
+    merged.extend(this_run.values())
+    jobs = merged
+    counts = {status: 0 for status in JOB_STATUSES}
+    for entry in jobs:
+        counts[entry["status"]] = counts.get(entry["status"], 0) + 1
     complete = all(entry["status"] in ("succeeded", "cached") for entry in jobs) and bool(jobs)
     manifest = {
         "v": MANIFEST_VERSION,
@@ -70,6 +98,10 @@ def build_manifest(
         manifest["runDir"] = str(run_dir)
     if notes:
         manifest["notes"] = notes
+    # a run history, so `out/manifest.json` says which invocations made it up
+    history = list((previous or {}).get("runs") or [])
+    history.append({"run_id": run_id, "startedAt": started_at, "complete": bool(manifest.get("complete")), "jobs": [entry["job"] for entry in jobs]})
+    manifest["runs"] = history
     return manifest
 
 

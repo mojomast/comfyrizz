@@ -13,7 +13,13 @@ import test from "node:test";
 
 import { spawnSync } from "node:child_process";
 
-import { createBundle, createColabBackend, BOOTSTRAP_SILENCE_MS, READY_WAIT_SECONDS } from "../src/colab-backend.mjs";
+import {
+  createBundle,
+  createColabBackend,
+  mergeBatchManifests,
+  BOOTSTRAP_SILENCE_MS,
+  READY_WAIT_SECONDS,
+} from "../src/colab-backend.mjs";
 import { parseReadyLine } from "../src/colab-plan.mjs";
 import { installFakeColab, makeCli, readLog } from "./helpers.mjs";
 
@@ -397,4 +403,42 @@ test("a run whose batch exec was lost says so instead of reporting an empty resu
   assert.equal(run.manifest, null, "no manifest, and the caller must be able to tell");
   assert.equal(run.reconcile.note, "polled the VM's known job ids; the batch was not resubmitted");
   await backend.teardown("error");
+});
+
+test("the batches' manifests become one, and it is the plan's verdict (G5-8)", () => {
+  const stills = {
+    run_id: "run_1",
+    complete: true,
+    counts: { succeeded: 2, cached: 1 },
+    jobs: [
+      { job: "a_title_still", status: "succeeded" },
+      { job: "a_city_still", status: "succeeded" },
+      { job: "a_mascot_still", status: "cached" },
+    ],
+  };
+  const plates = {
+    run_id: "run_2",
+    complete: true,
+    counts: { succeeded: 2 },
+    jobs: [
+      { job: "a_title_plate", status: "succeeded" },
+      { job: "a_turbine", status: "succeeded" },
+    ],
+    notes: ["ltx 97 frames"],
+  };
+  const jobs = ["a_title_still", "a_city_still", "a_mascot_still", "a_title_plate", "a_turbine"].map((id) => ({ id }));
+
+  const merged = mergeBatchManifests([stills, plates], jobs);
+
+  assert.deepEqual(merged.jobs.map((entry) => entry.job), jobs.map((job) => job.id), "every planned job is in it");
+  assert.deepEqual(merged.counts, { succeeded: 4, cached: 1 });
+  assert.equal(merged.complete, true);
+  assert.deepEqual(merged.batches.map((batch) => batch.run_id), ["run_1", "run_2"], "and it says which runs made it");
+  assert.deepEqual(merged.notes, ["ltx 97 frames"]);
+
+  // a job no batch reported on keeps the plan incomplete: "complete" is about the plan, not the file
+  assert.equal(mergeBatchManifests([stills], jobs).complete, false);
+  // and a later batch's verdict wins over an earlier one's for the same job
+  const retried = { run_id: "run_3", complete: true, jobs: [{ job: "a_city_still", status: "failed" }], counts: { failed: 1 } };
+  assert.equal(mergeBatchManifests([stills, retried], jobs).jobs.find((entry) => entry.job === "a_city_still").status, "failed");
 });

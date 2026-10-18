@@ -575,6 +575,9 @@ export function createColabBackend({
       let collect = null;
       let uploaded = false;
       const ran = [];
+      // G5-8: one manifest per batch, merged at the end (the runner merges too; this is the window
+      // where the host saw several files and must not let the last one speak for all of them)
+      const batchManifests = [];
 
       for (const name of planned) {
         const subset = name ? jobs.filter((job) => job.batch === name) : jobs;
@@ -646,10 +649,12 @@ export function createColabBackend({
         // collect after every batch, so a later failure never discards this batch's work
         collect = await collectOut({ onEvent, expectComplete: false });
         manifest = collect.manifest;
+        if (collect.manifest) batchManifests.push(collect.manifest);
       }
 
       collect = await collectOut({ onEvent, expectComplete: true });
       manifest = collect.manifest || manifest;
+      if (perBatch && batchManifests.length) manifest = mergeBatchManifests([...batchManifests, ...(manifest ? [manifest] : [])], jobs);
       if (!manifest) {
         // G5-7: without a manifest there is no verdict to apply, and the run panel used to show a bare
         // "failed" with no reason. Say what was collected, what was not, and that the tree was listed.
@@ -861,6 +866,35 @@ export function createColabBackend({
 
   state.runId = null;
   return withRunPackage(backend);
+}
+
+/**
+ * One manifest for a plan that ran batch by batch (GPU test 5, G5-8).
+ *
+ * The runner writes `out/manifest.json` once per `--batch` invocation, and the backend runs one
+ * invocation per batch, so the file the host downloads can describe only the last batch: GPU test 5's
+ * said `{succeeded: 2}` for the plates while three finished stills were gone. Later entries win per
+ * job; `complete` is about the whole plan, not about the file it came from.
+ */
+export function mergeBatchManifests(manifests, jobs = []) {
+  const byJob = new Map();
+  for (const manifest of manifests) for (const entry of manifest?.jobs || []) byJob.set(entry.job, entry);
+  const merged = [...byJob.values()];
+  const counts = {};
+  for (const entry of merged) counts[entry.status] = (counts[entry.status] || 0) + 1;
+  const settled = (entry) => entry && (entry.status === "succeeded" || entry.status === "cached");
+  const last = manifests.filter(Boolean).at(-1) ?? {};
+  return {
+    ...last,
+    jobs: merged,
+    counts,
+    complete: jobs.length ? jobs.every((job) => settled(byJob.get(job.id))) : merged.every(settled),
+    notes: [...new Set(manifests.flatMap((manifest) => manifest?.notes || []))],
+    runs: manifests.filter(Boolean).flatMap((manifest) => manifest.runs || []),
+    batches: manifests
+      .filter(Boolean)
+      .map((manifest) => ({ run_id: manifest.run_id ?? null, counts: manifest.counts ?? null, complete: manifest.complete === true })),
+  };
 }
 
 /** The revisions the model pin records, for the run log (a session should say what it downloaded). */

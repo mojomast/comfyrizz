@@ -71,7 +71,9 @@ def test_the_vm_requirement_list_is_the_measurable_part_of_setup():
         "torch is preinstalled on the G4 image: fetching it here would download hundreds of MB of the wrong CUDA"
     )
     assert "torchsde" in names, "torchsde is a small pure-python dependency and does belong in the cache"
-    for needed in ("huggingface_hub[hf_xet]>=1.0", "comfy-api-proxy", "comfy-sdk==0.5.0", "jsonschema==4.25.1"):
+    # H16/G5-4: comfy-api-proxy is pinned now - the VM starts it from `comfy_api_proxy.cli:main`, and
+    # an unpinned install is a moving target for the entry point the proxy is started with
+    for needed in ("huggingface_hub[hf_xet]>=1.0", "comfy-api-proxy==0.1.6", "comfy-sdk==0.5.0", "jsonschema==4.25.1"):
         assert needed in real, needed
     assert any("requirements.txt" in line for line in lines), "the list must say where it came from"
     assert any("v0.41.3" in line for line in lines), "and which ComfyUI ref it matches"

@@ -430,6 +430,11 @@ class Runner:
         if self.upload_note:
             notes = [*(notes or []), self.upload_note]
         notes = [*(notes or []), *self._carried_over_notes()]
+        # G5-8: this file is also written by the *other* batches of the same plan, so read what is
+        # there before overwriting it - otherwise out/manifest.json ends up describing only the batch
+        # that ran last, and everything the earlier batches finished is never applied.
+        # the file is the truth: an earlier batch wrote it in another process
+        previous = read_manifest(self.config.out_dir)
         manifest = build_manifest(
             run_id=self.run_id,
             jobs_doc=self.jobs_doc,
@@ -437,6 +442,7 @@ class Runner:
             started_at=self.started_at,
             run_dir=self.config.run_dir(),
             notes=notes,
+            previous=previous,
         )
         write_manifest(self.config.out_dir, manifest)
         run_dir = self.config.run_dir()
