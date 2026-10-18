@@ -20,5 +20,24 @@ export type { CpuSliceOptions, CpuSliceResult } from './cpu-slice.js';
 export { createScriptedModel } from './scripted-model.js';
 export type { ScriptedCall } from './scripted-model.js';
 export { DEFAULT_PALETTE, defaultCpuDatasets, defaultCpuScenes, foregroundFor, titleFor } from './package.js';
+export {
+  BRIEF_GOALS,
+  BRIEF_MODES,
+  BRIEF_LANGUAGES,
+  BRIEF_ASPECTS,
+  STYLE_PRESETS,
+  STYLE_PRESET_DEFAULTS,
+  BRIEF_EXAMPLE_PROMPTS,
+  QUESTION_BANK,
+  briefSchema,
+  extractBrief,
+  draftKeyMessages,
+  missingQuestions,
+  applyDecisions,
+  completeBrief,
+  secondsPerWord,
+  estimateNarrationSeconds,
+} from './brief.js';
+export type { Brief, BriefDraft, Question, BriefDecisions, StylePreset, ExtractBriefOptions } from './brief.js';
 export type { AgentEvent, RunAgentOptions, RunAgentResult, ToolRecord } from './agent.js';
 export type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ToolCall, ToolDef } from './types.js';
