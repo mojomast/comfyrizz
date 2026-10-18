@@ -19,6 +19,7 @@ export function GeneratedAssetsProvider({ assets, children }: { assets: Record<s
 }
 import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, fontFamily, palette, textColors } from './theme';
 import { proceduralStyle } from './background-model.js';
+import { statLines } from './stat-model.js';
 import { LowerThird, MediaFill, MediaPanel, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
 
 /* ------------------------------------------------------------------ *
@@ -342,16 +343,20 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
   const first = dataset?.values?.[0];
   const value = copy.body ?? (first ? `${first.value}${dataset?.unit ? ` ${dataset.unit}` : ''}` : '—');
   const number = emphasis(frame, 4);
+  // N12: kicker falls back to the headline; only an example dataset is tagged
+  // "example data", and the scene footnote (source line) is kept.
+  const lines = statLines(copy, dataset);
   return (
     <AbsoluteFill style={{ fontFamily: fontFamily(), color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%', padding: `0 ${SAFE_AREA.x}px`, gap: 18 }}>
-        <Kicker text={copy.headline} />
+        <Kicker text={lines.kicker} />
         <div style={{ fontSize: TYPE_SCALE.stat, fontWeight: 800, letterSpacing: -6, lineHeight: 1, color: colors[2], transform: `scale(${number})`, transformOrigin: 'left center' }}>
           {value}
         </div>
         {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.primary, opacity: 0.85 }}>{copy.sub}</div> : null}
-        {dataset?.label ? <div style={{ fontSize: TYPE_SCALE.footnote, color: text.primary, opacity: 0.6 }}>{dataset.label} · example data</div> : null}
+        {lines.sourceLine ? <div style={{ fontSize: TYPE_SCALE.footnote, color: text.primary, opacity: 0.6 }}>{lines.sourceLine}</div> : null}
+        {lines.footnote ? <div style={{ fontSize: TYPE_SCALE.footnote, color: text.primary, opacity: 0.6 }}>{lines.footnote}</div> : null}
       </div>
       <Foreground scene={scene} pkg={pkg} frame={frame} />
     </AbsoluteFill>

@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { statLines } from '../src/stat-model.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(here, '..', 'src');
@@ -55,4 +56,28 @@ test('N11: captions sit above scene scrims and foreground panels', () => {
   const body = functionBody(source('captions.tsx'), 'CaptionOverlay');
   assert.match(body, /zIndex:\s*100/, 'the caption overlay needs zIndex 100 to clear scrims (z 2) and panels (z 5-8)');
   assert.doesNotMatch(body, /zIndex:\s*(?:[0-9]|[1-9][0-9])\b(?!\d)/, 'no caption z-index below 100');
+});
+
+test('N12: the stat layout tags only example datasets and keeps kicker and footnote', () => {
+  const example = statLines({ headline: 'Placeholder' }, { label: 'Solar', source: 'example' });
+  assert.equal(example.kicker, 'Placeholder');
+  assert.equal(example.sourceLine, 'Solar · example data');
+  assert.equal(example.footnote, undefined);
+
+  const real = statLines({ kicker: 'Measured', footnote: 'Box, no GPU' }, { label: 'CPU time', source: 'user' });
+  assert.equal(real.kicker, 'Measured');
+  assert.equal(real.sourceLine, 'CPU time', 'a real dataset keeps its label with no example tag');
+  assert.equal(real.footnote, 'Box, no GPU');
+
+  // An explicit kicker wins over the headline; no dataset means no source line.
+  const both = statLines({ kicker: 'K', headline: 'H' }, undefined);
+  assert.equal(both.kicker, 'K');
+  assert.equal(both.sourceLine, undefined);
+
+  // The shipped StatLayout draws all three pieces from the helper.
+  const body = functionBody(source('components.tsx'), 'StatLayout');
+  assert.match(body, /statLines\(copy, dataset\)/);
+  assert.match(body, /lines\.sourceLine/);
+  assert.match(body, /lines\.footnote/);
+  assert.doesNotMatch(body, /· example data/);
 });
