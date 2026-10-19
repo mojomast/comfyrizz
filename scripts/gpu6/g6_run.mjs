@@ -152,7 +152,29 @@ async function run() {
     const pkg = writeGpu6Package(workspace);
     const jobs = planJobs(pkg).jobs;
 
-    fakeCli = fake ? installFakeColab(mkdtempSync(join(tmpdir(), "comfyrizz-g6-cli-"))) : null;
+    // The fake `colab` CLI has built-in specs for hf_token_dir.py, list_out.py and drop_token.py only:
+    // bootstrap.py, health.py and run_jobs.py have to be handed to it, or it reports them as missing on
+    // the VM. These are the same specs the dry run's Colab half installs, with this package's job count.
+    fakeCli = fake
+      ? installFakeColab(join(outDir, "fake-cli"), {
+          state: {
+            usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n",
+            sessions: "No active sessions found on server.\n",
+            scripts: {
+              "hf_token_dir.py": { output: "vm dirs ready: /content/.hf mode 700, /content/comfyrizz and /content/comfyrizz/out present" },
+              "bootstrap.py": { output: "bootstrap done", files: [{ path: "/content/comfyrizz/out/ready.json", content: '{"ok":true,"comfyui":"0.41.0"}' }] },
+              "health.py": { output: "health done", files: [{ path: "/content/comfyrizz/out/health.json", content: JSON.stringify({ ok: true, detail: "g6 run", vramFreeGB: 82.1 }) }] },
+              "run_jobs.py": {
+                output: `${JSON.stringify({ v: 1, attempt: "att_a_presenter.presenter_01", job: "a_presenter.presenter", seq: 1, event: "job_done", value: 1 })}\n`,
+                files: [
+                  { path: "/content/comfyrizz/out/manifest.json", content: JSON.stringify({ v: 1, complete: true, counts: { succeeded: jobs.length }, jobs: [], updatedAt: "2026-10-19T07:00:00Z" }) },
+                  { path: "/content/comfyrizz/out/assets/a_presenter.mp4", content: "COMFYRIZZ-GPU6-FAKERUNT" },
+                ],
+              },
+            },
+          },
+        })
+      : null;
     if (fake) {
       fakeServer = await startFakeServer();
       check("fake-comfy", true, `port ${fakeServer.port}`);
@@ -167,12 +189,17 @@ async function run() {
       cli: fake ? makeCli(fakeCli) : undefined,
       packageId: PACKAGE_ID,
       scratchDir: join(outDir, "scratch"),
-      logDir: logs,
+      logDir: fake ? join(fakeCli.tmpDir, "logs") : logs,
+      // the dry run's Colab half passes these: the runner reads the jobs file path from here, and a fake
+      // teardown does not need the real retry window
+      packageDir: null,
+      jobsFile: join(workspace, "jobs.json"),
+      teardownRetryMs: 5,
       budgetUnits: unitsCeiling,
-      // the hard ceiling: over this, the backend refuses to keep going rather than warning
-      watchdogMinutes: Number(readFlag("--watchdog-minutes", "20")),
+      // the hard ceiling: over this, the backend refuses to keep going rather than warning. A fakes-only
+      // run finishes in seconds, so its watchdog is short; a real one gets room for a slow first job.
+      watchdogMinutes: Number(readFlag("--watchdog-minutes", fake ? "0.5" : "20")),
       hfTokenPath: token.path,
-      ...(fake ? { fakeComfyBaseUrl: `http://127.0.0.1:${fakeServer.port}` } : {}),
     });
 
     const estimate = await backend.estimate(jobs);
@@ -210,6 +237,11 @@ async function run() {
     }
   } catch (error) {
     check("run", false, error.message);
+    // the step's own output is where the traceback is: the exec contract means a crashed script still
+    // exits 0, so a bare message is not enough to explain a failure
+    const output = error?.output ?? error?.detail?.output;
+    if (typeof output === "string" && output.trim()) process.stderr.write(`\n--- the failing step said:\n${output.slice(-4000)}\n`);
+    else if (error?.detail) process.stderr.write(`\n${JSON.stringify(error.detail, null, 1).slice(0, 4000)}\n`);
   } finally {
     try {
       // always stop: the token comes off the VM before the runtime does
