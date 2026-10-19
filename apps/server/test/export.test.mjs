@@ -10,12 +10,24 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
-import { EXPORT_FILE_NAMES, hasWordCues } from '../src/export.mjs';
+import { EXPORT_FILE_NAMES, hasWordCues, collectAssetVariantBytes } from '../src/export.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const repo = new URL('../../..', import.meta.url).pathname;
 const seed = JSON.parse(readFileSync(new URL('../../../examples/launch-demo/package.json', import.meta.url), 'utf8'));
+
+test('export collects declared upscale bytes and leaves missing variants detectable', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'export-variants-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, 'assets'));
+  writeFileSync(join(dir, 'assets/up.mp4'), 'upscaled bytes');
+  const bytes = collectAssetVariantBytes({ assets: {
+    video: { variants: { upscaled: { file: 'assets/up.mp4' }, missing: { file: 'assets/missing.mp4' } } },
+  } }, dir);
+  assert.equal(bytes.video.upscaled.toString(), 'upscaled bytes');
+  assert.equal(bytes.video.missing, undefined);
+});
 
 let runtime;
 let app;

@@ -66,6 +66,20 @@ export function collectAssetBytes(pkg, packageDir) {
   return assets;
 }
 
+export function collectAssetVariantBytes(pkg, packageDir) {
+  const variants = {};
+  for (const [id, asset] of Object.entries(pkg.assets ?? {})) {
+    for (const [name, variant] of Object.entries(asset.variants ?? {})) {
+      if (typeof variant?.file !== 'string') continue;
+      const file = join(packageDir, variant.file);
+      if (existsSync(file) && statSync(file).isFile()) {
+        (variants[id] ??= {})[name] = readFileSync(file);
+      }
+    }
+  }
+  return variants;
+}
+
 /**
  * @param {object} options
  * @param {string} options.exportsDir   every package gets `<exportsDir>/<package-id>/`
@@ -138,6 +152,7 @@ export function createExporter({ exportsDir, render } = {}) {
       package: pkg,
       timeline,
       assets: collectAssetBytes(pkg, packageDir),
+      assetVariants: collectAssetVariantBytes(pkg, packageDir),
       capturedWorkflows,
       generatedAt,
       extras,

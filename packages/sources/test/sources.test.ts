@@ -224,3 +224,37 @@ test('package.zip refuses a hash mismatch and unsafe/duplicate paths', () => {
   assert.throws(() => createZip([{ path: '../evil', data: 'x' }]), /unsafe zip path/);
   assert.throws(() => createZip([{ path: 'a', data: 'x' }, { path: 'a', data: 'y' }]), /duplicate zip entry/);
 });
+
+test('portable package preserves narration paths and ships checked upscale variants', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'comfyrizz-portable-'));
+  try {
+    const voice = Buffer.from('measured narration'), base = Buffer.from('base video'), upscale = Buffer.from('upscaled video');
+    const pkg: PackageLike = { id: 'portable', assets: {
+      voice: { kind: 'audio', file: 'audio/narration.norm.wav', sha256: sha256Hex(voice), license: { id: 'CC0-1.0' }, redistributable: true },
+      video: { kind: 'video', file: 'assets/video.mp4', license: { id: 'CC0-1.0' }, redistributable: true, variants: { upscaled: { file: 'assets/video@2x.mp4', sha256: sha256Hex(upscale) } } },
+    } };
+    const input = { package: pkg, assets: { voice, video: base }, assetVariants: { video: { upscaled: upscale } } };
+    const result = buildPackageZip(input);
+    assert.equal(result.complete, true);
+    const zip = join(dir, 'project.zip');
+    await writeFile(zip, result.bytes);
+    const archived = JSON.parse(execFileSync('unzip', ['-p', zip, 'package.json']).toString());
+    assert.deepEqual(archived, pkg);
+    assert.deepEqual(execFileSync('unzip', ['-p', zip, archived.assets!.voice.file!]), voice);
+    assert.deepEqual(execFileSync('unzip', ['-p', zip, archived.assets!.video.variants!.upscaled.file!]), upscale);
+    const missing = buildPackageZip({ ...input, assetVariants: {} });
+    assert.equal(missing.complete, false);
+    assert.equal(missing.excluded[0].file, 'assets/video@2x.mp4');
+    const corrupted = buildPackageZip({ ...input, assetVariants: { video: { upscaled: 'wrong' } } });
+    assert.equal(corrupted.complete, false);
+    assert.match(corrupted.excluded[0].reason, /sha256 mismatch/);
+    const blocked = structuredClone(pkg);
+    blocked.assets!.video.redistributable = false;
+    assert.ok(!buildPackageZip({ ...input, package: blocked }).entries.includes('assets/video@2x.mp4'));
+    const unsafe = structuredClone(pkg);
+    unsafe.assets!.voice.file = '../voice.wav';
+    assert.throws(() => buildPackageZip({ ...input, package: unsafe }), /unsafe zip path/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

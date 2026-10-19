@@ -5,6 +5,7 @@ export interface PackageAssetLike {
   file?: string;
   sha256?: string;
   bytes?: number;
+  variants?: Record<string, { file?: string; sha256?: string; width?: number; height?: number }>;
   source?: { provider?: string; id?: string; landing_url?: string; creator?: string; title?: string; retrieved_at?: string; original_file?: string };
   license?: { id?: string; url?: string; attribution?: string; approved_by_user?: boolean; approved_at?: string; blocked?: boolean; blocked_reason?: string };
   redistributable?: boolean;
@@ -120,6 +121,8 @@ export interface PackageZipInput {
   package: PackageLike;
   timeline?: unknown;
   assets?: Record<string, Uint8Array | Buffer | string>;
+  /** Variant bytes keyed by asset id, then variant name; inherit the parent asset's rights. */
+  assetVariants?: Record<string, Record<string, Uint8Array | Buffer | string>>;
   workflows?: Record<string, Uint8Array | Buffer | string>;
   /** API-format graphs captured next to generated stills and plates (W1). Paths are relative, like `assets/<id>.workflow.api.json`. */
   capturedWorkflows?: Record<string, Uint8Array | Buffer | string>;
