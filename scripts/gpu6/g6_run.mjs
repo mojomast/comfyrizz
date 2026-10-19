@@ -181,29 +181,43 @@ export function buildFakeManifest(pkg, jobs) {
 async function resolveRender() {
   const source = readFileSync(join(REPO, "apps/server/src/app.mjs"), "utf8");
   // `render:` appears more than once (a null in an options object, for one), so every candidate is tried
-  // and the first one that is a real import wins. `null` is spelled like an identifier and is not one.
+  // and the first one that resolves to a real function wins. A candidate can also be a *local* wrapper -
+  // app.mjs's exportRender is one line that calls `render` with `final: true` - so a locally defined
+  // name is followed one step further, which is where the actual renderer is.
   const candidates = [...source.matchAll(/render:\s*([A-Za-z_$][\w$]*)/g)]
     .map((match) => match[1])
     .filter((name) => name !== "null" && name !== "undefined");
-  if (!candidates.length) throw new Error("could not find the render function the server passes to its exporter");
-  for (const name of candidates) {
+
+  const fromImport = async (name) => {
     for (const match of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
-      // `import { createRenderer as exportRender }`: the module exports the *first* name, the file uses
-      // the second, and the two are not interchangeable when the module is imported directly
       const pairs = match[1].split(",").map((entry) => {
         const parts = entry.trim().split(/\s+as\s+/);
         return { exported: parts[0].trim(), local: (parts[1] ?? parts[0]).trim() };
       });
-      const pair = pairs.find((entry) => entry.local === name || entry.exported === name);
+      const pair = pairs.find((entry) => entry.local === name);
       if (!pair) continue;
       const module = await import(new URL(match[2], new URL("apps/server/src/app.mjs", `file://${REPO}/`)).href);
-      for (const key of [pair.exported, pair.local, "default"]) {
-        const candidate = module?.[key] ?? (key === "default" ? module?.default : null);
-        if (typeof candidate === "function") return candidate;
-      }
+      if (typeof module?.[pair.exported] === "function") return module[pair.exported];
     }
+    return null;
+  };
+
+  const resolve = async (name, depth = 0) => {
+    const imported = await fromImport(name);
+    if (imported) return imported;
+    if (depth >= 2) return null;
+    // a local wrapper: `const name = (a, b, opts = {}) => other(a, b, ...)` - follow what it calls
+    const local = new RegExp(`(?:const|let|function)\\s+${name}\\s*=?[^;]*?=>\\s*([A-Za-z_$][\\w$]*)\\s*\\(`).exec(source);
+    const called = local?.[1];
+    if (called && called !== name) return await resolve(called, depth + 1);
+    return null;
+  };
+
+  for (const name of candidates) {
+    const found = await resolve(name);
+    if (found) return found;
   }
-  throw new Error(`the server's render function (${candidates.join(", ")}) was not exported by the module it is imported from`);
+  throw new Error(`could not resolve the server's render function (tried ${candidates.join(", ")})`);
 }
 
 async function run() {
