@@ -1,65 +1,208 @@
 /**
- * Editor state shapes shared by the timeline and the CA-1 store contract.
- * CA-1 owns the store implementation; these fields are what the timeline reads.
+ * Editor document, derived projection and session.
+ * ProjectDoc is the CA-1 document class. Source ranges and take fingerprints live
+ * here (render-affecting editor state) until CA-1's schema extensions land.
+ * They are included in the editor export sidecar, not in session or media tickets.
  */
-import type { PackageV1 } from '../../../../packages/schema/types';
-import type { NarrationChunk } from '../../../../packages/planner/src/package-types.ts';
-import type { Timeline } from '../../../../packages/planner/src/timeline.ts';
-import type { Command } from './commands.ts';
 
-export type { NarrationChunk, Timeline };
+export interface VoiceSettings {
+  enabled: boolean;
+  engine?: 'kokoro' | 'qwen3-tts' | 'none';
+  voice?: string;
+  speed?: number;
+  language?: string;
+  lang?: string;
+  persona?: string;
+  ref_asset?: string;
+  strict?: boolean;
+}
 
-/** Source in/out for one scene asset, in source frames. Placement stays on the compiled timeline. */
-export interface MediaRange {
-  sceneId: string;
+export interface EditorScene {
+  id: string;
+  layout: string;
+  preferredFrames?: number;
+  copy?: Record<string, unknown>;
+  transitionOut?: { type: string; frames?: number; direction?: string };
+  narration?: string;
+  narration_spoken?: string;
+  spoken_text?: string;
+  narration_style?: string;
+  narration_asset?: string;
+  narration_duration_frames?: number;
+  presenter?: 'off' | 'pip' | 'split';
+  presenter_asset?: string;
+  locked?: boolean;
+  background?: { asset?: string } | null;
+  foreground?: Array<{ asset?: string }>;
+}
+
+export interface EditorPackage {
+  id: string;
+  title?: string;
+  revision?: number;
+  format: { width: number; height: number; fps: number };
+  duration?: { mode?: 'target' | 'flexible'; targetFrames?: number };
+  voice?: VoiceSettings;
+  scenes: EditorScene[];
+  assets?: Record<string, EditorAsset>;
+  /** Sound-design block consumed by the renderer's resolveAudioMix. */
+  audio?: unknown;
+  presenter?: {
+    enabled?: boolean;
+    portrait?: string;
+    scenes?: 'all' | 'bookends' | string[];
+    placement?: string;
+  };
+}
+
+export interface EditorAsset {
+  kind?: string;
+  status?: string;
+  file?: string;
+  media?: { audio?: string; durationSeconds?: number; fps?: number; frames?: number };
+}
+
+/** Inclusive start, exclusive end, in source samples. Playback rate is always 1. */
+export interface SourceRange {
+  inSample: number;
+  outSample: number;
+}
+
+export interface NarrationTake {
+  takeId: string;
   assetId: string;
-  /** Inclusive. */
-  inFrame: number;
-  /** Exclusive. */
-  outFrame: number;
+  /** Content hash of the full source audio, not the trimmed range. */
+  sourceHash: string;
+  /** Fingerprint of narration text + voice when this take was produced. */
+  inputFingerprint: string;
+  sampleRate: number;
+  /** Total samples in the source asset. */
+  sampleCount: number;
+  range: SourceRange;
 }
 
-/**
- * Canonical project document. The package is the source of truth.
- * Measured narration stays keyed by scene id so a reorder never rewrites a combined WAV.
- */
+export interface AlignmentWord {
+  text: string;
+  /** Seconds from the start of the chunk. */
+  start: number;
+  end: number;
+}
+
+/** Planner-compatible measured chunk. Times are scene-local once the chunk is placed. */
+export interface AlignmentChunk {
+  text: string;
+  seconds: number;
+  words?: AlignmentWord[];
+}
+
+export interface SceneAlignment {
+  sourceHash: string;
+  /** Fingerprint of the narration text this alignment was measured against. */
+  textFingerprint: string;
+  chunks: AlignmentChunk[];
+}
+
+export interface CaptionEdit {
+  index: number;
+  text: string;
+}
+
+export interface PresenterClip {
+  assetId: string;
+  /** Hash of the narration source range that conditioned this clip. */
+  conditioningHash: string;
+}
+
 export interface ProjectDoc {
-  package: PackageV1;
-  measured: Record<string, NarrationChunk[]>;
-  mediaRanges: MediaRange[];
-  revision: number;
+  pkg: EditorPackage;
+  takes: Record<string, NarrationTake>;
+  alignment: Record<string, SceneAlignment>;
+  /** Wording corrections. They do not change the spoken take. */
+  captions: Record<string, CaptionEdit[]>;
+  presenterClips: Record<string, PresenterClip>;
+  editSeq: number;
 }
 
-/** Compiler output. `compiled` is authoritative for durations and caption placement. */
+export type Freshness = 'fresh' | 'stale' | 'missing';
+
+export interface SceneFreshness {
+  take: Freshness;
+  alignment: Freshness;
+  presenter: Freshness | 'unused';
+}
+
+export interface PlacedScene {
+  id: string;
+  from: number;
+  duration: number;
+  transitionOut: number;
+}
+
+export interface SentenceCue {
+  index: number;
+  text: string;
+  from: number;
+  to: number;
+  sceneId: string;
+  estimated: boolean;
+}
+
+export interface EditorTimeline {
+  fps: number;
+  durationInFrames: number;
+  scenes: Array<{ id: string; from: number; durationInFrames: number; transitionOutFrames: number }>;
+  captions: SentenceCue[];
+}
+
+export interface WaveformPeaks {
+  sourceHash: string;
+  buckets: number;
+  min: Float32Array;
+  max: Float32Array;
+}
+
+export interface AuditionMix {
+  /** True when resolveAudioMix produced at least one bus. */
+  enabled: boolean;
+  narrationGain: 1;
+  musicGainDb: number | null;
+  musicLoop: boolean | null;
+  musicDuck: { enabled: boolean; reductionDb: number; attackMs: number; releaseMs: number } | null;
+  musicGains: number[] | null;
+  ambience: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number; gains: number[] }>;
+  sfx: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number }>;
+}
+
 export interface DerivedState {
-  compiled: Timeline | null;
-  error: string | null;
+  timeline: EditorTimeline;
+  placed: PlacedScene[];
+  status: Record<string, SceneFreshness>;
+  /** `take:s1`, `alignment:s1`, `presenter:s1` — the invalidation table, nothing else. */
+  staleWork: string[];
+  /** Presenter asset ids whose conditioning no longer matches. Visual and music assets are absent. */
+  staleAssets: string[];
+  sentences: Record<string, SentenceCue[]>;
+  audition: AuditionMix;
+  waveforms: Record<string, WaveformPeaks>;
+  diagnostics: string[];
 }
 
-/** Session state. It is not an undo step, except selection restored with a document undo. */
+export interface AuditionSession {
+  /** Session-only. Export uses the unmuted renderer mix. */
+  narration: boolean;
+  music: boolean;
+  ambience: boolean;
+  sfx: boolean;
+  /** `cpu` plays the Kokoro fixture and must not replace a selected Qwen voice. */
+  voicePreview: 'selected' | 'cpu';
+}
+
 export interface SessionState {
-  selectedIds: string[];
-  anchorId: string | null;
-  /** Integer project frame. */
-  playhead: number;
-  /** Pixels per frame. */
-  zoom: number;
-  scrollPx: number;
-  snap: boolean;
-  /**
-   * Transient gesture from `preview()`. The stand-in does not compile while this is set.
-   * A commit `dispatch` replaces it.
-   */
-  preview: Command | null;
+  selectedSceneId: string | null;
+  selectedCaption: number | null;
+  playheadFrame: number;
+  audition: AuditionSession;
+  saveStatus: 'saved' | 'pending' | 'offline' | 'conflict';
 }
 
-export type SaveStatus = 'saved' | 'pending' | 'offline' | 'conflict';
-
-export type Result = { ok: true; note?: string } | { ok: false; reason: string };
-
-export const SAVE_STATUS_TEXT: Record<SaveStatus, string> = {
-  saved: 'Saved',
-  pending: 'Saving…',
-  offline: 'Offline — changes kept on this device',
-  conflict: 'Save conflict — recovery copy kept',
-};
+export type Result = { ok: true } | { ok: false; reason: string };
