@@ -90,9 +90,10 @@ def main() -> int:
     fallback_reason = None
     if voice_cfg.get("engine") == "qwen3-tts":
         from narrate_qwen import FallbackToKokoro, narrate_qwen
+        from qwen import Qwen3Aligner, Qwen3Asr
 
         try:
-            narrate_qwen(package, args.out, gap=args.gap, padding=args.padding)
+            narrate_qwen(package, args.out, gap=args.gap, padding=args.padding, aligner=Qwen3Aligner(), asr=Qwen3Asr())
             return 0
         except FallbackToKokoro as exc:
             fallback_reason = str(exc)

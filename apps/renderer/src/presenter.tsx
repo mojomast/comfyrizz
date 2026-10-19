@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { PackageV1 } from '../../../packages/schema/types';
 import type { TimelinePresenter } from '../../../packages/planner/dist/src/index.js';
 import { MediaFill, MissingMediaPlaceholder } from './media';
@@ -30,8 +30,8 @@ export function PresenterOverlay({ presenters, pkg }: { presenters?: TimelinePre
         if (opacity <= 0) return null;
         const box = presenterBox({ placement: entry.placement, shape: entry.shape, size: entry.size, width, height });
         return (
+          <Sequence key={entry.sceneId} from={entry.from} durationInFrames={entry.durationInFrames} layout="none">
           <div
-            key={entry.sceneId}
             style={{
               position: 'absolute',
               left: box.left,
@@ -47,6 +47,7 @@ export function PresenterOverlay({ presenters, pkg }: { presenters?: TimelinePre
           >
             <PresenterClip assetId={entry.assetId} label={entry.label} pkg={pkg} frames={entry.durationInFrames} fontSize={Math.max(16, Math.round(box.height * 0.075))} shape={entry.shape} />
           </div>
+          </Sequence>
         );
       })}
     </AbsoluteFill>
@@ -70,7 +71,7 @@ export function PresenterClip({ assetId, label, pkg, frames, fontSize, shape }: 
         // VectorAsset), so the CPU demo can show a presenter with no GPU and no raster asset.
         <div style={{ width: '100%', height: '100%' }} dangerouslySetInnerHTML={{ __html: svg }} />
       ) : asset ? (
-        <MediaFill asset={asset} assetId={assetId} pkg={pkg} sceneFrames={frames} fit="cover" loop={false} muted />
+        <MediaFill asset={asset} assetId={assetId} pkg={pkg} sceneFrames={frames} fit="cover" loop={false} speed={1} muted />
       ) : (
         <MissingMediaPlaceholder assetId={assetId} pkg={pkg} />
       )}

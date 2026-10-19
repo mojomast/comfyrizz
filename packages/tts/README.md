@@ -71,8 +71,9 @@ does not import that backend.
 
 `py/qwen.py` is a thin adapter. VoiceDesign runs once per package from
 `voice.persona` and caches a `voice_clone_prompt`; every scene is then one
-Base clone of that prompt (the scene's sentences in a single call, with
-`narration_style` as the emotion instruct). `voice.lang` or `voice.language`
+Base clone of that prompt (the scene's sentences in a single call). Base does
+not support emotion instructions: persona belongs to VoiceDesign; punctuation
+and wording control scene delivery. `voice.lang` or `voice.language`
 selects English or French. `torch`, `qwen-tts` and the weights are imported
 only inside the real adapter, and they are not in `py/requirements.txt`.
 
@@ -94,15 +95,50 @@ missing. Retries stop at three; the best take is kept and `qa.flagged` is set.
 
 Tests never download weights and never start a GPU or a Google Colab runtime.
 They pass a fake synth (a tone of known length), a fake aligner (known tokens)
-and a fake ASR (a known transcript). A real GPU run still has to confirm the
-`qwen-tts` / `qwen-asr` call names, which are marked [unverified] in `py/qwen.py`.
+and a fake ASR (a known transcript). Adapter tests also check the documented
+batched `qwen-asr` interface and `start_time` / `end_time` token fields.
 
-Optional install, separate from the default venv:
+Optional install, separate from the default venv. The pinned upstream packages
+require different Transformers versions, so use two environments:
 
 ```bash
-pip install qwen-tts
-# Qwen3-ASR is a further optional import (`qwen_asr`); the package name is [unverified].
+python3 -m venv .venv-qwen-tts
+.venv-qwen-tts/bin/pip install qwen-tts==0.1.1
+python3 -m venv .venv-qwen-asr
+.venv-qwen-asr/bin/pip install qwen-asr==0.0.6
+# Install the PyTorch build appropriate for your GPU in each environment.
+# Set voice.engine=qwen3-tts, voice.strict=true, voice.voice=<your-project-name>,
+# voice.persona=<voice description>, voice.speed=1 in the package first.
+.venv-qwen-tts/bin/python packages/tts/py/synth.py --package /path/package.json --out /path/audio --padding 0.5
+.venv-qwen-asr/bin/python packages/tts/py/qa_qwen.py --package /path/package.json --out /path/audio
+node packages/tts/scripts/narrate.mjs --example /path
 ```
+
+`COMFYRIZZ_QWEN_DEVICE=cuda:0` selects GPU execution; default is CUDA when
+available, otherwise CPU. `COMFYRIZZ_QWEN_MODELS` can point at pinned local
+snapshots named after each model's repository basename. The runtime uses BF16
+and PyTorch SDPA on CUDA, avoiding a FlashAttention source build.
+
+For Google Colab, `scripts/tts/qwen_colab.mjs` uploads a minimal package,
+installs isolated environments and downloads the exact public model revisions
+in `colab/qwen-models.lock.json`. It uses the existing ownership registry,
+detached watchdog, collection and verified teardown:
+
+```bash
+node scripts/tts/qwen_colab.mjs --dry-run --package /path/package.json --out /path/qwen-run
+# Paid execution, only after authorizing the displayed run budget:
+node scripts/tts/qwen_colab.mjs --package /path/package.json --out /path/qwen-run --units-ceiling 4
+unzip /path/qwen-run/audio.zip -d /path
+node packages/tts/scripts/narrate.mjs --example /path
+```
+
+Review `audio/durations.json` for the actual engine, per-scene ASR transcript,
+WER flags and alignment method. The separated QA pass flags takes for review;
+it does not automatically regenerate them. The synthetic reference WAV and
+its text/persona are saved for reproducibility. No HF token is needed for these
+public Qwen models. Keep scene takes short and use the same reference across
+the film. An animated presenter must consume the exact final scene audio,
+with a frozen audio latent in both LTX stages and playback at speed 1.
 
 **VoxCPM2** (2B, Apache-2.0, 48 kHz, voice design with style prefixes) is a
 documented alternative only. There is no VoxCPM2 code in this repository. A

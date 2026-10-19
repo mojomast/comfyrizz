@@ -331,6 +331,9 @@ def narrate_qwen(
 
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
+    if "reference_audio" in prompt:
+        write_wav(out / "voice-reference.wav", to_sample_rate(prompt["reference_audio"], prompt["sample_rate"]))
+        (out / "voice-reference.json").write_text(json.dumps({"text": prompt["ref_text"], "persona": persona, "language": lang, "designModel": DESIGN_MODEL, "baseModel": BASE_MODEL}, indent=2))
     pad = np.zeros(int(round(padding * SAMPLE_RATE)), dtype=np.float32)
     report: dict = {
         "version": 1,
