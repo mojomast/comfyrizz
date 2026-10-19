@@ -115,6 +115,10 @@ let scrub: HTMLInputElement;
 type RunEvent = { type?: string; event?: string; [key: string]: unknown };
 type RunRender = { url: string; frames?: number; bytes?: number; timeline_sha256?: string };
 type QaFinding = { severity: string; code: string; frame: number; timeSeconds: number; sceneId: string | null; message: string };
+// M2: whether a render/export plays the package's sound design (music, ambience,
+// SFX) and normalises the mix to -16 LUFS. The mix itself lives in `pkg.audio`;
+// this is the owner's render-time toggle.
+let audioMixEnabled = true;
 // MS4: the last frame-QA report, so the storyboard can show the contact sheet and
 // per-scene findings the server produced for the newest render.
 const qaState = {
@@ -240,9 +244,20 @@ function presenterBar(): string {
   </div>`;
 }
 
+/** M2: the sound-design toggle for the storyboard toolbar. */
+function mixBar(): string {
+  const audio = (pkg.audio ?? {}) as { music?: unknown; ambience?: unknown; sfx?: unknown[] };
+  const hasMix = Boolean(audio.music || audio.ambience || (Array.isArray(audio.sfx) && audio.sfx.length > 0));
+  return `<div class="presenter-bar">
+    <span class="label">Sound design</span>
+    <label class="toggle"><input type="checkbox" data-audio-mix${audioMixEnabled ? ' checked' : ''} /> mix music, ambience + SFX</label>
+    <span class="hint">${hasMix ? 'this package declares a mix' : 'no audio block in this package'}</span>
+  </div>`;
+}
+
 function renderStoryboard(): void {
   const host = $('storyboard');
-  host.innerHTML = presenterBar() + pkg.scenes
+  host.innerHTML = presenterBar() + mixBar() + pkg.scenes
     .map((scene, index) => {
       const copy = (scene.copy ?? {}) as Record<string, unknown>;
       const datasetId = (scene.data as { dataset?: string } | undefined)?.dataset;
@@ -338,6 +353,12 @@ function renderStoryboard(): void {
   placement?.addEventListener('change', () => void applyPresenterFlow({ placement: placement.value }, `placement ${placement.value}`));
   const labelToggle = host.querySelector<HTMLInputElement>('input[data-presenter-label]');
   labelToggle?.addEventListener('change', () => void applyPresenterFlow({ label: labelToggle.checked ? 'AI presenter' : '' }, labelToggle.checked ? 'AI label on' : 'AI label off'));
+  // M2: the sound-design toggle, applied to the next render and export.
+  const mixToggle = host.querySelector<HTMLInputElement>('input[data-audio-mix]');
+  mixToggle?.addEventListener('change', () => {
+    audioMixEnabled = mixToggle.checked;
+    logActivity(`Sound design ${audioMixEnabled ? 'on' : 'off'} for the next render/export`);
+  });
 }
 
 function renderPalette(): void {
@@ -617,7 +638,7 @@ async function exportBundle(): Promise<void> {
     const response = await apiFetch('/api/export', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(audioMixEnabled ? body : { ...body, mixAudio: false }),
     });
     const result = (await response.json().catch(() => ({}))) as Record<string, any>;
     if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
@@ -987,7 +1008,7 @@ async function exportMp4(): Promise<void> {
     const response = await apiFetch('/api/render', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(audioMixEnabled ? body : { ...body, mixAudio: false }),
     });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? `HTTP ${response.status}`);
     const blob = await response.blob();

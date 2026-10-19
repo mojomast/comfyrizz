@@ -75,7 +75,7 @@ export function createExporter({ exportsDir, render } = {}) {
   if (!exportsDir) throw new Error('createExporter needs an exportsDir');
   if (typeof render !== 'function') throw new Error('createExporter needs a render function');
 
-  async function exportPackage({ pkg, packagePath, revision = null, force = false, onLog = () => {}, narration } = {}) {
+  async function exportPackage({ pkg, packagePath, revision = null, force = false, onLog = () => {}, narration, mixAudio } = {}) {
     if (!pkg || typeof pkg !== 'object') throw new Error('exportPackage needs a package');
     if (!packagePath) throw new Error('exportPackage needs a packagePath');
     const packageDir = dirname(packagePath);
@@ -99,7 +99,7 @@ export function createExporter({ exportsDir, render } = {}) {
       onLog(`reusing ${videoPath} (${video.bytes} bytes)`);
     } else {
       onLog(`rendering ${videoPath}`);
-      video = await render(packagePath, videoPath, { onLog, ...(narration !== undefined ? { narration } : {}) });
+      video = await render(packagePath, videoPath, { onLog, ...(narration !== undefined ? { narration } : {}), ...(mixAudio === false ? { mixAudio: false } : {}) });
       if (!existsSync(videoPath)) throw new Error('render finished without writing an MP4');
     }
 
@@ -196,7 +196,7 @@ export function createExporter({ exportsDir, render } = {}) {
    *
    * `variants` items: `{ package, language, aspect, slug, isBase, narration? }`.
    */
-  async function exportVariantSet({ pkg, packagePath, variants, force = false, onLog = () => {}, generatedAt = new Date().toISOString() } = {}) {
+  async function exportVariantSet({ pkg, packagePath, variants, force = false, onLog = () => {}, generatedAt = new Date().toISOString(), mixAudio } = {}) {
     if (!pkg || typeof pkg !== 'object') throw new Error('exportVariantSet needs a package');
     if (!packagePath) throw new Error('exportVariantSet needs a packagePath');
     if (!Array.isArray(variants) || variants.length === 0) throw new Error('exportVariantSet needs variants');
@@ -217,6 +217,7 @@ export function createExporter({ exportsDir, render } = {}) {
           force,
           onLog,
           ...(variant.narration !== undefined ? { narration: variant.narration } : {}),
+          ...(mixAudio === false ? { mixAudio: false } : {}),
         });
         results.push({ variant, result });
       }

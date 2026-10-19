@@ -6,10 +6,10 @@
  * frames (its scene, the next scene when a fade overlaps, the referenced
  * assets, the captions in range, the theme and the media sidecar). Unchanged
  * segments are reused from a content-addressed cache; only changed segments are
- * rendered again. The segments are then concatenated and the narration (if the
- * package has a ready audio asset) is muxed on. The final frame count is checked
- * against the compiled timeline, so an incremental export still matches a full
- * render.
+ * rendered again. The segments are then concatenated and the audio (narration
+ * plus the M2 sound-design buses) is mixed and loudness-normalised. The final
+ * frame count is checked against the compiled timeline, so an incremental export
+ * still matches a full render.
  *
  * No network. Used by `render:example` and the per-scene re-render test.
  */
@@ -20,6 +20,8 @@ import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
+import { muxPackageAudio } from './incremental-audio.mjs';
+import { narrationAudio } from '../src/audio-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { mergeScenes } from '../src/timeline-model.js';
 
@@ -216,27 +218,27 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
     if (ownsPublicDir) rmSync(publicDir, { recursive: true, force: true });
   }
 
-  const audioAsset = Object.values(pkg.assets ?? {}).find(asset => asset?.kind === 'audio' && asset.status === 'ready' && typeof asset.file === 'string');
+  // M2: narration plus the sound-design buses (music, ambience, SFX) are mixed
+  // and loudness-normalised. A package with no `audio` block keeps the old
+  // single-narration mux.
+  const mixAudio = options.mixAudio !== false;
   let audio = null;
   const silentPath = join(cache, 'silent.mp4');
-  if (audioAsset) {
-    const audioPath = join(packageDir, audioAsset.file);
-    if (!existsSync(audioPath)) {
-      // P-fix4: a clean clone has no narration file. Export silent with the
-      // committed captions instead of crashing.
-      onLog(`warning: media not in this clone: ${audioAsset.file}; exporting silent`);
+  const hasMix = mixAudio && pkg.audio && (pkg.audio.music || pkg.audio.ambience || (pkg.audio.sfx ?? []).length > 0);
+  const narration = narrationAudio(pkg);
+  const narrationPath = narration ? join(packageDir, narration.file) : null;
+  const hasNarration = Boolean(narrationPath && existsSync(narrationPath));
+  if (narrationPath && !hasNarration) onLog(`warning: media not in this clone: ${narration.file}; exporting silent`);
+  if (hasMix || hasNarration) {
+    rmSync(outputPath, { force: true });
+    try {
+      audio = muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timeline, onLog, mixAudio })?.audio ?? null;
+    } catch (error) {
+      onLog(`warning: audio mix failed (${error.message}); exporting silent`);
       copyFileSync(silentPath, outputPath);
       audio = null;
-    } else {
-      rmSync(outputPath, { force: true });
-      const mux = spawnSync(
-        'ffmpeg',
-        ['-y', '-hide_banner', '-nostats', '-i', silentPath, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', outputPath],
-        { encoding: 'utf8' },
-      );
-      if (mux.status !== 0) throw new Error(`audio mux failed: ${mux.stderr}`);
-      audio = { file: audioAsset.file, codec: 'aac' };
     }
+    if (!existsSync(outputPath)) copyFileSync(silentPath, outputPath);
   } else {
     copyFileSync(silentPath, outputPath);
   }

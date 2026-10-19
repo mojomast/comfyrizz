@@ -610,6 +610,7 @@ export function createApp({
             variants: plan,
             force: body.force === true,
             onLog: line => events.publish({ type: 'export.log', exportId, line }),
+            ...(body.mixAudio === false ? { mixAudio: false } : {}),
           });
           events.publish({
             type: 'export.finished',
@@ -628,6 +629,7 @@ export function createApp({
           revision,
           force: body.force === true,
           onLog: line => events.publish({ type: 'export.log', exportId, line }),
+          ...(body.mixAudio === false ? { mixAudio: false } : {}),
         });
         events.publish({
           type: 'export.finished',
@@ -689,6 +691,7 @@ export function createApp({
       try {
         const result = await render(packagePath, output, {
           onLog: line => events.publish({ type: 'render.log', renderId, line }),
+          ...(body.mixAudio === false ? { mixAudio: false } : {}),
         });
         events.publish({
           type: 'render.finished',

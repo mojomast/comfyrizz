@@ -40,3 +40,15 @@ test('scene narration_asset references win over other ready audio assets', () =>
   });
   assert.equal(audio.assetId, 'a_narration');
 });
+
+test('a package with an audio mix never treats an unreferenced bus as narration', () => {
+  const audio = narrationAudio({
+    audio: { music: { asset: 'a_music' } },
+    assets: {
+      a_music: { kind: 'audio', status: 'ready', file: 'audio/music.wav' },
+      a_narration: { kind: 'audio', status: 'pending', file: 'audio/narration.norm.wav' },
+    },
+    scenes: [{ id: 's1', narration_asset: 'a_narration' }],
+  });
+  assert.equal(audio, null);
+});
