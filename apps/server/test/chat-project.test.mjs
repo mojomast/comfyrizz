@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { conversationPlanSchema } from '../../../packages/agent/dist/src/index.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -20,6 +20,7 @@ function makePlan() {
 }
 
 async function setup(t) {
+  mkdirSync('/tmp/opencode', { recursive: true });
   const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-');
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const previousPlan = makePlan();
