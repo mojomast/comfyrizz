@@ -90,4 +90,5 @@ test('the pinned render config forces limited-range yuv420p, not yuvj420p', () =
   assert.match(config, /setPixelFormat\('yuv420p'\)/, 'pixel format stays yuv420p');
   assert.match(config, /setColorSpace\('bt709'\)/, 'bt709 tags limited range, so ffprobe reports yuv420p not yuvj420p');
   assert.match(config, /setCodec\('h264'\)/);
+  assert.match(config, /setDelayRenderTimeoutInMilliseconds\(120_000\)/, 'a loaded box needs more than the 30 s Chrome setup default');
 });
