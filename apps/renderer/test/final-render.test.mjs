@@ -73,10 +73,10 @@ function buildFixture() {
 }
 
 function probe(file) {
-  const result = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=width,height,nb_read_frames', '-of', 'json', file], { encoding: 'utf8' });
+  const result = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=width,height,nb_read_frames,pix_fmt,color_range,color_space', '-of', 'json', file], { encoding: 'utf8' });
   assert.equal(result.status, 0, `ffprobe failed: ${result.stderr}`);
   const stream = JSON.parse(result.stdout).streams[0];
-  return { width: stream.width, height: stream.height, frames: Number(stream.nb_read_frames) };
+  return { width: stream.width, height: stream.height, frames: Number(stream.nb_read_frames), pixFmt: stream.pix_fmt, colorRange: stream.color_range, colorSpace: stream.color_space };
 }
 
 /** Centre pixel of the frame at `seconds`, as [r, g, b]. Crops 2×2 because 1×1 rawvideo is rejected. */
@@ -108,6 +108,10 @@ test('preview keeps the working resolution and does not use the variant', { time
   assert.equal(probe0.width, 960);
   assert.equal(probe0.height, 544);
   assert.equal(probe0.frames, compileTimeline(rendered.package).durationInFrames);
+  // A10 nit: the CPU export is limited-range yuv420p, not full-range yuvj420p.
+  assert.equal(probe0.pixFmt, 'yuv420p', 'CPU export pixel format');
+  assert.equal(probe0.colorRange, 'tv', 'limited range');
+  assert.equal(probe0.colorSpace, 'bt709', 'bt709 tags limited range');
   const [r, g] = centerPixel(join(dir, 'preview.mp4'));
   assert.ok(r > 200 && g < 60, `preview should draw the red base file, got rgb(${r},${g})`);
 });
