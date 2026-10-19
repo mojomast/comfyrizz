@@ -10,7 +10,7 @@
 // It is deliberately backend-agnostic: it calls only the methods of the `Backend` typedef in
 // `index.mjs`. Apps call `backend.runPackage(pkg, opts)` (each factory attaches it), so the web run
 // panel and `apps/server` do not branch on the provider.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -98,12 +98,46 @@ export function runQualityGate({ package: pkg, outDir, packagePath = null, gateC
  * @param {"done"|"idle"|"never"} [opts.teardownMode] default "done"
  * @returns {Promise<object>} the run record (see the tests for the exact shape)
  */
+/**
+ * Copy the package's own files into the run workspace, at the relative paths the package declares.
+ *
+ * Only assets that are *not* generated and that name a `file` are staged: a generated asset is produced
+ * by a job. Returns what was copied and what was named but absent, so the caller can refuse a run rather
+ * than start one that will fail a job halfway through.
+ */
+export function stagePackageFiles(pkg, { workDir, packageDir = null } = {}) {
+  const copied = [];
+  const missing = [];
+  for (const [id, asset] of Object.entries(pkg.assets ?? {})) {
+    const file = typeof asset?.file === "string" ? asset.file : null;
+    if (!file || !workDir) continue;
+    if (asset.origin === "generated" && (asset.gen || asset.workflow)) continue;
+    const target = join(workDir, file);
+    const source = packageDir ? join(packageDir, file) : null;
+    if (source && existsSync(source)) {
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(source, target);
+      copied.push({ asset: id, file, from: source });
+      continue;
+    }
+    // already in the workspace (a second run, or a caller that staged it): that counts as staged
+    if (existsSync(target)) {
+      copied.push({ asset: id, file, from: target });
+      continue;
+    }
+    missing.push({ asset: id, file });
+  }
+  return { copied, missing };
+}
+
 export async function runPackage(backend, pkg, opts = {}) {
   if (!backend || typeof backend.run !== "function") throw new TypeError("runPackage needs a backend");
   if (!pkg || typeof pkg !== "object") throw new TypeError("runPackage needs a package");
   const {
     workDir,
     outDir = workDir ? join(workDir, "out") : null,
+    // where the package's own files live (the folder the package was read from, for the common case)
+    packageDir = null,
     onEvent = () => {},
     signal,
     budget = null,
@@ -134,6 +168,19 @@ export async function runPackage(backend, pkg, opts = {}) {
   if (problems.length) throw new Error(`the planned jobs are not usable: ${problems[0]}`);
   mkdirSync(workDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
+  // H17/GPU test 6: the package's own files (an uploaded narration, a music bed) travel with the jobs
+  // document. The runner resolves a fileInput against the jobs.json folder, and the workDir is that
+  // folder - so a package-relative `file` has to be *there*, not only named in the package. Nothing did
+  // this until the presenter made it visible: an a2v job is the first job whose input is an uploaded
+  // file rather than something a previous job wrote.
+  const staged = stagePackageFiles(pkg, { workDir, packageDir });
+  if (staged.missing.length) {
+    throw new Error(
+      `the package names ${staged.missing.length} file(s) that are not where it says they are: ` +
+        `${staged.missing.map((entry) => `${entry.asset} -> ${entry.file}`).join(", ")}` +
+        (packageDir ? ` (looked in ${packageDir})` : " (no packageDir was given to runPackage)"),
+    );
+  }
   const jobsFile = join(workDir, "jobs.json");
   writeFileSync(jobsFile, `${JSON.stringify(jobsDoc, null, 2)}\n`, "utf8");
   emit("planned", { jobs: jobsDoc.jobs.length, jobsFile });

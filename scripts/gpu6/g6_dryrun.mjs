@@ -119,7 +119,9 @@ export async function dryRun({ outDir = null } = {}) {
   });
   backends.push(backend);
   const phases = [];
-  const run = await backend.runPackage(pkg, { workDir: workspace, outDir: byoOut, onEvent: (event) => phases.push(event.phase ?? event.event) });
+  // the package's own files (the fixture's uploaded narration) live beside package.json
+  const packageDir = workspace;
+  const run = await backend.runPackage(pkg, { workDir: workspace, packageDir: packageDir ?? workspace, outDir: byoOut, onEvent: (event) => phases.push(event.phase ?? event.event) });
   check.ok("runPackage", `ok=${run.ok} counts=${JSON.stringify(run.counts)}`, run.ok === true);
 
   // GPU test 6: the presenter is the reason this harness exists, so assert it was planned, that it runs
@@ -203,7 +205,7 @@ export async function dryRun({ outDir = null } = {}) {
   // N5: the label-refusal note survives an all-cached re-run
   const notes = run.manifest.notes || [];
   check.ok("N5-note-first-run", `notes: ${notes.length}`, notes.some((note) => /job labels/.test(note)));
-  const second = await backend.runPackage(pkg, { workDir: workspace, outDir: byoOut, apply: false, teardownMode: "never" });
+  const second = await backend.runPackage(pkg, { workDir: workspace, packageDir: packageDir ?? workspace, outDir: byoOut, apply: false, teardownMode: "never" });
   const secondNotes = second.manifest.notes || [];
   check.ok("N5-note-cached", `cached=${second.counts.cached} notes: ${secondNotes.length}`, secondNotes.some((note) => /job labels/.test(note)) && secondNotes.some((note) => /earlier run against this deployment/.test(note)));
 

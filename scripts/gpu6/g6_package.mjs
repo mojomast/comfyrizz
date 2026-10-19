@@ -9,12 +9,33 @@
 // graph the honest thing for this harness to stage is the WAV, and the only change then is the asset's
 // origin, not the session.
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 export const PACKAGE_ID = "pkg_gpu6dryrun0001";
 export const FIXTURE = join(REPO, "pipeline-py", "tests", "fixtures", "package-gpu1-workflows.json");
+
+/** A real, tiny WAV: 16-bit mono PCM. The runner reads it; nothing here invents audio content. */
+export function silentWav(seconds = 0.5, sampleRate = 24000) {
+  const samples = Math.round(seconds * sampleRate);
+  const data = Buffer.alloc(samples * 2);
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
 
 export function gpu6Package() {
   const pkg = JSON.parse(readFileSync(FIXTURE, "utf8"));
@@ -53,6 +74,11 @@ export function writeGpu6Package(dir) {
   writeFileSync(join(dir, "package.json"), JSON.stringify(pkg, null, 2));
   const workflows = join(dir, "workflows");
   if (!existsSync(workflows)) symlinkSync(join(REPO, "workflows"), workflows);
+  // the fixture names audio/s1.wav as the uploaded narration, so the harness has to put a real WAV there:
+  // 0.5 s of silence at 24 kHz, written as a proper RIFF file rather than three header bytes
+  const wav = join(dir, "audio", "s1.wav");
+  mkdirSync(dirname(wav), { recursive: true });
+  if (!existsSync(wav)) writeFileSync(wav, silentWav(0.5, 24000));
   return pkg;
 }
 
