@@ -1,0 +1,28 @@
+[
+  {
+    "id": "solar-review-build-revise",
+    "turns": [
+      { "message": "Let's brainstorm a 30-second solar-panel explainer for homeowners. Give me two angles, no storyboard and don't build anything yet.", "expect": { "built": false, "plan": false } },
+      { "message": "Use the how-it-works angle. Draft a 30-second, 16:9 video with 4 scenes, calm tone, procedural visuals only, no invented numbers and no sales CTA. Write the copy and narration yourself. I want to review the plan before you build.", "expect": { "built": false, "plan": true, "scenes": 4, "seconds": 30, "media": "procedural" } },
+      { "message": "Change only the second scene's headline to 'Sunlight starts the flow'. Keep all other fields exactly the same. Still just a draft, don't build yet.", "expect": { "built": false, "headline": "Sunlight starts the flow", "preserveExceptSecondHeadline": true } },
+      { "message": "Looks good. Build this plan now.", "expect": { "built": true, "samePlan": true } },
+      { "message": "Change only the second scene's headline to 'Your roof makes current' and apply it to the project. Leave everything else unchanged.", "expect": { "built": true, "headline": "Your roof makes current", "preserveExceptSecondHeadline": true } },
+      { "message": "Just a question: would a vertical version work well? Don't change the plan or project.", "expect": { "built": false, "samePlan": true, "sameProject": true } }
+    ]
+  },
+  {
+    "id": "express-mechanism",
+    "turns": [
+      { "message": "Build a 30-second, 9:16 explainer of a token-bucket rate limiter for junior backend engineers. Three scenes, plain language, procedural visuals, no unsupported performance claims. In this implementation an empty bucket rejects excess requests. Explain that behavior accurately. You decide the copy and style; please don't ask questions.", "expect": { "built": true, "scenes": 3, "seconds": 30, "aspect": "9:16", "media": "procedural" } },
+      { "message": "Actually our implementation queues requests instead of rejecting them. Correct the narration and visual directions where needed and update the project. Keep the same scene IDs and duration.", "expect": { "built": true, "sameIds": true, "seconds": 30 } }
+    ]
+  },
+  {
+    "id": "missing-evidence",
+    "turns": [
+      { "message": "Make a draft plan for a 20-second product video for LedgerLeaf, a fictional app that groups receipts by project. Audience: freelancers. No performance data or customer testimonials exist, so don't invent any. Use 3 scenes with procedural visuals and a simple try-it CTA. Don't build yet.", "expect": { "built": false, "plan": true, "scenes": 3, "seconds": 20 } },
+      { "message": "Can we say it saves ten hours a week? I have no evidence for that. Suggest a truthful alternative without changing or building anything.", "expect": { "built": false, "samePlan": true } },
+      { "message": "Keep the existing plan as written and build it now.", "expect": { "built": true, "samePlan": true, "media": "procedural", "mustNotMatch": "(?:ten|10) hours" } }
+    ]
+  }
+]

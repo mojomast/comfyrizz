@@ -38,8 +38,10 @@ export async function probeToolUse(config: ModelConfig, signal = new AbortContro
   const request = { system: 'You are a capability probe. Use the supplied tool.', messages: [{ role: 'user' as const, content: prompt }], tools: [PROBE_TOOL], signal, sessionId: 'probe' };
   let call: ToolCall | undefined;
   let text = '';
+  let reasoning: string | undefined;
   for await (const chunk of model.stream(request)) {
     if (chunk.type === 'text') text += chunk.delta;
+    if (chunk.type === 'reasoning') reasoning = (reasoning ?? '') + chunk.delta;
     if (chunk.type === 'tool_call') {
       call = { id: chunk.id, name: chunk.name, args: chunk.args };
       break;
@@ -53,7 +55,7 @@ export async function probeToolUse(config: ModelConfig, signal = new AbortContro
 
   const messages: ChatMessage[] = [
     { role: 'user', content: prompt },
-    { role: 'assistant', content: '', tool_calls: [call] },
+    { role: 'assistant', content: text, tool_calls: [call], ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}) },
     { role: 'tool', content: '{"ok":true}', tool_call_id: call.id },
   ];
   let followUp = '';

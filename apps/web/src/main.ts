@@ -1,5 +1,7 @@
 import './style.css';
 import { mountSettingsCard } from './colab-card';
+import { mountAgentSettings } from './agent-settings';
+import { mountProjectChat, type ChatProject } from './project-chat';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
@@ -45,14 +47,15 @@ let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
 let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
-let providerAvailability: Record<string, boolean> | null = null;
+let agentSettings: ReturnType<typeof mountAgentSettings>;
+let projectChat: ReturnType<typeof mountProjectChat>;
 const state = {
   dirty: false,
   streaming: false,
   streamLabel: '',
   messages: [
-    { role: 'assistant', text: 'Describe a brief and the **local agent** builds a package: router → assets → timeline → Player. Choose an **LLM** above to plan with a live model; its API key stays in the server environment and is never sent to this page.' },
-    { role: 'assistant', text: 'The compiled `examples/launch-demo` is open now. Edit a headline, a chart value or the palette and the preview updates instantly. **Export MP4** renders the current draft on the local CPU renderer.' },
+    { role: 'assistant', text: 'Tell me what video you want to make. I’ll ask only what matters, write the copy and storyboard with you, and build the project when it’s ready. You can keep chatting to revise the same project after it’s built.' },
+    { role: 'assistant', text: 'The bundled demo is open for now. Open **Agent settings** to connect OpenCode Go or another provider for an interactive conversation. The local scripted model remains available offline.' },
   ] as Array<{ role: 'user' | 'assistant'; text: string; streaming?: boolean }>,
   activity: [] as Array<{ at: string; text: string }>,
 };
@@ -707,36 +710,6 @@ function renderSpendCard(): void {
     });
 }
 
-const PROVIDER_LABELS: Record<string, string> = {
-  none: 'local · scripted model',
-  'opencode-go': 'OpenCode Go · DeepSeek',
-  custom: 'Custom · OpenAI-compatible',
-  openrouter: 'OpenRouter',
-};
-
-/** Which providers have a server-side key; the browser only ever sees booleans. */
-async function loadProviders(): Promise<void> {
-  try {
-    const response = await apiFetch('/api/providers');
-    if (!response.ok) return;
-    const body = (await response.json()) as { providers?: Record<string, boolean> };
-    providerAvailability = body.providers ?? {};
-  } catch {
-    providerAvailability = null;
-  }
-  const select = $<HTMLSelectElement>('llm');
-  for (const option of Array.from(select.options)) {
-    const configured = providerAvailability?.[option.value];
-    const suffix = option.value === 'none' || configured === undefined ? '' : configured ? ' · configured' : ' · no key';
-    option.textContent = `${PROVIDER_LABELS[option.value] ?? option.value}${suffix}`;
-  }
-  const status = $('llm-status');
-  if (status) {
-    const ready = providerAvailability ? Object.entries(providerAvailability).filter(([, ok]) => ok).map(([name]) => name) : [];
-    status.textContent = providerAvailability === null ? '' : ready.length ? `server keys: ${ready.join(', ')}` : 'no provider keys on server';
-  }
-}
-
 async function refreshSpend(): Promise<void> {
   try {
     const response = await apiFetch('/api/run');
@@ -1363,6 +1336,41 @@ async function resolveBrief(): Promise<void> {
   renderBriefPanel();
 }
 
+function appendChatMessage(role: 'user' | 'assistant', text: string): void {
+  state.messages.push({ role, text });
+  renderMessages();
+  $('messages').scrollTop = $('messages').scrollHeight;
+}
+
+function replaceChatMessages(messages: Array<{ role: 'user' | 'assistant'; content: string }>): void {
+  state.messages = messages.length
+    ? messages.map(message => ({ role: message.role, text: message.content }))
+    : [{ role: 'assistant', text: 'Tell me what video you want to make. I’ll write the copy and storyboard with you, then build the project when it’s ready.' }];
+  renderMessages();
+  $('messages').scrollTop = $('messages').scrollHeight;
+}
+
+/** Load a conversation-built package into the Player, storyboard and asset views. */
+function adoptChatProject(project: ChatProject, built: boolean): void {
+  pkg = project.package;
+  timeline = project.timeline;
+  generatedAssets = project.generatedAssets;
+  pendingGpu = project.pendingGpu as typeof pendingGpu;
+  scrub.max = String(timeline.durationInFrames - 1);
+  renderStoryboard();
+  renderPalette();
+  renderAssets();
+  updatePreview(pkg, timeline, generatedAssets);
+  state.dirty = false;
+  $('draft').textContent = `chat project · ${pkg.scenes.length} scenes · rev ${project.revision}${built ? ' · built' : ''}`;
+  if (built) {
+    briefState.brief = null;
+    briefState.pending = [];
+    briefState.outline = null;
+    renderBriefPanel();
+  }
+}
+
 async function runBrief(brief: string): Promise<void> {
   const composer = $<HTMLButtonElement>('composer-send');
   if (composer) composer.disabled = true;
@@ -1371,10 +1379,11 @@ async function runBrief(brief: string): Promise<void> {
   setStreaming(true, useProvider ? `planning with ${provider}…` : 'planning with the scripted model…');
   logActivity(`Agent brief sent to /api/agent (${useProvider ? provider : 'scripted model'})`);
   try {
+    const selection = await agentSettings.selection();
     const response = await apiFetch('/api/agent', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ brief, ...(useProvider ? { provider } : {}), ...(brandPayload() ? { brand: brandPayload() } : {}) }),
+      body: JSON.stringify({ brief, ...(selection.provider !== 'none' ? selection : {}), ...(brandPayload() ? { brand: brandPayload() } : {}) }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
@@ -1388,10 +1397,12 @@ async function runBrief(brief: string): Promise<void> {
     renderAssets();
     updatePreview(pkg, timeline, generatedAssets);
     state.dirty = false;
-    $('draft').textContent = `agent package · ${body.svgAssets.length} SVG assets${body.live ? ` · live ${body.provider ?? 'model'}` : ' · scripted model'}`;
+    const agentLabel = body.fallback ? 'scripted fallback' : body.live ? `${body.provider} / ${body.model}` : 'scripted model';
+    $('draft').textContent = `agent package · ${body.svgAssets.length} SVG assets · ${agentLabel}`;
     const pending = pendingGpu.length > 0 ? ` ${pendingGpu.length} GPU need(s) are pending spend approval; procedural fallbacks are active.` : '';
-    state.messages.push({ role: 'assistant', text: `Built **${pkg.title}** with ${body.svgAssets.length} SVG assets and ${Object.keys(body.generatedAssets ?? {}).length} inlined vectors.${pending}` });
-    logActivity(`Agent finished: ${pkg.id} rev ${body.revision}, ${body.svgAssets.length} SVG assets`);
+    const fallback = body.fallback ? ' The live model draft was not usable, so this package uses the **scripted fallback**.' : '';
+    state.messages.push({ role: 'assistant', text: `Built **${pkg.title}** with ${body.svgAssets.length} SVG assets and ${Object.keys(body.generatedAssets ?? {}).length} inlined vectors.${pending}${fallback}` });
+    logActivity(`Agent finished: ${pkg.id} rev ${body.revision}, ${body.svgAssets.length} SVG assets · ${agentLabel}`);
   } catch (error) {
     state.messages.push({ role: 'assistant', text: `Agent request failed: ${(error as Error).message}` });
     logActivity(`Agent failed: ${(error as Error).message}`);
@@ -1411,7 +1422,7 @@ function init(): void {
   renderExportPanel();
   renderSpendCard();
   renderBriefPanel();
-  void loadProviders();
+  agentSettings = mountAgentSettings(apiFetch, logActivity);
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: 'Loaded examples/launch-demo package + compiled timeline' }];
   renderActivity();
 
@@ -1627,19 +1638,38 @@ function init(): void {
     void refreshSpend();
   }
 
+  projectChat = mountProjectChat({
+    apiFetch,
+    root: $('project-plan-panel'),
+    append: appendChatMessage,
+    replace: replaceChatMessages,
+    setBusy: (active, label) => setStreaming(active, label),
+    applyProject: adoptChatProject,
+    provider: () => agentSettings.selection(),
+    brand: brandPayload,
+    log: logActivity,
+  });
+
   $<HTMLFormElement>('composer').addEventListener('submit', event => {
     event.preventDefault();
-    if (briefState.pending.length > 0) {
+    const selected = $<HTMLSelectElement>('llm').value;
+    if (selected === 'none' && briefState.pending.length > 0) {
       void resolveBrief();
       return;
     }
     const prompt = $<HTMLTextAreaElement>('prompt');
     const text = prompt.value.trim();
     if (!text) return;
+    prompt.value = '';
+    // A live provider gets the persistent conversational builder. The offline
+    // scripted path keeps its deterministic one-shot behavior.
+    if (selected !== 'none') {
+      void projectChat.send(text, briefMode);
+      return;
+    }
     state.messages.push({ role: 'user', text });
     renderMessages();
     $('messages').scrollTop = $('messages').scrollHeight;
-    prompt.value = '';
     if (briefMode === 'plan' && token) void planBriefFlow(text);
     else void runBrief(text);
   });

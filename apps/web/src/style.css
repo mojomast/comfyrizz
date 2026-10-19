@@ -225,8 +225,9 @@ main {
   #activity-pane { display: none; }
 }
 @media (max-width: 760px) {
-  main { grid-template-columns: 1fr; }
-  #chat-pane { display: none; }
+  main { grid-template-columns: minmax(0, 1fr); }
+  #chat-pane { display: flex; min-width: 0; }
+  #topbar { position: static; }
 }
 
 /* U2: the Google Colab settings card. Small and quiet: it lives under the run controls and only grows

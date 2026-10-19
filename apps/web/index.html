@@ -13,12 +13,14 @@
         <label class="picker">LLM
           <select id="llm">
             <option value="none">local · scripted model</option>
-            <option value="opencode-go">OpenCode Go · DeepSeek</option>
+            <option value="opencode-go">OpenCode Go</option>
             <option value="custom">Custom · OpenAI-compatible</option>
             <option value="openrouter">OpenRouter</option>
           </select>
           <span id="llm-status" class="hint"></span>
         </label>
+        <label class="picker">Model <input id="agent-model" list="agent-model-options" placeholder="scripted" disabled maxlength="300" /><datalist id="agent-model-options"></datalist></label>
+        <button type="button" id="agent-settings-open">Agent settings</button>
         <label class="picker">Backend
           <select id="backend">
             <option value="cpu">CPU · no network</option>
@@ -43,12 +45,13 @@
         <section id="chat-pane" class="pane">
           <div class="pane-head"><b>Chat</b><span class="hint">brief → local agent → package</span></div>
           <div id="messages"></div>
+          <div id="project-plan-panel" hidden></div>
           <form id="composer">
             <div id="brief-panel" class="brief-panel" hidden></div>
-            <textarea id="prompt" rows="2" placeholder="Describe a video brief… (the agent builds a CPU package)"></textarea>
+            <textarea id="prompt" rows="2" placeholder="Describe your video, or tell the agent what to change…"></textarea>
             <div class="composer-row">
               <span class="mode-toggle" role="group" aria-label="Planning mode">
-                <button type="button" id="mode-plan" class="mode active" data-mode="plan">Plan</button>
+                <button type="button" id="mode-plan" class="mode active" data-mode="plan">Chat</button>
                 <button type="button" id="mode-express" class="mode" data-mode="express">Express</button>
               </span>
               <span class="hint" id="composer-hint">Enter to send · keys stay on the server</span>

@@ -29,7 +29,7 @@ LTX-2.5 motion plates and Kokoro narration, rendered deterministically with Remo
 
 ## What it does
 
-1. **Brief.** Describe a talk, launch or lesson in chat. In Plan mode the agent asks up to three chip questions (each with *Decide for me*), then shows an editable brief with a script-first outline, a style preset and an optional brand kit.
+1. **Brief.** Describe a talk, launch or lesson in chat. With a live provider, the agent writes the copy, narration script and storyboard. Brainstorm, review a draft, ask for corrections, then build an editable project and keep revising it. Express mode favors reasonable defaults. The offline scripted flow also offers chip questions and an editable brief.
 2. **Package.** A model-agnostic agent turns the brief into a `comfyrizz.package/v1`: scenes, copy, charts from your CSV, sanitised SVG art, and planned FLUX 3 Klein / LTX-2.5 jobs.
 3. **Generate.** GPU jobs run through the Comfy SDK on a **Google Colab** G4 runtime that Comfyrizz starts, runs, collects and verifiably stops, or on **your own ComfyUI**. Nothing is spent without a spend card you approve.
 4. **Render.** Remotion renders a 1080p MP4 on CPU with Kokoro narration and sentence captions, then exports a bundle: `video.mp4`, `captions.srt/.vtt`, `CREDITS.md` and a rights-filtered `package.zip`.
@@ -73,8 +73,8 @@ Stills from example videos rendered with Comfyrizz (FLUX 3 Klein stills and refe
 
 | | |
 |---|---|
-| 💬 **Chat-first agent** | Plan or Express mode, chip questions with *Decide for me*, editable brief and script-first outline. Bounded tool loop with zod-validated tools and a repair loop. |
-| 🔌 **Model-agnostic LLM** | Any OpenAI-compatible endpoint, OpenRouter, or OpenCode Go (e.g. DeepSeek v4.1). Keys stay in the server environment; the browser only sees "configured: yes/no". |
+| 💬 **Chat-first agent** | Chat or Express mode, persistent conversations, reviewable drafts and focused revisions. Four compact skills guide briefing, scripting, storyboarding and revision; validated tools preserve manual edits. See [conversation skills and evaluations](docs/CONVERSATION_AGENT.md). |
+| 🔌 **Model-agnostic LLM** | Configure OpenCode Go, OpenRouter, or named OpenAI-compatible connections in **Agent settings**. Discover or enter model IDs and test tool calling. Saved keys stay on the server. |
 | 🎨 **Style presets + brand kit** | Clay, Glass, Editorial flat, Isometric tech, Paper cut, Cinematic dark, with CPU/SVG thumbnails. Brand palette, fonts (licence-checked), tone and logo. |
 | 📐 **Generated-first vector art** | The agent writes SVG for icons, diagrams, patterns and animated parts. Every SVG is sanitised, rasterised with resvg and render-checked, with up to two automatic repairs. |
 | ✏️ **Sketch to render** | An agent-drawn SVG layout becomes the reference image for a FLUX 3 Klein edit, so the styled still keeps the composition. |
@@ -200,7 +200,13 @@ The same JSON is the `workflow` body of a Comfy API v2 job (`POST /api/v2/jobs`)
 
 ## Configuration
 
-All configuration is environment variables read by the local server. Nothing secret is sent to the browser.
+Open **Agent settings** in the top bar to add provider connections, save an API key,
+choose a model, and test tool calling. OpenCode Go and OpenRouter have presets;
+**+ Add provider** supports additional named OpenAI-compatible connections.
+Settings persist server-side and take effect immediately. Saved keys are never
+returned to the browser. See [Agent provider settings](docs/AGENT_PROVIDERS.md).
+
+Environment variables are also supported by the local server:
 
 | Variable | Purpose |
 |---|---|

@@ -208,7 +208,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
             `--props=${propsPath}`,
             `--public-dir=${resolvedPublicDir}`,
             `--frame=${frame}`,
-            '--browser-executable=/usr/bin/google-chrome',
+            `--browser-executable=${process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome'}`,
             '--log=error',
             ...(scale ? [`--scale=${scale}`] : []),
           ]
@@ -216,7 +216,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
             'remotion', 'render', 'src/index.ts', compositionId, outputPath,
             `--props=${propsPath}`,
             `--public-dir=${resolvedPublicDir}`,
-            '--browser-executable=/usr/bin/google-chrome',
+            `--browser-executable=${process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome'}`,
             '--concurrency=2',
             '--log=error',
             ...(scale ? [`--scale=${scale}`] : []),

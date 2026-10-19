@@ -123,6 +123,7 @@ test('CRLF-framed SSE parses every event instead of one bad_stream_json blob', a
   const chunks = await collect(createOpenAICompatibleModel(config(fetchImpl)));
   assert.equal(chunks.filter(chunk => chunk.type === 'error').length, 0);
   assert.deepEqual(chunks.filter(chunk => chunk.type === 'text'), [{ type: 'text', delta: 'ok' }]);
+  assert.deepEqual(chunks.filter(chunk => chunk.type === 'reasoning'), [{ type: 'reasoning', delta: 'thinking' }]);
   assert.ok(chunks.some(chunk => chunk.type === 'usage' && chunk.input === 3));
 });
 
@@ -173,12 +174,19 @@ test('listModels accepts OpenAI and bare-array shapes', async () => {
   assert.deepEqual(await listModels(config(bare)), ['c']);
 });
 
-test('probe: tool call then follow-up; refuses a text-only model', async () => {
+test('probe: fragmented reasoning survives tool follow-up; refuses a text-only model', async () => {
   let chat = 0;
-  const fetchImpl = (async (url: string | URL | Request) => {
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     if (String(url).endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'test-model' }] }), { status: 200 });
     chat += 1;
-    if (chat === 1) return sse([{ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'comfyrizz_probe_ping', arguments: '{"value":"pong"}' } }] }, finish_reason: 'tool_calls' }] }]);
+    if (chat === 1) return sse([
+      { choices: [{ delta: { reasoning_content: 'opaque ' } }] },
+      { choices: [{ delta: { reasoning_content: 'continuation' } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'comfyrizz_probe_ping', arguments: '{"value":"pong"}' } }] }, finish_reason: 'tool_calls' }] },
+    ]);
+    const assistant = JSON.parse(String(init?.body)).messages.find((message: ChatMessage) => message.role === 'assistant');
+    assert.equal(assistant.reasoning_content, 'opaque continuation');
+    assert.equal(assistant.content, '');
     return sse([{ choices: [{ delta: { content: 'pong received' }, finish_reason: 'stop' }] }]);
   }) as typeof fetch;
   const result = await probeToolUse(config(fetchImpl));
@@ -191,4 +199,17 @@ test('probe: tool call then follow-up; refuses a text-only model', async () => {
   const refused = await probeToolUse(config(noTool));
   assert.equal(refused.ok, false);
   assert.match(refused.reason ?? '', /no tool call/);
+});
+
+test('wire messages distinguish absent reasoning from an explicitly empty field', async () => {
+  const fetchImpl = (async (_url, init) => {
+    const assistants = JSON.parse(String(init?.body)).messages.filter((m: ChatMessage) => m.role === 'assistant');
+    assert.equal(Object.hasOwn(assistants[0], 'reasoning_content'), false);
+    assert.equal(assistants[1].reasoning_content, '');
+    return sse([{ choices: [{ delta: { content: 'ok' } }] }]);
+  }) as typeof fetch;
+  for await (const _chunk of createOpenAICompatibleModel(config(fetchImpl)).stream({ ...request, messages: [
+    { role: 'assistant', content: 'old reply' },
+    { role: 'assistant', content: '', reasoning_content: '' },
+  ] })) { /* consume */ }
 });
