@@ -80,6 +80,61 @@ test('a failed sync diagnostic prevents rendering a misleading successful video'
   assert.equal(f.events.at(-1).stageId, 'presenter_sync');
 });
 
+test('verify records a passing narration envelope in verification.json', async t => {
+  const f = fixture(t);
+  assert.equal(await executePipeline(f.spec, f.adapters), 0);
+  const verification = JSON.parse(readFileSync(join(f.spec.runDir, 'verification.json')));
+  assert.equal(verification.checks.narrationEnvelope, true);
+  assert.equal(verification.checks.nonSilentAudio, true);
+  assert.equal(verification.checks.frames, true);
+  assert.equal(verification.error, undefined);
+  assert.equal(f.events.find(e => e.kind === 'stage' && e.stageId === 'verify' && e.status === 'completed')?.status, 'completed');
+});
+
+test('verify treats mix exit 2 as a failed verdict and still writes verification.json', async t => {
+  const f = fixture(t);
+  const base = f.adapters.runCommand;
+  f.adapters.runCommand = async (bin, args, options) => {
+    if (args[0]?.endsWith('verify_mix.py')) {
+      assert.deepEqual(options.allowedCodes, [0, 2]);
+      writeFileSync(join(f.spec.runDir, 'audio-verification.json'), JSON.stringify({ passed: false, envelopeCorrelation: 0.12 }));
+      return { code: 2, stdout: '', stderr: '' };
+    }
+    return base(bin, args, options);
+  };
+  assert.equal(await executePipeline(f.spec, f.adapters), 1);
+  const failed = f.events.at(-1);
+  assert.equal(failed.kind, 'failed');
+  assert.equal(failed.stageId, 'verify');
+  assert.equal(failed.code, 'STAGE_FAILED');
+  assert.equal(failed.message, 'Final video verification failed');
+  const verification = JSON.parse(readFileSync(join(f.spec.runDir, 'verification.json')));
+  assert.equal(verification.checks.narrationEnvelope, false);
+  assert.equal(verification.narration.passed, false);
+  assert.equal(verification.error, 'Final video verification failed');
+  assert.equal(f.events.some(e => e.kind === 'stage' && e.stageId === 'verify' && e.status === 'completed'), false);
+  assert.ok(!f.calls.includes('export'));
+});
+
+test('verify writes verification.json when the mix check crashes', async t => {
+  const f = fixture(t);
+  const base = f.adapters.runCommand;
+  f.adapters.runCommand = async (bin, args, options) => {
+    if (args[0]?.endsWith('verify_mix.py')) throw new Error('python3 exited 1: checker crashed');
+    return base(bin, args, options);
+  };
+  assert.equal(await executePipeline(f.spec, f.adapters), 1);
+  const failed = f.events.at(-1);
+  assert.equal(failed.kind, 'failed');
+  assert.equal(failed.stageId, 'verify');
+  assert.match(failed.message, /exited 1/);
+  const verification = JSON.parse(readFileSync(join(f.spec.runDir, 'verification.json')));
+  assert.equal(verification.checks.narrationEnvelope, false);
+  assert.match(verification.error, /exited 1/);
+  assert.equal(verification.narration, undefined);
+  assert.ok(!f.calls.includes('export'));
+});
+
 test('cancelling during generation waits for cleanup before the cancelled event', async t => {
   const f = fixture(t), factory = f.adapters.colabFactory, controller = new AbortController();
   f.adapters.signal = controller.signal;
