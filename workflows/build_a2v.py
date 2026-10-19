@@ -78,6 +78,10 @@ def main() -> int:
     # params carry a file (the plate i2v graph declares only "image", and the a2v clip adds "audio"). The
     # first GPU 6 dry run said so in as many words - upload_not_declared - after the session had started.
     params["files"] = ["image", "audio"]
+    # the derived params inherited the plate kind, which is what the workflows contract test checks the
+    # map against - and it is why the map was judged against the plate vocabulary. The graph is the
+    # presenter's, so the params say so.
+    params["kind"] = "presenter"
     params["note"] = (
         "Derived from ltx25_i2v_2stage by workflows/build_a2v.py: stage 1's empty audio latent is "
         "replaced by the encoded narration (LTXVAudioVAEEncode), which the graph then freezes as the "
