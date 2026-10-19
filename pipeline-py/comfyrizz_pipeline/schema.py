@@ -393,6 +393,15 @@ def _check_voice(doc, errors) -> None:
     voiced = voice.get("engine") in ("kokoro", "qwen3-tts")
     if not voiced or not _is_str(voice_id) or voice_id == "":
         errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro or qwen3-tts and a non-empty voice"))
+    if voice.get("engine") == "qwen3-tts":
+        if voice.get("speed", 1) != 1:
+            errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/speed", "Qwen requires speed=1; use delivery direction for pacing"))
+        if voice.get("blend"):
+            errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/blend", "Voice blending is only supported by Kokoro"))
+        if voice.get("qwen_mode") == "custom" and str(voice_id).lower() not in {"ryan", "aiden", "vivian", "serena", "uncle_fu", "dylan", "eric", "ono_anna", "sohee"}:
+            errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/voice", "Unknown Qwen CustomVoice speaker"))
+    if isinstance(voice.get("blend"), list) and len({str(part.get("voice", ""))[:1] if _is_obj(part) else "" for part in voice["blend"]}) > 1:
+        errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/blend", "Kokoro blend voices must use the same language/accent"))
     assets = doc.get("assets") if _is_obj(doc.get("assets")) else {}
     ref_asset = voice.get("ref_asset")
     if _is_str(ref_asset) and not _is_obj(assets.get(ref_asset)):
@@ -1052,4 +1061,3 @@ def _check_asset_variants(asset, at: str, errors) -> None:
                         f"({media['width']}x{media['height']}, got {width}x{height})",
                     )
                 )
-

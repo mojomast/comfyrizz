@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 1f114eb00384017f826c3509a1cd6e714c98828e9fb65bf7deef7109ae26a817
+// Schema sha256: a423dba51e96f9d3242a5a5baedcdc3e5d3616a7197aa4124d9e82ff6065e3a8
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -105,6 +105,39 @@ export interface PackageV1 {
      * omitted, the run falls back to Kokoro.
      */
     strict?: boolean;
+    /**
+     * Kokoro synthesis context: separate sentences (default) or a coherent scene paragraph with
+     * estimated sentence/word alignment.
+     */
+    chunking?: "sentence" | "paragraph";
+    /**
+     * Kokoro weighted voice styles. Positive weights are normalized before synthesis.
+     * [minItems 2, maxItems 4]
+     */
+    blend?: Array<{
+      voice: string;
+      weight: number;
+      }>;
+    /**
+     * design (default) uses VoiceDesign then Base cloning; custom uses the CustomVoice preset named in
+     * voice.voice.
+     */
+    qwen_mode?: "design" | "custom";
+    /**
+     * CustomVoice default delivery instruction, overridden by scene.narration_style. For design mode,
+     * appended to the reference persona.
+     * [maxLength 400]
+     */
+    delivery?: string;
+    /**
+     * Qwen full-text conditioning. Defaults to false for Base cloning and true for CustomVoice.
+     */
+    non_streaming?: boolean;
+    /**
+     * Transcript synthesized by VoiceDesign to create the reusable synthetic reference.
+     * [minLength 1, maxLength 1000]
+     */
+    reference_text?: string;
     };
   datasets?: {
     [key: string]: Dataset;
@@ -594,7 +627,8 @@ export interface Scene {
    */
   spoken_text?: string;
   /**
-   * Per-scene emotion instruction for Qwen3-TTS (for example "calm, slightly amused").
+   * Per-scene delivery instruction for Qwen CustomVoice, overriding voice.delivery. Base cloning and
+   * Kokoro do not support per-scene instructions.
    * [maxLength 240]
    */
   narration_style?: string;

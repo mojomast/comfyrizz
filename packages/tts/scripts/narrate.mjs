@@ -27,7 +27,8 @@ const exampleDir = resolve(repoRoot, exampleArg >= 0 ? process.argv[exampleArg +
 const packagePath = join(exampleDir, 'package.json');
 const audioDir = join(exampleDir, 'audio');
 const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
-const durations = parseDurations(JSON.parse(readFileSync(join(audioDir, 'durations.json'), 'utf8')));
+const rawDurations = JSON.parse(readFileSync(join(audioDir, 'durations.json'), 'utf8'));
+const durations = parseDurations(rawDurations);
 
 const options = compileOptionsFromDurations(durations);
 const timeline = compileTimeline(pkg, options);
@@ -123,8 +124,8 @@ pkg.assets.a_narration = {
   redistributable: true,
   model_license: {
     id: 'Apache-2.0',
-    url: qwen ? 'https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base' : 'https://huggingface.co/hexgrad/Kokoro-82M',
-    note: qwen ? 'Qwen3-TTS 1.7B VoiceDesign reference and Base-clone narration.' : 'Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md.',
+    url: qwen ? `https://huggingface.co/${durations.model}` : 'https://huggingface.co/hexgrad/Kokoro-82M',
+    note: qwen ? `Qwen3-TTS 1.7B ${durations.voices} narration.` : 'Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md.',
   },
   gen: {
     generator: qwen ? 'qwen3-tts' : 'kokoro',
@@ -132,6 +133,7 @@ pkg.assets.a_narration = {
     inputs: {
       voice: durations.voice,
       speed: durations.speed,
+      voice_settings: JSON.stringify(rawDurations.voiceSettings ?? pkg.voice),
       sample_rate: durations.sampleRate,
       chunks: Object.values(durations.scenes).reduce((total, scene) => total + scene.chunks.length, 0),
     },

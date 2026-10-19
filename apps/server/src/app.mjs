@@ -26,6 +26,7 @@ import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { serveStaticFile } from './static-file.mjs';
 import { createPipelineController } from './pipeline.mjs';
 import { stagePipelineInputs } from './pipeline-media.mjs';
+import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/tts/voices.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
@@ -333,7 +334,18 @@ export function createApp({
       return;
     }
 
-    // Additive API for the editor team. Existing /api/run remains the media-only API.
+    if (url.pathname === '/api/voice-options' && request.method === 'GET') {
+      return sendJson(response, 200, {
+        version: 1, presets: VOICE_PRESETS, kokoroVoices: KOKORO_VOICES, qwenSpeakers: QWEN_SPEAKERS,
+        capabilities: {
+          kokoro: { runtime: 'local', controls: ['voice', 'speed', 'blend', 'chunking', 'language'] },
+          qwenDesign: { runtime: 'local-or-colab', controls: ['persona', 'delivery', 'reference_text', 'non_streaming', 'language'], perSceneDelivery: false },
+          qwenCustom: { runtime: 'local-or-colab', controls: ['voice', 'delivery', 'non_streaming', 'language'], perSceneDelivery: true },
+        },
+      });
+    }
+
+    // Full-production API. Existing /api/run remains the media-only API.
     if (['/api/pipeline/plan', '/api/pipeline'].includes(url.pathname) && request.method === 'POST') {
       const body = await readJson(request);
       const pkg = body.packageId ? store.read(body.packageId) : null;

@@ -230,6 +230,37 @@
         "strict": {
           "type": "boolean",
           "description": "When true, a selected qwen3-tts runtime that is unavailable fails the run. When false or omitted, the run falls back to Kokoro."
+        },
+        "chunking": {
+          "type": "string", "enum": ["sentence", "paragraph"],
+          "description": "Kokoro synthesis context: separate sentences (default) or a coherent scene paragraph with estimated sentence/word alignment."
+        },
+        "blend": {
+          "type": "array", "minItems": 2, "maxItems": 4,
+          "description": "Kokoro weighted voice styles. Positive weights are normalized before synthesis.",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["voice", "weight"],
+            "properties": {
+              "voice": {"type": "string", "minLength": 1, "maxLength": 64},
+              "weight": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+            }
+          }
+        },
+        "qwen_mode": {
+          "type": "string", "enum": ["design", "custom"],
+          "description": "design (default) uses VoiceDesign then Base cloning; custom uses the CustomVoice preset named in voice.voice."
+        },
+        "delivery": {
+          "type": "string", "maxLength": 400,
+          "description": "CustomVoice default delivery instruction, overridden by scene.narration_style. For design mode, appended to the reference persona."
+        },
+        "non_streaming": {
+          "type": "boolean",
+          "description": "Qwen full-text conditioning. Defaults to false for Base cloning and true for CustomVoice."
+        },
+        "reference_text": {
+          "type": "string", "minLength": 1, "maxLength": 1000,
+          "description": "Transcript synthesized by VoiceDesign to create the reusable synthetic reference."
         }
       }
     },
@@ -1431,7 +1462,7 @@
         "narration_style": {
           "type": "string",
           "maxLength": 240,
-          "description": "Per-scene emotion instruction for Qwen3-TTS (for example \"calm, slightly amused\")."
+          "description": "Per-scene delivery instruction for Qwen CustomVoice, overriding voice.delivery. Base cloning and Kokoro do not support per-scene instructions."
         },
         "narration_asset": {
           "$ref": "#/$defs/assetId"

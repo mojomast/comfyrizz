@@ -336,6 +336,12 @@ function checkVoice(doc, errors) {
   if (!voiced || !isStr(v.voice) || v.voice.length === 0) {
     errors.push(error("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro or qwen3-tts and a non-empty voice"));
   }
+  if (v.engine === 'qwen3-tts') {
+    if ((v.speed ?? 1) !== 1) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/speed', 'Qwen requires speed=1; use delivery direction for pacing'));
+    if (v.blend) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/blend', 'Voice blending is only supported by Kokoro'));
+    if (v.qwen_mode === 'custom' && !['ryan', 'aiden', 'vivian', 'serena', 'uncle_fu', 'dylan', 'eric', 'ono_anna', 'sohee'].includes(String(v.voice).toLowerCase())) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/voice', 'Unknown Qwen CustomVoice speaker'));
+  }
+  if (Array.isArray(v.blend) && new Set(v.blend.map(part => isObj(part) ? String(part.voice ?? '')[0] : undefined)).size > 1) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/blend', 'Kokoro blend voices must use the same language/accent'));
   const assets = isObj(doc.assets) ? doc.assets : {};
   if (isStr(v.ref_asset) && !isObj(assets[v.ref_asset])) {
     errors.push(error("SEM_REF_UNRESOLVED", "/voice/ref_asset", `unknown asset ${JSON.stringify(v.ref_asset)}`));
@@ -825,4 +831,3 @@ function fillDefaults(value, sub, schema) {
     if (isObj(sub.items)) value.forEach((item) => fillDefaults(item, sub.items, schema));
   }
 }
-

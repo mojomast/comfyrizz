@@ -42,7 +42,7 @@ CustomVoice 1.7B supports a preset speaker and an independent delivery instructi
 
 > Warm, curious, conversational American English. Ask the opening question with genuine interest; build a little excitement on “suddenly,” then land the final sentence calmly. Speak as if talking to one person.
 
-The experiment uses **Ryan** for three different passages, each with and without direction. Both takes are retained. CustomVoice is an experimental additional model here; production currently uses VoiceDesign + Base.
+The experiment uses **Ryan** for three different passages, each with and without direction. Both takes are retained. CustomVoice was an experimental additional model in this study; the subsequent [production integration](VOICE_GENERATION.md) now exposes it alongside VoiceDesign + Base.
 
 Do not use temperature as an “emotion” slider. It controls sampling, and changing it can affect stability and wording. This experiment retains the installed model's generation defaults and archives them. No claim is made that a particular temperature/top-p setting has been optimized for naturalness.
 

@@ -5,10 +5,11 @@ Companion to [the editor plan](FRONTEND_EDITOR_PLAN.md).
 
 ## Handoff to the frontend agents
 
-This change adds a backend API and worker. It does **not** modify `apps/web/`,
-the editor store, timeline components, CSS or navigation. Integrate the new API
-into the frontend work in progress; the existing `/api/run` remains the legacy
-media-only flow. A frontend still calling `/api/run` does not acquire the new
+The initial change added the backend API and worker. The subsequent
+[voice-generation integration](VOICE_GENERATION.md) adds a small storyboard
+panel using this API in the current web shell. Integrate the same contract into
+the redesigned frontend work in progress; the existing `/api/run` remains the
+legacy media-only flow. A frontend still calling `/api/run` does not acquire the
 voice/sync/export stages automatically.
 
 The new endpoint accepts a **saved package revision** and processes it through

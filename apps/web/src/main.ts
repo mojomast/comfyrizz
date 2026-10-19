@@ -2,6 +2,7 @@ import './style.css';
 import { mountSettingsCard } from './colab-card';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
+import { mountVoiceSettings } from './voice-settings';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
@@ -266,7 +267,7 @@ function mixBar(): string {
 
 function renderStoryboard(): void {
   const host = $('storyboard');
-  host.innerHTML = presenterBar() + mixBar() + pkg.scenes
+  host.innerHTML = '<div id="voice-settings-host"></div>' + presenterBar() + mixBar() + pkg.scenes
     .map((scene, index) => {
       const copy = (scene.copy ?? {}) as Record<string, unknown>;
       const datasetId = (scene.data as { dataset?: string } | undefined)?.dataset;
@@ -287,6 +288,9 @@ function renderStoryboard(): void {
         <label>Sub / body</label>
         <input type="text" data-scene="${esc(scene.id)}" data-field="${scene.layout === 'hero' ? 'body' : 'sub'}" value="${esc(copy[scene.layout === 'hero' ? 'body' : 'sub'] ?? '')}" placeholder="Add supporting copy…" maxlength="240" />
         ${chart}
+        <label>Narration text</label>
+        <textarea data-narration="${esc(scene.id)}" maxlength="600" rows="3">${esc(scene.narration ?? '')}</textarea>
+        <label>Scene delivery direction (Qwen CustomVoice only)</label><input data-delivery-scene="${esc(scene.id)}" maxlength="240" value="${esc(scene.narration_style ?? '')}" placeholder="Use the voice’s default delivery" />
         <label>Presenter</label>
         <select data-presenter-scene="${esc(scene.id)}">
           <option value=""${!scene.presenter ? ' selected' : ''}>default</option>
@@ -303,6 +307,16 @@ function renderStoryboard(): void {
       </div>`;
     })
     .join('');
+
+  mountVoiceSettings($('voice-settings-host'), { getPackage: () => pkg, changed: () => markDirty('voice settings'), save: () => persistDraft(true), api: apiFetch });
+  host.querySelectorAll<HTMLTextAreaElement>('[data-narration]').forEach(input => input.addEventListener('input', () => {
+    const scene = pkg.scenes.find(s => s.id === input.dataset.narration);
+    if (scene) { scene.narration = input.value || undefined; markDirty(`${scene.id}.narration`); }
+  }));
+  host.querySelectorAll<HTMLInputElement>('[data-delivery-scene]').forEach(input => input.addEventListener('input', () => {
+    const scene = pkg.scenes.find(s => s.id === input.dataset.deliveryScene);
+    if (scene) { scene.narration_style = input.value || undefined; markDirty(`${scene.id}.narration_style`); }
+  }));
 
   host.querySelectorAll<HTMLInputElement>('input[data-field]').forEach(input => {
     input.addEventListener('input', () => {
@@ -782,8 +796,8 @@ async function runOnBackend(approved = false): Promise<void> {
 
 // C11: persist the current draft with a base revision so the server plans/renders exactly what
 // the storyboard shows. Shared by the per-scene actions.
-async function persistDraft(): Promise<Record<string, unknown>> {
-  if (!token) return { package: pkg };
+async function persistDraft(requireSaved = false): Promise<Record<string, unknown>> {
+  if (!token && !requireSaved) return { package: pkg };
   const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },

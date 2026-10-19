@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-sentence Kokoro narration on CPU (spec 6.8/6.9).
+"""Sentence or connected-paragraph Kokoro narration on CPU (spec 6.8/6.9).
 
 Writes one WAV per scene plus `narration.wav`, and a `durations.json` whose
 sentence durations are *measured* (samples / sample rate), never estimated.
@@ -47,6 +47,23 @@ def resolve_language(voice_cfg: dict) -> str:
 def split_sentences(text: str) -> list[str]:
     chunks = [chunk.strip() for chunk in SENTENCE_SPLIT.split(text.strip()) if chunk.strip()]
     return chunks or [text.strip()]
+
+
+def resolve_kokoro_style(kokoro, voice_cfg: dict, voice: str):
+    """Resolve a preset or a normalized weighted blend; never ignore invalid choices."""
+    blend = voice_cfg.get("blend")
+    if not blend:
+        kokoro.get_voice_style(voice)  # Fail early for an unavailable preset.
+        return voice
+    if not isinstance(blend, list) or not 2 <= len(blend) <= 4:
+        raise ValueError("Kokoro blend needs two to four weighted voices")
+    weights = np.asarray([part['weight'] for part in blend], dtype=np.float32)
+    if not np.isfinite(weights).all() or not (weights > 0).all() or not (weights <= 1).all():
+        raise ValueError("Kokoro blend weights must be finite and in (0, 1]")
+    # Language code is the first preset character (a=US, b=GB, f=French, etc.).
+    if len({part['voice'][0] for part in blend}) != 1:
+        raise ValueError("Kokoro blend voices must use the same language/accent")
+    return sum(kokoro.get_voice_style(part['voice']) * (weight / weights.sum()) for part, weight in zip(blend, weights))
 
 
 def write_wav(path: Path, samples: np.ndarray, sample_rate: int = SAMPLE_RATE) -> None:
@@ -98,6 +115,8 @@ def main() -> int:
         except FallbackToKokoro as exc:
             fallback_reason = str(exc)
             print(f"qwen3-tts unavailable ({exc}); using Kokoro")
+            voice = "ff_siwis" if language.startswith("fr") else "af_heart"
+            voice_cfg = {**voice_cfg, "blend": None, "chunking": "sentence"}
 
     model = args.model_dir / "kokoro-v1.0.onnx"
     voices = args.model_dir / "voices-v1.0.bin"
@@ -112,6 +131,9 @@ def main() -> int:
 
     started = time.time()
     kokoro = Kokoro(str(model), str(voices))
+    style = resolve_kokoro_style(kokoro, {**voice_cfg, "blend": None} if args.voice else voice_cfg, voice)
+    paragraph = voice_cfg.get("chunking", "sentence") == "paragraph"
+    gap_seconds = 0.0 if paragraph else args.gap
     load_seconds = time.time() - started
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -128,7 +150,8 @@ def main() -> int:
         "language": language,
         "speed": speed,
         "sampleRate": SAMPLE_RATE,
-        "gapSeconds": args.gap,
+        "gapSeconds": gap_seconds,
+        "voiceSettings": {**voice_cfg, "voice": voice, "speed": speed},
         "paddingSeconds": args.padding,
         "loadSeconds": round(load_seconds, 3),
         "scenes": {},
@@ -144,9 +167,9 @@ def main() -> int:
             continue
         sentence_samples: list[np.ndarray] = []
         chunks: list[dict] = []
-        for sentence in split_sentences(text):
+        for sentence in ([text] if paragraph else split_sentences(text)):
             spoken = pronounce(sentence)
-            audio, sample_rate = kokoro.create(spoken, voice=voice, speed=speed, lang=language)
+            audio, sample_rate = kokoro.create(spoken, voice=style, speed=speed, lang=language)
             if sample_rate != SAMPLE_RATE:
                 raise SystemExit(f"unexpected sample rate {sample_rate}")
             audio = np.asarray(audio, dtype=np.float32)
@@ -163,6 +186,12 @@ def main() -> int:
                     "words": word_timings(sentence, seconds),
                 }
             )
+        if paragraph:
+            # Preserve sentence captions while clearly marking estimated boundaries.
+            # Measured duration is from the whole take, not an invented sentence call.
+            from narrate_qwen import build_chunks
+            sentences = split_sentences(text)
+            chunks = build_chunks(sentences, [pronounce(s) for s in sentences], len(sentence_samples[0]) / SAMPLE_RATE, None)
         parts: list[np.ndarray] = []
         for index, part in enumerate(sentence_samples):
             if index:
@@ -174,7 +203,7 @@ def main() -> int:
         write_wav(scene_path, scene_audio)
         report["scenes"][scene["id"]] = {
             "chunks": chunks,
-            "gapSeconds": args.gap,
+            "gapSeconds": gap_seconds,
             "paddingSeconds": args.padding,
             "seconds": round(read_wav_seconds(scene_path), 4),
             "file": str(scene_path.relative_to(args.out.parent)),

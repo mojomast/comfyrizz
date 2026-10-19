@@ -68,6 +68,8 @@ synthesised text; captions keep the original spelling.
 
 ## Optional Qwen3-TTS (R3)
 
+The storyboard's **Voice & narration** panel now exposes 29 Kokoro voices, weighted blends, paragraph context and speed, plus Qwen designed voices and nine directed CustomVoice speakers. See [production voice options](../../docs/VOICE_GENERATION.md) for presets, saved package fields and the full-generation action. The supported catalogue is also available through authenticated `GET /api/voice-options`.
+
 Kokoro stays the default and the no-GPU fallback. Set `voice.engine` to
 `qwen3-tts` to use Qwen3-TTS 1.7B instead. With no engine change, `synth.py`
 does not import that backend.

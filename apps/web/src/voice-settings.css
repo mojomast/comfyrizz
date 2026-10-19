@@ -1,0 +1,13 @@
+.voice-settings { border: 1px solid var(--border, #34414c); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.voice-settings h3 { margin: 0 0 12px; }
+.voice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0; }
+.voice-settings label { display: block; font-size: 12px; }
+.voice-settings select, .voice-settings textarea, .voice-settings input:not([type=checkbox]) { width: 100%; box-sizing: border-box; margin-top: 5px; }
+.voice-settings textarea { resize: vertical; background: var(--panel, #192128); color: inherit; border: 1px solid var(--border, #34414c); border-radius: 5px; padding: 8px; font: inherit; }
+.voice-settings .hint { line-height: 1.5; }
+.voice-settings a { color: inherit; text-decoration: underline; }
+.voice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.voice-settings [role=status] { white-space: pre-wrap; font-size: 12px; }
+.voice-settings ol { font-size: 12px; padding-left: 20px; }
+.voice-error { color: #ffac9d; }
+.voice-production { margin-top: 12px; }
