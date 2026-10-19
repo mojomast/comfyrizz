@@ -34,7 +34,7 @@ function speechDoc() {
   };
   const voice = { enabled: true, engine: 'kokoro', voice: 'af_heart', speed: 1 };
   const doc = {
-    pkg: {
+    package: {
       id: 'pkg_speech', title: 'Speech', revision: 1,
       format: { width: 1920, height: 1080, fps: 30 },
       duration: { mode: 'flexible' },
@@ -48,15 +48,15 @@ function speechDoc() {
       },
       audio: { music: { asset: 'a_bed', fade_in_seconds: 0, fade_out_seconds: 0 } },
     },
-    takes: {}, alignment: {}, captions: {}, presenterClips: {}, editSeq: 0,
+    editor: { version: 1, captionOverrides: [], takes: {}, alignment: {}, presenterClips: {} },
   };
   const take = {
     takeId: 'take-s1', assetId: 'a_voice', sourceHash: 'hash-s1',
     inputFingerprint: narrationInputFingerprint(scene, voice),
     sampleRate: 8000, sampleCount: 8000, range: { inSample: 0, outSample: 8000 },
   };
-  doc.takes.s1 = take;
-  doc.alignment.s1 = {
+  doc.editor.takes.s1 = take;
+  doc.editor.alignment.s1 = {
     sourceHash: 'hash-s1', textFingerprint: textFingerprint(narration),
     chunks: [{
       text: narration, seconds: 1,
@@ -68,7 +68,7 @@ function speechDoc() {
       ],
     }],
   };
-  doc.presenterClips.s1 = { assetId: 'a_pres', conditioningHash: conditioningHash(take) };
+  doc.editor.presenterClips.s1 = { assetId: 'a_pres', conditioningHash: conditioningHash(take) };
   return doc;
 }
 
@@ -77,20 +77,20 @@ function withSecondScene(doc) {
     id: 's2', layout: 'title', preferredFrames: 90, narration: 'second scene stays',
     narration_asset: 'a_voice2', transitionOut: { type: 'cut', frames: 0 }, copy: { headline: 'Next' },
   };
-  doc.pkg.scenes.push(scene);
+  doc.package.scenes.push(scene);
   const take = {
     takeId: 'take-s2', assetId: 'a_voice2', sourceHash: 'hash-s2',
-    inputFingerprint: narrationInputFingerprint(scene, doc.pkg.voice),
+    inputFingerprint: narrationInputFingerprint(scene, doc.package.voice),
     sampleRate: 8000, sampleCount: 4000, range: { inSample: 0, outSample: 4000 },
   };
-  doc.takes.s2 = take;
-  doc.alignment.s2 = {
+  doc.editor.takes.s2 = take;
+  doc.editor.alignment.s2 = {
     sourceHash: 'hash-s2', textFingerprint: textFingerprint(scene.narration),
     chunks: [{ text: scene.narration, seconds: 0.5 }],
   };
-  doc.presenterClips.s2 = { assetId: 'a_pres2', conditioningHash: conditioningHash(take) };
-  doc.pkg.assets.a_voice2 = { kind: 'audio', status: 'ready', file: 'audio/s2.wav' };
-  doc.pkg.assets.a_pres2 = { kind: 'video', status: 'ready', file: 'assets/presenter-2.mp4' };
+  doc.editor.presenterClips.s2 = { assetId: 'a_pres2', conditioningHash: conditioningHash(take) };
+  doc.package.assets.a_voice2 = { kind: 'audio', status: 'ready', file: 'audio/s2.wav' };
+  doc.package.assets.a_pres2 = { kind: 'video', status: 'ready', file: 'assets/presenter-2.mp4' };
   return doc;
 }
 
@@ -104,14 +104,14 @@ test('split and reorder keep narration samples identical and unstretched', () =>
   const store = createEditorStore(speechDoc());
   const before = structuredClone(store.getState().doc);
   const split = store.dispatch({ type: 'SplitScene', sceneId: 's1', frame: 15, newSceneId: 's1b' });
-  assert.equal(split.ok, true, split.reason);
+  assert.equal(split.ok, true, split.error);
   const doc = store.getState().doc;
-  const left = doc.takes.s1;
-  const right = doc.takes.s1b;
+  const left = doc.editor.takes.s1;
+  const right = doc.editor.takes.s1b;
   assert.equal(left.range.outSample, right.range.inSample);
   assert.deepEqual(left.range, { inSample: 0, outSample: 4000 });
   assert.deepEqual(right.range, { inSample: 4000, outSample: 8000 });
-  assert.notDeepEqual(left.range, before.takes.s1.range);
+  assert.notDeepEqual(left.range, before.editor.takes.s1.range);
   assert.equal(left.sampleRate, 8000);
   assert.equal(NARRATION_PLAYBACK_RATE, 1);
   assert.equal(rangeDurationSeconds(left) + rangeDurationSeconds(right), 1);
@@ -120,31 +120,32 @@ test('split and reorder keep narration samples identical and unstretched', () =>
   assert.deepEqual(joined, samples);
   store.dispatch({ type: 'MoveScene', sceneId: 's1b', toIndex: 0 });
   const moved = store.getState().doc;
-  const halves = [moved.takes.s1b, moved.takes.s1];
+  const halves = [moved.editor.takes.s1b, moved.editor.takes.s1];
   const reordered = assembleNarration(halves, pcm);
   assert.deepEqual(reordered.subarray(0, 4000), samples.subarray(4000, 8000));
   assert.deepEqual(reordered.subarray(4000), samples.subarray(0, 4000));
   assert.equal(reordered.length, samples.length);
   store.undo();
   store.undo();
-  assert.deepEqual(store.getState().doc, before);
+  assert.deepEqual(store.getState().doc.package, before.package);
+  assert.deepEqual(store.getState().doc.editor, before.editor);
 });
 
 test('a caption that crosses the cut is divided and no cue still contains it', () => {
   const store = createEditorStore(speechDoc());
-  const placed = placeScenes(store.getState().doc.pkg, { s1: store.getState().doc.alignment.s1.chunks });
+  const placed = placeScenes(store.getState().doc.package, { s1: store.getState().doc.editor.alignment.s1.chunks });
   assert.equal(placed.ok, true);
-  const before = sentenceCues(store.getState().doc.alignment.s1.chunks, placed.scenes[0].from, 's1', placed.fps);
+  const before = sentenceCues(store.getState().doc.editor.alignment.s1.chunks, placed.scenes[0].from, 's1', placed.fps);
   assert.equal(before.length, 1);
   assert.ok(before[0].from < 15 && before[0].to > 15);
   store.dispatch({ type: 'SplitScene', sceneId: 's1', frame: 15, newSceneId: 's1b' });
   const doc = store.getState().doc;
-  assert.equal(doc.alignment.s1.chunks[0].text, 'one two');
-  assert.equal(doc.alignment.s1b.chunks[0].text, 'three four');
-  assert.equal(chunkCrosses(doc.alignment.s1.chunks, doc.alignment.s1.chunks[0].seconds), false);
-  assert.equal(chunkCrosses(doc.alignment.s1b.chunks, 0), false);
+  assert.equal(doc.editor.alignment.s1.chunks[0].text, 'one two');
+  assert.equal(doc.editor.alignment.s1b.chunks[0].text, 'three four');
+  assert.equal(chunkCrosses(doc.editor.alignment.s1.chunks, doc.editor.alignment.s1.chunks[0].seconds), false);
+  assert.equal(chunkCrosses(doc.editor.alignment.s1b.chunks, 0), false);
   const straddled = speechDoc();
-  straddled.alignment.s1.chunks = [{
+  straddled.editor.alignment.s1.chunks = [{
     text: 'stay across',
     seconds: 1,
     words: [{ text: 'stay', start: 0, end: 0.4 }, { text: 'across', start: 0.4, end: 0.6 }],
@@ -152,15 +153,15 @@ test('a caption that crosses the cut is divided and no cue still contains it', (
   const cut = createEditorStore(straddled);
   cut.dispatch({ type: 'SplitScene', sceneId: 's1', frame: 15, newSceneId: 's1b' });
   const halves = cut.getState().doc;
-  const texts = [halves.alignment.s1.chunks[0].text, halves.alignment.s1b.chunks[0].text];
+  const texts = [halves.editor.alignment.s1.chunks[0].text, halves.editor.alignment.s1b.chunks[0].text];
   assert.equal(texts.filter(text => text.includes('across')).length, 1);
-  assert.ok(halves.alignment.s1.chunks[0].words.every(word => word.end <= halves.alignment.s1.chunks[0].seconds + 1e-6));
+  assert.ok(halves.editor.alignment.s1.chunks[0].words.every(word => word.end <= halves.editor.alignment.s1.chunks[0].seconds + 1e-6));
 });
 
 test('editing narration text marks take, alignment and presenter stale and nothing else', () => {
   const store = createEditorStore(withSecondScene(speechDoc()));
-  const still = structuredClone(store.getState().doc.pkg.assets.a_still);
-  const bed = structuredClone(store.getState().doc.pkg.assets.a_bed);
+  const still = structuredClone(store.getState().doc.package.assets.a_still);
+  const bed = structuredClone(store.getState().doc.package.assets.a_bed);
   assert.deepEqual(staleWork(store.getState().doc), []);
   store.dispatch({ type: 'SetNarrationText', sceneId: 's1', text: 'one two three four changed' });
   const doc = store.getState().doc;
@@ -169,18 +170,20 @@ test('editing narration text marks take, alignment and presenter stale and nothi
   assert.equal(sceneStatus(doc, 's2').take, 'fresh');
   assert.equal(sceneStatus(doc, 's2').alignment, 'fresh');
   assert.equal(sceneStatus(doc, 's2').presenter, 'fresh');
-  assert.deepEqual(doc.pkg.assets.a_still, still);
-  assert.deepEqual(doc.pkg.assets.a_bed, bed);
+  assert.deepEqual(doc.package.assets.a_still, still);
+  assert.deepEqual(doc.package.assets.a_bed, bed);
   assert.equal(store.saveStatus(), 'pending');
   store.undo();
   assert.deepEqual(staleWork(store.getState().doc), []);
+  assert.equal(store.saveStatus(), 'pending');
+  store.noteSave({ type: 'ack', editSequence: store.getState().doc.editSequence, revision: 2 });
   assert.equal(store.saveStatus(), 'saved');
   store.dispatch({ type: 'SetSceneCopy', sceneId: 's1', copy: { headline: 'Renamed' } });
   assert.deepEqual(staleWork(store.getState().doc), []);
-  store.dispatch({ type: 'SetCaptionText', sceneId: 's1', chunkIndex: 0, text: 'one two three four.' });
+  store.dispatch({ type: 'SetCaptionText', sceneId: 's1', index: 0, text: 'one two three four.' });
   const corrected = store.getState();
-  assert.equal(corrected.doc.pkg.scenes[0].narration, 'one two three four');
-  assert.equal(corrected.derived.sentences.s1[0].text, 'one two three four.');
+  assert.equal(corrected.doc.package.scenes[0].narration, 'one two three four');
+  assert.equal(corrected.derived.timeline.captions[0].text, 'one two three four.');
   assert.deepEqual(staleWork(corrected.doc), []);
 });
 
@@ -195,12 +198,12 @@ test('changing the voice marks every narration take and not the picture or the b
 
 test('sentence seek uses measured alignment frames', () => {
   const doc = speechDoc();
-  doc.alignment.s1.chunks = [
+  doc.editor.alignment.s1.chunks = [
     { text: 'First.', seconds: 0.5 },
     { text: 'Second.', seconds: 0.5 },
   ];
-  const placed = placeScenes(doc.pkg, { s1: doc.alignment.s1.chunks });
-  const cues = sentenceCues(doc.alignment.s1.chunks, placed.scenes[0].from, 's1', placed.fps);
+  const placed = placeScenes(doc.package, { s1: doc.editor.alignment.s1.chunks });
+  const cues = sentenceCues(doc.editor.alignment.s1.chunks, placed.scenes[0].from, 's1', placed.fps);
   assert.equal(seekFrameForSentence(cues, 1), cues[1].from);
   assert.ok(cues[1].from > cues[0].to);
 });
@@ -208,8 +211,8 @@ test('sentence seek uses measured alignment frames', () => {
 test('audition mix params equal the renderer mix params', () => {
   const store = createEditorStore(speechDoc());
   const { doc, derived } = store.getState();
-  const rendered = resolveAudioMix(doc.pkg, derived.timeline);
-  const audition = auditionParams(doc.pkg, derived.timeline);
+  const rendered = resolveAudioMix(doc.package, derived.timeline);
+  const audition = auditionParams(doc.package, derived.timeline);
   assert.equal(audition.narrationGain, 1);
   assert.equal(audition.musicGainDb, rendered.music.gainDb);
   assert.equal(audition.musicGainDb, AUDIO_MIX_DEFAULTS.musicGainDb);
@@ -218,20 +221,19 @@ test('audition mix params equal the renderer mix params', () => {
   assert.equal(audition.musicLoop, rendered.music.loop);
   assert.deepEqual(audition.ambience, rendered.ambience);
   assert.deepEqual(audition.sfx.map(item => item.gainDb), rendered.sfx.map(item => item.gainDb));
-  store.setAudition({ music: false, narration: false });
-  assert.equal(store.getState().derived.audition.musicGainDb, AUDIO_MIX_DEFAULTS.musicGainDb);
+  assert.equal(audition.musicGainDb, AUDIO_MIX_DEFAULTS.musicGainDb);
   assert.equal(store.saveStatus(), 'saved');
 });
 
 test('placement matches the planner for measured speech', () => {
   const doc = withSecondScene(speechDoc());
-  doc.pkg.scenes[0].transitionOut = { type: 'fade', frames: 15 };
+  doc.package.scenes[0].transitionOut = { type: 'fade', frames: 15 };
   const measured = {
-    s1: doc.alignment.s1.chunks,
-    s2: doc.alignment.s2.chunks,
+    s1: doc.editor.alignment.s1.chunks,
+    s2: doc.editor.alignment.s2.chunks,
   };
-  const placed = placeScenes(doc.pkg, measured);
-  const timeline = compileTimeline(doc.pkg, { narration: measured });
+  const placed = placeScenes(doc.package, measured);
+  const timeline = compileTimeline(doc.package, { narration: measured });
   assert.equal(placed.ok, true);
   assert.deepEqual(placed.scenes.map(scene => [scene.id, scene.from, scene.duration, scene.transitionOut]),
     timeline.scenes.map(scene => [scene.id, scene.from, scene.durationInFrames, scene.transitionOutFrames]));
@@ -257,8 +259,6 @@ test('voice preview uses a fixture and does not replace the selected voice', () 
 
 test('export sidecar omits tokens, tickets and audition state', () => {
   const store = createEditorStore(speechDoc());
-  store.setAudition({ music: false });
-  store.setSaveStatus('pending');
   const token = 'test-token-0123456789abcdef';
   const sidecar = editorExportSidecar(store.getState().doc);
   assert.equal(containsSecret(sidecar, [token]), false);
@@ -342,18 +342,18 @@ test('long media peaks come from byte windows, never one whole-file read', async
 
 test('a locked scene rejects a split with a reason', () => {
   const doc = speechDoc();
-  doc.pkg.scenes[0].locked = true;
-  const result = applyCommand(doc, { type: 'SplitScene', sceneId: 's1', frame: 15, newSceneId: 's1b' });
+  doc.package.scenes[0].locked = true;
+  const result = applyCommand({ ...doc, editSequence: 0 }, { type: 'SplitScene', sceneId: 's1', frame: 15, newSceneId: 's1b' });
   assert.equal(result.ok, false);
-  assert.match(result.reason, /locked/);
+  assert.match(result.error, /locked/);
 });
 
 test('preview does not commit a split', () => {
   const store = createEditorStore(speechDoc());
   store.preview({ type: 'SplitScene', sceneId: 's1', frame: 15, newSceneId: 's1b' });
-  assert.equal(store.getState().doc.pkg.scenes.length, 2);
+  assert.equal(store.getState().doc.package.scenes.length, 2);
   assert.equal(store.canUndo(), false);
   store.cancelPreview();
-  assert.equal(store.getState().doc.pkg.scenes.length, 1);
+  assert.equal(store.getState().doc.package.scenes.length, 1);
   assert.equal(store.saveStatus(), 'saved');
 });

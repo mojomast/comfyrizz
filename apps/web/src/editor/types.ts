@@ -1,8 +1,7 @@
 /**
- * Editor document, derived projection and session.
- * ProjectDoc is the CA-1 document class. Source ranges and take fingerprints live
- * here (render-affecting editor state) until CA-1's schema extensions land.
- * They are included in the editor export sidecar, not in session or media tickets.
+ * Script, audio and media shapes. The project document and the command union
+ * live in commands.ts. Takes, alignment and presenter clips are editor sidecar
+ * fields, not package-v1.
  */
 
 export interface VoiceSettings {
@@ -113,16 +112,6 @@ export interface PresenterClip {
   conditioningHash: string;
 }
 
-export interface ProjectDoc {
-  pkg: EditorPackage;
-  takes: Record<string, NarrationTake>;
-  alignment: Record<string, SceneAlignment>;
-  /** Wording corrections. They do not change the spoken take. */
-  captions: Record<string, CaptionEdit[]>;
-  presenterClips: Record<string, PresenterClip>;
-  editSeq: number;
-}
-
 export type Freshness = 'fresh' | 'stale' | 'missing';
 
 export interface SceneFreshness {
@@ -147,13 +136,6 @@ export interface SentenceCue {
   estimated: boolean;
 }
 
-export interface EditorTimeline {
-  fps: number;
-  durationInFrames: number;
-  scenes: Array<{ id: string; from: number; durationInFrames: number; transitionOutFrames: number }>;
-  captions: SentenceCue[];
-}
-
 export interface WaveformPeaks {
   sourceHash: string;
   buckets: number;
@@ -173,36 +155,3 @@ export interface AuditionMix {
   sfx: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number }>;
 }
 
-export interface DerivedState {
-  timeline: EditorTimeline;
-  placed: PlacedScene[];
-  status: Record<string, SceneFreshness>;
-  /** `take:s1`, `alignment:s1`, `presenter:s1` — the invalidation table, nothing else. */
-  staleWork: string[];
-  /** Presenter asset ids whose conditioning no longer matches. Visual and music assets are absent. */
-  staleAssets: string[];
-  sentences: Record<string, SentenceCue[]>;
-  audition: AuditionMix;
-  waveforms: Record<string, WaveformPeaks>;
-  diagnostics: string[];
-}
-
-export interface AuditionSession {
-  /** Session-only. Export uses the unmuted renderer mix. */
-  narration: boolean;
-  music: boolean;
-  ambience: boolean;
-  sfx: boolean;
-  /** `cpu` plays the Kokoro fixture and must not replace a selected Qwen voice. */
-  voicePreview: 'selected' | 'cpu';
-}
-
-export interface SessionState {
-  selectedSceneId: string | null;
-  selectedCaption: number | null;
-  playheadFrame: number;
-  audition: AuditionSession;
-  saveStatus: 'saved' | 'pending' | 'offline' | 'conflict';
-}
-
-export type Result = { ok: true } | { ok: false; reason: string };

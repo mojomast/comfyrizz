@@ -1,51 +1,45 @@
-/** Derived timeline, freshness and the renderer mix. */
+/** Freshness and sentence cues beside the compiled timeline. The store owns compile. */
+import type { CompiledTimeline } from '../../../../packages/planner/dist/src/browser.js';
 import { auditionParams } from './audio/audition.ts';
-import { sentenceCues, placeScenes } from './audio/speech.ts';
 import { sceneStatus, staleAssets, staleWork } from './audio/status.ts';
-import { waveformSnapshot } from './audio/waveform-cache.ts';
-import type { AlignmentChunk, DerivedState, EditorTimeline, ProjectDoc, SentenceCue } from './types.ts';
+import type { ProjectDoc } from './commands.ts';
+import type { SceneFreshness, SentenceCue } from './types.ts';
 
-export function derive(doc: ProjectDoc): DerivedState {
-  const chunks: Record<string, AlignmentChunk[] | undefined> = {};
-  for (const [id, align] of Object.entries(doc.alignment)) chunks[id] = align.chunks;
-  const placed = placeScenes(doc.pkg, chunks);
-  const diagnostics: string[] = [];
+export interface ScriptView {
+  status: Record<string, SceneFreshness>;
+  staleWork: string[];
+  staleAssets: string[];
+  sentences: Record<string, SentenceCue[]>;
+  diagnostics: string[];
+}
+
+export function scriptView(doc: ProjectDoc, timeline: CompiledTimeline | null): ScriptView {
+  const status: Record<string, SceneFreshness> = {};
+  for (const scene of doc.package.scenes) status[scene.id] = sceneStatus(doc, scene.id);
   const sentences: Record<string, SentenceCue[]> = {};
-  let timeline: EditorTimeline = { fps: 30, durationInFrames: 0, scenes: [], captions: [] };
-  if (!placed.ok) diagnostics.push(placed.reason);
-  else {
-    const scenes = placed.scenes.map(scene => ({
-      id: scene.id,
-      from: scene.from,
-      durationInFrames: scene.duration,
-      transitionOutFrames: scene.transitionOut,
+  for (const scene of doc.package.scenes) {
+    const cues = (timeline?.captions ?? []).filter(cue => cue.sceneId === scene.id);
+    sentences[scene.id] = cues.map((cue, index) => ({
+      index,
+      text: cue.text,
+      from: cue.from,
+      to: cue.to,
+      sceneId: cue.sceneId,
+      estimated: cue.estimated,
     }));
-    const captions: SentenceCue[] = [];
-    for (const scene of placed.scenes) {
-      const align = doc.alignment[scene.id];
-      const cues = align ? sentenceCues(align.chunks, scene.from, scene.id, placed.fps, doc.captions[scene.id]) : [];
-      sentences[scene.id] = cues;
-      captions.push(...cues);
-    }
-    const last = placed.scenes[placed.scenes.length - 1];
-    timeline = {
-      fps: placed.fps,
-      durationInFrames: last ? last.from + last.duration : 0,
-      scenes,
-      captions,
-    };
   }
-  const status: DerivedState['status'] = {};
-  for (const scene of doc.pkg.scenes) status[scene.id] = sceneStatus(doc, scene.id);
   return {
-    timeline,
-    placed: placed.ok ? placed.scenes : [],
     status,
     staleWork: staleWork(doc),
     staleAssets: staleAssets(doc),
     sentences,
-    audition: auditionParams(doc.pkg, timeline),
-    waveforms: waveformSnapshot(),
-    diagnostics,
+    diagnostics: timeline?.warnings ?? [],
   };
+}
+
+export function exportAudition(doc: ProjectDoc, timeline: CompiledTimeline | null) {
+  if (!timeline) {
+    return auditionParams(doc.package, { fps: 30, durationInFrames: 0, scenes: [] });
+  }
+  return auditionParams(doc.package, timeline);
 }

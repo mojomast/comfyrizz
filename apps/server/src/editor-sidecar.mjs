@@ -31,7 +31,14 @@ export function validateEditor(value) {
     }
     captionOverrides.push({ sceneId: item.sceneId, index: item.index, text: item.text });
   }
-  return { editor: { version: 1, captionOverrides } };
+  const editor = { version: 1, captionOverrides };
+  for (const key of ['takes', 'alignment', 'presenterClips']) {
+    const extra = value[key];
+    if (extra == null) continue;
+    if (typeof extra !== 'object' || Array.isArray(extra)) return { error: `editor.${key} must be an object` };
+    editor[key] = extra;
+  }
+  return { editor };
 }
 
 export function writeEditor(runtimeDir, id, editor) {

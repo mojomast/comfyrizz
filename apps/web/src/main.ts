@@ -12,6 +12,7 @@ import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
 import { mountPreview, updatePreview } from './preview';
+import { mountScriptAudioPanel } from './editor/inspector/panel.ts';
 import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
 import type { InlineAsset } from '../../renderer/src/components';
 
@@ -54,6 +55,10 @@ if (sessionToken()) {
 }
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
 let editorApi: SceneTimelineHandle | null = null;
+function adoptEditorPackage(next: PackageV1): void {
+  pkg = next;
+  editorStore.replaceDocument({ package: next as never });
+}
 let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
@@ -855,7 +860,7 @@ async function applySceneChipFlow(sceneId: string, chip: string): Promise<void> 
     if (result.package) {
       pkg = result.package;
       if (result.revision != null) pkg.revision = result.revision;
-      editorApi?.load(pkg);
+      adoptEditorPackage(pkg);
       updatePreview(pkg, timeline, generatedAssets);
       renderStoryboard();
     }
@@ -889,7 +894,7 @@ async function applyPresenterFlow(args: Record<string, unknown>, note: string): 
       pkg = result.package;
       if (result.revision != null) pkg.revision = result.revision;
       timeline.presenters = result.presenters ?? [];
-      editorApi?.load(pkg);
+      adoptEditorPackage(pkg);
       updatePreview(pkg, timeline, generatedAssets);
       renderStoryboard();
     }
@@ -1365,7 +1370,7 @@ function replaceChatMessages(messages: Array<{ role: 'user' | 'assistant'; conte
 function adoptChatProject(project: ChatProject, built: boolean): void {
   pkg = project.package;
   timeline = project.timeline;
-  editorApi?.load(pkg);
+  adoptEditorPackage(pkg);
   generatedAssets = project.generatedAssets;
   pendingGpu = project.pendingGpu as typeof pendingGpu;
   scrub.max = String(timeline.durationInFrames - 1);
@@ -1401,7 +1406,7 @@ async function runBrief(brief: string): Promise<void> {
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
     pkg = body.package as PackageV1;
     timeline = body.timeline as Timeline;
-    editorApi?.load(pkg);
+    adoptEditorPackage(pkg);
     generatedAssets = body.generatedAssets as Record<string, InlineAsset>;
     pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu : [];
     scrub.max = String(timeline.durationInFrames - 1);
@@ -1442,8 +1447,10 @@ function init(): void {
   scrub = $<HTMLInputElement>('scrub');
   scrub.max = String(timeline.durationInFrames - 1);
   const timelineHost = document.getElementById('scene-timeline');
+  const scriptHost = document.getElementById('script-audio-panel');
+  if (scriptHost) mountScriptAudioPanel(scriptHost, editorStore);
   if (timelineHost) {
-    editorApi = mountSceneTimeline(timelineHost, pkg, {
+    editorApi = mountSceneTimeline(timelineHost, editorStore, {
       onDocument(next, compiled) {
         pkg = next;
         timeline = compiled;

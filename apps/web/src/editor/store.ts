@@ -26,6 +26,7 @@ import {
   type EditorSidecar,
   type ProjectDoc,
 } from './commands.ts';
+import type { AlignmentChunk } from './types.ts';
 
 export type { Command, MeasuredInput, ProjectDoc, EditorSidecar };
 export type { CompiledTimeline };
@@ -105,6 +106,10 @@ export interface EditorExtras {
   acknowledgedSequence(): number;
   isDirty(): boolean;
   statusText(): string;
+  /** Measured durations the compiler is using, including sidecar alignment. */
+  measuredInput(): MeasuredInput;
+  /** Replace the open project. Clears undo. Not an edit of the previous document. */
+  replaceDocument(next: { package: EditablePackage; editor?: EditorSidecar; measured?: MeasuredInput }): void;
 }
 
 interface Patch {
@@ -156,7 +161,7 @@ function mediaRangesOf(doc: ProjectDoc): MediaRange[] {
 }
 
 function selectionFor(before: ProjectDoc, after: ProjectDoc, command: Command, fallback: string[]): string[] {
-  if (command.type === 'DuplicateScene') {
+  if (command.type === 'DuplicateScene' || command.type === 'SplitScene') {
     const previous = new Set(before.package.scenes.map(scene => scene.id));
     const added = after.package.scenes.find(scene => !previous.has(scene.id));
     return added ? [added.id] : fallback;
@@ -167,11 +172,30 @@ function selectionFor(before: ProjectDoc, after: ProjectDoc, command: Command, f
     if (scenes.length === 0) return [];
     return [scenes[Math.min(Math.max(index, 0), scenes.length - 1)]!.id];
   }
+  if (command.type === 'SetVoice') return fallback;
   return after.package.scenes.some(scene => scene.id === command.sceneId) ? [command.sceneId] : fallback;
 }
 
 function sameCommand(a: Command, b: Command): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Sidecar alignment wins over the measured report for scenes that still exist. */
+export function measuredFor(doc: ProjectDoc, base: MeasuredInput): MeasuredInput {
+  const narration: NonNullable<MeasuredInput['narration']> = { ...(base.narration ?? {}) };
+  for (const id of Object.keys(narration)) {
+    if (!doc.package.scenes.some(scene => scene.id === id)) delete narration[id];
+  }
+  for (const scene of doc.package.scenes) {
+    const chunks = doc.editor.alignment?.[scene.id]?.chunks;
+    if (!chunks?.length) continue;
+    narration[scene.id] = chunks.map((chunk: AlignmentChunk) => ({
+      text: chunk.text,
+      seconds: chunk.seconds,
+      ...(chunk.words ? { words: chunk.words } : {}),
+    }));
+  }
+  return { ...base, narration };
 }
 
 function patchOf(doc: ProjectDoc): Patch {
@@ -220,10 +244,11 @@ export function createEditorStore(options: {
     const doc = visible();
     const mediaRanges = mediaRangesOf(doc);
     try {
-      const timeline = compileTimeline(doc, measured);
+      const input = measuredFor(doc, measured);
+      const timeline = compileTimeline(doc, input);
       derived = {
         timeline,
-        inputHash: compileInputHash(doc, measured),
+        inputHash: compileInputHash(doc, input),
         compiledSequence: doc.editSequence,
         diagnostics: timeline.warnings ?? [],
         mediaRanges,
@@ -247,7 +272,7 @@ export function createEditorStore(options: {
 
   function compiles(doc: ProjectDoc): { ok: false; code: string; error: string } | null {
     try {
-      compileTimeline(doc, measured);
+      compileTimeline(doc, measuredFor(doc, measured));
       return null;
     } catch (error) {
       const coded = error as { code?: string; message?: string };
@@ -275,7 +300,7 @@ export function createEditorStore(options: {
   function applyAll(commands: Command[]): { ok: true; doc: ProjectDoc } | { ok: false; code?: string; error?: string } {
     let next = committed;
     for (const command of commands) {
-      const applied = applyCommand(next, command, measured);
+      const applied = applyCommand(next, command, measuredFor(next, measured));
       if (!applied.ok) return applied;
       next = applied.doc;
     }
@@ -316,7 +341,7 @@ export function createEditorStore(options: {
       return { ok: true };
     },
     preview(cmd) {
-      const applied = applyCommand(committed, cmd, measured);
+      const applied = applyCommand(committed, cmd, measuredFor(committed, measured));
       if (!applied.ok) return;
       if (compiles(applied.doc)) return;
       const sessionBefore = { ...session, selectedSceneIds: session.selectedSceneIds.slice(), previewing: false };
@@ -408,7 +433,7 @@ export function createEditorStore(options: {
     applyCompileResult(result) {
       const doc = visible();
       if (result.editSequence !== doc.editSequence) return false;
-      if (result.inputHash !== compileInputHash(doc, measured)) return false;
+      if (result.inputHash !== compileInputHash(doc, measuredFor(doc, measured))) return false;
       derived = { ...derived, timeline: result.timeline, inputHash: result.inputHash, compiledSequence: result.editSequence };
       snapshot = { doc, derived, session };
       for (const listener of listeners) listener();
@@ -417,6 +442,27 @@ export function createEditorStore(options: {
     acknowledgedSequence: () => acked,
     isDirty: () => committed.editSequence !== acked,
     statusText: () => saveStatusText(store.saveStatus()),
+    measuredInput: () => measuredFor(visible(), measured),
+    replaceDocument(next) {
+      preview = null;
+      undoStack.length = 0;
+      redoStack.length = 0;
+      measured = next.measured ?? {};
+      committed = {
+        package: structuredClone(next.package),
+        editor: structuredClone(next.editor ?? emptyEditor()),
+        editSequence: 0,
+      };
+      acked = 0;
+      phase = 'idle';
+      session = {
+        ...session,
+        selectedSceneIds: committed.package.scenes[0] ? [committed.package.scenes[0].id] : [],
+        playheadFrame: 0,
+        previewing: false,
+      };
+      publish();
+    },
   };
 
   return store;

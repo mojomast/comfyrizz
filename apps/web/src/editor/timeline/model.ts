@@ -3,7 +3,7 @@
  * without a browser. Drags call these helpers once per animation frame and
  * dispatch a command only on release.
  */
-import type { Timeline } from '../types.ts';
+import type { CompiledTimeline as Timeline } from '../../../../../packages/planner/dist/src/browser.js';
 import type { Command } from '../commands.ts';
 
 export const MIN_ZOOM = 0.2;

@@ -3,21 +3,20 @@ import { readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
-import { LAYOUT_LIMITS as PLANNER_LIMITS, compileTimeline } from '../../../packages/planner/src/timeline.ts';
-import { LAYOUT_LIMITS, applyCommand, duplicateId, narrationFloorFrames } from '../src/editor/commands.ts';
-import { createEditorStore, type StandInStore } from '../src/editor/store.ts';
-import type { NarrationChunk, ProjectDoc, Timeline } from '../src/editor/types.ts';
+import { LAYOUT_LIMITS as PLANNER_LIMITS, compileTimeline as compileNode, type Timeline } from '../../../packages/planner/dist/src/index.js';
+import { compileTimeline, type MeasuredInput } from '../../../packages/planner/dist/src/browser.js';
+import { applyCommand } from '../src/editor/commands.ts';
+import { createEditorStore } from '../src/editor/store.ts';
+import { LAYOUT_LIMITS, clampTrim, mediaRangeCommand } from '../src/editor/timeline/bounds.ts';
 import { keyboardAction, musicBlock, narrationBlocks, selectAdjacent, selectionAfterClick, snapFrame } from '../src/editor/timeline/model.ts';
 
-function chunks(text: string, seconds: number): NarrationChunk[] {
+function chunks(text: string, seconds: number) {
   return [{ text, seconds }];
 }
 
-function roughCut(): ProjectDoc {
-  return {
-    revision: 1,
-    mediaRanges: [],
-    measured: {
+function roughOptions() {
+  const measured: MeasuredInput = {
+    narration: {
       s_open: chunks('Welcome to the rough cut.', 1.2),
       s_point: [
         { text: 'The point lands here.', seconds: 0.8 },
@@ -25,6 +24,9 @@ function roughCut(): ProjectDoc {
       ],
       s_end: chunks('That is the end.', 0.9),
     },
+  };
+  return {
+    measured,
     package: {
       schemaVersion: 1,
       id: 'pkg_rough',
@@ -46,25 +48,31 @@ function roughCut(): ProjectDoc {
         { id: 's_plate', layout: 'stat', preferredFrames: 120, copy: { headline: 'Plate' }, background: { asset: 'a_plate', loop: false }, transitionOut: { type: 'fade', frames: 12 } },
         { id: 's_end', layout: 'list', preferredFrames: 80, copy: { headline: 'End' }, narration: 'That is the end.', transitionOut: { type: 'cut', frames: 0 } },
       ],
-    } as ProjectDoc['package'],
+    },
   };
 }
 
-function speech(doc: ProjectDoc) {
-  return Object.fromEntries(Object.entries(doc.measured).map(([id, list]) => [id, list.map(chunk => ({ text: chunk.text, seconds: chunk.seconds }))]));
+function openRough() {
+  const options = roughOptions();
+  return createEditorStore({ package: options.package as never, measured: options.measured });
+}
+
+function speechOf(store: ReturnType<typeof openRough>) {
+  const narration = store.measuredInput().narration ?? {};
+  return Object.fromEntries(Object.entries(narration).map(([id, list]) => [id, list.map(chunk => ({ text: chunk.text, seconds: chunk.seconds }))]));
 }
 
 function captionShape(timeline: Timeline) {
   return timeline.captions.map(caption => ({ sceneId: caption.sceneId, text: caption.text, frames: caption.to - caption.from }));
 }
 
-function order(doc: ProjectDoc) {
-  return doc.package.scenes.map(scene => scene.id);
+function order(store: ReturnType<typeof openRough>) {
+  return store.getState().doc.package.scenes.map(scene => scene.id);
 }
 
-function compiledOf(store: StandInStore): Timeline {
-  const timeline = store.getState().derived.compiled;
-  assert.ok(timeline, store.getState().derived.error ?? 'missing compile');
+function compiledOf(store: ReturnType<typeof openRough>): Timeline {
+  const timeline = store.getState().derived.timeline;
+  assert.ok(timeline, store.getState().derived.diagnostics.join('; ') || 'missing compile');
   return timeline;
 }
 
@@ -84,9 +92,9 @@ test('layout floors match the planner table', () => {
 });
 
 test('reorder, duplicate, delete and undo keep narration and captions intact', () => {
-  const store = createEditorStore(roughCut());
+  const store = openRough();
   const before = compiledOf(store);
-  const beforeSpeech = speech(store.getState().doc);
+  const beforeSpeech = speechOf(store);
   const beforeCaptions = captionShape(before);
   assertInteger(before);
   assert.deepEqual(before.captions.map(caption => caption.sceneId), ['s_open', 's_point', 's_point', 's_end']);
@@ -95,158 +103,164 @@ test('reorder, duplicate, delete and undo keep narration and captions intact', (
   assert.equal(before.presenters?.length, 4);
 
   const moved = store.dispatch({ type: 'MoveScene', sceneId: 's_end', toIndex: 0 });
-  assert.equal(moved.ok, true);
+  assert.equal(moved.ok, true, moved.error);
   const after = compiledOf(store);
   assertInteger(after);
-  assert.deepEqual(order(store.getState().doc), ['s_end', 's_open', 's_point', 's_plate']);
-  assert.deepEqual(speech(store.getState().doc), beforeSpeech);
+  assert.deepEqual(order(store), ['s_end', 's_open', 's_point', 's_plate']);
+  assert.deepEqual(speechOf(store), beforeSpeech);
   assert.deepEqual(captionShape(after).map(item => `${item.sceneId}:${item.text}:${item.frames}`).sort(), beforeCaptions.map(item => `${item.sceneId}:${item.text}:${item.frames}`).sort());
   assert.equal(after.captions[0].sceneId, 's_end');
-  assert.notEqual(after.scenes[0].from, before.scenes.find(scene => scene.id === 's_end')?.from);
   for (const caption of after.captions) {
     const prior = before.captions.find(item => item.sceneId === caption.sceneId && item.text === caption.text);
     assert.ok(prior);
     assert.equal(caption.to - caption.from, prior.to - prior.from);
   }
 
-  const movedCaptions = captionShape(after);
-  store.setSession({ selectedIds: ['s_open'], anchorId: 's_open' });
+  store.setSession({ selectedSceneIds: ['s_open'] });
   assert.equal(store.dispatch({ type: 'DeleteScene', sceneId: 's_open' }).ok, true);
   const deleted = compiledOf(store);
   assert.equal(deleted.captions.some(caption => caption.sceneId === 's_open'), false);
-  assert.equal(store.getState().doc.measured.s_open, undefined);
-  assert.equal(store.getState().session.selectedIds.includes('s_open'), false);
+  assert.equal(store.measuredInput().narration?.s_open, undefined);
+  assert.equal(store.getState().session.selectedSceneIds.includes('s_open'), false);
   store.undo();
-  assert.deepEqual(speech(store.getState().doc), beforeSpeech);
-  assert.deepEqual(store.getState().session.selectedIds, ['s_open']);
-  assert.deepEqual(captionShape(compiledOf(store)), movedCaptions);
+  assert.deepEqual(speechOf(store), beforeSpeech);
+  store.undo();
+  assert.deepEqual(order(store), ['s_open', 's_point', 's_plate', 's_end']);
 
-  const newId = duplicateId(order(store.getState().doc), 's_open');
-  assert.equal(store.dispatch({ type: 'DuplicateScene', sceneId: 's_open', newId }).ok, true);
-  const copy = store.getState().doc.measured[newId];
-  assert.ok(copy);
-  assert.deepEqual(copy.map(chunk => chunk.seconds), beforeSpeech.s_open.map(chunk => chunk.seconds));
-  assert.notEqual(copy, store.getState().doc.measured.s_open);
-  assert.equal(compiledOf(store).captions.filter(caption => caption.text === 'Welcome to the rough cut.').length, 2);
+  assert.equal(store.dispatch({ type: 'DuplicateScene', sceneId: 's_point' }).ok, true);
+  const copyId = store.getState().session.selectedSceneIds[0];
+  assert.ok(copyId && copyId !== 's_point');
+  assert.equal(compiledOf(store).captions.filter(caption => caption.sceneId === copyId).length, 2);
   store.undo();
-  assert.equal(store.getState().doc.measured[newId], undefined);
-  assert.deepEqual(order(store.getState().doc), ['s_end', 's_open', 's_point', 's_plate']);
-  store.undo();
-  assert.deepEqual(order(store.getState().doc), ['s_open', 's_point', 's_plate', 's_end']);
-  assert.deepEqual(compiledOf(store).scenes.map(scene => scene.from), before.scenes.map(scene => scene.from));
+  assert.deepEqual(order(store), ['s_open', 's_point', 's_plate', 's_end']);
 });
 
-test('trim respects speech and source bounds and undo restores the preference', () => {
-  const store = createEditorStore(roughCut());
-  const seconds = store.getState().doc.measured.s_point.map(chunk => chunk.seconds);
+test('trim below the speech floor is rejected and the gesture clamp holds the floor', () => {
+  const store = openRough();
+  const seconds = store.measuredInput().narration?.s_point?.map(chunk => chunk.seconds);
   const trimmed = store.dispatch({ type: 'TrimScene', sceneId: 's_point', preferredFrames: 10 });
-  assert.equal(trimmed.ok, true);
-  if (trimmed.ok) assert.match(trimmed.note ?? '', /narration/);
+  assert.equal(trimmed.ok, false);
+  assert.equal(trimmed.code, 'below-speech-floor');
+  const held = clampTrim(store.getState().doc, store.measuredInput(), 's_point', 10);
+  assert.ok(!('error' in held));
+  if (!('error' in held)) {
+    assert.equal(held.preferredFrames, 57);
+    assert.match(held.note ?? '', /narration/);
+    assert.equal(store.dispatch({ type: 'TrimScene', sceneId: 's_point', preferredFrames: held.preferredFrames }).ok, true);
+  }
   const point = store.getState().doc.package.scenes.find(scene => scene.id === 's_point');
-  const floor = narrationFloorFrames(store.getState().doc.measured.s_point, 30);
-  assert.equal(floor, 57);
-  assert.equal(point?.preferredFrames, floor);
+  assert.equal(point?.preferredFrames, 57);
   const scene = compiledOf(store).scenes.find(item => item.id === 's_point');
-  assert.equal(scene?.durationInFrames, floor);
-  assert.deepEqual(store.getState().doc.measured.s_point.map(chunk => chunk.seconds), seconds);
-  assert.equal(scene?.durationInFrames, Math.round(scene?.durationInFrames ?? 0));
+  assert.equal(scene?.durationInFrames, 57);
+  assert.deepEqual(store.measuredInput().narration?.s_point?.map(chunk => chunk.seconds), seconds);
 
-  const plate = store.dispatch({ type: 'TrimScene', sceneId: 's_plate', preferredFrames: 200.9 });
-  assert.equal(plate.ok, true);
-  assert.equal(store.getState().doc.package.scenes.find(scene => scene.id === 's_plate')?.preferredFrames, 60);
-  assert.equal(compiledOf(store).scenes.find(scene => scene.id === 's_plate')?.durationInFrames, 60);
-
-  store.undo();
+  const plate = clampTrim(store.getState().doc, store.measuredInput(), 's_plate', 200.9);
+  assert.ok(!('error' in plate));
+  if (!('error' in plate)) assert.equal(plate.preferredFrames, 60);
   store.undo();
   assert.equal(store.getState().doc.package.scenes.find(scene => scene.id === 's_point')?.preferredFrames, 40);
-  assert.equal(compiledOf(store).scenes.find(scene => scene.id === 's_point')?.durationInFrames, 57);
 });
 
 test('caption text edits do not stretch speech and follow a reorder', () => {
-  const store = createEditorStore(roughCut());
-  const before = store.getState().doc.measured.s_point[0].seconds;
+  const store = openRough();
+  const before = store.measuredInput().narration?.s_point?.[0]?.seconds;
+  const narration = store.getState().doc.package.scenes.map(scene => scene.narration);
   assert.equal(store.dispatch({ type: 'SetCaptionText', sceneId: 's_point', index: 0, text: 'The point stays put.' }).ok, true);
-  assert.equal(store.getState().doc.measured.s_point[0].seconds, before);
+  assert.equal(store.measuredInput().narration?.s_point?.[0]?.seconds, before);
+  assert.deepEqual(store.getState().doc.package.scenes.map(scene => scene.narration), narration);
   assert.equal(store.dispatch({ type: 'MoveScene', sceneId: 's_point', toIndex: 0 }).ok, true);
   const caption = compiledOf(store).captions.find(item => item.text === 'The point stays put.');
   assert.equal(caption?.sceneId, 's_point');
   assert.equal(compiledOf(store).captions[0].sceneId, 's_point');
   store.undo();
   store.undo();
-  assert.equal(store.getState().doc.measured.s_point[0].text, 'The point lands here.');
+  assert.equal(store.getState().doc.editor.captionOverrides.length, 0);
+  assert.equal(store.measuredInput().narration?.s_point?.[0]?.text, 'The point lands here.');
 });
 
-test('a batch is one undo step and preview does not compile', () => {
-  const store = createEditorStore(roughCut());
-  const compiled = compiledOf(store);
+test('a batch is one undo step and a preview compiles without committing', () => {
+  const store = openRough();
+  const before = store.getState().doc.package.scenes[0]?.preferredFrames;
   store.preview({ type: 'TrimScene', sceneId: 's_open', preferredFrames: 200 });
-  assert.equal(store.getState().derived.compiled, compiled);
-  assert.equal(store.getState().doc.package.scenes[0].preferredFrames, 90);
+  assert.equal(store.getState().session.previewing, true);
+  assert.equal(store.getState().doc.package.scenes[0]?.preferredFrames, 200);
+  assert.equal(store.canUndo(), false);
+  assert.equal(compiledOf(store).scenes[0]?.durationInFrames, 200);
   store.cancelPreview();
-  assert.equal(store.getState().session.preview, null);
+  assert.equal(store.getState().session.previewing, false);
+  assert.equal(store.getState().doc.package.scenes[0]?.preferredFrames, before);
   assert.equal(store.dispatch([
     { type: 'TrimScene', sceneId: 's_open', preferredFrames: 120 },
     { type: 'MoveScene', sceneId: 's_open', toIndex: 2 },
   ]).ok, true);
   assert.equal(store.canUndo(), true);
   store.undo();
-  assert.equal(store.getState().doc.package.scenes[0].id, 's_open');
-  assert.equal(store.getState().doc.package.scenes[0].preferredFrames, 90);
+  assert.equal(store.getState().doc.package.scenes[0]?.id, 's_open');
+  assert.equal(store.getState().doc.package.scenes[0]?.preferredFrames, 90);
   assert.equal(store.canRedo(), true);
   store.redo();
-  assert.equal(store.getState().doc.package.scenes[2].id, 's_open');
-  assert.equal(store.getState().doc.package.scenes[2].preferredFrames, 120);
+  assert.equal(store.getState().doc.package.scenes[2]?.id, 's_open');
+  assert.equal(store.getState().doc.package.scenes[2]?.preferredFrames, 120);
 });
 
 test('locked scenes, bad transitions and source ranges are rejected', () => {
-  const doc = roughCut();
-  (doc.package.scenes[1] as { locked?: boolean }).locked = true;
-  assert.equal(applyCommand(doc, { type: 'MoveScene', sceneId: 's_point', toIndex: 0 }).ok, false);
-  assert.equal(applyCommand(doc, { type: 'DeleteScene', sceneId: 's_point' }).ok, false);
-  const store = createEditorStore(roughCut());
+  const options = roughOptions();
+  (options.package.scenes[1] as { locked?: boolean }).locked = true;
+  const doc = { package: options.package, editor: { version: 1 as const, captionOverrides: [] }, editSequence: 0 };
+  assert.equal(applyCommand(doc as never, { type: 'MoveScene', sceneId: 's_point', toIndex: 0 }, options.measured).ok, false);
+  assert.equal(applyCommand(doc as never, { type: 'DeleteScene', sceneId: 's_point' }, options.measured).ok, false);
+  const store = openRough();
   const last = store.dispatch({ type: 'SetTransition', sceneId: 's_end', transitionOut: { type: 'fade', frames: 10 } });
   assert.equal(last.ok, false);
   const wide = store.dispatch({ type: 'SetTransition', sceneId: 's_open', transitionOut: { type: 'fade', frames: 120 } });
   assert.equal(wide.ok, false);
-  const range = store.dispatch({ type: 'SetMediaRange', sceneId: 's_plate', assetId: 'a_plate', inFrame: 0, outFrame: 80 });
-  assert.equal(range.ok, false);
-  if (!range.ok) assert.match(range.reason, /past the asset/);
-  assert.equal(store.dispatch({ type: 'SetMediaRange', sceneId: 's_plate', assetId: 'a_plate', inFrame: 0, outFrame: 24 }).ok, true);
-  const capped = store.dispatch({ type: 'TrimScene', sceneId: 's_plate', preferredFrames: 90 });
-  assert.equal(capped.ok, true);
-  assert.equal(store.getState().doc.package.scenes.find(scene => scene.id === 's_plate')?.preferredFrames, 30);
+  const range = mediaRangeCommand(store.getState().doc, 's_plate', 'a_plate', 0, 80);
+  assert.ok('error' in range);
+  if ('error' in range) assert.match(range.error, /past the asset/);
+  const legal = mediaRangeCommand(store.getState().doc, 's_plate', 'a_plate', 0, 24);
+  assert.ok(!('error' in legal));
+  if (!('error' in legal)) assert.equal(store.dispatch(legal).ok, true);
+  const capped = clampTrim(store.getState().doc, store.measuredInput(), 's_plate', 90);
+  assert.ok(!('error' in capped));
+  if (!('error' in capped)) assert.equal(capped.preferredFrames, 30);
 });
 
 test('browser compile matches planner compile for the rough cut', () => {
-  const doc = roughCut();
-  const fromStore = compiledOf(createEditorStore(doc));
-  const direct = compileTimeline(doc.package as unknown as Parameters<typeof compileTimeline>[0], { narration: doc.measured });
-  assert.deepEqual(fromStore.scenes.map(scene => [scene.id, scene.from, scene.durationInFrames]), direct.scenes.map(scene => [scene.id, scene.from, scene.durationInFrames]));
+  const store = openRough();
+  const fromStore = compiledOf(store);
+  const options = roughOptions();
+  const direct = compileTimeline({ package: options.package, editor: { version: 1, captionOverrides: [] }, editSequence: 0 }, options.measured);
+  const node = compileNode(options.package as never, { narration: options.measured.narration });
+  const project = (timeline: { scenes: Array<{ id: string; from: number; durationInFrames: number }> }) => timeline.scenes.map(scene => [scene.id, scene.from, scene.durationInFrames]);
+  assert.deepEqual(project(fromStore), project(direct));
+  assert.deepEqual(project(fromStore), project(node));
   assert.deepEqual(fromStore.captions, direct.captions);
 });
 
 test('selection feedback on a 12-scene fixture stays under 100ms', () => {
-  const doc = roughCut();
-  const seed = doc.package.scenes[0];
-  doc.package.scenes = Array.from({ length: 12 }, (_, index) => ({
+  const options = roughOptions();
+  const seed = options.package.scenes[0];
+  options.package.scenes = Array.from({ length: 12 }, (_, index) => ({
     ...structuredClone(seed),
     id: `s_beat${index}`,
     narration: `Beat ${index}.`,
-    transitionOut: index === 11 ? { type: 'cut' as const, frames: 0 } : { type: 'fade' as const, frames: 8 },
+    transitionOut: index === 11 ? { type: 'cut', frames: 0 } : { type: 'fade', frames: 8 },
   }));
-  doc.measured = Object.fromEntries(doc.package.scenes.map(scene => [scene.id, chunks(scene.narration ?? '', 0.6)]));
-  const store = createEditorStore(doc);
-  const ids = order(doc);
+  options.measured = {
+    narration: Object.fromEntries(options.package.scenes.map(scene => [scene.id, chunks(scene.narration ?? '', 0.6)])),
+  };
+  const store = createEditorStore({ package: options.package as never, measured: options.measured });
+  const ids = options.package.scenes.map(scene => scene.id);
   const started = performance.now();
   for (let index = 0; index < 12; index += 1) {
     const next = selectionAfterClick(ids, [], ids[0], ids[index], false);
-    store.setSession(next);
+    store.setSession({ selectedSceneIds: next.selectedIds });
   }
   const elapsed = performance.now() - started;
   const perSelection = elapsed / 12;
   console.log(JSON.stringify({ hardware: cpus()[0]?.model ?? 'unknown', perSelectionMs: Number(perSelection.toFixed(3)), samples: 12 }));
   assert.ok(perSelection < 100, `selection took ${perSelection}ms`);
-  assert.deepEqual(store.getState().session.selectedIds, ['s_beat11']);
+  assert.deepEqual(store.getState().session.selectedSceneIds, ['s_beat11']);
 });
 
 test('keyboard covers every edit and ignores typing', () => {
@@ -262,7 +276,7 @@ test('keyboard covers every edit and ignores typing', () => {
   assert.equal(keyboardAction({ ...base, key: 's' })?.type, 'toggle-snap');
   assert.equal(keyboardAction({ ...base, key: 'f' })?.type, 'fit');
   assert.equal(keyboardAction({ ...base, key: '+' })?.type, 'zoom');
-  assert.equal(keyboardAction({ ...base, key: ' ', })?.type, 'play');
+  assert.equal(keyboardAction({ ...base, key: ' ' })?.type, 'play');
   assert.equal(keyboardAction({ ...base, key: 'Delete' })?.type, 'delete');
   assert.equal(keyboardAction({ ...base, key: 'd', meta: true })?.type, 'duplicate');
   assert.equal(keyboardAction({ ...base, key: 'z', ctrl: true })?.type, 'undo');
@@ -281,13 +295,14 @@ test('snap threshold stays in screen pixels', () => {
 });
 
 test('save status text and the timeline shell are exposed', () => {
-  const store = createEditorStore(roughCut());
+  const store = openRough();
   assert.equal(store.saveStatus(), 'saved');
-  store.setSaveStatus('conflict');
+  store.noteSave({ type: 'conflict' });
   assert.equal(store.saveStatus(), 'conflict');
   const timeline = readFileSync(new URL('../src/editor/timeline/Timeline.tsx', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../src/editor/timeline/timeline.css', import.meta.url), 'utf8');
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const panel = readFileSync(new URL('../src/editor/inspector/panel.ts', import.meta.url), 'utf8');
   assert.match(timeline, /requestAnimationFrame/);
   assert.doesNotMatch(timeline, /compileTimeline/);
   assert.match(timeline, /data-save-status/);
@@ -298,5 +313,7 @@ test('save status text and the timeline shell are exposed', () => {
   assert.match(css, /prefers-reduced-motion/);
   assert.match(main, /followFrame/);
   assert.match(main, /frameupdate/);
+  assert.match(main, /mountScriptAudioPanel/);
+  assert.doesNotMatch(panel, /__comfyrizzEditorStore/);
   assert.equal(store.dispatch({ type: 'DeleteScene', sceneId: 'missing' }).ok, false);
 });

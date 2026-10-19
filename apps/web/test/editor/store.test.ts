@@ -145,6 +145,61 @@ test('media ranges keep source seconds and integer source frames', () => {
   assert.equal(Number.isInteger(range?.startFrame), true);
 });
 
+test('transition, narration, voice and split undo back to the same document', () => {
+  const editor = createEditorStore({
+    package: {
+      ...pkg(),
+      voice: { enabled: true, engine: 'kokoro', voice: 'af_heart', speed: 1 },
+      scenes: [
+        { id: 's_open', layout: 'title', preferredFrames: 90, copy: { headline: 'Open' }, narration: 'one two three four', transitionOut: { type: 'cut', frames: 0 } },
+        { id: 's_end', layout: 'list', preferredFrames: 90, copy: { headline: 'End' }, narration: 'Close.', transitionOut: { type: 'cut', frames: 0 } },
+      ],
+    },
+    editor: {
+      version: 1,
+      captionOverrides: [],
+      takes: {
+        s_open: {
+          takeId: 'take-open', assetId: 'a_plate', sourceHash: 'hash-open', inputFingerprint: 'stale-on-purpose',
+          sampleRate: 8000, sampleCount: 8000, range: { inSample: 0, outSample: 8000 },
+        },
+      },
+      alignment: {
+        s_open: {
+          sourceHash: 'hash-open', textFingerprint: 'will-change',
+          chunks: [{ text: 'one two three four', seconds: 1, words: [
+            { text: 'one', start: 0, end: 0.25 }, { text: 'two', start: 0.25, end: 0.5 },
+            { text: 'three', start: 0.5, end: 0.75 }, { text: 'four', start: 0.75, end: 1 },
+          ] }],
+        },
+      },
+      presenterClips: {},
+    },
+  });
+  const before = docBody(editor.getState().doc);
+  const commands: Command[] = [
+    { type: 'SetTransition', sceneId: 's_open', transitionOut: { type: 'fade', frames: 8 } },
+    { type: 'SetNarrationText', sceneId: 's_open', text: 'rewritten line' },
+    { type: 'SetVoice', voice: { enabled: true, engine: 'none', voice: 'af_heart', speed: 1 } },
+    { type: 'SplitScene', sceneId: 's_open', frame: 15, newSceneId: 's_open_b' },
+  ];
+  for (const command of commands) {
+    const one = createEditorStore({
+      package: structuredClone(editor.getState().doc.package),
+      editor: structuredClone(before.editor),
+    });
+    const start = docBody(one.getState().doc);
+    const result = one.dispatch(command);
+    assert.equal(result.ok, true, `${command.type} ${result.error ?? ''}`);
+    assert.notDeepEqual(docBody(one.getState().doc), start);
+    one.undo();
+    assert.deepEqual(docBody(one.getState().doc), start);
+    assert.equal(one.canRedo(), true);
+    one.redo();
+    assert.notDeepEqual(docBody(one.getState().doc), start);
+  }
+});
+
 test('undo restores selection and a failed batch changes nothing', () => {
   const editor = store();
   editor.setSession({ selectedSceneIds: ['s_mid'] });

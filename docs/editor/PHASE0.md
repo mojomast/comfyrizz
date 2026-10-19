@@ -32,6 +32,8 @@ The compiler can still make the scene longer than `preferredFrames` (layout mini
 
 `dispatch([cmd, cmd])` is one undo step and is atomic. That is the agent batch boundary. Undo restores `package` and `editor` and the selection. `editSequence` only increases (including on undo and redo); it is the save/compile cursor, not part of the document patch.
 
+`q/editor-phase0` was not on origin, so this note stays the Phase 0 record. The timeline and the script panel call this store. Their extra commands are `SetTransition`, `SplitScene`, `SetNarrationText` and `SetVoice`, with the same undo patch. `SetTransition` rejects a last-scene outgoing transition and a length outside 0–120 frames. `SplitScene` cuts a sidecar narration take at a project frame and keeps playback rate 1. `SetNarrationText` and `SetVoice` change the package fields the freshness check reads; caption overrides for that scene are cleared on a narration edit and are not speech. Takes, alignment and presenter clips stay on editor sidecar version 1, beside `captionOverrides`. Moving, deleting, duplicating or splitting clears an outgoing transition that would otherwise land on the last scene, because the compiler rejects that. A trim below the speech floor is still rejected. The timeline clamps a drag to that floor before it dispatches. Undo does not rewind `editSequence`, so the save line stays pending until that new sequence is acknowledged.
+
 ## Editor sidecar (not a schema change)
 
 Caption overrides and other editor metadata live in a versioned sidecar, `editor` version 1:

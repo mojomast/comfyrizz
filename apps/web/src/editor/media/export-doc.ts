@@ -2,27 +2,27 @@
  * Editor export sidecar. Session, tickets and API tokens are not copied.
  * The package itself stays the source of truth; this file adds source ranges.
  */
-import type { ProjectDoc } from '../types.ts';
+import type { ProjectDoc } from '../commands.ts';
 
-export interface EditorSidecar {
+export interface EditorExportSidecar {
   version: 1;
   packageId: string;
   editSeq: number;
-  takes: ProjectDoc['takes'];
-  alignment: ProjectDoc['alignment'];
-  captions: ProjectDoc['captions'];
-  presenterClips: ProjectDoc['presenterClips'];
+  takes: NonNullable<ProjectDoc['editor']['takes']>;
+  alignment: NonNullable<ProjectDoc['editor']['alignment']>;
+  captions: ProjectDoc['editor']['captionOverrides'];
+  presenterClips: NonNullable<ProjectDoc['editor']['presenterClips']>;
 }
 
-export function editorExportSidecar(doc: ProjectDoc): EditorSidecar {
+export function editorExportSidecar(doc: ProjectDoc): EditorExportSidecar {
   return {
     version: 1,
-    packageId: doc.pkg.id,
-    editSeq: doc.editSeq,
-    takes: doc.takes,
-    alignment: doc.alignment,
-    captions: doc.captions,
-    presenterClips: doc.presenterClips,
+    packageId: String(doc.package.id ?? ''),
+    editSeq: doc.editSequence,
+    takes: doc.editor.takes ?? {},
+    alignment: doc.editor.alignment ?? {},
+    captions: doc.editor.captionOverrides,
+    presenterClips: doc.editor.presenterClips ?? {},
   };
 }
 

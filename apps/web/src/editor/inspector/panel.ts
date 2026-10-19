@@ -1,22 +1,19 @@
 /**
- * Script, audio and media panel. Own file so the timeline panel can land beside it.
- * Buttons and numeric fields are the non-drag path for split, seek and caption edits.
+ * Script, audio and media panel. Edits go through the EditorStore passed in
+ * from the shell. Mute and solo stay in this view and are not commands.
  */
+import './panel.css';
 import { browserPeakPort, loadPeaks } from '../audio/waveform.ts';
 import { resolveVoicePreview } from '../audio/voice-preview.ts';
 import type { Command } from '../commands.ts';
-import { DEMO_SOURCE, demoSamples, demoStore } from './demo.ts';
-import type { StandInEditorStore } from '../store.ts';
-import type { SceneFreshness, SessionState } from '../types.ts';
+import { nextSceneId } from '../commands.ts';
+import { exportAudition, scriptView } from '../derive.ts';
+import { DEMO_SOURCE, demoSamples } from './demo.ts';
+import type { EditorStore, EditorExtras } from '../store.ts';
+import { saveStatusText } from '../store.ts';
+import type { SceneFreshness } from '../types.ts';
 
-type PanelStore = StandInEditorStore;
-
-const SAVE_TEXT: Record<SessionState['saveStatus'], string> = {
-  saved: 'Saved',
-  pending: 'Unsaved changes',
-  offline: 'Offline. Changes stay in this session.',
-  conflict: 'Conflict. A recovery copy was kept.',
-};
+type PanelStore = EditorStore & EditorExtras;
 
 function freshnessText(status: SceneFreshness | undefined): string {
   if (!status) return 'No scene selected.';
@@ -28,7 +25,7 @@ function tone(status: SceneFreshness | undefined): string {
   return status.take === 'stale' || status.alignment === 'stale' || status.presenter === 'stale' ? 'stale' : 'fresh';
 }
 
-export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore = demoStore(), samples = demoSamples()): void {
+export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samples = demoSamples()): void {
   host.innerHTML = '';
   const panel = document.createElement('section');
   panel.className = 'sa-panel';
@@ -102,15 +99,18 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore = dem
   const mixEl = q<HTMLParagraphElement>('mix');
   const canvas = q<HTMLCanvasElement>('wave');
   let captionIndex = 0;
+  let waveMin: Float32Array | null = null;
+  let waveMax: Float32Array | null = null;
 
-  const selectedId = () => sceneSelect.value;
+  const selectedId = () => sceneSelect.value || store.getState().session.selectedSceneIds[0] || '';
   const run = (cmd: Command) => {
     const result = store.dispatch(cmd);
-    action.textContent = result.ok ? 'Edit applied.' : result.reason;
+    action.textContent = result.ok ? 'Edit applied.' : (result.error ?? 'Edit failed.');
   };
 
   sceneSelect.addEventListener('change', () => {
-    store.setSelection(selectedId(), null);
+    const id = selectedId();
+    if (id) store.setSession({ selectedSceneIds: [id] });
     fillForm();
   });
   q<HTMLButtonElement>('undo').addEventListener('click', () => store.undo());
@@ -119,7 +119,7 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore = dem
     run({ type: 'SetNarrationText', sceneId: selectedId(), text: narration.value });
   });
   q<HTMLButtonElement>('apply-caption').addEventListener('click', () => {
-    run({ type: 'SetCaptionText', sceneId: selectedId(), chunkIndex: captionIndex, text: caption.value });
+    run({ type: 'SetCaptionText', sceneId: selectedId(), index: captionIndex, text: caption.value });
   });
   q<HTMLButtonElement>('set-voice').addEventListener('click', () => {
     const engine = panel.querySelector<HTMLSelectElement>('[data-engine]')!.value as 'kokoro' | 'qwen3-tts' | 'none';
@@ -135,52 +135,47 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore = dem
   });
   q<HTMLButtonElement>('preview-voice').addEventListener('click', () => {
     const state = store.getState();
-    const status = state.derived.status[selectedId()];
+    const status = scriptView(state.doc, state.derived.timeline).status[selectedId()];
+    const fresh = status?.take === 'fresh';
     const preview = resolveVoicePreview({
-      engine: state.doc.pkg.voice?.engine,
-      takeFresh: status?.take === 'fresh' && state.session.audition.voicePreview !== 'cpu',
-      takeSamples: status?.take === 'fresh' ? samples : undefined,
+      engine: state.doc.package.voice?.engine,
+      takeFresh: fresh,
+      takeSamples: fresh ? samples : undefined,
       takeSampleRate: 8000,
-      preferCpu: state.session.audition.voicePreview === 'cpu' || status?.take !== 'fresh',
+      preferCpu: !fresh,
     });
     previewEl.textContent = preview.label;
     play(preview.samples, preview.sampleRate);
   });
   q<HTMLButtonElement>('split').addEventListener('click', () => {
     const frame = Number(frameInput.value || store.getState().session.playheadFrame);
-    const id = `s_b${store.getState().doc.editSeq}`;
+    const id = nextSceneId(store.getState().doc.package.scenes, selectedId() || 's');
     run({ type: 'SplitScene', sceneId: selectedId(), frame, newSceneId: id });
   });
   sentences.addEventListener('click', event => {
     const button = (event.target as HTMLElement).closest('button');
     if (!button) return;
     const index = Number(button.dataset.index);
-    const cue = store.getState().derived.sentences[selectedId()]?.find(item => item.index === index);
+    const cue = scriptView(store.getState().doc, store.getState().derived.timeline).sentences[selectedId()]?.find(item => item.index === index);
     if (!cue) return;
     captionIndex = index;
     caption.value = cue.text;
-    store.setPlayhead(cue.from);
-    store.setSelection(selectedId(), index);
+    store.setSession({ playheadFrame: cue.from, selectedSceneIds: [selectedId()] });
     frameInput.value = String(cue.from);
     action.textContent = `Seeked to frame ${cue.from}, sentence ${index + 1}.`;
   });
-  for (const box of panel.querySelectorAll<HTMLInputElement>('[data-mute]')) {
-    box.addEventListener('change', () => {
-      const key = box.dataset.mute as 'narration' | 'music' | 'ambience' | 'sfx';
-      store.setAudition({ [key]: box.checked });
-    });
-  }
 
   function fillForm(): void {
     const state = store.getState();
-    const scene = state.doc.pkg.scenes.find(item => item.id === selectedId());
+    const scene = state.doc.package.scenes.find(item => item.id === selectedId());
     if (document.activeElement !== narration) narration.value = scene?.narration ?? '';
     const engine = panel.querySelector<HTMLSelectElement>('[data-engine]')!;
     const voiceId = panel.querySelector<HTMLInputElement>('[data-voice-id]')!;
     const speed = panel.querySelector<HTMLInputElement>('[data-speed]')!;
-    if (document.activeElement !== engine) engine.value = state.doc.pkg.voice?.engine ?? 'kokoro';
-    if (document.activeElement !== voiceId) voiceId.value = state.doc.pkg.voice?.voice ?? '';
-    if (document.activeElement !== speed) speed.value = String(state.doc.pkg.voice?.speed ?? 1);
+    const voice = state.doc.package.voice;
+    if (document.activeElement !== engine) engine.value = voice?.engine ?? 'kokoro';
+    if (document.activeElement !== voiceId) voiceId.value = voice?.voice ?? '';
+    if (document.activeElement !== speed) speed.value = String(voice?.speed ?? 1);
   }
 
   function draw(min: Float32Array, max: Float32Array): void {
@@ -203,24 +198,28 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore = dem
 
   function render(): void {
     const state = store.getState();
-    const ids = state.doc.pkg.scenes.map(scene => scene.id);
+    const view = scriptView(state.doc, state.derived.timeline);
+    const ids = state.doc.package.scenes.map(scene => scene.id);
     if ([...sceneSelect.options].map(option => option.value).join() !== ids.join()) {
       sceneSelect.replaceChildren(...ids.map(id => {
         const option = document.createElement('option');
         option.value = id;
-        option.textContent = state.doc.pkg.scenes.find(scene => scene.id === id)?.copy?.headline as string || id;
+        option.textContent = String(state.doc.package.scenes.find(scene => scene.id === id)?.copy?.headline ?? id);
         return option;
       }));
     }
-    if (state.session.selectedSceneId && ids.includes(state.session.selectedSceneId)) sceneSelect.value = state.session.selectedSceneId;
-    saveEl.textContent = SAVE_TEXT[state.session.saveStatus];
-    saveEl.dataset.tone = state.session.saveStatus === 'saved' ? 'fresh' : 'stale';
-    const status = state.derived.status[selectedId()];
+    const selected = state.session.selectedSceneIds.find(id => ids.includes(id));
+    if (selected) sceneSelect.value = selected;
+    const statusName = store.saveStatus();
+    saveEl.textContent = saveStatusText(statusName);
+    saveEl.dataset.tone = statusName === 'saved' ? 'fresh' : 'stale';
+    saveEl.dataset.state = statusName;
+    const status = view.status[selectedId()];
     freshEl.textContent = freshnessText(status);
     freshEl.dataset.tone = tone(status);
     q<HTMLButtonElement>('undo').disabled = !store.canUndo();
     q<HTMLButtonElement>('redo').disabled = !store.canRedo();
-    sentences.replaceChildren(...(state.derived.sentences[selectedId()] ?? []).map(cue => {
+    sentences.replaceChildren(...(view.sentences[selectedId()] ?? []).map(cue => {
       const item = document.createElement('li');
       const button = document.createElement('button');
       button.type = 'button';
@@ -229,19 +228,23 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore = dem
       item.append(button);
       return item;
     }));
-    const music = state.derived.audition.musicGainDb;
-    mixEl.textContent = `Export music gain ${music === null ? 'off' : `${music} dB`}. Audition switches are not part of the export. Narration gain ${state.derived.audition.narrationGain}.`;
-    const peaks = state.derived.waveforms[DEMO_SOURCE];
-    if (peaks) draw(peaks.min, peaks.max);
+    const mix = exportAudition(state.doc, state.derived.timeline);
+    const music = mix.musicGainDb;
+    mixEl.textContent = `Export music gain ${music === null ? 'off' : `${music} dB`}. Audition switches are not part of the export. Narration gain ${mix.narrationGain}.`;
+    if (waveMin && waveMax) draw(waveMin, waveMax);
     if (document.activeElement !== frameInput && state.session.playheadFrame) frameInput.value = String(state.session.playheadFrame);
-    const scene = state.doc.pkg.scenes.find(item => item.id === selectedId());
+    const scene = state.doc.package.scenes.find(item => item.id === selectedId());
     if (document.activeElement !== narration) narration.value = scene?.narration ?? '';
   }
 
   store.subscribe(render);
   render();
   fillForm();
-  void loadPeaks(browserPeakPort(), samples, DEMO_SOURCE, 64).then(() => store.touch()).catch(error => {
+  void loadPeaks(browserPeakPort(), samples, DEMO_SOURCE, 64).then(peaks => {
+    waveMin = peaks.min;
+    waveMax = peaks.max;
+    draw(peaks.min, peaks.max);
+  }).catch(error => {
     const message = error instanceof Error ? error.message : 'Waveform failed.';
     action.textContent = message;
     console.error('waveform', message);

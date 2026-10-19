@@ -1,48 +1,45 @@
 /**
- * Host adapter. The timeline component only sees EditorStore.
- * TEMPORARY: this constructs CA-1's stand-in. When CA-1 lands, build that
- * store (or accept one) and pass it to SceneTimeline — the view does not change.
+ * Host adapter. The shell constructs one EditorStore and passes it here.
  */
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { PackageV1 } from '../../../../../packages/schema/types';
-import type { Timeline } from '../types.ts';
-import { createEditorStore, projectDocFromPackage } from '../store.ts';
+import type { CompiledTimeline } from '../../../../../packages/planner/dist/src/browser.js';
+import type { EditorExtras, EditorStore } from '../store.ts';
 import { SceneTimeline } from './Timeline.tsx';
 
 export interface SceneTimelineHandle {
-  load(pkg: PackageV1): void;
   followFrame(frame: number): void;
   destroy(): void;
 }
 
+type TimelineStore = EditorStore & EditorExtras;
+
 export function mountSceneTimeline(
   container: HTMLElement,
-  pkg: PackageV1,
+  store: TimelineStore,
   hooks: {
-    onDocument: (pkg: PackageV1, timeline: Timeline) => void;
+    onDocument: (pkg: PackageV1, timeline: CompiledTimeline) => void;
     seek: (frame: number) => void;
     togglePlay: () => void;
   },
 ): SceneTimelineHandle {
-  const store = createEditorStore(projectDocFromPackage(pkg));
-  let revision = store.getState().doc.revision;
+  if (store.getState().session.zoom === 1) store.setSession({ zoom: 2 });
+  let seen = store.getState().doc.editSequence;
   const unsubscribe = store.subscribe(() => {
-    const { doc, derived } = store.getState();
-    if (doc.revision === revision || !derived.compiled) return;
-    revision = doc.revision;
-    hooks.onDocument(doc.package, derived.compiled);
+    const { doc, derived, session } = store.getState();
+    if (session.previewing) return;
+    if (doc.editSequence === seen) return;
+    const userEdit = doc.editSequence > seen;
+    seen = doc.editSequence;
+    if (!userEdit || !derived.timeline) return;
+    hooks.onDocument(doc.package as unknown as PackageV1, derived.timeline);
   });
   const root: Root = createRoot(container);
   root.render(<SceneTimeline store={store} onSeek={hooks.seek} onTogglePlay={hooks.togglePlay} />);
   return {
-    load(next) {
-      const doc = projectDocFromPackage(next);
-      revision = doc.revision;
-      store.load(doc);
-    },
     followFrame(frame) {
-      store.setSession({ playhead: Math.max(0, Math.floor(frame)) });
+      store.setSession({ playheadFrame: Math.max(0, Math.floor(frame)) });
     },
     destroy() {
       unsubscribe();

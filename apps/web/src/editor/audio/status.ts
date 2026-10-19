@@ -1,6 +1,7 @@
 /** Take / alignment / presenter freshness. Matches the section 7 invalidation table. */
+import type { ProjectDoc } from '../commands.ts';
 import { conditioningHash, narrationInputFingerprint, textFingerprint } from './speech.ts';
-import type { EditorPackage, EditorScene, ProjectDoc, SceneFreshness } from '../types.ts';
+import type { EditorPackage, EditorScene, SceneFreshness } from '../types.ts';
 
 export function sceneUsesPresenter(pkg: EditorPackage, scene: EditorScene): boolean {
   if (scene.presenter === 'off') return false;
@@ -16,20 +17,21 @@ export function sceneUsesPresenter(pkg: EditorPackage, scene: EditorScene): bool
 }
 
 export function sceneStatus(doc: ProjectDoc, sceneId: string): SceneFreshness {
-  const scene = doc.pkg.scenes.find(item => item.id === sceneId);
+  const pkg = doc.package as EditorPackage;
+  const scene = pkg.scenes.find(item => item.id === sceneId);
   if (!scene) return { take: 'missing', alignment: 'missing', presenter: 'unused' };
-  const expected = narrationInputFingerprint(scene, doc.pkg.voice);
-  const take = doc.takes[sceneId];
+  const expected = narrationInputFingerprint(scene, pkg.voice);
+  const take = doc.editor.takes?.[sceneId];
   const takeStatus = !take ? 'missing' : take.inputFingerprint === expected ? 'fresh' : 'stale';
-  const align = doc.alignment[sceneId];
+  const align = doc.editor.alignment?.[sceneId];
   let alignment: SceneFreshness['alignment'] = 'missing';
   if (align) {
     const textOk = align.textFingerprint === textFingerprint(scene.narration ?? '');
-    const hashOk = Boolean(take) && align.sourceHash === take.sourceHash;
+    const hashOk = Boolean(take) && align.sourceHash === take?.sourceHash;
     alignment = textOk && hashOk && takeStatus === 'fresh' ? 'fresh' : 'stale';
   }
-  const clip = doc.presenterClips[sceneId];
-  const used = sceneUsesPresenter(doc.pkg, scene);
+  const clip = doc.editor.presenterClips?.[sceneId];
+  const used = sceneUsesPresenter(pkg, scene);
   let presenter: SceneFreshness['presenter'] = 'unused';
   if (!used && !clip) presenter = 'unused';
   else if (!clip) presenter = 'missing';
@@ -41,7 +43,7 @@ export function sceneStatus(doc: ProjectDoc, sceneId: string): SceneFreshness {
 /** Only the rows the narration-text/voice edit is allowed to mark. */
 export function staleWork(doc: ProjectDoc): string[] {
   const out: string[] = [];
-  for (const scene of doc.pkg.scenes) {
+  for (const scene of doc.package.scenes) {
     const status = sceneStatus(doc, scene.id);
     if (status.take === 'stale') out.push(`take:${scene.id}`);
     if (status.alignment === 'stale') out.push(`alignment:${scene.id}`);
@@ -53,9 +55,9 @@ export function staleWork(doc: ProjectDoc): string[] {
 /** Presenter assets only. Music, stills and plates are not listed. */
 export function staleAssets(doc: ProjectDoc): string[] {
   const out: string[] = [];
-  for (const scene of doc.pkg.scenes) {
+  for (const scene of doc.package.scenes) {
     if (sceneStatus(doc, scene.id).presenter !== 'stale') continue;
-    const clip = doc.presenterClips[scene.id];
+    const clip = doc.editor.presenterClips?.[scene.id];
     if (clip && !out.includes(clip.assetId)) out.push(clip.assetId);
   }
   return out;

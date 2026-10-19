@@ -3,9 +3,9 @@
  * not written into this result or into an export.
  */
 import { resolveAudioMix } from '../../../../../apps/renderer/src/audio-mix-model.js';
-import type { AuditionMix, EditorTimeline } from '../types.ts';
+import type { AuditionMix } from '../types.ts';
 
-export function auditionParams(pkg: unknown, timeline: EditorTimeline): AuditionMix {
+export function auditionParams(pkg: unknown, timeline: { fps?: number; durationInFrames?: number; scenes?: unknown[] }): AuditionMix {
   const mix = resolveAudioMix(pkg as never, timeline as never);
   return {
     enabled: Boolean(mix.enabled),

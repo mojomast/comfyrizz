@@ -2,7 +2,8 @@
  * Editor commands. Pure: `applyCommand` clones and returns the next document.
  * Undo stores a before/after patch of `package` + `editor` (see PHASE0.md).
  *
- * CA-2 and CA-3 should construct the seven command types below. `text: null`
+ * The original seven commands are the CA-1 set. SetTransition, SplitScene,
+ * SetNarrationText and SetVoice are the timeline and script commands. `text: null`
  * and `startSeconds: null` clear a caption override or a source trim.
  */
 import {
@@ -11,8 +12,27 @@ import {
   speechFloorFrames,
   type MeasuredInput,
 } from '../../../../packages/planner/dist/src/browser.js';
+import {
+  narrationFromChunks,
+  narrationInputFingerprint,
+  placeScenes,
+  sampleCut,
+  sentenceCues,
+  snapSplitFrame,
+  splitAlignmentAtFrame,
+  textFingerprint,
+} from './audio/speech.ts';
+import type {
+  AlignmentChunk,
+  EditorPackage,
+  EditorScene,
+  NarrationTake,
+  PresenterClip,
+  SceneAlignment,
+  VoiceSettings,
+} from './types.ts';
 
-export type { MeasuredInput };
+export type { MeasuredInput, VoiceSettings };
 
 export interface CaptionOverride {
   sceneId: string;
@@ -23,6 +43,10 @@ export interface CaptionOverride {
 export interface EditorSidecar {
   version: 1;
   captionOverrides: CaptionOverride[];
+  /** Narration takes keyed by scene id. Not part of package-v1. */
+  takes?: Record<string, NarrationTake>;
+  alignment?: Record<string, SceneAlignment>;
+  presenterClips?: Record<string, PresenterClip>;
 }
 
 export interface EditableScene {
@@ -33,7 +57,11 @@ export interface EditableScene {
   background?: { asset?: string; trim?: { startSeconds: number; endSeconds?: number } | null; [key: string]: unknown } | null;
   media?: Array<{ asset?: string; trim?: { startSeconds: number; endSeconds?: number } | null; [key: string]: unknown } | null>;
   narration?: string;
+  narration_asset?: string;
+  narration_duration_frames?: number;
+  transitionOut?: { type: string; frames?: number; direction?: string } | null;
   locked?: boolean;
+  presenter?: 'off' | 'pip' | 'split' | string;
   [key: string]: unknown;
 }
 
@@ -42,7 +70,8 @@ export interface EditablePackage {
   revision?: number;
   format?: { fps?: number; width?: number; height?: number };
   scenes: EditableScene[];
-  assets?: Record<string, { kind?: string; media?: { fps?: number; frames?: number } } | undefined>;
+  assets?: Record<string, { kind?: string; media?: { fps?: number; frames?: number; audio?: string; durationSeconds?: number } } | undefined>;
+  voice?: VoiceSettings;
   [key: string]: unknown;
 }
 
@@ -73,6 +102,20 @@ export interface SetCaptionText {
 }
 export interface DuplicateScene { type: 'DuplicateScene'; sceneId: string; newId?: string }
 export interface DeleteScene { type: 'DeleteScene'; sceneId: string }
+export interface SetTransition {
+  type: 'SetTransition';
+  sceneId: string;
+  transitionOut: { type: string; frames: number; direction?: string } | null;
+}
+export interface SplitScene {
+  type: 'SplitScene';
+  sceneId: string;
+  frame: number;
+  newSceneId: string;
+  snapFrames?: number;
+}
+export interface SetNarrationText { type: 'SetNarrationText'; sceneId: string; text: string }
+export interface SetVoice { type: 'SetVoice'; voice: VoiceSettings | null }
 
 export type Command =
   | MoveScene
@@ -81,7 +124,11 @@ export type Command =
   | SetMediaRange
   | SetCaptionText
   | DuplicateScene
-  | DeleteScene;
+  | DeleteScene
+  | SetTransition
+  | SplitScene
+  | SetNarrationText
+  | SetVoice;
 
 export type ApplyResult =
   | { ok: true; doc: ProjectDoc }
@@ -92,7 +139,7 @@ export function emptyEditor(): EditorSidecar {
 }
 
 const SCENE_ID = /^s[A-Za-z0-9_-]{0,63}$/;
-const LOCKED = new Set(['MoveScene', 'TrimScene', 'DeleteScene', 'DuplicateScene', 'SetMediaRange']);
+const LOCKED = new Set(['MoveScene', 'TrimScene', 'DeleteScene', 'DuplicateScene', 'SetMediaRange', 'SetTransition', 'SplitScene']);
 
 function fail(code: string, error: string): ApplyResult {
   return { ok: false, code, error };
@@ -128,6 +175,7 @@ function isFail(value: { index: number; scene: EditableScene } | ApplyResult): v
 }
 
 export function applyCommand(doc: ProjectDoc, command: Command, measured: MeasuredInput = {}): ApplyResult {
+  if (command.type === 'SetVoice') return setVoice(clone(doc), command);
   const found = sceneAt(doc, command.sceneId);
   if (isFail(found)) return found;
   if (found.scene.locked && LOCKED.has(command.type)) {
@@ -150,6 +198,12 @@ export function applyCommand(doc: ProjectDoc, command: Command, measured: Measur
       return duplicateScene(next, found.index, scene, command);
     case 'DeleteScene':
       return deleteScene(next, found.index, command);
+    case 'SetTransition':
+      return setTransition(next, scene, command, measured);
+    case 'SplitScene':
+      return splitScene(next, scene, command, measured);
+    case 'SetNarrationText':
+      return setNarration(next, scene, command);
     default: {
       const unknown: never = command;
       return fail('unknown-command', `Unknown command ${(unknown as Command).type}.`);
@@ -165,6 +219,7 @@ function moveScene(doc: ProjectDoc, index: number, command: MoveScene): ApplyRes
   if (command.toIndex === index) return { ok: true, doc };
   const [scene] = doc.package.scenes.splice(index, 1);
   doc.package.scenes.splice(command.toIndex, 0, scene!);
+  clearTerminalTransition(doc);
   return { ok: true, doc };
 }
 
@@ -254,12 +309,177 @@ function duplicateScene(doc: ProjectDoc, index: number, scene: EditableScene, co
     .filter(item => item.sceneId === scene.id)
     .map(item => ({ ...item, sceneId: newId }));
   doc.editor.captionOverrides = [...doc.editor.captionOverrides, ...carried];
+  copySceneSidecar(doc, scene.id, newId);
+  clearTerminalTransition(doc);
   return { ok: true, doc };
 }
 
 function deleteScene(doc: ProjectDoc, index: number, command: DeleteScene): ApplyResult {
   if (doc.package.scenes.length < 2) return fail('last-scene', 'A package keeps at least one scene.');
   doc.package.scenes.splice(index, 1);
+  dropSceneSidecar(doc, command.sceneId);
+  clearTerminalTransition(doc);
+  return { ok: true, doc };
+}
+
+function transitionFrames(scene: EditableScene | undefined): number {
+  const type = scene?.transitionOut?.type;
+  if (!type || type === 'none' || type === 'cut') return 0;
+  return Math.max(0, Math.floor(scene?.transitionOut?.frames ?? 0));
+}
+
+/** A valid compile rejects an outgoing transition on the last scene. */
+function clearTerminalTransition(doc: ProjectDoc): void {
+  const last = doc.package.scenes[doc.package.scenes.length - 1];
+  if (last && transitionFrames(last) > 0) last.transitionOut = { type: 'cut', frames: 0 };
+}
+
+function copySceneSidecar(doc: ProjectDoc, fromId: string, toId: string): void {
+  const take = doc.editor.takes?.[fromId];
+  if (take) {
+    doc.editor.takes = { ...doc.editor.takes, [toId]: { ...structuredClone(take), takeId: `${take.takeId}-copy` } };
+  }
+  const alignment = doc.editor.alignment?.[fromId];
+  if (alignment) doc.editor.alignment = { ...doc.editor.alignment, [toId]: structuredClone(alignment) };
+  const clip = doc.editor.presenterClips?.[fromId];
+  if (clip) doc.editor.presenterClips = { ...doc.editor.presenterClips, [toId]: structuredClone(clip) };
+}
+
+function dropSceneSidecar(doc: ProjectDoc, sceneId: string): void {
+  doc.editor.captionOverrides = doc.editor.captionOverrides.filter(item => item.sceneId !== sceneId);
+  if (doc.editor.takes) delete doc.editor.takes[sceneId];
+  if (doc.editor.alignment) delete doc.editor.alignment[sceneId];
+  if (doc.editor.presenterClips) delete doc.editor.presenterClips[sceneId];
+}
+
+function chunkMapFor(doc: ProjectDoc, measured: MeasuredInput): Record<string, AlignmentChunk[] | undefined> {
+  const out: Record<string, AlignmentChunk[] | undefined> = {};
+  for (const scene of doc.package.scenes) {
+    const aligned = doc.editor.alignment?.[scene.id]?.chunks;
+    const spoken = measured.narration?.[scene.id] as AlignmentChunk[] | undefined;
+    if (aligned?.length) out[scene.id] = aligned;
+    else if (spoken?.length) out[scene.id] = spoken;
+  }
+  return out;
+}
+
+function setTransition(doc: ProjectDoc, scene: EditableScene, command: SetTransition, measured: MeasuredInput): ApplyResult {
+  const index = doc.package.scenes.findIndex(item => item.id === scene.id);
+  const spec = command.transitionOut;
+  if (!spec || spec.type === 'none' || spec.type === 'cut' || spec.frames <= 0) {
+    scene.transitionOut = { type: 'cut', frames: 0 };
+    return { ok: true, doc };
+  }
+  const frames = Math.floor(spec.frames);
+  if (!Number.isFinite(frames) || frames < 0 || frames > 120) {
+    return fail('bad-transition', 'Transition length has to be from 0 to 120 frames.');
+  }
+  if (index < 0 || index === doc.package.scenes.length - 1) {
+    return fail('bad-transition', 'The last scene has no outgoing transition.');
+  }
+  scene.transitionOut = { type: spec.type, frames, ...(spec.direction ? { direction: spec.direction } : {}) };
+  const placed = placeScenes(doc.package as EditorPackage, chunkMapFor(doc, measured));
+  if (!placed.ok) return fail('bad-transition', placed.reason);
+  return { ok: true, doc };
+}
+
+function setNarration(doc: ProjectDoc, scene: EditableScene, command: SetNarrationText): ApplyResult {
+  if (typeof command.text !== 'string' || command.text.length > 600) {
+    return fail('bad-narration', 'Narration is longer than 600 characters.');
+  }
+  scene.narration = command.text;
   doc.editor.captionOverrides = doc.editor.captionOverrides.filter(item => item.sceneId !== command.sceneId);
+  return { ok: true, doc };
+}
+
+function setVoice(doc: ProjectDoc, command: SetVoice): ApplyResult {
+  if (command.voice === null) {
+    delete doc.package.voice;
+    return { ok: true, doc };
+  }
+  const voice = command.voice;
+  if (typeof voice.enabled !== 'boolean') return fail('bad-voice', 'Voice needs an enabled flag.');
+  if (voice.engine && voice.engine !== 'kokoro' && voice.engine !== 'qwen3-tts' && voice.engine !== 'none') {
+    return fail('bad-voice', 'Voice engine must be kokoro, qwen3-tts or none.');
+  }
+  if (voice.speed !== undefined && (typeof voice.speed !== 'number' || voice.speed < 0.5 || voice.speed > 2)) {
+    return fail('bad-voice', 'Voice speed must be between 0.5 and 2.');
+  }
+  if (voice.voice !== undefined && (voice.voice.length < 1 || voice.voice.length > 64)) {
+    return fail('bad-voice', 'Voice id must be 1–64 characters.');
+  }
+  if (voice.persona !== undefined && voice.persona.length > 400) return fail('bad-voice', 'Persona is longer than 400 characters.');
+  doc.package.voice = structuredClone(voice);
+  return { ok: true, doc };
+}
+
+function splitScene(doc: ProjectDoc, scene: EditableScene, command: SplitScene, measured: MeasuredInput): ApplyResult {
+  if (!SCENE_ID.test(command.newSceneId) || doc.package.scenes.some(item => item.id === command.newSceneId)) {
+    return fail('bad-id', 'Split needs a new scene id that is not already used.');
+  }
+  const take = doc.editor.takes?.[command.sceneId];
+  const align = doc.editor.alignment?.[command.sceneId];
+  if (!take || !align?.chunks?.length) return fail('no-take', `Scene ${command.sceneId} has no measured narration take to split.`);
+  if (take.range.outSample - take.range.inSample < 2) return fail('short-range', 'The source range is too short to split.');
+  const placed = placeScenes(doc.package as EditorPackage, chunkMapFor(doc, measured));
+  if (!placed.ok) return fail('placement', placed.reason);
+  const slot = placed.scenes.find(item => item.id === command.sceneId);
+  if (!slot) return fail('placement', `Scene ${command.sceneId} is not on the timeline.`);
+  if (!Number.isInteger(command.frame) || command.frame <= slot.from || command.frame >= slot.from + slot.duration) {
+    return fail('bad-frame', 'The playhead is outside this scene.');
+  }
+  const overrides = doc.editor.captionOverrides.filter(item => item.sceneId === command.sceneId);
+  const cues = sentenceCues(align.chunks, slot.from, command.sceneId, placed.fps, overrides);
+  const cutFrame = snapSplitFrame(cues, command.frame, slot.from, slot.from + slot.duration, command.snapFrames ?? 8);
+  const baked = align.chunks.map((chunk, index) => {
+    const edit = overrides.find(item => item.index === index);
+    return edit ? { ...chunk, text: edit.text } : chunk;
+  });
+  const bakedCues = sentenceCues(baked, slot.from, command.sceneId, placed.fps);
+  const split = splitAlignmentAtFrame(baked, bakedCues, cutFrame);
+  if (split.left.length === 0 || split.right.length === 0) {
+    return fail('bad-split', 'Split needs speech on both sides. Move onto a sentence or closer to its boundary.');
+  }
+  const original = structuredClone(take);
+  const totalSeconds = baked.reduce((sum, chunk) => sum + chunk.seconds, 0);
+  const cutSample = sampleCut(original, split.cutSeconds, totalSeconds);
+  const leftText = narrationFromChunks(split.left);
+  const rightText = narrationFromChunks(split.right);
+  const voice = doc.package.voice;
+  const originalTransition = scene.transitionOut ? structuredClone(scene.transitionOut) : undefined;
+  const local = cutFrame - slot.from;
+  scene.narration = leftText;
+  scene.preferredFrames = Math.max(1, local);
+  scene.narration_duration_frames = Math.max(1, Math.round(((cutSample - original.range.inSample) / original.sampleRate) * placed.fps));
+  scene.transitionOut = { type: 'cut', frames: 0 };
+  const right = structuredClone(scene);
+  right.id = command.newSceneId;
+  right.narration = rightText;
+  right.preferredFrames = Math.max(1, slot.duration - local);
+  right.narration_duration_frames = Math.max(1, Math.round(((original.range.outSample - cutSample) / original.sampleRate) * placed.fps));
+  right.transitionOut = originalTransition;
+  right.locked = false;
+  doc.package.scenes.splice(doc.package.scenes.findIndex(item => item.id === command.sceneId) + 1, 0, right);
+  const takes = { ...(doc.editor.takes ?? {}) };
+  takes[command.sceneId] = {
+    ...original,
+    range: { inSample: original.range.inSample, outSample: cutSample },
+    inputFingerprint: narrationInputFingerprint(scene as EditorScene, voice),
+  };
+  takes[command.newSceneId] = {
+    ...structuredClone(original),
+    takeId: `${original.takeId}-b`,
+    range: { inSample: cutSample, outSample: original.range.outSample },
+    inputFingerprint: narrationInputFingerprint(right as EditorScene, voice),
+  };
+  doc.editor.takes = takes;
+  const alignment = { ...(doc.editor.alignment ?? {}) };
+  alignment[command.sceneId] = { sourceHash: original.sourceHash, textFingerprint: textFingerprint(leftText), chunks: split.left };
+  alignment[command.newSceneId] = { sourceHash: original.sourceHash, textFingerprint: textFingerprint(rightText), chunks: split.right };
+  doc.editor.alignment = alignment;
+  doc.editor.captionOverrides = doc.editor.captionOverrides.filter(item => item.sceneId !== command.sceneId);
+  clearTerminalTransition(doc);
+  const check = placeScenes(doc.package as EditorPackage, chunkMapFor(doc, measured));
+  if (!check.ok) return fail('placement', check.reason);
   return { ok: true, doc };
 }
