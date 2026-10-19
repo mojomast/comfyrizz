@@ -14,7 +14,11 @@ import zipfile
 
 def run(argv, **kwargs):
     print("Running:", " ".join(map(str, argv)), flush=True)
-    subprocess.run(list(map(str, argv)), check=True, **kwargs)
+    process = subprocess.Popen(list(map(str, argv)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs)
+    for line in process.stdout:
+        print(line, end="", flush=True)
+    if process.wait():
+        raise subprocess.CalledProcessError(process.returncode, argv)
 
 
 def main():
@@ -24,7 +28,7 @@ def main():
         archive.extractall(root)
     lock = json.loads((root / "models.lock.json").read_text())
     run(["apt-get", "update", "-qq"])
-    run(["apt-get", "install", "-y", "-qq", "sox", "ffmpeg"])
+    run(["apt-get", "install", "-y", "-qq", "sox", "ffmpeg", "python3-venv"])
     for name, package in [("tts", lock["ttsPackage"]), ("asr", lock["asrPackage"])]:
         env = root / ("venv-" + name)
         run([sys.executable, "-m", "venv", "--system-site-packages", env])

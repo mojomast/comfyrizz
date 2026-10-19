@@ -42,7 +42,12 @@ if (!process.argv.includes('--dry-run')) {
     const session = (await backend.ensureUp({ approved: true })).session;
     await step(argvUpload({ session, localPath: input, remotePath: '/content/comfyrizz-qwen-input.zip' }));
     const r = await step(argvExec({ session, file: 'qwen_narrate.py', timeout: watchdogMinutes * 60 - 60 }), { cwd: join(root, 'colab'), wallMs: watchdogMinutes * 60000, silenceMs: watchdogMinutes * 60000 });
-    await step(argvDownload({ session, remotePath: '/content/comfyrizz-qwen-output.zip', localPath: join(out, 'audio.zip') }));
+    try {
+      await step(argvDownload({ session, remotePath: '/content/comfyrizz-qwen-output.zip', localPath: join(out, 'audio.zip') }));
+    } catch (error) {
+      if (!r.output.includes('COMFYRIZZ_OK qwen-narrate')) throw Error(`Qwen worker failed before collection: ${r.output.slice(-3000)}`);
+      throw error;
+    }
     if (!r.output.includes('COMFYRIZZ_OK qwen-narrate')) throw Error(`Qwen worker did not finish: ${r.output.slice(-2000)}`);
   } catch (e) { failure = e; }
   finally {
