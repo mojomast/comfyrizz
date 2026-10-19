@@ -114,6 +114,8 @@ flowchart TD
 - **The timeline.** `packages/planner` compiles the package plus measured narration into integer-frame `timeline.json` at 30 fps, with transition overlaps, plate retiming and sentence-level caption cues.
 - **The render.** `apps/renderer` (Remotion) supports Title, Hero, Stat, Chart, List, Split, Compare and Code layouts, motion tokens, animated diagrams and procedural backgrounds when no plate exists. Measured speech can extend a scene beyond its default visual pacing limit.
 
+See the [animation and storytelling research (19 October 2026)](docs/research/ANIMATION_STORYTELLING_2026.md) for the current capability audit, MIT-library shortlist, proposed visual styles and prioritized integration plan.
+
 ## Quickstart
 
 ### Requirements
