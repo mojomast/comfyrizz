@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Audio, Composition, staticFile } from 'remotion';
+import React, { useMemo, useState } from 'react';
+import { Audio, Composition, Sequence, staticFile } from 'remotion';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
 import narratedPkgJson from '../../../examples/narrated-demo/package.json';
@@ -9,6 +9,7 @@ import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import { TimelinePlayer, sceneById } from './player';
 import type { MediaDimsMap } from './media';
 import { narrationAudio } from './audio-model';
+import { dbToLinear, resolveAudioMix } from './audio-mix-model.js';
 import type { InlineAsset } from './components';
 import type { MediaSidecar } from './media';
 
@@ -17,13 +18,13 @@ const timeline = timelineJson as unknown as Timeline;
 const narratedPkg = narratedPkgJson as unknown as PackageV1;
 const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
-type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[]; mediaDims?: MediaDimsMap };
+type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[]; mediaDims?: MediaDimsMap; mixAudio?: boolean };
 
 /** Audio that disappears instead of crashing when its file is not in this clone. */
-function SafeAudio({ file }: { file: string }) {
+function SafeAudio({ file, volume, loop }: { file: string; volume?: number | ((frame: number) => number); loop?: boolean }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
-  return <Audio src={staticFile(file)} onError={() => setFailed(true)} />;
+  return <Audio src={staticFile(file)} {...(volume !== undefined ? { volume } : {})} {...(loop ? { loop } : {})} onError={() => setFailed(true)} />;
 }
 
 function LaunchDemo(props: Partial<DemoProps>) {
@@ -54,15 +55,42 @@ function NarratedDemo() {
  * plays the package's measured narration and, when the timeline has measured
  * (non-estimated) captions, burns them in (N7).
  */
-function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAssets, media, missingMedia, mediaDims }: Partial<DemoProps>) {
+function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAssets, media, missingMedia, mediaDims, mixAudio = true }: Partial<DemoProps>) {
   const resolvedPkg = demoPkg ?? pkg;
   const resolvedTimeline = demoTimeline ?? timeline;
   const audio = narrationAudio(resolvedPkg);
   const audioMissing = audio ? new Set(missingMedia ?? []).has(audio.file) : false;
   const captions = (resolvedTimeline.captions ?? []).some(cue => !cue.estimated) ? resolvedTimeline.captions : undefined;
+  // M2: the sound design. The package declares the buses (M1 schema); this resolves
+  // them to per-frame gains, then each bus plays with its ducked level. Presenter
+  // clip audio is never a bus, so the narration stays the only voice.
+  const mix = useMemo(() => resolveAudioMix(resolvedPkg, resolvedTimeline), [resolvedPkg, resolvedTimeline]);
+  const missing = new Set(missingMedia ?? []);
+  const gainAt = (gains: number[]) => (frame: number) => gains[Math.min(Math.max(0, frame), gains.length - 1)] ?? 1;
   return (
     <>
       {audio && !audioMissing ? <Audio src={staticFile(audio.file)} /> : null}
+      {mixAudio && mix.enabled ? (
+        <>
+          {mix.music && !missing.has(mix.music.file) ? (
+            <SafeAudio file={mix.music.file} volume={gainAt(mix.music.gains)} loop={mix.music.loop} />
+          ) : null}
+          {mix.ambience.map(ambience =>
+            missing.has(ambience.file) ? null : (
+              <Sequence key={ambience.sceneId} from={ambience.from} durationInFrames={ambience.durationInFrames}>
+                <SafeAudio file={ambience.file} volume={gainAt(ambience.gains)} />
+              </Sequence>
+            ),
+          )}
+          {mix.sfx.map((sfx, index) =>
+            missing.has(sfx.file) ? null : (
+              <Sequence key={`${sfx.assetId}-${index}`} from={sfx.from} durationInFrames={sfx.durationInFrames}>
+                <SafeAudio file={sfx.file} volume={dbToLinear(sfx.gainDb)} />
+              </Sequence>
+            ),
+          )}
+        </>
+      ) : null}
       <TimelinePlayer
         pkg={resolvedPkg}
         timeline={resolvedTimeline}
