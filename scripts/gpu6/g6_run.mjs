@@ -117,6 +117,41 @@ const TINY_PNG = Buffer.from(
 );
 
 /** One frame of black, from ffmpeg. Returns null when ffmpeg is not usable, and the caller says so. */
+/**
+ * Write real media where the applied package says its files are, and verify what was written.
+ *
+ * A PNG is checked by its signature and an MP4 by containing a `moov` box: those are exactly the two
+ * things that were wrong when the bytes travelled through the fake CLI's JSON as a string.
+ */
+export function writeStandInMedia(pkg, { packageDir, mp4 = null } = {}) {
+  const results = [];
+  for (const asset of Object.values(pkg?.assets ?? {})) {
+    const file = typeof asset?.file === "string" ? asset.file : null;
+    const relative = asset?.variants?.upscaled?.file ?? asset?.variants?.upscaled?.path ?? null;
+    const candidates = [file, typeof relative === "string" ? relative : null].filter(Boolean);
+    for (const candidate of candidates) {
+      const target = join(packageDir, candidate);
+      if (!existsSync(target)) continue;
+      const kind = asset.kind === "audio" ? "audio" : asset.kind === "video" ? "video" : "image";
+      const bytes = kind === "audio" ? silentWav(0.5) : kind === "video" ? mp4 : TINY_PNG;
+      if (!bytes) {
+        results.push({ name: candidate, ok: false, reason: "ffmpeg could not make the stand-in video" });
+        continue;
+      }
+      writeFileSync(target, bytes);
+      const read = readFileSync(target);
+      const ok =
+        kind === "audio"
+          ? read.subarray(0, 4).toString() === "RIFF"
+          : kind === "video"
+            ? read.includes(Buffer.from("moov"))
+            : read.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+      results.push({ name: candidate, ok, reason: ok ? "verified" : `${kind} bytes are not a valid ${kind}` });
+    }
+  }
+  return results;
+}
+
 function tinyMp4() {
   const out = join(mkdtempSync(join(tmpdir(), "comfyrizz-g6-frame-")), "one.mp4");
   const made = spawnSync("ffmpeg", ["-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1", "-pix_fmt", "yuv420p", "-y", out], { encoding: "utf8", timeout: 60000 });
@@ -308,12 +343,24 @@ async function run() {
     const collected = runResult.collect?.localDir ?? runResult.collect?.dir ?? join(outDir, "scratch", "out");
     const copied = copyNamedAssets({ pkg: appliedPkg, outputDir: collected, packageDir: workspace });
     check("applied", copied.length > 0, `${copied.length} file(s) copied from ${collected}`);
+    // The fake CLI's file spec carries its content as a JSON *string*, so binary that goes through it
+    // arrives with an invalid PNG signature and an MP4 with no moov atom (ffprobe refuses both). The
+    // harness therefore writes the stand-in media into the copied tree itself: the fake VM proves the
+    // flow - stage, bootstrap, jobs, collect, apply - and these bytes stand in for the GPU's real outputs,
+    // which is why they are generated here and verified (signature, moov) rather than asserted.
+    const media = writeStandInMedia(appliedPkg, { packageDir: workspace, mp4: tinyMp4() });
+    check("media-real", media.every((entry) => entry.ok), media.map((entry) => `${entry.name}:${entry.ok ? "ok" : entry.reason}`).join(" "));
 
     if (hasFlag("--no-render")) {
       check("render", true, "skipped (--no-render)");
     } else {
       const render = await resolveRender();
-      const rendered = await render(packagePath, join(outDir, `${PACKAGE_ID}.mp4`), { onLog: (line) => process.stderr.write(`  render: ${line}\n`) });
+      // no `publicDir`: the renderer prepares its own when the package needs media, and that is the path
+      // the server uses. Passing the workspace replaced it and cost the composition its fonts (404 on
+      // Inter-Variable.ttf) - the assets and the renderer's own public files have to be served together.
+      const rendered = await render(packagePath, join(outDir, `${PACKAGE_ID}.mp4`), {
+        onLog: (line) => process.stderr.write(`  render: ${line}\n`),
+      });
       renderResult = rendered;
       check("render", Boolean(rendered?.bytes), `${rendered?.frames ?? "?"} frames, ${rendered?.bytes ?? "?"} bytes`);
     }
