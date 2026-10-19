@@ -23,6 +23,9 @@ const LAYOUT_LIMITS: Record<string, { min: number; max: number }> = {
   stat: { min: 30, max: 300 },
   chart: { min: 45, max: 450 },
   list: { min: 45, max: 600 },
+  split: { min: 45, max: 600 },
+  compare: { min: 45, max: 600 },
+  code: { min: 45, max: 600 },
 };
 
 const PACKAGE_ID = /^pkg_[A-Za-z0-9_-]{4,64}$/;

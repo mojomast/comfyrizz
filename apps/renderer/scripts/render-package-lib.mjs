@@ -147,7 +147,7 @@ export function preparePublicDir(pkg, packageDir) {
   return temp;
 }
 
-export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration, mixAudio = true, normalizeLoudness = true } = {}) {
+export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration, scale, mixAudio = true, normalizeLoudness = true } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
   // A9: validate the package as stored — the base `file` and `variants` are checked (H12 variant
@@ -207,6 +207,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
             `--frame=${frame}`,
             '--browser-executable=/usr/bin/google-chrome',
             '--log=error',
+            ...(scale ? [`--scale=${scale}`] : []),
           ]
         : [
             'remotion', 'render', 'src/index.ts', compositionId, outputPath,
@@ -215,6 +216,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
             '--browser-executable=/usr/bin/google-chrome',
             '--concurrency=2',
             '--log=error',
+            ...(scale ? [`--scale=${scale}`] : []),
           ],
       { cwd: rendererDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
     );

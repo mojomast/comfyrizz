@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { routeAsset, type AssetNeed, type RouteDecision } from './router.js';
 import { foregroundFor } from './package.js';
@@ -191,6 +194,14 @@ const searchSchema = z.object({
 
 const attachSchema = z.object({ scene_id: z.string().min(1), candidate_id: z.string().min(1) });
 
+export const codeSceneSchema = z.object({
+  scene_id: z.string().min(1).max(64).optional(),
+  language: z.string().min(1).max(32),
+  code: z.string().min(1).max(4000),
+  highlights: z.array(z.number().int().min(1).max(400)).max(8).optional(),
+  charsPerSecond: z.number().min(1).max(120).optional(),
+});
+
 export const cutdownSchema = z.object({
   target_s: z.union([z.literal(6), z.literal(15), z.literal(30)]),
 });
@@ -209,12 +220,13 @@ function baseParameters(properties: Record<string, unknown>, required: string[])
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
-const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list'] as const;
+const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list', 'split', 'compare', 'code'] as const;
 type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 const SCENE_KEYS = new Set([
   'id', 'layout', 'variant', 'preferredFrames', 'copy', 'data', 'background', 'foreground',
   'media_only', 'lower_third', 'transitionOut', 'motion', 'narration', 'narration_asset',
   'narration_duration_frames', 'locked', 'notes', 'presenter', 'presenter_asset', 'cast',
+  'media', 'code',
 ]);
 const COPY_KEYS = new Set(['headline', 'kicker', 'sub', 'body', 'quote', 'attribution', 'footnote', 'cta', 'items']);
 const COPY_LIMITS: Record<SceneLayout, Record<string, number>> = {
@@ -223,6 +235,9 @@ const COPY_LIMITS: Record<SceneLayout, Record<string, number>> = {
   stat: { headline: 48, sub: 90, body: 40 },
   chart: { headline: 64, sub: 120, footnote: 120 },
   list: { headline: 64, quote: 200, attribution: 80 },
+  split: { headline: 48, sub: 90 },
+  compare: { headline: 48, sub: 90 },
+  code: { headline: 64 },
 };
 const LAYOUT_VARIANTS: Record<SceneLayout, string[]> = {
   title: ['centered', 'outro'],
@@ -230,9 +245,39 @@ const LAYOUT_VARIANTS: Record<SceneLayout, string[]> = {
   stat: [],
   chart: ['bar'],
   list: ['bullets', 'quote'],
+  split: [],
+  compare: [],
+  code: [],
 };
 const BACKGROUND_PATTERNS = ['gradient', 'grid', 'dots', 'grain', 'mesh'];
-const DEFAULT_SCENE_FRAMES: Record<SceneLayout, number> = { title: 150, hero: 210, stat: 180, chart: 210, list: 180 };
+const DEFAULT_SCENE_FRAMES: Record<SceneLayout, number> = { title: 150, hero: 210, stat: 180, chart: 210, list: 180, split: 180, compare: 180, code: 240 };
+const DEFAULT_CHARS_PER_SECOND = 1 / 0.035;
+const PIP_PLACEMENTS = new Set(['pip-br', 'pip-bl', 'pip-bc', 'split-left']);
+const PIP_MASKS = new Set(['circle', 'rounded-rect']);
+
+type CodeLayoutModule = {
+  DEFAULT_CHARS_PER_SECOND: number;
+  lintCodeScene: (code: string, width: number, height: number) => Array<{ code: string }>;
+  codeTimelineFrames: (source: string, fps: number, rate: number) => number;
+};
+
+let codeLayoutPromise: Promise<CodeLayoutModule> | null = null;
+
+/** Resolve code-layout.mjs from either src/ (tsx) or dist/src/ (the built test). */
+function loadCodeLayout(): Promise<CodeLayoutModule> {
+  if (!codeLayoutPromise) {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    let found: string | null = null;
+    for (let hop = 0; hop < 6 && !found; hop += 1) {
+      const candidate = join(dir, 'schema', 'src', 'code-layout.mjs');
+      if (existsSync(candidate)) found = candidate;
+      dir = dirname(dir);
+    }
+    if (!found) throw new Error('code-layout.mjs not found');
+    codeLayoutPromise = import(pathToFileURL(found).href) as Promise<CodeLayoutModule>;
+  }
+  return codeLayoutPromise;
+}
 const SCENE_ID_RE = /^s[A-Za-z0-9_-]{0,63}$/;
 
 function clampText(value: unknown, max: number): string | undefined {
@@ -240,6 +285,47 @@ function clampText(value: unknown, max: number): string | undefined {
   const text = value.trim();
   if (!text) return undefined;
   return text.length > max ? `${text.slice(0, Math.max(1, max - 1)).trimEnd()}\u2026` : text;
+}
+
+function sanitizeForegroundItem(item: Record<string, any>): Record<string, any> {
+  const next = { ...item };
+  if (next.frame !== 'pip') delete next.frame;
+  if (!PIP_PLACEMENTS.has(next.placement)) delete next.placement;
+  if (!PIP_MASKS.has(next.mask)) delete next.mask;
+  if (typeof next.size !== 'number' || next.size < 0.18 || next.size > 0.32) delete next.size;
+  return next;
+}
+
+function sanitizePlate(plate: any, assetIds: Set<string>): Record<string, any> | undefined {
+  if (!plate || typeof plate !== 'object') return undefined;
+  const label = clampText(plate.label, 40);
+  const procedural = plate.procedural && typeof plate.procedural === 'object' ? { ...plate.procedural } : undefined;
+  if (procedural) {
+    if (!BACKGROUND_PATTERNS.includes(procedural.pattern)) procedural.pattern = 'gradient';
+    if (procedural.seed !== undefined && !Number.isInteger(procedural.seed)) delete procedural.seed;
+    if (Array.isArray(procedural.palette)) {
+      procedural.palette = procedural.palette.filter((entry: unknown) => typeof entry === 'string' && /^#[0-9a-fA-F]{6}$/.test(entry)).slice(0, 8);
+      if (procedural.palette.length === 0) delete procedural.palette;
+    }
+  }
+  const asset = typeof plate.asset === 'string' && assetIds.has(plate.asset) ? plate.asset : undefined;
+  if (Boolean(procedural) === Boolean(asset)) return undefined;
+  const out: Record<string, any> = procedural ? { procedural } : { asset };
+  if (label) out.label = label;
+  return out;
+}
+
+function sanitizeCodeBlock(block: any, fallbackRate: number): Record<string, any> | undefined {
+  if (!block || typeof block !== 'object') return undefined;
+  const language = typeof block.language === 'string' ? block.language.trim().slice(0, 32) : '';
+  const code = typeof block.code === 'string' ? block.code.replace(/\r\n/g, '\n').slice(0, 4000) : '';
+  if (!language || code.trim().length === 0) return undefined;
+  const highlights = Array.isArray(block.highlights)
+    ? block.highlights.filter((entry: unknown) => Number.isInteger(entry) && (entry as number) >= 1 && (entry as number) <= 400).slice(0, 8)
+    : [];
+  const raw = typeof block.charsPerSecond === 'number' ? block.charsPerSecond : block.typing?.charsPerSecond;
+  const rate = typeof raw === 'number' && raw >= 1 && raw <= 120 ? raw : fallbackRate;
+  return { language, code, ...(highlights.length > 0 ? { highlights } : {}), typing: { charsPerSecond: rate } };
 }
 
 /** The live model often sends `role`/`title` and no `layout`; infer one. */
@@ -283,7 +369,8 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   const limits = COPY_LIMITS[finalLayout];
   for (const [key, max] of Object.entries(limits)) if (copy[key] !== undefined) copy[key] = clampText(copy[key], max);
   if (Array.isArray(copy.items)) copy.items = copy.items.map(item => clampText(item, 72)).filter(Boolean).slice(0, 6);
-  if (!copy.headline) copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline);
+  if (!copy.headline && finalLayout !== 'code') copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline ?? 48);
+  if (finalLayout === 'code' && !copy.headline) delete copy.headline;
 
   let variant = source.variant;
   const allowedVariants = LAYOUT_VARIANTS[finalLayout];
@@ -308,7 +395,10 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   }
 
   const foreground = Array.isArray(source.foreground)
-    ? source.foreground.filter((item: any) => item && typeof item === 'object' && typeof item.asset === 'string' && assetIds.has(item.asset)).slice(0, 12)
+    ? source.foreground
+      .filter((item: any) => item && typeof item === 'object' && typeof item.asset === 'string' && assetIds.has(item.asset))
+      .slice(0, 12)
+      .map(sanitizeForegroundItem)
     : [];
 
   const scene: Record<string, any> = { id, layout: finalLayout };
@@ -339,6 +429,14 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
       if (typeof id === 'string' && /^c[A-Za-z0-9_-]{0,63}$/.test(id) && !ids.includes(id)) ids.push(id);
     }
     if (ids.length) scene.cast = ids.slice(0, 8);
+  }
+  if (finalLayout === 'code') {
+    const block = sanitizeCodeBlock(source.code, DEFAULT_CHARS_PER_SECOND);
+    if (block) scene.code = block;
+  }
+  if (Array.isArray(source.media)) {
+    const plates = source.media.map((plate: any) => sanitizePlate(plate, assetIds)).filter(Boolean).slice(0, 2);
+    if (plates.length === 2) scene.media = plates;
   }
   // SCENE_KEYS is the allow-list. `motion` has to be in it or this drops the field.
   for (const key of Object.keys(scene)) if (!SCENE_KEYS.has(key)) delete scene[key];
@@ -843,6 +941,66 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       ),
       presenterSetSchema,
       presenterSet,
+    ),
+    'scene.code': tool(
+      'scene.code',
+      'Add or replace a code/terminal scene. Typing is deterministic (chars per second; default about 0.035 s/char). Returns layout-lint findings and does not write the scene when the source overflows the frame, including when shrunk to 360 px wide.',
+      baseParameters({
+        scene_id: { type: 'string' },
+        language: { type: 'string' },
+        code: { type: 'string' },
+        highlights: { type: 'array', items: { type: 'integer' } },
+        charsPerSecond: { type: 'number' },
+      }, ['language', 'code']),
+      codeSceneSchema,
+      async (args: z.infer<typeof codeSceneSchema>) => {
+        const layoutMod = await loadCodeLayout();
+        if (!state.package) {
+          state.package = {
+            $schema: 'https://comfyrizz.example/schema/package-v1.json',
+            schemaVersion: 1,
+            revision: 1,
+            id: hashId('pkg', `code:${args.language}:${args.code}`),
+            title: 'Code scene',
+            createdAt: (options.now ?? (() => new Date().toISOString()))(),
+            format: { width: 1920, height: 1080, fps: 30 },
+            duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
+            theme: { palette: ['#243056', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) },
+            voice: { enabled: false, engine: 'none' },
+            datasets: {},
+            scenes: [],
+            assets: { ...(options.brandAssets ?? {}) },
+            compliance: { open_weights_only: true },
+            renders: [],
+          };
+        }
+        const draft = state.package;
+        const width = draft.format?.width ?? 1920;
+        const height = draft.format?.height ?? 1080;
+        const fps = draft.format?.fps ?? 30;
+        const block = sanitizeCodeBlock(
+          { language: args.language, code: args.code, highlights: args.highlights, charsPerSecond: args.charsPerSecond },
+          layoutMod.DEFAULT_CHARS_PER_SECOND,
+        );
+        if (!block) throw new Error('scene.code needs a language and a code string');
+        const findings = layoutMod.lintCodeScene(block.code, width, height);
+        const rawId = args.scene_id ?? 's_code';
+        const id = SCENE_ID_RE.test(rawId) ? rawId : 's_code';
+        if (findings.length > 0) return { ok: false, scene_id: id, findings };
+        const scene = {
+          id,
+          layout: 'code' as const,
+          preferredFrames: layoutMod.codeTimelineFrames(block.code, fps, block.typing.charsPerSecond),
+          code: block,
+          background: { procedural: { pattern: 'gradient', palette: ['#243056', '#6d8cff'] } },
+        };
+        const scenes = Array.isArray(draft.scenes) ? draft.scenes : [];
+        const index = scenes.findIndex(item => item?.id === id);
+        const next = index >= 0 ? scenes.map((item, sceneIndex) => sceneIndex === index ? scene : item) : [...scenes, scene];
+        state.package = { ...draft, scenes: next, revision: Number(draft.revision ?? 0) + 1 };
+        touch();
+        return { ok: true, scene_id: id, scene, findings, package: state.package, revision: state.package.revision };
+      },
     ),
     'variant.cutdown': tool(
       'variant.cutdown',

@@ -1,0 +1,135 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_splitwithoutmedia",
+  "title": "Layout pack v2",
+  "createdAt": "2026-10-18T12:00:00-04:00",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "maxFrames": 1200
+  },
+  "theme": {
+    "palette": [
+      "#1b2440",
+      "#6d8cff",
+      "#e6e8ee"
+    ],
+    "font": "Inter"
+  },
+  "scenes": [
+    {
+      "id": "s_split",
+      "layout": "split",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Side by side"
+      }
+    },
+    {
+      "id": "s_compare",
+      "layout": "compare",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Before and after"
+      },
+      "media": [
+        {
+          "label": "Before",
+          "procedural": {
+            "pattern": "grid",
+            "seed": 2
+          }
+        },
+        {
+          "label": "After",
+          "procedural": {
+            "pattern": "mesh",
+            "seed": 3,
+            "palette": [
+              "#1b2440",
+              "#6d8cff"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "s_code",
+      "layout": "code",
+      "preferredFrames": 180,
+      "code": {
+        "language": "typescript",
+        "code": "export function hello() {\n  return 'ok';\n}\n",
+        "highlights": [
+          1
+        ],
+        "typing": {
+          "charsPerSecond": 28.57
+        }
+      },
+      "background": {
+        "procedural": {
+          "pattern": "gradient",
+          "palette": [
+            "#243056",
+            "#6d8cff"
+          ]
+        }
+      }
+    },
+    {
+      "id": "s_inset",
+      "layout": "hero",
+      "variant": "full-bleed",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "A framed inset"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "gradient",
+          "palette": [
+            "#1b2440",
+            "#6d8cff"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_pip",
+          "frame": "pip",
+          "placement": "pip-br",
+          "mask": "rounded-rect",
+          "size": 0.24
+        }
+      ]
+    }
+  ],
+  "assets": {
+    "a_pip": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "caption": "A flat coral square on a plain background, no text and no people.",
+        "inputs": {
+          "width": 512,
+          "height": 512,
+          "seed": 3,
+          "steps": 8
+        }
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true
+  }
+}

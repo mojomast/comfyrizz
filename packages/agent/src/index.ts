@@ -12,6 +12,7 @@ export {
   generateSvgSchema,
   generateImageSchema,
   sketchToRenderSchema,
+  codeSceneSchema,
   cutdownSchema,
 } from './tools.js';
 export {

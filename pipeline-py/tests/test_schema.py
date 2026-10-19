@@ -62,7 +62,7 @@ def test_spec_6_3_example_validates():
     assert doc["assets"]["a_plate1"]["license"]["id"] == "CC0-1.0"
 
 
-@pytest.mark.parametrize("layout", ["title", "hero", "stat", "chart", "list"])
+@pytest.mark.parametrize("layout", list(S.LAYOUTS))
 def test_every_layout_appears_in_a_valid_fixture(layout):
     seen = False
     for entry in VALID:

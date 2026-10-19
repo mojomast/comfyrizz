@@ -31,7 +31,7 @@ test("the schema file is JSON Schema 2020-12 and declares the v1 id", () => {
 });
 
 test("layout contract is published and the chart layout requires data", () => {
-  assert.deepEqual(Object.keys(LAYOUTS).sort(), ["chart", "hero", "list", "stat", "title"]);
+  assert.deepEqual(Object.keys(LAYOUTS).sort(), ["chart", "code", "compare", "hero", "list", "split", "stat", "title"]);
   assert.equal(LAYOUTS.chart.requiresData, true);
   assert.deepEqual(LAYOUTS.chart.variants, ["bar"]);
   assert.deepEqual(LAYOUTS.list.variants, ["bullets", "quote"]);

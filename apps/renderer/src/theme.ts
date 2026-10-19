@@ -39,6 +39,9 @@ export const COPY_LIMITS: Record<Scene['layout'], Partial<Record<string, number>
   stat: { headline: 48, sub: 90, body: 40 },
   chart: { headline: 64, sub: 120, footnote: 120 },
   list: { headline: 64, quote: 200, attribution: 80 },
+  split: { headline: 48, sub: 90 },
+  compare: { headline: 48, sub: 90 },
+  code: { headline: 64 },
 };
 
 /** The exact spec text of a fade default, kept here so the renderer never guesses. */
