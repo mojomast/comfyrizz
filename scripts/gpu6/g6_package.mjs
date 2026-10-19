@@ -67,6 +67,14 @@ export function gpu6Package() {
   pkg.assets.a_plate1.gen.inputs.upscale = true;
 
   pkg.audio = { music: { asset: "a_music", gain_db: -18, fade_in_seconds: 0.5, fade_out_seconds: 1, loop: true } };
+
+  // The fixture is a *planning* fixture: nothing rendered it before this harness, so nobody had noticed
+  // that its last scene carries a transition - which a renderer rejects ("Scene s1 has a transition but
+  // is the last scene"). GPU test 6 is the first thing to render this package, so it fixes that here
+  // rather than in the shared fixture, which other tests plan from.
+  // every transition, not only the last scene's: the renderer compiles its own timeline from the scenes
+  // whose assets are ready, so which scene ends up last there is not what the package says
+  for (const scene of Array.isArray(pkg.scenes) ? pkg.scenes : []) delete scene.transition;
   return pkg;
 }
 

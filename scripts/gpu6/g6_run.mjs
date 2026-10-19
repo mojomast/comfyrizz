@@ -139,8 +139,11 @@ export function buildFakeManifest(pkg, jobs) {
     const asset = pkg.assets?.[assetId] ?? {};
     const kind = asset.kind === "audio" ? "audio" : asset.kind === "video" ? "video" : "image";
     const content = kind === "audio" ? silentWav(0.5) : kind === "video" ? mp4 ?? Buffer.from("not a video: ffmpeg is missing") : TINY_PNG;
+    // one file per job, named for the job: a plate and its upscaled variant must not be the same path, or
+    // the package is invalid (SEM_ASSET_VARIANT_SAME_FILE) before the renderer ever sees it
+    const suffix = String(job.kind ?? job.id.split(".").pop());
     const extension = kind === "audio" ? "wav" : kind === "video" ? "mp4" : "png";
-    const name = `${assetId}${kind === "video" ? ".plate" : ""}.${extension}`;
+    const name = `${assetId}${kind === "video" || kind === "image" ? `.${suffix}` : ""}.${extension}`;
     const remote = `/content/comfyrizz/out/assets/${name}`;
     files.push({ path: remote, content: content.toString("binary") });
     entries.push({
@@ -178,46 +181,17 @@ export function buildFakeManifest(pkg, jobs) {
 }
 
 /** The render the server itself uses, found rather than restated, so the two cannot drift. */
+/**
+ * The renderer, taken from where it actually lives rather than inferred from the server's plumbing.
+ *
+ * `apps/renderer/scripts/render-package-lib.mjs` exports `renderPackage`, and its options include
+ * `mixAudio` - the M1/M2 music bed mixed under the narration - which is half of what this harness exists
+ * to prove. The server wraps it (`final: true`) in one line; this calls it the same way.
+ */
 async function resolveRender() {
-  const source = readFileSync(join(REPO, "apps/server/src/app.mjs"), "utf8");
-  // `render:` appears more than once (a null in an options object, for one), so every candidate is tried
-  // and the first one that resolves to a real function wins. A candidate can also be a *local* wrapper -
-  // app.mjs's exportRender is one line that calls `render` with `final: true` - so a locally defined
-  // name is followed one step further, which is where the actual renderer is.
-  const candidates = [...source.matchAll(/render:\s*([A-Za-z_$][\w$]*)/g)]
-    .map((match) => match[1])
-    .filter((name) => name !== "null" && name !== "undefined");
-
-  const fromImport = async (name) => {
-    for (const match of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
-      const pairs = match[1].split(",").map((entry) => {
-        const parts = entry.trim().split(/\s+as\s+/);
-        return { exported: parts[0].trim(), local: (parts[1] ?? parts[0]).trim() };
-      });
-      const pair = pairs.find((entry) => entry.local === name);
-      if (!pair) continue;
-      const module = await import(new URL(match[2], new URL("apps/server/src/app.mjs", `file://${REPO}/`)).href);
-      if (typeof module?.[pair.exported] === "function") return module[pair.exported];
-    }
-    return null;
-  };
-
-  const resolve = async (name, depth = 0) => {
-    const imported = await fromImport(name);
-    if (imported) return imported;
-    if (depth >= 2) return null;
-    // a local wrapper: `const name = (a, b, opts = {}) => other(a, b, ...)` - follow what it calls
-    const local = new RegExp(`(?:const|let|function)\\s+${name}\\s*=?[^;]*?=>\\s*([A-Za-z_$][\\w$]*)\\s*\\(`).exec(source);
-    const called = local?.[1];
-    if (called && called !== name) return await resolve(called, depth + 1);
-    return null;
-  };
-
-  for (const name of candidates) {
-    const found = await resolve(name);
-    if (found) return found;
-  }
-  throw new Error(`could not resolve the server's render function (tried ${candidates.join(", ")})`);
+  const module = await import(new URL("apps/renderer/scripts/render-package-lib.mjs", `file://${REPO}/`).href);
+  if (typeof module.renderPackage !== "function") throw new Error("apps/renderer/scripts/render-package-lib.mjs no longer exports renderPackage");
+  return (packagePath, outputPath, opts = {}) => module.renderPackage(packagePath, outputPath, { ...opts, final: true });
 }
 
 async function run() {
