@@ -19,7 +19,9 @@ Each directory holds:
 
 Both fixtures are deterministic: the narration budget per chunk is derived from
 the intended scene length, so the compiled timeline lands on the exact frame
-counts above with no warnings and no target deviation. If you change a
+counts above with no warnings and no target deviation. Regenerate them with
+`node build.mjs` in this directory (it validates every package with the real
+schema first, and a clean regeneration is an empty diff). If you change a
 `preferredFrames`, a narration text or a transition frame count, re-check the
 compiled total — the frame counts in the table are asserted by
 `apps/web/test/editor-phase0.test.mjs`.
