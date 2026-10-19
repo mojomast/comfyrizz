@@ -13,6 +13,23 @@ const runtimeDir = join(here, '.runtime');
  * C1 dev-only export route. C2 replaces this with the token/Host-checked local
  * server and SSE progress; here it is one synchronous CPU render.
  */
+/**
+ * TEMPORARY STAND-IN until CA-1's browser-safe planner export drops `node:crypto`.
+ * Lets the timeline call the real `compileTimeline` in the browser. The shim hash
+ * is not used for save or export.
+ */
+function shimNodeCrypto(): Plugin {
+  const shim = join(here, 'src/editor/stand-in/node-crypto-shim.ts');
+  return {
+    name: 'comfyrizz-node-crypto-shim',
+    enforce: 'pre',
+    resolveId(id) {
+      if (id === 'node:crypto' || id === 'crypto') return shim;
+      return null;
+    },
+  };
+}
+
 function renderApi(): Plugin {
   return {
     name: 'comfyrizz-render-api',
@@ -60,7 +77,7 @@ function renderApi(): Plugin {
 
 export default defineConfig({
   publicDir: join(repoRoot, 'apps', 'renderer', 'public'),
-  plugins: [react(), renderApi()],
+  plugins: [shimNodeCrypto(), react(), renderApi()],
   resolve: {
     dedupe: ['remotion', 'react', 'react-dom'],
     alias: {
