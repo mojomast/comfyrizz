@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { compileTimeline, measuredFromReport } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
 import { narrationWarning } from '../src/audio-model.js';
@@ -111,20 +111,7 @@ export function applyFinalRender(pkg, packageDir, final = {}) {
 export function narrationOptions(packageDir) {
   const durationsPath = join(packageDir, 'audio', 'durations.json');
   if (!existsSync(durationsPath)) return {};
-  const durations = JSON.parse(readFileSync(durationsPath, 'utf8'));
-  const narration = {};
-  for (const [sceneId, scene] of Object.entries(durations.scenes ?? {})) {
-    narration[sceneId] = (scene.chunks ?? []).map(chunk =>
-      chunk.words && chunk.words.length > 0
-        ? { text: chunk.text, seconds: chunk.seconds, words: chunk.words }
-        : { text: chunk.text, seconds: chunk.seconds },
-    );
-  }
-  return {
-    narration,
-    narrationGapSeconds: durations.gapSeconds,
-    narrationPaddingSeconds: durations.paddingSeconds,
-  };
+  return measuredFromReport(JSON.parse(readFileSync(durationsPath, 'utf8')));
 }
 
 /**

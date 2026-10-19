@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "gapSeconds": 0.15,
+  "paddingSeconds": 0.25,
+  "scenes": {
+    "s_voice": {
+      "chunks": [
+        {
+          "text": "Measured line.",
+          "seconds": 2,
+          "words": [
+            {
+              "text": "Measured",
+              "start": 0,
+              "end": 0.8
+            },
+            {
+              "text": "line.",
+              "start": 0.8,
+              "end": 2
+            }
+          ]
+        }
+      ],
+      "file": "audio/narration.wav"
+    }
+  }
+}

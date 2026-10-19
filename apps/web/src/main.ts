@@ -2,6 +2,10 @@ import './style.css';
 import { mountSettingsCard } from './colab-card';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
+import { apiFetch, installSessionToken, savePackageRequest, sessionToken } from './editor/api.ts';
+import { createAutosave } from './editor/autosave.ts';
+import { createIndexedDbDraftStore, createMemoryDraftStore } from './editor/recovery.ts';
+import { createEditorStore, saveStatusText } from './editor/store.ts';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
@@ -14,18 +18,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 
 // The C2 server prints http://127.0.0.1:4319/#token=...; the fragment never
 // leaves the browser. Strip it from the visible URL and keep it for API calls.
-const TOKEN_KEY = 'comfyrizz.token';
-const fragmentToken = new URLSearchParams(location.hash.slice(1)).get('token');
-if (fragmentToken) {
-  sessionStorage.setItem(TOKEN_KEY, fragmentToken);
-  history.replaceState(null, '', `${location.pathname}${location.search}`);
-}
-const token = fragmentToken ?? sessionStorage.getItem(TOKEN_KEY);
-function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  if (token) headers.set('x-comfyrizz-token', token);
-  return fetch(input, { ...init, headers });
-}
+const token = installSessionToken();
 
 /* Lifted from Orbit's Grok Bots shell (MIT): escape, then a tiny markdown subset. */
 function esc(value: unknown): string {
@@ -44,6 +37,20 @@ const colabHost = document.getElementById('colab-card-host');
 if (colabHost) mountSettingsCard(colabHost, apiFetch);
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
+const editorStore = createEditorStore({ package: pkg as never });
+const saveStatusEl = document.getElementById('save-status');
+const paintSaveStatus = () => {
+  if (!saveStatusEl) return;
+  const status = editorStore.saveStatus();
+  saveStatusEl.textContent = saveStatusText(status);
+  saveStatusEl.dataset.state = status;
+};
+editorStore.subscribe(paintSaveStatus);
+paintSaveStatus();
+if (sessionToken()) {
+  const drafts = typeof indexedDB === 'undefined' ? createMemoryDraftStore() : createIndexedDbDraftStore();
+  createAutosave(editorStore, { save: payload => savePackageRequest(apiFetch, payload), drafts });
+}
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
 let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];

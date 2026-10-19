@@ -22,7 +22,10 @@ import { applySceneChip, sceneChipList } from '../../../packages/agent/dist/src/
 import { applyPresenterSet, presenterChips, presenterPresets } from '../../../packages/agent/dist/src/index.js';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { compilePackage, measuredOptionsFromDir } from './compile-package.mjs';
+import { handleCompile } from './compile-route.mjs';
+import { handleMedia } from './media-route.mjs';
+import { readEditor, validateEditor, writeEditor } from './editor-sidecar.mjs';
 import { serveStaticFile } from './static-file.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
@@ -425,21 +428,31 @@ export function createApp({
       return sendBytes(response, 200, loaded.body, headers);
     }
 
+    if (await handleCompile({ request, response, url, readJson, sendJson, store })) return;
+    if (handleMedia({ request, response, url, sendJson, runtimeDir, store })) return;
+
     const packageMatch = /^\/api\/package\/([^/]+)$/.exec(url.pathname);
     if (packageMatch) {
       const id = packageMatch[1];
       if (request.method === 'GET') {
         const pkg = store.read(id);
         if (!pkg) return sendJson(response, 404, { error: 'package not found' });
-        return sendJson(response, 200, { package: pkg, revision: pkg.revision });
+        let editor = null;
+        try { editor = readEditor(runtimeDir, id); } catch { editor = null; }
+        return sendJson(response, 200, editor ? { package: pkg, revision: pkg.revision, editor } : { package: pkg, revision: pkg.revision });
       }
       if (request.method === 'PATCH') {
         const body = await readJson(request);
         if (!body.package || typeof body.package !== 'object') return sendJson(response, 400, { error: 'package required' });
+        const parsed = validateEditor(body.editor);
+        if (parsed.error) return sendJson(response, 400, { error: parsed.error });
         try {
           const saved = store.save(id, body.package, body.baseRevision);
+          if (parsed.editor) writeEditor(runtimeDir, id, parsed.editor);
           events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
-          return sendJson(response, 200, { package: saved, revision: saved.revision });
+          const editor = parsed.editor ?? readEditor(runtimeDir, id);
+          const ack = Number.isInteger(body.editSequence) ? { editSequence: body.editSequence } : {};
+          return sendJson(response, 200, { package: saved, revision: saved.revision, ...ack, ...(editor ? { editor } : {}) });
         } catch (error) {
           if (error instanceof ConflictError) {
             return sendJson(response, 409, { error: 'conflict', currentRevision: error.currentRevision });
@@ -526,7 +539,7 @@ export function createApp({
           onEvent: event => events.publish({ type: 'agent.event', event }),
         });
         const saved = store.write(result.package);
-        const timeline = compileTimeline(saved);
+        const timeline = compilePackage(saved, dirname(store.path(saved.id)));
         events.publish({ type: 'agent.finished', packageId: saved.id, revision: saved.revision, svgAssets: result.svgAssets?.length ?? 0, live: Boolean(result.live) });
         return sendJson(response, 200, {
           package: saved,
@@ -918,7 +931,7 @@ export function createApp({
         presenter: result.package.presenter ?? null,
         findings: result.findings ?? [],
         portrait_prompt: result.portrait_prompt ?? null,
-        presenters: compileTimeline(result.package).presenters ?? [],
+        presenters: compilePackage(result.package, dirname(target.packagePath)).presenters ?? [],
         package: result.package,
       });
     }
@@ -942,7 +955,10 @@ export function createApp({
         });
       }
       try {
-        const plan = sceneJobsPlan(target.pkg, body.sceneId, { includeReady: body.includeReady !== false });
+        const plan = sceneJobsPlan(target.pkg, body.sceneId, {
+          includeReady: body.includeReady !== false,
+          measured: measuredOptionsFromDir(dirname(target.packagePath)),
+        });
         return sendJson(response, 200, {
           packageId: target.pkg.id,
           revision: target.revision,
@@ -972,7 +988,7 @@ export function createApp({
         });
       }
       if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
-      const assets = sceneAssetIds(target.pkg, body.sceneId);
+      const assets = sceneAssetIds(target.pkg, body.sceneId, measuredOptionsFromDir(dirname(target.packagePath)));
       if (assets === null) return sendJson(response, 404, { error: `unknown scene ${body.sceneId}` });
       activeSceneRender = renderId;
       const output = join(rendersDir, `${renderId}.mp4`);

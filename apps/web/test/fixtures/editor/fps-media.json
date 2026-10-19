@@ -1,0 +1,73 @@
+{
+  "id": "pkg_fpsmedia",
+  "title": "24/25/30 fps media",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible"
+  },
+  "scenes": [
+    {
+      "id": "s24",
+      "layout": "hero",
+      "preferredFrames": 90,
+      "background": {
+        "asset": "a_fps24"
+      },
+      "transitionOut": {
+        "type": "none",
+        "frames": 0
+      }
+    },
+    {
+      "id": "s25",
+      "layout": "hero",
+      "preferredFrames": 90,
+      "background": {
+        "asset": "a_fps25"
+      },
+      "transitionOut": {
+        "type": "none",
+        "frames": 0
+      }
+    },
+    {
+      "id": "s30",
+      "layout": "hero",
+      "preferredFrames": 90,
+      "background": {
+        "asset": "a_fps30"
+      },
+      "transitionOut": {
+        "type": "none",
+        "frames": 0
+      }
+    }
+  ],
+  "assets": {
+    "a_fps24": {
+      "kind": "video",
+      "media": {
+        "fps": 24,
+        "frames": 48
+      }
+    },
+    "a_fps25": {
+      "kind": "video",
+      "media": {
+        "fps": 25,
+        "frames": 50
+      }
+    },
+    "a_fps30": {
+      "kind": "video",
+      "media": {
+        "fps": 30,
+        "frames": 60
+      }
+    }
+  }
+}
