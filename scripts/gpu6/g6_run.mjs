@@ -304,8 +304,11 @@ async function run() {
     check("applied-package", Boolean(appliedPkg), appliedPkg ? "runPackage applied the manifest" : "runPackage returned no applied package");
     if (!appliedPkg) throw new Error("runPackage returned no applied package, so there is nothing to render");
     writeFileSync(packagePath, `${JSON.stringify(appliedPkg, null, 2)}\n`);
-    const copied = copyNamedAssets({ pkg: appliedPkg, outputDir: join(workspace, "out"), packageDir: workspace });
-    check("applied", copied.length > 0, `${copied.length} file(s) copied`);
+    // where the backend collected the VM's `out/` tree: that is the directory the applied package's
+    // files are named against, and it is what `completeRun` copies from as `record.outputDir`
+    const collected = runResult.collect?.localDir ?? runResult.collect?.dir ?? join(outDir, "scratch", "out");
+    const copied = copyNamedAssets({ pkg: appliedPkg, outputDir: collected, packageDir: workspace });
+    check("applied", copied.length > 0, `${copied.length} file(s) copied from ${collected}`);
 
     if (hasFlag("--no-render")) {
       check("render", true, "skipped (--no-render)");
