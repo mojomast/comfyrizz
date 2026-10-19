@@ -15,10 +15,10 @@ export function MotionDiagram({ scene, pkg, frame }: { scene: Scene; pkg: Packag
   const portrait = height > width;
   const hub = scene.motion?.diagram === 'hub' && !portrait;
   const cardW = portrait ? width * 0.72 : hub ? width * 0.29 : width * 0.82 / Math.max(1, items.length) - 24;
-  const cardH = portrait ? height * 0.11 : height * 0.23;
+  const cardH = portrait ? height * 0.11 : height * (hub ? 0.19 : 0.23);
   const points = items.map((_, i) => ({
     x: portrait ? width * 0.5 : hub ? width * (i % 2 ? 0.75 : 0.25) : width * 0.09 + (i + 0.5) * width * 0.82 / items.length,
-    y: portrait ? height * 0.28 + i * height * 0.135 : hub ? height * (i < 2 ? 0.40 : 0.69) : height * 0.50,
+    y: portrait ? height * 0.28 + i * height * 0.135 : hub ? height * (i < 2 ? 0.36 : 0.59) : height * 0.50,
   }));
   return <AbsoluteFill style={{ fontFamily: family, color: text.primary, zIndex: 8 }}>
     <div style={{ position: 'absolute', left: '8%', right: '8%', top: '10%' }}>
@@ -28,7 +28,7 @@ export function MotionDiagram({ scene, pkg, frame }: { scene: Scene; pkg: Packag
     <svg width={width} height={height} style={{ position: 'absolute', inset: 0 }}>
       {points.map((p, i) => {
         if (!hub && i === 0) return null;
-        const a = hub ? { x: width * 0.5, y: height * 0.545 } : points[i - 1];
+        const a = hub ? { x: width * 0.5, y: height * 0.475 } : points[i - 1];
         const reveal = state.cards[i].reveal;
         const travel = ((frame / fps * 0.22) + i * 0.17) % 1;
         return <g key={i} opacity={0.25 + reveal * 0.75}>
@@ -36,7 +36,7 @@ export function MotionDiagram({ scene, pkg, frame }: { scene: Scene; pkg: Packag
           <circle cx={a.x + (p.x - a.x) * travel} cy={a.y + (p.y - a.y) * travel} r={7} fill={colors[2]} opacity={reveal} />
         </g>;
       })}
-      {hub && <><circle cx={width * 0.5} cy={height * 0.545} r={width * 0.045} fill={colors[0]} stroke={colors[2]} strokeWidth={3}/><text x={width * 0.5} y={height * 0.545 + 9} textAnchor="middle" fontSize={26} fill={text.primary} fontWeight="700">{scene.copy?.cta ?? 'HUB'}</text></>}
+      {hub && <><circle cx={width * 0.5} cy={height * 0.475} r={width * 0.045} fill={colors[0]} stroke={colors[2]} strokeWidth={3}/><text x={width * 0.5} y={height * 0.475 + 9} textAnchor="middle" fontSize={26} fill={text.primary} fontWeight="700">{scene.copy?.cta ?? 'HUB'}</text></>}
     </svg>
     {points.map((p, i) => {
       const { reveal } = state.cards[i], active = state.active === i;
@@ -46,7 +46,7 @@ export function MotionDiagram({ scene, pkg, frame }: { scene: Scene; pkg: Packag
         <div style={{ height: 3, width: `${reveal * 100}%`, background: colors[2], opacity: 0.7 }} />
       </div>;
     })}
-    {scene.copy?.sub && <div style={{ position: 'absolute', left: '9%', right: '9%', top: hub ? '84%' : '72%', fontSize: 28, color: text.muted }}>{scene.copy.sub}</div>}
+    {scene.copy?.sub && <div style={{ position: 'absolute', left: '9%', right: '9%', top: '71%', fontSize: 28, color: text.muted }}>{scene.copy.sub}</div>}
     <div style={{ position: 'absolute', bottom: 0, left: 0, height: 4, width: `${state.progress * 100}%`, background: colors[2] }} />
   </AbsoluteFill>;
 }
