@@ -5,7 +5,7 @@ import type { TimelinePresenter } from '../../../packages/planner/dist/src/index
 import { MediaFill, MissingMediaPlaceholder } from './media';
 import { useGeneratedAssets } from './generated-assets-context';
 import { palette, useFontFamily } from './theme';
-import { isOverlayPlacement, presenterBox, presenterOpacity } from './presenter-model.js';
+import { isOverlayPlacement, presenterBox, presenterLabelStyle, presenterOpacity } from './presenter-model.js';
 
 /**
  * P-pres: the persistent AI presenter overlay (research 2.2). It is one layer
@@ -45,7 +45,7 @@ export function PresenterOverlay({ presenters, pkg }: { presenters?: TimelinePre
               boxShadow: `0 0 0 3px ${colors[2]}, 0 24px 60px rgba(0,0,0,0.45)`,
             }}
           >
-            <PresenterClip assetId={entry.assetId} label={entry.label} pkg={pkg} frames={entry.durationInFrames} fontSize={Math.max(16, Math.round(box.height * 0.075))} />
+            <PresenterClip assetId={entry.assetId} label={entry.label} pkg={pkg} frames={entry.durationInFrames} fontSize={Math.max(16, Math.round(box.height * 0.075))} shape={entry.shape} />
           </div>
         );
       })}
@@ -57,9 +57,10 @@ export function PresenterOverlay({ presenters, pkg }: { presenters?: TimelinePre
  * The presenter clip plus its disclosure chip. Shared by the overlay and the
  * split-left card so both read the same. The clip's audio is never mixed.
  */
-export function PresenterClip({ assetId, label, pkg, frames, fontSize }: { assetId: string; label?: string | null; pkg: PackageV1; frames: number; fontSize?: number }) {
+export function PresenterClip({ assetId, label, pkg, frames, fontSize, shape }: { assetId: string; label?: string | null; pkg: PackageV1; frames: number; fontSize?: number; shape?: 'circle' | 'rounded-rect' }) {
   const family = useFontFamily();
   const inline = useGeneratedAssets();
+  const labelStyle = presenterLabelStyle(shape, fontSize ?? 24);
   const asset = pkg.assets?.[assetId];
   const svg = inline[assetId]?.svg;
   return (
@@ -77,18 +78,13 @@ export function PresenterClip({ assetId, label, pkg, frames, fontSize }: { asset
         <div
           style={{
             position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            padding: '8px 0',
             textAlign: 'center',
             background: 'rgba(4, 6, 12, 0.68)',
             color: '#f4f6fb',
             fontFamily: family,
-            fontSize: fontSize ?? 24,
             fontWeight: 700,
-            letterSpacing: 1.5,
             textTransform: 'uppercase',
+            ...labelStyle,
           }}
         >
           {label}

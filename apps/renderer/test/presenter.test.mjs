@@ -6,6 +6,7 @@ import {
   isOverlayPlacement,
   presenterAssetId,
   presenterBox,
+  presenterLabelStyle,
   presenterOpacity,
 } from '../src/presenter-model.js';
 
@@ -64,4 +65,30 @@ test('P-pres: the clip falls back to the package portrait when a scene has no a2
 
 test('P-pres: the default size is inside the schema range', () => {
   assert.ok(PRESENTER_SIZE_DEFAULT >= 0.18 && PRESENTER_SIZE_DEFAULT <= 0.32);
+});
+
+test('G6-11: the disclosure chip fits inside a circular presenter mask at every legal size', () => {
+  const label = 'AI presenter';
+  for (const size of [0.18, 0.24, PRESENTER_SIZE_DEFAULT, 0.32]) {
+    const box = presenterBox({ placement: 'pip-br', shape: 'circle', size, width: W, height: H });
+    const style = presenterLabelStyle('circle', Math.max(16, Math.round(box.height * 0.075)));
+    const inset = (box.width * parseFloat(style.left)) / 100;
+    const available = box.width - inset * 2;
+    const chipHeight = 4 * 2 + Math.round(style.fontSize * 1.2);
+    const centreFromBottom = (box.height * parseFloat(style.bottom)) / 100 + chipHeight / 2;
+    const radius = box.height / 2;
+    const chord = 2 * Math.sqrt(Math.max(0, radius ** 2 - (radius - centreFromBottom) ** 2));
+    // Rough advance width for a bold uppercase face, plus the per-glyph tracking.
+    const text = label.length * style.fontSize * 0.62 + label.length * style.letterSpacing;
+    assert.ok(available <= chord, `size ${size}: chip ${available}px wide exceeds the ${Math.round(chord)}px chord`);
+    assert.ok(text <= available, `size ${size}: ${Math.round(text)}px of label does not fit ${Math.round(available)}px`);
+  }
+});
+
+test('G6-11: a rounded-rect card keeps the chip flush instead of insetting it', () => {
+  const style = presenterLabelStyle('rounded-rect', 24);
+  assert.equal(style.left, 0);
+  assert.equal(style.right, 0);
+  assert.equal(style.bottom, 0);
+  assert.equal(style.fontSize, 24);
 });

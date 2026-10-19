@@ -68,3 +68,24 @@ export function presenterOpacity(local, durationInFrames, dissolveInFrames = 0, 
 export function isOverlayPlacement(placement) {
   return placement !== 'split-left';
 }
+
+/**
+ * The disclosure chip's geometry (G6-11). On a circular mask a full-width chip
+ * is cut by the arc at its bottom corners, so the chip is inset and lifted until
+ * it sits inside a chord; 17% insets keep the default "AI presenter" label
+ * inside the circle at every legal size. A rounded-rect card keeps it flush.
+ */
+export function presenterLabelStyle(shape = 'circle', fontSize = 24) {
+  if (shape !== 'circle') {
+    return { left: 0, right: 0, bottom: 0, padding: '8px 0', fontSize, letterSpacing: 1.5, borderRadius: 0 };
+  }
+  return {
+    left: '17%',
+    right: '17%',
+    bottom: '10%',
+    padding: '4px 0',
+    fontSize: Math.max(13, Math.round(fontSize * 0.75)),
+    letterSpacing: 1,
+    borderRadius: 999,
+  };
+}
