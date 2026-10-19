@@ -1,6 +1,8 @@
 /**
- * Gesture clamps for the timeline. The command still rejects an illegal trim.
- * These helpers keep a drag inside the speech floor and a known source range.
+ * Gesture limits for the timeline. A request below the speech floor or the
+ * layout minimum is still dispatched: TrimScene keeps it as a preference and
+ * the compiler floors the duration. These helpers only reject a range the
+ * source cannot cover, and they cap a drag at a known source or layout max.
  */
 import { projectFps, speechFloorFrames, type MeasuredInput } from '../../../../../packages/planner/dist/src/browser.js';
 import type { ProjectDoc } from '../commands.ts';
@@ -69,36 +71,45 @@ export function trimBounds(doc: ProjectDoc, measured: MeasuredInput, sceneId: st
   return { min, max: Math.max(min, max), speech, source };
 }
 
-/** Clamp a requested preference. The compiler may still land on a different duration. */
+/** What the compiler will do with a preference that is shorter than speech or the layout minimum. */
+export function trimFloorMessage(requested: number, effective: number, bounds?: TrimBounds | null): string {
+  const reason = bounds?.speech != null && effective === bounds.speech
+    ? ' to measured narration'
+    : bounds != null && (bounds.speech == null || effective === bounds.min)
+      ? ' to the readable minimum'
+      : '';
+  return `Requested ${requested}, effective ${effective} (floored${reason}).`;
+}
+
+/**
+ * Keep a gesture inside a known source or layout maximum.
+ * A shorter request stays as the preference; `effective` is the floor the compiler applies.
+ */
 export function clampTrim(
   doc: ProjectDoc,
   measured: MeasuredInput,
   sceneId: string,
   requested: number,
-): { preferredFrames: number; note?: string } | { error: string } {
+): { preferredFrames: number; effective: number; floored: boolean; note?: string } | { error: string } {
   const bounds = trimBounds(doc, measured, sceneId);
   if (!bounds) return { error: `Unknown scene ${sceneId}.` };
   if (!Number.isFinite(requested)) return { error: 'Duration has to be a whole number of frames.' };
   if (bounds.source !== null && bounds.source < bounds.min) {
     return { error: `Source is ${bounds.source} frames, shorter than the ${bounds.min}-frame speech minimum.` };
   }
-  const floored = Math.floor(requested);
-  let preferred = floored;
+  const whole = Math.floor(requested);
+  let preferred = Math.max(1, Math.min(MAX_PREFERRED, whole));
   let note: string | undefined;
-  const layoutMin = LAYOUT_LIMITS[doc.package.scenes.find(item => item.id === sceneId)?.layout ?? 'hero']?.min ?? 0;
-  if (preferred < bounds.min) {
-    preferred = bounds.min;
-    note = bounds.speech !== null && bounds.speech >= layoutMin
-      ? `Held at ${preferred} frames so the narration is not cut.`
-      : `Held at the ${preferred}-frame readable minimum.`;
-  }
   if (preferred > bounds.max) {
     preferred = bounds.max;
     note = bounds.source !== null && bounds.max === bounds.source
       ? `Held at ${preferred} frames, the end of the source.`
       : `Held at ${preferred} frames.`;
   }
-  return { preferredFrames: preferred, note: preferred === floored ? undefined : note };
+  const effective = Math.max(preferred, bounds.min);
+  const floored = effective > preferred;
+  if (floored) note = trimFloorMessage(preferred, effective, bounds);
+  return { preferredFrames: preferred, effective, floored, note };
 }
 
 /** Build a CA-1 SetMediaRange from source frames. Rejects a range past a known asset. */

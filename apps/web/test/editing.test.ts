@@ -135,21 +135,23 @@ test('reorder, duplicate, delete and undo keep narration and captions intact', (
   assert.deepEqual(order(store), ['s_open', 's_point', 's_plate', 's_end']);
 });
 
-test('trim below the speech floor is rejected and the gesture clamp holds the floor', () => {
+test('trim below the speech floor is kept as a preference and the result says it was floored', () => {
   const store = openRough();
   const seconds = store.measuredInput().narration?.s_point?.map(chunk => chunk.seconds);
   const trimmed = store.dispatch({ type: 'TrimScene', sceneId: 's_point', preferredFrames: 10 });
-  assert.equal(trimmed.ok, false);
-  assert.equal(trimmed.code, 'below-speech-floor');
+  assert.equal(trimmed.ok, true, trimmed.error);
+  assert.equal(trimmed.floored, true);
+  assert.equal(trimmed.effective, 57);
   const held = clampTrim(store.getState().doc, store.measuredInput(), 's_point', 10);
   assert.ok(!('error' in held));
   if (!('error' in held)) {
-    assert.equal(held.preferredFrames, 57);
+    assert.equal(held.preferredFrames, 10);
+    assert.equal(held.effective, 57);
+    assert.equal(held.floored, true);
     assert.match(held.note ?? '', /narration/);
-    assert.equal(store.dispatch({ type: 'TrimScene', sceneId: 's_point', preferredFrames: held.preferredFrames }).ok, true);
   }
   const point = store.getState().doc.package.scenes.find(scene => scene.id === 's_point');
-  assert.equal(point?.preferredFrames, 57);
+  assert.equal(point?.preferredFrames, 10);
   const scene = compiledOf(store).scenes.find(item => item.id === 's_point');
   assert.equal(scene?.durationInFrames, 57);
   assert.deepEqual(store.measuredInput().narration?.s_point?.map(chunk => chunk.seconds), seconds);

@@ -89,17 +89,49 @@ test('an agent batch is one undo step', () => {
   assert.equal(editor.canUndo(), false);
 });
 
-test('trims below the speech floor are rejected and do not change narration', () => {
+test('trims below the speech floor or layout minimum are floored and do not change narration', () => {
   const editor = createEditorStore({
     package: pkg(),
     measured: { narration: { s_open: [{ text: 'Open the film.', seconds: 4 }] }, narrationPaddingSeconds: 0.25 },
   });
-  const before = docBody(editor.getState().doc);
-  const result = editor.dispatch({ type: 'TrimScene', sceneId: 's_open', preferredFrames: 40 });
-  assert.equal(result.ok, false);
-  assert.equal(result.code, 'below-speech-floor');
-  assert.deepEqual(docBody(editor.getState().doc), before);
-  assert.match(result.error ?? '', /script/i);
+  const narration = editor.getState().doc.package.scenes.map(scene => scene.narration);
+  const spoken = editor.dispatch({ type: 'TrimScene', sceneId: 's_open', preferredFrames: 40 });
+  assert.equal(spoken.ok, true, spoken.error);
+  assert.equal(spoken.floored, true);
+  assert.equal(spoken.effective, 128);
+  assert.equal(editor.getState().doc.package.scenes[0]?.preferredFrames, 40);
+  assert.equal(editor.getState().derived.timeline?.scenes[0]?.durationInFrames, 128);
+  assert.deepEqual(editor.getState().doc.package.scenes.map(scene => scene.narration), narration);
+
+  const silent = createEditorStore({ package: pkg() });
+  const layout = silent.dispatch({ type: 'TrimScene', sceneId: 's_end', preferredFrames: 5 });
+  assert.equal(layout.ok, true, layout.error);
+  assert.equal(layout.floored, true);
+  assert.equal(layout.effective, 45);
+  assert.equal(silent.getState().doc.package.scenes.find(scene => scene.id === 's_end')?.preferredFrames, 5);
+});
+
+test('reorder and delete clear the new last scene tail transition', () => {
+  const editor = store();
+  assert.equal(editor.dispatch({ type: 'SetTransition', sceneId: 's_mid', transitionOut: { type: 'fade', frames: 10 } }).ok, true);
+  assert.equal(editor.dispatch({ type: 'DeleteScene', sceneId: 's_end' }).ok, true);
+  const afterDelete = editor.getState().doc.package.scenes.at(-1);
+  assert.equal(afterDelete?.id, 's_mid');
+  assert.deepEqual(afterDelete?.transitionOut, { type: 'cut', frames: 0 });
+
+  const moved = store();
+  assert.equal(moved.dispatch({ type: 'SetTransition', sceneId: 's_open', transitionOut: { type: 'fade', frames: 12 } }).ok, true);
+  assert.equal(moved.dispatch({ type: 'MoveScene', sceneId: 's_open', toIndex: 2 }).ok, true);
+  const tail = moved.getState().doc.package.scenes.at(-1);
+  assert.equal(tail?.id, 's_open');
+  assert.deepEqual(tail?.transitionOut, { type: 'cut', frames: 0 });
+});
+
+test('project fps is floored before frames are counted', () => {
+  const editor = createEditorStore({
+    package: { ...pkg(), format: { width: 1920, height: 1080, fps: 30.9 } },
+  });
+  assert.equal(editor.getState().derived.timeline?.fps, 30);
 });
 
 test('a stale compile acknowledgement is ignored', () => {

@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "engine": "qwen3-tts",
+  "engineVersion": "stub",
+  "model": "Qwen3-TTS-1.7B",
+  "voice": "hermes",
+  "speed": 1,
+  "sampleRate": 24000,
+  "gapSeconds": 0.15,
+  "paddingSeconds": 0.25,
+  "scenes": {
+    "s1": {
+      "chunks": [
+        {
+          "text": "Hermes release.",
+          "spoken": "Hermes release.",
+          "seconds": 7.295,
+          "samples": 175080
+        },
+        {
+          "text": "The model, the pipeline, the numbers.",
+          "spoken": "The model, the pipeline, the numbers.",
+          "seconds": 7.295,
+          "samples": 175080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 14.99,
+      "file": "audio/narration/s1.wav"
+    },
+    "s2": {
+      "chunks": [
+        {
+          "text": "What we shipped.",
+          "spoken": "What we shipped.",
+          "seconds": 9.795,
+          "samples": 235080
+        },
+        {
+          "text": "A local pipeline that turns a brief into a finished film.",
+          "spoken": "A local pipeline that turns a brief into a finished film.",
+          "seconds": 9.795,
+          "samples": 235080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 19.99,
+      "file": "audio/narration/s2.wav"
+    },
+    "s3": {
+      "chunks": [
+        {
+          "text": "Six stages.",
+          "spoken": "Six stages.",
+          "seconds": 8.128333,
+          "samples": 195080
+        },
+        {
+          "text": "Brief, plan, generate, assemble, review, export.",
+          "spoken": "Brief, plan, generate, assemble, review, export.",
+          "seconds": 8.128333,
+          "samples": 195080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 16.6567,
+      "file": "audio/narration/s3.wav"
+    },
+    "s4": {
+      "chunks": [
+        {
+          "text": "Units per minute.",
+          "spoken": "Units per minute.",
+          "seconds": 6.795,
+          "samples": 163080
+        },
+        {
+          "text": "Cost falls as clips are reused across renders.",
+          "spoken": "Cost falls as clips are reused across renders.",
+          "seconds": 6.795,
+          "samples": 163080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 13.99,
+      "file": "audio/narration/s4.wav"
+    },
+    "s5": {
+      "chunks": [
+        {
+          "text": "27 minutes.",
+          "spoken": "27 minutes.",
+          "seconds": 4.795,
+          "samples": 115080
+        },
+        {
+          "text": "Median time from brief to a reviewable cut.",
+          "spoken": "Median time from brief to a reviewable cut.",
+          "seconds": 4.795,
+          "samples": 115080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 9.99,
+      "file": "audio/narration/s5.wav"
+    },
+    "s6": {
+      "chunks": [
+        {
+          "text": "Edit beside the cut.",
+          "spoken": "Edit beside the cut.",
+          "seconds": 9.795,
+          "samples": 235080
+        },
+        {
+          "text": "Timing changes recompile only what moved.",
+          "spoken": "Timing changes recompile only what moved.",
+          "seconds": 9.795,
+          "samples": 235080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 19.99,
+      "file": "audio/narration/s6.wav"
+    },
+    "s7": {
+      "chunks": [
+        {
+          "text": "Two voices.",
+          "spoken": "Two voices.",
+          "seconds": 9.128333,
+          "samples": 219080
+        },
+        {
+          "text": "A CPU narrator for drafts, Qwen for the final take.",
+          "spoken": "A CPU narrator for drafts, Qwen for the final take.",
+          "seconds": 9.128333,
+          "samples": 219080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 18.6567,
+      "file": "audio/narration/s7.wav"
+    },
+    "s8": {
+      "chunks": [
+        {
+          "text": "One file.",
+          "spoken": "One file.",
+          "seconds": 7.795,
+          "samples": 187080
+        },
+        {
+          "text": "The package is the project; the timeline is derived.",
+          "spoken": "The package is the project; the timeline is derived.",
+          "seconds": 7.795,
+          "samples": 187080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 15.99,
+      "file": "audio/narration/s8.wav"
+    },
+    "s9": {
+      "chunks": [
+        {
+          "text": "A presenter who stays in sync.",
+          "spoken": "A presenter who stays in sync.",
+          "seconds": 9.795,
+          "samples": 235080
+        },
+        {
+          "text": "Clips are corrected once and reused.",
+          "spoken": "Clips are corrected once and reused.",
+          "seconds": 9.795,
+          "samples": 235080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 19.99,
+      "file": "audio/narration/s9.wav"
+    },
+    "s10": {
+      "chunks": [
+        {
+          "text": "Review gates.",
+          "spoken": "Review gates.",
+          "seconds": 9.795,
+          "samples": 235080
+        },
+        {
+          "text": "Frames, audio, captions and bounds are checked.",
+          "spoken": "Frames, audio, captions and bounds are checked.",
+          "seconds": 9.795,
+          "samples": 235080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 19.99,
+      "file": "audio/narration/s10.wav"
+    },
+    "s11": {
+      "chunks": [
+        {
+          "text": "Budget honesty.",
+          "spoken": "Budget honesty.",
+          "seconds": 7.295,
+          "samples": 175080
+        },
+        {
+          "text": "Every unit is metered before it is spent.",
+          "spoken": "Every unit is metered before it is spent.",
+          "seconds": 7.295,
+          "samples": 175080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 14.99,
+      "file": "audio/narration/s11.wav"
+    },
+    "s12": {
+      "chunks": [
+        {
+          "text": "Hermes.",
+          "spoken": "Hermes.",
+          "seconds": 4.878333,
+          "samples": 117080
+        },
+        {
+          "text": "Nineteen minutes short of a feature.",
+          "spoken": "Nineteen minutes short of a feature.",
+          "seconds": 4.878333,
+          "samples": 117080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 10.1567,
+      "file": "audio/narration/s12.wav"
+    }
+  }
+}

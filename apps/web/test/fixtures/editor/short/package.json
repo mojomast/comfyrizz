@@ -1,0 +1,122 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_editor_short_1",
+  "title": "Editor fixture: short cut",
+  "createdAt": "2025-10-19T00:00:00.000Z",
+  "format": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#101522",
+      "#1d2b45",
+      "#7bd1c0",
+      "#f2f6ff"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "qwen3-tts",
+    "voice": "hermes",
+    "speed": 1
+  },
+  "scenes": [
+    {
+      "id": "s_open",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 90,
+      "copy": {
+        "kicker": "Fixture",
+        "headline": "Short editor cut",
+        "sub": "Three scenes with linked narration."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 11
+        }
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_body",
+      "layout": "hero",
+      "preferredFrames": 120,
+      "copy": {
+        "headline": "One sentence, one caption",
+        "sub": "Trimming must stop at the speech."
+      },
+      "background": {
+        "asset": "a_plate"
+      },
+      "transitionOut": {
+        "type": "slide",
+        "frames": 12,
+        "direction": "left"
+      }
+    },
+    {
+      "id": "s_close",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 90,
+      "copy": {
+        "headline": "Fin",
+        "sub": "Re-import and edit again.",
+        "cta": "example.test"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 13
+        }
+      }
+    }
+  ],
+  "assets": {
+    "a_plate": {
+      "kind": "video",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/a_plate.mp4",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 640,
+        "height": 360,
+        "fps": 24,
+        "frames": 96
+      },
+      "sha256": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "bytes": 1024
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "llm-svg",
+      "weights": "open"
+    },
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Editor fixture: synthetic text and placeholder media declared, no binary assets committed."
+    ]
+  }
+}

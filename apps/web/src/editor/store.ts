@@ -67,6 +67,10 @@ export interface Result {
   ok: boolean;
   code?: string;
   error?: string;
+  /** Compiled scene length after a single TrimScene, in project frames. */
+  effective?: number;
+  /** True when that length is longer than the requested preference. */
+  floored?: boolean;
 }
 
 export type SaveStatus = 'saved' | 'pending' | 'offline' | 'conflict';
@@ -202,6 +206,15 @@ function patchOf(doc: ProjectDoc): Patch {
   return { package: structuredClone(doc.package), editor: structuredClone(doc.editor) };
 }
 
+/** A TrimScene reports the compiler's length, which may be longer than the preference. */
+function trimReport(command: Command | Command[] | undefined, timeline: CompiledTimeline | null): Pick<Result, 'effective' | 'floored'> {
+  const one = Array.isArray(command) ? (command.length === 1 ? command[0] : undefined) : command;
+  if (!one || one.type !== 'TrimScene' || !timeline) return {};
+  const scene = timeline.scenes.find(item => item.id === one.sceneId);
+  if (!scene) return {};
+  return { effective: scene.durationInFrames, floored: scene.durationInFrames > one.preferredFrames };
+}
+
 export function saveStatusText(status: SaveStatus): string {
   if (status === 'saved') return 'Saved';
   if (status === 'pending') return 'Saving changes';
@@ -324,7 +337,7 @@ export function createEditorStore(options: {
         const beforeSelection = preview.sessionBefore.selectedSceneIds;
         const afterSelection = selectionFor(committed, preview.doc, commands[0]!, beforeSelection);
         commit(preview.doc, beforeSelection, afterSelection);
-        return { ok: true };
+        return { ok: true, ...trimReport(cmd, snapshot.derived.timeline) };
       }
       if (preview) {
         session = { ...preview.sessionBefore, previewing: false };
@@ -338,7 +351,7 @@ export function createEditorStore(options: {
       const selectionBefore = session.selectedSceneIds.slice();
       const selectionAfter = selectionFor(committed, applied.doc, commands[commands.length - 1]!, selectionBefore);
       commit(applied.doc, selectionBefore, selectionAfter);
-      return { ok: true };
+      return { ok: true, ...trimReport(cmd, snapshot.derived.timeline) };
     },
     preview(cmd) {
       const applied = applyCommand(committed, cmd, measuredFor(committed, measured));

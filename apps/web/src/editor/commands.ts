@@ -6,12 +6,7 @@
  * SetNarrationText and SetVoice are the timeline and script commands. `text: null`
  * and `startSeconds: null` clear a caption override or a source trim.
  */
-import {
-  normalizeMeasured,
-  projectFps,
-  speechFloorFrames,
-  type MeasuredInput,
-} from '../../../../packages/planner/dist/src/browser.js';
+import { type MeasuredInput } from '../../../../packages/planner/dist/src/browser.js';
 import {
   narrationFromChunks,
   narrationInputFingerprint,
@@ -187,7 +182,7 @@ export function applyCommand(doc: ProjectDoc, command: Command, measured: Measur
     case 'MoveScene':
       return moveScene(next, found.index, command);
     case 'TrimScene':
-      return trimScene(next, scene, command, measured);
+      return trimScene(next, scene, command);
     case 'SetSceneCopy':
       return setCopy(next, scene, command);
     case 'SetMediaRange':
@@ -223,24 +218,12 @@ function moveScene(doc: ProjectDoc, index: number, command: MoveScene): ApplyRes
   return { ok: true, doc };
 }
 
-function trimScene(doc: ProjectDoc, scene: EditableScene, command: TrimScene, measured: MeasuredInput): ApplyResult {
+function trimScene(doc: ProjectDoc, scene: EditableScene, command: TrimScene): ApplyResult {
   if (!Number.isInteger(command.preferredFrames) || command.preferredFrames < 1 || command.preferredFrames > 108000) {
     return fail('bad-frames', 'A trim needs an integer project frame count from 1 to 108000.');
   }
-  const fps = projectFps(doc.package.format);
-  const floor = speechFloorFrames(
-    { id: scene.id, layout: scene.layout as 'title' },
-    normalizeMeasured(measured),
-    fps,
-  );
-  if (command.preferredFrames < floor.frames) {
-    return fail(
-      floor.measured ? 'below-speech-floor' : 'below-layout-min',
-      floor.measured
-        ? `Scene ${scene.id} cannot be shorter than ${floor.frames} frames of measured speech and padding. Revise the script to trim further.`
-        : `Scene ${scene.id} cannot be shorter than the ${floor.frames}-frame readable minimum for its layout.`,
-    );
-  }
+  // The request is a preference. Speech and layout.min floor the compiled duration;
+  // the store reports that effective length. Narration text is not changed.
   scene.preferredFrames = command.preferredFrames;
   return { ok: true, doc };
 }

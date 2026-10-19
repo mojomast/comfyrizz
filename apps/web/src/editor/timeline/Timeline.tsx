@@ -6,7 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { nextSceneId, type Command } from '../commands.ts';
 import type { EditorExtras, EditorStore } from '../store.ts';
 import { saveStatusText } from '../store.ts';
-import { clampTrim, mediaRangeCommand, trimBounds } from './bounds.ts';
+import { clampTrim, mediaRangeCommand, trimBounds, trimFloorMessage } from './bounds.ts';
 import {
   captionBlocks,
   fitZoom,
@@ -101,7 +101,11 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
 
   const run = (command: Command | Command[]) => {
     const result = store.dispatch(command);
-    setMessage(result.ok ? '' : (result.error ?? 'Edit failed.'));
+    if (!result.ok) setMessage(result.error ?? 'Edit failed.');
+    else if (!Array.isArray(command) && command.type === 'TrimScene' && result.floored && result.effective != null) {
+      const live = store.getState().doc;
+      setMessage(trimFloorMessage(command.preferredFrames, result.effective, trimBounds(live, store.measuredInput(), command.sceneId)));
+    } else setMessage('');
     return result;
   };
 
@@ -157,7 +161,12 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
     const command: Command = { type: 'TrimScene', sceneId: current.sceneId, preferredFrames: clamped.preferredFrames };
     gesture.current = command;
     store.preview(command);
-    setMessage(`${clamped.note ?? `Proposed preference ${clamped.preferredFrames} frames.`}${snapped.label ? ` Snapped to ${snapped.label}.` : ''}`);
+    const compiledLength = store.getState().derived.timeline?.scenes.find(item => item.id === current.sceneId)?.durationInFrames;
+    const effective = compiledLength ?? clamped.effective;
+    const snapNote = snapped.label ? ` Snapped to ${snapped.label}.` : '';
+    setMessage(effective > clamped.preferredFrames
+      ? `${trimFloorMessage(clamped.preferredFrames, effective, trimBounds(view.doc, store.measuredInput(), current.sceneId))}${snapNote}`
+      : `${clamped.note ?? `Proposed preference ${clamped.preferredFrames} frames.`}${snapNote}`);
   };
 
   const schedule = (clientX: number, alt: boolean) => {
@@ -457,8 +466,12 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
         onTrim={frames => {
           if (!primary) return;
           const clamped = clampTrim(doc, store.measuredInput(), primary, frames);
-          if ('error' in clamped) setMessage(clamped.error);
-          else run({ type: 'TrimScene', sceneId: primary, preferredFrames: clamped.preferredFrames });
+          if ('error' in clamped) {
+            setMessage(clamped.error);
+            return;
+          }
+          const result = run({ type: 'TrimScene', sceneId: primary, preferredFrames: clamped.preferredFrames });
+          if (result.ok && !result.floored && clamped.note) setMessage(clamped.note);
         }}
         onTransition={(type, frames, direction) => primary && run({ type: 'SetTransition', sceneId: primary, transitionOut: { type, frames, ...(direction ? { direction } : {}) } })}
         onRange={(inFrame, outFrame) => {
