@@ -10,6 +10,7 @@ import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
+import { normalizeMixLoudness } from './mix-loudness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '..', '..', '..');
@@ -146,7 +147,7 @@ export function preparePublicDir(pkg, packageDir) {
   return temp;
 }
 
-export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration } = {}) {
+export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration, mixAudio = true, normalizeLoudness = true } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
   // A9: validate the package as stored — the base `file` and `variants` are checked (H12 variant
@@ -175,7 +176,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   const mediaPath = join(packageDir, 'media.json');
   const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
   const propsPath = `${outputPath.replace(/\.(mp4|png|jpg)$/, '')}.props.json`;
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(mixAudio ? {} : { mixAudio: false }), ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
   onLog(`inlined ${Object.keys(generatedAssets).length} generated asset(s)`);
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
   if (timeline.provisional) onLog('warning: narration is not measured; timeline is provisional and must not be exported as final');
@@ -223,6 +224,13 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   if (render.status !== 0) {
     throw new Error(`remotion render exited ${render.status}: ${(render.stderr || render.stdout || '').slice(-1200)}`);
   }
+  // M2: the sound design is mixed by Remotion; one ffmpeg pass brings the finished
+  // file to the -16 LUFS master the narration already uses. Only packages with an
+  // `audio` block are touched, so a silent video stays byte-identical.
+  let mixLoudness = null;
+  if (!still && mixAudio && normalizeLoudness && pkg.audio) {
+    mixLoudness = normalizeMixLoudness(outputPath, { onLog });
+  }
   return {
     output: outputPath,
     frames: still ? 1 : timeline.durationInFrames,
@@ -232,6 +240,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
     package: pkg,
     ...(still ? { still: true } : {}),
     ...(applied ? { final: { width: applied.width, height: applied.height, upscaled: applied.used } } : {}),
+    ...(mixLoudness ? { mixLoudness } : {}),
     ...(missingMedia.length > 0 ? { missingMedia } : {}),
     ...(dimProblems.length > 0 ? { dimProblems } : {}),
     ...(media ? { media } : {}),

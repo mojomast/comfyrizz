@@ -169,6 +169,25 @@ clip's own audio is never mixed.
 `examples/presenter-demo` is the CPU reference: four scenes with the presenter
 on, the split card on the hero, and a flat-cartoon SVG portrait.
 
+## Sound design (M1 + M2)
+
+The mix is declared in the package (`audio.music`, `audio.ambience`,
+`audio.sfx`; M1 schema) and resolved by `src/audio-mix-model.js`. The music bed
+plays under the whole film with its fades; the ambience bus unmutes the audio of
+any scene background that is a video with `media.audio: present`; SFX land at a
+scene seam (`at` + `offset_seconds`). Music and ambience duck by `reduction_db`
+while a caption cue is speaking, with a 20 ms attack and a 300 ms release (the
+ffmpeg `sidechaincompress` defaults); K1 word spans widen the cue to the spoken
+words. A package with no `audio` block resolves to an empty mix and renders
+exactly as before, and the presenter clip is never a bus, so narration stays the
+only voice.
+
+After a package with an `audio` block renders, `scripts/mix-loudness.mjs` makes
+one ffmpeg pass (`-c:v copy`) to bring the finished file to the same -16 LUFS
+master the narration uses. Pass `mixAudio: false` to `renderPackage` (or
+`--no-audio-mix` to the showcase script) to render without the mix or the
+loudness pass.
+
 ## Commands
 
 ```bash
