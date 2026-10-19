@@ -8,6 +8,7 @@ import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
 import { mountPreview, updatePreview } from './preview';
+import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
 import type { InlineAsset } from '../../renderer/src/components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -45,6 +46,7 @@ if (colabHost) mountSettingsCard(colabHost, apiFetch);
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
+let editorApi: SceneTimelineHandle | null = null;
 let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
@@ -846,6 +848,7 @@ async function applySceneChipFlow(sceneId: string, chip: string): Promise<void> 
     if (result.package) {
       pkg = result.package;
       if (result.revision != null) pkg.revision = result.revision;
+      editorApi?.load(pkg);
       updatePreview(pkg, timeline, generatedAssets);
       renderStoryboard();
     }
@@ -879,6 +882,7 @@ async function applyPresenterFlow(args: Record<string, unknown>, note: string): 
       pkg = result.package;
       if (result.revision != null) pkg.revision = result.revision;
       timeline.presenters = result.presenters ?? [];
+      editorApi?.load(pkg);
       updatePreview(pkg, timeline, generatedAssets);
       renderStoryboard();
     }
@@ -1354,6 +1358,7 @@ function replaceChatMessages(messages: Array<{ role: 'user' | 'assistant'; conte
 function adoptChatProject(project: ChatProject, built: boolean): void {
   pkg = project.package;
   timeline = project.timeline;
+  editorApi?.load(pkg);
   generatedAssets = project.generatedAssets;
   pendingGpu = project.pendingGpu as typeof pendingGpu;
   scrub.max = String(timeline.durationInFrames - 1);
@@ -1389,6 +1394,7 @@ async function runBrief(brief: string): Promise<void> {
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
     pkg = body.package as PackageV1;
     timeline = body.timeline as Timeline;
+    editorApi?.load(pkg);
     generatedAssets = body.generatedAssets as Record<string, InlineAsset>;
     pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu : [];
     scrub.max = String(timeline.durationInFrames - 1);
@@ -1428,16 +1434,41 @@ function init(): void {
 
   scrub = $<HTMLInputElement>('scrub');
   scrub.max = String(timeline.durationInFrames - 1);
+  const timelineHost = document.getElementById('scene-timeline');
+  if (timelineHost) {
+    editorApi = mountSceneTimeline(timelineHost, pkg, {
+      onDocument(next, compiled) {
+        pkg = next;
+        timeline = compiled;
+        scrub.max = String(Math.max(0, compiled.durationInFrames - 1));
+        const frame = player?.getCurrentFrame() ?? 0;
+        $('time').textContent = `${formatTime(frame, compiled.fps)} / ${formatTime(compiled.durationInFrames, compiled.fps)}`;
+        updatePreview(pkg, timeline, generatedAssets);
+        renderStoryboard();
+      },
+      seek(frame) {
+        player?.seekTo(Math.max(0, Math.floor(frame)));
+      },
+      togglePlay() {
+        player?.toggle();
+      },
+    });
+  }
+  let boundPlayer: PlayerRef | null = null;
   mountPreview($('player'), pkg, timeline, ref => {
     player = ref;
+    if (boundPlayer === ref) return;
+    boundPlayer = ref;
     const onFrame = () => {
       const frame = ref.getCurrentFrame();
+      editorApi?.followFrame(frame);
       scrub.value = String(frame);
       $('time').textContent = `${formatTime(frame, timeline.fps)} / ${formatTime(timeline.durationInFrames, timeline.fps)}`;
       const active = timeline.scenes.find(scene => frame >= scene.from && frame < scene.from + scene.durationInFrames)?.id;
       document.querySelectorAll('.scene-card').forEach(card => card.classList.toggle('active', card.getAttribute('data-scene-id') === active));
     };
     ref.addEventListener('frameupdate', onFrame);
+    editorApi?.followFrame(ref.getCurrentFrame());
     ref.addEventListener('play', () => ($('play').textContent = 'Pause'));
     ref.addEventListener('pause', () => ($('play').textContent = 'Play'));
     onFrame();
