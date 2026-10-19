@@ -3,6 +3,7 @@ import { dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
+import { colabStatus } from './colab-status.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
 import { buildVariants } from './variant.mjs';
@@ -324,6 +325,14 @@ export function createApp({
     // never receives a key and never needs one (U1).
     if (url.pathname === '/api/providers' && request.method === 'GET') {
       return sendJson(response, 200, { providers });
+    }
+
+    // U2: the settings card's read-only view of the Google Colab CLI - installed or not, signed in or
+    // not, and the units a run will be measured against. Read-only on purpose: the sign-in itself is a
+    // separate route that streams the CLI's own prompt, and the token never passes through here.
+    if (url.pathname === '/api/colab/status' && request.method === 'GET') {
+      const status = await colabStatus({ backendFactory });
+      return sendJson(response, 200, status);
     }
 
     // W1: download the API-format workflow saved next to a generated still or plate.
