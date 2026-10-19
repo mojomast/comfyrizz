@@ -86,6 +86,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     if (signal.aborted) return { ok: false, text, messages, toolCalls: records, usage, stopped: 'aborted' };
     emit({ type: 'step', step });
     let stepText = '';
+    let reasoning: string | undefined;
     const calls: Array<{ id: string; name: string; args: unknown }> = [];
     let modelError: ChatChunk & { type: 'error' } | undefined;
     for await (const chunk of options.model.stream({ system: options.system ?? DEFAULT_SYSTEM, messages: messages.filter(message => message.role !== 'system'), tools: definitions, signal, sessionId })) {
@@ -93,6 +94,8 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
         stepText += chunk.delta;
         text += chunk.delta;
         emit({ type: 'text', delta: chunk.delta });
+      } else if (chunk.type === 'reasoning') {
+        reasoning = (reasoning ?? '') + chunk.delta;
       } else if (chunk.type === 'tool_call') {
         calls.push({ id: chunk.id, name: chunk.name, args: chunk.args });
       } else if (chunk.type === 'usage') {
@@ -111,7 +114,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       return { ok: Boolean(text.trim()), text, messages, toolCalls: records, usage, stopped: 'final' };
     }
 
-    messages.push({ role: 'assistant', content: stepText, tool_calls: calls });
+    messages.push({ role: 'assistant', content: stepText, tool_calls: calls, ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}) });
     for (const call of calls) {
       emit({ type: 'tool_call', id: call.id, name: call.name, args: call.args });
       const tool = options.tools[call.name];

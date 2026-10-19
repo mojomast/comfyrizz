@@ -20,6 +20,7 @@ function wireMessages(system: string, messages: ChatMessage[]): WireMessage[] {
       wire.push({
         role: 'assistant',
         content: message.content ?? null,
+        ...(message.reasoning_content !== undefined ? { reasoning_content: message.reasoning_content } : {}),
         ...(message.tool_calls?.length
           ? {
               tool_calls: message.tool_calls.map(call => ({
@@ -165,6 +166,7 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
         const choice = payload.choices?.[0];
         if (!choice) return out;
         const delta = choice.delta ?? {};
+        if (typeof delta.reasoning_content === 'string') out.push({ type: 'reasoning', delta: delta.reasoning_content });
         if (typeof delta.content === 'string' && delta.content.length > 0) out.push({ type: 'text', delta: delta.content });
         for (const fragment of delta.tool_calls ?? []) {
           const index = Number(fragment.index ?? 0);

@@ -13,11 +13,13 @@ export interface ToolCall {
 
 export type ChatMessage =
   | { role: 'system' | 'user'; content: string }
-  | { role: 'assistant'; content?: string | null; tool_calls?: ToolCall[] }
+  | { role: 'assistant'; content?: string | null; tool_calls?: ToolCall[]; reasoning_content?: string }
   | { role: 'tool'; content: string; tool_call_id: string };
 
 export type ChatChunk =
   | { type: 'text'; delta: string }
+  /** Provider continuation data; never display as assistant reply text. */
+  | { type: 'reasoning'; delta: string }
   | { type: 'tool_call'; id: string; name: string; args: unknown }
   | { type: 'usage'; input: number; output: number }
   | { type: 'error'; code: string; message?: string; retryAfterMs?: number; toolCallId?: string }

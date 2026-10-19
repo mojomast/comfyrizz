@@ -20,6 +20,23 @@ class ScriptedModel implements ChatModel {
   }
 }
 
+test('legacy tool loop preserves provider reasoning without emitting it as text', async () => {
+  const events: unknown[] = [];
+  const model = new ScriptedModel((step, request) => {
+    if (step === 0) return [
+      { type: 'reasoning', delta: 'opaque ' }, { type: 'reasoning', delta: 'continuation' },
+      { type: 'tool_call', id: 'c1', name: 'unknown', args: {} },
+    ];
+    const assistant = request.messages.find(m => m.role === 'assistant');
+    assert.equal(assistant?.reasoning_content, 'opaque continuation');
+    return [{ type: 'text', delta: 'Finished.' }];
+  });
+  const result = await runAgent({ model, tools: {}, brief: 'Test continuation', onEvent: event => events.push(event) });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, 'Finished.');
+  assert.doesNotMatch(JSON.stringify(events), /opaque/);
+});
+
 test('router: SVG for icons/diagrams/charts/patterns, FLUX for illustrations/textures/backgrounds', () => {
   assert.equal(routeAsset({ sceneId: 's', intent: 'rocket icon', kind: 'icon' }).tool, 'assets.generate_svg');
   assert.equal(routeAsset({ sceneId: 's', intent: 'system diagram', kind: 'diagram' }).tool, 'assets.generate_svg');
