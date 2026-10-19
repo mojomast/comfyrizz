@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Audio, Composition, Sequence, staticFile } from 'remotion';
+import { Audio, Composition, Sequence, staticFile, useCurrentFrame } from 'remotion';
 import type { CalculateMetadataFunction } from 'remotion';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
@@ -22,10 +22,16 @@ const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[]; mediaDims?: MediaDimsMap; mixAudio?: boolean };
 
 /** Audio that disappears instead of crashing when its file is not in this clone. */
-function SafeAudio({ file, volume, loop }: { file: string; volume?: number | ((frame: number) => number); loop?: boolean }) {
+function SafeAudio({ file, volume, gains, loop }: { file: string; volume?: number; gains?: number[]; loop?: boolean }) {
+  const frame = useCurrentFrame();
   const [failed, setFailed] = useState(false);
   if (failed) return null;
-  return <Audio src={staticFile(file)} {...(volume !== undefined ? { volume } : {})} {...(loop ? { loop } : {})} onError={() => setFailed(true)} />;
+  // G6-11: a looped <Audio> hands the volume function a media-relative frame, which
+  // is fractional at a fractional-duration loop boundary and fell through to the old
+  // `?? 1` default, so the second pass of the bed played at full level. Index the
+  // composition (or enclosing <Sequence>) frame instead, rounded, and default to 0.
+  const level = gains ? gains[Math.min(Math.max(0, Math.round(frame)), gains.length - 1)] ?? 0 : volume;
+  return <Audio src={staticFile(file)} {...(level !== undefined ? { volume: level } : {})} {...(loop ? { loop } : {})} onError={() => setFailed(true)} />;
 }
 
 function LaunchDemo(props: Partial<DemoProps>) {
@@ -67,19 +73,18 @@ function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAs
   // clip audio is never a bus, so the narration stays the only voice.
   const mix = useMemo(() => resolveAudioMix(resolvedPkg, resolvedTimeline), [resolvedPkg, resolvedTimeline]);
   const missing = new Set(missingMedia ?? []);
-  const gainAt = (gains: number[]) => (frame: number) => gains[Math.min(Math.max(0, frame), gains.length - 1)] ?? 1;
   return (
     <>
       {audio && !audioMissing ? <Audio src={staticFile(audio.file)} /> : null}
       {mixAudio && mix.enabled ? (
         <>
           {mix.music && !missing.has(mix.music.file) ? (
-            <SafeAudio file={mix.music.file} volume={gainAt(mix.music.gains)} loop={mix.music.loop} />
+            <SafeAudio file={mix.music.file} gains={mix.music.gains} loop={mix.music.loop} />
           ) : null}
           {mix.ambience.map(ambience =>
             missing.has(ambience.file) ? null : (
               <Sequence key={ambience.sceneId} from={ambience.from} durationInFrames={ambience.durationInFrames}>
-                <SafeAudio file={ambience.file} volume={gainAt(ambience.gains)} />
+                <SafeAudio file={ambience.file} gains={ambience.gains} />
               </Sequence>
             ),
           )}

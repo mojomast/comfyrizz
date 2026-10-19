@@ -26,6 +26,20 @@ function fixtures(dir) {
   return { quiet, silent };
 }
 
+/** Mean volume (dBFS) of a window, via volumedetect. */
+function meanVolume(file, start, duration) {
+  const run = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-ss', String(start), '-t', String(duration), '-i', file, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' });
+  const match = run.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/);
+  assert.ok(match, `volumedetect failed: ${(run.stderr || '').slice(-300)}`);
+  return Number(match[1]);
+}
+
+/** The first audio stream's sample rate. */
+function sampleRate(file) {
+  const run = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=sample_rate', '-of', 'default=nk=1:nw=1', file], { encoding: 'utf8' });
+  return Number(run.stdout.trim());
+}
+
 test('a clip with no audio stream is left alone', () => {
   const dir = mkdtempSync(join(tmpdir(), 'mix-loudness-'));
   try {
@@ -50,6 +64,31 @@ test('the mix is normalised to about -16 LUFS and the picture is copied', () => 
     const after = measureLoudness(quiet);
     assert.ok(after && Math.abs(after.integratedLufs - MIX_LOUDNESS_TARGET.integratedLufs) < 2, `expected about -16 LUFS, got ${JSON.stringify(after)}`);
     assert.ok(after.truePeakDbtp <= MIX_LOUDNESS_TARGET.truePeakDbtp + 0.5, `true peak ${after.truePeakDbtp} exceeds the ceiling`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('G6-11: two-pass linear loudnorm keeps the ducked tail quiet and resamples to 48 kHz', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mix-loudness-'));
+  try {
+    // 2 s of "narration" at -14 dB then 2 s of "ducked music" 26 dB below it; the
+    // old one-pass dynamic loudnorm would pump the quiet tail back up (G6-11).
+    const mix = join(dir, 'mix.mp4');
+    ffmpeg([
+      '-y', '-hide_banner', '-nostats',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+      '-f', 'lavfi', '-i', 'sine=frequency=330:duration=2',
+      '-filter_complex', '[0:a]volume=-14dB[a];[1:a]volume=-40dB[b];[a][b]concat=n=2:v=0:a=1[out]',
+      '-map', '[out]', '-ar', '44100', '-c:a', 'aac', '-b:a', '192k', mix,
+    ]);
+    const beforeGap = meanVolume(mix, 0, 1) - meanVolume(mix, 2.5, 1);
+    assert.ok(beforeGap > 20, `fixture should start with a wide gap, got ${beforeGap}`);
+    const result = normalizeMixLoudness(mix);
+    assert.equal(result.applied, true);
+    const afterGap = meanVolume(mix, 0, 1) - meanVolume(mix, 2.5, 1);
+    assert.ok(afterGap > beforeGap - 3, `the ducked tail must stay ~${beforeGap} dB down, got ${afterGap}`);
+    assert.equal(sampleRate(mix), 48000, 'loudnorm must not leave the AAC at 96 kHz');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

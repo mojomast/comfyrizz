@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { dbToLinear, resolveAudioMix } from '../src/audio-mix-model.js';
 import { narrationAudio } from '../src/audio-model.js';
-import { MIX_LOUDNESS_TARGET } from './mix-loudness.mjs';
+import { MIX_LOUDNESS_TARGET, normalizeMixLoudness } from './mix-loudness.mjs';
 
 /** Sidechain ratio that approximates a fixed dB reduction (ffmpeg has no duck preset). */
 function duckRatio(reductionDb) {
@@ -116,19 +116,21 @@ export function muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timel
   });
 
   filters.push(`${mixLabels.join('')}amix=inputs=${mixLabels.length}:duration=longest:normalize=0[mixed]`);
-  filters.push(`[mixed]loudnorm=I=${MIX_LOUDNESS_TARGET.integratedLufs}:TP=${MIX_LOUDNESS_TARGET.truePeakDbtp}:LRA=${MIX_LOUDNESS_TARGET.rangeLu}[out]`);
 
   const args = [
     '-y', '-hide_banner', '-nostats',
     ...inputs,
     '-filter_complex', filters.join(';'),
-    '-map', '0:v', '-map', '[out]',
-    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+    '-map', '0:v', '-map', '[mixed]',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
     '-shortest', '-movflags', '+faststart',
     outputPath,
   ];
   const run = spawnSync('ffmpeg', args, { encoding: 'utf8' });
   if (run.status !== 0) throw new Error(`audio mix failed: ${(run.stderr || '').slice(-800)}`);
+  // Two-pass linear loudnorm, not the old inline one-pass: dynamic loudnorm pumps
+  // the quiet stretches and undoes the sidechain duck (G6-11).
+  const normalised = normalizeMixLoudness(outputPath, { onLog });
   onLog(`mixed ${mixLabels.length} audio source(s) and normalised to ${MIX_LOUDNESS_TARGET.integratedLufs} LUFS`);
-  return { audio: { sources: mixLabels.length, loudness: MIX_LOUDNESS_TARGET }, loudness: MIX_LOUDNESS_TARGET };
+  return { audio: { sources: mixLabels.length, loudness: MIX_LOUDNESS_TARGET }, loudness: MIX_LOUDNESS_TARGET, normalised };
 }
