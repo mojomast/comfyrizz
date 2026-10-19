@@ -64,6 +64,9 @@ function frameStats(file, frame) {
   let gold = 0;
   let goldX = 0;
   let white = 0;
+  let whiteMinX = width;
+  let whiteMaxX = -1;
+  let hash = 2166136261;
   for (let i = 0; i < bytes.length; i += 3) {
     const r = bytes[i];
     const g = bytes[i + 1];
@@ -72,9 +75,19 @@ function frameStats(file, frame) {
       gold += 1;
       goldX += (i / 3) % width;
     }
-    if (r > 200 && g > 200 && b > 200) white += 1;
+    if (r > 200 && g > 200 && b > 200) {
+      white += 1;
+      const x = (i / 3) % width;
+      const y = Math.floor(i / 3 / width);
+      if (x < whiteMinX) whiteMinX = x;
+      if (x > whiteMaxX) whiteMaxX = x;
+      // Hash the white ink's position only, so a moving scene behind the
+      // semi-transparent caption band cannot make the same word look different.
+      hash = ((hash ^ x) * 16777619) >>> 0;
+      hash = ((hash ^ y) * 16777619) >>> 0;
+    }
   }
-  return { gold, goldX: gold > 0 ? goldX / gold : -1, white };
+  return { gold, goldX: gold > 0 ? goldX / gold : -1, white, whiteWidth: whiteMaxX - whiteMinX, hash };
 }
 
 test('K1: karaoke highlights the spoken word and the highlight moves through the sentence', { timeout: 300_000 }, () => {
@@ -102,6 +115,23 @@ test('K1: word-pop adds each spoken word to the caption band', { timeout: 300_00
     assert.ok(frames[0].white > 0, `word 1 should be drawn at frame 8, ink=${frames[0].white}`);
     assert.ok(frames[1].white > frames[0].white, `two words should out-ink one (${frames[1].white} vs ${frames[0].white})`);
     assert.ok(frames[2].white > frames[1].white, `three words should out-ink two (${frames[2].white} vs ${frames[1].white})`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test('K1: big-word renders one word at a time and swaps it as the voice moves', { timeout: 300_000 }, () => {
+  const work = mkdtempSync(join(tmpdir(), 'comfyrizz-k1bigword-'));
+  try {
+    const { out } = renderStyle(work, 'big-word');
+    // Frames 30 and 38 are both inside word 2 (Orbit, 0.6-1.4s); 50 and 58 are both inside
+    // word 3 (today., 1.4-2.0s). After the entry animation settles the same word is the same
+    // frame; a different word is a different frame, which is what "one word at a time" means.
+    const [w2a, w2b, w3a, w3b] = [30, 38, 50, 58].map(frame => frameStats(out, frame));
+    assert.ok(w2a.white > 0 && w3a.white > 0, 'each big word is drawn in white ink');
+    assert.equal(w2a.hash, w2b.hash, 'word 2 stays on screen through its span');
+    assert.equal(w3a.hash, w3b.hash, 'word 3 stays on screen through its span');
+    assert.notEqual(w2a.hash, w3a.hash, 'the word changes when the voice moves on');
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
