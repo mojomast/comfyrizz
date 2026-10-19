@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Audio, Composition, Sequence, staticFile } from 'remotion';
+import type { CalculateMetadataFunction } from 'remotion';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
 import narratedPkgJson from '../../../examples/narrated-demo/package.json';
@@ -118,6 +119,16 @@ const previews = (['title', 'hero', 'stat', 'chart', 'list'] as const).map(layou
   return { id: `Preview-${label}`, sceneId: scene.id, durationInFrames: scene.durationInFrames };
 });
 
+const packageMetadata: CalculateMetadataFunction<DemoProps> = ({ props }) => {
+  const timeline = props.timeline;
+  return {
+    durationInFrames: timeline.durationInFrames,
+    fps: timeline.fps,
+    width: timeline.width,
+    height: timeline.height,
+  };
+};
+
 export function RemotionRoot() {
   return (
     <>
@@ -134,15 +145,7 @@ export function RemotionRoot() {
         id="PackageDemo"
         component={PackageDemo}
         defaultProps={{ pkg, timeline }}
-        calculateMetadata={({ props }) => {
-          const timeline = (props as DemoProps).timeline;
-          return {
-            durationInFrames: timeline.durationInFrames,
-            fps: timeline.fps,
-            width: timeline.width,
-            height: timeline.height,
-          };
-        }}
+        calculateMetadata={packageMetadata}
       />
       <Composition
         id="NarratedDemo"
