@@ -44,7 +44,6 @@ def main():
     tts_python, asr_python = [root / ("venv-" + name) / "bin/python" for name in ("tts", "asr")]
     download = """
 import json
-from concurrent.futures import ThreadPoolExecutor
 from huggingface_hub import snapshot_download
 from pathlib import Path
 root=Path('/content/comfyrizz-qwen')
@@ -54,8 +53,10 @@ if json.loads((root/'task.json').read_text()).get('qaOnly'):
 def download(item):
     repo,revision=item
     snapshot_download(repo, revision=revision, local_dir=root/'models'/repo.split('/')[-1], max_workers=4)
-with ThreadPoolExecutor(max_workers=2) as pool:
-    list(pool.map(download, models.items()))
+# Concurrent snapshot_download calls share tqdm's class lock; one can remove it
+# while another closes its progress bar. Keep file concurrency inside each repo.
+for item in models.items():
+    download(item)
 """
     event("downloading_models")
     run([asr_python if qa_only else tts_python, "-c", download])

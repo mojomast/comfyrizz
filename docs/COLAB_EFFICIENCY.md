@@ -2,6 +2,8 @@
 
 Research date: **2026-10-19**. This is a source/code/log review, not a new GPU benchmark. Recommendations below have not been enabled or measured in production.
 
+Follow-up: [measured Colab experiments](COLAB_EFFICIENCY_RESULTS.md) now cover Qwen batching, LTX worker concurrency and artifact collection. Use that report for experimental results and current recommendations; this document preserves the initial research basis.
+
 ## Conclusion
 
 The current path works, but is not demonstrated to maximize throughput or minimize compute units. The clearest measured opportunity is eliminating generation gaps while collecting outputs. The strongest model-level batching candidate is Qwen narration. LTX parallelism needs profiling before choosing a concurrency value.
