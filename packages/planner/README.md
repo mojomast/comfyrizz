@@ -14,16 +14,18 @@ npm test         # tsc + node:test
 `compileTimeline(pkg, options?) -> Timeline`
 
 - Integer frames at the package fps (30 in our examples; `fps` is respected if different).
-- Scene length = `max(preferredFrames, narration frames + padding)`, clamped to the
-  layout limits in `LAYOUT_LIMITS` (a readable floor and a sanity ceiling).
+- Preferred pacing is clamped to `LAYOUT_LIMITS` (a readable floor and a visual
+  ceiling). Measured narration plus padding raises that ceiling when necessary:
+  a long take in a stat or title scene is never truncated to the layout default.
 - Transitions **overlap**: `total = sum(scenes) − sum(overlaps)`. Six 150-frame scenes
   with five 15-frame fades compile to **825** frames. A transition that does not fit
   both neighbours throws `TimelineError` with code `transition-out-of-range`.
 - `target` mode grows scenes toward `targetFrames` and reports
   `target.deviationFrames` + `target.requiresAcceptance`; it never cuts speech.
-- `flexible` mode grows to fit speech, up to `MAX_FLEXIBLE_FRAMES` (2700 = 90 s).
-  Past the cap it warns and adds a "shorten copy" proposal; speech is never sped up,
-  clipped or silently cut.
+- `flexible` mode grows to fit speech. `MAX_FLEXIBLE_FRAMES` (2700 = 90 s at
+  30 fps) is an advisory threshold, not an export limit. Past it, the compiler
+  warns and adds a "shorten copy" proposal; longer explainers still compile with
+  all measured speech intact.
 - Narration is **provisional** until measured chunks exist; provisional timelines are
   flagged and must not be exported as final.
 - Source plates at another fps (for example LTX at 24 fps) get an explicit

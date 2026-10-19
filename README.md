@@ -8,7 +8,7 @@
 ### Chat in a brief. Get a narrated motion-graphics explainer.
 
 Open-source AI explainer videos: exact type, real charts, generated vector art, FLUX 3 Klein stills,<br>
-LTX-2.5 motion plates and Kokoro narration, rendered deterministically with Remotion.
+LTX-2.5 motion plates and Kokoro or Qwen3-TTS narration, rendered deterministically with Remotion.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
 [![Node.js 22](https://img.shields.io/badge/node-22-339933?logo=nodedotjs&logoColor=white)](#requirements)
@@ -32,7 +32,7 @@ LTX-2.5 motion plates and Kokoro narration, rendered deterministically with Remo
 1. **Brief.** Describe a talk, launch or lesson in chat. With a live provider, the agent writes the copy, narration script and storyboard. Brainstorm, review a draft, ask for corrections, then build an editable project and keep revising it. Express mode favors reasonable defaults. The offline scripted flow also offers chip questions and an editable brief.
 2. **Package.** A model-agnostic agent turns the brief into a `comfyrizz.package/v1`: scenes, copy, charts from your CSV, sanitised SVG art, and planned FLUX 3 Klein / LTX-2.5 jobs.
 3. **Generate.** GPU jobs run through the Comfy SDK on a **Google Colab** G4 runtime that Comfyrizz starts, runs, collects and verifiably stops, or on **your own ComfyUI**. Nothing is spent without a spend card you approve.
-4. **Render.** Remotion renders a 1080p MP4 on CPU with Kokoro narration and sentence captions, then exports a bundle: `video.mp4`, `captions.srt/.vtt`, `CREDITS.md` and a rights-filtered `package.zip`.
+4. **Render.** Remotion renders a 1080p MP4 on CPU with measured narration and captions, then exports a bundle: `video.mp4`, `captions.srt/.vtt`, `CREDITS.md` and a rights-filtered `package.zip`. Kokoro is the default CPU voice; optional Qwen3-TTS uses a designed voice and reusable reference.
 
 No GPU? The whole loop (brief → package → SVG art → preview → MP4 → bundle) runs on CPU with procedural fallbacks and a scripted agent. No API key needed.
 
@@ -81,6 +81,8 @@ Stills from example videos rendered with Comfyrizz (FLUX 3 Klein stills and refe
 | 🎞️ **LTX-2.5 plates** | Text-to-video and image-to-video moving backgrounds, trimmed, looped and retimed to the 30 fps timeline. |
 | 📊 **Charts from CSV** | Paste, upload or fetch a CSV; the exact values become chart, stat and list scenes with the source on screen. Missing numbers stay visible placeholders, never invented. |
 | 🗣️ **Kokoro narration + captions** | Per-sentence synthesis on CPU, measured durations drive the timeline, loudness-normalised mix, burned-in captions plus SRT/VTT. |
+| 🎙️ **Optional Qwen3-TTS** | VoiceDesign → Base cloning for a consistent synthetic narrator, separate ASR/forced-alignment QA, pinned Colab setup and strict engine selection. See [voice setup](packages/tts/README.md#optional-qwen3-tts-r3). |
+| 🔗 **Animated diagrams** | Editable flow and hub cards with scene-local cue times, animated connections and caption-safe landscape layouts. See [renderer motion diagrams](apps/renderer/README.md#motion-diagrams). |
 | 🌍 **Multilingual + aspect variants** | Export per-language and 16:9 / 9:16 / 1:1 variants with re-flowed layouts. |
 | ☁️ **Google Colab backend** | Spins up a G4, bootstraps ComfyUI with pinned models, runs batches, downloads results and stops the runtime, verified against `colab sessions`. Watchdog, budget formula and `stop_unconfirmed` reporting. |
 | 🖥️ **Bring your own ComfyUI** | Point the same jobs at your own ComfyUI (plus `comfy-api-proxy`). Not metered, never called free. |
@@ -102,7 +104,7 @@ flowchart TD
     E --> G["🖼️ Assets + manifest"]
     F --> G
     C -.->|"CPU path: SVG + procedural fallbacks"| H
-    G --> H["🎬 Remotion render<br/>Kokoro narration · captions"]
+    G --> H["🎬 Remotion render<br/>Kokoro / Qwen narration · captions"]
     H --> I["📤 Export bundle<br/>MP4 · SRT/VTT · CREDITS · package.zip"]
 ```
 
@@ -110,7 +112,7 @@ flowchart TD
 - **The agent.** `packages/agent` runs a bounded tool loop (`storyboard.propose`, `storyboard.edit`, `assets.route`, `assets.generate_svg`, `assets.generate_image`, `assets.sketch_to_render`). An asset router picks SVG for icons, diagrams and charts, FLUX for illustrations and textures, and sketch-to-render for styled heroes. Invalid tool arguments go back to the model (max two repairs); partial streamed arguments never execute. GPU work is only ever *planned* by the agent. It runs after you approve the spend card.
 - **The pipeline.** `packages/jobs` turns a package into an ordered, hashed `jobs.json` (stills before plates, LTX sizes in multiples of 64 and 8n+1 frames). `pipeline-py` submits the jobs with the Comfy SDK, writes an attempt record *before* each submit, and treats an atomic `out/manifest.json` as the only proof of success. A lost submission is reconciled, never blindly resubmitted.
 - **The timeline.** `packages/planner` compiles the package plus measured narration into integer-frame `timeline.json` at 30 fps, with transition overlaps, plate retiming and sentence-level caption cues.
-- **The render.** `apps/renderer` (Remotion) has five layout families (Title, Hero, Stat, Chart, List), motion tokens and procedural backgrounds when no plate exists.
+- **The render.** `apps/renderer` (Remotion) supports Title, Hero, Stat, Chart, List, Split, Compare and Code layouts, motion tokens, animated diagrams and procedural backgrounds when no plate exists. Measured speech can extend a scene beyond its default visual pacing limit.
 
 ## Quickstart
 
@@ -151,6 +153,18 @@ Optional narration (Kokoro-82M on CPU):
 python3 -m venv .venv && .venv/bin/pip install -r packages/tts/py/requirements.txt
 packages/tts/scripts/fetch-models.sh               # kokoro-v1.0.onnx + voices (not committed)
 ```
+
+For **Qwen3-TTS 1.7B**, use the [separate-environment setup and Colab commands](packages/tts/README.md#optional-qwen3-tts-r3).
+Select `voice.engine: "qwen3-tts"` and `voice.strict: true` in the package.
+The pinned TTS and ASR packages require different Transformers versions, so they
+run in separate environments. The Qwen Colab script is an explicit CLI workflow;
+its GPU allocation is separate from the app's ComfyUI media run.
+
+Recent production evidence:
+
+- [Comfyrizz full-pipeline test](docs/COMFYRIZZ_FULL_PIPELINE_TEST.md): delivered 29.2-second Kokoro/GPU example.
+- [Hermes video status and verification](docs/HERMES_VIDEO_STATUS.md): longer Qwen-narrated example and current checks.
+- [Hermes research and implementation decisions](docs/HERMES_VIDEO_RESEARCH.md): primary release sources, voice setup and presenter synchronization.
 
 ### 2. Google Colab (G4 GPU)
 

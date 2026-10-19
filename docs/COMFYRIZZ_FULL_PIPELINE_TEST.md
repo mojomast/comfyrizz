@@ -64,3 +64,12 @@ audio-visual playback assessment was completed.
    missing/corrupt variants, blocked parent assets, and unsafe paths.
 
 No additional GPU run was needed for the archive correction.
+
+## Follow-up: longer Hermes example
+
+The subsequent [Hermes production test](HERMES_VIDEO_STATUS.md) uses Qwen3-TTS
+and a longer, more animated storyboard. Investigation of this earlier presenter
+found missing frozen-audio conditioning and playback-clock/speed issues. Those
+code fixes and their evidence are documented in the
+[presenter research notes](HERMES_VIDEO_RESEARCH.md#presenter-synchronization).
+The old video's sampled mouth movement should not be read as a lip-sync pass.

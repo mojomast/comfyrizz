@@ -3,6 +3,9 @@
 Research checked 2026-10-19. Primary topic: Nous Research's **Hermes Agent**,
 not the similarly named language-model releases.
 
+For completed-run measurements and the current production checkpoint, see
+[Hermes video status](HERMES_VIDEO_STATUS.md).
+
 ## Editorial source ledger
 
 - [Latest stable API](https://api.github.com/repos/NousResearch/hermes-agent/releases/latest):
@@ -111,10 +114,13 @@ supports byte ranges so a browser can seek through the longer MP4.
 
 The existing authorization is 20 Colab units total, including 1.07 spent on the
 previous Comfyrizz explainer. Every attempt records before/after usage and a
-verified stop. Qwen uses a 4-unit ceiling with a 24-minute watchdog; graphics
-will have their own bounded run after package validation and fake rendering.
+verified stop. Qwen synthesis used a 4-unit ceiling with a 24-minute watchdog;
+the alignment-only rerun used a 2-unit ceiling and 11-minute watchdog. Graphics
+were launched after validation and fake rendering, with a 5-unit ceiling and
+30-minute watchdog. The final CPU render follows GPU teardown.
 The first two Qwen environment attempts stopped during setup and reported no
 balance change; account-level cumulative spend remains the final authority.
 
-This document records research and implementation decisions. Completed-run
-evidence belongs in the final artifact report, not in claims of unmeasured quality.
+This document records research and implementation decisions. The linked status
+report distinguishes completed measurements from pending graphics and playback
+checks; passing pipeline tests alone does not establish perceptual lip-sync.

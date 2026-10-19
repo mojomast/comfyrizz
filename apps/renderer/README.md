@@ -17,7 +17,8 @@ inlined, so the composition only ever sees verified markup.
 ## Layouts
 
 `Title` (centered/outro), `Hero` (split/full-bleed), `Stat`, `Chart` (SVG bars,
-zero baseline), `List` (bullets/quote). Registered compositions:
+zero baseline), `List` (bullets/quote or motion diagram), `Split`, `Compare`,
+and `Code`. Registered compositions:
 
 - `LaunchDemo` — full example, 1095 frames @ 30 fps (36.5 s), 1920×1080
 - `PackageDemo` — the same component with `calculateMetadata`, so a render can
@@ -146,6 +147,30 @@ transition vocabulary on the committed timing; `TimelinePlayer` calls it
 whenever a caller does not pass merged scenes, so a bare `timeline.json` can
 never silently drop its transitions (and truncate the run).
 
+## Motion diagrams
+
+For a list scene, `motion.diagram: "flow"` draws connected step cards and
+`"hub"` connects the cards to a shared center. Labels come from `copy.items`;
+the hub label comes from `copy.cta` (default `HUB`). Copy remains editable.
+
+```json
+{
+  "layout": "list",
+  "variant": "bullets",
+  "copy": {
+    "headline": "From request to result",
+    "items": ["Receive", "Plan", "Execute", "Review"]
+  },
+  "motion": {"diagram": "flow", "cue_seconds": [0.7, 3, 6, 9]}
+}
+```
+
+`cue_seconds` contains one nonnegative, nondecreasing **scene-local** timestamp
+per card. Derive cues from narration word timings when possible. Missing or
+invalid cue lists use evenly spaced beats. Reveal, active-card emphasis,
+connections and progress are driven by frame number. Landscape diagrams reserve
+space below the cards for captions; portrait diagrams use a vertical stack.
+
 ## Presenter (P-pres)
 
 The presenter is opt-in (`presenter.enabled`); when it is on, `bookends`
@@ -165,6 +190,19 @@ the shared `PresenterClip` (clip + on-by-default "AI presenter" chip). A
 flat-cartoon or paper-cut portrait is an inline, pre-sanitized SVG (the same A5
 check as `VectorAsset`), so the CPU demo shows a presenter with no GPU. The
 clip's own audio is never mixed.
+
+Each overlay has a scene-local Remotion `Sequence`. Presenter video plays at
+`speed={1}` with looping disabled, so a shorter source is not slowed to fill a
+scene. The rendered regression in `test/presenter-playback.test.mjs` checks both
+native speed and the start time of a later scene.
+
+The LTX audio-to-video graph applies a zero audio noise mask in **both** sampling
+stages. Generate it from the final scene audio after timeline compilation, pad
+to its 8n+1 frame duration, and use the original narration for the final mix.
+`scripts/tts/check_lipsync.py` is an optional SyncNet offset/confidence diagnostic;
+it requires separately installed evaluator code and weights. See the
+[research notes](../../docs/HERMES_VIDEO_RESEARCH.md#presenter-synchronization)
+and [current validation status](../../docs/HERMES_VIDEO_STATUS.md).
 
 `examples/presenter-demo` is the CPU reference: four scenes with the presenter
 on, the split card on the hero, and a flat-cartoon SVG portrait.
