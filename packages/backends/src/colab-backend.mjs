@@ -126,6 +126,10 @@ export const BOOTSTRAP_OVERHEAD_MINUTES = 4;
  * leash is long and the script's own heartbeat is what keeps the two honest.
  */
 export const BOOTSTRAP_SILENCE_MS = 180000;
+/** G6-6: wall (and silence) budget for `colab new`; the assign POST is silent and can exceed 60 s. */
+export const NEW_WALL_MS = 300000;
+/** G6-6: the CLI output of an assign the Google frontend gave up on (HTTP 503 after ~60 s). */
+export const isAssignUnavailable = (output) => /Service Unavailable/.test(String(output || "")) && /assign/.test(String(output || ""));
 
 /**
  * How long a lost bootstrap may still turn into a usable box (GPU test 5, G5-3).
@@ -170,6 +174,8 @@ export function createColabBackend({
   watchdogMinutes = 45,
   now = () => Date.now(),
   zipCommand = null,
+  newAttempts = 3,
+  newRetryMs = 20000,
 } = {}) {
   if (!packageId) throw new Error("createColabBackend needs a packageId (it names the session)");
   const session = sessionNameFor(packageId);
@@ -530,8 +536,22 @@ export function createColabBackend({
       if (!approved) {
         throw new ColabCliError("Refusing to allocate: the spend approval card was not confirmed.", { session });
       }
-      const result = await step(argvNew({ session, gpu }), { label: "new", wallMs: 180000 });
-      if (result.code !== 0) throw new ColabCliError(`colab new failed (exit ${result.code}): ${result.output.slice(-300)}`, { session });
+      // G6-6: `colab new` prints one line and then sits silent while POST /tun/m/assign provisions the VM.
+      // That POST took 2.6 s at 07:11 but ~55-60 s from 09:48 on (cold G4 pool), so the runner's default
+      // 60 s silence watchdog SIGTERMed the CLI mid-request. Silence is normal here; bound it by the wall.
+      // Past its ~60 s deadline Google's frontend answers the assign POST with a 503 (no VM, nothing billed;
+      // seen 10:04 EDT Oct 19). That is capacity, not a bad request, so retry a couple of times with backoff.
+      let result = null;
+      for (let attempt = 1; attempt <= newAttempts; attempt += 1) {
+        result = await step(argvNew({ session, gpu }), { label: attempt === 1 ? "new" : `new-${attempt}`, wallMs: NEW_WALL_MS, silenceMs: NEW_WALL_MS });
+        if (result.code === 0 || !isAssignUnavailable(result.output) || attempt === newAttempts) break;
+        emit(onEvent, { type: "assign_retry", session, attempt, reason: "503 Service Unavailable from POST /tun/m/assign" });
+        await sleep(newRetryMs * attempt);
+      }
+      if (result.code !== 0) {
+        const why = isAssignUnavailable(result.output) ? ` (Google Colab answered 503 Service Unavailable to the ${gpu} assign ${newAttempts}x: no capacity right now)` : "";
+        throw new ColabCliError(`colab new failed (exit ${result.code ?? result.signal})${why}: ${result.output.slice(-300)}`, { session });
+      }
       rememberSession();
       state.startedAtMs = now();
       armWatchdog();
