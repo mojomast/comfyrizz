@@ -33,7 +33,18 @@ python3 scripts/bench/summarize_efficiency.py /path/to/evidence --rate 1.54
 
 Only use these paid commands with a budget reservation. The example does not itself grant spending authorization.
 
-## Graphics
+## Natural-speech listening experiments
+
+`tts_expression_plan.json` defines matched-text tests for CustomVoice delivery instructions, Base punctuation/full-text conditioning/designed references, and Kokoro chunking/speed/voice blending. See `docs/TTS_NATURALNESS.md` for the research and interpretation.
+
+1. Run `kokoro_expression.py --out /path/to/campaign/kokoro` with the local Kokoro environment.
+2. Create an input ZIP with `tts_expression_plan.json` as `task.json`, `tts_expression_models.lock.json` as `models.lock.json`, and `tts_expression.py` as `qwen_efficiency.py`. Include the approved synthetic reference as `reference.wav`, its original metadata as `reference-before.json`, and the CPU outputs under `extras/` (including `kokoro.json`). The reference transcript must equal the plan's `referenceText`.
+3. Run the bounded Colab controller with `colab/qwen_efficiency_worker.py`; the recorded L4 trial reserves two units and a 40-minute watchdog. The prior example command does not grant authorization to run it.
+4. Run `python3 scripts/bench/publish_tts_expression.py --run /path/to/campaign/qwen-run-01 --publish apps/web/dist/tts-expression` after collecting the output archive.
+
+The publisher validates 27 expected source clips, applies gain-only common-target normalization, checks duration/loudness/true peak, and creates nine comparison cards and 15 pair tracks. The page supports alternate takes, shuffled A/B labels, local listening preferences and a full WAV/settings download. Blind mode hides configuration labels; it is a lightweight audition aid, not a formal blinded study. Technical checks do not establish a perceptual winner.
+
+## Graphics workloads
 
 Create an input ZIP with `graphics_efficiency.py`, two fully materialized LTX API graphs (`graph0.json`, `graph1.json`), their reference images, and `task.json` with an `images` filename list. Both graphs should be the same workload geometry. The recorded campaign uses the existing 289-frame, 1024×576 final-output Hermes plates.
 
