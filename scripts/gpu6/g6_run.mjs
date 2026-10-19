@@ -146,6 +146,7 @@ async function run() {
   let fakeCli = null;
   let renderResult = null;
   let runResult = null;
+  let token = null;
   let stopped = "not started";
 
   try {
@@ -182,7 +183,7 @@ async function run() {
 
     // Fake mode still stages a real (dummy) 0600 token file: the bootstrap refuses to run without one,
     // so a fakes-only run that skipped it would not be exercising the path the real run takes.
-    const token = fake ? stageFakeToken() : stageToken(tokenFile);
+    token = fake ? stageFakeToken() : stageToken(tokenFile);
     check("token-file", fake || Boolean(token.path), token.error ?? token.describe ?? "staged");
 
     backend = createColabBackend({
@@ -255,6 +256,15 @@ async function run() {
       check("teardown", fake || stopped === "stopped", stopped);
     } catch (error) {
       check("teardown", false, error.message);
+    }
+    // G6-5: the staged copy of the token - a 0600 file under /tmp - has to go, whatever happened above.
+    // It survived the first real run because nothing called the cleanup the staging returned, which is
+    // exactly the kind of leak that a `finally` exists to prevent.
+    try {
+      token?.cleanup?.();
+      check("token-cleaned", !token?.path || !existsSync(token.path), token?.path ? "the staged file is gone" : "nothing staged");
+    } catch (error) {
+      check("token-cleaned", false, error.message);
     }
     fakeServer?.child?.kill("SIGTERM");
     release();
