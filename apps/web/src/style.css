@@ -228,3 +228,13 @@ main {
   main { grid-template-columns: 1fr; }
   #chat-pane { display: none; }
 }
+
+/* U2: the Google Colab settings card. Small and quiet: it lives under the run controls and only grows
+   when there is something to do (install, sign in). */
+.colab-card-host { display: flex; align-items: center; gap: 8px; }
+.colab-card { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border: 1px solid var(--line, #333); border-radius: 6px; font-size: 12px; }
+.colab-head { display: flex; align-items: center; gap: 8px; }
+.colab-install, .colab-signin { display: flex; flex-direction: column; gap: 4px; }
+.colab-install code { font-size: 11px; opacity: 0.9; }
+.colab-warn { color: var(--warn, #e0a030); margin: 0; }
+.colab-card #colab-log { max-height: 120px; overflow: auto; white-space: pre-wrap; font-size: 11px; margin: 0; }

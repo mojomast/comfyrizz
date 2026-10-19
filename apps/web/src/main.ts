@@ -1,4 +1,5 @@
 import './style.css';
+import { mountSettingsCard } from './colab-card';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
@@ -34,6 +35,11 @@ function md(value: string): string {
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
 }
+
+// U2: the Google Colab settings card. It asks the server, never the CLI, and the server never reads a
+// credential on its behalf.
+const colabHost = document.getElementById('colab-card-host');
+if (colabHost) mountSettingsCard(colabHost, apiFetch);
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
