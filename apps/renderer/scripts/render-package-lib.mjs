@@ -9,6 +9,7 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
+import { narrationWarning } from '../src/audio-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { normalizeMixLoudness } from './mix-loudness.mjs';
 
@@ -182,6 +183,8 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   if (timeline.provisional) onLog('warning: narration is not measured; timeline is provisional and must not be exported as final');
   for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
   for (const item of dimProblems) onLog(`warning: declared ${item.declared.width}x${item.declared.height} for ${item.id} (${item.file}) but the file is ${item.real.width}x${item.real.height}; using the real size`);
+  const narrationNote = narrationWarning(pkg);
+  if (narrationNote) onLog(`warning: ${narrationNote}`);
 
   let resolvedPublicDir = publicDir;
   let cleanupDir = null;

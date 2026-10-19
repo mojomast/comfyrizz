@@ -21,7 +21,7 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
 import { muxPackageAudio } from './incremental-audio.mjs';
-import { narrationAudio } from '../src/audio-model.js';
+import { narrationAudio, narrationWarning } from '../src/audio-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { mergeScenes } from '../src/timeline-model.js';
 
@@ -166,6 +166,8 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
   for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
   for (const item of dimProblems) onLog(`warning: declared ${item.declared.width}x${item.declared.height} for ${item.id} (${item.file}) but the file is ${item.real.width}x${item.real.height}; using the real size`);
+  const narrationNote = narrationWarning(pkg);
+  if (narrationNote) onLog(`warning: ${narrationNote}`);
 
   const segments = planSegments(pkg, timeline, { generatedAssets, media, compositionId, missingMedia, mediaDims });
   const rendered = [];

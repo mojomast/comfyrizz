@@ -26,3 +26,45 @@ export function narrationAudio(pkg) {
   }
   return null;
 }
+
+/**
+ * Ready audio assets that no scene references as narration and that the mix does
+ * not use as a bus. With an `audio` block present, `narrationAudio` only accepts
+ * scene-referenced assets, so a stray file here is the silent-voice case: the
+ * package carries a narration but never points a scene at it (G6-13).
+ *
+ * @param {PackageV1} pkg
+ * @returns {string[]} asset ids
+ */
+export function unreferencedNarrationAssets(pkg) {
+  const assets = pkg?.assets ?? {};
+  const referenced = new Set();
+  for (const scene of pkg?.scenes ?? []) {
+    if (scene?.narration_asset) referenced.add(scene.narration_asset);
+  }
+  const audio = pkg?.audio ?? {};
+  const buses = new Set();
+  if (audio.music?.asset) buses.add(audio.music.asset);
+  for (const ambience of audio.ambience ?? []) if (ambience?.asset) buses.add(ambience.asset);
+  for (const sfx of audio.sfx ?? []) if (sfx?.asset) buses.add(sfx.asset);
+  return Object.keys(assets).filter(assetId => {
+    const asset = assets[assetId];
+    const usable = asset?.kind === 'audio' && asset.status === 'ready' && typeof asset.file === 'string' && asset.file.length > 0;
+    return usable && !referenced.has(assetId) && !buses.has(assetId);
+  });
+}
+
+/**
+ * A one-line warning for a package whose voice will not be mixed, or null. It is
+ * deliberately quiet for a package with no `audio` block (the fallback finds a
+ * ready asset) and for one that already resolves a narration.
+ *
+ * @param {PackageV1} pkg
+ * @returns {string | null}
+ */
+export function narrationWarning(pkg) {
+  if (narrationAudio(pkg) || !pkg?.audio) return null;
+  const stray = unreferencedNarrationAssets(pkg);
+  if (stray.length === 0) return null;
+  return `no scene sets narration_asset, so the ready audio ${stray.join(', ')} is not mixed as voice; point a scene's narration_asset at it`;
+}

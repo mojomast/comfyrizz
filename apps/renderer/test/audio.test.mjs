@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { narrationAudio } from '../src/audio-model.js';
+import { narrationAudio, narrationWarning, unreferencedNarrationAssets } from '../src/audio-model.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
@@ -51,4 +51,41 @@ test('a package with an audio mix never treats an unreferenced bus as narration'
     scenes: [{ id: 's1', narration_asset: 'a_narration' }],
   });
   assert.equal(audio, null);
+});
+
+test('G6-15: a ready audio asset that no scene references is flagged as stray', () => {
+  const pkg = {
+    audio: { music: { asset: 'a_music' } },
+    assets: {
+      a_music: { kind: 'audio', status: 'ready', file: 'audio/music.wav' },
+      a_narr: { kind: 'audio', status: 'ready', file: 'audio/s1.wav' },
+      a_pending: { kind: 'audio', status: 'pending', file: 'audio/pending.wav' },
+    },
+    scenes: [{ id: 's1' }],
+  };
+  assert.deepEqual(unreferencedNarrationAssets(pkg), ['a_narr']);
+});
+
+test('G6-15: warns when a package has a voice asset but no scene points at it', () => {
+  const pkg = {
+    audio: { music: { asset: 'a_music' } },
+    assets: {
+      a_music: { kind: 'audio', status: 'ready', file: 'audio/music.wav' },
+      a_narr: { kind: 'audio', status: 'ready', file: 'audio/s1.wav' },
+    },
+    scenes: [{ id: 's1' }],
+  };
+  const warning = narrationWarning(pkg);
+  assert.match(warning, /a_narr/);
+  assert.match(warning, /narration_asset/);
+});
+
+test('G6-15: stays quiet when the voice is referenced, when there is no mix, or when only a bus is unreferenced', () => {
+  const assets = {
+    a_music: { kind: 'audio', status: 'ready', file: 'audio/music.wav' },
+    a_narr: { kind: 'audio', status: 'ready', file: 'audio/s1.wav' },
+  };
+  assert.equal(narrationWarning({ audio: { music: { asset: 'a_music' } }, assets, scenes: [{ id: 's1', narration_asset: 'a_narr' }] }), null);
+  assert.equal(narrationWarning({ assets, scenes: [{ id: 's1' }] }), null);
+  assert.equal(narrationWarning({ audio: { music: { asset: 'a_music' } }, assets: { a_music: assets.a_music }, scenes: [{ id: 's1' }] }), null);
 });
