@@ -81,6 +81,24 @@ export const MEASURED_JOB_MINUTES = { still: 0.15, plate: 0.5, upscale: 0.5, aud
 /** The floor a presenter job is billed at: per-job overhead, rounded up like the other kinds. */
 export const PRESENTER_MEASURED_JOB_MINUTES = 0.15;
 
+/**
+ * Refuse a bundle that the runtime would refuse anyway, before the upload and with a reason.
+ *
+ * G6-1 cost one paid session: 646 MB of repository - node_modules and .venv - went out as jobs.zip from a
+ * `packageDir` that defaulted to the process's cwd, and the runtime answered with a bare 400.
+ */
+export function assertBundleSize(bundlePath, { packageDir = null } = {}) {
+  const bytes = statSync(bundlePath).size;
+  if (bytes <= BUNDLE_MAX_BYTES) return bytes;
+  throw new ColabCliError(
+    `the jobs bundle is ${(bytes / 1024 / 1024).toFixed(0)} MB, over the ${BUNDLE_MAX_BYTES / 1024 / 1024} MB ceiling; ` +
+      `the runtime refuses uploads this size. ` +
+      (packageDir
+        ? `packageDir is ${packageDir}: check that it is the package's own folder and not a repository root.`
+        : `no packageDir was given, so only the runner and the schemas should be in it.`),
+  );
+}
+
 /** G6-1: what a jobs bundle may weigh before it is not worth uploading. The runner, the schemas and a
  * package's own files are megabytes; a repository root is hundreds. */
 export const BUNDLE_MAX_BYTES = 128 * 1024 * 1024;
@@ -643,16 +661,7 @@ export function createColabBackend({
           const bundle = createBundle({ jobsFile, packageDir, scratch, zipCommand });
           // G6-1: a bundle that is too big fails at the *runtime*, after the session is paid for, with a
           // 400 that says nothing. Take its size here, where the answer is cheap and the reason is known.
-          const bundleBytes = statSync(bundle).size;
-          if (bundleBytes > BUNDLE_MAX_BYTES) {
-            throw new ColabCliError(
-              `the jobs bundle is ${(bundleBytes / 1024 / 1024).toFixed(0)} MB, over the ${BUNDLE_MAX_BYTES / 1024 / 1024} MB ceiling; ` +
-                `the runtime refuses uploads this size. ` +
-                (packageDir
-                  ? `packageDir is ${packageDir}: check that it is the package's own folder and not a repository root.`
-                  : `no packageDir was given, so only the runner and the schemas should be in it.`),
-            );
-          }
+          assertBundleSize(bundle, { packageDir });
           const uploadBundle = await step(argvUpload({ session, localPath: bundle, remotePath: `${REMOTE_ROOT}/jobs.zip` }), {
             label: "upload-bundle",
             wallMs: 600000,

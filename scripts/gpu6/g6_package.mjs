@@ -72,9 +72,11 @@ export function gpu6Package() {
   // that its last scene carries a transition - which a renderer rejects ("Scene s1 has a transition but
   // is the last scene"). GPU test 6 is the first thing to render this package, so it fixes that here
   // rather than in the shared fixture, which other tests plan from.
-  // every transition, not only the last scene's: the renderer compiles its own timeline from the scenes
-  // whose assets are ready, so which scene ends up last there is not what the package says
-  for (const scene of Array.isArray(pkg.scenes) ? pkg.scenes : []) delete scene.transition;
+  // The fixture has a single scene with `transitionOut` (that is the field the planner reads, and a
+  // single scene is always the last one), so the timeline compiler refuses it: "Scene s1 has a transition
+  // but is the last scene". A planning fixture never had to survive the renderer; this harness is the
+  // first thing that renders it.
+  for (const scene of Array.isArray(pkg.scenes) ? pkg.scenes : []) delete scene.transitionOut;
   return pkg;
 }
 
