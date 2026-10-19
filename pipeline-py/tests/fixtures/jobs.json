@@ -179,8 +179,8 @@
       "params": {
         "image": "a_plate1_still",
         "prompt": "slow drift through a soft blue nebula, no text, no letters, no words, no logos, no watermarks, static camera, gentle motion, no cuts",
-        "width": 960,
-        "height": 576,
+        "width": 1920,
+        "height": 1080,
         "frames": 97,
         "fps": 24,
         "upscale": "x2+crop",
@@ -228,7 +228,7 @@
           "because": "GPU test 2: the verified good i2v prompts used a static camera and no cuts; push-ins and orbits went wrong"
         }
       ],
-      "cacheKey": "40f5224def1db071fe0a4bdfc0c42de5b28272794190c68d2b72c1553f37ea6e"
+      "cacheKey": "4154882a940388d528103611b06c75ee2d4c0a363c85e2384a20b0e7ffbed7a5"
     },
     {
       "id": "a_narr.audio",
@@ -261,5 +261,5 @@
     }
   ],
   "warnings": [],
-  "hash": "3e03b93577ab93b17a25d14899c893c1e74aeeb2c398acfb73494676d5f3e2b8"
+  "hash": "e10311868dda341dfd05d13604abbe13289ce983f8517d3d29de7efcfc81cbb2"
 }
