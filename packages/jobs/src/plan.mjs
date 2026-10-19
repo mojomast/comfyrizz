@@ -663,6 +663,10 @@ export function planJobs(pkg, opts = {}) {
         // upscale job writes the x2 *variant* next to it. Both live in the package's media dir, so an
         // export that prefers the variant can resolve it from the package alone.
         job.output = `assets/${assetId}${OUTPUT_EXT.plate}`;
+        // G6-10: the upscale stage used to be planned with the *plate's* params, so the x2 graph rendered
+        // the size it was given and handed back a "variant" identical to its own source - which apply
+        // refuses (SEM_ASSET_VARIANT_NOT_BIGGER) and the render therefore never happened. The dims the
+        // graph is given are the target's, and they are set below, once the target and the crop are known.
         const upscaleParams = { ...params, upscale: params.upscale };
         // A package may name a dedicated finals graph; otherwise the upscale stage of the plate
         // graph is reused, and `paramsSource` tells the runner to prefer that stage's map.
@@ -698,6 +702,10 @@ export function planJobs(pkg, opts = {}) {
         const cropX = Number(format.width) && target.width > Number(format.width) ? target.width - Number(format.width) : 0;
         const cropY = Number(format.height) && target.height > Number(format.height) ? target.height - Number(format.height) : 0;
         up.dims = { width: target.width - cropX, height: target.height - cropY };
+        // the graph renders what the plan asks for (the plate stage's internal halving is the params map's
+        // business, not the plan's), so the upscale has to *ask* for the bigger size
+        upscaleParams.width = up.dims.width;
+        upscaleParams.height = up.dims.height;
         up.upscaleTarget = target;
         if (cropX || cropY) {
           up.crop = { top: Math.floor(cropY / 2), bottom: Math.ceil(cropY / 2), left: Math.floor(cropX / 2), right: Math.ceil(cropX / 2) };
