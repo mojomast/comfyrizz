@@ -1,9 +1,10 @@
 {
  "files": [
-  "image"
+  "image",
+  "audio"
  ],
  "generator": "ltx25-a2v",
- "kind": "presenter",
+ "kind": "plate",
  "map": {
   "audio": [
    "44",
