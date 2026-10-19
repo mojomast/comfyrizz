@@ -20,7 +20,7 @@ import { HF_TOKEN_REMOTE_PATH } from "../../packages/backends/src/colab-plan.mjs
 import { applyManifestToPackage, checkJobsDoc, planJobs } from "../../packages/jobs/src/index.mjs";
 import { validatePackage } from "../../packages/schema/src/index.mjs";
 import { installFakeColab, makeCli, readLog } from "../../packages/backends/test/helpers.mjs";
-import { PACKAGE_ID, writeGpu6Package } from "./g6_package.mjs";
+import { PACKAGE_ID, writeGpu6Package, wavDurationSeconds, wavIsAudible } from "./g6_package.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -139,11 +139,26 @@ export async function dryRun({ outDir = null } = {}) {
     `${presenterJob?.workflow}`,
     presenterJob?.workflow === "workflows/ltx25_a2v_2stage.api.json",
   );
-  check.ok("G6-presenter-portrait", `${presenterJob?.params.image}@${presenterJob?.params.strength}`, presenterJob?.params.image === "a_still" && presenterJob?.params.strength === 1);
+  check.ok("G6-presenter-portrait", `${presenterJob?.params.image}@${presenterJob?.params.strength}`, presenterJob?.params.image === "a_portrait" && presenterJob?.params.strength === 1);
   check.ok(
     "G6-music-bed",
     `music=${pkg.audio?.music?.asset}`,
     pkg.audio?.music?.asset === "a_music" && pkg.assets.a_music?.kind === "audio",
+  );
+  // G6-12: harness is judgeable - real narration, distinct music file, portrait is not the nebula still
+  const narrFile = join(packageDir, pkg.assets.a_narr.file);
+  const narrSecs = wavDurationSeconds(narrFile);
+  check.ok("G6-12-narration-length", `narration ${narrSecs.toFixed(2)}s at ${narrFile}`, narrSecs > 5);
+  check.ok("G6-12-narration-audible", `rms check ${narrFile}`, wavIsAudible(narrFile));
+  check.ok(
+    "G6-12-music-distinct",
+    `narr=${pkg.assets.a_narr.file} music=${pkg.assets.a_music.file}`,
+    pkg.assets.a_narr.file !== pkg.assets.a_music.file && pkg.assets.a_music.sha256 !== pkg.assets.a_narr.sha256,
+  );
+  check.ok(
+    "G6-12-portrait-not-nebula",
+    `portrait=${pkg.presenter?.portrait} stillPrompt=${pkg.assets.a_still?.gen?.inputs?.prompt?.slice(0, 40)}`,
+    pkg.presenter?.portrait === "a_portrait" && pkg.presenter?.portrait !== "a_still" && !/nebula/i.test(String(pkg.assets.a_portrait?.gen?.inputs?.prompt ?? "")),
   );
   check.ok(
     "runPackage-phases",
