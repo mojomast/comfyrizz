@@ -122,16 +122,11 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       record.events.push(event);
       publish({ type: 'run.event', runId: record.runId, event });
     };
-    const instance = await backend(backendId, {
-      budgetUnits,
-      ratePerHour,
-      comfyuiUrl,
-      packageId: pkg.id,
-      workDir: record.workDir,
-      outDir: record.outputDir,
-      scratchDir: dirname(record.outputDir),
-    });
     try {
+      const instance = await backend(backendId, {
+        budgetUnits, ratePerHour, comfyuiUrl, packageId: pkg.id,
+        workDir: record.workDir, outDir: record.outputDir, scratchDir: dirname(record.outputDir),
+      });
       record.status = 'running';
       // H8's runPackage does plan -> estimate -> up -> health -> run -> collect -> apply -> teardown.
       const result = await instance.runPackage(pkg, {
@@ -153,7 +148,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       // H8's `ok` is false when the manifest says the run did not complete; that is a failure even
       // though the box came up and went away cleanly, and the UI must say so.
       const complete = result.ok !== false && (result.manifest?.complete ?? true) !== false;
-      record.status = complete ? (result.teardown?.state === 'stopped' ? 'done' : result.teardown?.state === 'idle' ? 'idle' : 'stop_unconfirmed') : 'failed';
+      const finalStatus = complete ? (result.teardown?.state === 'stopped' ? 'done' : result.teardown?.state === 'idle' ? 'idle' : 'stop_unconfirmed') : 'failed';
+      record.status = complete && onComplete ? 'rendering' : finalStatus;
       if (typeof record.budget?.required === 'number') spentEstimate += record.budget.required;
 
       if (onComplete) {
@@ -162,11 +158,15 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           record.revision = after?.revision ?? null;
           record.render = after?.render ?? null;
         } catch (error) {
-          // the plates landed; a render failure is reported, not a run failure
+          // Media succeeded, but the end-to-end request has not produced a video.
           record.renderError = error.message;
+          record.status = 'failed';
           emit({ v: 1, event: 'render_failed', message: error.message });
+          publish({ type: 'run.failed', runId: record.runId, backendId, phase: 'render', message: error.message, teardown: record.teardown, counts: record.counts });
+          return;
         }
       }
+      record.status = finalStatus;
       if (!complete) {
         const unfinished = record.counts?.failed ?? record.counts?.pending ?? record.manifest?.counts?.failed ?? 0;
         publish({

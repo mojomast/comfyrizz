@@ -1,4 +1,4 @@
-import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
@@ -24,6 +24,8 @@ import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { serveStaticFile } from './static-file.mjs';
+import { createPipelineController } from './pipeline.mjs';
+import { stagePipelineInputs } from './pipeline-media.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
@@ -134,6 +136,7 @@ export function createApp({
   providerSettings = null,
   backendFactory = defaultBackendFactory,
   datasetFetch = globalThis.fetch,
+  pipelineLaunch,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
@@ -210,6 +213,7 @@ export function createApp({
   let activeRender = null;
   let activeExport = null;
   let activeSceneRender = null;
+  const pipelines = createPipelineController({ runtimeDir, events, stageInputs: stagePipelineInputs, ...(pipelineLaunch ? { launch: pipelineLaunch } : {}), isBusy: () => Boolean(runs.status().activeRunId || activeRender || activeExport || activeSceneRender) });
   // C13: the last successfully rendered timeline per package, so an edit can be diffed
   // against what the frame grid actually was. In-memory: a server restart just makes the
   // next edit a first render (the A6 cache still reuses unchanged segments).
@@ -327,6 +331,61 @@ export function createApp({
       const lastEventId = request.headers['last-event-id'] ?? url.searchParams.get('lastEventId');
       events.subscribe(request, response, lastEventId);
       return;
+    }
+
+    // Additive API for the editor team. Existing /api/run remains the media-only API.
+    if (['/api/pipeline/plan', '/api/pipeline'].includes(url.pathname) && request.method === 'POST') {
+      const body = await readJson(request);
+      const pkg = body.packageId ? store.read(body.packageId) : null;
+      if (!pkg) return sendJson(response, 404, { error: 'package not found' });
+      if (body.baseRevision !== pkg.revision) return sendJson(response, 409, { error: 'revision conflict', currentRevision: pkg.revision });
+      try {
+        if (url.pathname.endsWith('/plan')) return sendJson(response, 200, pipelines.plan(pkg, body));
+        const result = await pipelines.start(pkg, body, dirname(store.path(pkg.id)));
+        return sendJson(response, result.status, result);
+      } catch (error) { return sendJson(response, 400, { error: error.message }); }
+    }
+    if (url.pathname === '/api/pipeline' && request.method === 'GET') return sendJson(response, 200, { runs: pipelines.list() });
+    const pipelineMatch = /^\/api\/pipeline\/(pipe_[a-f0-9]{32})(?:\/(cancel|reconcile|events|package|verification|files\/[^/]+|assets\/[A-Za-z0-9_-]+))?$/.exec(url.pathname);
+    if (pipelineMatch) {
+      const [, runId, resource] = pipelineMatch;
+      const record = pipelines.get(runId), directory = pipelines.directory(runId);
+      if (!record) return sendJson(response, 404, { error: 'pipeline not found' });
+      if (resource === 'cancel' && request.method === 'POST') return sendJson(response, 202, { run: pipelines.cancel(runId) });
+      if (resource === 'reconcile' && request.method === 'POST') {
+        const result = pipelines.reconcile(runId); return sendJson(response, result.status, result);
+      }
+      if (!['GET', 'HEAD'].includes(request.method)) return sendJson(response, 405, { error: 'method not allowed' });
+      if (!resource) return sendJson(response, 200, { run: record });
+      if (resource === 'events') {
+        const after = Number(url.searchParams.get('after') ?? 0);
+        if (!Number.isSafeInteger(after) || after < 0) return sendJson(response, 400, { error: 'after must be a non-negative sequence number' });
+        const entries = pipelines.replay(runId, after);
+        const nextSequence = entries.at(-1)?.sequence ?? after;
+        return sendJson(response, 200, { events: entries, nextSequence, hasMore: nextSequence < record.sequence });
+      }
+      if (resource === 'package' || resource === 'verification') {
+        if (record.status !== 'completed') return sendJson(response, 409, { error: 'pipeline has not completed' });
+        const file = resource === 'package' ? join(directory, 'work', 'package.json') : join(directory, 'verification.json');
+        return sendJson(response, 200, JSON.parse(readFileSync(file)));
+      }
+      if (resource?.startsWith('assets/')) {
+        const id = resource.slice(7);
+        if (!record.artifacts?.some(asset => asset.assetId === id)) return sendJson(response, 404, { error: 'asset has not been collected' });
+        const root = join(directory, 'work');
+        const pkg = JSON.parse(readFileSync(join(root, 'package.json')));
+        const asset = pkg.assets[id];
+        const file = asset?.file ? resolve(root, asset.file) : null;
+        if (!file || !file.startsWith(root + sep) || !existsSync(file) || !realpathSync(file).startsWith(realpathSync(root) + sep)) return sendJson(response, 404, { error: 'asset not available' });
+        return serveStaticFile(request, response, file, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
+      }
+      if (resource?.startsWith('files/')) {
+        const name = resource.slice(6);
+        const file = record.result?.files?.find(item => item.name === name);
+        if (record.status !== 'completed' || !file) return sendJson(response, 404, { error: 'artifact not available' });
+        return serveStaticFile(request, response, join(directory, 'exports', record.packageId, name), { 'content-type': MIME[extname(name)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
+      }
+      return sendJson(response, 404, { error: 'not found' });
     }
 
     // Which live providers have a server-side key. Booleans only: the browser
@@ -551,6 +610,7 @@ export function createApp({
     }
 
     if (url.pathname === '/api/run' && request.method === 'POST') {
+      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
       const body = await readJson(request);
       try {
         let pkg = null;
@@ -631,6 +691,7 @@ export function createApp({
     }
 
     if (url.pathname === '/api/export' && request.method === 'POST') {
+      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
       if (activeExport) return sendJson(response, 409, { error: 'export busy', exportId: activeExport });
       const body = await readJson(request);
       const exportId = `x_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -710,6 +771,7 @@ export function createApp({
     }
 
     if (url.pathname === '/api/render' && request.method === 'POST') {
+      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
       if (activeRender) return sendJson(response, 409, { error: 'render busy', renderId: activeRender });
       const body = await readJson(request);
       const renderId = `r_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -959,6 +1021,7 @@ export function createApp({
     // segment whose key did not change (A6), then re-stitches and muxes; the response is the
     // full-length MP4.
     if (url.pathname === '/api/scene/render' && request.method === 'POST') {
+      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
       if (activeSceneRender) return sendJson(response, 409, { error: 'scene render busy', renderId: activeSceneRender });
       const body = await readJson(request);
       const renderId = `sr_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -1023,6 +1086,7 @@ export function createApp({
     // package is diffed against the last rendered timeline; a scene-local change goes through
     // the A6 incremental cache, a timing change falls back to a full render with a reason.
     if (url.pathname === '/api/render/edited' && request.method === 'POST') {
+      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
       if (activeSceneRender) return sendJson(response, 409, { error: 'scene render busy', renderId: activeSceneRender });
       let body;
       try {
@@ -1133,10 +1197,11 @@ export function createApp({
     store,
     events,
     runs,
+    pipelines,
     rendersDir,
     exportsDir,
     sceneCacheDir,
     webDist,
-    close: () => events.closeAll(),
+    close: () => { pipelines.close(); events.closeAll(); },
   };
 }

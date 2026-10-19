@@ -345,6 +345,7 @@ def narrate_qwen(
     if not 0.5 <= speed <= 2.0:
         raise SystemExit(f"speed {speed} outside 0.5-2.0")
 
+    print(json.dumps({"event": "qwen_phase", "phase": "designing_voice"}), flush=True)
     try:
         prompt = _adapter_call(
             "voice design",
@@ -380,7 +381,9 @@ def narrate_qwen(
     }
 
     full: list[np.ndarray] = []
-    for scene in package.get("scenes", []):
+    narrated_scenes = [s for s in package.get("scenes", []) if (s.get("narration") or "").strip()]
+    for scene_index, scene in enumerate(narrated_scenes):
+        print(json.dumps({"event": "voice_scene_start", "sceneId": scene["id"], "completed": scene_index, "total": len(narrated_scenes)}), flush=True)
         display = (scene.get("narration") or "").strip()
         if not display:
             continue
@@ -417,6 +420,7 @@ def narrate_qwen(
             "seed": qa["seeds"][-1] if qa.get("seeds") else seed,
             "qa": qa,
         }
+        print(json.dumps({"event": "voice_scene_done", "sceneId": scene["id"], "completed": scene_index + 1, "total": len(narrated_scenes)}), flush=True)
         full.append(scene_audio)
         full.append(np.zeros(int(round(WORD_SPLIT_GAP * SAMPLE_RATE)), dtype=np.float32))
 

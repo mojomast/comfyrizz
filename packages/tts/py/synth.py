@@ -136,7 +136,9 @@ def main() -> int:
     }
 
     full: list[np.ndarray] = []
-    for scene in package.get("scenes", []):
+    scenes = [s for s in package.get("scenes", []) if (s.get("narration") or "").strip()]
+    for scene_index, scene in enumerate(scenes):
+        print(json.dumps({"event": "voice_scene_start", "sceneId": scene["id"], "completed": scene_index, "total": len(scenes)}), flush=True)
         text = (scene.get("narration") or "").strip()
         if not text:
             continue
@@ -177,6 +179,7 @@ def main() -> int:
             "seconds": round(read_wav_seconds(scene_path), 4),
             "file": str(scene_path.relative_to(args.out.parent)),
         }
+        print(json.dumps({"event": "voice_scene_done", "sceneId": scene["id"], "completed": scene_index + 1, "total": len(scenes)}), flush=True)
         full.append(scene_audio)
         full.append(np.zeros(int(round(0.1 * SAMPLE_RATE)), dtype=np.float32))
 

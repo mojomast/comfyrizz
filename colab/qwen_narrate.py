@@ -22,12 +22,15 @@ def run(argv, **kwargs):
 
 
 def main():
+    def event(phase):
+        print(json.dumps({"event": "qwen_phase", "phase": phase}), flush=True)
     root = Path("/content/comfyrizz-qwen")
     root.mkdir(exist_ok=True)
     with zipfile.ZipFile("/content/comfyrizz-qwen-input.zip") as archive:
         archive.extractall(root)
     lock = json.loads((root / "models.lock.json").read_text())
     qa_only = json.loads((root / "task.json").read_text()).get("qaOnly", False)
+    event("installing_dependencies")
     run(["apt-get", "update", "-qq"])
     run(["apt-get", "install", "-y", "-qq", "sox", "ffmpeg", "python3.12-venv"])
     environments = [("asr", lock["asrPackage"])] if qa_only else [("tts", lock["ttsPackage"]), ("asr", lock["asrPackage"])]
@@ -54,14 +57,17 @@ def download(item):
 with ThreadPoolExecutor(max_workers=2) as pool:
     list(pool.map(download, models.items()))
 """
+    event("downloading_models")
     run([asr_python if qa_only else tts_python, "-c", download])
     environment = {**os.environ, "COMFYRIZZ_QWEN_DEVICE": "cuda:0", "COMFYRIZZ_QWEN_MODELS": str(root / "models"), "PYTHONUNBUFFERED": "1"}
     pkg = root / "package.json"
     out = root / "audio"
     if not qa_only:
+        event("synthesizing")
         run([tts_python, root / "py/synth.py", "--package", pkg, "--out", out, "--padding", "0.5"], env=environment)
     qa_error = None
     try:
+        event("aligning")
         run([asr_python, root / "py/qa_qwen.py", "--package", pkg, "--out", out], env=environment)
     except subprocess.CalledProcessError as exc:
         qa_error = str(exc)
@@ -74,6 +80,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
         python = root / ("venv-" + name) / "bin/python"
         with (out / (name + "-environment.txt")).open("w") as f:
             subprocess.run([str(python), "-m", "pip", "freeze"], stdout=f, check=True)
+    event("packaging_audio")
     shutil.make_archive("/content/comfyrizz-qwen-output", "zip", root, "audio")
     if qa_error:
         raise RuntimeError("Narration saved, but alignment/ASR failed: " + qa_error)

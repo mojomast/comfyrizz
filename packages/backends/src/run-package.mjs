@@ -224,13 +224,17 @@ export async function runPackage(backend, pkg, opts = {}) {
   // 4. bring the box up, check it, run, and always say what became of it
   let up;
   try {
-    up = typeof backend.ensureUp === "function" ? await backend.ensureUp({ budget, approved, signal }) : null;
+    signal?.throwIfAborted();
+    emit('allocating');
+    up = typeof backend.ensureUp === "function" ? await backend.ensureUp({ budget, approved, signal, onEvent }) : null;
     emit("up", { state: up?.state ?? null });
     result.up = up ?? null;
+    signal?.throwIfAborted();
     // G4-1: a freshly created Google Colab session is an empty VM. `ensureUp` only allocates it, so
     // the bootstrap (clone ComfyUI, install, download the pinned models, start the proxy) has to run
     // before anything asks the box to be healthy. BYO has no bootstrap step and skips it.
     if (typeof backend.bootstrap === "function") {
+      emit('bootstrapping');
       const bootstrapped = await backend.bootstrap({ onEvent, signal });
       result.bootstrap = bootstrapped ?? null;
       if (bootstrapped?.lost === true) {
@@ -238,11 +242,15 @@ export async function runPackage(backend, pkg, opts = {}) {
       }
       emit("bootstrapped", { lost: false, code: bootstrapped?.code ?? null });
     }
-    result.health = typeof backend.health === "function" ? await backend.health() : null;
+    signal?.throwIfAborted();
+    emit('checking_health');
+    result.health = typeof backend.health === "function" ? await backend.health({ onEvent }) : null;
     if (result.health && result.health.ok === false) {
       throw new Error(`the backend is not healthy: ${result.health.detail}`);
     }
 
+    signal?.throwIfAborted();
+    emit('generating');
     const run = await backend.run(jobsFile, onEvent, signal);
     // G5-7: this used to be `run?.manifest ?? run`, so a backend that reported no manifest had its own
     // run object read as one: `counts: null`, "applied 0", ok false, and not a word about why. The
@@ -286,6 +294,7 @@ export async function runPackage(backend, pkg, opts = {}) {
     // a half-finished run still has to say what happened to the box
     if (typeof backend.teardown === "function") {
       try {
+        emit('stopping');
         result.teardown = await backend.teardown("error");
       } catch (teardownError) {
         result.teardown = { state: "unknown", evidence: `teardown also failed: ${teardownError.message}` };
@@ -297,6 +306,7 @@ export async function runPackage(backend, pkg, opts = {}) {
   }
 
   if (teardownMode !== "never" && typeof backend.teardown === "function") {
+    emit('stopping');
     result.teardown = await backend.teardown(teardownMode === "idle" ? "idle" : "done");
   }
   emit("teardown", { state: result.teardown?.state ?? null });

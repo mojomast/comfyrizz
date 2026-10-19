@@ -8,6 +8,7 @@
 // (silence timeout, host restart, dropped network) while the VM keeps executing. The result
 // then carries `lost: true` and the caller must reconcile instead of rerunning (SPEC.md 6.4).
 import { spawn } from "node:child_process";
+import { StringDecoder } from 'node:string_decoder';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -63,7 +64,8 @@ export class ColabCli {
    * `cwd` matters for `colab exec -f <script>`: the real CLI resolves the script against *its own*
    * working directory, so the caller passes the script's folder (GPU test 4, G4-3).
    */
-  run(args, { silenceMs = 60000, wallMs = 180000, detached = this.detached, label = "colab", cwd = null, onLog = null } = {}) {
+  run(args, { silenceMs = 60000, wallMs = 180000, detached = this.detached, label = "colab", cwd = null, onLog = null, signal = null } = {}) {
+    signal?.throwIfAborted();
     assertNoSecrets(args);
     const id = `${String(label).replace(/[^A-Za-z0-9_-]/g, "_")}-${randomUUID().slice(0, 8)}`;
     const log = join(this.logDir, `${id}.log`);
@@ -73,7 +75,7 @@ export class ColabCli {
     this.steps.push(step);
 
     if (!detached) {
-      return this.#runInline(step, args, { silenceMs, wallMs, cwd, onLog: onLog ?? this.onLog });
+      return this.#runInline(step, args, { silenceMs, wallMs, cwd, onLog: onLog ?? this.onLog, signal });
     }
     const specPath = join(this.logDir, `${id}.spec.json`);
     writeFileSync(
@@ -104,12 +106,16 @@ export class ColabCli {
     }
   }
 
-  #runInline(step, args, { silenceMs, wallMs, cwd = null, onLog = null }) {
+  #runInline(step, args, { silenceMs, wallMs, cwd = null, onLog = null, signal = null }) {
     return new Promise((resolve) => {
       const chunks = [];
       const child = spawn(this.bin, args, { shell: false, windowsHide: true, env: this.environment(), cwd: cwd || undefined, stdio: ["pipe", "pipe", "pipe"] });
       let lastOutput = Date.now();
       let timedOut = false;
+      const abort = () => child.kill('SIGTERM');
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+      const decoder = new StringDecoder('utf8');
       const watchdog = setInterval(() => {
         if (Date.now() - lastOutput > silenceMs || Date.now() - step.startedAt > wallMs) {
           timedOut = true;
@@ -122,7 +128,7 @@ export class ColabCli {
       }, Math.min(200, Math.max(25, Math.floor(silenceMs / 4))));
       const push = (chunk) => {
         lastOutput = Date.now();
-        const text = redactForLog(stripAnsi(chunk.toString("utf8")));
+        const text = redactForLog(stripAnsi(decoder.write(chunk)));
         chunks.push(text);
         const sink = onLog ?? this.onLog;
         if (sink) sink(text, { step });
@@ -131,6 +137,7 @@ export class ColabCli {
       child.stderr.on("data", push);
       child.on("error", (error) => {
         clearInterval(watchdog);
+        signal?.removeEventListener('abort', abort);
         resolve({
           done: true,
           code: 1,
@@ -142,14 +149,16 @@ export class ColabCli {
           durationMs: Date.now() - step.startedAt,
         });
       });
-      child.on("close", (code, signal) => {
+      child.on("close", (code, exitSignal) => {
         clearInterval(watchdog);
+        signal?.removeEventListener('abort', abort);
         const output = chunks.join("");
         writeFileSync(step.log, output, { mode: 0o600 });
         resolve({
           done: true,
           code: code ?? 1,
-          signal: signal || null,
+          signal: exitSignal || null,
+          aborted: signal?.aborted === true,
           timedOut,
           output,
           log: output,

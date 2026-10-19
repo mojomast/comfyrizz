@@ -1,0 +1,58 @@
+// Complete package composition with actual Remotion frame/encoding telemetry.
+// Invoked in an isolated pipeline worker, keeping the HTTP server responsive.
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { validatePackage } from '../../../packages/schema/src/index.mjs';
+import { inlineGeneratedAssets, narrationOptions, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
+import { collectMediaDims } from '../src/media-dims.js';
+
+// Resolve the exact renderer/bundler versions used by the pinned CLI.
+const require = createRequire(import.meta.resolve('@remotion/cli/package.json'));
+const { bundle } = require('@remotion/bundler');
+const { selectComposition, renderMedia, makeCancelSignal } = require('@remotion/renderer');
+
+export async function renderPipeline(packagePath, output, { signal, onEvent = () => {} } = {}) {
+  const packageDir = join(packagePath, '..');
+  const pkg = JSON.parse(readFileSync(packagePath));
+  const validation = validatePackage(pkg);
+  if (!validation.valid) throw new Error('Render package failed validation');
+  const missing = missingMediaFiles(pkg, packageDir);
+  if (missing.length) throw new Error(`Missing render media: ${missing.map(m => m.id).join(', ')}`);
+  const timeline = compileTimeline(pkg, narrationOptions(packageDir));
+  if (pkg.voice?.enabled && timeline.provisional) throw new Error('Narration timing is still provisional');
+  const props = { pkg, timeline, generatedAssets: inlineGeneratedAssets(pkg, packageDir), mediaDims: collectMediaDims(pkg, packageDir) };
+  if (existsSync(join(packageDir, 'media.json'))) props.media = JSON.parse(readFileSync(join(packageDir, 'media.json')));
+  writeFileSync(output.replace(/\.mp4$/, '.props.json'), JSON.stringify(props));
+  const publicDir = preparePublicDir(pkg, packageDir);
+  const cancel = makeCancelSignal();
+  const abort = () => cancel.cancel();
+  signal?.addEventListener('abort', abort, { once: true });
+  let serveUrl;
+  try {
+    signal?.throwIfAborted();
+    onEvent({ phase: 'bundling', progress: null });
+    serveUrl = await bundle({ entryPoint: join(rendererDir, 'src/index.ts'), publicDir });
+    signal?.throwIfAborted();
+    const browserExecutable = process.env.REMOTION_BROWSER || '/usr/bin/google-chrome';
+    const composition = await selectComposition({ serveUrl, id: 'PackageDemo', inputProps: props, browserExecutable });
+    let last = 0;
+    await renderMedia({
+      serveUrl, composition, inputProps: props, outputLocation: output, codec: 'h264', pixelFormat: 'yuv420p', audioCodec: 'aac', audioSampleRate: 48000,
+      browserExecutable, concurrency: 2, cancelSignal: cancel.cancelSignal,
+      onProgress: value => {
+        const now = Date.now();
+        if (now - last < 500 && value.progress < 1) return;
+        last = now;
+        onEvent({ phase: value.stitchStage, progress: { mode: 'measured', completed: value.renderedFrames, total: timeline.durationInFrames, unit: 'frames', encodedFrames: value.encodedFrames, fraction: value.progress, source: 'remotion' } });
+      },
+    });
+    signal?.throwIfAborted();
+    return { frames: timeline.durationInFrames, hash: timeline.hash, bytes: statSync(output).size, fps: timeline.fps, width: timeline.width, height: timeline.height };
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    rmSync(publicDir, { recursive: true, force: true });
+    if (serveUrl) rmSync(serveUrl, { recursive: true, force: true });
+  }
+}

@@ -26,7 +26,9 @@ def main():
     assert report["engine"] == "qwen3-tts", "QA requires Qwen narration"
     aligner, asr = Qwen3Aligner(), Qwen3Asr()
     language = qwen_language_name(pkg["voice"])
-    for scene in pkg["scenes"]:
+    scenes = [s for s in pkg["scenes"] if s["id"] in report["scenes"]]
+    for index, scene in enumerate(scenes):
+        print(json.dumps({"event": "alignment_scene_start", "sceneId": scene["id"], "completed": index, "total": len(scenes)}), flush=True)
         if scene["id"] not in report["scenes"]:
             continue
         measured = report["scenes"][scene["id"]]
@@ -42,6 +44,7 @@ def main():
         measured["qa"] = {"transcript": transcript, "wer": round(wer(spoken, transcript), 4), "flagged": should_regenerate(spoken, transcript), "attempts": 1, "method": "separate-environment-qwen-asr"}
         print(scene["id"], json.dumps(measured["qa"]), flush=True)
         path.write_text(json.dumps(report, indent=2))
+        print(json.dumps({"event": "alignment_scene_done", "sceneId": scene["id"], "completed": index + 1, "total": len(scenes), "flagged": measured["qa"]["flagged"]}), flush=True)
     timings = {c["timing"] for s in report["scenes"].values() for c in s["chunks"]}
     report["aligner"] = ALIGNER_MODEL if timings == {"aligner"} else "mixed" if "aligner" in timings else "syllable-fallback"
     path.write_text(json.dumps(report, indent=2))
