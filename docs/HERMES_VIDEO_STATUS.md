@@ -1,7 +1,7 @@
 # Hermes release video: production status and verification
 
-Checkpoint: **2026-10-19, after Qwen alignment and the full fake render, while
-graphics run 01 is executing**. Branch: `feat/hermes-qwen-video`.
+Checkpoint: **2026-10-19, after graphics run 01 and the corrected-presenter
+SyncNet diagnostics**. Branch: `feat/hermes-qwen-video`.
 
 ## Deliverable
 
@@ -39,6 +39,7 @@ finished deliverable.
 | Presenter playback | A real rendered color-frame test verifies native speed and a later scene's local clock |
 | Workflow conditioning | Tests require the original encoded audio with a zero noise mask in both LTX sampling stages |
 | Fake pipeline | All 14 fake jobs collected/applied; a complete 5,700-frame CPU render succeeded |
+| Real graphics | All 14 jobs succeeded; 42 files collected/applied; staged token removed; runtime stopped |
 | Regression checks | Workspace suites, Python pipeline tests, renderer/web typechecks and the GPU dry run pass |
 | Editable export | Targeted export tests cover duration/take sidecars, path confinement and existing variant inclusion |
 | Browser seeking | Tailscale HTTP GET with `Range: bytes=0-1023` returns `206`, correct content range and exactly 1,024 bytes |
@@ -60,11 +61,23 @@ The evaluator was also calibrated on SyncNet's official `example.avi`: it
 returned the expected **3-frame offset**, with confidence **10.081** versus
 the upstream approximate reference of 10.021.
 
-The new presenter clips must still be collected and evaluated. The local
-diagnostic uses an absolute offset limit of **80 ms** and minimum confidence
-**3**; these are this test's gates, not universal perceptual-quality thresholds.
-Face-crop inspection and paired playback remain important. The desktop browser
-was disconnected at this checkpoint, so browser playback has not been verified.
+The original new presenter clips measured −120 ms / confidence **9.637** (opening)
+and −160 ms / confidence **9.973** (closing). Both missed the local offset gate.
+CPU-only correction candidates add 3 and 4 initial held frames respectively at
+24 fps (125 ms and 166.7 ms), retaining the original frame counts and unmodified
+narration. Both candidates measure **0 ms** after correction, with confidence
+**9.292** and **9.818**. The original clips remain preserved; the candidates have
+not yet been applied to the final package.
+
+Reports are in `graphics-run-01/sync-s1/`, `sync-s12/`, `sync-corrected-s1/` and
+`sync-corrected-s12/`. Candidate files are `a_presenter_s1-synced.mp4` and
+`a_presenter_s12-synced.mp4` in the graphics output root.
+
+The local diagnostic uses an absolute offset limit of **80 ms** and minimum
+confidence **3**; these are this test's gates, not universal perceptual-quality
+thresholds. Face-crop inspection, end-frame review (the correction trims the tail)
+and paired playback remain pending. The desktop browser was disconnected, so
+browser playback has not been verified.
 
 ## Compute ledger
 
@@ -78,13 +91,12 @@ previous delivered Comfyrizz video. Balance before that first video: **369.57**.
 | Qwen setup 02 | 368.50 → 368.50 | 0.00 reported | Kernel Python and apt venv versions differed; stopped |
 | Qwen synthesis 03 | 368.50 → 367.77 | 0.73 | Synthesis and QA completed; stopped |
 | Qwen alignment 04 | 367.77 → 367.57 | 0.20 | Corrected alignment verified; stopped |
-| Graphics 01 | Pending | Pending | G4; 5-unit ceiling, 30-minute watchdog |
+| Graphics 01 | 367.57 → 365.95 | 1.62 | 14/14 jobs succeeded; runtime stopped |
 
-**Completed spend: 2.00 units; 18.00 units remained before graphics 01.** Its
-unsettled spend is not included in that figure. The account balance is the
-authority for cumulative usage. The completed Qwen runs each verified no active
-assignments and zero usage rate after teardown; graphics 01 is still active at
-this checkpoint.
+**Completed spend: 3.62 units; 16.38 units remain authorized.** The account
+balance is the authority for cumulative usage. After graphics 01, `colab usage`
+reported balance **365.95**, **0.00 units/hour** and **0 active assignments**;
+`colab sessions` reported no active sessions. The staged token file was removed.
 
 ## Reproduction and artifacts
 
@@ -111,7 +123,6 @@ QA, renderer fixes and regression tests are committed on the feature branch.
 
 ## Next checks
 
-Collect all real graphics, settle the compute ledger and verify teardown;
-evaluate both corrected presenter clips; render and inspect the real MP4;
+Visually review and apply the corrected presenter candidates; render and inspect the real MP4;
 check final audio/media geometry and exported archive paths/hashes; publish
 the player, MP4 and editable bundle, then update this report with those results.
