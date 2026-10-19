@@ -1,7 +1,7 @@
 # Hermes release video: production status and verification
 
-Checkpoint: **2026-10-19, after graphics run 01 and the corrected-presenter
-SyncNet diagnostics**. Branch: `feat/hermes-qwen-video`.
+Checkpoint: **2026-10-19, final video and editable bundle published over
+Tailscale**. Branch: `feat/hermes-qwen-video`.
 
 ## Deliverable
 
@@ -23,9 +23,17 @@ editorial distinctions and implementation choices are in
 
 The opening take is available on the test deployment:
 [Qwen narration preview](https://mail.tailec998.ts.net:8451/hermes-release/narration-preview.wav).
-The final graphics-backed MP4 and bundle are **pending** at this checkpoint.
-The successful fake-render MP4 uses placeholder visual media and is not the
-finished deliverable.
+The final graphics-backed deliverables are published:
+
+- [Watch the complete video](https://mail.tailec998.ts.net:8451/hermes-release/index.html).
+- [Download MP4](https://mail.tailec998.ts.net:8451/hermes-release/video.mp4)
+  — 40,409,471 bytes, 1920×1080, 30 fps, 5,700 frames.
+- [Editable project bundle](https://mail.tailec998.ts.net:8451/hermes-release/package.zip)
+  — 58,969,980 bytes, 69 archive entries.
+- [English captions](https://mail.tailec998.ts.net:8451/hermes-release/captions.srt).
+
+The earlier fake-render MP4 uses placeholder media; the published MP4 uses the
+real collected graphics and corrected presenter clips.
 
 ## Verified results
 
@@ -43,6 +51,11 @@ finished deliverable.
 | Regression checks | Workspace suites, Python pipeline tests, renderer/web typechecks and the GPU dry run pass |
 | Editable export | Targeted export tests cover duration/take sidecars, path confinement and existing variant inclusion |
 | Browser seeking | Tailscale HTTP GET with `Range: bytes=0-1023` returns `206`, correct content range and exactly 1,024 bytes |
+| Final render | 5,700 video frames; H.264 1080p/30; stereo AAC at 48 kHz; container duration 190.016 s |
+| Final audio | Two-pass −16 LUFS normalization; narration/mix RMS-envelope correlation 0.999979 |
+| Visual sampling | Reviewed a mid-scene frame from all 12 chapters and presenter/source-motion contact sheets |
+| Archive round trip | ZIP integrity and safe paths pass; all 19 file-backed asset hashes match; extracted package recompiles to the identical timeline hash |
+| Publication | Player GET succeeds; MP4 range response is correct; ZIP returns HTTP 200 and expected size |
 
 The forced-aligner integration initially rejected valid output because of
 trailing silence and split compound words. The corrected adapter preserves
@@ -66,8 +79,10 @@ and −160 ms / confidence **9.973** (closing). Both missed the local offset gat
 CPU-only correction candidates add 3 and 4 initial held frames respectively at
 24 fps (125 ms and 166.7 ms), retaining the original frame counts and unmodified
 narration. Both candidates measure **0 ms** after correction, with confidence
-**9.292** and **9.818**. The original clips remain preserved; the candidates have
-not yet been applied to the final package.
+**9.292** and **9.818**. The original clips remain preserved; corrected files are
+applied to the final package with updated asset paths, byte sizes and hashes.
+The exact transformations are retained in `presenter-corrections.json` beside
+the render output.
 
 Reports are in `graphics-run-01/sync-s1/`, `sync-s12/`, `sync-corrected-s1/` and
 `sync-corrected-s12/`. Candidate files are `a_presenter_s1-synced.mp4` and
@@ -75,9 +90,11 @@ Reports are in `graphics-run-01/sync-s1/`, `sync-s12/`, `sync-corrected-s1/` and
 
 The local diagnostic uses an absolute offset limit of **80 ms** and minimum
 confidence **3**; these are this test's gates, not universal perceptual-quality
-thresholds. Face-crop inspection, end-frame review (the correction trims the tail)
-and paired playback remain pending. The desktop browser was disconnected, so
-browser playback has not been verified.
+thresholds. Sampled presenter frames and final composition frames were inspected.
+The correction trims the source video tail to retain duration. Continuous paired
+playback and a dedicated last-frame review have not been completed; the desktop
+browser remains disconnected. Publication is supported by the frame/audio checks
+above, not a claim of full browser playback or perfect articulation.
 
 ## Compute ledger
 
@@ -121,8 +138,14 @@ These runtime artifacts and model weights are not repository fixtures. The
 model revision pins are committed in `colab/qwen-models.lock.json`; the setup,
 QA, renderer fixes and regression tests are committed on the feature branch.
 
-## Next checks
+## Final artifacts and remaining review
 
-Visually review and apply the corrected presenter candidates; render and inspect the real MP4;
-check final audio/media geometry and exported archive paths/hashes; publish
-the player, MP4 and editable bundle, then update this report with those results.
+`graphics-run-01/` contains the final MP4 and props, `render-result.json`,
+`presenter-corrections.json`, `review/report.json`, `review/contact-sheet.png`,
+`review/export.json`, `review/roundtrip.json`, and the extracted `export-roundtrip/`.
+The compiled timeline SHA-256 is
+`01c91aca618db778de03dc417025d92bc7ea9763bb30d26ab85580b12dcda927`.
+
+All automated publication checks pass. Continuous browser playback remains a
+manual review item. No additional GPU compute was used for timing correction,
+final rendering, verification or publication.
