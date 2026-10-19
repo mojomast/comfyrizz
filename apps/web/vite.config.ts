@@ -59,6 +59,7 @@ function renderApi(): Plugin {
 }
 
 export default defineConfig({
+  publicDir: join(repoRoot, 'apps', 'renderer', 'public'),
   plugins: [react(), renderApi()],
   resolve: {
     dedupe: ['remotion', 'react', 'react-dom'],

@@ -5,6 +5,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync }
 import { join } from 'node:path';
 import { createApp } from './app.mjs';
 import { createCpuAgentRunner } from './agent-runner.mjs';
+import { createProviderSettings } from './provider-settings.mjs';
 import { repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 
 const port = Number(process.env.COMFYRIZZ_PORT ?? 4319);
@@ -17,17 +18,15 @@ const token = process.env.COMFYRIZZ_TOKEN ?? randomBytes(32).toString('hex');
 writeFileSync(tokenPath, `${token}\n`);
 chmodSync(tokenPath, 0o600);
 
+const providerSettings = createProviderSettings({ runtimeDir });
 const app = createApp({
   root: repoRoot,
   token,
   runtimeDir,
+  providerSettings,
   agentRunner: createCpuAgentRunner({
     runtimeDir,
-    // The custom preset (spec 5.4) can be pointed at a local OpenAI-compatible
-    // server without editing the preset list. The key stays in COMFYRIZZ_CUSTOM_API_KEY.
-    ...(process.env.COMFYRIZZ_CUSTOM_BASE_URL
-      ? { providers: { custom: { baseUrl: process.env.COMFYRIZZ_CUSTOM_BASE_URL } } }
-      : {}),
+    resolveProviderConfig: providerSettings.resolve,
   }),
 });
 const seedPath = join(repoRoot, 'examples', 'launch-demo', 'package.json');

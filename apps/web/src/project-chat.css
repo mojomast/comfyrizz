@@ -1,0 +1,25 @@
+#project-plan-panel { margin: 0 12px 10px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 12px; }
+#chat-pane { align-self: start; }
+#messages { max-height: 48vh; min-height: 150px; overflow-y: auto; overflow-wrap: anywhere; flex: 0 1 auto; }
+.project-plan-details { margin: 10px 0; }
+.project-plan-details summary { cursor: pointer; font-size: 12px; color: var(--accent-2); }
+.composer-row { flex-wrap: wrap; }
+.mode-toggle { flex-shrink: 0; }
+.project-plan-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.project-plan-head b { display: block; font-size: 14px; }
+.project-plan-head .hint { display: block; margin-top: 5px; }
+.plan-state { border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.project-plan-audience { margin: 8px 0; font-size: 11px; color: var(--muted); }
+.project-plan-scenes { margin: 12px 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 330px; overflow: auto; }
+.project-plan-scenes > li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; border: 1px solid var(--line); border-radius: 9px; padding: 9px; background: var(--panel-2); }
+.project-plan-scenes .plan-layout { font-size: 9px; color: var(--accent-2); text-transform: uppercase; letter-spacing: .5px; }
+.project-plan-scenes b { font-size: 12px; display: block; }
+.project-plan-scenes span { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+.project-plan-scenes ul { margin: 5px 0 0; padding-left: 16px; color: var(--muted); font-size: 11px; }
+.project-plan-scenes li li { margin: 2px 0; }
+.project-plan-scenes .plan-narration { margin: 6px 0 0; font-size: 11px; color: var(--text); border-left: 2px solid var(--accent); padding-left: 7px; }
+.project-plan-scenes small { display: block; margin-top: 6px; font-size: 10px; color: var(--muted); font-style: italic; }
+.project-plan-scenes time { color: var(--muted); font-size: 10px; }
+.project-plan-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.project-plan-actions .hint { margin-left: auto; }
+button.quiet { background: transparent; color: var(--muted); }

@@ -16,6 +16,8 @@ import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
 import { packageTimeline, timingChangeReason } from './edit.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
 import { prepareBrand } from './brand.mjs';
+import { handleProviderSettings } from './provider-settings.mjs';
+import { createProjectChat } from './agent-chat.mjs';
 import { applySceneChip, sceneChipList } from '../../../packages/agent/dist/src/index.js';
 import { applyPresenterSet, presenterChips, presenterPresets } from '../../../packages/agent/dist/src/index.js';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
@@ -124,6 +126,7 @@ export function createApp({
   renderScene = defaultRenderScene,
   agentRunner = null,
   providers = providerAvailability(),
+  providerSettings = null,
   backendFactory = defaultBackendFactory,
   datasetFetch = globalThis.fetch,
 } = {}) {
@@ -133,6 +136,7 @@ export function createApp({
   const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
   const store = new PackageStore(join(runtimeDir, 'packages'));
+  const projectChat = createProjectChat({ runtimeDir, store, providerSettings, prepareBrand });
   const events = new EventLog();
 
   // C9: stage where H8's runPackage resolves relative paths: the package JSON, the repo's
@@ -325,7 +329,23 @@ export function createApp({
     // Which live providers have a server-side key. Booleans only: the browser
     // never receives a key and never needs one (U1).
     if (url.pathname === '/api/providers' && request.method === 'GET') {
-      return sendJson(response, 200, { providers });
+      const configured = providerSettings
+        ? Object.fromEntries(providerSettings.snapshot().profiles.map(item => [item.id, item.configured]))
+        : providers;
+      return sendJson(response, 200, { providers: configured });
+    }
+
+    if (providerSettings && await handleProviderSettings({ request, response, url, settings: providerSettings, readJson, sendJson })) return;
+
+    const chatMatch = /^\/api\/agent\/chat(?:\/([^/]+))?$/.exec(url.pathname);
+    if (chatMatch) {
+      try {
+        if (request.method === 'GET' && chatMatch[1]) return sendJson(response, 200, projectChat.get(chatMatch[1]));
+        if (request.method === 'POST' && !chatMatch[1]) return sendJson(response, 200, await projectChat.send(await readJson(request)));
+        return sendJson(response, 405, { error: 'method not allowed' });
+      } catch (error) {
+        return sendJson(response, error.status ?? 502, { error: providerSettings ? providerSettings.redact(error.message) : error.message });
+      }
     }
 
     // U2: the settings card's read-only view of the Google Colab CLI - installed or not, signed in or
