@@ -4,6 +4,13 @@
   "note": "sha256 values and dates in fixtures are synthetic; they exist to exercise the format, not to describe real files.",
   "fixtures": [
     {
+      "file": "valid/audio-mix.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
       "file": "valid/cast-mascot.json",
       "kind": "valid",
       "schemaOk": true,
@@ -168,6 +175,46 @@
       "schemaCodes": [],
       "semantic": [
         "SEM_DUPLICATE_CAST_ID"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/audio-music-not-audio.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_AUDIO_ASSET_NOT_AUDIO"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/audio-music-unknown.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_AUDIO_ASSET_UNKNOWN"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/audio-music-not-ready.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_AUDIO_ASSET_NOT_READY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/audio-sfx-unknown-scene.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_AUDIO_UNKNOWN_SCENE"
       ],
       "warnings": null
     },

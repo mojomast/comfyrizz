@@ -47,6 +47,10 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_CAST_REF_UNREADY",
   "SEM_CAST_UNKNOWN",
   "SEM_DUPLICATE_CAST_ID",
+  "SEM_AUDIO_ASSET_UNKNOWN",
+  "SEM_AUDIO_ASSET_NOT_AUDIO",
+  "SEM_AUDIO_ASSET_NOT_READY",
+  "SEM_AUDIO_UNKNOWN_SCENE",
 ]);
 
 // Published layout contract (PLAN.md A5 / SPEC.md 6.3). The schema holds the loose
@@ -152,6 +156,7 @@ export function semanticCheck(doc) {
   checkAssets(assets, errors);
   checkPresenter(doc, scenes, assets, errors);
   checkCast(doc, scenes, assets, errors);
+  checkAudio(doc, scenes, assets, errors);
   checkDatasets(datasets, errors);
   checkUnusedAssets(doc, scenes, assets, datasets, warnings);
   return { errors: dedupe(errors), warnings: dedupe(warnings) };
@@ -536,6 +541,42 @@ function checkPresenter(doc, scenes, assets, errors) {
   }
 }
 
+/**
+ * M1: music bed + sound effects with auto-ducking.
+ *
+ * A package with no audio block is not judged here. When it is present, the mix has to name files
+ * that exist and are rendered: a music bed or a whoosh that is not ready is a silent hole in the
+ * finished film, which is exactly what the GPU session would find after spending the units. An sfx
+ * also names the scene whose seam it belongs to.
+ */
+function checkAudio(doc, scenes, assets, errors) {
+  const audio = isObj(doc.audio) ? doc.audio : null;
+  if (!audio) return;
+  const sceneIds = new Set(scenes.map((scene) => (isObj(scene) ? scene.id : null)).filter((id) => isStr(id)));
+  const requireAudio = (id, path, what) => {
+    if (!isStr(id) || !isObj(assets[id])) {
+      errors.push(error("SEM_AUDIO_ASSET_UNKNOWN", path, `${what} ${JSON.stringify(id)} is not a known asset`));
+      return;
+    }
+    const asset = assets[id];
+    if (asset.kind !== "audio") {
+      errors.push(error("SEM_AUDIO_ASSET_NOT_AUDIO", path, `${what} ${JSON.stringify(id)} is a ${asset.kind ?? "?"} asset, not audio`));
+    } else if (asset.status !== "ready") {
+      errors.push(error("SEM_AUDIO_ASSET_NOT_READY", path, `${what} ${JSON.stringify(id)} is ${asset.status ?? "pending"}: the mix needs a rendered file`));
+    }
+  };
+  if (isObj(audio.music)) requireAudio(audio.music.asset, "/audio/music/asset", "the music bed");
+  if (Array.isArray(audio.sfx)) {
+    audio.sfx.forEach((sfx, i) => {
+      if (!isObj(sfx)) return;
+      requireAudio(sfx.asset, `/audio/sfx/${i}/asset`, "the sound effect");
+      if (!sceneIds.has(sfx.scene)) {
+        errors.push(error("SEM_AUDIO_UNKNOWN_SCENE", `/audio/sfx/${i}/scene`, `unknown scene ${JSON.stringify(sfx.scene)}`));
+      }
+    });
+  }
+}
+
 function checkAssets(assets, errors) {
   for (const [id, asset] of Object.entries(assets)) {
     if (!isObj(asset)) continue;
@@ -646,6 +687,12 @@ function checkUnusedAssets(doc, scenes, assets, datasets, warnings) {
   if (isObj(doc.voice) && isStr(doc.voice.ref_asset)) used.add(doc.voice.ref_asset);
   if (Array.isArray(doc.cast)) {
     for (const member of doc.cast) if (isObj(member) && isStr(member.ref_asset)) used.add(member.ref_asset);
+  }
+  if (isObj(doc.audio)) {
+    if (isObj(doc.audio.music) && isStr(doc.audio.music.asset)) used.add(doc.audio.music.asset);
+    if (Array.isArray(doc.audio.sfx)) {
+      for (const sfx of doc.audio.sfx) if (isObj(sfx) && isStr(sfx.asset)) used.add(sfx.asset);
+    }
   }
   for (const scene of scenes) {
     const bg = scene.background;

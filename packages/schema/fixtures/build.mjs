@@ -102,6 +102,35 @@ export const MUTATIONS = [
     ]],
     expect: { schemaOk: true, semantic: ["SEM_DUPLICATE_CAST_ID"] },
   },
+  // M1: the music bed, ambience and SFX have to name rendered audio, and an sfx names its scene
+  {
+    name: "audio-music-not-audio",
+    base: "generated-first",
+    ops: [["set", "audio", { music: { asset: "a_cutout" } }]],
+    expect: { schemaOk: true, semantic: ["SEM_AUDIO_ASSET_NOT_AUDIO"] },
+  },
+  {
+    name: "audio-music-unknown",
+    base: "generated-first",
+    ops: [["set", "audio", { music: { asset: "a_missing" } }]],
+    expect: { schemaOk: true, semantic: ["SEM_AUDIO_ASSET_UNKNOWN"] },
+  },
+  {
+    name: "audio-music-not-ready",
+    base: "generated-first",
+    ops: [
+      ["set", "audio", { music: { asset: "a_narr" } }],
+      ["set", "assets.a_narr.status", "pending"],
+      ["del", "assets.a_narr.file"],
+    ],
+    expect: { schemaOk: true, semantic: ["SEM_AUDIO_ASSET_NOT_READY"] },
+  },
+  {
+    name: "audio-sfx-unknown-scene",
+    base: "generated-first",
+    ops: [["set", "audio", { sfx: [{ asset: "a_narr", scene: "s99" }] }]],
+    expect: { schemaOk: true, semantic: ["SEM_AUDIO_UNKNOWN_SCENE"] },
+  },
   {
     name: "duplicate-scene-id",
     base: "spec-6.3-example",
@@ -490,6 +519,21 @@ export const DERIVED_VALID = [
       ["set", "scenes.0.cast", ["c_pip"]],
       ["set", "assets.a_cutout.cast", "c_pip"],
       ["set", "presenter", { enabled: false, portrait: "c_pip", cast: "c_pip" }],
+    ],
+    expect: { schemaOk: true, semantic: [], warnings: [] },
+  },
+  {
+    // M1: the full sound design - a music bed with ducking, plate ambience, and an sfx at a seam.
+    name: "audio-mix",
+    base: "generated-first",
+    ops: [
+      ["set", "audio", {
+        music: { asset: "a_bed", gain_db: -20, fade_out_seconds: 1.5, duck: { reduction_db: -14 } },
+        ambience: { gain_db: -24, duck: { enabled: true } },
+        sfx: [{ asset: "a_whoosh", scene: "s1", at: "scene-end", offset_seconds: 0.2 }],
+      }],
+      ["set", "assets.a_bed", { kind: "audio", origin: "upload", status: "ready", file: "audio/bed.wav", sha256: "b".repeat(64) }],
+      ["set", "assets.a_whoosh", { kind: "audio", origin: "upload", status: "ready", file: "audio/whoosh.wav", sha256: "c".repeat(64) }],
     ],
     expect: { schemaOk: true, semantic: [], warnings: [] },
   },

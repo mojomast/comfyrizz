@@ -80,6 +80,10 @@ SEMANTIC_CODES = (
     "SEM_CAST_REF_UNREADY",
     "SEM_CAST_UNKNOWN",
     "SEM_DUPLICATE_CAST_ID",
+    "SEM_AUDIO_ASSET_UNKNOWN",
+    "SEM_AUDIO_ASSET_NOT_AUDIO",
+    "SEM_AUDIO_ASSET_NOT_READY",
+    "SEM_AUDIO_UNKNOWN_SCENE",
 )
 
 # Published layout contract (PLAN.md A5 / SPEC.md 6.3); the schema holds the loose
@@ -219,6 +223,7 @@ def semantic_check(doc: Any) -> dict[str, list[dict[str, Any]]]:
     _check_assets(assets, errors)
     _check_presenter(doc, scenes, assets, errors)
     _check_cast(doc, scenes, assets, errors)
+    _check_audio(doc, scenes, assets, errors)
     _check_datasets(datasets, errors)
     _check_unused(doc, scenes, assets, datasets, warnings)
     return {"errors": _dedupe(errors), "warnings": _dedupe(warnings)}
@@ -515,6 +520,45 @@ def _check_presenter(doc, scenes, assets, errors) -> None:
             )
 
 
+def _check_audio(doc, scenes, assets, errors) -> None:
+    """M1: music bed + sound effects with auto-ducking, the same rules as
+    `packages/schema/src/semantic.mjs` - the conformance test compares the two verdicts."""
+    audio = doc.get("audio") if _is_obj(doc.get("audio")) else None
+    if audio is None:
+        return
+    scene_ids = {scene.get("id") for scene in scenes if _is_obj(scene) and _is_str(scene.get("id"))}
+
+    def require_audio(asset_id, path: str, what: str) -> None:
+        if not _is_str(asset_id) or not _is_obj(assets.get(asset_id)):
+            errors.append(_err("SEM_AUDIO_ASSET_UNKNOWN", path, f"{what} {json.dumps(asset_id)} is not a known asset"))
+            return
+        asset = assets[asset_id]
+        if asset.get("kind") != "audio":
+            errors.append(
+                _err("SEM_AUDIO_ASSET_NOT_AUDIO", path, f"{what} {json.dumps(asset_id)} is a {asset.get('kind') or '?'} asset, not audio")
+            )
+        elif asset.get("status") != "ready":
+            errors.append(
+                _err(
+                    "SEM_AUDIO_ASSET_NOT_READY",
+                    path,
+                    f"{what} {json.dumps(asset_id)} is {asset.get('status') or 'pending'}: the mix needs a rendered file",
+                )
+            )
+
+    music = audio.get("music")
+    if _is_obj(music):
+        require_audio(music.get("asset"), "/audio/music/asset", "the music bed")
+    sfx = audio.get("sfx")
+    if isinstance(sfx, list):
+        for index, item in enumerate(sfx):
+            if not _is_obj(item):
+                continue
+            require_audio(item.get("asset"), f"/audio/sfx/{index}/asset", "the sound effect")
+            if item.get("scene") not in scene_ids:
+                errors.append(_err("SEM_AUDIO_UNKNOWN_SCENE", f"/audio/sfx/{index}/scene", f"unknown scene {json.dumps(item.get('scene'))}"))
+
+
 def _check_assets(assets, errors) -> None:
     for asset_id, asset in assets.items():
         if not _is_obj(asset):
@@ -657,6 +701,15 @@ def _check_unused(doc, scenes, assets, datasets, warnings) -> None:
         for member in doc["cast"]:
             if _is_obj(member) and _is_str(member.get("ref_asset")):
                 used.add(member["ref_asset"])
+    audio = doc.get("audio")
+    if _is_obj(audio):
+        music = audio.get("music")
+        if _is_obj(music) and _is_str(music.get("asset")):
+            used.add(music["asset"])
+        if isinstance(audio.get("sfx"), list):
+            for item in audio["sfx"]:
+                if _is_obj(item) and _is_str(item.get("asset")):
+                    used.add(item["asset"])
     for scene in scenes:
         bg = scene.get("background")
         if _is_obj(bg) and _is_str(bg.get("asset")):
