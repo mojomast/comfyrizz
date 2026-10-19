@@ -204,6 +204,12 @@ export function gpu6Package() {
   // Scene preferred length should cover the narration (~10 s at 30 fps = 300 frames already).
   if (Array.isArray(pkg.scenes) && pkg.scenes[0]) {
     pkg.scenes[0].preferredFrames = Math.max(pkg.scenes[0].preferredFrames ?? 0, Math.ceil(narrSeconds * 30) + 30);
+
+    // G6-13: a scene names the narration it is spoken with and the presenter clip that covers it. The
+    // fixture names neither, so the 13:15 real run rendered a film with the music bed only - no voice,
+    // nothing to duck under - and a PiP showing the portrait still instead of the generated a2v clip.
+    if (pkg.assets.a_narr) pkg.scenes[0].narration_asset = 'a_narr';
+    if (pkg.assets.a_presenter) pkg.scenes[0].presenter_asset = 'a_presenter';
   }
   return pkg;
 }
@@ -214,7 +220,15 @@ export function writeGpu6Package(dir) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify(pkg, null, 2));
   const workflows = join(dir, "workflows");
-  if (!existsSync(workflows)) symlinkSync(join(REPO, "workflows"), workflows);
+  // G6-14: existsSync follows the link, so a *dangling* workflows symlink reads as not there and
+  // symlinkSync then throws EEXIST. lstat is the question "does this entry exist at all".
+  let linkPresent = false;
+  try {
+    linkPresent = Boolean(lstatSync(workflows));
+  } catch {
+    linkPresent = false;
+  }
+  if (!linkPresent) symlinkSync(join(REPO, "workflows"), workflows);
 
   const audioDir = join(dir, "audio");
   mkdirSync(audioDir, { recursive: true });

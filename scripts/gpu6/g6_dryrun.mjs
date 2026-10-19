@@ -148,6 +148,12 @@ export async function dryRun({ outDir = null } = {}) {
   // G6-12: harness is judgeable - real narration, distinct music file, portrait is not the nebula still
   const narrFile = join(packageDir, pkg.assets.a_narr.file);
   const narrSecs = wavDurationSeconds(narrFile);
+  // G6-13: the scene has to name the narration and the clip, or the render is music-only and the PiP is
+  // the portrait still - which is exactly what the 13:15 real run produced with every job green.
+  const scene0 = (pkg.scenes ?? [])[0] ?? {};
+  check.ok("G6-13-scene-narration", 'narration_asset=' + String(scene0.narration_asset), scene0.narration_asset === "a_narr");
+  check.ok("G6-13-scene-presenter", 'presenter_asset=' + String(scene0.presenter_asset), scene0.presenter_asset === "a_presenter");
+
   check.ok("G6-12-narration-length", `narration ${narrSecs.toFixed(2)}s at ${narrFile}`, narrSecs > 5);
   check.ok("G6-12-narration-audible", `rms check ${narrFile}`, wavIsAudible(narrFile));
   check.ok(
