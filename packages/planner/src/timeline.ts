@@ -5,15 +5,15 @@
  * narration always produce the same `timeline.json`, including its hash.
  *
  * Frame model (integer frames at the package's fps, normally 30):
- *   scene length = max(preferredFrames, narration frames + padding)  (clamped to layout limits)
+ *   scene length = max(clamped preferredFrames, narration frames + padding)
  *   transitions overlap: total = sum(scene frames) - sum(overlaps)
  *   six 150-frame scenes with five 15-frame fades = 825 frames.
  *
  * Duration modes:
  *   target    - grow scenes toward `targetFrames` and report the deviation;
  *               any non-zero deviation requires explicit user acceptance.
- *   flexible  - grow to fit speech, up to MAX_FLEXIBLE_FRAMES (90 s); never
- *               speed up, clip or silently cut speech.
+ *   flexible  - grow to fit speech; exceeding MAX_FLEXIBLE_FRAMES (90 s) gives
+ *               a pacing advisory, never speeding up, clipping or cutting speech.
  */
 
 import { createHash } from 'node:crypto';
@@ -252,11 +252,14 @@ function planScenes(pkg: ComfyrizzPackage, options: CompileOptions, fps: number)
     const provisional = hasNarrationText && (pkg.voice?.enabled ?? false) && !chunks?.length;
     // Provisional scenes use preferred length but never below the readable floor.
     const base = spoken === null ? preferred : Math.max(preferred, spoken);
-    const duration = clamp(base, limit.min, limit.max);
+    // Layout caps constrain preferred pacing, never measured speech. Clamping a
+    // long stat/title take to its visual default silently cut narration on export.
+    const max = Math.max(limit.max, spoken ?? 0);
+    const duration = clamp(base, limit.min, max);
     const transitionOut = scene.transitionOut?.type && scene.transitionOut.type !== 'none' && scene.transitionOut.type !== 'cut'
       ? Math.max(0, Math.floor(scene.transitionOut.frames || 0))
       : 0;
-    return { scene, duration, transitionOut, narrationFrames: spoken, provisional, min: limit.min, max: limit.max };
+    return { scene, duration, transitionOut, narrationFrames: spoken, provisional, min: limit.min, max };
   });
 }
 

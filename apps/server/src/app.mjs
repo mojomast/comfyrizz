@@ -23,6 +23,7 @@ import { applyPresenterSet, presenterChips, presenterPresets } from '../../../pa
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { serveStaticFile } from './static-file.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
@@ -37,6 +38,9 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
+  '.mp4': 'video/mp4',
+  '.vtt': 'text/vtt; charset=utf-8',
+  '.zip': 'application/zip',
 };
 
 function sendJson(response, status, value, extraHeaders = {}) {
@@ -299,9 +303,7 @@ export function createApp({
     }
     const headers = { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' };
     if (pathname.startsWith('/assets/')) headers['cache-control'] = 'public, max-age=31536000, immutable';
-    response.writeHead(200, headers);
-    if (request.method === 'HEAD') return response.end();
-    createReadStream(file).pipe(response);
+    return serveStaticFile(request, response, file, headers);
   }
 
   async function handler(request, response) {

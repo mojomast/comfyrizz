@@ -123,6 +123,14 @@ test('preferred lengths are clamped to layout limits', () => {
   assert.equal(tiny.scenes[0].durationInFrames, LAYOUT_LIMITS.title.min);
 });
 
+test('measured speech exceeds a stat layout cap without truncating the audio or captions', () => {
+  const film = pkg([scene('s1', { layout: 'stat', narration: 'A longer explanation.', preferredFrames: 300, transitionOut: { type: 'cut', frames: 0 } })]);
+  const timeline = compileTimeline(film, { narration: { s1: [{ text: 'A longer explanation.', seconds: 17 }] }, narrationPaddingSeconds: 0.5 });
+  assert.equal(timeline.scenes[0].durationInFrames, 525);
+  assert.ok(timeline.scenes[0].durationInFrames > LAYOUT_LIMITS.stat.max);
+  assert.equal(timeline.captions[0].to, 510);
+});
+
 test('24 fps plates are retimed to the 30 fps timeline explicitly', () => {
   const withPlate = pkg([scene('s1', { background: { asset: 'a_plate', fit: 'cover', loop: true }, transitionOut: { type: 'none', frames: 0 } })]);
   withPlate.assets = {

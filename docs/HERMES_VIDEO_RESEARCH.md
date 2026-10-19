@@ -103,6 +103,12 @@ Use 1024×576 two-stage LTX outputs, whose half-resolution lattice is valid.
 The previous 1920×1080 upscale request floored to 1920×1024; that geometry bug
 should not be hidden behind incorrect metadata. Final composition remains 1080p.
 
+Long-form preflight also exposed a planner cap that truncated measured speech
+in stat/title scenes. Measured narration now raises the layout's cap; unmeasured
+preferred pacing still obeys the existing limits. Editable ZIPs retain the
+duration sidecar, per-scene takes and the saved Qwen reference. The static server
+supports byte ranges so a browser can seek through the longer MP4.
+
 The existing authorization is 20 Colab units total, including 1.07 spent on the
 previous Comfyrizz explainer. Every attempt records before/after usage and a
 verified stop. Qwen uses a 4-unit ceiling with a 24-minute watchdog; graphics
