@@ -20,6 +20,8 @@
 //
 // `--fake` runs the identical code path against the fake `colab` CLI and the fake Comfy server: no
 // network, no session, no token needed. That is what the dry run proves.
+// `--package /path/to/package.json` stages a prepared package and its own files instead of the
+// default GPU test 6 fixture. Ready inputs, including measured narration, survive fake generation.
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,6 +34,7 @@ import { copyNamedAssets } from "../../apps/server/src/run-assets.mjs";
 import { installFakeColab, makeCli } from "../../packages/backends/test/helpers.mjs";
 import { gpu6Package, silentWav, writeGpu6Package, PACKAGE_ID } from "./g6_package.mjs";
 import { createHash } from "node:crypto";
+import { validatePackage } from "../../packages/schema/src/index.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 export const REPO = resolve(HERE, "..", "..");
@@ -123,9 +126,10 @@ const TINY_PNG = Buffer.from(
  * A PNG is checked by its signature and an MP4 by containing a `moov` box: those are exactly the two
  * things that were wrong when the bytes travelled through the fake CLI's JSON as a string.
  */
-export function writeStandInMedia(pkg, { packageDir, mp4 = null } = {}) {
+export function writeStandInMedia(pkg, { packageDir, mp4 = null, generatedIds = null } = {}) {
   const results = [];
-  for (const asset of Object.values(pkg?.assets ?? {})) {
+  for (const [id, asset] of Object.entries(pkg?.assets ?? {})) {
+    if (generatedIds && !generatedIds.has(id)) continue;
     const file = typeof asset?.file === "string" ? asset.file : null;
     const relative = asset?.variants?.upscaled?.file ?? asset?.variants?.upscaled?.path ?? null;
     const candidates = [file, typeof relative === "string" ? relative : null].filter(Boolean);
@@ -203,8 +207,8 @@ export function buildFakeManifest(pkg, jobs) {
     jobs: entries,
     manifest: {
       v: 1,
-      run_id: `run_${PACKAGE_ID}`,
-      packageId: PACKAGE_ID,
+      run_id: `run_${pkg.id}`,
+      packageId: pkg.id,
       startedAt: "2026-10-19T07:00:00Z",
       updatedAt: "2026-10-19T07:01:00Z",
       complete: true,
@@ -227,6 +231,18 @@ async function resolveRender() {
   const module = await import(new URL("apps/renderer/scripts/render-package-lib.mjs", `file://${REPO}/`).href);
   if (typeof module.renderPackage !== "function") throw new Error("apps/renderer/scripts/render-package-lib.mjs no longer exports renderPackage");
   return (packagePath, outputPath, opts = {}) => module.renderPackage(packagePath, outputPath, { ...opts, final: true });
+}
+
+/** Stage a prepared test package without mutating its source audio or media. */
+export function stageRunPackage(packagePath, workspace) {
+  if (!packagePath) return writeGpu6Package(workspace);
+  const source = resolve(packagePath);
+  const pkg = JSON.parse(readFileSync(source, 'utf8'));
+  const validation = validatePackage(pkg);
+  if (!validation.valid) throw new Error(`Test package invalid: ${validation.errors.map(e => e.message).join('; ')}`);
+  cpSync(dirname(source), workspace, { recursive: true, dereference: true });
+  writeFileSync(join(workspace, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
+  return pkg;
 }
 
 /** G6-7: build jobs.zip the way the run will, check it, and throw before a session if it is incomplete. */
@@ -267,7 +283,7 @@ async function run() {
   let usageBefore = null;
 
   try {
-    const pkg = writeGpu6Package(workspace);
+    const pkg = stageRunPackage(readFlag('--package'), workspace);
     const jobs = planJobs(pkg).jobs;
 
     // The fake `colab` CLI has built-in specs for hf_token_dir.py, list_out.py and drop_token.py only:
@@ -310,7 +326,7 @@ async function run() {
 
     backend = createColabBackend({
       cli: fake ? makeCli(fakeCli) : undefined,
-      packageId: PACKAGE_ID,
+      packageId: pkg.id,
       // G6-1: the constructor's packageDir is what createBundle zips. This is the package's folder, not
       // the repository, and it is the same directory runPackage stages the package's files into.
       packageDir: workspace,
@@ -372,7 +388,7 @@ async function run() {
     // which is why they are generated here and verified (signature, moov) rather than asserted.
     // G6-8: stand-ins are for the fake VM only. On a real run they would overwrite the GPU's outputs.
     if (fake) {
-      const media = writeStandInMedia(appliedPkg, { packageDir: workspace, mp4: tinyMp4() });
+      const media = writeStandInMedia(appliedPkg, { packageDir: workspace, mp4: tinyMp4(), generatedIds: new Set(jobs.map(job => job.assetId ?? String(job.id).split('.')[0])) });
       check("media-real", media.every((entry) => entry.ok), media.map((entry) => `${entry.name}:${entry.ok ? "ok" : entry.reason}`).join(" "));
     }
 
@@ -383,7 +399,7 @@ async function run() {
       // no `publicDir`: the renderer prepares its own when the package needs media, and that is the path
       // the server uses. Passing the workspace replaced it and cost the composition its fonts (404 on
       // Inter-Variable.ttf) - the assets and the renderer's own public files have to be served together.
-      const rendered = await render(packagePath, join(outDir, `${PACKAGE_ID}.mp4`), {
+      const rendered = await render(packagePath, join(outDir, `${pkg.id}.mp4`), {
         onLog: (line) => process.stderr.write(`  render: ${line}\n`),
       });
       renderResult = rendered;
