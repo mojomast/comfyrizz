@@ -24,6 +24,7 @@ import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { serveStaticFile } from './static-file.mjs';
+import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
@@ -134,9 +135,12 @@ export function createApp({
   providerSettings = null,
   backendFactory = defaultBackendFactory,
   datasetFetch = globalThis.fetch,
+  mediaRoot = join(runtimeDir, 'media'),
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
+  mkdirSync(mediaRoot, { recursive: true });
+  const mediaTickets = createMediaTickets();
   const rendersDir = join(runtimeDir, 'renders');
   const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
@@ -320,8 +324,26 @@ export function createApp({
       return serveStatic(request, response, url);
     }
 
+    // Ticket URLs are the credential for native media elements, which cannot send
+    // the API header. The ticket is not the API token and is not written to exports.
+    const mediaGet = /^\/api\/media\/([a-f0-9]{32})$/.exec(url.pathname);
+    if (mediaGet && (request.method === 'GET' || request.method === 'HEAD')) {
+      const file = mediaTickets.resolve(mediaGet[1]);
+      if (!file) return sendJson(response, 401, { error: 'media ticket expired' });
+      return serveTicket(request, response, file);
+    }
+
     const denied = auth(request, url);
     if (denied) return sendJson(response, denied.status, { error: denied.error });
+
+    if (url.pathname === '/api/media-ticket' && request.method === 'POST') {
+      const body = await readJson(request);
+      const file = safeMediaPath(mediaRoot, body?.path);
+      if (!file) return sendJson(response, 400, { error: 'bad path' });
+      if (!existsSync(file)) return sendJson(response, 404, { error: 'media not found' });
+      const minted = mediaTickets.mint(file);
+      return sendJson(response, 200, { ticket: minted.ticket, expiresAt: minted.expiresAt, url: minted.url });
+    }
 
     if (url.pathname === '/api/events' && request.method === 'GET') {
       const lastEventId = request.headers['last-event-id'] ?? url.searchParams.get('lastEventId');
