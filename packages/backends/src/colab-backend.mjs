@@ -78,6 +78,9 @@ const REPO = resolve(HERE, "..", "..", "..");
  */
 export const MEASURED_JOB_MINUTES = { still: 0.15, plate: 0.5, upscale: 0.5, audio: 0.05 };
 
+/** The floor a presenter job is billed at: per-job overhead, rounded up like the other kinds. */
+export const PRESENTER_MEASURED_JOB_MINUTES = 0.15;
+
 /**
  * Measured Google Colab GPU test 3: clone 1.7 s + requirements/proxy/SDK 193.5 s + model
  * downloads 193.5 s (parallel, 60.0 GB) + the text-encoder merge 22.2 s = 218.5 s (3.6 min), plus
@@ -307,7 +310,16 @@ export function createColabBackend({
 
   function estimateJobs(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
-    const minutesFor = (job) => MEASURED_JOB_MINUTES[job.kind] ?? 1;
+    const minutesFor = (job) => {
+      // H17: a presenter clip is priced per video-second (research 2.2 measured about 3.3 GPU-seconds
+      // per second of video at 0.59 MP), not per job, because its cost scales with the narration it
+      // covers. The number to replace is PRESENTER_GPU_SECONDS_PER_VIDEO_SECOND, from the bake-off.
+      if (job.kind === "presenter") {
+        const seconds = Number(job.params?.frames ?? 0) / Number(job.params?.fps ?? 24);
+        return Math.max(PRESENTER_MEASURED_JOB_MINUTES, (seconds * PRESENTER_GPU_SECONDS_PER_VIDEO_SECOND) / 60);
+      }
+      return MEASURED_JOB_MINUTES[job.kind] ?? 1;
+    };
     const gpuMinutes = list.reduce((total, job) => total + minutesFor(job), 0);
     const slowest = list.reduce((worst, job) => Math.max(worst, minutesFor(job)), 0);
     return {

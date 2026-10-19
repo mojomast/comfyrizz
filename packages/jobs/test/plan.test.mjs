@@ -830,3 +830,23 @@ test("the mascot example plans a ref-edit upload of the synthetic sheet", () => 
   }
   assert.notEqual(stills[0].cacheKey, stills[1].cacheKey);
 });
+
+test("the presenter job takes its length from the narration and its portrait at strength 1 (H17)", () => {
+  // the shared fixture is the one the workflows contract test plans from, so it is the one that has to
+  // carry a presenter; this package reads it rather than keeping a second copy that could drift
+  const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "pipeline-py", "tests", "fixtures", "package-gpu1-workflows.json");
+  const doc = planJobs(JSON.parse(readFileSync(fixturePath, "utf8")));
+  const job = doc.jobs.find((candidate) => candidate.kind === "presenter");
+
+  assert.ok(job, "the a2v asset plans a presenter job");
+  assert.equal(job.batch, "presenters", "after the narration it is generated from");
+  assert.equal(job.generator, "ltx25-a2v");
+  assert.equal(job.workflow, "workflows/ltx25_a2v_2stage.api.json");
+  assert.equal(job.params.strength, 1, "the portrait is the first frame at full strength");
+  assert.equal(job.params.width % 64, 0);
+  assert.equal(job.params.height % 64, 0);
+  assert.match(job.params.prompt, /static camera, the frame and framing never change/);
+  assert.deepEqual(job.params.image, "a_still", "the portrait travels as the file input");
+  assert.deepEqual(job.params.audio, "a_narr", "and the narration travels as the audio input");
+  assert.ok(job.promptGuards.some((guard) => guard.guard === "presenter"), JSON.stringify(job.promptGuards));
+});

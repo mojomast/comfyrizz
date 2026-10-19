@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathProblem } from "../../schema/src/semantic.mjs";
-import { applyMotionRoleDefaults, applyPromptDefaults } from "./defaults.mjs";
+import { applyMotionRoleDefaults, applyPresenterDefaults, applyPromptDefaults } from "./defaults.mjs";
 import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
 
 export const JOBS_VERSION = 1;
@@ -532,6 +532,15 @@ export function planJobs(pkg, opts = {}) {
       });
       promptGuards.push(...motion.applied);
       warnings.push(...motion.warnings);
+    }
+    if (kind === "presenter") {
+      // H17: the narration it is generated from decides the length, and the portrait decides the
+      // identity; `audio` is a package-sourced file input, so its asset is where the length is measured.
+      const narration = typeof inputs.audio === "string" ? assets[inputs.audio] : null;
+      const narrationFrames = narration?.media?.frames ?? (sceneIndex >= 0 ? pkg.scenes[sceneIndex].narration_duration_frames : null);
+      const presenter = applyPresenterDefaults(params, { narrationFrames: narrationFrames ?? null, asset: assetId });
+      promptGuards.push(...presenter.applied);
+      warnings.push(...presenter.warnings);
     }
     let workflow = gen.workflow;
     let workflowSha256 = gen.workflow_sha256 ?? null;

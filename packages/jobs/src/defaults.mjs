@@ -188,3 +188,63 @@ export function applyPromptDefaults(params, { kind, textAllowed = false, hasSour
   }
   return { applied, warnings };
 }
+
+// --- H17: the presenter (research section 2.2) -------------------------------------------------------
+//: The sentence every presenter prompt carries. It is the same discovery as the static plate's framing
+//: sentence: the frame has to be told not to move, and "looking at the camera" alone does not say it.
+export const PRESENTER_GUARD = "static camera, the frame and framing never change, natural blinking, subtle head motion";
+
+//: The portrait is the first frame at full strength on purpose: every per-scene clip is conditioned on
+//: the *same* portrait, and that is what holds the identity across clips and across scene seams.
+export const PRESENTER_STRENGTH = 1;
+
+//: Square, 768x768: the same pixel count as the plates we measured, and one set of clips serves 16:9,
+//: 9:16 and 1:1 - only the placement changes (research 2.2, design 2).
+export const PRESENTER_DIMS = 768;
+export const PRESENTER_LATTICE = 64;
+
+/** The a2v ratio GPU test 6 has to replace: about 3.3 GPU-seconds per video-second at 0.59 MP. */
+export const PRESENTER_GPU_SECONDS_PER_VIDEO_SECOND = 3.3;
+
+const snapDim = (value) => Math.max(PRESENTER_LATTICE, Math.round(Number(value) / PRESENTER_LATTICE) * PRESENTER_LATTICE);
+
+/**
+ * The presenter job's defaults: square dims on the 64 lattice, the portrait at strength 1, and a length
+ * that matches the narration it is generated from.
+ *
+ * The length is the interesting one. An a2v clip is generated *to* its audio, so the plan states the
+ * narration's own frame count when it is known (the audio asset's measured media, or the scene's
+ * recorded narration length) and only falls back to the package's value otherwise. A mismatch there is
+ * a clip whose mouth stops before its voice does.
+ */
+export function applyPresenterDefaults(params, { narrationFrames = null, asset = null } = {}) {
+  const applied = [];
+  const warnings = [];
+
+  if (params.strength === undefined) {
+    params.strength = PRESENTER_STRENGTH;
+    applied.push({ guard: "presenter-strength", because: `the portrait is the first frame at strength ${PRESENTER_STRENGTH} so the identity holds across clips (research 2.2)` });
+  }
+  const width = snapDim(params.width ?? PRESENTER_DIMS);
+  const height = snapDim(params.height ?? PRESENTER_DIMS);
+  params.width = width;
+  params.height = height;
+  if (width !== params.width || height !== params.height) {
+    warnings.push(`${asset ?? "presenter"}: dims snapped to the ${PRESENTER_LATTICE} lattice (${width}x${height})`);
+  }
+
+  if (narrationFrames && params.frames !== narrationFrames) {
+    if (params.frames !== undefined) {
+      warnings.push(`${asset ?? "presenter"}: frames ${params.frames} replaced by the narration's ${narrationFrames}`);
+    }
+    params.frames = narrationFrames;
+    applied.push({ guard: "presenter-frames", because: "the clip is generated to its narration, so its length is the narration's" });
+  }
+
+  const prompt = typeof params.prompt === "string" ? params.prompt : "";
+  if (prompt.trim() && !prompt.toLowerCase().includes("static camera")) {
+    params.prompt = `${prompt.trim().replace(/[.\s]+$/, "")}. ${PRESENTER_GUARD}.`;
+    applied.push({ guard: "presenter", because: "a talking head still needs the frame held (the plate's framing sentence, plus blinking)" });
+  }
+  return { applied, warnings };
+}
