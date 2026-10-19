@@ -242,8 +242,8 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
       const frame = Math.max(0, session.playheadFrame + action.delta);
       writeSession({ playheadFrame: frame });
       onSeek(frame);
-    } else if (action.type === 'undo') store.undo();
-    else if (action.type === 'redo') store.redo();
+    }     else if (action.type === 'undo') { store.undo(); setMessage(''); }
+    else if (action.type === 'redo') { store.redo(); setMessage(''); }
     else if (action.type === 'toggle-snap') setSnap(value => !value);
     else if (action.type === 'zoom') writeSession({ zoom: zoomClamped(zoom, action.factor) });
     else if (action.type === 'fit') fit();
@@ -358,8 +358,8 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
         <button type="button" onClick={() => writeSession({ zoom: zoomClamped(zoom, 1.25) })} aria-keyshortcuts="+">Zoom in</button>
         <button type="button" onClick={fit} aria-keyshortcuts="F">Fit</button>
         <button type="button" aria-pressed={snap} onClick={() => setSnap(value => !value)} aria-keyshortcuts="S">Snap</button>
-        <button type="button" onClick={() => store.undo()} disabled={!store.canUndo()} aria-keyshortcuts="Control+Z">Undo</button>
-        <button type="button" onClick={() => store.redo()} disabled={!store.canRedo()} aria-keyshortcuts="Control+Shift+Z">Redo</button>
+        <button type="button" onClick={() => { store.undo(); setMessage(''); }} disabled={!store.canUndo()} aria-keyshortcuts="Control+Z">Undo</button>
+        <button type="button" onClick={() => { store.redo(); setMessage(''); }} disabled={!store.canRedo()} aria-keyshortcuts="Control+Shift+Z">Redo</button>
         <button type="button" onClick={() => primary && run({ type: 'MoveScene', sceneId: primary, toIndex: Math.max(0, orderedIds.indexOf(primary) - 1) })} disabled={!primary}>Move earlier</button>
         <button type="button" onClick={() => primary && run({ type: 'MoveScene', sceneId: primary, toIndex: Math.min(orderedIds.length - 1, orderedIds.indexOf(primary) + 1) })} disabled={!primary}>Move later</button>
         <button type="button" onClick={() => primary && duplicate(primary)} disabled={!primary} aria-keyshortcuts="Control+D">Duplicate</button>
