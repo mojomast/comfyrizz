@@ -24,7 +24,10 @@ Our pinned workloads:
 
 ## Measured lifecycle evidence
 
-Source archive: `/home/mojo/comfyrizz-gpu-tests/hermes-20261019/graphics-run-01/`; harness summary: `/tmp/opencode/hermes-graphics-01.log`.
+Source archive: the graphics run's local GPU-test archive
+(`comfyrizz-gpu-tests/hermes-20261019/graphics-run-01/`); harness log: the run's
+`hermes-graphics-01.log`. Both live outside the repository, under an operator's
+home directory, and are not committed.
 
 | Measurement | Recorded value |
 | --- | ---: |

@@ -256,13 +256,14 @@ SyncNet correction was also run against both original Hermes presenter clips:
 the pipeline independently applied **3/4 native frames**, then measured **0 ms**
 for both, with confidence **9.292/9.818**. Exact presenter-input preparation
 produced **305/369 frames at 24 fps** and two valid, workflow-hashed jobs.
-No new Colab allocation was used; balance remained **365.95**, usage **0.00/hr**,
-active assignments **0**. A live paid run of the newly combined API remains
-unverified; its provider components were previously exercised during production.
+No new Colab allocation was used: the account balance was unchanged, usage was
+**0.00/hr** and active assignments were **0**. A live paid run of the newly
+combined API remains unverified; its provider components were previously
+exercised during production.
 
-A full-HD version of the short CPU smoke test is published at
-[CPU pipeline example](https://mail.tailec998.ts.net:8451/cpu-pipeline/index.html),
-with MP4, captions and editable ZIP links. It is 151 frames at 30 fps, with local
+A full-HD version of the short CPU smoke test was also published to the private
+test deployment (the URL is not recorded here), with MP4, captions and editable
+ZIP artifacts. It is 151 frames at 30 fps, with local
 Kokoro narration. The original 360p test exposed fixed-pixel caption sizing in
 `apps/renderer/src/captions.tsx`; technical checks passed but captions were too
 large at that resolution. This is a remaining low-resolution layout issue for
