@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "engine": "qwen3-tts",
+  "engineVersion": "stub",
+  "model": "Qwen3-TTS-1.7B",
+  "voice": "hermes",
+  "speed": 1,
+  "sampleRate": 24000,
+  "gapSeconds": 0.15,
+  "paddingSeconds": 0.25,
+  "scenes": {
+    "s_open": {
+      "chunks": [
+        {
+          "text": "A short opening beat for editing.",
+          "spoken": "A short opening beat for editing.",
+          "seconds": 4.74,
+          "samples": 113760
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 4.99,
+      "file": "audio/narration/s_open.wav"
+    },
+    "s_body": {
+      "chunks": [
+        {
+          "text": "The middle beat carries a plate shot.",
+          "spoken": "The middle beat carries a plate shot.",
+          "seconds": 3.295,
+          "samples": 79080
+        },
+        {
+          "text": "And a second sentence.",
+          "spoken": "And a second sentence.",
+          "seconds": 3.295,
+          "samples": 79080
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 6.99,
+      "file": "audio/narration/s_body.wav"
+    },
+    "s_close": {
+      "chunks": [
+        {
+          "text": "A closing line.",
+          "spoken": "A closing line.",
+          "seconds": 4.74,
+          "samples": 113760
+        }
+      ],
+      "gapSeconds": 0.15,
+      "paddingSeconds": 0.25,
+      "seconds": 4.99,
+      "file": "audio/narration/s_close.wav"
+    }
+  }
+}
