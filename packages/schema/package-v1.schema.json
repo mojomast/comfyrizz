@@ -329,6 +329,9 @@
     "captions": {
       "$ref": "#/$defs/packageCaptions"
     },
+    "audio": {
+      "$ref": "#/$defs/packageAudio"
+    },
     "cast": {
       "type": "array",
       "maxItems": 8,
@@ -575,6 +578,149 @@
         }
       },
       "description": "K1: caption presentation. Optional; absent means sentence, except a 9:16 video defaults to big-word."
+    },
+    "packageAudio": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "description": "M1: the film's sound design - a music bed, LTX plate ambience and short sound effects, all mixed under the narration with sidechain-style ducking. Optional and additive: a package without this block renders exactly as before.",
+      "properties": {
+        "music": {
+          "type": "object",
+          "required": [
+            "asset"
+          ],
+          "unevaluatedProperties": false,
+          "description": "A background music bed under the narration. `asset` names a ready audio asset; a missing or not-ready asset is a semantic error, not a silent skip.",
+          "properties": {
+            "asset": {
+              "$ref": "#/$defs/assetId"
+            },
+            "gain_db": {
+              "type": "number",
+              "minimum": -60,
+              "maximum": 12,
+              "default": -18,
+              "description": "Bed level before ducking. -18 dB is the intended default under narration."
+            },
+            "fade_in_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 30,
+              "default": 0.5
+            },
+            "fade_out_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 30,
+              "default": 1
+            },
+            "loop": {
+              "type": "boolean",
+              "default": true,
+              "description": "Loop the bed if it is shorter than the video; the fade-out still applies at the end."
+            },
+            "duck": {
+              "$ref": "#/$defs/audioDuck"
+            }
+          }
+        },
+        "ambience": {
+          "type": "object",
+          "unevaluatedProperties": false,
+          "description": "LTX plate audio (an asset with media.audio: present) mixed under the narration. -24 LUFS-ish, ducked.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "gain_db": {
+              "type": "number",
+              "minimum": -60,
+              "maximum": 12,
+              "default": -24
+            },
+            "duck": {
+              "$ref": "#/$defs/audioDuck"
+            }
+          }
+        },
+        "sfx": {
+          "type": "array",
+          "maxItems": 64,
+          "description": "Short sound effects at scene seams, timed to the MS3 transition. Each names a ready audio asset and the scene it belongs to.",
+          "items": {
+            "$ref": "#/$defs/audioSfx"
+          }
+        }
+      }
+    },
+    "audioDuck": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "description": "M1: sidechain-style ducking under the narration. Defaults mirror a typical sidechaincompress: -12 dB of gain reduction, 20 ms attack, 300 ms release.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "reduction_db": {
+          "type": "number",
+          "minimum": -40,
+          "maximum": 0,
+          "default": -12,
+          "description": "How far the bed/ambience is pushed down while the narration speaks."
+        },
+        "attack_ms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2000,
+          "default": 20
+        },
+        "release_ms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 300
+        }
+      }
+    },
+    "audioSfx": {
+      "type": "object",
+      "required": [
+        "asset",
+        "scene"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/assetId"
+        },
+        "scene": {
+          "$ref": "#/$defs/sceneId",
+          "description": "The scene whose seam the sound belongs to. scene-start is the scene's first frame; scene-end/transition is its out-transition."
+        },
+        "at": {
+          "type": "string",
+          "enum": [
+            "scene-start",
+            "scene-end",
+            "transition"
+          ],
+          "default": "scene-start"
+        },
+        "offset_seconds": {
+          "type": "number",
+          "minimum": -2,
+          "maximum": 10,
+          "default": 0
+        },
+        "gain_db": {
+          "type": "number",
+          "minimum": -60,
+          "maximum": 12,
+          "default": -6
+        }
+      }
     },
     "sceneMotion": {
       "type": "object",

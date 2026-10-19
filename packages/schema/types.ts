@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 72701e14f6aee81b7f0542d39a892d400b570eecf60795366c3a03379c26b077
+// Schema sha256: 06d48b0410bc5b953fe45f0a19d7e5057c2cd0d923486a9d4e8730c1d9b3d7e7
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -127,6 +127,7 @@ export interface PackageV1 {
   motion?: PackageMotion;
   presenter?: Presenter;
   captions?: PackageCaptions;
+  audio?: PackageAudio;
   /**
    * CAST1: recurring fictional characters (a mascot). Optional. A package without this array
    * validates, plans and renders exactly as before. v1 is fictional only: no real people and no user
@@ -229,6 +230,67 @@ export interface PackageCaptions {
    * [default "sentence"]
    */
   style?: "sentence" | "karaoke" | "word-pop" | "big-word";
+  }
+
+export interface PackageAudio {
+  /**
+   * A background music bed under the narration. `asset` names a ready audio asset; a missing or
+   * not-ready asset is a semantic error, not a silent skip.
+   */
+  music?: {
+    asset: AssetId;
+    /**
+     * Bed level before ducking. -18 dB is the intended default under narration.
+     * [min -60, max 12, default -18]
+     */
+    gain_db?: number;
+    fade_in_seconds?: number;
+    fade_out_seconds?: number;
+    /**
+     * Loop the bed if it is shorter than the video; the fade-out still applies at the end.
+     * [default true]
+     */
+    loop?: boolean;
+    duck?: AudioDuck;
+    };
+  /**
+   * LTX plate audio (an asset with media.audio: present) mixed under the narration. -24 LUFS-ish,
+   * ducked.
+   */
+  ambience?: {
+    enabled?: boolean;
+    gain_db?: number;
+    duck?: AudioDuck;
+    };
+  /**
+   * Short sound effects at scene seams, timed to the MS3 transition. Each names a ready audio asset
+   * and the scene it belongs to.
+   * [maxItems 64]
+   */
+  sfx?: Array<AudioSfx>;
+  }
+
+export interface AudioDuck {
+  enabled?: boolean;
+  /**
+   * How far the bed/ambience is pushed down while the narration speaks.
+   * [min -40, max 0, default -12]
+   */
+  reduction_db?: number;
+  attack_ms?: number;
+  release_ms?: number;
+  }
+
+export interface AudioSfx {
+  asset: AssetId;
+  /**
+   * The scene whose seam the sound belongs to. scene-start is the scene's first frame;
+   * scene-end/transition is its out-transition.
+   */
+  scene: SceneId;
+  at?: "scene-start" | "scene-end" | "transition";
+  offset_seconds?: number;
+  gain_db?: number;
   }
 
 export interface SceneMotion {

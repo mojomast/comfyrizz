@@ -152,3 +152,24 @@ test("K1: captions.style is a closed enum and absent by default", () => {
   assert.ok(result.errors.some((e) => /captions/.test(e.path)));
   assert.equal(validatePackage({ ...doc, captions: { style: "sentence", extra: 1 } }).valid, false, "unknown caption keys are rejected");
 });
+
+test("M1: the audio block is optional and closed", () => {
+  const doc = load("valid/minimal.json");
+  assert.equal(validatePackage(doc).valid, true, "a package with no audio block stays valid");
+  const readyBed = { kind: "audio", origin: "upload", status: "ready", file: "audio/bed.wav", sha256: "b".repeat(64) };
+  const withAudio = {
+    ...doc,
+    assets: { ...doc.assets, a_bed: readyBed },
+    audio: {
+      music: { asset: "a_bed", gain_db: -20 },
+      ambience: { gain_db: -24 },
+      sfx: [{ asset: "a_bed", scene: "s1", at: "scene-end", offset_seconds: 0.2 }],
+    },
+  };
+  const good = validatePackage(withAudio);
+  assert.equal(good.valid, true, JSON.stringify(good.errors));
+  assert.equal(validatePackage({ ...withAudio, audio: { ...withAudio.audio, extra: 1 } }).valid, false, "unknown audio keys are rejected");
+  assert.equal(validatePackage({ ...withAudio, audio: { sfx: [{ asset: "a_bed", scene: "s1", at: "nope" }] } }).valid, false, "sfx.at is a closed enum");
+  assert.equal(validatePackage({ ...withAudio, audio: { music: {} } }).valid, false, "music needs an asset");
+  assert.equal(validatePackage({ ...withAudio, audio: { music: { asset: "a_bed", gain_db: 99 } } }).valid, false, "gain_db is bounded");
+});
