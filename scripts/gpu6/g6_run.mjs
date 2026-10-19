@@ -180,19 +180,30 @@ export function buildFakeManifest(pkg, jobs) {
 /** The render the server itself uses, found rather than restated, so the two cannot drift. */
 async function resolveRender() {
   const source = readFileSync(join(REPO, "apps/server/src/app.mjs"), "utf8");
-  const used = /render:\s*([A-Za-z_$][\w$]*)/.exec(source);
-  const imported = /import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/.exec(source);
-  if (!used) throw new Error("could not find the render function the server passes to its exporter");
-  const name = used[1];
-  for (const match of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
-    const names = match[1].split(",").map((entry) => entry.trim().split(/\s+as\s+/).pop());
-    if (names.includes(name)) {
+  // `render:` appears more than once (a null in an options object, for one), so every candidate is tried
+  // and the first one that is a real import wins. `null` is spelled like an identifier and is not one.
+  const candidates = [...source.matchAll(/render:\s*([A-Za-z_$][\w$]*)/g)]
+    .map((match) => match[1])
+    .filter((name) => name !== "null" && name !== "undefined");
+  if (!candidates.length) throw new Error("could not find the render function the server passes to its exporter");
+  for (const name of candidates) {
+    for (const match of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
+      // `import { createRenderer as exportRender }`: the module exports the *first* name, the file uses
+      // the second, and the two are not interchangeable when the module is imported directly
+      const pairs = match[1].split(",").map((entry) => {
+        const parts = entry.trim().split(/\s+as\s+/);
+        return { exported: parts[0].trim(), local: (parts[1] ?? parts[0]).trim() };
+      });
+      const pair = pairs.find((entry) => entry.local === name || entry.exported === name);
+      if (!pair) continue;
       const module = await import(new URL(match[2], new URL("apps/server/src/app.mjs", `file://${REPO}/`)).href);
-      if (typeof module[name] === "function") return module[name];
+      for (const key of [pair.exported, pair.local, "default"]) {
+        const candidate = module?.[key] ?? (key === "default" ? module?.default : null);
+        if (typeof candidate === "function") return candidate;
+      }
     }
   }
-  void imported;
-  throw new Error(`the server's render function ${name} was imported from a module that does not export it`);
+  throw new Error(`the server's render function (${candidates.join(", ")}) was not exported by the module it is imported from`);
 }
 
 async function run() {
