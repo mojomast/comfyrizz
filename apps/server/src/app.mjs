@@ -39,6 +39,7 @@ const MIME = {
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
   '.mp4': 'video/mp4',
+  '.wav': 'audio/wav',
   '.vtt': 'text/vtt; charset=utf-8',
   '.zip': 'application/zip',
 };
