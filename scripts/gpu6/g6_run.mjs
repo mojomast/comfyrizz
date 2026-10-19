@@ -188,6 +188,9 @@ async function run() {
     backend = createColabBackend({
       cli: fake ? makeCli(fakeCli) : undefined,
       packageId: PACKAGE_ID,
+      // G6-1: the constructor's packageDir is what createBundle zips. This is the package's folder, not
+      // the repository, and it is the same directory runPackage stages the package's files into.
+      packageDir: workspace,
       scratchDir: join(outDir, "scratch"),
       logDir: fake ? join(fakeCli.tmpDir, "logs") : logs,
       // the dry run's Colab half passes these: the runner reads the jobs file path from here, and a fake

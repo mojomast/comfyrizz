@@ -81,6 +81,10 @@ export const MEASURED_JOB_MINUTES = { still: 0.15, plate: 0.5, upscale: 0.5, aud
 /** The floor a presenter job is billed at: per-job overhead, rounded up like the other kinds. */
 export const PRESENTER_MEASURED_JOB_MINUTES = 0.15;
 
+/** G6-1: what a jobs bundle may weigh before it is not worth uploading. The runner, the schemas and a
+ * package's own files are megabytes; a repository root is hundreds. */
+export const BUNDLE_MAX_BYTES = 128 * 1024 * 1024;
+
 /** About 3.3 GPU-seconds per video-second at 0.59 MP (the research figure for LTX-2.5 a2v). This mirrors
  * PRESENTER_GPU_SECONDS_PER_VIDEO_SECOND in the job defaults on purpose: the backend must not import the
  * planner to price a job, and a test asserts the two numbers stay equal so they cannot drift. */
@@ -118,7 +122,11 @@ export function createColabBackend({
   cli = null,
   packageId,
   home = process.env.HOME || null,
-  packageDir = process.cwd(),
+  // G6-1: this used to default to process.cwd(), and createBundle zips it. On a real run that meant a
+  // 646 MB jobs.zip with 113k entries - the repo's node_modules and .venv - which the runtime's contents
+  // API refused with a 400 after the session was already paid for. A backend has no business guessing
+  // which directory the package lives in: without one, the bundle carries the runner and the schemas.
+  packageDir = null,
   scratchDir = null,
   logDir = null,
   budgetUnits = 0,
@@ -633,11 +641,27 @@ export function createColabBackend({
         }
         if (!uploaded) {
           const bundle = createBundle({ jobsFile, packageDir, scratch, zipCommand });
+          // G6-1: a bundle that is too big fails at the *runtime*, after the session is paid for, with a
+          // 400 that says nothing. Take its size here, where the answer is cheap and the reason is known.
+          const bundleBytes = statSync(bundle).size;
+          if (bundleBytes > BUNDLE_MAX_BYTES) {
+            throw new ColabCliError(
+              `the jobs bundle is ${(bundleBytes / 1024 / 1024).toFixed(0)} MB, over the ${BUNDLE_MAX_BYTES / 1024 / 1024} MB ceiling; ` +
+                `the runtime refuses uploads this size. ` +
+                (packageDir
+                  ? `packageDir is ${packageDir}: check that it is the package's own folder and not a repository root.`
+                  : `no packageDir was given, so only the runner and the schemas should be in it.`),
+            );
+          }
           const uploadBundle = await step(argvUpload({ session, localPath: bundle, remotePath: `${REMOTE_ROOT}/jobs.zip` }), {
             label: "upload-bundle",
             wallMs: 600000,
           });
-          if (uploadBundle.code !== 0) throw new ColabCliError(`uploading jobs.zip failed (exit ${uploadBundle.code})`);
+          if (uploadBundle.code !== 0) {
+            // G6-2: the CLI's own last lines say why (a 400, a quota, a path); "exit 1" says nothing.
+            const said = redactForLog(String(uploadBundle.output ?? "")).trim().split("\n").slice(-6).join("\n");
+            throw new ColabCliError(`uploading jobs.zip failed (exit ${uploadBundle.code})${said ? `:\n${said}` : ""}`);
+          }
           uploaded = true;
         }
         if (name) {

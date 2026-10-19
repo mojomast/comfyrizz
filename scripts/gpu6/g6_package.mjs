@@ -13,7 +13,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
-export const PACKAGE_ID = "pkg_gpu6dryrun0001";
+// G6-4: the session name is derived from this id, and "dryrun" on a paid session is misleading in the
+// logs and in the units ledger. The dry run and the real run share the id deliberately: same package,
+// same job set, which is what makes their numbers comparable.
+export const PACKAGE_ID = "pkg_gpu6run0001";
 export const FIXTURE = join(REPO, "pipeline-py", "tests", "fixtures", "package-gpu1-workflows.json");
 
 /** A real, tiny WAV: 16-bit mono PCM. The runner reads it; nothing here invents audio content. */
