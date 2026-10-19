@@ -726,6 +726,17 @@
       "type": "object",
       "unevaluatedProperties": false,
       "properties": {
+        "diagram": {
+          "type": "string",
+          "enum": ["flow", "hub"],
+          "description": "List-layout motion diagram: connected step cards or a shared hub. Copy stays editable."
+        },
+        "cue_seconds": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {"type": "number", "minimum": 0},
+          "description": "Scene-local speech cue times for diagram cards, one per copy item. Omitted cues spread through the scene."
+        },
         "entry": {
           "type": "string",
           "enum": [

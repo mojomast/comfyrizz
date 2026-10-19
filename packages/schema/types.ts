@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: d6c1ac232fc6cf1f52d5fb89b06ada328cb039a0edfc7a889b458f03b38dda11
+// Schema sha256: 1f114eb00384017f826c3509a1cd6e714c98828e9fb65bf7deef7109ae26a817
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -294,6 +294,16 @@ export interface AudioSfx {
   }
 
 export interface SceneMotion {
+  /**
+   * List-layout motion diagram: connected step cards or a shared hub. Copy stays editable.
+   */
+  diagram?: "flow" | "hub";
+  /**
+   * Scene-local speech cue times for diagram cards, one per copy item. Omitted cues spread through
+   * the scene.
+   * [maxItems 6]
+   */
+  cue_seconds?: Array<number>;
   /**
    * Entry preset. fadeUp/maskRise/pop/countUp are the MS1 primitives of the same name
    * (apps/renderer/src/motion/primitives.js); waterfall (kinetic words) and drawOn (SVG stroke

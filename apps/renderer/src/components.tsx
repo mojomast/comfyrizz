@@ -14,6 +14,7 @@ import { PRESENTER_LABEL_DEFAULT, presenterAssetId } from './presenter-model.js'
 import { InsetFrame } from './inset-frame';
 import { SplitCompareLayout } from './split-layout';
 import { CodeLayout } from './code-scene';
+import { MotionDiagram } from './diagram';
 import { STAGGER_SECONDS, countUp, fadeUp, maskRise, pop, prog, staggerFrames } from './motion/primitives.js';
 import { energyProfile } from './motion/index.js';
 import { highlightSweep, canDrawOn, drawOnSvg, splitHighlight, waterfallEntry, waterfallPlan } from './motion/kinetic.js';
@@ -581,6 +582,7 @@ function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
   const copy = (scene.copy ?? {}) as Record<string, string | undefined | string[]>;
   const quote = scene.variant === 'quote';
   const items = Array.isArray(copy.items) ? (copy.items as string[]) : [];
+  if (scene.motion?.diagram) return <AbsoluteFill><Background scene={scene} pkg={pkg} media={media} /><MotionDiagram scene={scene} pkg={pkg} frame={frame} /></AbsoluteFill>;
   return (
     <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
       <Background scene={scene} pkg={pkg} media={media} />
