@@ -27,9 +27,11 @@ def main():
     with zipfile.ZipFile("/content/comfyrizz-qwen-input.zip") as archive:
         archive.extractall(root)
     lock = json.loads((root / "models.lock.json").read_text())
+    qa_only = json.loads((root / "task.json").read_text()).get("qaOnly", False)
     run(["apt-get", "update", "-qq"])
     run(["apt-get", "install", "-y", "-qq", "sox", "ffmpeg", "python3.12-venv"])
-    for name, package in [("tts", lock["ttsPackage"]), ("asr", lock["asrPackage"])]:
+    environments = [("asr", lock["asrPackage"])] if qa_only else [("tts", lock["ttsPackage"]), ("asr", lock["asrPackage"])]
+    for name, package in environments:
         env = root / ("venv-" + name)
         # Colab's kernel can be 3.13 while apt's venv support belongs to 3.12.
         # Explicitly select the supported interpreter and isolate the CUDA stack.
@@ -44,17 +46,20 @@ from huggingface_hub import snapshot_download
 from pathlib import Path
 root=Path('/content/comfyrizz-qwen')
 models=json.loads((root/'models.lock.json').read_text())['models']
+if json.loads((root/'task.json').read_text()).get('qaOnly'):
+    models={repo:rev for repo,rev in models.items() if 'TTS' not in repo}
 def download(item):
     repo,revision=item
     snapshot_download(repo, revision=revision, local_dir=root/'models'/repo.split('/')[-1], max_workers=4)
 with ThreadPoolExecutor(max_workers=2) as pool:
     list(pool.map(download, models.items()))
 """
-    run([tts_python, "-c", download])
+    run([asr_python if qa_only else tts_python, "-c", download])
     environment = {**os.environ, "COMFYRIZZ_QWEN_DEVICE": "cuda:0", "COMFYRIZZ_QWEN_MODELS": str(root / "models"), "PYTHONUNBUFFERED": "1"}
     pkg = root / "package.json"
     out = root / "audio"
-    run([tts_python, root / "py/synth.py", "--package", pkg, "--out", out, "--padding", "0.5"], env=environment)
+    if not qa_only:
+        run([tts_python, root / "py/synth.py", "--package", pkg, "--out", out, "--padding", "0.5"], env=environment)
     qa_error = None
     try:
         run([asr_python, root / "py/qa_qwen.py", "--package", pkg, "--out", out], env=environment)
@@ -65,7 +70,8 @@ with ThreadPoolExecutor(max_workers=2) as pool:
     if report.get("engine") != "qwen3-tts" or report.get("engineFallback"):
         raise RuntimeError("Expected actual Qwen output, never a fallback")
     shutil.copy(root / "models.lock.json", out / "models.lock.json")
-    for name, python in [("tts", tts_python), ("asr", asr_python)]:
+    for name, _ in environments:
+        python = root / ("venv-" + name) / "bin/python"
         with (out / (name + "-environment.txt")).open("w") as f:
             subprocess.run([str(python), "-m", "pip", "freeze"], stdout=f, check=True)
     shutil.make_archive("/content/comfyrizz-qwen-output", "zip", root, "audio")

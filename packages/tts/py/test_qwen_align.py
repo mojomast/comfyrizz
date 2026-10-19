@@ -5,7 +5,7 @@ aligner speaks ``start_ts`` / ``end_ts``, the same names Kokoro's pipeline uses.
 """
 import pytest
 
-from narrate_qwen import narrate_qwen
+from narrate_qwen import narrate_qwen, build_chunks
 from qwen import ALIGNER_MODEL, Qwen3Aligner, QwenRuntimeUnavailable
 from test_qwen_engine import FakeTts, package
 from words import word_timings
@@ -91,3 +91,16 @@ def test_an_aligner_error_also_falls_back(tmp_path):
     chunk = report["scenes"]["s1"]["chunks"][0]
     assert chunk["words"] == word_timings(chunk["text"], chunk["seconds"])
     assert chunk["timing"] == "syllable-fallback"
+
+
+def test_real_alignment_keeps_leading_silence_and_holds_the_tail():
+    chunks = build_chunks(["Twenty-two changes."], ["Twenty-two changes."], 2.0, [
+        {"text": "Twenty", "start_ts": 0.2, "end_ts": 0.5},
+        {"text": "two", "start_ts": 0.5, "end_ts": 0.8},
+        {"text": "changes", "start_ts": 1.0, "end_ts": 1.7},
+    ])
+    assert chunks[0]["timing"] == "aligner"
+    assert chunks[0]["words"] == [
+        {"text": "Twenty-two", "start": 0.2, "end": 0.8},
+        {"text": "changes.", "start": 1.0, "end": 2.0},
+    ]

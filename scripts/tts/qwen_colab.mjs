@@ -24,6 +24,18 @@ const py = join(root, 'packages/tts/py');
 const entries = readdirSync(py).filter(n => n.endsWith('.py') && !n.startsWith('test_')).map(n => ({ path: `py/${n}`, data: readFileSync(join(py, n)) }));
 entries.push({ path: 'package.json', data: readFileSync(packagePath) }, { path: 'models.lock.json', data: readFileSync(join(root, 'colab/qwen-models.lock.json')) });
 const input = join(out, 'input.zip');
+const qaOnly = process.argv.includes('--qa-only');
+entries.push({ path: 'task.json', data: JSON.stringify({ qaOnly }) });
+if (qaOnly) {
+  const audioDir = join(dirname(packagePath), 'audio');
+  const addAudio = (dir, prefix = 'audio') => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) addAudio(join(dir, entry.name), `${prefix}/${entry.name}`);
+      else if (entry.isFile() && /\.(wav|json)$/.test(entry.name)) entries.push({ path: `${prefix}/${entry.name}`, data: readFileSync(join(dir, entry.name)) });
+    }
+  };
+  addAudio(audioDir);
+}
 writeFileSync(input, createZip(entries));
 const watchdogMinutes = Math.max(1, Math.floor((units - 0.3) / 8.9 * 60));
 console.log(JSON.stringify({ dryRun: process.argv.includes('--dry-run'), input, scenes: pkg.scenes.length, unitsCeiling: units, watchdogMinutes }));

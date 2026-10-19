@@ -37,6 +37,7 @@ def main():
         spoken, spoken_sentences = spoken_for_scene(scene, sentences)
         transcript = asr.transcribe(speech, sr, language)
         tokens = aligner.align(speech, sr, " ".join(sentences), language)
+        measured["alignmentTokens"] = tokens
         measured["chunks"] = build_chunks(sentences, spoken_sentences, len(speech) / sr, tokens)
         measured["qa"] = {"transcript": transcript, "wer": round(wer(spoken, transcript), 4), "flagged": should_regenerate(spoken, transcript), "attempts": 1, "method": "separate-environment-qwen-asr"}
         print(scene["id"], json.dumps(measured["qa"]), flush=True)

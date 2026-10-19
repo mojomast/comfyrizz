@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -120,9 +121,33 @@ def build_chunks(sentences: list[str], spoken_sentences: list[str], speech_secon
     """
     counts = [len(sentence.split()) for sentence in sentences]
     accepted = None
-    if tokens and sum(counts) == len(tokens):
+    if tokens:
         try:
-            accepted = word_timings(" ".join(sentences), speech_seconds, tokens)
+            # The aligner may split a hyphenated display word into several tokens.
+            # Merge only exact normalized matches; never invent token timing.
+            normalized = lambda value: re.sub(r"[^\w]", "", value.lower())
+            merged, cursor = [], 0
+            for word in " ".join(sentences).split():
+                target, gathered, parts = normalized(word), "", []
+                while cursor < len(tokens) and (not parts or gathered != target):
+                    token = tokens[cursor]
+                    gathered += normalized(token["text"])
+                    parts.append(token)
+                    cursor += 1
+                    if not target.startswith(gathered):
+                        raise ValueError("aligner token text does not match display words")
+                if gathered != target:
+                    raise ValueError("incomplete alignment")
+                merged.append({"text": word, "start": parts[0].get("start", parts[0].get("start_ts")), "end": parts[-1].get("end", parts[-1].get("end_ts"))})
+            if cursor != len(tokens) or not merged:
+                raise ValueError("extra alignment tokens")
+            # Real speech often ends before the WAV does. Validate the measured
+            # endpoint first, then hold the last caption across trailing silence.
+            end = float(merged[-1]["end"])
+            if end > speech_seconds + 0.02:
+                raise ValueError("alignment exceeds the audio")
+            accepted = word_timings(" ".join(sentences), end, merged)
+            accepted[-1]["end"] = round(speech_seconds, 4)
         except ValueError:
             accepted = None
     groups = None
@@ -147,7 +172,7 @@ def build_chunks(sentences: list[str], spoken_sentences: list[str], speech_secon
             chunk_seconds = 0.0001
         local = None
         if groups is not None and groups[index]:
-            origin = float(groups[index][0]["start"])
+            origin = bounds[index]
             local = [
                 {
                     "text": token["text"],
@@ -156,7 +181,6 @@ def build_chunks(sentences: list[str], spoken_sentences: list[str], speech_secon
                 }
                 for token in groups[index]
             ]
-            local[0]["start"] = 0.0
             # Hold the last word through the pause before the next sentence so
             # the chunk still sums to its measured duration.
             local[-1]["end"] = round(chunk_seconds, 4)
