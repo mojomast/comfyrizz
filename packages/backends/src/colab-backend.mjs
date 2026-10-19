@@ -81,6 +81,11 @@ export const MEASURED_JOB_MINUTES = { still: 0.15, plate: 0.5, upscale: 0.5, aud
 /** The floor a presenter job is billed at: per-job overhead, rounded up like the other kinds. */
 export const PRESENTER_MEASURED_JOB_MINUTES = 0.15;
 
+/** About 3.3 GPU-seconds per video-second at 0.59 MP (the research figure for LTX-2.5 a2v). This mirrors
+ * PRESENTER_GPU_SECONDS_PER_VIDEO_SECOND in the job defaults on purpose: the backend must not import the
+ * planner to price a job, and a test asserts the two numbers stay equal so they cannot drift. */
+export const PRESENTER_GPU_SECONDS_PER_VIDEO_SECOND = 3.3;
+
 /**
  * Measured Google Colab GPU test 3: clone 1.7 s + requirements/proxy/SDK 193.5 s + model
  * downloads 193.5 s (parallel, 60.0 GB) + the text-encoder merge 22.2 s = 218.5 s (3.6 min), plus
