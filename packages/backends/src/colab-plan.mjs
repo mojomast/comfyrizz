@@ -278,7 +278,10 @@ export function resolveColabBinary({ env = process.env, home = env.HOME || "", e
 export function redactRuntimeUrl(text) {
   return String(text ?? "")
     .replace(/(colab-runtime-proxy-token=)[^&\s"']+/gi, "$1[REDACTED]")
-    .replace(/([?&](?:token|access_token|key|api_key|apikey|auth|signature)=)[^&\s"']+/gi, "$1[REDACTED]");
+    .replace(/([?&](?:token|access_token|key|api_key|apikey|auth|signature)=)[^&\s"']+/gi, "$1[REDACTED]")
+    // and the same names *without* a query prefix: a CLI that prints "or use access_token=..." is the
+    // case that slipped through, and it is exactly the credential this exists to keep out of a log
+    .replace(/\b(token|access_token|api_key|apikey|auth_token|signature)=[^&\s"']+/gi, "$1=[REDACTED]");
 }
 
 /** `redactAll` plus the URL query scrubbing: the single funnel every log line goes through. */

@@ -4,6 +4,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { colabStatus } from './colab-status.mjs';
+import { startColabAuth } from './colab-auth.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
 import { buildVariants } from './variant.mjs';
@@ -333,6 +334,29 @@ export function createApp({
     if (url.pathname === '/api/colab/status' && request.method === 'GET') {
       const status = await colabStatus({ backendFactory });
       return sendJson(response, 200, status);
+    }
+
+    // U2: the guided sign-in. `colab auth` prints a URL and waits; every line it prints is relayed to
+    // the card as it arrives (redacted) and the response carries the outcome. The token stays with the
+    // CLI: nothing here reads, parses or stores a credential.
+    if (url.pathname === '/api/colab/auth' && request.method === 'POST') {
+      const outcome = await startColabAuth({
+        onLine: (line) => {
+          // the run panel's own event stream, when it is there: the card renders live lines if it is
+          // watching, and the response below carries them all either way
+          try {
+            events?.emit?.('colab_auth', { line });
+          } catch {
+            /* an emitter that is not there yet is not a reason to lose the sign-in */
+          }
+        },
+      });
+      return sendJson(response, outcome.ok ? 200 : 502, {
+        ok: outcome.ok,
+        lines: outcome.lines,
+        reason: outcome.reason,
+        install: outcome.install === true,
+      });
     }
 
     // W1: download the API-format workflow saved next to a generated still or plate.
