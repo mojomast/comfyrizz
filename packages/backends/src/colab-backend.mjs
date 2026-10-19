@@ -1064,7 +1064,13 @@ export function createBundle({ jobsFile, packageDir, scratch, zipCommand = null,
   const bundle = join(scratch, "jobs.zip");
   if (existsSync(bundle)) rmSync(bundle, { force: true });
   const command = zipCommand || [process.env.COMFYRIZZ_PYTHON || "python3", "-m", "zipfile", "-c", bundle];
-  const result = spawnSync(command[0], [...command.slice(1), jobsFile, ...(packageDir ? [join(packageDir, "workflows"), packageDir] : [])], {
+  // G6-7: the package's own entries go in at the bundle root, next to jobs.json, because the runner
+  // resolves `workflow` and `fileInputs[from=package]` against the jobs.json directory. Zipping the
+  // package folder itself nested them under its basename (`workspace/audio/s1.wav`) where nothing looks.
+  const entries = packageDir && existsSync(packageDir)
+    ? readdirSync(packageDir).filter((name) => !BUNDLE_SKIP.has(name)).map((name) => join(packageDir, name))
+    : [];
+  const result = spawnSync(command[0], [...command.slice(1), jobsFile, ...entries], {
     cwd: dirname(jobsFile),
     encoding: "utf8",
   });
@@ -1084,6 +1090,54 @@ export function createBundle({ jobsFile, packageDir, scratch, zipCommand = null,
     }
   }
   return bundle;
+}
+
+/** Package entries never shipped: the run's own outputs, a second jobs file, and anything repo-sized. */
+const BUNDLE_SKIP = new Set(["out", "jobs.json", "node_modules", ".venv", ".git"]);
+
+/**
+ * G6-7 pre-flight: every file a job reads from the bundle has to be in it, where the VM will look.
+ *
+ * The VM unzips jobs.zip and takes the first jobs.json it finds (colab/run_jobs.py); the runner resolves
+ * a job's `workflow` and its `fileInputs` with `from: "package"` against that file's
+ * directory. `from: "job"` inputs are a dependency's outputs and are produced on the VM, so they are not
+ * checked. Returns the missing paths; an empty list means the bundle is complete.
+ */
+export function bundleMissingInputs(bundle, { python = process.env.COMFYRIZZ_PYTHON || "python3" } = {}) {
+  const listed = spawnSync(
+    python,
+    ["-c", "import sys, json, zipfile; z = zipfile.ZipFile(sys.argv[1]); n = z.namelist(); print(json.dumps(n))", bundle],
+    { encoding: "utf8", timeout: 60000 },
+  );
+  if (listed.status !== 0) throw new ColabCliError(`could not list ${bundle}: ${(listed.stderr || "").slice(-200)}`);
+  const names = new Set(JSON.parse(listed.stdout));
+  const jobsEntries = [...names].filter((name) => name === "jobs.json" || name.endsWith("/jobs.json")).sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
+  if (!jobsEntries.length) return ["jobs.json"];
+  const base = jobsEntries[0].includes("/") ? jobsEntries[0].slice(0, jobsEntries[0].lastIndexOf("/") + 1) : "";
+  const read = spawnSync(python, ["-c", "import sys, zipfile; sys.stdout.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]).decode())", bundle, jobsEntries[0]], { encoding: "utf8", timeout: 60000 });
+  if (read.status !== 0) throw new ColabCliError(`could not read ${jobsEntries[0]} from ${bundle}`);
+  const doc = JSON.parse(read.stdout);
+  const missing = [];
+  for (const job of Array.isArray(doc.jobs) ? doc.jobs : []) {
+    const wanted = [job.workflow, ...(job.fileInputs || []).filter((entry) => entry?.from === "package").map((entry) => entry.path)];
+    for (const rel of wanted) {
+      if (typeof rel !== "string" || !rel || rel.startsWith("/")) continue;
+      if (!names.has(`${base}${rel}`)) missing.push(`${job.id}: ${rel}`);
+    }
+  }
+  return missing;
+}
+
+/** Throw before any session exists when the bundle would leave a job without its files. */
+export function assertBundleComplete(bundle, opts = {}) {
+  const missing = bundleMissingInputs(bundle, opts);
+  if (missing.length) {
+    throw new ColabCliError(
+      `jobs.zip is missing ${missing.length} file(s) a job reads, so those jobs would fail on the VM (workflow_unreadable / input_file_missing): ${missing.slice(0, 12).join(", ")}${missing.length > 12 ? ", ..." : ""}`,
+      { missing },
+    );
+  }
+  return true;
 }
 
 /** The manifest alone decides success; every recorded output is re-hashed on disk. */

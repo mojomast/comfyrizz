@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createColabBackend } from "../../packages/backends/src/colab-backend.mjs";
+import { assertBundleComplete, createBundle, createColabBackend } from "../../packages/backends/src/colab-backend.mjs";
 import { applyManifestToPackage, planJobs } from "../../packages/jobs/src/index.mjs";
 import { copyNamedAssets } from "../../apps/server/src/run-assets.mjs";
 import { installFakeColab, makeCli } from "../../packages/backends/test/helpers.mjs";
@@ -229,6 +229,20 @@ async function resolveRender() {
   return (packagePath, outputPath, opts = {}) => module.renderPackage(packagePath, outputPath, { ...opts, final: true });
 }
 
+/** G6-7: build jobs.zip the way the run will, check it, and throw before a session if it is incomplete. */
+export function preflightBundle({ pkg, workspace, scratch }) {
+  const jobsFile = join(workspace, "jobs.json");
+  writeFileSync(jobsFile, `${JSON.stringify(planJobs(pkg), null, 2)}\n`);
+  const dir = mkdtempSync(join(tmpdir(), "comfyrizz-g6-preflight-"));
+  try {
+    const bundle = createBundle({ jobsFile, packageDir: workspace, scratch: dir });
+    return assertBundleComplete(bundle);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(jobsFile, { force: true });
+  }
+}
+
 async function run() {
   const outDir = readFlag("--out", DEFAULT_OUT);
   const unitsCeiling = Number(readFlag("--units-ceiling", String(DEFAULT_UNITS_CEILING)));
@@ -250,6 +264,7 @@ async function run() {
   let runResult = null;
   let token = null;
   let stopped = "not started";
+  let usageBefore = null;
 
   try {
     const pkg = writeGpu6Package(workspace);
@@ -302,8 +317,8 @@ async function run() {
       scratchDir: join(outDir, "scratch"),
       logDir: fake ? join(fakeCli.tmpDir, "logs") : logs,
       // the dry run's Colab half passes these: the runner reads the jobs file path from here, and a fake
-      // teardown does not need the real retry window
-      packageDir: null,
+      // teardown does not need the real retry window. (G6-7: a second `packageDir: null` used to sit here;
+      // the last key wins, so the bundle went out with no workflows and every real job failed.)
       jobsFile: join(workspace, "jobs.json"),
       teardownRetryMs: 5,
       budgetUnits: unitsCeiling,
@@ -313,10 +328,15 @@ async function run() {
       hfTokenPath: token.path,
     });
 
+    // G6-7 pre-flight, before any Google Colab session exists: build the bundle exactly as the run will
+    // and refuse to start if a job's workflow, params file or package input is not where the VM looks.
+    check("bundle-complete", preflightBundle({ pkg, workspace, scratch: join(outDir, "scratch") }), "every job's workflow and package inputs are in jobs.zip");
+
     const estimate = await backend.estimate(jobs);
     check("estimate-under-ceiling", estimate.units <= unitsCeiling, `${estimate.units.toFixed(2)} of ${unitsCeiling}`);
     if (estimate.units > unitsCeiling) throw new Error(`the estimate (${estimate.units.toFixed(2)} units) is over the ceiling of ${unitsCeiling}`);
 
+    usageBefore = await backend.usage().catch(() => null);
     runResult = await backend.runPackage(pkg, {
       // this script is the approval: a human ran it deliberately, the estimate was printed and checked
       // against the ceiling above, and the ceiling is enforced again below
@@ -329,7 +349,9 @@ async function run() {
       },
     });
     check("runPackage", runResult.ok === true, `ok=${runResult.ok} counts=${JSON.stringify(runResult.counts)}`);
-    check("units-spent", (runResult.units ?? runResult.spentUnits ?? 0) <= unitsCeiling, `${runResult.units ?? runResult.spentUnits ?? "?"} of ${unitsCeiling}`);
+    // G6-8: fail closed. A run whose GPU jobs failed has nothing real to apply or render; rendering the
+    // stand-ins anyway produced a silent placeholder MP4 and a row of PASS lines on a failed run.
+    if (runResult.ok !== true) throw new Error(`GPU jobs did not all succeed (${JSON.stringify(runResult.counts)}), so nothing is applied or rendered`);
 
     // apply, then render: the same order, and the same source, as the server's completeRun - runPackage
     // has already applied the manifest, and `result.package` is the package with its assets landed
@@ -348,8 +370,11 @@ async function run() {
     // harness therefore writes the stand-in media into the copied tree itself: the fake VM proves the
     // flow - stage, bootstrap, jobs, collect, apply - and these bytes stand in for the GPU's real outputs,
     // which is why they are generated here and verified (signature, moov) rather than asserted.
-    const media = writeStandInMedia(appliedPkg, { packageDir: workspace, mp4: tinyMp4() });
-    check("media-real", media.every((entry) => entry.ok), media.map((entry) => `${entry.name}:${entry.ok ? "ok" : entry.reason}`).join(" "));
+    // G6-8: stand-ins are for the fake VM only. On a real run they would overwrite the GPU's outputs.
+    if (fake) {
+      const media = writeStandInMedia(appliedPkg, { packageDir: workspace, mp4: tinyMp4() });
+      check("media-real", media.every((entry) => entry.ok), media.map((entry) => `${entry.name}:${entry.ok ? "ok" : entry.reason}`).join(" "));
+    }
 
     if (hasFlag("--no-render")) {
       check("render", true, "skipped (--no-render)");
@@ -390,6 +415,12 @@ async function run() {
       check("token-cleaned", !token?.path || !existsSync(token.path), token?.path ? "the staged file is gone" : "nothing staged");
     } catch (error) {
       check("token-cleaned", false, error.message);
+    }
+    // G6-8: units spent is the balance before minus after; unknown is not a PASS
+    if (usageBefore) {
+      const after = await backend?.usage?.().catch(() => null);
+      const spent = Number.isFinite(usageBefore?.balance) && Number.isFinite(after?.balance) ? Number((usageBefore.balance - after.balance).toFixed(2)) : null;
+      check("units-spent", spent !== null && spent <= unitsCeiling, `${spent ?? "unknown"} of ${unitsCeiling} (balance ${usageBefore?.balance ?? "?"} -> ${after?.balance ?? "?"})`);
     }
     fakeServer?.child?.kill("SIGTERM");
     release();
