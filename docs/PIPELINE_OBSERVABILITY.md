@@ -259,6 +259,15 @@ No new Colab allocation was used; balance remained **365.95**, usage **0.00/hr**
 active assignments **0**. A live paid run of the newly combined API remains
 unverified; its provider components were previously exercised during production.
 
+A full-HD version of the short CPU smoke test is published at
+[CPU pipeline example](https://mail.tailec998.ts.net:8451/cpu-pipeline/index.html),
+with MP4, captions and editable ZIP links. It is 151 frames at 30 fps, with local
+Kokoro narration. The original 360p test exposed fixed-pixel caption sizing in
+`apps/renderer/src/captions.tsx`; technical checks passed but captions were too
+large at that resolution. This is a remaining low-resolution layout issue for
+the preview/editor integration. The published example uses the normal 1080p
+composition size and has been checked with a sampled frame.
+
 Remaining instrumentation limits are explicit: no truthful byte-level model
 download percentage, no reliable overall ETA, and no automatic perception score
 for generated imagery or natural speech. Local model loading and ZIP creation
