@@ -28,10 +28,13 @@ def main():
         archive.extractall(root)
     lock = json.loads((root / "models.lock.json").read_text())
     run(["apt-get", "update", "-qq"])
-    run(["apt-get", "install", "-y", "-qq", "sox", "ffmpeg", "python3-venv"])
+    run(["apt-get", "install", "-y", "-qq", "sox", "ffmpeg", "python3.12-venv"])
     for name, package in [("tts", lock["ttsPackage"]), ("asr", lock["asrPackage"])]:
         env = root / ("venv-" + name)
-        run([sys.executable, "-m", "venv", "--system-site-packages", env])
+        # Colab's kernel can be 3.13 while apt's venv support belongs to 3.12.
+        # Explicitly select the supported interpreter and isolate the CUDA stack.
+        run(["/usr/bin/python3.12", "-m", "venv", env])
+        run([env / "bin/python", "-m", "pip", "install", "--disable-pip-version-check", "torch==2.9.1", "torchaudio==2.9.1", "--index-url", "https://download.pytorch.org/whl/cu128"])
         run([env / "bin/python", "-m", "pip", "install", "--disable-pip-version-check", package])
     tts_python, asr_python = [root / ("venv-" + name) / "bin/python" for name in ("tts", "asr")]
     download = """
