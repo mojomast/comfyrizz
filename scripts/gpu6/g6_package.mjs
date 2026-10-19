@@ -8,7 +8,7 @@
 // is a licence-clean geometric face (not the nebula still). Lip-sync and ducking can then be judged
 // on a real Google Colab run (section 5.4 of the handoff).
 import { createHash, randomBytes } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
