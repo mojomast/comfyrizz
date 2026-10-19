@@ -7,6 +7,13 @@ import { resolveAudioMix } from './audio-mix-model.js';
  *
  * Estimated captions stay off the burn-in. Measured cues are passed through.
  * A missing narration file is reported and not played.
+ *
+ * @typedef {import('../../../packages/schema/types').PackageV1} PackageV1
+ * @typedef {import('../../../packages/planner/dist/src/index.js').Timeline} Timeline
+ *
+ * @param {PackageV1} pkg
+ * @param {Timeline} timeline
+ * @param {{ missingMedia?: string[], mixAudio?: boolean }} [options]
  */
 export function resolvePackageComposition(pkg, timeline, { missingMedia = [], mixAudio = true } = {}) {
   const audio = narrationAudio(pkg);

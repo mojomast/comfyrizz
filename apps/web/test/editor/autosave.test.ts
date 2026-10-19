@@ -11,7 +11,7 @@ function editor() {
       id: 'pkg_autosave0001',
       revision: 1,
       format: { fps: 30, width: 100, height: 100 },
-      scenes: [{ id: 's1', layout: 'title', preferredFrames: 90, copy: { headline: 'A' }, transitionOut: { type: 'none', frames: 0 } }],
+      scenes: [{ id: 's1', layout: 'title', preferredFrames: 90, copy: { headline: 'Start' }, transitionOut: { type: 'none', frames: 0 } }],
     },
   });
 }

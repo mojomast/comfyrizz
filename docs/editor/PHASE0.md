@@ -63,4 +63,4 @@ Preview and MP4 render share `resolvePackageComposition` / `PackageComposition` 
 
 ## Save
 
-Autosave is serialized and debounced. `saveStatus()` is `saved`, `pending`, `offline`, or `conflict`. The status line is in the shell (`#save-status`, `role="status"`). A save echoes the `editSequence` it accepted; an older acknowledgement does not mark newer edits saved. IndexedDB (memory in tests) keeps a draft and, on revision conflict, a recovery copy. The local document is not replaced.
+Autosave is serialized and debounced. `saveStatus()` is `saved`, `pending`, `offline`, or `conflict`. The status line is in the shell (`#save-status`, `role="status"`). A save echoes the `editSequence` it accepted; an older acknowledgement does not mark newer edits saved. A failed attempt does not retry that same sequence: status publishes are not new edits. A newer edit schedules another attempt. IndexedDB (memory in tests) keeps a draft and, on revision conflict, a recovery copy. The local document is not replaced, and further edits stay in conflict until the user resolves it.

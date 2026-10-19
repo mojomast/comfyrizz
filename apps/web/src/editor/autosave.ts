@@ -38,6 +38,9 @@ export function createAutosave(store: Editor, options: {
   let timer: unknown = null;
   let chain = Promise.resolve();
   let disposed = false;
+  let inFlight = false;
+  /** Last edit sequence a save attempt already covered. Status publishes must not retry it. */
+  let attempted = -1;
 
   function enqueue(task: () => Promise<void>): Promise<void> {
     const run = chain.then(task, task);
@@ -63,7 +66,9 @@ export function createAutosave(store: Editor, options: {
   async function runSave() {
     if (disposed || store.getState().session.previewing || store.saveStatus() === 'conflict' || !store.isDirty()) return;
     const doc = store.getState().doc;
-    if (!doc.package.id) return;
+    if (!doc.package.id || doc.editSequence <= attempted) return;
+    attempted = doc.editSequence;
+    inFlight = true;
     const payload: SavePayload = {
       packageId: String(doc.package.id),
       baseRevision: Number(doc.package.revision ?? 0),
@@ -71,29 +76,33 @@ export function createAutosave(store: Editor, options: {
       editor: structuredClone(doc.editor),
       editSequence: doc.editSequence,
     };
-    await persist('draft', doc);
-    store.noteSave({ type: 'start' });
-    let result: SaveResult;
     try {
-      result = await options.save(payload);
-    } catch {
-      result = { ok: false, status: 'offline' };
+      await persist('draft', doc);
+      store.noteSave({ type: 'start' });
+      let result: SaveResult;
+      try {
+        result = await options.save(payload);
+      } catch {
+        result = { ok: false, status: 'offline' };
+      }
+      if (result.ok) {
+        store.noteSave({ type: 'ack', editSequence: payload.editSequence, revision: result.revision });
+      } else if (result.status === 'conflict') {
+        await persist('recovery', payloadAsDoc(payload));
+        store.noteSave({ type: 'conflict', currentRevision: result.currentRevision });
+      } else if (result.status === 'offline') {
+        store.noteSave({ type: 'offline' });
+      }
+      const newer = store.getState().doc.editSequence > attempted;
+      if (newer && store.isDirty() && store.saveStatus() !== 'conflict') await runSave();
+    } finally {
+      inFlight = false;
     }
-    if (result.ok) {
-      store.noteSave({ type: 'ack', editSequence: payload.editSequence, revision: result.revision });
-      if (store.isDirty() && store.saveStatus() !== 'conflict') await runSave();
-      return;
-    }
-    if (result.status === 'conflict') {
-      await persist('recovery', payloadAsDoc(payload));
-      store.noteSave({ type: 'conflict', currentRevision: result.currentRevision });
-      return;
-    }
-    if (result.status === 'offline') store.noteSave({ type: 'offline' });
   }
 
   const unsubscribe = store.subscribe(() => {
-    if (disposed || store.getState().session.previewing || store.saveStatus() === 'conflict' || !store.isDirty()) return;
+    if (disposed || inFlight || store.getState().session.previewing || store.saveStatus() === 'conflict' || !store.isDirty()) return;
+    if (store.getState().doc.editSequence <= attempted) return;
     if (timer != null) cancel(timer);
     timer = schedule(() => {
       timer = null;
