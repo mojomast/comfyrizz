@@ -75,8 +75,8 @@ paradox. **8 fresh stills, 11 normal-speed motion shots, 5 editable SVG inserts*
 a scene-aware original score apply the updated direction guidance. Narration was
 measured before GPU shot lengths were planned; the 19-job batch used **0.74 credits**.
 See the [film, production decisions and reproduction guide](docs/ANONYMOUS_DEMO.md).
-[Watch the published short](https://mail.tailec998.ts.net:8451/rich-anonymous/index.html)
-or [download the MP4](https://mail.tailec998.ts.net:8451/rich-anonymous/video.mp4).
+[Watch the published short](https://<your-host>/rich-anonymous/index.html)
+or [download the MP4](https://<your-host>/rich-anonymous/video.mp4).
 
 ### Rich storytelling collection
 

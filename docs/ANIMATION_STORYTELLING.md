@@ -126,15 +126,15 @@ On 20 October 2026, both the 1920×1080 and 1080×1920 CPU productions completed
 
 Headless Chromium verified save/reload persistence, morph controls, focus-rectangle validation, preservation of existing motion fields, locked/final-scene controls, authenticated catalogue access and a 390-pixel mobile layout. All six recipe stills in each orientation rendered identically after shuffled/repeated frame requests. Contact-sheet review covered both orientations and five transition midpoints. The refreshed exports fix morph aspect distortion, sketch/portrait alignment and illustration font rendering; portrait artwork is generated for its own frame dimensions.
 
-- **Landscape player and same-audio comparison:** <https://mail.tailec998.ts.net:8451/animation-showcase/index.html>
-- **Portrait player:** <https://mail.tailec998.ts.net:8451/animation-showcase-portrait/index.html>
-- **Editor:** <https://mail.tailec998.ts.net:8451/>
+- **Landscape player and same-audio comparison:** <https://<your-host>/animation-showcase/index.html>
+- **Portrait player:** <https://<your-host>/animation-showcase-portrait/index.html>
+- **Editor:** <https://<your-host>/>
 
 Playback was verified over Tailscale for both showcases and all five previous players. Twelve published downloads were checked byte-for-byte against local artifacts, including both editable bundles and the baseline. The deployed authenticated catalogue and software notices also passed access checks.
 
 Verification results: schema **140**, planner **32**, renderer **213**, agent **110**, web **19**, and TTS **17** passing tests; full server suite **157/157**, plus two subsequently added tool-schema contract tests. Python pipeline and targeted production regressions passed. Web and renderer TypeScript checks and the production frontend build passed. A live `opencode-go/deepseek-v4.1-flash` authoring turn built a valid six-scene project containing title, list, chart, compare and code layouts, with the requested technical-flow cues and no pending GPU work.
 
-Reproduction evidence is stored outside the repository at `/home/mojo/comfyrizz-gpu-tests/animation-implementation-20261020`, including the portrait run, baseline report, deterministic-still verification, browser checks and deployment hashes. This animation work consumed no Colab units; cumulative authorization remains 10.22 of 20 units spent.
+Reproduction evidence is stored outside the repository at `~/comfyrizz-gpu-tests/animation-implementation-20261020`, including the portrait run, baseline report, deterministic-still verification, browser checks and deployment hashes. This animation work consumed no Colab units; cumulative authorization remains 10.22 of 20 units spent.
 
 The agent-knowledge follow-up (prompt 2.2.0) passed all **110 agent tests**, **five
 targeted catalogue/tool-contract tests**, and a **2/2-turn live DeepSeek evaluation**

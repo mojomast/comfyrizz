@@ -3,9 +3,9 @@
 **October 20, 2026** — a new fictional short applying the
 [content-quality research](CONTENT_QUALITY_RESEARCH.md) to the Ministry setting.
 
-**[Watch the film](https://mail.tailec998.ts.net:8451/rich-anonymous/index.html)** ·
-[Download MP4](https://mail.tailec998.ts.net:8451/rich-anonymous/video.mp4) ·
-[Editable project](https://mail.tailec998.ts.net:8451/rich-anonymous/package.zip)
+**[Watch the film](https://<your-host>/rich-anonymous/index.html)** ·
+[Download MP4](https://<your-host>/rich-anonymous/video.mp4) ·
+[Editable project](https://<your-host>/rich-anonymous/package.zip)
 
 One citizen proposes fewer forms. Her teal suggestion travels through listening,
 duplication and inspection before being rejected for lacking a signature. The signed
