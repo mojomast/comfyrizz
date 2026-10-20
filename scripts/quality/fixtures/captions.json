@@ -1,0 +1,11 @@
+{
+  "cues": [
+    { "speaker": "Ada", "text": "Today I can't reach my sandwich. It sits on the counter behind the glass while the painter gestures beside me and the jury watches in silence..", "start": 10.0, "end": 18.0 },
+    { "speaker": "Nell", "text": "The raccoon portrait in the courtroom is the approved recurring asset worn by the judge in the", "start": 20.0, "end": 23.48432055749129 },
+    { "speaker": "Painter", "text": "I will hand you the sandwich right now.", "start": 30.0, "end": 32.0 },
+    { "speaker": "Ada", "text": "The rejected cloud shot leaks at 04:36 and Nell rises off the floor.", "start": 40.0, "end": 48.0 },
+    { "speaker": "Reporter", "text": "Someone put bad anatomy on my chair and I have not sat down since Tuesday.", "start": 50.0, "end": 56.0 },
+    { "speaker": "Ada", "text": "A human figure in the frame is not the raccoon portrait we approved at opening.", "start": 60.0, "end": 68.0 },
+    { "speaker": "Nell", "text": "The closing cardigan pays off the paid-leave beat at nine o clock.", "start": 70.0, "end": 78.0 }
+  ]
+}
