@@ -29,6 +29,7 @@ import {
 import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
 import { cutdownPackage, type VoiceFn } from './cutdown.js';
+import { styleApplyFor, styleList, styleSuggest } from './style-recipes.js';
 
 export interface AgentTool {
   definition: ToolDef;
@@ -1002,6 +1003,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         return { ok: true, scene_id: id, scene, findings, package: state.package, revision: state.package.revision };
       },
     ),
+    'style.list': styleList,
+    'style.suggest': styleSuggest,
+    'style.apply': styleApplyFor(() => state.package, pkg => { state.package = pkg; touch(); }),
     'variant.cutdown': tool(
       'variant.cutdown',
       'Cut the current package to 6, 15 or 30 seconds. Keeps a scene subset, rewrites narration to fit, and re-voices on CPU. Presenter clips are planned only for scenes whose narration changed, and are never run.',

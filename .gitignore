@@ -19,3 +19,4 @@ runs/
 **/logs/sessions*.txt
 **/logs/usage*.txt
 test/gpu*/logs/
+assets/motionkit/cache/

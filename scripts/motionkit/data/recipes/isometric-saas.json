@@ -1,0 +1,25 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "isometric-saas",
+  "label": "Isometric SaaS",
+  "taxonomy": { "era": "contemporary", "finish": "clean", "energy": "medium", "geometry": "isometric", "type": "grotesk" },
+  "palette": [
+    { "role": "background", "hex": "#0d1117" },
+    { "role": "text", "hex": "#e6edf3" },
+    { "role": "accent", "hex": "#2d6cff" },
+    { "role": "secondary", "hex": "#31d0aa" }
+  ],
+  "fonts": { "display": "space-grotesk", "text": "inter" },
+  "easing": { "personality": "snappy", "entry": "enter", "exit": "exit", "spring": "snap" },
+  "entries": ["fadeUp", "pop", "waterfall"],
+  "emphasis": ["hero", "keyword"],
+  "transitions": { "primary": "slide", "accent": ["push", "shape-reveal"] },
+  "storyRecipe": "technical-flow",
+  "background": { "pattern": "dots" },
+  "finish": [{ "id": "soft-glow", "params": { "intensity": 0.3, "radius": 24 } }],
+  "rules": {
+    "do": ["clean isometric hero objects on deep navy", "snappy product-demo slides"],
+    "dont": ["cluttered backgrounds", "serif display"]
+  },
+  "prompt": "Isometric SaaS product explainer, deep navy ground, bright blue and mint accents, clean sans"
+}

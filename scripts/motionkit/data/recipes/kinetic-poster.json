@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "kinetic-poster",
+  "label": "Kinetic poster",
+  "taxonomy": { "era": "contemporary", "finish": "clean", "energy": "high", "geometry": "flat", "type": "display" },
+  "palette": [
+    { "role": "background", "hex": "#0d0d0d" },
+    { "role": "text", "hex": "#f5f5f5" },
+    { "role": "accent", "hex": "#ff5a1f" },
+    { "role": "muted", "hex": "#3a3a3a" }
+  ],
+  "fonts": { "display": "bebas-neue", "text": "inter" },
+  "easing": { "personality": "snappy", "entry": "enter", "exit": "exit", "spring": "snap" },
+  "entries": ["waterfall", "fadeUp", "pop"],
+  "emphasis": ["hero", "keyword"],
+  "transitions": { "primary": "push", "accent": ["zoom", "cut"] },
+  "storyRecipe": "kinetic",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "motion-smear", "params": { "amount": 6, "direction": 0 } },
+    { "id": "grain-fine", "params": { "amount": 0.08, "size": 1 } }
+  ],
+  "rules": {
+    "do": ["oversized condensed display type filling the frame", "one electric orange accent"],
+    "dont": ["tiny headlines", "slow fades"]
+  },
+  "prompt": "High-energy kinetic poster, huge condensed type, near-black ground, electric orange accent"
+}

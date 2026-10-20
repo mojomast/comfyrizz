@@ -1,0 +1,885 @@
+[
+  {
+    "id": "bauhaus-play",
+    "label": "Bauhaus play",
+    "taxonomy": {
+      "era": "modernist",
+      "finish": "clean",
+      "energy": "medium",
+      "geometry": "geometric",
+      "type": "display"
+    },
+    "fonts": {
+      "display": "unbounded",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "paper-grain",
+        "params": {
+          "amount": 0.05,
+          "contrast": 0.4
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "blueprint",
+    "label": "Blueprint",
+    "taxonomy": {
+      "era": "industrial",
+      "finish": "print",
+      "energy": "medium",
+      "geometry": "line",
+      "type": "mono"
+    },
+    "fonts": {
+      "display": "ibm-plex-mono",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "paper-grain",
+        "params": {
+          "amount": 0.04
+        }
+      },
+      {
+        "id": "vignette-soft",
+        "params": {
+          "amount": 0.35,
+          "radius": 0.65
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "cinematic-noir",
+    "label": "Cinematic noir",
+    "taxonomy": {
+      "era": "classic",
+      "finish": "film",
+      "energy": "calm",
+      "geometry": "flat",
+      "type": "serif-editorial"
+    },
+    "fonts": {
+      "display": "dm-serif-display",
+      "text": "inter",
+      "mono": "ibm-plex-mono"
+    },
+    "finish": [
+      {
+        "id": "film-grain",
+        "params": {
+          "amount": 0.18,
+          "size": 2
+        }
+      },
+      {
+        "id": "vignette-hard",
+        "params": {
+          "amount": 0.7,
+          "radius": 0.5
+        }
+      },
+      {
+        "id": "mono-grade",
+        "params": {
+          "amount": 1,
+          "contrast": 1.1
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "clay-soft",
+    "label": "Clay soft",
+    "taxonomy": {
+      "era": "contemporary",
+      "finish": "soft",
+      "energy": "medium",
+      "geometry": "organic",
+      "type": "serif"
+    },
+    "fonts": {
+      "display": "fraunces",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "soft-shadow",
+        "params": {
+          "offsetY": 8,
+          "blur": 20,
+          "opacity": 0.28
+        }
+      },
+      {
+        "id": "grain-fine",
+        "params": {
+          "amount": 0.07,
+          "size": 1.5
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "crt-arcade",
+    "label": "8-bit arcade",
+    "taxonomy": {
+      "era": "retro-80s",
+      "finish": "crt",
+      "energy": "high",
+      "geometry": "flat",
+      "type": "pixel"
+    },
+    "fonts": {
+      "display": "press-start-2p",
+      "text": "vt323",
+      "mono": "vt323"
+    },
+    "finish": [
+      {
+        "id": "crt-curve",
+        "params": {
+          "curvature": 0.4,
+          "bezel": 6
+        }
+      },
+      {
+        "id": "scanlines",
+        "params": {
+          "count": 240,
+          "opacity": 0.4
+        }
+      },
+      {
+        "id": "pixelate-in",
+        "params": {
+          "size": 12,
+          "steps": 6
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "data-journalism",
+    "label": "FT/Bloomberg charts",
+    "taxonomy": {
+      "era": "modernist",
+      "finish": "paper",
+      "energy": "medium",
+      "geometry": "flat",
+      "type": "serif-editorial"
+    },
+    "fonts": {
+      "display": "instrument-serif",
+      "text": "ibm-plex-mono",
+      "mono": "ibm-plex-mono"
+    },
+    "finish": [
+      {
+        "id": "paper-grain",
+        "params": {
+          "amount": 0.06,
+          "contrast": 0.5
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "documentary-archive",
+    "label": "Archival doc",
+    "taxonomy": {
+      "era": "retro-70s",
+      "finish": "archival",
+      "energy": "calm",
+      "geometry": "flat",
+      "type": "serif-editorial"
+    },
+    "fonts": {
+      "display": "dm-serif-display",
+      "text": "ibm-plex-mono",
+      "mono": "ibm-plex-mono"
+    },
+    "finish": [
+      {
+        "id": "dust-scratches",
+        "params": {
+          "density": 0.3,
+          "opacity": 0.5
+        }
+      },
+      {
+        "id": "sepia-grade",
+        "params": {
+          "amount": 0.8
+        }
+      },
+      {
+        "id": "gate-weave",
+        "params": {
+          "amount": 0.02
+        }
+      }
+    ],
+    "licences": [
+      "CC0-1.0",
+      "MIT"
+    ]
+  },
+  {
+    "id": "editorial-serif",
+    "label": "Editorial serif",
+    "taxonomy": {
+      "era": "contemporary",
+      "finish": "print",
+      "energy": "medium",
+      "geometry": "flat",
+      "type": "serif"
+    },
+    "fonts": {
+      "display": "playfair-display",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "paper-grain",
+        "params": {
+          "amount": 0.05
+        }
+      },
+      {
+        "id": "vignette-soft",
+        "params": {
+          "amount": 0.3,
+          "radius": 0.7
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "film-35mm",
+    "label": "Warm 35 mm film",
+    "taxonomy": {
+      "era": "retro-70s",
+      "finish": "film",
+      "energy": "calm",
+      "geometry": "flat",
+      "type": "serif-editorial"
+    },
+    "fonts": {
+      "display": "instrument-serif",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "film-grain",
+        "params": {
+          "amount": 0.14,
+          "size": 2
+        }
+      },
+      {
+        "id": "halation",
+        "params": {
+          "threshold": 0.7,
+          "radius": 18
+        }
+      },
+      {
+        "id": "light-leak",
+        "params": {
+          "intensity": 0.5,
+          "hue": 25,
+          "softness": 0.6
+        }
+      },
+      {
+        "id": "gate-weave",
+        "params": {
+          "amount": 0.02
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "glassmorphism",
+    "label": "Glassmorphism",
+    "taxonomy": {
+      "era": "futurist",
+      "finish": "clean",
+      "energy": "calm",
+      "geometry": "soft",
+      "type": "display"
+    },
+    "fonts": {
+      "display": "syne",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "bloom",
+        "params": {
+          "intensity": 0.45,
+          "radius": 20
+        }
+      },
+      {
+        "id": "grain-fine",
+        "params": {
+          "amount": 0.05,
+          "size": 1
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "isometric-saas",
+    "label": "Isometric SaaS",
+    "taxonomy": {
+      "era": "contemporary",
+      "finish": "clean",
+      "energy": "medium",
+      "geometry": "isometric",
+      "type": "grotesk"
+    },
+    "fonts": {
+      "display": "space-grotesk",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "soft-glow",
+        "params": {
+          "intensity": 0.3,
+          "radius": 24
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "kinetic-poster",
+    "label": "Kinetic poster",
+    "taxonomy": {
+      "era": "contemporary",
+      "finish": "clean",
+      "energy": "high",
+      "geometry": "flat",
+      "type": "display"
+    },
+    "fonts": {
+      "display": "bebas-neue",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "motion-smear",
+        "params": {
+          "amount": 6,
+          "direction": 0
+        }
+      },
+      {
+        "id": "grain-fine",
+        "params": {
+          "amount": 0.08,
+          "size": 1
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "luxury-minimal",
+    "label": "Premium brand",
+    "taxonomy": {
+      "era": "modernist",
+      "finish": "clean",
+      "energy": "calm",
+      "geometry": "flat",
+      "type": "serif-editorial"
+    },
+    "fonts": {
+      "display": "instrument-serif",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "grain-fine",
+        "params": {
+          "amount": 0.05,
+          "size": 1
+        }
+      },
+      {
+        "id": "vignette-soft",
+        "params": {
+          "amount": 0.35,
+          "radius": 0.65
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "mono-terminal",
+    "label": "Mono terminal",
+    "taxonomy": {
+      "era": "contemporary",
+      "finish": "crt",
+      "energy": "medium",
+      "geometry": "flat",
+      "type": "mono"
+    },
+    "fonts": {
+      "display": "jetbrains-mono",
+      "text": "ibm-plex-mono",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "scanlines-soft",
+        "params": {
+          "count": 120,
+          "opacity": 0.18
+        }
+      },
+      {
+        "id": "glow-text",
+        "params": {
+          "intensity": 0.55,
+          "spread": 10
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "neo-brutalist",
+    "label": "Neo brutalist",
+    "taxonomy": {
+      "era": "contemporary",
+      "finish": "raw",
+      "energy": "high",
+      "geometry": "hard-edge",
+      "type": "grotesk"
+    },
+    "fonts": {
+      "display": "archivo-black",
+      "text": "space-grotesk",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "hard-shadow",
+        "params": {
+          "offset": 10,
+          "blur": 0
+        }
+      },
+      {
+        "id": "halftone",
+        "params": {
+          "dotSize": 2,
+          "angle": 45
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "neon-cyber",
+    "label": "Cyberpunk HUD",
+    "taxonomy": {
+      "era": "futurist",
+      "finish": "neon",
+      "energy": "high",
+      "geometry": "flat",
+      "type": "mono"
+    },
+    "fonts": {
+      "display": "orbitron",
+      "text": "jetbrains-mono",
+      "mono": "jetbrains-mono"
+    },
+    "finish": [
+      {
+        "id": "glitch-slice",
+        "params": {
+          "slices": 8,
+          "offset": 18
+        }
+      },
+      {
+        "id": "chroma-shift",
+        "params": {
+          "offset": 2,
+          "angle": 0
+        }
+      },
+      {
+        "id": "glow-text",
+        "params": {
+          "intensity": 0.6,
+          "spread": 12
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "organic-hand",
+    "label": "Hand-drawn",
+    "taxonomy": {
+      "era": "classic",
+      "finish": "paper",
+      "energy": "calm",
+      "geometry": "organic",
+      "type": "hand"
+    },
+    "fonts": {
+      "display": "caveat",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "paper-texture",
+        "params": {
+          "scale": 1,
+          "opacity": 0.35
+        }
+      },
+      {
+        "id": "boil-line",
+        "params": {
+          "jitter": 2,
+          "rate": 8,
+          "seed": 4242
+        }
+      }
+    ],
+    "licences": [
+      "CC0-1.0",
+      "MIT"
+    ]
+  },
+  {
+    "id": "paper-collage",
+    "label": "Paper collage",
+    "taxonomy": {
+      "era": "handmade",
+      "finish": "grain",
+      "energy": "medium",
+      "geometry": "organic",
+      "type": "handwritten"
+    },
+    "fonts": {
+      "display": "caveat",
+      "text": "fraunces",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "paper-texture",
+        "params": {
+          "scale": 1,
+          "opacity": 0.4
+        }
+      },
+      {
+        "id": "drop-shadow",
+        "params": {
+          "offsetY": 10,
+          "blur": 12,
+          "opacity": 0.3
+        }
+      }
+    ],
+    "licences": [
+      "CC0-1.0",
+      "MIT"
+    ]
+  },
+  {
+    "id": "risograph",
+    "label": "Risograph",
+    "taxonomy": {
+      "era": "retro",
+      "finish": "print",
+      "energy": "medium",
+      "geometry": "flat",
+      "type": "display"
+    },
+    "fonts": {
+      "display": "syne",
+      "text": "ibm-plex-mono",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "riso-misregister",
+        "params": {
+          "offset": 3,
+          "angle": 8
+        }
+      },
+      {
+        "id": "halftone",
+        "params": {
+          "dotSize": 2,
+          "angle": 15
+        }
+      },
+      {
+        "id": "paper-grain",
+        "params": {
+          "amount": 0.05
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "swiss-grid",
+    "label": "Swiss grid",
+    "taxonomy": {
+      "era": "modernist",
+      "finish": "clean",
+      "energy": "medium",
+      "geometry": "flat",
+      "type": "grotesk"
+    },
+    "fonts": {
+      "display": "space-grotesk",
+      "text": "inter",
+      "mono": "jetbrains-mono"
+    },
+    "finish": [
+      {
+        "id": "paper-grain",
+        "params": {
+          "amount": 0.04
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "synthwave",
+    "label": "Neon 80s horizon",
+    "taxonomy": {
+      "era": "retro-80s",
+      "finish": "neon",
+      "energy": "high",
+      "geometry": "flat",
+      "type": "display"
+    },
+    "fonts": {
+      "display": "orbitron",
+      "text": "inter",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "glow-text",
+        "params": {
+          "intensity": 0.6,
+          "spread": 12
+        }
+      },
+      {
+        "id": "scanlines-soft",
+        "params": {
+          "count": 120,
+          "opacity": 0.15
+        }
+      },
+      {
+        "id": "bloom",
+        "params": {
+          "intensity": 0.5,
+          "radius": 24
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "vaporwave",
+    "label": "Pastel internet",
+    "taxonomy": {
+      "era": "retro-90s",
+      "finish": "glitch",
+      "energy": "calm",
+      "geometry": "organic",
+      "type": "grotesk"
+    },
+    "fonts": {
+      "display": "syne",
+      "text": "vt323",
+      "mono": "vt323"
+    },
+    "finish": [
+      {
+        "id": "chroma-shift",
+        "params": {
+          "offset": 2,
+          "angle": 0
+        }
+      },
+      {
+        "id": "grain-fine",
+        "params": {
+          "amount": 0.06,
+          "size": 1
+        }
+      },
+      {
+        "id": "duotone",
+        "params": {
+          "amount": 0.9,
+          "contrast": 1
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "vhs-retro",
+    "label": "90s camcorder",
+    "taxonomy": {
+      "era": "retro-90s",
+      "finish": "crt",
+      "energy": "medium",
+      "geometry": "flat",
+      "type": "mono"
+    },
+    "fonts": {
+      "display": "vt323",
+      "text": "ibm-plex-mono",
+      "mono": "ibm-plex-mono"
+    },
+    "finish": [
+      {
+        "id": "vhs-tracking",
+        "params": {
+          "bandHeight": 0.2,
+          "intensity": 0.5
+        }
+      },
+      {
+        "id": "chroma-shift",
+        "params": {
+          "offset": 2,
+          "angle": 0
+        }
+      },
+      {
+        "id": "scanlines",
+        "params": {
+          "count": 240,
+          "opacity": 0.35
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  },
+  {
+    "id": "y2k-chrome",
+    "label": "Millennium chrome",
+    "taxonomy": {
+      "era": "y2k",
+      "finish": "glossy",
+      "energy": "high",
+      "geometry": "rounded-3d",
+      "type": "display"
+    },
+    "fonts": {
+      "display": "monoton",
+      "text": "syne",
+      "mono": ""
+    },
+    "finish": [
+      {
+        "id": "chrome-sheen",
+        "params": {
+          "angle": 105,
+          "sharpness": 0.35,
+          "width": 0.35
+        }
+      },
+      {
+        "id": "bloom",
+        "params": {
+          "intensity": 0.5,
+          "radius": 24
+        }
+      }
+    ],
+    "licences": [
+      "MIT"
+    ]
+  }
+]

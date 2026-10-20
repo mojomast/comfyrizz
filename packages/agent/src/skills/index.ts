@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs';
 
-export const SKILL_CATALOG_VERSION = '1.3.0';
+export const SKILL_CATALOG_VERSION = '1.4.0';
 
 export const BUNDLED_SKILL_IDS = [
   'video-brief',
   'explainer-script',
   'storyboard-direction',
   'project-revision',
+  'motion-style',
 ] as const;
 
 export type SkillId = typeof BUNDLED_SKILL_IDS[number];
