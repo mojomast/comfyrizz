@@ -1,11 +1,12 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { createToolset, conversationPlanSchema, STYLE_PRESET_DEFAULTS, brandTheme } from '../../../packages/agent/dist/src/index.js';
 import { sanitizeSvg, renderCheck, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compilePackage } from './compile-package.mjs';
+import { toPackageInputs, validateAssignment } from './references/assign.mjs';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 
 export function chatProjectResponse(pkg, runtimeDir) {
@@ -121,11 +122,298 @@ function mergeMotion(result, oldMotion, newMotion, label) {
   if (Object.keys(result.motion).length === 0) delete result.motion;
 }
 
+
+// R13: confirmed reference assignments become ordinary package assets, so the
+// jobs planner and both Comfy backends need no reference-specific code. The
+// helper is deliberately tolerance-first: an assignment whose scene or
+// reference disappeared is skipped and noted, never applied half-way.
+const REFERENCE_SLOTS = ['style_reference', 'subject_reference', 'start_frame', 'background_plate', 'logo_overlay', 'motion_reference'];
+const KLEIN_SLOT_CAP = 10;
+const TEXT_CAP = 1000;
+
+function asList(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Map) return [...value.values()];
+  if (value && typeof value === 'object') return Object.values(value);
+  return [];
+}
+
+function capText(value, max = TEXT_CAP) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text.length > max ? `${text.slice(0, Math.max(0, max - 3))}...` : text;
+}
+
+function confirmedOnly(assignments) {
+  return asList(assignments).filter(assignment => assignment && typeof assignment === 'object'
+    && (assignment.status === undefined || assignment.status === null || assignment.status === 'confirmed'));
+}
+
+function referenceState(references) {
+  if (!references || typeof references !== 'object') return null;
+  const refs = typeof references.list === 'function'
+    ? references.list()
+    : typeof references.refs === 'function' ? references.refs() : references.refs ?? references.references ?? [];
+  const assignments = typeof references.assignments === 'function'
+    ? references.assignments()
+    : references.assignments ?? [];
+  return {
+    source: references,
+    refs: asList(refs).filter(ref => ref && typeof ref === 'object'),
+    assignments: asList(assignments).filter(assignment => assignment && typeof assignment === 'object'),
+  };
+}
+
+function sceneAssetIds(scene) {
+  const ids = [];
+  if (typeof scene?.background?.asset === 'string') ids.push(scene.background.asset);
+  for (const item of Array.isArray(scene?.foreground) ? scene.foreground : []) {
+    if (typeof item?.asset === 'string') ids.push(item.asset);
+  }
+  for (const plate of Array.isArray(scene?.media) ? scene.media : []) {
+    if (typeof plate?.asset === 'string') ids.push(plate.asset);
+  }
+  return [...new Set(ids)];
+}
+
+function generatedAssetsFor(assets, scene, slot) {
+  const ids = sceneAssetIds(scene).filter(id => {
+    const asset = assets?.[id];
+    return asset?.origin === 'generated' && typeof asset.gen?.generator === 'string';
+  });
+  if (slot === 'style_reference' || slot === 'subject_reference') {
+    return ids.filter(id => assets[id].gen.generator === 'flux3-klein');
+  }
+  if (slot === 'start_frame' || slot === 'motion_reference') {
+    const plates = ids.filter(id => assets[id].gen.generator === 'ltx25' || assets[id].gen.generator === 'ltx25-a2v');
+    return plates.length ? plates : ids.filter(id => assets[id].gen.generator === 'flux3-klein');
+  }
+  return ids;
+}
+
+function referenceInputList(inputs) {
+  const refs = [];
+  if (typeof inputs.reference === 'string' && inputs.reference) refs.push(inputs.reference);
+  for (let index = 2; index <= KLEIN_SLOT_CAP; index += 1) {
+    const value = inputs[`reference_${index}`] ?? inputs[`_reference_${index}`];
+    if (typeof value === 'string' && value) refs.push(value);
+  }
+  return refs;
+}
+
+function writeReferenceInputList(inputs, refs) {
+  delete inputs.reference;
+  for (let index = 2; index <= KLEIN_SLOT_CAP; index += 1) {
+    delete inputs[`reference_${index}`];
+    delete inputs[`_reference_${index}`];
+  }
+  refs.slice(0, KLEIN_SLOT_CAP).forEach((refId, index) => {
+    if (index === 0) inputs.reference = refId;
+    else inputs[`reference_${index + 1}`] = refId;
+  });
+}
+
+function assetIdFromFile(file) {
+  return basename(file ?? '').replace(/\.[^.]+$/, '');
+}
+
+function frameFor(ref, index) {
+  const frames = Array.isArray(ref?.frames) ? ref.frames : [];
+  return frames.find(frame => Number(frame?.index) === index) ?? frames[index] ?? null;
+}
+
+function selectedFrameIndex(assignment, ref) {
+  if (ref?.kind !== 'video') return undefined;
+  return assignment.slot === 'motion_reference' ? 0 : (assignment.frameIndex ?? 0);
+}
+
+function referenceSourceFile(references, ref, frameIndex) {
+  if (typeof references?.sourcePath === 'function') return references.sourcePath(ref, frameIndex);
+  const dir = references?.dir;
+  const filesDir = references?.filesDir ?? (dir ? join(dir, 'files') : undefined);
+  const framesDir = references?.framesDir ?? (dir ? join(dir, 'frames') : undefined);
+
+  if (frameIndex !== undefined) {
+    const frame = frameFor(ref, frameIndex);
+    if (typeof frame?.file === 'string' && frame.file) {
+      if (isAbsolute(frame.file)) return frame.file;
+      return dir ? join(dir, frame.file) : frame.file;
+    }
+    if (framesDir) return join(framesDir, ref.id, `${frameIndex}.png`);
+    throw new Error(`reference ${ref.id} frame ${frameIndex} has no readable file`);
+  }
+
+  if (typeof ref.file === 'string' && isAbsolute(ref.file)) return ref.file;
+  if (filesDir && typeof ref.file === 'string' && ref.file) return join(filesDir, basename(ref.file));
+  if (typeof ref.file === 'string' && ref.file) return ref.file;
+  throw new Error(`reference ${ref.id} has no readable file`);
+}
+
+function readReferenceBytes(references, sourceFile) {
+  const reader = references?.readFile ?? references?.readFileSync ?? references?.fs?.readFileSync;
+  if (typeof reader === 'function') return reader(sourceFile);
+  return readFileSync(sourceFile);
+}
+
+function appliedReferenceAsset(draft, result) {
+  const assetId = assetIdFromFile(result.packageAsset.file);
+  draft.assets[assetId] = structuredClone(result.packageAsset);
+  return assetId;
+}
+
+function applyReferenceAssignment(draft, assignment, ref, result, sceneHasStartFrame) {
+  const scene = draft.scenes.find(candidate => candidate.id === assignment.sceneId);
+  if (!scene) return null;
+  const assetId = appliedReferenceAsset(draft, result);
+
+  if (assignment.slot === 'style_reference' || assignment.slot === 'subject_reference') {
+    for (const targetId of generatedAssetsFor(draft.assets, scene, assignment.slot)) {
+      const asset = draft.assets[targetId];
+      asset.gen ??= {};
+      asset.gen.inputs = { ...(asset.gen.inputs ?? {}) };
+      const refs = referenceInputList(asset.gen.inputs);
+      if (!refs.includes(assetId)) {
+        if (refs.length >= KLEIN_SLOT_CAP) continue;
+        if (assignment.slot === 'style_reference') refs.unshift(assetId);
+        else refs.push(assetId);
+      }
+      writeReferenceInputList(asset.gen.inputs, refs);
+    }
+  } else if (assignment.slot === 'start_frame') {
+    for (const targetId of generatedAssetsFor(draft.assets, scene, 'start_frame')) {
+      const asset = draft.assets[targetId];
+      asset.gen ??= {};
+      asset.gen.inputs = { ...(asset.gen.inputs ?? {}), image: assetId };
+    }
+  } else if (assignment.slot === 'motion_reference') {
+    for (const targetId of generatedAssetsFor(draft.assets, scene, 'motion_reference')) {
+      const asset = draft.assets[targetId];
+      asset.gen ??= {};
+      const inputs = { ...(asset.gen.inputs ?? {}) };
+      if (result.promptHint) {
+        inputs.prompt = typeof inputs.prompt === 'string' && inputs.prompt.trim()
+          ? `${inputs.prompt.trimEnd()}\n\n${result.promptHint}`
+          : result.promptHint;
+      }
+      if (!sceneHasStartFrame && !inputs.image) inputs.image = assetId;
+      asset.gen.inputs = inputs;
+    }
+  } else if (assignment.slot === 'background_plate') {
+    const fit = scene.background?.fit;
+    scene.background = { ...(fit ? { fit } : {}), asset: assetId };
+  } else if (assignment.slot === 'logo_overlay') {
+    draft.theme ??= {};
+    draft.theme.logo_asset = assetId;
+  }
+  return assetId;
+}
+
+function referenceSidecar({ pkg, used, skipped }) {
+  const notes = new Map();
+  for (const entry of used) {
+    if (notes.has(entry.ref.id)) continue;
+    notes.set(entry.ref.id, {
+      refId: entry.ref.id,
+      label: capText(entry.ref.label, 80),
+      kind: entry.ref.kind,
+      role: entry.ref.role ?? 'other',
+      note: capText(entry.ref.note, TEXT_CAP),
+    });
+  }
+  return {
+    schema: 'comfyrizz.references/v1',
+    packageId: pkg.id,
+    packageRevision: pkg.revision,
+    assignments: used.map(entry => ({
+      ...(entry.assignment.id ? { id: entry.assignment.id } : {}),
+      refId: entry.ref.id,
+      sceneId: entry.assignment.sceneId,
+      slot: entry.assignment.slot,
+      ...(entry.assignment.frameIndex !== undefined ? { frameIndex: entry.assignment.frameIndex } : {}),
+      status: 'confirmed',
+      ...(entry.assignment.reason ? { reason: capText(entry.assignment.reason, 512) } : {}),
+      assetId: entry.assetId,
+      assetFile: entry.result.packageAsset.file,
+      ...(entry.result.promptHint ? { promptHint: capText(entry.result.promptHint, 1200) } : {}),
+    })),
+    notes: [...notes.values()],
+    ...(skipped.length ? { skipped } : {}),
+  };
+}
+
+function applyReferenceAssignments({ draft, references, runtimeDir }) {
+  const state = referenceState(references);
+  if (!state) return null;
+  const confirmed = confirmedOnly(state.assignments);
+  if (!confirmed.length) return null;
+
+  const refs = new Map(state.refs.map(ref => [ref.id, ref]));
+  const scenes = draft.scenes.map(scene => ({ id: scene.id }));
+  const ordered = confirmed
+    .map((assignment, index) => ({ assignment, index }))
+    .sort((left, right) => {
+      const a = REFERENCE_SLOTS.indexOf(left.assignment.slot);
+      const b = REFERENCE_SLOTS.indexOf(right.assignment.slot);
+      return (a === -1 ? REFERENCE_SLOTS.length : a) - (b === -1 ? REFERENCE_SLOTS.length : b) || left.index - right.index;
+    })
+    .map(entry => entry.assignment);
+
+  const startFrameScenes = new Set(ordered
+    .filter(assignment => assignment.slot === 'start_frame')
+    .map(assignment => assignment.sceneId));
+  const used = [];
+  const skipped = [];
+  const assetsDir = join(runtimeDir, 'packages', 'assets');
+  mkdirSync(assetsDir, { recursive: true });
+
+  for (const assignment of ordered) {
+    const ref = refs.get(assignment.refId);
+    if (!ref) {
+      skipped.push({ refId: assignment.refId, sceneId: assignment.sceneId, slot: assignment.slot, reason: 'unknown reference' });
+      continue;
+    }
+    if (!scenes.some(scene => scene.id === assignment.sceneId)) {
+      skipped.push({ refId: assignment.refId, sceneId: assignment.sceneId, slot: assignment.slot, reason: 'unknown scene' });
+      continue;
+    }
+    try {
+      const validated = validateAssignment(assignment, { refs: state.refs, scenes, assignments: confirmed });
+      const applied = {
+        ...validated,
+        ...(typeof assignment.id === 'string' && assignment.id ? { id: assignment.id } : {}),
+        ...(typeof assignment.reason === 'string' && assignment.reason.trim() ? { reason: assignment.reason.trim() } : {}),
+      };
+      const result = toPackageInputs(applied, ref);
+      const frameIndex = selectedFrameIndex(applied, ref);
+      const sourceFile = referenceSourceFile(state.source, ref, frameIndex);
+      const bytes = readReferenceBytes(state.source, sourceFile);
+      writeFileSync(join(assetsDir, basename(result.packageAsset.file)), bytes, { mode: 0o600 });
+      const assetId = applyReferenceAssignment(draft, applied, ref, result, startFrameScenes.has(applied.sceneId));
+      if (assetId) used.push({ assignment: applied, ref, result, assetId });
+    } catch (error) {
+      skipped.push({
+        refId: assignment.refId,
+        sceneId: assignment.sceneId,
+        slot: assignment.slot,
+        reason: capText(error?.message ?? 'reference could not be applied', 512),
+      });
+    }
+  }
+
+  if (!used.length) return null;
+  const sidecar = referenceSidecar({ pkg: draft, used, skipped });
+  const sidecarPath = join(runtimeDir, 'packages', 'references.json');
+  const temp = `${sidecarPath}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(sidecar, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temp, sidecarPath);
+  return sidecar;
+}
+
 const ASPECTS = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
 const DEFAULT_TRANSITION = { type: 'fade', frames: 12 };
 
 /** Compile model-authored content, merging revisions into the current project. */
-export async function buildChatProject({ plan: rawPlan, previous, previousPlan, brand, runtimeDir, signal }) {
+export async function buildChatProject({ plan: rawPlan, previous, previousPlan, brand, runtimeDir, signal, references }) {
   signal?.throwIfAborted();
   const plan = conversationPlanSchema.parse(rawPlan);
   if (previous && !previousPlan) throw conflict('the last built plan is missing');
@@ -422,6 +710,8 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   }
   draft.revision = previous?.revision ?? 1;
   draft.renders = [];
+  signal?.throwIfAborted();
+  applyReferenceAssignments({ draft, references, runtimeDir });
   signal?.throwIfAborted();
   const validation = validatePackage(draft);
   if (!validation.valid) throw new Error(`Project validation failed: ${validation.errors.slice(0, 5).map(error => `${error.path}: ${error.message}`).join('; ')}`);
