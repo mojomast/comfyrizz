@@ -46,6 +46,7 @@ import {
   unitsForMinutes,
 } from "../../packages/backends/src/budget.mjs";
 import { redactForLog, sessionNameFor } from "../../packages/backends/src/colab-plan.mjs";
+import { normalizeRenderLocation } from "../../packages/backends/src/colab-render-plan.mjs";
 import { applyManifestToPackage, canonical, checkJobsDoc, planJobs, sha256Hex } from "../../packages/jobs/src/index.mjs";
 import { validatePackage } from "../../packages/schema/src/index.mjs";
 import { planPipeline } from "../../apps/server/src/pipeline-contract.mjs";
@@ -230,6 +231,10 @@ Spend and approval:
 Media phase:
   --no-render, --gpu-only  accepted for compatibility; this runner is media-only and always stops
                            after collection. Narration/render/publish are parent-owned.
+  --render-location <where>
+                           local (default) or colab. Recorded on the pipeline plan.
+                           This runner still stops after collection. The app pipeline
+                           renders on the Google Colab VM only when that plan says so.
   --resume                 reuse this --out directory's staged packages after an interrupted run
   --include-ready          also plan already-ready media (normally only pending assets are planned)
 
@@ -259,6 +264,7 @@ function parseArgs(argv) {
     noRender: false,
     resume: false,
     includeReady: false,
+    renderLocation: "local",
     json: false,
     help: false,
   };
@@ -284,6 +290,12 @@ function parseArgs(argv) {
       case "--no-render": case "--gpu-only": options.noRender = true; break;
       case "--resume": options.resume = true; break;
       case "--include-ready": options.includeReady = true; break;
+      case "--render-location": {
+        try { options.renderLocation = normalizeRenderLocation(valueFor(index, arg)); }
+        catch { throw new Error("--render-location must be local or colab"); }
+        index += 1;
+        break;
+      }
       case "--json": options.json = true; break;
       case "--help": case "-h": options.help = true; break;
       default: throw new Error(`unknown argument ${JSON.stringify(arg)}\n\n${USAGE}`);
@@ -457,7 +469,7 @@ function checkDisk(outDir, logger) {
   }
 }
 
-function planForPackage(entry, { includeReady, allocationUnits, env }) {
+function planForPackage(entry, { includeReady, allocationUnits, env, renderLocation = "local" }) {
   const jobsDoc = planJobs(entry.pkg, { includeReady });
   const problems = checkJobsDoc(jobsDoc);
   if (problems.length) throw new Error(`${entry.pkg.id}: ${problems[0]}`);
@@ -466,6 +478,7 @@ function planForPackage(entry, { includeReady, allocationUnits, env }) {
     budgetUnits: Math.max(1, allocationUnits ?? 1),
     narrationRuntime: "local",
     narrationUnits: 0,
+    renderLocation,
   }, { env });
   return { jobsDoc, plan, jobs: jobsDoc.jobs.length };
 }
@@ -1204,7 +1217,7 @@ async function main(argv = process.argv.slice(2)) {
     // Plan and estimate. No session exists yet. Presenter packages were refused above, so this
     // runner only plans ordinary still/plate/upscale media.
     for (const entry of staged) {
-      const planned = planForPackage(entry, { includeReady: options.includeReady, allocationUnits: options.capUnits, env: process.env });
+      const planned = planForPackage(entry, { includeReady: options.includeReady, allocationUnits: options.capUnits, env: process.env, renderLocation: options.renderLocation });
       entry.jobsDoc = planned.jobsDoc;
       entry.jobs = planned.jobs;
       entry.plan = planned.plan;

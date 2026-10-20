@@ -1,8 +1,22 @@
-# Colab efficiency and concurrency review
+# Google Colab efficiency and concurrency review
 
 Research date: **2026-10-19**. This is a source/code/log review, not a new GPU benchmark. Recommendations below have not been enabled or measured in production.
 
-Follow-up: [measured Colab experiments](COLAB_EFFICIENCY_RESULTS.md) now cover Qwen batching, LTX worker concurrency and artifact collection. Use that report for experimental results and current recommendations; this document preserves the initial research basis.
+Follow-up: [measured Google Colab experiments](COLAB_EFFICIENCY_RESULTS.md) now cover Qwen batching, LTX worker concurrency and artifact collection. Use that report for experimental results and current recommendations; this document preserves the initial research basis.
+
+## Opt-in final render on the Google Colab VM
+
+The pipeline can assemble the MP4 on the Google Colab VM that already holds the generated plates (`renderLocation: "colab"`, default `local`). That path is not a measured production speedup. It follows the collection finding in this review: serial per-file downloads and the gaps around them dominate wall time once the GPU work is done.
+
+What the option changes:
+
+- Generated plates stay on the VM through Remotion. The media stage returns a manifest, not every asset, while the VM is held.
+- Remotion concurrency on the VM is the host CPU count, capped at 8. The local renderer default remains 2.
+- Node.js 22.20.0, npm packages (renderer, schema, vector, including the native resvg binding), ffmpeg, and a headless browser are installed only when missing, under `/content/comfyrizz/render-cache`.
+- After the render, two zip archives come back: the MP4 plus verification reports, and one media archive so the editable export can still check asset bytes. That is one post-render transfer instead of a serial download of every plate before a local render.
+- The VM is stopped before host verification, export, or a local fallback. A failed remote render logs `REMOTE_RENDER_FALLBACK` and renders locally only after a confirmed stop.
+
+The cold install can cost more than a short local render, which is why the default stays on this machine. A later Google Colab session does not inherit the previous VM's cache. Do not treat the Hermes collection gaps (about 109 seconds in the recorded harness) as a promised saving: bootstrap, Chromium, and the post-render archive are unpaid in that log.
 
 ## Conclusion
 
@@ -12,9 +26,9 @@ Optimize **accepted output per compute unit**, including startup, transfers, ret
 
 ## Actual hardware and workload
 
-The Hermes graphics run's `scratch/out/health.json` identifies **NVIDIA RTX PRO 6000 Blackwell Server Edition**, with 97,887 MiB reported by `nvidia-smi` (roughly 95.6 GiB). This is the nominal 96 GB device selected through our Colab `G4` configuration. The pre-workload check reported 94.43 GiB free; that is not peak-workload headroom.
+The Hermes graphics run's `scratch/out/health.json` identifies **NVIDIA RTX PRO 6000 Blackwell Server Edition**, with 97,887 MiB reported by `nvidia-smi` (roughly 95.6 GiB). This is the nominal 96 GB device selected through our Google Colab `G4` configuration. The pre-workload check reported 94.43 GiB free; that is not peak-workload headroom.
 
-NVIDIA lists this GPU as **compute capability 12.0 / SM120**. B200/GB200 are SM100, and their memory system, kernels and benchmark results must not be assumed to apply to this card. Google Cloud G4 prices are not Colab compute-unit prices. Colab hardware availability and consumption rates must be checked for each allocation.
+NVIDIA lists this GPU as **compute capability 12.0 / SM120**. B200/GB200 are SM100, and their memory system, kernels and benchmark results must not be assumed to apply to this card. Google Cloud G4 prices are not Google Colab compute-unit prices. Google Colab hardware availability and consumption rates must be checked for each allocation.
 
 Our pinned workloads:
 
@@ -90,7 +104,7 @@ CUDA MPS can help independent processes overlap underutilized workloads, but doe
 
 - **96 GB RTX PRO 6000:** strong baseline for the mixed FLUX/LTX workflow and memory-headroom experiments; not yet proven cheapest per accepted asset.
 - **L4/T4-class smaller GPUs:** candidates for Qwen-only comparisons if available. Their lower hourly rate can be offset by slower execution, unsupported precision paths or setup overhead. Do not assume our mixed LTX graph fits them.
-- **A100 or other offered accelerators:** compare using actual assigned VRAM, supported kernels and live Colab rates. Do not transfer B200, GB200 or H20 vendor benchmark results to them.
+- **A100 or other offered accelerators:** compare using actual assigned VRAM, supported kernels and live Google Colab rates. Do not transfer B200, GB200 or H20 vendor benchmark results to them.
 
 For a fixed-quality workload, cost is approximately `rate_in_units_per_hour × billed_seconds / 3600`; settled balance changes remain the final accounting. Two runtimes improve cost only if the combined billed units fall, even if wall time improves. Prefer one-runtime batching experiments first.
 

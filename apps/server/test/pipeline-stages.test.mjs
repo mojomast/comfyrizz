@@ -187,6 +187,95 @@ test('verify does not reuse a stale passing report', async t => {
   assert.ok(!f.calls.includes('export'));
 });
 
+function enableRemote(f, { teardownState = 'stopped' } = {}) {
+  f.spec.plan.remoteRender = true;
+  f.spec.plan.options = { backendId: 'colab', renderLocation: 'colab' };
+  const pkg = JSON.parse(readFileSync(join(f.spec.workDir, 'package.json')));
+  f.adapters.colabFactory = () => ({
+    preflight: async () => ({ ok: true, ready: true }),
+    estimate: async () => ({ gpuMinutes: 1 }),
+    usage: async () => ({ balance: 100 }),
+    setCollectPolicy: policy => { f.calls.push(`collect:${policy}`); },
+    runPackage: async (_pkg, opts) => {
+      f.calls.push(`hold:${opts.teardownMode}`);
+      f.calls.push('media');
+      return { ok: true, package: pkg, teardown: { state: 'stopped' } };
+    },
+    downloadListed: async () => { f.calls.push('presenter-files'); },
+    collectOut: async () => { f.calls.push('collect-full'); return { local: join(f.spec.runDir, 'missing-out') }; },
+    teardown: async reason => { f.calls.push(`teardown:${reason}`); return { state: teardownState }; },
+  });
+  f.adapters.presenterCorrection = async () => { f.calls.push('sync'); };
+  f.adapters.render = async (_path, output) => {
+    f.calls.push('local-render');
+    writeFileSync(output, 'local-video');
+    return { frames: 30, fps: 30, width: 640, height: 360 };
+  };
+}
+
+test('a Google Colab render returns the MP4 and stops the VM before local verification', async t => {
+  const f = fixture(t);
+  enableRemote(f);
+  f.adapters.colabRender = async () => {
+    f.calls.push('remote-render');
+    writeFileSync(join(f.spec.runDir, 'video.mp4'), 'remote-video');
+    writeFileSync(join(f.spec.runDir, 'loudness.json'), '{}');
+    return { renderResult: { frames: 30, fps: 30, width: 640, height: 360, location: 'colab' } };
+  };
+  assert.equal(await executePipeline(f.spec, f.adapters), 0, JSON.stringify(f.events.at(-1)));
+  assert.ok(f.calls.includes('collect:manifest'));
+  assert.ok(f.calls.includes('hold:never'));
+  assert.ok(f.calls.includes('presenter-files'));
+  assert.ok(f.calls.includes('remote-render'));
+  assert.equal(f.calls.includes('local-render'), false);
+  assert.ok(f.calls.indexOf('teardown:render done') > f.calls.indexOf('remote-render'));
+  assert.ok(f.calls.indexOf('teardown:render done') < f.calls.indexOf('export'));
+  assert.ok(f.events.some(event => event.kind === 'progress' && event.message === 'Rendering on the Google Colab VM'));
+  const stopped = f.events.filter(event => event.kind === 'runtime' && event.runtime === 'media' && event.value?.state === 'stopped');
+  assert.equal(stopped.at(-1).value.note, 'render done');
+  assert.ok(f.events.findIndex(event => event.kind === 'runtime' && event.value?.note === 'render done') < f.events.findIndex(event => event.kind === 'result'));
+  assert.equal(f.events.find(event => event.kind === 'result').result.renderLocation, 'colab');
+  assert.equal(f.events.some(event => event.code === 'REMOTE_RENDER_FALLBACK'), false);
+});
+
+test('a failed Google Colab render falls back locally only after the VM stops', async t => {
+  const f = fixture(t);
+  enableRemote(f);
+  f.adapters.colabRender = async () => { f.calls.push('remote-render'); throw new Error('browser missing'); };
+  assert.equal(await executePipeline(f.spec, f.adapters), 0, JSON.stringify(f.events.at(-1)));
+  assert.ok(f.calls.includes('collect:full'));
+  assert.ok(f.calls.includes('collect-full'));
+  assert.ok(f.calls.indexOf('teardown:remote render failed') < f.calls.indexOf('local-render'));
+  const warning = f.events.find(event => event.code === 'REMOTE_RENDER_FALLBACK');
+  assert.equal(warning.message, 'Google Colab render failed (browser missing). Falling back to the local render after the VM is stopped.');
+  assert.equal(f.events.find(event => event.kind === 'result').result.renderLocation, 'local');
+});
+
+test('an unconfirmed Google Colab shutdown does not start the local render', async t => {
+  const f = fixture(t);
+  enableRemote(f, { teardownState: 'stop_unconfirmed' });
+  f.adapters.colabRender = async () => { throw new Error('browser missing'); };
+  assert.equal(await executePipeline(f.spec, f.adapters), 1);
+  assert.equal(f.calls.includes('local-render'), false);
+  const warning = f.events.find(event => event.code === 'REMOTE_RENDER_FALLBACK');
+  assert.match(warning.message, /shutdown is unconfirmed/);
+  assert.equal(f.events.at(-1).kind, 'failed');
+  assert.match(f.events.at(-1).message, /shutdown is unconfirmed/);
+});
+
+test('cancelling a Google Colab render stops the VM and does not fall back', async t => {
+  const f = fixture(t);
+  enableRemote(f);
+  const controller = new AbortController();
+  f.adapters.signal = controller.signal;
+  f.adapters.colabRender = async () => { controller.abort(); throw new Error('interrupted'); };
+  assert.equal(await executePipeline(f.spec, f.adapters), 1);
+  assert.equal(f.calls.includes('local-render'), false);
+  assert.ok(f.calls.includes('teardown:cancelled'));
+  assert.equal(f.events.some(event => event.code === 'REMOTE_RENDER_FALLBACK'), false);
+  assert.equal(f.events.at(-1).kind, 'cancelled');
+});
+
 test('cancelling during generation waits for cleanup before the cancelled event', async t => {
   const f = fixture(t), factory = f.adapters.colabFactory, controller = new AbortController();
   f.adapters.signal = controller.signal;

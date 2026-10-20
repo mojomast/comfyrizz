@@ -7,7 +7,7 @@ import { createAutosave } from './editor/autosave.ts';
 import { createIndexedDbDraftStore, createMemoryDraftStore } from './editor/recovery.ts';
 import { createEditorStore } from './editor/store.ts';
 import { mountAnimationInspector } from './editor/inspector/animation.ts';
-import { mountVoiceSettings } from './voice-settings';
+import { mountVoiceSettings, readRenderLocation, writeRenderLocation } from './voice-settings';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
@@ -1612,6 +1612,11 @@ function init(): void {
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   $('render').addEventListener('click', () => void exportMp4());
+  const renderLocation = $<HTMLSelectElement>('render-location');
+  if (renderLocation) {
+    renderLocation.value = readRenderLocation();
+    renderLocation.addEventListener('change', () => writeRenderLocation(renderLocation.value));
+  }
   $('run-backend').addEventListener('click', () => void runOnBackend(false));
   $('render-changes').addEventListener('click', () => void renderChangedScenes());
   document.querySelectorAll<HTMLButtonElement>('.mode-toggle .mode').forEach(button => {

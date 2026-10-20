@@ -141,6 +141,7 @@ export const isAssignUnavailable = (output) => /Service Unavailable/.test(String
 export const READY_WAIT_SECONDS = 600;
 
 import { progressLines } from './progress-lines.mjs';
+import { entriesForCollect } from './colab-render-plan.mjs';
 
 export function createColabBackend({
   cli = null,
@@ -202,6 +203,8 @@ export function createColabBackend({
     // G5-14: what this session has already fetched, keyed by remote path, so a later collect does not
     // pay for the same files again
     downloaded: new Map(),
+    // "manifest" skips generated plates so a remote render can use the files still on the VM.
+    collectPolicy: "full",
   };
 
   const emit = (onEvent, event) => {
@@ -863,6 +866,59 @@ export function createColabBackend({
       return { session, ...state, registry: registry(), logs, scratch };
     },
 
+    /** `full` downloads every listed output. `manifest` keeps generated media on the VM. */
+    setCollectPolicy(policy) {
+      if (policy !== "full" && policy !== "manifest") throw new Error("Unknown collect policy");
+      state.collectPolicy = policy;
+    },
+
+    async uploadFile(localPath, remotePath) {
+      const result = await step(argvUpload({ session, localPath, remotePath }), { label: "upload-render", wallMs: 600000 });
+      if (result.code !== 0) {
+        const said = redactForLog(String(result.output ?? "")).trim().split("\n").slice(-4).join(" ");
+        throw new ColabCliError(`uploading ${remotePath} failed (exit ${result.code})${said ? `: ${said}` : ""}`);
+      }
+      return { ok: true, remotePath };
+    },
+
+    async downloadFile(remotePath, localPath) {
+      return download({ remote: remotePath, local: localPath, optional: false });
+    },
+
+    /** Download specific VM outputs (presenter clips) without collecting the whole tree. */
+    async downloadListed(relativePaths, localDir, { onEvent = null } = {}) {
+      const fetched = [];
+      for (const rel of relativePaths || []) {
+        if (typeof rel !== "string" || rel.split("/").some((part) => !part || part === "." || part === "..")) {
+          throw new Error("Refusing a render path that escapes the project");
+        }
+        const result = await download({ remote: `${REMOTE_ROOT}/out/${rel}`, local: join(localDir, rel), optional: true, onEvent });
+        if (result.ok) fetched.push(rel);
+      }
+      return { fetched };
+    },
+
+    /**
+     * Run one uploaded script on the current session. The argv is `colab exec -f`,
+     * never `--env`. `onEvent` receives JSON progress lines the script prints.
+     */
+    async execStep(script, stepName, { timeout = 900, silenceMs = null, signal = null, onEvent = null } = {}) {
+      const progress = progressLines((event) => {
+        if (typeof onEvent === "function") onEvent(event);
+      });
+      const exec = await execScript(script, {
+        step: stepName,
+        timeout,
+        wallMs: (Number(timeout) + 120) * 1000,
+        signal,
+        ...(silenceMs ? { silenceMs } : {}),
+        onLog: (text) => progress.write(text),
+      });
+      progress.end();
+      const outcome = execOutcome(exec, stepName);
+      return { ...outcome, code: exec.code, lost: isLost(exec) };
+    },
+
     // -- helpers used by the steps above -------------------------------------------
     async usage() {
       const reading = await usage();
@@ -907,7 +963,7 @@ export function createColabBackend({
     if (!listOutcome.ok) return { ok: false, files: 0, listed: listed.code, detail: listOutcome.note };
     let entries;
     try {
-      entries = parseTreeListing(listed.output);
+      entries = entriesForCollect(parseTreeListing(listed.output), state.collectPolicy);
     } catch (error) {
       emit(onEvent, { type: "list_out_unreadable", detail: error.message });
       return { ok: false, files: 0, listed: listed.code, detail: error.message };

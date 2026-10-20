@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { normalizeRenderLocation, remoteRenderDecision } from '../../../packages/backends/src/colab-render-plan.mjs';
 
 export const PIPELINE_VERSION = 1;
 export const PIPELINE_STAGES = Object.freeze([
@@ -64,7 +65,8 @@ export function pipelineOptions(input = {}) {
   }
   const narrationUnits = Number(input.narrationUnits ?? Math.min(2, budgetUnits / 2));
   if (!Number.isFinite(narrationUnits) || narrationUnits < 0 || narrationUnits > 4) throw new Error('narrationUnits must be between 0 and 4');
-  return { backendId, budgetUnits, narrationRuntime, narrationUnits, comfyuiUrl: input.comfyuiUrl ?? null };
+  const renderLocation = normalizeRenderLocation(input.renderLocation);
+  return { backendId, budgetUnits, narrationRuntime, narrationUnits, comfyuiUrl: input.comfyuiUrl ?? null, renderLocation };
 }
 
 export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
@@ -90,15 +92,20 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   if (presenters && selectedPresenterScenes(pkg).some(scene => !scene.narration?.trim())) issue('PRESENTER_SCENE_SILENT', 'A selected presenter scene has no narration.', 'Add narration or turn the presenter off for that scene.');
   if (presenters && !pkg.assets?.[presenterPortrait(pkg)]) issue('PRESENTER_PORTRAIT_REQUIRED', 'The presenter has no portrait asset.', 'Choose a portrait.');
   if (presenters && (!existsSync(env.COMFYRIZZ_SYNCNET_PYTHON ?? '') || !existsSync(join(env.COMFYRIZZ_SYNCNET_DIR ?? '', 'syncnet_v2.model')))) issue('SYNCNET_UNAVAILABLE', 'Presenter diagnostics are not configured on this server.', 'Configure COMFYRIZZ_SYNCNET_PYTHON and COMFYRIZZ_SYNCNET_DIR.');
+  const remote = remoteRenderDecision({ renderLocation: options.renderLocation, backendId: options.backendId, gpuMedia });
+  if (remote.issue) issue(remote.issue.code, remote.issue.message, remote.issue.action);
   const stages = PIPELINE_STAGES.map(stage => ({ ...stage, status: 'pending', progress: null }));
   const requiresApproval = remoteVoice || (gpuMedia && options.backendId === 'colab');
+  const estimateNote = remote.remoteRender
+    ? 'Allocation ceilings, not predicted charges. Media admission is re-estimated after measured narration. The Google Colab VM stays allocated through the final render and verification, then stops.'
+    : 'Allocation ceilings, not predicted charges. Media admission is re-estimated after measured narration.';
   return {
     version: PIPELINE_VERSION, packageId: pkg.id, baseRevision: pkg.revision,
     inputHash: fingerprint(pkg), planHash: fingerprint({ pkg, options }), options,
-    stages, voiced, presenters, remoteVoice, gpuMedia,
+    stages, voiced, presenters, remoteVoice, gpuMedia, remoteRender: remote.remoteRender, remoteRenderNote: remote.note,
     jobs: summarizeJobs(pkg, jobs),
     reusableAssets: Object.entries(pkg.assets ?? {}).filter(([, asset]) => asset.file && ['ready', 'candidate'].includes(asset.status)).map(([assetId, asset]) => ({ assetId, kind: asset.kind, status: asset.status, verification: 'checked_when_staging' })),
-    budget: { ceilingUnits: options.budgetUnits, narrationCeilingUnits: remoteVoice ? options.narrationUnits : 0, mediaCeilingUnits: options.backendId === 'colab' && gpuMedia ? Math.max(0, mediaUnits) : 0, estimateUnits: null, estimateNote: 'Allocation ceilings, not predicted charges. Media admission is re-estimated after measured narration.' },
+    budget: { ceilingUnits: options.budgetUnits, narrationCeilingUnits: remoteVoice ? options.narrationUnits : 0, mediaCeilingUnits: options.backendId === 'colab' && gpuMedia ? Math.max(0, mediaUnits) : 0, estimateUnits: null, estimateNote },
     requiresApproval, issues, ready: issues.length === 0,
   };
 }

@@ -13,7 +13,7 @@ const require = createRequire(import.meta.resolve('@remotion/cli/package.json'))
 const { bundle } = require('@remotion/bundler');
 const { selectComposition, renderMedia, makeCancelSignal } = require('@remotion/renderer');
 
-export async function renderPipeline(packagePath, output, { signal, onEvent = () => {} } = {}) {
+export async function renderPipeline(packagePath, output, { signal, onEvent = () => {}, concurrency = 2 } = {}) {
   const packageDir = join(packagePath, '..');
   const pkg = JSON.parse(readFileSync(packagePath));
   const validation = validatePackage(pkg);
@@ -40,7 +40,7 @@ export async function renderPipeline(packagePath, output, { signal, onEvent = ()
     let last = 0;
     await renderMedia({
       serveUrl, composition, inputProps: props, outputLocation: output, codec: 'h264', pixelFormat: 'yuv420p', audioCodec: 'aac', audioSampleRate: 48000,
-      browserExecutable, concurrency: 2, cancelSignal: cancel.cancelSignal,
+      browserExecutable, concurrency, cancelSignal: cancel.cancelSignal,
       onProgress: value => {
         const now = Date.now();
         if (now - last < 500 && value.progress < 1) return;
