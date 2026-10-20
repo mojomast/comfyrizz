@@ -10,9 +10,13 @@
 // valid frame of the transition.
 
 import { clamp, ease } from './index.js';
+import { ANIMATION_REVEAL_TRANSITIONS } from '../../../../packages/schema/src/animation.mjs';
 
-/** MS2 transition types, in schema order. @type {readonly string[]} */
-export const TRANSITION_TYPES = ['none', 'cut', 'fade', 'blur', 'slide', 'push', 'wipe', 'zoom', 'iris'];
+/** MS2 transition types, in schema order. AI2 appends the non-directional reveal family. @type {readonly string[]} */
+export const TRANSITION_TYPES = ['none', 'cut', 'fade', 'blur', 'slide', 'push', 'wipe', 'zoom', 'iris', ...ANIMATION_REVEAL_TRANSITIONS];
+
+/** AI2: reveal effects. They reveal the incoming scene and never claim shared identity. */
+export const REVEAL_TYPES = [...ANIMATION_REVEAL_TRANSITIONS];
 
 /** Types whose `direction` is an axis. @type {readonly string[]} */
 export const DIRECTIONAL_TYPES = ['slide', 'push', 'wipe'];
@@ -114,6 +118,117 @@ export function blurAmount(progress, max = BLUR_MAX_PX) {
   return max * Math.sin(Math.PI * clamp(progress));
 }
 
+/**
+ * AI2 paper-reveal: stacked paper strips alternate from the left and right.
+ * The path is a union of axis-aligned rectangles; at p=0 every strip has zero
+ * width, at p=1 they overlap and cover the whole frame. There is deliberately no
+ * `direction` input: a reveal is not a directional push.
+ * @param {number} progress
+ * @param {number} width
+ * @param {number} height
+ * @param {{strips?:number,seed?:number}} [options]
+ * @returns {{path:string,coverage:number,strips:number}}
+ */
+export function paperRevealGeometry(progress, width, height, { strips = 7, seed = 7 } = {}) {
+  const p = clamp(progress);
+  const count = Math.max(3, Math.min(12, Math.round(strips)));
+  const stripHeight = height / count;
+  const stagger = 0.055;
+  const travel = Math.max(0.01, 1 - stagger * (count - 1));
+  let total = 0;
+  const parts = [];
+  for (let index = 0; index < count; index += 1) {
+    const local = clamp((p - index * stagger) / travel);
+    total += local;
+    if (local <= 0) continue;
+    const x0 = index % 2 === 0 ? 0 : width * (1 - local);
+    const x1 = index % 2 === 0 ? width * local : width;
+    const y0 = index * stripHeight;
+    const y1 = Math.min(height, y0 + stripHeight + 2);
+    parts.push(`M${round(x0)},${round(y0)} L${round(x1)},${round(y0)} L${round(x1)},${round(y1)} L${round(x0)},${round(y1)} Z`);
+  }
+  return { path: parts.join(' ') || 'M0,0 Z', coverage: total / count, strips: count, seed };
+}
+
+/**
+ * AI2 draw-reveal: a deterministic pencil-edge wipe. The boundary is a jagged
+ * diagonal with no axis direction; p=0 starts outside the frame and p=1 finishes
+ * beyond it, so both endpoints are exact.
+ * @param {number} progress
+ * @param {number} width
+ * @param {number} height
+ * @returns {{path:string,frontTop:number,frontBottom:number,coverage:number}}
+ */
+export function drawRevealGeometry(progress, width, height) {
+  const p = clamp(progress);
+  // p=0 -> the whole boundary is left of 0; p=1 -> below/right of the frame.
+  const frontTop = -height + p * (width + height * 1.45);
+  const frontBottom = frontTop + height * 0.45;
+  const steps = 9;
+  const amplitude = Math.max(4, width * 0.012);
+  const points = [`M0,0`, `L${round(frontTop)},0`];
+  for (let index = 1; index <= steps; index += 1) {
+    const t = index / steps;
+    const y = height * t;
+    const baseline = frontTop + (frontBottom - frontTop) * t;
+    const tooth = Math.sin(index * 2.17 + 0.8) * amplitude * (index === steps ? 0.3 : 1);
+    points.push(`L${round(baseline + tooth)},${round(y)}`);
+  }
+  points.push(`L0,${round(height)} Z`);
+  return { path: points.join(' '), frontTop, frontBottom, coverage: p };
+}
+
+/**
+ * AI2 shape-reveal: a seeded, gently lobed circle grows from the focal point
+ * until it covers every corner. No direction, no shared-element matching.
+ * @param {number} progress
+ * @param {number} width
+ * @param {number} height
+ * @param {{focal?:{x:number,y:number},seed?:number}} [options]
+ */
+export function shapeRevealGeometry(progress, width, height, { focal = { x: 0.5, y: 0.5 }, seed = 3 } = {}) {
+  const p = clamp(progress);
+  const cx = clamp(focal.x, 0, 1) * width;
+  const cy = clamp(focal.y, 0, 1) * height;
+  const corners = [[0, 0], [width, 0], [0, height], [width, height]];
+  const maxRadius = Math.max(...corners.map(([x, y]) => Math.hypot(x - cx, y - cy))) * 1.06;
+  const radius = p * maxRadius;
+  const count = 24;
+  const points = [];
+  for (let index = 0; index < count; index += 1) {
+    const angle = (index / count) * Math.PI * 2;
+    const wobble = 1 + Math.sin(angle * 5 + seed * 0.37) * 0.025 + Math.sin(angle * 3 - seed * 0.11) * 0.018;
+    points.push(`${index === 0 ? 'M' : 'L'}${round(cx + Math.cos(angle) * radius * wobble)},${round(cy + Math.sin(angle) * radius * wobble)}`);
+  }
+  return { path: `${points.join(' ')} Z`, radius, maxRadius, coverage: p };
+}
+
+/** @param {number} value */
+function round(value) {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * The pure geometry of one reveal transition, so tests can check endpoints
+ * without a browser. `coverage` is 0 at the start and 1 at the end for every
+ * type; the path remains finite and bounded.
+ * @param {'paper-reveal'|'draw-reveal'|'shape-reveal'|string} type
+ * @param {number} progress
+ * @param {number} width
+ * @param {number} height
+ * @param {{seed?:number,focal?:{x:number,y:number}}} [options]
+ */
+export function revealGeometry(type, progress, width, height, options = {}) {
+  if (type === 'paper-reveal') return paperRevealGeometry(progress, width, height, options);
+  if (type === 'draw-reveal') return drawRevealGeometry(progress, width, height);
+  return shapeRevealGeometry(progress, width, height, options);
+}
+
+/** `path()` is supported by the pinned Chromium render target and keeps exact endpoints. */
+function revealClipPath(path) {
+  return `path('${path}')`;
+}
+
 /** Opacity for a crossfade: the outgoing fades out as the entering fades in. */
 export function fadeOpacity(progress) {
   const t = clamp(progress);
@@ -157,6 +272,23 @@ export function transitionStyle(type, progress, options = {}) {
       const { outgoing, entering } = fadeOpacity(progress);
       const blur = blurAmount(progress);
       return { kind: 'blur', direction: null, outgoing: { opacity: outgoing, filter: `blur(${blur}px)` }, entering: { opacity: entering, filter: `blur(${blur}px)` } };
+    }
+    case 'paper-reveal':
+    case 'draw-reveal':
+    case 'shape-reveal': {
+      const geometry = revealGeometry(type, progress, width, height, {
+        seed: typeof options.seed === 'number' ? options.seed : 7,
+        ...(focal ? { focal } : {}),
+      });
+      // A reveal owns the incoming side only; the outgoing scene is already
+      // covered by the growing incoming mask. No direction field is emitted.
+      return {
+        kind: type,
+        direction: null,
+        coverage: geometry.coverage,
+        outgoing: {},
+        entering: { clipPath: revealClipPath(geometry.path) },
+      };
     }
     case 'fade': {
       const { outgoing, entering } = fadeOpacity(progress);

@@ -230,6 +230,37 @@
         "strict": {
           "type": "boolean",
           "description": "When true, a selected qwen3-tts runtime that is unavailable fails the run. When false or omitted, the run falls back to Kokoro."
+        },
+        "chunking": {
+          "type": "string", "enum": ["sentence", "paragraph"],
+          "description": "Kokoro synthesis context: separate sentences (default) or a coherent scene paragraph with estimated sentence/word alignment."
+        },
+        "blend": {
+          "type": "array", "minItems": 2, "maxItems": 4,
+          "description": "Kokoro weighted voice styles. Positive weights are normalized before synthesis.",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["voice", "weight"],
+            "properties": {
+              "voice": {"type": "string", "minLength": 1, "maxLength": 64},
+              "weight": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+            }
+          }
+        },
+        "qwen_mode": {
+          "type": "string", "enum": ["design", "custom"],
+          "description": "design (default) uses VoiceDesign then Base cloning; custom uses the CustomVoice preset named in voice.voice."
+        },
+        "delivery": {
+          "type": "string", "maxLength": 400,
+          "description": "CustomVoice default delivery instruction, overridden by scene.narration_style. For design mode, appended to the reference persona."
+        },
+        "non_streaming": {
+          "type": "boolean",
+          "description": "Qwen full-text conditioning. Defaults to false for Base cloning and true for CustomVoice."
+        },
+        "reference_text": {
+          "type": "string", "minLength": 1, "maxLength": 1000,
+          "description": "Transcript synthesized by VoiceDesign to create the reusable synthetic reference."
         }
       }
     },
@@ -457,9 +488,12 @@
         "push",
         "wipe",
         "zoom",
-        "iris"
+        "iris",
+        "paper-reveal",
+        "draw-reveal",
+        "shape-reveal"
       ],
-      "description": "MS2 transition vocabulary. none/cut: no overlap; fade/blur: calm crossfades; slide/push/wipe: directional (medium); zoom/iris: in/out (high). The first four of the original enum (none, fade, slide, wipe) keep their meaning."
+      "description": "MS2 transition vocabulary. none/cut: no overlap; fade/blur: calm crossfades; slide/push/wipe: directional (medium); zoom/iris: in/out (high); paper-reveal/draw-reveal/shape-reveal: no-axis reveal transitions for the storytelling recipes. The first four of the original enum (none, fade, slide, wipe) keep their meaning."
     },
     "transitionDirection": {
       "type": "string",
@@ -726,6 +760,90 @@
       "type": "object",
       "unevaluatedProperties": false,
       "properties": {
+        "diagram": {
+          "type": "string",
+          "enum": ["flow", "hub"],
+          "description": "List-layout motion diagram: connected step cards or a shared hub. Copy stays editable."
+        },
+        "recipe": {
+          "type": "string",
+          "enum": ["sketch", "paper-cut", "morph", "technical-flow", "focus", "kinetic"],
+          "description": "Storytelling recipe for this scene. Optional: an absent recipe means the renderer keeps its current layout/default behaviour. The shared catalogue is packages/schema/src/animation.mjs ANIMATION_RECIPES."
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Stable seed for the recipe's generated texture/geometry. Omitted: the renderer's own deterministic default."
+        },
+        "intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Recipe strength, 0..1. Omitted: the recipe's default."
+        },
+        "focus": {
+          "type": "object",
+          "required": ["x", "y", "width", "height"],
+          "unevaluatedProperties": false,
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Left edge as a fraction of the frame width."
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Top edge as a fraction of the frame height."
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Positive width as a fraction of the frame width."
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Positive height as a fraction of the frame height."
+            }
+          },
+          "description": "Normalised focus window (for recipe focus). x + width and y + height must stay within 1; the semantic pass reports SEM_MOTION_FOCUS_RECT when the rectangle leaves the frame."
+        },
+        "morph": {
+          "type": "object",
+          "required": ["from", "to"],
+          "unevaluatedProperties": false,
+          "properties": {
+            "from": {
+              "type": "string",
+              "enum": ["circle", "square", "triangle", "blob"]
+            },
+            "to": {
+              "type": "string",
+              "enum": ["circle", "square", "triangle", "blob"]
+            }
+          },
+          "description": "Bounded shape morph (for recipe morph): the renderer interpolates between two catalogue shapes."
+        },
+        "cue_phrases": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "description": "Narration phrases that anchor scene beats, in order. The planner resolves each against measured captions/word cues and records provenance; it falls back to an explicit diagnostic instead of claiming forced alignment. cue_seconds, when present, wins."
+        },
+        "cue_seconds": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {"type": "number", "minimum": 0},
+          "description": "Scene-local speech cue times for diagram cards, one per copy item. Explicit seconds take priority over cue_phrases. Omitted cues spread through the scene."
+        },
         "entry": {
           "type": "string",
           "enum": [
@@ -1398,7 +1516,7 @@
             "type": "fade",
             "frames": 15
           },
-          "description": "Transition into the next scene (PLAN.md A1: fades; MS2: the motion transition vocabulary). Missing transitionOut means a default fade. `direction` applies to slide | push | wipe (left/right/up/down) and zoom | iris (in/out); when it is omitted on a directional type the renderer uses the package motion.direction (the film's one current) or `in`. `cut` always has frames 0. lintMotion() checks budget, vector law and durations."
+          "description": "Transition into the next scene (PLAN.md A1: fades; MS2: the motion transition vocabulary). Missing transitionOut means a default fade. `direction` applies to slide | push | wipe (left/right/up/down) and zoom | iris (in/out); when it is omitted on a directional type the renderer uses the package motion.direction (the film's one current) or `in`. paper-reveal | draw-reveal | shape-reveal have no axis, so a direction on them is a lint warning. `cut` always has frames 0. lintMotion() checks budget, vector law and durations."
         },
         "motion": {
           "$ref": "#/$defs/sceneMotion"
@@ -1420,7 +1538,7 @@
         "narration_style": {
           "type": "string",
           "maxLength": 240,
-          "description": "Per-scene emotion instruction for Qwen3-TTS (for example \"calm, slightly amused\")."
+          "description": "Per-scene delivery instruction for Qwen CustomVoice, overriding voice.delivery. Base cloning and Kokoro do not support per-scene instructions."
         },
         "narration_asset": {
           "$ref": "#/$defs/assetId"

@@ -24,5 +24,18 @@
       { "message": "Can we say it saves ten hours a week? I have no evidence for that. Suggest a truthful alternative without changing or building anything.", "expect": { "built": false, "samePlan": true } },
       { "message": "Keep the existing plan as written and build it now.", "expect": { "built": true, "samePlan": true, "media": "procedural", "mustNotMatch": "(?:ten|10) hours" } }
     ]
+  },
+  {
+    "id": "express-animation-build-revise",
+    "turns": [
+      {
+        "message": "Build a six-scene 16:9 CPU procedural-only animation explainer. Use these layouts and recipes in order: sketch list, paper-cut hero, morph hero, technical-flow list, focus code, kinetic title. Write concise copy and narration for every scene. For every scene use motion seed 42, intensity 0.6 and entry maskRise. Morph circle to square. The technical-flow items are Request, Worker, Result; its narration must contain those exact words in that order, initially with explicit cue_seconds [0.5, 2, 4]. The code is const result = worker(request); in javascript. Focus rectangle is x 0.1, y 0.2, width 0.5, height 0.5. Use paper-reveal, draw-reveal and shape-reveal at appropriate boundaries, no outgoing final transition. No SVG, images, external assets, paid generation or invented statistics. Build now.",
+        "expect": { "built": true, "scenes": 6, "layouts": ["list", "hero", "hero", "list", "code", "title"], "recipes": ["sketch", "paper-cut", "morph", "technical-flow", "focus", "kinetic"], "motion": { "2": { "morph": { "from": "circle", "to": "square" } }, "3": { "cue_seconds": [0.5, 2, 4], "seed": 42, "entry": "maskRise" }, "4": { "focus": { "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.5 } } }, "noGpu": true }
+      },
+      {
+        "message": "Make only these animation changes and apply them: on scene 3 change the morph destination to triangle, preserving its origin; on scene 4 replace explicit cue seconds with narration phrases request, worker, result; on scene 5 remove the focus recipe but keep its other motion settings. Preserve all seeds, intensity, entry, copy, narration, timing, layouts, transitions, media and scene IDs. Do not rewrite the story.",
+        "expect": { "built": true, "sameIds": true, "preserveSceneContent": true, "recipes": ["sketch", "paper-cut", "morph", "technical-flow", null, "kinetic"], "motion": { "2": { "morph": { "from": "circle", "to": "triangle" }, "seed": 42, "intensity": 0.6, "entry": "maskRise" }, "3": { "cue_seconds": null, "cue_phrases": ["request", "worker", "result"], "seed": 42, "intensity": 0.6, "entry": "maskRise" }, "4": { "recipe": null, "seed": 42, "intensity": 0.6, "entry": "maskRise", "focus": { "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.5 } } }, "noGpu": true }
+      }
+    ]
   }
 ]

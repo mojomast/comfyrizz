@@ -55,6 +55,19 @@ KNOWN_PARAMS = {
 GRAPH_FILES = sorted(p for p in WORKFLOWS.glob("*.api.json") if not p.name.endswith(".params.json"))
 
 
+def test_presenter_freezes_original_audio_in_both_sampling_stages():
+    graph = json.loads((WORKFLOWS / "ltx25_a2v_2stage.api.json").read_text())
+    for concat in ("10", "22"):
+        frozen = graph[graph[concat]["inputs"]["audio_latent"][0]]
+        assert frozen["class_type"] == "SetLatentNoiseMask"
+        encoded = graph[frozen["inputs"]["samples"][0]]
+        assert encoded["class_type"] == "LTXVAudioVAEEncode"
+        mask = graph[frozen["inputs"]["mask"][0]]
+        assert mask["class_type"] == "SolidMask"
+        assert mask["inputs"]["value"] == 0
+    assert graph["12"]["inputs"]["sampler_name"] == "euler"
+
+
 def test_the_gpu_test_1_workflow_set_is_present():
     names = {p.name for p in GRAPH_FILES}
     assert names == {

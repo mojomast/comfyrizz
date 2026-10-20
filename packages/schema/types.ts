@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: d6c1ac232fc6cf1f52d5fb89b06ada328cb039a0edfc7a889b458f03b38dda11
+// Schema sha256: 81b3a7c74cb05f5930b4b7014f512aa65cee0c1ed1d5af75ea04178c695ad8f1
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -105,6 +105,39 @@ export interface PackageV1 {
      * omitted, the run falls back to Kokoro.
      */
     strict?: boolean;
+    /**
+     * Kokoro synthesis context: separate sentences (default) or a coherent scene paragraph with
+     * estimated sentence/word alignment.
+     */
+    chunking?: "sentence" | "paragraph";
+    /**
+     * Kokoro weighted voice styles. Positive weights are normalized before synthesis.
+     * [minItems 2, maxItems 4]
+     */
+    blend?: Array<{
+      voice: string;
+      weight: number;
+      }>;
+    /**
+     * design (default) uses VoiceDesign then Base cloning; custom uses the CustomVoice preset named in
+     * voice.voice.
+     */
+    qwen_mode?: "design" | "custom";
+    /**
+     * CustomVoice default delivery instruction, overridden by scene.narration_style. For design mode,
+     * appended to the reference persona.
+     * [maxLength 400]
+     */
+    delivery?: string;
+    /**
+     * Qwen full-text conditioning. Defaults to false for Base cloning and true for CustomVoice.
+     */
+    non_streaming?: boolean;
+    /**
+     * Transcript synthesized by VoiceDesign to create the reusable synthetic reference.
+     * [minLength 1, maxLength 1000]
+     */
+    reference_text?: string;
     };
   datasets?: {
     [key: string]: Dataset;
@@ -174,10 +207,11 @@ export type MotionDirection = "left" | "right" | "up" | "down";
 
 /**
  * MS2 transition vocabulary. none/cut: no overlap; fade/blur: calm crossfades; slide/push/wipe:
- * directional (medium); zoom/iris: in/out (high). The first four of the original enum (none, fade,
- * slide, wipe) keep their meaning.
+ * directional (medium); zoom/iris: in/out (high); paper-reveal/draw-reveal/shape-reveal: no-axis
+ * reveal transitions for the storytelling recipes. The first four of the original enum (none,
+ * fade, slide, wipe) keep their meaning.
  */
-export type TransitionType = "none" | "cut" | "fade" | "blur" | "slide" | "push" | "wipe" | "zoom" | "iris";
+export type TransitionType = "none" | "cut" | "fade" | "blur" | "slide" | "push" | "wipe" | "zoom" | "iris" | "paper-reveal" | "draw-reveal" | "shape-reveal";
 
 /**
  * MS2: direction of a transition. left/right/up/down for slide, push and wipe; in/out for zoom (in
@@ -294,6 +328,73 @@ export interface AudioSfx {
   }
 
 export interface SceneMotion {
+  /**
+   * List-layout motion diagram: connected step cards or a shared hub. Copy stays editable.
+   */
+  diagram?: "flow" | "hub";
+  /**
+   * Storytelling recipe for this scene. Optional: an absent recipe means the renderer keeps its
+   * current layout/default behaviour. The shared catalogue is packages/schema/src/animation.mjs
+   * ANIMATION_RECIPES.
+   */
+  recipe?: "sketch" | "paper-cut" | "morph" | "technical-flow" | "focus" | "kinetic";
+  /**
+   * Stable seed for the recipe's generated texture/geometry. Omitted: the renderer's own
+   * deterministic default.
+   * [min 1, max 2147483647]
+   */
+  seed?: number;
+  /**
+   * Recipe strength, 0..1. Omitted: the recipe's default.
+   * [min 0, max 1]
+   */
+  intensity?: number;
+  /**
+   * Normalised focus window (for recipe focus). x + width and y + height must stay within 1; the
+   * semantic pass reports SEM_MOTION_FOCUS_RECT when the rectangle leaves the frame.
+   */
+  focus?: {
+    /**
+     * Left edge as a fraction of the frame width.
+     * [min 0, max 1]
+     */
+    x: number;
+    /**
+     * Top edge as a fraction of the frame height.
+     * [min 0, max 1]
+     */
+    y: number;
+    /**
+     * Positive width as a fraction of the frame width.
+     * [max 1]
+     */
+    width: number;
+    /**
+     * Positive height as a fraction of the frame height.
+     * [max 1]
+     */
+    height: number;
+    };
+  /**
+   * Bounded shape morph (for recipe morph): the renderer interpolates between two catalogue shapes.
+   */
+  morph?: {
+    from: "circle" | "square" | "triangle" | "blob";
+    to: "circle" | "square" | "triangle" | "blob";
+    };
+  /**
+   * Narration phrases that anchor scene beats, in order. The planner resolves each against measured
+   * captions/word cues and records provenance; it falls back to an explicit diagnostic instead of
+   * claiming forced alignment. cue_seconds, when present, wins.
+   * [maxItems 6]
+   */
+  cue_phrases?: Array<NonEmptyString>;
+  /**
+   * Scene-local speech cue times for diagram cards, one per copy item. Explicit seconds take
+   * priority over cue_phrases. Omitted cues spread through the scene.
+   * [maxItems 6]
+   */
+  cue_seconds?: Array<number>;
   /**
    * Entry preset. fadeUp/maskRise/pop/countUp are the MS1 primitives of the same name
    * (apps/renderer/src/motion/primitives.js); waterfall (kinetic words) and drawOn (SVG stroke
@@ -561,8 +662,9 @@ export interface Scene {
    * Transition into the next scene (PLAN.md A1: fades; MS2: the motion transition vocabulary).
    * Missing transitionOut means a default fade. `direction` applies to slide | push | wipe
    * (left/right/up/down) and zoom | iris (in/out); when it is omitted on a directional type the
-   * renderer uses the package motion.direction (the film's one current) or `in`. `cut` always has
-   * frames 0. lintMotion() checks budget, vector law and durations.
+   * renderer uses the package motion.direction (the film's one current) or `in`. paper-reveal |
+   * draw-reveal | shape-reveal have no axis, so a direction on them is a lint warning. `cut` always
+   * has frames 0. lintMotion() checks budget, vector law and durations.
    * [default {"type":"fade","frames":15}]
    */
   transitionOut?: {
@@ -584,7 +686,8 @@ export interface Scene {
    */
   spoken_text?: string;
   /**
-   * Per-scene emotion instruction for Qwen3-TTS (for example "calm, slightly amused").
+   * Per-scene delivery instruction for Qwen CustomVoice, overriding voice.delivery. Base cloning and
+   * Kokoro do not support per-scene instructions.
    * [maxLength 240]
    */
   narration_style?: string;

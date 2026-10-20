@@ -3,8 +3,8 @@
 // captions.vtt, CREDITS.md and package.zip. package.zip carries only assets the
 // v0.1 rights policy allows; everything else is listed with its source and
 // licence reason in CREDITS.md and manifest.json. No network and no keys.
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import { buildCredits, buildPackageZip, isAssetRedistributable } from '../../../packages/sources/dist/src/index.js';
 import { captionsToSrt, captionsToVtt, captionsToWordVtt } from '../../../packages/tts/dist/src/index.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -66,6 +66,41 @@ export function collectAssetBytes(pkg, packageDir) {
   return assets;
 }
 
+export function collectAssetVariantBytes(pkg, packageDir) {
+  const variants = {};
+  for (const [id, asset] of Object.entries(pkg.assets ?? {})) {
+    for (const [name, variant] of Object.entries(asset.variants ?? {})) {
+      if (typeof variant?.file !== 'string') continue;
+      const file = join(packageDir, variant.file);
+      if (existsSync(file) && statSync(file).isFile()) {
+        (variants[id] ??= {})[name] = readFileSync(file);
+      }
+    }
+  }
+  return variants;
+}
+
+/** Preserve the measured timeline and synthetic scene takes when editing a ZIP. */
+export function collectNarrationExtras(pkg, packageDir) {
+  if (!pkg.voice?.enabled || !pkg.assets?.a_narration || !isAssetRedistributable(pkg.assets.a_narration)) return [];
+  const path = join(packageDir, 'audio/durations.json');
+  if (!existsSync(path)) return [];
+  const root = realpathSync(packageDir);
+  const files = new Map();
+  const add = name => {
+    if (typeof name !== 'string' || !name.startsWith('audio/') || name.split('/').some(part => part === '..' || part === '.') || name.includes('\\')) throw new Error('Invalid narration sidecar path');
+    const file = resolve(packageDir, name);
+    if (!existsSync(file)) return;
+    if (!realpathSync(file).startsWith(root + sep)) throw new Error('Narration sidecar escapes the package');
+    if (statSync(file).isFile()) files.set(name, { path: name, data: readFileSync(file) });
+  };
+  add('audio/durations.json');
+  const report = JSON.parse(files.get('audio/durations.json').data);
+  for (const scene of Object.values(report.scenes ?? {})) if (scene?.file) add(scene.file);
+  for (const name of ['voice-reference.wav', 'voice-reference.json', 'models.lock.json']) add(`audio/${name}`);
+  return [...files.values()];
+}
+
 /**
  * @param {object} options
  * @param {string} options.exportsDir   every package gets `<exportsDir>/<package-id>/`
@@ -117,7 +152,7 @@ export function createExporter({ exportsDir, render } = {}) {
     const generatedAt = new Date().toISOString();
     const social = buildSocialPack({ mp4: videoPath, timeline, pkg, outDir: dir, onLog });
     const blocked = blockedSceneAsset(pkg);
-    const extras = [];
+    const extras = narration === undefined ? collectNarrationExtras(pkg, packageDir) : [];
     const extraExcluded = [];
     for (const file of social) {
       const pixels = SOCIAL_PIXEL_FILES.includes(file.name);
@@ -138,6 +173,7 @@ export function createExporter({ exportsDir, render } = {}) {
       package: pkg,
       timeline,
       assets: collectAssetBytes(pkg, packageDir),
+      assetVariants: collectAssetVariantBytes(pkg, packageDir),
       capturedWorkflows,
       generatedAt,
       extras,

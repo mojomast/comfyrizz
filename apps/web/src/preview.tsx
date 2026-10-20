@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Player, type PlayerRef } from '@remotion/player';
 import type { PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
-import { TimelinePlayer } from '../../renderer/src/player';
+import { PackageComposition } from '../../renderer/src/composition';
 import type { InlineAsset } from '../../renderer/src/components';
 
 let root: Root | null = null;
@@ -11,8 +11,8 @@ let ready: ((player: PlayerRef) => void) | null = null;
 
 const Preview = ({ pkg, timeline, generatedAssets }: { pkg: PackageV1; timeline: Timeline; generatedAssets?: Record<string, InlineAsset> }) => (
   <Player
-    // TimelinePlayer is the same composition the MP4 renderer uses.
-    component={TimelinePlayer as unknown as React.ComponentType<Record<string, unknown>>}
+    // PackageComposition is the same narration, caption and mix tree the MP4 renderer uses.
+    component={PackageComposition as unknown as React.ComponentType<Record<string, unknown>>}
     inputProps={{ pkg, timeline, ...(generatedAssets ? { generatedAssets } : {}) }}
     durationInFrames={timeline.durationInFrames}
     compositionWidth={timeline.width}

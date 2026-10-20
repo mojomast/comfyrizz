@@ -722,7 +722,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       origin: 'generated',
       status: 'pending',
       license: { id: 'CC0-1.0' },
-      model_license: { id: 'Apache-2.0', url: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell' },
+      model_license: { id: 'FLUX-Kommunity', url: 'https://huggingface.co/black-forest-labs/flux-3-image-klein', note: 'FLUX Kommunity License v1.0; model terms are separate from generated-output rights.' },
       redistributable: true,
       ...(cast.ids[0] ? { cast: cast.ids[0] } : {}),
       notes: isRefEdit

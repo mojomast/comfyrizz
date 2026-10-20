@@ -148,6 +148,7 @@ export function createByoBackend({
 
     /** Spawn the same pipeline-py runner used on Google Colab, pointed at the local proxy. */
     async run(jobsFileOrNull, onEvent = () => {}, signal = null) {
+      signal?.throwIfAborted();
       const file = jobsFileOrNull || jobsFile;
       if (!file) throw new ColabCliError("byo run needs a jobs.json path");
       // `runnerCommand` is the prefix (default: the pipeline-py module); the jobs file, the
@@ -202,7 +203,22 @@ export function createByoBackend({
       };
       child.stdout.on("data", handle);
       child.stderr.on("data", handle);
-      const code = await new Promise((resolve) => child.on("close", (value) => resolve(value ?? 1)));
+      let cancellation = null;
+      const abort = () => {
+        child.kill('SIGTERM');
+        cancellation = Promise.allSettled([...state.submittedJobs].map(id => backend.cancelOwnJob(id)));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+      let code;
+      try {
+        code = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', value => resolve(value ?? 1)); });
+        if (cancellation) {
+          await cancellation;
+          onEvent({ type: 'cancelled_jobs', jobs: [...state.cancelCalls] });
+        }
+        signal?.throwIfAborted();
+      } finally { signal?.removeEventListener('abort', abort); }
       const outRoot = outDir || join(process.cwd(), "out");
       const manifestPath = join(outRoot, "manifest.json");
       const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : null;
@@ -228,7 +244,7 @@ export function createByoBackend({
         state.cancelCalls.push({ jobId, cancelled: false, reason: "not submitted by this backend" });
         return { cancelled: false, reason: "not submitted by this backend" };
       }
-      const response = await fetch(`${v2()}/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+      const response = await fetch(`${v2()}/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", signal: AbortSignal.timeout(10000) });
       state.cancelCalls.push({ jobId, cancelled: response.ok, status: response.status });
       return { cancelled: response.ok, status: response.status };
     },

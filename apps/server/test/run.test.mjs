@@ -231,3 +231,22 @@ test('the HTTP routes expose estimate, approve and status (C9: packages, not job
 test('createRunController validates its backend factory', () => {
   assert.throws(() => createRunController({ runtimeDir: '/tmp', events: null }), /backendFactory/);
 });
+
+test('a render failure cannot publish a successful legacy run finish', async t => {
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'comfyrizz-render-failure-'));
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  const emitted = [];
+  const controller = createRunController({
+    runtimeDir, backendFactory: async id => fakeBackend(id), events: { publish: event => emitted.push(event) },
+    onComplete: async ({ record }) => {
+      assert.equal(record.status, 'rendering');
+      throw new Error('Encoder failed');
+    },
+  });
+  const started = await controller.start({ backendId: 'byo-comfyui', pkg: fixturePackage() });
+  const result = await controller.wait(started.runId);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.renderError, 'Encoder failed');
+  assert.ok(emitted.some(event => event.type === 'run.failed' && event.phase === 'render'));
+  assert.ok(!emitted.some(event => event.type === 'run.finished'));
+});

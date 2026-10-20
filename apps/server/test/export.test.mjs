@@ -10,14 +10,43 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
-import { EXPORT_FILE_NAMES, hasWordCues } from '../src/export.mjs';
+import { EXPORT_FILE_NAMES, hasWordCues, collectAssetVariantBytes, collectNarrationExtras } from '../src/export.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const repo = new URL('../../..', import.meta.url).pathname;
 const seed = JSON.parse(readFileSync(new URL('../../../examples/launch-demo/package.json', import.meta.url), 'utf8'));
 
+test('export collects declared upscale bytes and leaves missing variants detectable', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'export-variants-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, 'assets'));
+  writeFileSync(join(dir, 'assets/up.mp4'), 'upscaled bytes');
+  const bytes = collectAssetVariantBytes({ assets: {
+    video: { variants: { upscaled: { file: 'assets/up.mp4' }, missing: { file: 'assets/missing.mp4' } } },
+  } }, dir);
+  assert.equal(bytes.video.upscaled.toString(), 'upscaled bytes');
+  assert.equal(bytes.video.missing, undefined);
+});
+
 let runtime;
+
+test('editable exports retain measured narration and refuse escaping sidecar references', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'export-narration-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, 'audio'));
+  const pkg = { voice: { enabled: true }, assets: { a_narration: { origin: 'generated', license: { id: 'CC0-1.0' }, redistributable: true } } };
+  const file = join(dir, 'audio/durations.json');
+  writeFileSync(file, JSON.stringify({ scenes: { s1: { file: 'audio/s1.wav', seconds: 2 } } }));
+  writeFileSync(join(dir, 'audio/s1.wav'), 'scene take');
+  const files = collectNarrationExtras(pkg, dir);
+  assert.deepEqual(files.map(f => f.path), ['audio/durations.json', 'audio/s1.wav']);
+  assert.equal(files[1].data.toString(), 'scene take');
+  writeFileSync(file, JSON.stringify({ scenes: { s1: { file: 'audio/../../secret' } } }));
+  assert.throws(() => collectNarrationExtras(pkg, dir), /Invalid narration/);
+  pkg.assets.a_narration.redistributable = false;
+  assert.deepEqual(collectNarrationExtras(pkg, dir), []);
+});
 let app;
 let server;
 let port;

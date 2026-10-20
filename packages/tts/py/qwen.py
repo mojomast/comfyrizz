@@ -5,14 +5,16 @@ selects ``voice.engine = qwen3-tts``. ``qwen-tts`` and torch are imported inside
 the real adapter methods, never at import time, so the default install and the
 tests do not need them and no weights are downloaded here.
 
-The real call shape follows the public ``qwen-tts`` helpers (VoiceDesign once,
-then Base ``create_voice_clone_prompt`` / ``generate_voice_clone``). A GPU run
-still has to confirm the keyword names; they are marked [unverified] below.
-Tests replace this adapter with a scripted fake.
+The call shape follows the public qwen-tts and qwen-asr APIs: VoiceDesign once,
+then Base create_voice_clone_prompt / generate_voice_clone. Alignment and ASR
+accept (waveform, sample_rate) tuples and return batches. Tests mock the model
+classes to check this boundary without downloading weights.
 """
 from __future__ import annotations
 
 import importlib.util
+import gc
+import os
 
 import numpy as np
 
@@ -21,14 +23,18 @@ ENGINE_QWEN = "qwen3-tts"
 SAMPLE_RATE = 24_000
 BASE_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+CUSTOM_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+CUSTOM_SPEAKERS = {"ryan", "aiden", "vivian", "serena", "uncle_fu", "dylan", "eric", "ono_anna", "sohee"}
 MODEL_LICENSE = "Apache-2.0"
 ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
 ASR_MODEL = "Qwen/Qwen3-ASR-0.6B"
-DEFAULT_REFERENCE = "Hello. I will narrate this film."
-# Qwen3-TTS language argument is the English name of the language [unverified].
+DEFAULT_REFERENCE = "Here is what changed, why it matters, and how it works. We will walk through the details together, one clear step at a time."
+# Qwen3-TTS language argument is the English name of the language.
 _LANG_NAMES = {
     "en": "English",
     "fr": "French",
+    "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "de": "German",
+    "it": "Italian", "pt": "Portuguese", "es": "Spanish", "ru": "Russian",
 }
 
 
@@ -57,12 +63,7 @@ def strict_voice(voice_cfg: dict | None) -> bool:
 
 
 def qwen_language_name(voice_cfg: dict | None) -> str:
-    """``English`` or ``French`` for the Qwen3-TTS call.
-
-    ``voice.lang`` wins (``en`` / ``fr``). Otherwise ``voice.language``
-    (``en-us``, ``fr-fr``, …) is mapped. Anything else stays English: this
-    backend promises English and French, and does not guess a third language.
-    """
+    """Map a supported Qwen language tag; voice.lang wins over voice.language."""
     raw = ""
     if isinstance(voice_cfg, dict):
         candidate = voice_cfg.get("lang")
@@ -71,9 +72,7 @@ def qwen_language_name(voice_cfg: dict | None) -> str:
         if isinstance(candidate, str):
             raw = candidate
     key = raw.strip().lower().replace("_", "-")
-    if key.startswith("fr"):
-        return _LANG_NAMES["fr"]
-    return _LANG_NAMES["en"]
+    return _LANG_NAMES.get(key.split('-')[0], "English")
 
 
 def to_sample_rate(audio: np.ndarray, src_rate: int, dst_rate: int = SAMPLE_RATE) -> np.ndarray:
@@ -111,38 +110,54 @@ def coerce_aligner_tokens(result) -> list[dict]:
         out.append(
             {
                 "text": getattr(token, "text", ""),
-                "start_ts": getattr(token, "start_ts", getattr(token, "start", None)),
-                "end_ts": getattr(token, "end_ts", getattr(token, "end", None)),
+                "start_ts": getattr(token, "start_time", getattr(token, "start_ts", getattr(token, "start", None))),
+                "end_ts": getattr(token, "end_time", getattr(token, "end_ts", getattr(token, "end", None))),
             }
         )
     return out
 
 
+def model_options() -> dict:
+    import torch
+    device = os.environ.get("COMFYRIZZ_QWEN_DEVICE", "cuda:0" if torch.cuda.is_available() else "cpu")
+    return {
+        "device_map": device,
+        "dtype": torch.bfloat16 if device.startswith("cuda") else torch.float32,
+        "attn_implementation": "sdpa",
+    }
+
+
+def model_path(model: str) -> str:
+    """An optional local snapshot root lets deployment pin weights without editing the adapter."""
+    root = os.environ.get("COMFYRIZZ_QWEN_MODELS")
+    return os.path.join(root, model.split("/")[-1]) if root else model
+
+
 class Qwen3Aligner:
     """Qwen3-ForcedAligner-0.6B as a token provider for ``word_timings``.
 
-    The call shape is [unverified] until a GPU run. A missing install raises
+    The class is exported by qwen_asr, not qwen_tts. A missing install raises
     ``QwenRuntimeUnavailable``; the narrator then keeps the syllable fallback.
     """
 
     def available(self) -> bool:
-        return importlib.util.find_spec("qwen_tts") is not None
+        return importlib.util.find_spec("qwen_asr") is not None
 
     def align(self, samples: np.ndarray, sample_rate: int, text: str, lang: str) -> list[dict]:
-        qwen_tts = _import_qwen_tts()
-        aligner_cls = getattr(qwen_tts, "Qwen3ForcedAligner", None)
-        if aligner_cls is None:
-            raise QwenRuntimeUnavailable("qwen_tts.Qwen3ForcedAligner is missing")
-        aligner = aligner_cls.from_pretrained(ALIGNER_MODEL)
-        result = aligner.align(audio=np.asarray(samples), sample_rate=sample_rate, text=text, language=lang)
-        return coerce_aligner_tokens(result)
+        try:
+            from qwen_asr import Qwen3ForcedAligner
+        except ImportError as exc:
+            raise QwenRuntimeUnavailable('qwen-asr is required for forced alignment') from exc
+        if not hasattr(self, "_model"):
+            self._model = Qwen3ForcedAligner.from_pretrained(model_path(ALIGNER_MODEL), **model_options())
+        result = self._model.align(audio=(np.asarray(samples), sample_rate), text=text, language=lang)
+        return coerce_aligner_tokens(result[0])
 
 
 class Qwen3Asr:
     """Qwen3-ASR-0.6B transcript for the mispronunciation check.
 
-    The package name and call shape are [unverified] until a GPU run. Tests
-    pass a scripted fake and never import this.
+    Reuses a loaded qwen_asr model across scenes. Tests substitute the model.
     """
 
     def available(self) -> bool:
@@ -158,8 +173,11 @@ class Qwen3Asr:
         model_cls = getattr(qwen_asr, "Qwen3ASRModel", None)
         if model_cls is None:
             raise QwenRuntimeUnavailable("qwen_asr.Qwen3ASRModel is missing")
-        model = model_cls.from_pretrained(ASR_MODEL)
-        result = model.transcribe(audio=np.asarray(samples), sample_rate=sample_rate, language=lang)
+        if not hasattr(self, "_model"):
+            self._model = model_cls.from_pretrained(model_path(ASR_MODEL), **model_options(), max_new_tokens=512)
+        result = self._model.transcribe(audio=(np.asarray(samples), sample_rate), language=lang)
+        if isinstance(result, list):
+            result = result[0]
         if isinstance(result, str):
             return result
         if isinstance(result, dict):
@@ -168,7 +186,11 @@ class Qwen3Asr:
 
 
 class Qwen3Tts:
-    """Real VoiceDesign + Base-clone adapter. Tests never construct a successful call."""
+    """Real designed-reference cloning or instruction-following preset narration."""
+
+    def __init__(self, voice_cfg: dict | None = None):
+        self.config = voice_cfg or {}
+        self.custom = self.config.get("qwen_mode", "design") == "custom"
 
     def available(self) -> bool:
         return importlib.util.find_spec("qwen_tts") is not None
@@ -179,11 +201,22 @@ class Qwen3Tts:
         model_cls = getattr(qwen_tts, "Qwen3TTSModel", None)
         if model_cls is None:
             raise QwenRuntimeUnavailable("qwen_tts.Qwen3TTSModel is missing")
-        # from_pretrained / generate_voice_design keyword names are [unverified].
-        design = model_cls.from_pretrained(DESIGN_MODEL)
-        wavs, sr = design.generate_voice_design(text=reference_line, language=lang, instruct=persona)
+        if self.custom:
+            speaker = self.config.get("voice", "Ryan")
+            if speaker.lower() not in CUSTOM_SPEAKERS:
+                raise ValueError(f"Unknown Qwen CustomVoice speaker: {speaker}")
+            self._base = model_cls.from_pretrained(model_path(CUSTOM_MODEL), **model_options())
+            return {"speaker": speaker}
+        self._seed(42)
+        design = model_cls.from_pretrained(model_path(DESIGN_MODEL), **model_options())
+        wavs, sr = design.generate_voice_design(text=reference_line, language=lang, instruct=persona, max_new_tokens=2048)
         audio = np.asarray(wavs[0], dtype=np.float32)
-        base = model_cls.from_pretrained(BASE_MODEL)
+        del design
+        gc.collect()
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        base = model_cls.from_pretrained(model_path(BASE_MODEL), **model_options())
         prompt = base.create_voice_clone_prompt(ref_audio=(audio, int(sr)), ref_text=reference_line)
         self._base = base
         return {
@@ -192,6 +225,7 @@ class Qwen3Tts:
             "sample_rate": int(sr),
             "persona": persona,
             "lang": lang,
+            "reference_audio": audio,
         }
 
     def synthesize(self, text: str, *, prompt: dict, instruct: str | None, lang: str, seed: int) -> tuple[np.ndarray, int]:
@@ -200,21 +234,20 @@ class Qwen3Tts:
         model_cls = getattr(qwen_tts, "Qwen3TTSModel", None)
         if model_cls is None:
             raise QwenRuntimeUnavailable("qwen_tts.Qwen3TTSModel is missing")
-        base = getattr(self, "_base", None) or model_cls.from_pretrained(BASE_MODEL)
+        base = getattr(self, "_base", None) or model_cls.from_pretrained(model_path(CUSTOM_MODEL if self.custom else BASE_MODEL), **model_options())
+        self._base = base
         self._seed(seed)
         kwargs = {
             "text": text,
             "language": lang,
-            "voice_clone_prompt": prompt.get("voice_clone_prompt", prompt),
+            "max_new_tokens": 2048,
+            "non_streaming_mode": self.config.get("non_streaming", self.custom),
         }
-        # Per-scene emotion on the Base clone is [unverified]; drop it if the call rejects it.
-        if instruct:
-            kwargs["instruct"] = instruct
-        try:
-            wavs, sr = base.generate_voice_clone(**kwargs)
-        except TypeError:
-            kwargs.pop("instruct", None)
-            wavs, sr = base.generate_voice_clone(**kwargs)
+        if self.custom:
+            wavs, sr = base.generate_custom_voice(**kwargs, speaker=prompt["speaker"], instruct=instruct or "")
+        else:
+            # Base supports cloning, not instruction following. Direction is applied in VoiceDesign.
+            wavs, sr = base.generate_voice_clone(**kwargs, voice_clone_prompt=prompt.get("voice_clone_prompt", prompt))
         audio = to_sample_rate(np.asarray(wavs[0], dtype=np.float32), int(sr), SAMPLE_RATE)
         return audio, SAMPLE_RATE
 

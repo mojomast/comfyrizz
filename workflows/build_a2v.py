@@ -59,6 +59,13 @@ def main() -> int:
     }
     # stage 1's concat now takes the encoded narration instead of an empty audio latent
     graph[STAGE1_CONCAT_ID]["inputs"]["audio_latent"] = [AUDIO_ENCODE_ID, 0]
+    # Encoding supplies samples, not a noise mask. Without this mask the sampler
+    # destroys the supplied speech and generates new audio, breaking lip sync.
+    graph["46"] = {"class_type": "SolidMask", "inputs": {"value": 0.0, "width": 64, "height": 64}}
+    graph["47"] = {"class_type": "SetLatentNoiseMask", "inputs": {"samples": [AUDIO_ENCODE_ID, 0], "mask": ["46", 0]}}
+    graph[STAGE1_CONCAT_ID]["inputs"]["audio_latent"] = ["47", 0]
+    graph["22"]["inputs"]["audio_latent"] = ["47", 0]
+    graph["12"]["inputs"]["sampler_name"] = "euler"
 
     mapping = dict(params["map"])
     # the plate graph's `frames` maps to the empty-audio node's own length as well; that node is gone

@@ -21,7 +21,41 @@ A build produces an editable package and preview. Narration remains script
 text until synthesis; image requests create pending GPU jobs. Audio synthesis,
 GPU execution and MP4 export are separate operations. Procedural visuals render
 the existing mesh backdrop and text layouts; visual-direction prose is not an
-animation program. For an actual diagram the agent must provide SVG markup.
+animation program. Built-in sketch and technical-flow recipes render bounded
+diagrams from editable scene items; custom diagrams still need SVG markup.
+
+## Animation and richer layouts
+
+The agent authors all eight layouts: **title, hero, stat, chart, list, split,
+compare and code**. Stat/chart use plan-level datasets with supplied values, units
+and provenance; split/compare use two labeled plates; code carries actual source
+and language. See [animation and storytelling](ANIMATION_STORYTELLING.md) for the
+six recipes, timing contract, editor controls and live showcases.
+
+Try these requests:
+
+- “Build a procedural-only workflow explainer. Use a technical-flow list with
+  Request, Worker and Result; anchor each node to that word in the narration.
+  Use a paper reveal into the next scene and finish with a kinetic title.”
+- “Change only this hero's shape animation from circle to triangle. Keep its
+  intensity, seed, copy and narration.”
+- “Use narration phrases instead of the explicit seconds on the workflow scene.”
+- “Remove the focus recipe but preserve its original text-entry animation.”
+
+The model receives the recipe/layout compatibility matrix on drafting and
+revision turns, plus usage examples, whole-frame focus bounds, bounded morph
+shapes, cue precedence and provenance, reveal-transition limits, and CPU/future
+adapter boundaries. `project_patch_plan` merges omitted motion fields and nested
+focus/morph fields. `null` clears a token or the whole motion object; `{recipe:null}`
+preserves other motion settings. To switch to phrase timing, explicitly clear
+`cue_seconds`. Focus and paper-cut enter at scene start; they do not consume phrase
+anchors. Kokoro phrase timing is estimated, not forced alignment.
+
+The authenticated `GET /api/animation-options` endpoint supplies editor/integration
+discovery. It is not a model-callable tool: the agent gets its knowledge through
+the system prompt, bundled skills and JSON tool descriptions. A contract test
+checks the actual model requests against the shared catalogue in both Chat and
+Express modes, for drafting and revision.
 
 ## Four bundled skills
 
@@ -34,7 +68,9 @@ Canonical Markdown lives under `packages/agent/src/skills/`:
 | `storyboard-direction` | Choose concrete, consistent visuals within actual rendering capabilities |
 | `project-revision` | Make scoped corrections while preserving unrelated work and stable scene IDs |
 
-Each skill is versioned `1.0.0`; the runtime prompt is versioned separately.
+The runtime prompt is `2.2.0` and skill catalogue is `1.2.0`.
+`storyboard-direction` is `1.2.0`, `project-revision` is `1.1.0`, and the briefing
+and scripting skills remain `1.0.0`.
 At most three skills are injected per model request. Once a draft exists,
 `project-revision` replaces `video-brief`. The loader resolves fixed bundled
 paths; compiled packages include the canonical source Markdown. Source links in
@@ -48,7 +84,8 @@ These are instruction-tuned skills, not a fine-tuned set of model weights.
   `project_patch_plan` changes only supplied fields and supports scene additions,
   removals and ordering. Patches validate atomically.
 - Runtime/tool limits align with package limits: narration ≤600 characters,
-  visual notes ≤512, headline ≤48, supporting line ≤90, hero body ≤240.
+  visual notes ≤512, headline ≤64, supporting line ≤120, hero body ≤240;
+  per-layout constraints may be tighter. Follow the active tool schema.
 - `project_build` saves through package revision locking. Field-level merging
   preserves unrelated manual copy, scenes, ordering, media, audio and timing.
   Existing manual edits are included in model context; locked scenes and edits
@@ -110,6 +147,26 @@ general quality improvement. Timing varies with provider latency, and tokens
 include repeated context across model steps. The first integration used fewer
 media assertions than the final paired comparison. Automated checks establish
 state transitions and preservation, not a comprehensive visual-quality score.
+
+### Animation knowledge follow-up: October 20, 2026
+
+With prompt `2.2.0`, a live OpenCode Go / `deepseek-v4.1-flash` run passed
+**2/2 turns**. It built all six recipes in compatible layouts, then changed a morph
+destination, replaced explicit seconds with phrase cues, and removed the focus
+recipe while retaining its other motion settings. Assertions checked stable IDs,
+unchanged non-motion scene content, preserved seeds/intensity/entry and no pending
+GPU work. This is a targeted behavioral check, not a general quality benchmark.
+
+Reproduce only that case with:
+
+```bash
+node packages/agent/scripts/eval-conversation.mjs \
+  --case express-animation-build-revise --label animation \
+  --output .runtime/evals/animation.json
+```
+
+Local evidence for the completed run is `.runtime/evals/animation-handoff.json`;
+credentials and evaluation artifacts stay outside source control.
 
 ### Reproduce
 

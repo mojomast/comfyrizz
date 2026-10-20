@@ -6,6 +6,11 @@ Deadline: **Thu Oct 30, 9:00 am PT = 12:00 pm Toronto**. Submit the evening of *
 
 ## Key dates (Toronto time)
 
+Follow-on frontend work: [Frontend editor research and implementation
+plan](FRONTEND_EDITOR_PLAN.md) (2026-10-19) proposes the scene timeline, shared
+preview timing/audio, recovery, generation workspace and usability milestones.
+Its estimates are separate from the original dates below.
+
 | Milestone | Target | Exit check |
 |---|---|---|
 | M0 Kickoff | Sat Oct 17 | Repo `/home/box/comfyrizz` scaffolded; Pi and Hermes started on A1/A2 and B1/B2/B3 |

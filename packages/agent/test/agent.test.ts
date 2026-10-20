@@ -150,6 +150,8 @@ test('tools: propose + edit package, SVG result, planned FLUX job', async () => 
   assert.equal(image.note, 'planned only; no GPU job was submitted');
   assert.match(image.caption, /no text/);
   assert.equal(image.asset.gen.model, 'flux-3-klein');
+  assert.equal(image.asset.model_license.id, 'FLUX-Kommunity');
+  assert.equal(image.asset.model_license.url, 'https://huggingface.co/black-forest-labs/flux-3-image-klein');
   assert.equal(image.reference_edit, false);
   assert.equal(image.output_aspect, '16:9');
   assert.equal(image.asset.gen.workflow, 'workflows/flux3_klein_t2i.api.json');

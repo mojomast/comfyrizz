@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import { request as httpRequest } from 'node:http';
 import { spawn } from 'node:child_process';
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -58,9 +59,45 @@ function renderApi(): Plugin {
   };
 }
 
+/**
+ * E2E only. Forwards `/api` to the local Comfyrizz server while keeping the
+ * browser Host and Origin, which the server requires to match on POST.
+ * Unset COMFYRIZZ_API leaves the dev server unchanged.
+ */
+function apiProxy(): Plugin {
+  const target = process.env.COMFYRIZZ_API;
+  return {
+    name: 'comfyrizz-api-proxy',
+    configureServer(server) {
+      if (!target) return;
+      const upstream = new URL(target);
+      server.middlewares.use((req, res, next) => {
+        const path = req.url ?? '';
+        if (!path.startsWith('/api')) return next();
+        const proxy = httpRequest({
+          hostname: upstream.hostname,
+          port: upstream.port,
+          path,
+          method: req.method,
+          headers: req.headers,
+        }, upstreamResponse => {
+          res.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+          upstreamResponse.pipe(res);
+        });
+        proxy.on('error', () => {
+          if (res.headersSent) return;
+          res.statusCode = 502;
+          res.end(JSON.stringify({ error: 'api proxy failed' }));
+        });
+        req.pipe(proxy);
+      });
+    },
+  };
+}
+
 export default defineConfig({
   publicDir: join(repoRoot, 'apps', 'renderer', 'public'),
-  plugins: [react(), renderApi()],
+  plugins: [apiProxy(), react(), renderApi()],
   resolve: {
     dedupe: ['remotion', 'react', 'react-dom'],
     alias: {

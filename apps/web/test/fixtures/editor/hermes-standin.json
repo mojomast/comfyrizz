@@ -1,0 +1,173 @@
+{
+  "id": "pkg_hermesstandin",
+  "title": "Hermes stand-in (12 scenes, 190s)",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible"
+  },
+  "voice": {
+    "enabled": true
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "layout": "hero",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 1"
+      },
+      "narration": "Beat 1 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s02",
+      "layout": "list",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 2"
+      },
+      "narration": "Beat 2 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s03",
+      "layout": "split",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 3"
+      },
+      "narration": "Beat 3 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s04",
+      "layout": "compare",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 4"
+      },
+      "narration": "Beat 4 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s05",
+      "layout": "code",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 5"
+      },
+      "narration": "Beat 5 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s06",
+      "layout": "hero",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 6"
+      },
+      "narration": "Beat 6 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s07",
+      "layout": "list",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 7"
+      },
+      "narration": "Beat 7 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s08",
+      "layout": "split",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 8"
+      },
+      "narration": "Beat 8 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s09",
+      "layout": "compare",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 9"
+      },
+      "narration": "Beat 9 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s10",
+      "layout": "code",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 10"
+      },
+      "narration": "Beat 10 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s11",
+      "layout": "hero",
+      "preferredFrames": 489,
+      "copy": {
+        "headline": "Beat 11"
+      },
+      "narration": "Beat 11 of the stand-in.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s12",
+      "layout": "list",
+      "preferredFrames": 486,
+      "copy": {
+        "headline": "Beat 12"
+      },
+      "narration": "Beat 12 of the stand-in.",
+      "transitionOut": {
+        "type": "none",
+        "frames": 0
+      }
+    }
+  ]
+}

@@ -27,7 +27,8 @@ const exampleDir = resolve(repoRoot, exampleArg >= 0 ? process.argv[exampleArg +
 const packagePath = join(exampleDir, 'package.json');
 const audioDir = join(exampleDir, 'audio');
 const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
-const durations = parseDurations(JSON.parse(readFileSync(join(audioDir, 'durations.json'), 'utf8')));
+const rawDurations = JSON.parse(readFileSync(join(audioDir, 'durations.json'), 'utf8'));
+const durations = parseDurations(rawDurations);
 
 const options = compileOptionsFromDurations(durations);
 const timeline = compileTimeline(pkg, options);
@@ -105,6 +106,7 @@ writeFileSync(join(exampleDir, 'captions.srt'), captionsToSrt(timeline.captions,
 writeFileSync(join(exampleDir, 'captions.vtt'), captionsToVtt(timeline.captions, timeline.fps));
 
 const audioBytes = readFileSync(normPath);
+const qwen = durations.engine === 'qwen3-tts';
 pkg.assets = pkg.assets ?? {};
 pkg.assets.a_narration = {
   kind: 'audio',
@@ -122,19 +124,20 @@ pkg.assets.a_narration = {
   redistributable: true,
   model_license: {
     id: 'Apache-2.0',
-    url: 'https://huggingface.co/hexgrad/Kokoro-82M',
-    note: 'Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md.',
+    url: qwen ? `https://huggingface.co/${durations.model}` : 'https://huggingface.co/hexgrad/Kokoro-82M',
+    note: qwen ? `Qwen3-TTS 1.7B ${durations.voices} narration.` : 'Kokoro-82M weights; kokoro-onnx wrapper, voices and phonemizer notices are kept in packages/tts/README.md.',
   },
   gen: {
-    generator: 'kokoro',
-    model: 'kokoro-v1.0.onnx',
+    generator: qwen ? 'qwen3-tts' : 'kokoro',
+    model: qwen ? durations.model : 'kokoro-v1.0.onnx',
     inputs: {
       voice: durations.voice,
       speed: durations.speed,
+      voice_settings: JSON.stringify(rawDurations.voiceSettings ?? pkg.voice),
       sample_rate: durations.sampleRate,
       chunks: Object.values(durations.scenes).reduce((total, scene) => total + scene.chunks.length, 0),
     },
-    caption: 'Six-sentence-level-scene narration synthesized locally on CPU from the package narration text.',
+    caption: `Measured ${qwen ? 'Qwen3-TTS' : 'Kokoro'} narration synthesized from the package narration text.`,
   },
 };
 // Reference the narration asset from every narrated scene so the validator does

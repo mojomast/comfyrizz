@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,7 @@ from qa import MAX_ATTEMPTS, missing_pronunciations, should_regenerate, wer
 from qwen import (
     ALIGNER_MODEL,
     BASE_MODEL,
+    CUSTOM_MODEL,
     DEFAULT_REFERENCE,
     DESIGN_MODEL,
     ENGINE_QWEN,
@@ -120,9 +122,33 @@ def build_chunks(sentences: list[str], spoken_sentences: list[str], speech_secon
     """
     counts = [len(sentence.split()) for sentence in sentences]
     accepted = None
-    if tokens and sum(counts) == len(tokens):
+    if tokens:
         try:
-            accepted = word_timings(" ".join(sentences), speech_seconds, tokens)
+            # The aligner may split a hyphenated display word into several tokens.
+            # Merge only exact normalized matches; never invent token timing.
+            normalized = lambda value: re.sub(r"[^\w]", "", value.lower())
+            merged, cursor = [], 0
+            for word in " ".join(sentences).split():
+                target, gathered, parts = normalized(word), "", []
+                while cursor < len(tokens) and (not parts or gathered != target):
+                    token = tokens[cursor]
+                    gathered += normalized(token["text"])
+                    parts.append(token)
+                    cursor += 1
+                    if not target.startswith(gathered):
+                        raise ValueError("aligner token text does not match display words")
+                if gathered != target:
+                    raise ValueError("incomplete alignment")
+                merged.append({"text": word, "start": parts[0].get("start", parts[0].get("start_ts")), "end": parts[-1].get("end", parts[-1].get("end_ts"))})
+            if cursor != len(tokens) or not merged:
+                raise ValueError("extra alignment tokens")
+            # Real speech often ends before the WAV does. Validate the measured
+            # endpoint first, then hold the last caption across trailing silence.
+            end = float(merged[-1]["end"])
+            if end > speech_seconds + 0.02:
+                raise ValueError("alignment exceeds the audio")
+            accepted = word_timings(" ".join(sentences), end, merged)
+            accepted[-1]["end"] = round(speech_seconds, 4)
         except ValueError:
             accepted = None
     groups = None
@@ -147,7 +173,7 @@ def build_chunks(sentences: list[str], spoken_sentences: list[str], speech_secon
             chunk_seconds = 0.0001
         local = None
         if groups is not None and groups[index]:
-            origin = float(groups[index][0]["start"])
+            origin = bounds[index]
             local = [
                 {
                     "text": token["text"],
@@ -156,7 +182,6 @@ def build_chunks(sentences: list[str], spoken_sentences: list[str], speech_secon
                 }
                 for token in groups[index]
             ]
-            local[0]["start"] = 0.0
             # Hold the last word through the pause before the next sentence so
             # the chunk still sums to its measured duration.
             local[-1]["end"] = round(chunk_seconds, 4)
@@ -306,13 +331,16 @@ def narrate_qwen(
     if resolve_engine(voice_cfg) != ENGINE_QWEN:
         return _unavailable(voice_cfg, "engine is not qwen3-tts", kokoro_runner)
 
-    adapter = tts if tts is not None else Qwen3Tts()
+    custom = voice_cfg.get("qwen_mode", "design") == "custom"
+    adapter = tts if tts is not None else Qwen3Tts(voice_cfg)
     available = adapter.available() if hasattr(adapter, "available") else True
     if not available:
         return _unavailable(voice_cfg, "qwen3-tts runtime is unavailable", kokoro_runner)
 
     lang = qwen_language_name(voice_cfg)
     persona = voice_cfg.get("persona") if isinstance(voice_cfg.get("persona"), str) and voice_cfg.get("persona").strip() else "a clear neutral narrator"
+    if not custom and voice_cfg.get("delivery"):
+        persona += ". " + voice_cfg["delivery"]
     voice_id = voice_cfg.get("voice") if isinstance(voice_cfg.get("voice"), str) and voice_cfg.get("voice").strip() else "af_heart"
     try:
         speed = float(voice_cfg.get("speed", 1.0))
@@ -320,25 +348,32 @@ def narrate_qwen(
         speed = 1.0
     if not 0.5 <= speed <= 2.0:
         raise SystemExit(f"speed {speed} outside 0.5-2.0")
+    if speed != 1.0:
+        raise SystemExit("Qwen does not support the Kokoro speed control; use delivery direction and speed=1.")
 
+    print(json.dumps({"event": "qwen_phase", "phase": "loading_custom_voice" if custom else "designing_voice"}), flush=True)
     try:
         prompt = _adapter_call(
             "voice design",
-            lambda: adapter.design(persona=persona, lang=lang, reference_line=DEFAULT_REFERENCE),
+            lambda: adapter.design(persona=persona, lang=lang, reference_line=voice_cfg.get("reference_text", DEFAULT_REFERENCE)),
         )
     except QwenRuntimeUnavailable as exc:
         return _unavailable(voice_cfg, str(exc), kokoro_runner)
 
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
+    if "reference_audio" in prompt:
+        write_wav(out / "voice-reference.wav", to_sample_rate(prompt["reference_audio"], prompt["sample_rate"]))
+        (out / "voice-reference.json").write_text(json.dumps({"text": prompt["ref_text"], "persona": persona, "language": lang, "designModel": DESIGN_MODEL, "baseModel": BASE_MODEL}, indent=2))
     pad = np.zeros(int(round(padding * SAMPLE_RATE)), dtype=np.float32)
     report: dict = {
         "version": 1,
         "engine": ENGINE_QWEN,
         "engineVersion": "1.7B",
-        "model": BASE_MODEL,
-        "designModel": DESIGN_MODEL,
-        "voices": "voice-design+base-clone",
+        "model": CUSTOM_MODEL if custom else BASE_MODEL,
+        "designModel": None if custom else DESIGN_MODEL,
+        "voices": "custom-voice" if custom else "voice-design+base-clone",
+        "voiceSettings": dict(voice_cfg),
         "voice": voice_id,
         "language": resolve_language(voice_cfg),
         "lang": lang,
@@ -353,13 +388,15 @@ def narrate_qwen(
     }
 
     full: list[np.ndarray] = []
-    for scene in package.get("scenes", []):
+    narrated_scenes = [s for s in package.get("scenes", []) if (s.get("narration") or "").strip()]
+    for scene_index, scene in enumerate(narrated_scenes):
+        print(json.dumps({"event": "voice_scene_start", "sceneId": scene["id"], "completed": scene_index, "total": len(narrated_scenes)}), flush=True)
         display = (scene.get("narration") or "").strip()
         if not display:
             continue
         sentences = split_sentences(display)
         spoken, spoken_sentences = spoken_for_scene(scene, sentences)
-        instruct = scene.get("narration_style") if isinstance(scene.get("narration_style"), str) and scene.get("narration_style").strip() else None
+        instruct = scene.get("narration_style") if isinstance(scene.get("narration_style"), str) and scene.get("narration_style").strip() else voice_cfg.get("delivery") or None
         seed = scene_seed(str(scene.get("id", "")), spoken)
         try:
             audio, qa = _synthesize_checked(
@@ -390,6 +427,7 @@ def narrate_qwen(
             "seed": qa["seeds"][-1] if qa.get("seeds") else seed,
             "qa": qa,
         }
+        print(json.dumps({"event": "voice_scene_done", "sceneId": scene["id"], "completed": scene_index + 1, "total": len(narrated_scenes)}), flush=True)
         full.append(scene_audio)
         full.append(np.zeros(int(round(WORD_SPLIT_GAP * SAMPLE_RATE)), dtype=np.float32))
 

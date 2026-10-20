@@ -1,0 +1,112 @@
+/* Per-scene animation & storytelling controls. Mounted below the script/audio inspector. */
+.animation-panel { border-top: 1px solid var(--line, #232b3a); padding: 12px 16px 18px; }
+.animation-empty { color: var(--muted, #8a93a6); font-size: 12px; margin: 0; }
+.animation-settings {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.animation-settings.locked { opacity: 0.78; }
+.animation-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+.animation-title {
+  color: var(--accent-2, #9fb2ff);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.animation-layout {
+  border: 1px solid var(--line, #232b3a);
+  border-radius: 999px;
+  color: var(--muted, #8a93a6);
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  padding: 2px 6px;
+  text-transform: uppercase;
+}
+.animation-lock {
+  margin-left: auto;
+  border: 1px solid #5a4a1a;
+  border-radius: 999px;
+  color: var(--warn, #ffc46b);
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  text-transform: uppercase;
+}
+.animation-settings label { display: block; font-size: 11px; color: var(--muted, #8a93a6); margin: 7px 0 3px; }
+.animation-settings select,
+.animation-settings input:not([type="range"]),
+.animation-settings textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+}
+.animation-settings textarea {
+  resize: vertical;
+  background: #0b0e15;
+  border: 1px solid var(--line, #232b3a);
+  border-radius: 9px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 11px;
+}
+.animation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 0 8px;
+}
+.animation-recipe-fields { align-items: end; }
+.animation-conditional { margin-top: 2px; }
+.animation-focus { margin-top: 6px; }
+.animation-focus-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.animation-subhead { display: block; color: var(--muted, #8a93a6); font-size: 10px; letter-spacing: 0.3px; margin-top: 8px; text-transform: uppercase; }
+.animation-value {
+  color: var(--accent-2, #9fb2ff);
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+.animation-settings input[type="range"] { width: 100%; accent-color: var(--accent, #6d8cff); margin-top: 8px; }
+.animation-hint {
+  color: var(--muted, #8a93a6);
+  font-size: 10px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+.animation-hint[data-animation-timing="estimated"],
+.animation-hint[data-animation-timing="unavailable"] { color: var(--warn, #ffc46b); }
+.animation-recipe-description { min-height: 14px; }
+.animation-cues textarea { margin-top: 5px; }
+.animation-transition { margin-top: 8px; }
+.animation-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+.animation-actions button { font-size: 10px; padding: 4px 8px; }
+.animation-status { color: var(--muted, #8a93a6); font-size: 10px; }
+.scene-lock {
+  border: 1px solid #5a4a1a;
+  border-radius: 999px;
+  color: var(--warn, #ffc46b);
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  padding: 2px 6px;
+  text-transform: uppercase;
+}
+
+@media (max-width: 760px) {
+  .animation-grid,
+  .animation-focus-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .animation-actions { align-items: flex-start; }
+}
+@media (max-width: 430px) {
+  .animation-grid,
+  .animation-focus-grid { grid-template-columns: minmax(0, 1fr); }
+}

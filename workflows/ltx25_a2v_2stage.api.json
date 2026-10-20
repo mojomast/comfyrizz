@@ -10,7 +10,7 @@
   "class_type": "LTXVConcatAVLatent",
   "inputs": {
    "audio_latent": [
-    "45",
+    "47",
     0
    ],
    "video_latent": [
@@ -28,7 +28,7 @@
  "12": {
   "class_type": "KSamplerSelect",
   "inputs": {
-   "sampler_name": "euler_ancestral"
+   "sampler_name": "euler"
   }
  },
  "13": {
@@ -125,8 +125,8 @@
   "class_type": "LTXVConcatAVLatent",
   "inputs": {
    "audio_latent": [
-    "16",
-    1
+    "47",
+    0
    ],
    "video_latent": [
     "34",
@@ -313,6 +313,27 @@
    ],
    "audio_vae": [
     "4",
+    0
+   ]
+  }
+ },
+ "46": {
+  "class_type": "SolidMask",
+  "inputs": {
+   "height": 64,
+   "value": 0.0,
+   "width": 64
+  }
+ },
+ "47": {
+  "class_type": "SetLatentNoiseMask",
+  "inputs": {
+   "mask": [
+    "46",
+    0
+   ],
+   "samples": [
+    "45",
     0
    ]
   }

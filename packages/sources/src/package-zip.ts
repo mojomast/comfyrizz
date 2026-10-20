@@ -96,7 +96,10 @@ export function createZip(entries: ZipEntry[]): Buffer {
 
 function assetPath(assetId: string, asset: PackageAssetLike): string {
   const file = asset.file?.replace(/\\/g, '/');
-  if (file?.startsWith('assets/') && !file.includes('..')) return file;
+  if (file) {
+    if (file.startsWith('/') || /^[a-z]:/i.test(file)) throw new Error(`unsafe zip path: ${file}`);
+    return safePath(file);
+  }
   const ext = asset.kind === 'video' ? 'mp4' : asset.kind === 'audio' ? 'wav' : 'bin';
   return `assets/${assetId}.${ext}`;
 }
@@ -117,8 +120,12 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
   const entries: ZipEntry[] = [];
   const included: string[] = [];
   const excluded: ExcludedAsset[] = [];
+  const archivedPackage = structuredClone(input.package);
 
-  entries.push({ path: 'package.json', data: `${JSON.stringify(input.package, null, 2)}\n` });
+  // Filled after asset paths are resolved so generated assets without a declared file
+  // also point at their archived bytes.
+  const packageEntry = { path: 'package.json', data: '' };
+  entries.push(packageEntry);
   if (input.timeline !== undefined) entries.push({ path: 'timeline.json', data: `${JSON.stringify(input.timeline, null, 2)}\n` });
   for (const [name, data] of Object.entries(input.workflows ?? {})) {
     entries.push({ path: safePath(name.startsWith('workflows/') ? name : `workflows/${name}`), data });
@@ -162,9 +169,23 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
       excluded.push({ assetId, ...(asset.file ? { file: asset.file } : {}), sha256: asset.sha256, reason: 'sha256 mismatch; refusing to ship a different file' });
       continue;
     }
-    entries.push({ path: assetPath(assetId, asset), data: buffer });
+    const path = assetPath(assetId, asset);
+    entries.push({ path, data: buffer });
+    archivedPackage.assets![assetId].file = path;
     included.push(assetId);
+    for (const [name, variant] of Object.entries(asset.variants ?? {})) {
+      if (!variant.file) continue;
+      const variantBytes = input.assetVariants?.[assetId]?.[name];
+      if (variantBytes === undefined || (variant.sha256 && sha256Hex(variantBytes) !== variant.sha256)) {
+        excluded.push({ assetId, file: variant.file, reason: variantBytes === undefined ? `variant ${name} bytes were not provided to the archive builder` : `variant ${name} sha256 mismatch` });
+        continue;
+      }
+      const variantPath = assetPath(assetId, { ...asset, file: variant.file });
+      entries.push({ path: variantPath, data: variantBytes });
+      archivedPackage.assets![assetId].variants![name].file = variantPath;
+    }
   }
+  packageEntry.data = `${JSON.stringify(archivedPackage, null, 2)}\n`;
 
   for (const extra of input.extraExcluded ?? []) {
     excluded.push(extra);

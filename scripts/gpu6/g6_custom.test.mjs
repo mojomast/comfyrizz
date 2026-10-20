@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { stageRunPackage, writeStandInMedia, buildFakeManifest } from './g6_run.mjs';
+
+test('custom test package stages its inputs and fake generation preserves ready narration', t => {
+  const root=mkdtempSync(join(tmpdir(),'g6-custom-'));
+  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const source=join(root,'source'), workspace=join(root,'workspace');
+  mkdirSync(join(source,'audio'),{recursive:true});
+  mkdirSync(join(source,'assets'));
+  const pkg=JSON.parse(readFileSync(new URL('../../examples/launch-demo/package.json',import.meta.url),'utf8'));
+  pkg.id='pkg_customtest01';
+  pkg.assets.a_voice={kind:'audio',origin:'upload',status:'ready',file:'audio/voice.wav',sha256:createHash('sha256').update('original narration bytes').digest('hex'),license:{id:'CC0-1.0'},redistributable:true};
+  pkg.assets.a_generated={kind:'image',origin:'generated',status:'pending',gen:{generator:'flux3-klein'}};
+  writeFileSync(join(source,'audio/voice.wav'),'original narration bytes');
+  writeFileSync(join(source,'package.json'),JSON.stringify(pkg));
+  const staged=stageRunPackage(join(source,'package.json'),workspace);
+  assert.equal(staged.id,pkg.id);
+  assert.equal(readFileSync(join(workspace,'audio/voice.wav'),'utf8'),'original narration bytes');
+  staged.assets.a_generated={...staged.assets.a_generated,status:'ready',file:'assets/new.png'};
+  writeFileSync(join(workspace,'assets/new.png'),'broken fake transport bytes');
+  const results=writeStandInMedia(staged,{packageDir:workspace,generatedIds:new Set(['a_generated'])});
+  assert.equal(results.length,1);
+  assert.equal(results[0].ok,true);
+  assert.equal(readFileSync(join(workspace,'audio/voice.wav'),'utf8'),'original narration bytes');
+  assert.equal(readFileSync(join(source,'audio/voice.wav'),'utf8'),'original narration bytes');
+  const fake=buildFakeManifest(pkg,[]);
+  assert.equal(fake.manifest.packageId,pkg.id);
+  assert.equal(fake.manifest.run_id,`run_${pkg.id}`);
+  writeFileSync(join(source,'package.json'),JSON.stringify({...pkg,scenes:[]}));
+  assert.throws(()=>stageRunPackage(join(source,'package.json'),join(root,'invalid')),/Test package invalid/);
+});

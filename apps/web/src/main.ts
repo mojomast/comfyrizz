@@ -2,30 +2,27 @@ import './style.css';
 import { mountSettingsCard } from './colab-card';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
+import { apiFetch, installSessionToken, savePackageRequest, sessionToken } from './editor/api.ts';
+import { createAutosave } from './editor/autosave.ts';
+import { createIndexedDbDraftStore, createMemoryDraftStore } from './editor/recovery.ts';
+import { createEditorStore } from './editor/store.ts';
+import { mountAnimationInspector } from './editor/inspector/animation.ts';
+import { mountVoiceSettings } from './voice-settings';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
 import { mountPreview, updatePreview } from './preview';
+import { mountScriptAudioPanel } from './editor/inspector/panel.ts';
+import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
 import type { InlineAsset } from '../../renderer/src/components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 // The C2 server prints http://127.0.0.1:4319/#token=...; the fragment never
 // leaves the browser. Strip it from the visible URL and keep it for API calls.
-const TOKEN_KEY = 'comfyrizz.token';
-const fragmentToken = new URLSearchParams(location.hash.slice(1)).get('token');
-if (fragmentToken) {
-  sessionStorage.setItem(TOKEN_KEY, fragmentToken);
-  history.replaceState(null, '', `${location.pathname}${location.search}`);
-}
-const token = fragmentToken ?? sessionStorage.getItem(TOKEN_KEY);
-function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  if (token) headers.set('x-comfyrizz-token', token);
-  return fetch(input, { ...init, headers });
-}
+const token = installSessionToken();
 
 /* Lifted from Orbit's Grok Bots shell (MIT): escape, then a tiny markdown subset. */
 function esc(value: unknown): string {
@@ -44,7 +41,77 @@ const colabHost = document.getElementById('colab-card-host');
 if (colabHost) mountSettingsCard(colabHost, apiFetch);
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
+const editorStore = createEditorStore({ package: pkg as never });
+const saveStatusEl = document.getElementById('save-status');
+const paintSaveStatus = () => {
+  if (!saveStatusEl) return;
+  const status = editorStore.saveStatus();
+  saveStatusEl.textContent = editorStore.statusText();
+  saveStatusEl.dataset.state = status;
+};
+editorStore.subscribe(paintSaveStatus);
+paintSaveStatus();
+let autosave: ReturnType<typeof createAutosave> | null = null;
+if (sessionToken()) {
+  const drafts = typeof indexedDB === 'undefined' ? createMemoryDraftStore() : createIndexedDbDraftStore();
+  autosave = createAutosave(editorStore, { save: payload => savePackageRequest(apiFetch, payload), drafts });
+}
+
+/** Flush the shared autosave for an explicit Save/plan action in the inspector. */
+async function saveEditorNow(): Promise<{
+  ok: boolean;
+  packageId: string;
+  baseRevision: number;
+  revision?: number;
+  status: string;
+  text: string;
+}> {
+  await autosave?.flush();
+  const doc = editorStore.getState().doc;
+  const status = editorStore.saveStatus();
+  const revision = Number(doc.package.revision ?? 0);
+  return {
+    ok: status === 'saved',
+    packageId: String(doc.package.id ?? ''),
+    baseRevision: revision,
+    revision,
+    status,
+    text: editorStore.statusText(),
+  };
+}
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
+let editorApi: SceneTimelineHandle | null = null;
+function adoptEditorPackage(next: PackageV1): void {
+  pkg = next;
+  editorStore.replaceDocument({ package: next as never });
+}
+
+/**
+ * `?package=<id>` plus the session token opens that stored project instead of
+ * the bundled demo. Reload then shows the autosaved document. No query leaves
+ * the demo in place.
+ */
+async function openRequestedPackage(): Promise<void> {
+  const loc = globalThis.location;
+  if (!loc || !sessionToken()) return;
+  const requested = new URLSearchParams(loc.search).get('package');
+  if (!requested) return;
+  try {
+    const response = await apiFetch(`/api/package/${encodeURIComponent(requested)}`);
+    if (!response.ok) return;
+    const body = await response.json() as { package?: PackageV1; editor?: unknown };
+    if (!body.package || typeof body.package !== 'object') return;
+    editorStore.replaceDocument({
+      package: body.package as never,
+      ...(body.editor && typeof body.editor === 'object' ? { editor: body.editor as never } : {}),
+    });
+    pkg = body.package;
+    const compiled = editorStore.getState().derived.timeline;
+    if (compiled) timeline = compiled as unknown as Timeline;
+  } catch (error) {
+    console.error('package open failed', error);
+  }
+}
 let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
@@ -136,6 +203,17 @@ const qaState = {
   findings: [] as QaFinding[],
   sheet: false,
 };
+// The contact sheet is an authenticated image. Fetch it with the API header and
+// hand the <img> a blob: URL so the session token never appears in src or logs.
+let qaSheetUrl: string | null = null;
+let qaSheetFor: string | null = null;
+let qaSheetRequest = 0;
+
+function releaseQaSheet(): void {
+  if (qaSheetUrl) URL.revokeObjectURL(qaSheetUrl);
+  qaSheetUrl = null;
+  qaSheetFor = null;
+}
 const runState = {
   active: null as null | { runId: string; backendId: string; status: string },
   events: [] as RunEvent[],
@@ -288,7 +366,7 @@ function renderStoryboard(): void {
         <input type="text" data-scene="${esc(scene.id)}" data-field="${scene.layout === 'hero' ? 'body' : 'sub'}" value="${esc(copy[scene.layout === 'hero' ? 'body' : 'sub'] ?? '')}" placeholder="Add supporting copy…" maxlength="240" />
         ${chart}
         <label>Presenter</label>
-        <select data-presenter-scene="${esc(scene.id)}">
+        <select data-presenter-scene="${esc(scene.id)}" aria-label="Presenter for ${esc(scene.id)}">
           <option value=""${!scene.presenter ? ' selected' : ''}>default</option>
           <option value="off"${scene.presenter === 'off' ? ' selected' : ''}>off</option>
           <option value="pip"${scene.presenter === 'pip' ? ' selected' : ''}>pip</option>
@@ -376,7 +454,7 @@ function renderPalette(): void {
   if (!theme) return;
   const colors = (theme.palette ??= ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee']);
   host.innerHTML = colors
-    .map((color, index) => `<input type="color" data-color="${index}" value="${esc(color)}" title="palette ${index}" />`)
+    .map((color, index) => `<label>Palette ${index + 1}<input type="color" data-color="${index}" value="${esc(color)}" /></label>`)
     .join('');
   host.querySelectorAll<HTMLInputElement>('input[data-color]').forEach(input => {
     input.addEventListener('input', () => {
@@ -563,9 +641,28 @@ function renderQaPanel(): void {
     .join('');
   const more = qaState.findings.length > 5 ? `<div class="hint">+${qaState.findings.length - 5} more</div>` : '';
   const sheet = qaState.sheet
-    ? `<img class="qa-sheet" src="/api/qa/sheet?renderId=${encodeURIComponent(qaState.renderId)}&token=${encodeURIComponent(token ?? '')}" alt="contact sheet" />`
+    ? qaSheetUrl && qaSheetFor === qaState.renderId
+      ? `<img class="qa-sheet" src="${esc(qaSheetUrl)}" alt="contact sheet" />`
+      : '<div class="hint" data-qa-sheet-loading>Loading contact sheet…</div>'
     : '';
   host.innerHTML = `<div class="pane-head"><b>Frame QA</b>${badge}<span class="hint">${qaState.findings.length} finding${qaState.findings.length === 1 ? '' : 's'}</span></div>${sheet}${rows || '<div class="event">No findings — layout, contrast and motion checks cleared.</div>'}${more}`;
+}
+
+/** Fetch the sheet through the authenticated API and keep only the newest response. */
+async function loadQaSheet(renderId: string): Promise<void> {
+  const request = ++qaSheetRequest;
+  try {
+    const response = await apiFetch(`/api/qa/sheet?renderId=${encodeURIComponent(renderId)}`);
+    if (!response.ok) return;
+    const blob = await response.blob();
+    if (request !== qaSheetRequest || qaState.renderId !== renderId) return;
+    releaseQaSheet();
+    qaSheetUrl = URL.createObjectURL(blob);
+    qaSheetFor = renderId;
+    renderQaPanel();
+  } catch {
+    // Keep the badge and findings; the sheet simply stays unavailable.
+  }
 }
 
 async function loadQa(renderId: string): Promise<void> {
@@ -573,9 +670,13 @@ async function loadQa(renderId: string): Promise<void> {
     const response = await apiFetch(`/api/qa?renderId=${encodeURIComponent(renderId)}`);
     if (!response.ok) return;
     const data = (await response.json()) as { findings?: QaFinding[]; sheet?: string | null };
+    // A later QA result already replaced this render; do not let an older
+    // response restore stale findings or a stale sheet.
+    if (qaState.renderId !== renderId) return;
     qaState.findings = Array.isArray(data.findings) ? data.findings : [];
     qaState.sheet = Boolean(data.sheet);
     renderQaPanel();
+    if (qaState.sheet) void loadQaSheet(renderId);
   } catch {
     // the badge simply stays as the SSE summary reported it
   }
@@ -825,7 +926,9 @@ async function reRenderScene(sceneId: string): Promise<void> {
   } catch (error) {
     logActivity(`Scene re-render failed: ${(error as Error).message}`);
   } finally {
-    sceneState.rendering = null;
+    // A failure event can unlock the card before this request settles. Only the
+    // request that still owns the slot may clear it, so a newer render is safe.
+    if (sceneState.rendering === sceneId) sceneState.rendering = null;
     renderStoryboard();
   }
 }
@@ -846,6 +949,7 @@ async function applySceneChipFlow(sceneId: string, chip: string): Promise<void> 
     if (result.package) {
       pkg = result.package;
       if (result.revision != null) pkg.revision = result.revision;
+      adoptEditorPackage(pkg);
       updatePreview(pkg, timeline, generatedAssets);
       renderStoryboard();
     }
@@ -879,6 +983,7 @@ async function applyPresenterFlow(args: Record<string, unknown>, note: string): 
       pkg = result.package;
       if (result.revision != null) pkg.revision = result.revision;
       timeline.presenters = result.presenters ?? [];
+      adoptEditorPackage(pkg);
       updatePreview(pkg, timeline, generatedAssets);
       renderStoryboard();
     }
@@ -1354,6 +1459,7 @@ function replaceChatMessages(messages: Array<{ role: 'user' | 'assistant'; conte
 function adoptChatProject(project: ChatProject, built: boolean): void {
   pkg = project.package;
   timeline = project.timeline;
+  adoptEditorPackage(pkg);
   generatedAssets = project.generatedAssets;
   pendingGpu = project.pendingGpu as typeof pendingGpu;
   scrub.max = String(timeline.durationInFrames - 1);
@@ -1389,6 +1495,7 @@ async function runBrief(brief: string): Promise<void> {
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
     pkg = body.package as PackageV1;
     timeline = body.timeline as Timeline;
+    adoptEditorPackage(pkg);
     generatedAssets = body.generatedAssets as Record<string, InlineAsset>;
     pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu : [];
     scrub.max = String(timeline.durationInFrames - 1);
@@ -1428,16 +1535,66 @@ function init(): void {
 
   scrub = $<HTMLInputElement>('scrub');
   scrub.max = String(timeline.durationInFrames - 1);
+  const timelineHost = document.getElementById('scene-timeline');
+  const scriptHost = document.getElementById('script-audio-panel');
+  if (scriptHost) {
+    mountScriptAudioPanel(scriptHost, editorStore);
+    const animationHost = document.createElement('div');
+    animationHost.id = 'animation-panel';
+    scriptHost.append(animationHost);
+    mountAnimationInspector(animationHost, editorStore, { save: saveEditorNow, log: logActivity });
+    const voiceHost = document.createElement('div');
+    voiceHost.id = 'voice-panel';
+    scriptHost.append(voiceHost);
+    mountVoiceSettings(voiceHost, {
+      getPackage: () => editorStore.getState().doc.package as unknown as PackageV1,
+      setVoice: voice => {
+        const result = editorStore.dispatch({ type: 'SetVoice', voice: voice as never });
+        return { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
+      },
+      setNarrationStyle: (sceneId, text) => {
+        const result = editorStore.dispatch({ type: 'SetNarrationStyle', sceneId, text });
+        return { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
+      },
+      save: saveEditorNow,
+      api: apiFetch,
+      subscribe: listener => editorStore.subscribe(listener),
+    });
+  }
+  if (timelineHost) {
+    editorApi = mountSceneTimeline(timelineHost, editorStore, {
+      onDocument(next, compiled) {
+        pkg = next;
+        timeline = compiled;
+        scrub.max = String(Math.max(0, compiled.durationInFrames - 1));
+        const frame = player?.getCurrentFrame() ?? 0;
+        $('time').textContent = `${formatTime(frame, compiled.fps)} / ${formatTime(compiled.durationInFrames, compiled.fps)}`;
+        updatePreview(pkg, timeline, generatedAssets);
+        renderStoryboard();
+      },
+      seek(frame) {
+        player?.seekTo(Math.max(0, Math.floor(frame)));
+      },
+      togglePlay() {
+        player?.toggle();
+      },
+    });
+  }
+  let boundPlayer: PlayerRef | null = null;
   mountPreview($('player'), pkg, timeline, ref => {
     player = ref;
+    if (boundPlayer === ref) return;
+    boundPlayer = ref;
     const onFrame = () => {
       const frame = ref.getCurrentFrame();
+      editorApi?.followFrame(frame);
       scrub.value = String(frame);
       $('time').textContent = `${formatTime(frame, timeline.fps)} / ${formatTime(timeline.durationInFrames, timeline.fps)}`;
       const active = timeline.scenes.find(scene => frame >= scene.from && frame < scene.from + scene.durationInFrames)?.id;
       document.querySelectorAll('.scene-card').forEach(card => card.classList.toggle('active', card.getAttribute('data-scene-id') === active));
     };
     ref.addEventListener('frameupdate', onFrame);
+    editorApi?.followFrame(ref.getCurrentFrame());
     ref.addEventListener('play', () => ($('play').textContent = 'Pause'));
     ref.addEventListener('pause', () => ($('play').textContent = 'Play'));
     onFrame();
@@ -1485,6 +1642,7 @@ function init(): void {
     });
     stream.addEventListener('qa.result', event => {
       const data = JSON.parse((event as MessageEvent).data) as { renderId: string; ok: boolean; findings: number; sheet?: string | null };
+      if (qaState.renderId !== data.renderId) releaseQaSheet();
       qaState.renderId = data.renderId;
       qaState.ok = data.ok;
       qaState.sheet = Boolean(data.sheet);
@@ -1602,7 +1760,12 @@ function init(): void {
       const data = JSON.parse((event as MessageEvent).data) as { sceneId: string; message: string };
       sceneState.log = [`failed: ${data.message}`];
       logActivity(`Server: scene ${data.sceneId} re-render failed — ${data.message}`);
-      if (sceneState.rendering === data.sceneId) renderStoryboard();
+      if (sceneState.rendering === data.sceneId) {
+        // Unlock the card even if the request itself is still settling; a hung
+        // body or a slow proxy must not leave this scene showing "Re-rendering…".
+        sceneState.rendering = null;
+        renderStoryboard();
+      }
     });
     stream.addEventListener('edit.render.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { full: boolean; reason?: string | null };
@@ -1675,4 +1838,5 @@ function init(): void {
   });
 }
 
+await openRequestedPackage();
 init();

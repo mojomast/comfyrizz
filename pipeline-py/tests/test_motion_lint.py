@@ -44,7 +44,25 @@ def test_vocabulary_matches_the_schema():
     assert list(defs["transitionType"]["enum"]) == list(MOTION_VOCABULARY["transitionTypes"])
     assert list(defs["transitionDirection"]["enum"]) == list(MOTION_VOCABULARY["transitionDirections"])
     assert list(defs["sceneMotion"]["properties"]["entry"]["enum"]) == list(MOTION_VOCABULARY["entries"])
+    assert list(defs["sceneMotion"]["properties"]["recipe"]["enum"]) == [
+        "sketch", "paper-cut", "morph", "technical-flow", "focus", "kinetic"
+    ]
     assert list(TRANSITIONS) == list(MOTION_VOCABULARY["transitionTypes"])
+    for kind in ("paper-reveal", "draw-reveal", "shape-reveal"):
+        assert TRANSITIONS[kind]["axis"] is None
+
+
+@pytest.mark.parametrize("kind,frames", [("paper-reveal", 9), ("paper-reveal", 24), ("draw-reveal", 11), ("draw-reveal", 27), ("shape-reveal", 8), ("shape-reveal", 18)])
+def test_reveal_transition_bands_are_in_band(kind, frames):
+    doc = base()
+    doc["scenes"][0]["transitionOut"] = {"type": kind, "frames": frames}
+    assert not [f for f in lint_motion(doc) if f["code"] == "MOTION_TRANSITION_DURATION"]
+
+
+def test_reveal_transition_direction_is_unused():
+    doc = base()
+    doc["scenes"][0]["transitionOut"] = {"type": "draw-reveal", "frames": 15, "direction": "left"}
+    assert [f["code"] for f in lint_motion(doc) if f["code"] == "MOTION_DIRECTION_UNUSED"] == ["MOTION_DIRECTION_UNUSED"]
 
 
 def test_motion_fields_validate_and_are_optional():

@@ -1,5 +1,9 @@
 # Comfyrizz web UI — U1 before/after
 
+For the next editor iteration, see the [frontend editor research and implementation
+plan](../FRONTEND_EDITOR_PLAN.md): linked scene tracks, preview/export parity,
+undo/autosave, pre-GPU preparation and overall usability improvements.
+
 Screenshots captured with headless Chrome (1440×900) against `apps/server`
 serving a production `apps/web` build. `u1-before.jpg` is the pre-U1 shell;
 the `u1-after*.jpg` shots are the U1 polish pass.

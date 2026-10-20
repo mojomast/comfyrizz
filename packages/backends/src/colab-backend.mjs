@@ -140,6 +140,8 @@ export const isAssignUnavailable = (output) => /Service Unavailable/.test(String
  */
 export const READY_WAIT_SECONDS = 600;
 
+import { progressLines } from './progress-lines.mjs';
+
 export function createColabBackend({
   cli = null,
   packageId,
@@ -256,11 +258,12 @@ export function createColabBackend({
    * traceback and the CLI still exits 0 - success is therefore the *sentinel line* the script prints
    * last (`COMFYRIZZ_OK <step>`), never the exit code.
    */
-  async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null, silenceMs = null, onLog = null } = {}) {
+  async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null, silenceMs = null, onLog = null, signal = null } = {}) {
     const result = await step(argvExec({ session, file: script, timeout }), {
       label: stepName,
       wallMs: wallMs ?? (timeout + 60) * 1000,
       cwd: dirname(script),
+      signal,
       ...(silenceMs ? { silenceMs } : {}),
       // G5-9: the CLI can stream a step's output as it arrives; the backend's run() turns the runner's
       // JSON progress lines into events, so a batch shows its jobs while it runs instead of at the end
@@ -560,7 +563,7 @@ export function createColabBackend({
     },
 
     /** Upload the HF token as a 0600 file, then run the bootstrap script. Never `--env`. */
-    async bootstrap({ onEvent = null, timeout = 900 } = {}) {
+    async bootstrap({ onEvent = null, timeout = 900, signal = null } = {}) {
       if (!hfTokenPath || !existsSync(hfTokenPath)) {
         throw new ColabCliError("Refusing to bootstrap without the Hugging Face token file (see preflight).");
       }
@@ -605,7 +608,10 @@ export function createColabBackend({
         timeout,
         onEvent,
         silenceMs: BOOTSTRAP_SILENCE_MS,
+        signal,
+        onLog: text => emit(onEvent, { type: 'bootstrap_log', message: text.slice(-2000) }),
       });
+      signal?.throwIfAborted();
       emit(onEvent, { type: "bootstrap", code: result.code, lost: isLost(result), token: hfTokenPlan({ localTokenPath: hfTokenPath }) });
       const outcome = execOutcome(result, "bootstrap");
       if (outcome.lost) {
@@ -664,6 +670,7 @@ export function createColabBackend({
       const batchManifests = [];
 
       for (const name of planned) {
+        signal?.throwIfAborted();
         const subset = name ? jobs.filter((job) => job.batch === name) : jobs;
         const admission = admit(subset, { onEvent });
         if (!admission.allowed) {
@@ -706,23 +713,17 @@ export function createColabBackend({
           emit(onEvent, { type: "batch_start", batch: name, jobs: subset.length });
         }
 
+        const progress = progressLines(onEvent);
         const exec = await execScript(runJobsScript, {
           step: "run",
           timeout: 3600,
           wallMs: 3660000,
           onEvent: null,
-          onLog: (text) => {
-            for (const line of text.split("\n")) {
-              const trimmed = line.trim();
-              if (!trimmed.startsWith("{")) continue;
-              try {
-                onEvent(JSON.parse(trimmed));
-              } catch {
-                /* not a progress line */
-              }
-            }
-          },
+          signal,
+          onLog: text => progress.write(text),
         });
+        progress.end();
+        signal?.throwIfAborted();
         // G4-6: a batch's verdict is the manifest (downloaded and verified below), but a *missing
         // sentinel* means the batch script itself did not reach its end, which is the same situation
         // as a lost exec: reconcile instead of believing the exit code.
@@ -932,6 +933,7 @@ export function createColabBackend({
         existsSync(local);
       if (unchanged) {
         skipped += 1;
+        emit(onEvent, { type: 'collection_progress', completed: fetched + skipped, total: entries.length, file: entry.path, reused: true });
         continue;
       }
       const result = await download({ remote, local, optional: true, onEvent });
@@ -941,6 +943,7 @@ export function createColabBackend({
       } else {
         missing.push(entry.path);
       }
+      emit(onEvent, { type: 'collection_progress', completed: fetched + skipped, total: entries.length, file: entry.path, missing: missing.length });
     }
     emit(onEvent, { type: "download_tree", files: entries.length, fetched, skipped, missing: missing.length, remoteDir });
     return { ok: fetched + skipped === entries.length, files: entries.length, fetched, skipped, missing, entries };

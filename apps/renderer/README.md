@@ -17,7 +17,8 @@ inlined, so the composition only ever sees verified markup.
 ## Layouts
 
 `Title` (centered/outro), `Hero` (split/full-bleed), `Stat`, `Chart` (SVG bars,
-zero baseline), `List` (bullets/quote). Registered compositions:
+zero baseline), `List` (bullets/quote or motion diagram), `Split`, `Compare`,
+and `Code`. Registered compositions:
 
 - `LaunchDemo` — full example, 1095 frames @ 30 fps (36.5 s), 1920×1080
 - `PackageDemo` — the same component with `calculateMetadata`, so a render can
@@ -146,6 +147,92 @@ transition vocabulary on the committed timing; `TimelinePlayer` calls it
 whenever a caller does not pass merged scenes, so a bare `timeline.json` can
 never silently drop its transitions (and truncate the run).
 
+## Motion diagrams
+
+For a list scene, `motion.diagram: "flow"` draws connected step cards and
+`"hub"` connects the cards to a shared center. Labels come from `copy.items`;
+the hub label comes from `copy.cta` (default `HUB`). Copy remains editable.
+
+```json
+{
+  "layout": "list",
+  "variant": "bullets",
+  "copy": {
+    "headline": "From request to result",
+    "items": ["Receive", "Plan", "Execute", "Review"]
+  },
+  "motion": {"diagram": "flow", "cue_seconds": [0.7, 3, 6, 9]}
+}
+```
+
+`cue_seconds` contains one nonnegative, nondecreasing **scene-local** timestamp
+per card. Derive cues from narration word timings when possible. Missing or
+invalid cue lists use evenly spaced beats. Reveal, active-card emphasis,
+connections and progress are driven by frame number. Landscape diagrams reserve
+space below the cards for captions; portrait diagrams use a vertical stack.
+
+## Storytelling recipes (AI2)
+
+`scene.motion.recipe` selects one of six CPU, frame-deterministic recipes. The
+field is optional: an absent or unknown recipe renders exactly the old layout.
+The ids are derived from the shared catalogue in
+`packages/schema/src/animation.mjs` (`ANIMATION_RECIPE_IDS`), so the renderer,
+planner and editor cannot drift.
+
+| Recipe | Renderer effect | Recommended layouts (shared catalogue) |
+|---|---|---|
+| `sketch` | Seeded Rough.js outlines, perfect-freehand ticks/arrows and sketched cards around editable copy. List cards reveal on planner cue frames. | title, hero, list, chart, code |
+| `paper-cut` | Torn-paper layers, offset shadows, sheets behind headlines/list rows and paper tabs on split labels. | title, hero, split, compare, list |
+| `morph` | Bounded Flubber interpolation between `circle`, `square`, `triangle` and `blob`, with endpoint ghosts and a speech-anchored window. | title, hero, compare, list |
+| `technical-flow` | Dagre node/edge layout from `copy.items`, speech-cued node reveals, active-node emphasis, routed connectors and analytic packets. Replaces the list layout; compact graph overlay is used on hero/chart when the visual area is free. | hero, list, chart |
+| `focus` | A dimmed surround with a transparent focus window, accent frame and corner brackets over existing media, entering at scene start. The image inside stays fully visible. | hero, split, compare, chart, code |
+| `kinetic` | Masked phrase/headline reveals grouped by `motion.cue_phrases` and anchored by resolved timings. Copy is never replaced. | title, hero, list, stat |
+
+Optional parameters: `seed` (integer 1..2147483647), `intensity` (0..1),
+`focus` (`{x,y,width,height}` normalized), `morph` (`{from,to}` shape ids) and
+`cue_phrases`. Existing `cue_seconds` remains the highest-priority timing
+source. The renderer consumes the planner's `timeline.scenes[].motionCues`
+(absolute timeline frames) and converts each to a scene-local frame by
+subtracting `scene.from`; unresolved phrases get a bounded deterministic
+fallback plus `data-cue-source` / `data-cue-fallback` / `data-cue-missing`
+attributes and one process warning, never silent decoration.
+This cue plan drives sketch items, technical-flow, morph and kinetic; paper-cut
+and focus use scene-entry timing. The renderer tolerates additional layout/recipe
+combinations, but authoring should use the recommended catalogue above.
+
+`paper-reveal`, `draw-reveal` and `shape-reveal` are appended to the transition
+vocabulary. They are non-directional reveal masks (no shared-element identity,
+no axis `direction`): paper strips, a jagged pencil edge and a seeded lobed
+circle, each with exact hidden/visible endpoints.
+
+```json
+{
+  "layout": "list",
+  "copy": {"headline": "Request to result", "items": ["Receive", "Plan", "Render", "Review"]},
+  "motion": {"recipe": "technical-flow", "seed": 33, "cue_phrases": ["Receive", "Plan", "Render", "Review"]}
+}
+```
+
+`apps/renderer/fixtures/recipe-showcase/` contains landscape and portrait
+packages covering the recipes; `node scripts/render-recipes.mjs --all
+--scale=0.5` exports both. The fixture uses only local, first-party SVG media
+and no narration/GPU work. Run renderer tests with the installed headless
+shell:
+
+```bash
+REMOTION_BROWSER="$PWD/node_modules/.remotion/chrome-headless-shell/linux64/chrome-headless-shell-linux64/chrome-headless-shell" \
+TMPDIR=/tmp/opencode npx tsc --noEmit -p tsconfig.json
+REMOTION_BROWSER="$PWD/node_modules/.remotion/chrome-headless-shell/linux64/chrome-headless-shell-linux64/chrome-headless-shell" \
+TMPDIR=/tmp/opencode node --test test/recipes.test.mjs test/transitions.test.mjs test/narration-render.test.mjs
+```
+
+Limitations: `technical-flow` on `code` has no free area outside the terminal
+card, so it intentionally draws no compact graph (the code layout wins);
+`focus` does not crop or hide the source; `morph` with `from === to` is a
+static shape; the reveal transitions use CSS `path()` clipping and target the
+pinned Chromium render browser. All recipe geometry is cached per scene key and
+is a pure function of frame, seed and native composition size.
+
 ## Presenter (P-pres)
 
 The presenter is opt-in (`presenter.enabled`); when it is on, `bookends`
@@ -165,6 +252,19 @@ the shared `PresenterClip` (clip + on-by-default "AI presenter" chip). A
 flat-cartoon or paper-cut portrait is an inline, pre-sanitized SVG (the same A5
 check as `VectorAsset`), so the CPU demo shows a presenter with no GPU. The
 clip's own audio is never mixed.
+
+Each overlay has a scene-local Remotion `Sequence`. Presenter video plays at
+`speed={1}` with looping disabled, so a shorter source is not slowed to fill a
+scene. The rendered regression in `test/presenter-playback.test.mjs` checks both
+native speed and the start time of a later scene.
+
+The LTX audio-to-video graph applies a zero audio noise mask in **both** sampling
+stages. Generate it from the final scene audio after timeline compilation, pad
+to its 8n+1 frame duration, and use the original narration for the final mix.
+`scripts/tts/check_lipsync.py` is an optional SyncNet offset/confidence diagnostic;
+it requires separately installed evaluator code and weights. See the
+[research notes](../../docs/HERMES_VIDEO_RESEARCH.md#presenter-synchronization)
+and [current validation status](../../docs/HERMES_VIDEO_STATUS.md).
 
 `examples/presenter-demo` is the CPU reference: four scenes with the presenter
 on, the split card on the hero, and a flat-cartoon SVG portrait.
