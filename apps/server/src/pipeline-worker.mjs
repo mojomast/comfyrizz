@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
@@ -170,18 +170,37 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   });
 
   await stage('verify', async () => {
-    const probe = JSON.parse((await command('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,width,height,nb_read_frames,sample_rate:format=duration', '-of', 'json', join(runDir, 'video.mp4')])).stdout);
-    const video = probe.streams.find(s => s.codec_type === 'video'), audio = probe.streams.find(s => s.codec_type === 'audio');
-    const checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !plan.voiced || Boolean(audio) };
-    if (plan.voiced) {
-      const measure = await command('ffmpeg', ['-hide_banner', '-nostats', '-i', join(runDir, 'video.mp4'), '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
-      const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(measure.stderr);
-      checks.nonSilentAudio = Boolean(mean) && Number(mean[1]) > -60;
-      await command(process.env.COMFYRIZZ_PYTHON || 'python3', [join(repoRoot, 'scripts/tts/verify_mix.py'), '--video', join(runDir, 'video.mp4'), '--narration', join(workDir, 'audio/narration.norm.wav'), '--out', join(runDir, 'audio-verification.json')]);
-      checks.narrationEnvelope = json(join(runDir, 'audio-verification.json')).passed;
+    // Exit 2 from the mix check is a failed narration verdict only when it comes with
+    // a fresh report. Remove any old report, require the checker to write a new one,
+    // and require its exit code and verdict to agree before recording it.
+    const report = { checks: {}, probe: null, note: 'Technical checks do not replace perceptual review.' };
+    try {
+      report.probe = JSON.parse((await command('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,width,height,nb_read_frames,sample_rate:format=duration', '-of', 'json', join(runDir, 'video.mp4')])).stdout);
+      const video = report.probe.streams.find(s => s.codec_type === 'video'), audio = report.probe.streams.find(s => s.codec_type === 'audio');
+      report.checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(report.probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !plan.voiced || Boolean(audio) };
+      if (plan.voiced) {
+        const measure = await command('ffmpeg', ['-hide_banner', '-nostats', '-i', join(runDir, 'video.mp4'), '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
+        const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(measure.stderr);
+        report.checks.nonSilentAudio = Boolean(mean) && Number(mean[1]) > -60;
+        const narrationPath = join(runDir, 'audio-verification.json');
+        rmSync(narrationPath, { force: true });
+        const verdict = await command(process.env.COMFYRIZZ_PYTHON || 'python3', [join(repoRoot, 'scripts/tts/verify_mix.py'), '--video', join(runDir, 'video.mp4'), '--narration', join(workDir, 'audio/narration.norm.wav'), '--out', narrationPath], { allowedCodes: [0, 2] });
+        let narration;
+        try { narration = json(narrationPath); }
+        catch { throw new Error(`Mix checker exited ${verdict.code} without writing a report`); }
+        if (!narration || typeof narration.passed !== 'boolean') throw new Error(`Mix checker exited ${verdict.code} with an invalid report`);
+        if ((verdict.code === 0) !== (narration.passed === true)) throw new Error(`Mix checker exit ${verdict.code} contradicts its ${narration.passed ? 'passing' : 'failing'} report`);
+        report.narration = narration;
+        report.checks.narrationEnvelope = narration.passed === true;
+      }
+      if (Object.values(report.checks).some(value => !value)) throw new Error('Final video verification failed');
+    } catch (error) {
+      report.error = error.message;
+      if (plan.voiced && report.checks.narrationEnvelope === undefined) report.checks.narrationEnvelope = false;
+      throw error;
+    } finally {
+      writeJson(join(runDir, 'verification.json'), report);
     }
-    writeJson(join(runDir, 'verification.json'), { checks, probe, note: 'Technical checks do not replace perceptual review.' });
-    if (Object.values(checks).some(value => !value)) throw new Error('Final video verification failed');
   });
 
   await stage('export', async () => {
