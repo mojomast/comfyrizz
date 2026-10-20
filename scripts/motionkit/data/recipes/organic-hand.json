@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "organic-hand",
+  "label": "Hand-drawn",
+  "taxonomy": { "era": "classic", "finish": "paper", "energy": "calm", "geometry": "organic", "type": "hand" },
+  "palette": [
+    { "role": "background", "hex": "#fbf8f1" },
+    { "role": "text", "hex": "#2e2a24" },
+    { "role": "accent", "hex": "#ef6f4b" },
+    { "role": "muted", "hex": "#6aa58e" }
+  ],
+  "fonts": { "display": "caveat", "text": "inter" },
+  "easing": { "personality": "anticipate", "entry": "land", "exit": "exit", "spring": "pop" },
+  "entries": ["drawOn", "maskRise", "fadeUp"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "draw-reveal", "accent": ["paper-reveal", "fade"] },
+  "storyRecipe": "sketch",
+  "background": { "pattern": "grain" },
+  "finish": [
+    { "id": "paper-texture", "params": { "scale": 1, "opacity": 0.35 } },
+    { "id": "boil-line", "params": { "jitter": 2, "rate": 8, "seed": 4242 } }
+  ],
+  "rules": {
+    "do": ["hand-drawn strokes that draw on", "paper texture and warm ink"],
+    "dont": ["perfect geometry", "drop shadows"]
+  },
+  "prompt": "Hand-drawn sketchbook, warm paper, coral and sage ink, boiling line, paper texture"
+}

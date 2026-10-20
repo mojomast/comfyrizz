@@ -1,0 +1,29 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "synthwave",
+  "label": "Neon 80s horizon",
+  "taxonomy": { "era": "retro-80s", "finish": "neon", "energy": "high", "geometry": "flat", "type": "display" },
+  "palette": [
+    { "role": "background", "hex": "#120428" },
+    { "role": "text", "hex": "#fdf0ff" },
+    { "role": "accent", "hex": "#ff2a6d" },
+    { "role": "muted", "hex": "#05d9e8" }
+  ],
+  "fonts": { "display": "orbitron", "text": "inter" },
+  "easing": { "personality": "floaty", "entry": "move", "exit": "exit", "spring": "settle" },
+  "entries": ["pop", "maskRise", "countUp"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "zoom", "accent": ["push", "cut"] },
+  "storyRecipe": "kinetic",
+  "background": { "pattern": "grid" },
+  "finish": [
+    { "id": "glow-text", "params": { "intensity": 0.6, "spread": 12 } },
+    { "id": "scanlines-soft", "params": { "count": 120, "opacity": 0.15 } },
+    { "id": "bloom", "params": { "intensity": 0.5, "radius": 24 } }
+  ],
+  "rules": {
+    "do": ["neon horizon grid and glowing type", "magenta to cyan gradient"],
+    "dont": ["muted pastels", "thin strokes"]
+  },
+  "prompt": "Synthwave neon horizon, magenta sun over a cyan grid, glowing type, soft scanlines"
+}

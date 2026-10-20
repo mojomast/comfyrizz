@@ -1,0 +1,29 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "cinematic-noir",
+  "label": "Cinematic noir",
+  "taxonomy": { "era": "classic", "finish": "film", "energy": "calm", "geometry": "flat", "type": "serif-editorial" },
+  "palette": [
+    { "role": "background", "hex": "#050505" },
+    { "role": "text", "hex": "#f2f2f2" },
+    { "role": "accent", "hex": "#c9a227" },
+    { "role": "muted", "hex": "#3b3b3b" }
+  ],
+  "fonts": { "display": "dm-serif-display", "text": "inter", "mono": "ibm-plex-mono" },
+  "easing": { "personality": "heavy", "entry": "land", "exit": "exit", "spring": "heavy" },
+  "entries": ["fadeUp", "maskRise", "pop"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "fade", "accent": ["cut"] },
+  "storyRecipe": "focus",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "film-grain", "params": { "amount": 0.18, "size": 2 } },
+    { "id": "vignette-hard", "params": { "amount": 0.7, "radius": 0.5 } },
+    { "id": "mono-grade", "params": { "amount": 1, "contrast": 1.1 } }
+  ],
+  "rules": {
+    "do": ["hold on a single image; let the frame breathe", "light one gold detail per scene"],
+    "dont": ["bright colour fills", "fast cuts"]
+  },
+  "prompt": "Black and white film noir, deep shadows, hard key light, one gold accent, film grain, hard vignette"
+}

@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "y2k-chrome",
+  "label": "Millennium chrome",
+  "taxonomy": { "era": "y2k", "finish": "glossy", "energy": "high", "geometry": "rounded-3d", "type": "display" },
+  "palette": [
+    { "role": "background", "hex": "#e9ecf5" },
+    { "role": "text", "hex": "#101326" },
+    { "role": "accent", "hex": "#6c5cff" },
+    { "role": "muted", "hex": "#b8f3ff" }
+  ],
+  "fonts": { "display": "monoton", "text": "syne" },
+  "easing": { "personality": "elastic", "entry": "land", "exit": "exit", "spring": "elastic" },
+  "entries": ["pop", "maskRise", "waterfall"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "zoom", "accent": ["iris", "push"] },
+  "storyRecipe": "morph",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "chrome-sheen", "params": { "angle": 105, "sharpness": 0.35, "width": 0.35 } },
+    { "id": "bloom", "params": { "intensity": 0.5, "radius": 24 } }
+  ],
+  "rules": {
+    "do": ["liquid chrome gradients and soft glow", "rounded, glossy surfaces"],
+    "dont": ["matte flat colour", "sharp corners"]
+  },
+  "prompt": "Millennium chrome Y2K, liquid metal gradient, violet and ice blue, soft bloom, rounded gloss"
+}

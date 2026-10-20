@@ -1,0 +1,29 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "crt-arcade",
+  "label": "8-bit arcade",
+  "taxonomy": { "era": "retro-80s", "finish": "crt", "energy": "high", "geometry": "flat", "type": "pixel" },
+  "palette": [
+    { "role": "background", "hex": "#000000" },
+    { "role": "text", "hex": "#f8f8f8" },
+    { "role": "accent", "hex": "#ffd400" },
+    { "role": "muted", "hex": "#00e5ff" }
+  ],
+  "fonts": { "display": "press-start-2p", "text": "vt323", "mono": "vt323" },
+  "easing": { "personality": "mechanical", "entry": "linear", "exit": "linear", "spring": "snap" },
+  "entries": ["pop", "countUp", "fadeUp"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "cut", "accent": ["iris", "zoom"] },
+  "storyRecipe": "kinetic",
+  "background": { "pattern": "grid" },
+  "finish": [
+    { "id": "crt-curve", "params": { "curvature": 0.4, "bezel": 6 } },
+    { "id": "scanlines", "params": { "count": 240, "opacity": 0.4 } },
+    { "id": "pixelate-in", "params": { "size": 12, "steps": 6 } }
+  ],
+  "rules": {
+    "do": ["chunky pixel type and hard cut scenes", "one flashing accent per level"],
+    "dont": ["anti-aliased curves", "soft shadows"]
+  },
+  "prompt": "8-bit arcade CRT, pixel type, yellow and cyan on black, scanlines, curved screen"
+}
