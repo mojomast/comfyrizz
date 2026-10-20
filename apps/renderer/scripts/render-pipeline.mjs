@@ -7,6 +7,7 @@ import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { inlineGeneratedAssets, narrationOptions, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
 import { collectMediaDims } from '../src/media-dims.js';
+import { materializeCompositions } from './composition-worker.mjs';
 
 // Resolve the exact renderer/bundler versions used by the pinned CLI.
 const require = createRequire(import.meta.resolve('@remotion/cli/package.json'));
@@ -15,13 +16,17 @@ const { selectComposition, renderMedia, makeCancelSignal } = require('@remotion/
 
 export async function renderPipeline(packagePath, output, { signal, onEvent = () => {} } = {}) {
   const packageDir = join(packagePath, '..');
-  const pkg = JSON.parse(readFileSync(packagePath));
+  let pkg = JSON.parse(readFileSync(packagePath));
   const validation = validatePackage(pkg);
   if (!validation.valid) throw new Error('Render package failed validation');
+  let timeline = compileTimeline(pkg, narrationOptions(packageDir));
+  if (pkg.voice?.enabled && timeline.provisional) throw new Error('Narration timing is still provisional');
+  const materialized = await materializeCompositions({ pkg, packageDir, timeline, signal, onEvent });
+  pkg = materialized.pkg;
+  timeline = compileTimeline(pkg, narrationOptions(packageDir));
+  if (!validatePackage(pkg).valid) throw new Error('Materialized render package failed validation');
   const missing = missingMediaFiles(pkg, packageDir);
   if (missing.length) throw new Error(`Missing render media: ${missing.map(m => m.id).join(', ')}`);
-  const timeline = compileTimeline(pkg, narrationOptions(packageDir));
-  if (pkg.voice?.enabled && timeline.provisional) throw new Error('Narration timing is still provisional');
   const props = { pkg, timeline, generatedAssets: inlineGeneratedAssets(pkg, packageDir), mediaDims: collectMediaDims(pkg, packageDir) };
   if (existsSync(join(packageDir, 'media.json'))) props.media = JSON.parse(readFileSync(join(packageDir, 'media.json')));
   writeFileSync(output.replace(/\.mp4$/, '.props.json'), JSON.stringify(props));
@@ -49,7 +54,7 @@ export async function renderPipeline(packagePath, output, { signal, onEvent = ()
       },
     });
     signal?.throwIfAborted();
-    return { frames: timeline.durationInFrames, hash: timeline.hash, bytes: statSync(output).size, fps: timeline.fps, width: timeline.width, height: timeline.height };
+    return { frames: timeline.durationInFrames, hash: timeline.hash, bytes: statSync(output).size, fps: timeline.fps, width: timeline.width, height: timeline.height, package: pkg, compositions: materialized.report };
   } finally {
     signal?.removeEventListener('abort', abort);
     rmSync(publicDir, { recursive: true, force: true });

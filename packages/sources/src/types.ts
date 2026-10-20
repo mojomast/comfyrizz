@@ -24,7 +24,7 @@ export interface PackageLike {
 export interface LicenseDecision {
   allowed: boolean;
   canonicalId: string;
-  family: 'CC0' | 'PDM' | 'CC-BY' | 'CC-BY-SA' | 'CC-BY-NC' | 'CC-BY-ND' | 'GENERATED' | 'UPLOAD' | 'UNKNOWN';
+  family: 'CC0' | 'PDM' | 'MIT' | 'CC-BY' | 'CC-BY-SA' | 'CC-BY-NC' | 'CC-BY-ND' | 'GENERATED' | 'UPLOAD' | 'UNKNOWN';
   redistributable: boolean;
   requiresAttribution: boolean;
   reason: string;
@@ -102,6 +102,7 @@ export interface CreditEntry {
   creator: string;
   licenseId: string;
   licenseUrl?: string;
+  licenseNotice?: string;
   sourceUrl?: string;
   attribution: string;
   file?: string;

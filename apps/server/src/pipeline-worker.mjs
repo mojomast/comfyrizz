@@ -163,6 +163,12 @@ with zipfile.ZipFile(sys.argv[1]) as z:
 
   await stage('render', async () => {
     renderResult = await render(packagePath, join(runDir, 'video.mp4'), { signal, onEvent: event => progress(event.phase, event.progress) });
+    // Only the isolated run snapshot receives derived assets; the saved project
+    // and its editable composition manifest remain authoritative source.
+    if (renderResult.package) {
+      pkg = renderResult.package;
+      writeJson(packagePath, pkg);
+    }
     progress('Normalizing the final audio mix', null);
     await command(process.execPath, [fileURLToPath(new URL('./pipeline-cpu-task.mjs', import.meta.url)), 'normalize', workDir, runDir]);
     renderResult.bytes = statSync(join(runDir, 'video.mp4')).size;

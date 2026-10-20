@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { buildCredits } from './credits.js';
-import { DEFAULT_LICENSE_POLICY, isAssetRedistributable } from './licenses.js';
+import { canonicalLicenseId, DEFAULT_LICENSE_POLICY, isAssetRedistributable } from './licenses.js';
+import { MIT_TERMS } from './mit-notice.js';
 import { OPEN_IN_COMFYUI_MARKDOWN } from './open-comfyui.js';
 import { redactWorkflowDocument } from './secrets.js';
 import type { ExcludedAsset, PackageAssetLike, PackageZipInput, PackageZipResult, ZipEntry } from './types.js';
@@ -119,6 +120,7 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   const entries: ZipEntry[] = [];
   const included: string[] = [];
+  const mitNotices: string[] = [];
   const excluded: ExcludedAsset[] = [];
   const archivedPackage = structuredClone(input.package);
 
@@ -173,6 +175,9 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
     entries.push({ path, data: buffer });
     archivedPackage.assets![assetId].file = path;
     included.push(assetId);
+    if (canonicalLicenseId(asset.license?.id) === 'MIT') {
+      mitNotices.push(`Asset: ${assetId}\nFile: ${path}\n${asset.license!.attribution!}`);
+    }
     for (const [name, variant] of Object.entries(asset.variants ?? {})) {
       if (!variant.file) continue;
       const variantBytes = input.assetVariants?.[assetId]?.[name];
@@ -186,6 +191,9 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
     }
   }
   packageEntry.data = `${JSON.stringify(archivedPackage, null, 2)}\n`;
+  if (mitNotices.length > 0) {
+    entries.push({ path: 'licenses/MIT.txt', data: `MIT License\n\nThe following supplied notices apply to the included MIT assets and their included variants/companions:\n\n${mitNotices.join('\n\n')}\n\n${MIT_TERMS}\n` });
+  }
 
   for (const extra of input.extraExcluded ?? []) {
     excluded.push(extra);
@@ -196,7 +204,8 @@ export function buildPackageZip(input: PackageZipInput): PackageZipResult {
 
   const credits = input.credits ?? buildCredits(input.package, { generatedAt, policy, excluded });
   entries.push({ path: 'credits.json', data: `${JSON.stringify({ ...credits, markdown: undefined }, null, 2)}\n` });
-  entries.push({ path: 'CREDITS.md', data: credits.markdown });
+  const mitCredits = mitNotices.length > 0 ? `\n## MIT asset notices\n\nMIT permission, conditions, disclaimer and per-asset attribution: [licenses/MIT.txt](licenses/MIT.txt).\n` : '';
+  entries.push({ path: 'CREDITS.md', data: credits.markdown + mitCredits });
   const complete = excluded.length === 0;
   const manifest = {
     version: 1,

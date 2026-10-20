@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-20",
+  "branch": "feat/hyperframes-scenes",
+  "baselineCommit": "ff5f013",
+  "compilerVersion": "native-scenes/1.0.1",
+  "hyperframesVersion": "0.8.181",
+  "runtime": { "node": "22.19.0", "chromium": "157.0.8080.0", "ffmpeg": "7.1.5" },
+  "animation": "Native stateless frame functions; no GSAP script dependency",
+  "componentAspectChecks": {
+    "components": ["object-transfer", "mechanism-journey", "evidence-reveal"],
+    "dimensions": [[1280, 720], [720, 1280], [720, 720]],
+    "passed": 9,
+    "lintRuntimeLayoutMotionContrastFindings": 0
+  },
+  "assembledExport": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "decodedFrames": 480,
+    "durationSeconds": 16,
+    "sceneFrames": [150, 180, 150],
+    "completeArchive": true,
+    "secondExportReused": true,
+    "sourcePackageUnchanged": true,
+    "restoredScenesCacheHits": 3,
+    "snapshotScenesCacheHits": 3,
+    "portableReceiptsContainRuntimeAbsolutePaths": false,
+    "mitLicenseNoticeIncluded": true,
+    "videoSha256": "633dfb3d060f1b11734a89633b067da862f00dda19ca4eb9b635c5a1f6696341",
+    "archiveSha256": "3541041418d73c2a1461b5c68fa0c2ffc807ca01c327d5927cf71f2f5b42f185"
+  },
+  "scopedPortraitCutdown": {
+    "width": 720,
+    "height": 1280,
+    "fps": 30,
+    "decodedFrames": 150,
+    "durationSeconds": 5,
+    "completeArchive": true,
+    "retainedSceneIds": ["s_transfer"],
+    "restoredSourcePath": "compositions/pkg_composition_stories-portrait/manifest.json"
+  },
+  "chromiumEditorE2E": { "passed": 30, "failed": 0 },
+  "unitVerification": {
+    "compositionCompiler": { "passed": 15, "failed": 0 },
+    "compositionRendererAndCli": { "passed": 27, "failed": 0 },
+    "server": { "passed": 191, "failed": 0 },
+    "web": { "passed": 82, "failed": 0 },
+    "sourcesWithMitNotices": { "passed": 15, "failed": 0 },
+    "rendererRegressionDuringIntegration": { "passed": 236, "failed": 0 },
+    "workerAfterFinalDiagnosticChange": { "passed": 21, "failed": 0 },
+    "python": { "passed": 357, "skipped": 1, "failed": 0 },
+    "typechecks": ["web", "renderer"],
+    "note": "Suite counts overlap; these are not additive. Other existing shared package suites also passed sequentially."
+  },
+  "colabCreditsSpent": 0,
+  "limits": [
+    "Rendered examples are silent technical demonstrations, not a narrated quality comparison",
+    "Composition authoring uses JSON source; no new live authoring inspector",
+    "Browser findings are sampled checks, not every-frame proofs",
+    "Local font availability and pinned browser/runtime affect reproducibility",
+    "No arbitrary executable HTML ingestion or GSAP-backed keyframe editor"
+  ]
+}

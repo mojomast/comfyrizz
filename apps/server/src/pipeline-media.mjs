@@ -7,6 +7,8 @@ import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { pipelineCommand } from './pipeline-process.mjs';
 import { selectedPresenterScenes, presenterPortrait } from './pipeline-contract.mjs';
+import { collectCompositionExtras } from '../../../packages/compositions/src/index.mjs';
+import { collectCompositionCacheExtras } from '../../renderer/scripts/composition-worker.mjs';
 
 export const json = path => JSON.parse(readFileSync(path));
 export const writeJson = (path, value) => {
@@ -37,7 +39,7 @@ export async function stagePipelineInputs(pkg, sourceDir, workDir) {
     copyFileSync(join(sourceDir, font.file), join(workDir, font.file));
   }
   // Export's validated sidecar collector also protects recovery/import paths.
-  for (const extra of collectNarrationExtras(pkg, sourceDir)) {
+  for (const extra of [...collectNarrationExtras(pkg, sourceDir), ...collectCompositionExtras(pkg, sourceDir), ...await collectCompositionCacheExtras(pkg, sourceDir)]) {
     mkdirSync(dirname(join(workDir, extra.path)), { recursive: true });
     writeFileSync(join(workDir, extra.path), extra.data);
   }

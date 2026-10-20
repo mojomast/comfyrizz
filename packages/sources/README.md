@@ -9,6 +9,7 @@ No network call runs during render; the Openverse client is only used at edit ti
 | --- | --- | --- |
 | CC0-1.0, PDM-1.0 | yes | yes |
 | CC-BY-* | yes | only after user approval + stored attribution |
+| MIT | not an Openverse filter | when policy allows MIT and attribution is stored; archive includes the complete MIT notice |
 | CC-BY-SA-* | blocked | no — share-alike obligations are not implemented |
 | CC-BY-NC-*, CC-BY-ND-* | blocked | no — cannot be used in an edited video |
 | unknown / all rights reserved | blocked | no |
@@ -19,6 +20,13 @@ No network call runs during render; the Openverse client is only used at edit ti
 `by-nc`, …), returns an allow/block decision and never marks an unapproved CC BY
 asset as redistributable. `isAssetRedistributable()` is the single gate used by
 credits and the zip builder.
+
+MIT assets retain their own license rather than being relabeled CC0. The ZIP
+builder includes `licenses/MIT.txt` with exact supplied per-asset attribution and
+the full permission, conditions and disclaimer for assets that actually pass byte
+and hash checks. Explicit license blocks and `redistributable: false` still win.
+This supports original [curated CPU compositions](../../docs/COMPOSITIONS.md)
+without changing GSAP's separate licensing terms.
 
 ## Openverse
 
@@ -61,7 +69,7 @@ whose bytes match the recorded sha256. Everything else is listed in
 `complete: false`. No keys, signed URLs or model weights are written.
 
 ```bash
-npm test          # 8 tests: licence matrix, Openverse mapping, uploads, credits, zip filter, hash mismatch
+npm test          # licence matrix, MIT notices, Openverse, uploads, credits, ZIP filtering/hashes
 ```
 
 The zip writer has no dependency: it emits local headers, a central directory and
