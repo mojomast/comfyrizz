@@ -2,6 +2,8 @@ import './style.css';
 import { mountSettingsCard } from './colab-card';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
+import { createReferenceApi } from './references/api.ts';
+import { mountReferencePanel } from './references/panel';
 import { apiFetch, installSessionToken, savePackageRequest, sessionToken } from './editor/api.ts';
 import { createAutosave } from './editor/autosave.ts';
 import { createIndexedDbDraftStore, createMemoryDraftStore } from './editor/recovery.ts';
@@ -116,6 +118,7 @@ let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
 let projectChat: ReturnType<typeof mountProjectChat>;
+let referencePanel: ReturnType<typeof mountReferencePanel> | null = null;
 const state = {
   dirty: false,
   streaming: false,
@@ -1816,6 +1819,26 @@ function init(): void {
     provider: () => agentSettings.selection(),
     brand: brandPayload,
     log: logActivity,
+    referenceLabel: refId => referencePanel?.controller.findReference(refId)?.label,
+    onReferencesChanged: () => { void referencePanel?.refresh(); },
+    onReset: () => { void referencePanel?.refresh(); },
+    onChangeAssignment: () => {
+      const prompt = $<HTMLTextAreaElement>('prompt');
+      if (!prompt) return;
+      prompt.focus();
+      if (!prompt.value.trim()) prompt.value = 'Change the reference placement: ';
+    },
+  });
+
+  const referenceHost = document.createElement('div');
+  referenceHost.id = 'reference-panel-host';
+  $('composer').before(referenceHost);
+  referencePanel = mountReferencePanel(referenceHost, {
+    api: createReferenceApi({
+      apiFetch,
+      chatId: () => projectChat.conversationId,
+      ensureChatId: () => projectChat.ensureConversationId(),
+    }),
   });
 
   $<HTMLFormElement>('composer').addEventListener('submit', event => {
