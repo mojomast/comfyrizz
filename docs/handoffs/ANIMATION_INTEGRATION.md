@@ -97,6 +97,10 @@ editor decisions. The reviewed PR #14 plus hardening merged as `a33c3d7`.
 
 ### Integrated verification
 
+Delivered on `main` by merge **`663c72e`**, pushed after verification. The
+integration branch tip is `57e0d03`. [PR #16](https://github.com/mojomast/comfyrizz/pull/16)
+remains open against `integ/editor`; that branch has not been rewritten or merged.
+
 Suites were run sequentially. Shared packages passed **521** tests (agent 110,
 backends 119, jobs 61, LLM 11, planner 39, schema 140, sources 12, TTS 17,
 vector 12). Renderer passed **216**, server **174**, and web **82**. Python passed
@@ -245,6 +249,13 @@ Use **`--emptyOutDir false`** on live frontend builds. Preserve published direct
 `animation-showcase` and `animation-showcase-portrait`. Ordinary frontend builds
 otherwise empty dist. Verify both new players, previous players, downloads and
 authenticated catalogue after deployment.
+
+Integration deployment completed after an idle-production check and backups of
+the frontend/server runtime. The frontend was built with `--emptyOutDir false`,
+the service restarted, and app/catalogue/pipeline/run/notices endpoints returned
+200. All seven existing media pages played successfully in headless Chromium;
+all **153 published artifact files** retained their pre-deployment hashes.
+Local evidence: `.runtime/integration-animation-editor/deploy-verification.json`.
 
 Credentials, model weights, runtime outputs and the local untracked
 `pnpm-lock.yaml` are excluded from this series. Resolve lockfile policy with the
