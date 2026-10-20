@@ -1,0 +1,406 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_editor_hermes_1",
+  "title": "Editor fixture: Hermes release, 12 chapters",
+  "createdAt": "2025-10-19T00:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "target",
+    "targetFrames": 5700
+  },
+  "theme": {
+    "palette": [
+      "#101522",
+      "#1d2b45",
+      "#7bd1c0",
+      "#f2f6ff"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "qwen3-tts",
+    "voice": "hermes",
+    "speed": 1
+  },
+  "presenter": {
+    "enabled": true,
+    "portrait": "a_portrait",
+    "placement": "pip-br",
+    "shape": "circle",
+    "size": 0.24,
+    "scenes": "bookends",
+    "label": "AI presenter"
+  },
+  "audio": {
+    "music": {
+      "asset": "a_music",
+      "gain_db": -18,
+      "fade_in_seconds": 0.5,
+      "fade_out_seconds": 1,
+      "loop": true,
+      "duck": {
+        "reduction_db": -12,
+        "attack_ms": 20,
+        "release_ms": 300
+      }
+    }
+  },
+  "datasets": {
+    "d_units": {
+      "unit": "units",
+      "label": "Colab units per render",
+      "values": [
+        {
+          "label": "Cold",
+          "value": 0.74
+        },
+        {
+          "label": "Warm",
+          "value": 0.28
+        }
+      ],
+      "source": "example",
+      "approved": true
+    }
+  },
+  "scenes": [
+    {
+      "id": "s1",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Hermes release",
+        "sub": "The model, the pipeline, the numbers."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 1
+        }
+      },
+      "narration": "Hermes release. The model, the pipeline, the numbers.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s2",
+      "layout": "hero",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "What we shipped",
+        "sub": "A local pipeline that turns a brief into a finished film."
+      },
+      "background": {
+        "asset": "a_plate"
+      },
+      "narration": "What we shipped. A local pipeline that turns a brief into a finished film.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s3",
+      "layout": "list",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Six stages",
+        "sub": "Brief, plan, generate, assemble, review, export.",
+        "items": [
+          "Reuse before regenerate",
+          "Measure before you claim",
+          "Fail loudly, not silently"
+        ]
+      },
+      "narration": "Six stages. Brief, plan, generate, assemble, review, export.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s4",
+      "layout": "chart",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Units per minute",
+        "sub": "Cost falls as clips are reused across renders."
+      },
+      "data": {
+        "dataset": "d_units",
+        "display": "bar"
+      },
+      "narration": "Units per minute. Cost falls as clips are reused across renders.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s5",
+      "layout": "stat",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "27 minutes",
+        "sub": "Median time from brief to a reviewable cut."
+      },
+      "data": {
+        "dataset": "d_units",
+        "display": "number"
+      },
+      "narration": "27 minutes. Median time from brief to a reviewable cut.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s6",
+      "layout": "split",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Edit beside the cut",
+        "sub": "Timing changes recompile only what moved."
+      },
+      "media": [
+        {
+          "asset": "a_plate"
+        },
+        {
+          "asset": "a_presenter"
+        }
+      ],
+      "narration": "Edit beside the cut. Timing changes recompile only what moved.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s7",
+      "layout": "compare",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Two voices",
+        "sub": "A CPU narrator for drafts, Qwen for the final take."
+      },
+      "media": [
+        {
+          "asset": "a_plate"
+        },
+        {
+          "asset": "a_presenter"
+        }
+      ],
+      "narration": "Two voices. A CPU narrator for drafts, Qwen for the final take.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s8",
+      "layout": "code",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "One file",
+        "sub": "The package is the project; the timeline is derived."
+      },
+      "code": {
+        "language": "js",
+        "code": "compileTimeline(pkg, { narration })"
+      },
+      "narration": "One file. The package is the project; the timeline is derived.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s9",
+      "layout": "hero",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "A presenter who stays in sync",
+        "sub": "Clips are corrected once and reused."
+      },
+      "background": {
+        "asset": "a_plate"
+      },
+      "narration": "A presenter who stays in sync. Clips are corrected once and reused.",
+      "narration_asset": "a_narr",
+      "presenter_asset": "a_presenter",
+      "presenter": "pip",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s10",
+      "layout": "list",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Review gates",
+        "sub": "Frames, audio, captions and bounds are checked.",
+        "items": [
+          "Reuse before regenerate",
+          "Measure before you claim",
+          "Fail loudly, not silently"
+        ]
+      },
+      "narration": "Review gates. Frames, audio, captions and bounds are checked.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s11",
+      "layout": "chart",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Budget honesty",
+        "sub": "Every unit is metered before it is spent."
+      },
+      "data": {
+        "dataset": "d_units",
+        "display": "bar"
+      },
+      "narration": "Budget honesty. Every unit is metered before it is spent.",
+      "narration_asset": "a_narr",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s12",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Hermes",
+        "sub": "Nineteen minutes short of a feature."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 12
+        }
+      },
+      "narration": "Hermes. Nineteen minutes short of a feature.",
+      "narration_asset": "a_narr"
+    }
+  ],
+  "assets": {
+    "a_narr": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "audio/s1.wav",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "sha256": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+      "bytes": 2048
+    },
+    "a_music": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "audio/music.wav",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "sha256": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "bytes": 2048
+    },
+    "a_portrait": {
+      "kind": "image",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/a_portrait.png",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 640,
+        "height": 640
+      },
+      "sha256": "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3",
+      "bytes": 1024
+    },
+    "a_presenter": {
+      "kind": "video",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/a_presenter.mp4",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 960,
+        "height": 544,
+        "fps": 24,
+        "frames": 240
+      },
+      "sha256": "b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4",
+      "bytes": 4096
+    },
+    "a_plate": {
+      "kind": "video",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/a_plate.mp4",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "media": {
+        "width": 960,
+        "height": 576,
+        "fps": 24,
+        "frames": 96
+      },
+      "sha256": "b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5",
+      "bytes": 1024
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "local-agent",
+      "model": "llm-svg",
+      "weights": "open"
+    },
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Editor fixture: synthetic text and placeholder media declared, no binary assets committed."
+    ]
+  }
+}

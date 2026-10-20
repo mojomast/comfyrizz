@@ -2,30 +2,25 @@ import './style.css';
 import { mountSettingsCard } from './colab-card';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
+import { apiFetch, installSessionToken, savePackageRequest, sessionToken } from './editor/api.ts';
+import { createAutosave } from './editor/autosave.ts';
+import { createIndexedDbDraftStore, createMemoryDraftStore } from './editor/recovery.ts';
+import { createEditorStore } from './editor/store.ts';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
 import { mountPreview, updatePreview } from './preview';
+import { mountScriptAudioPanel } from './editor/inspector/panel.ts';
+import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
 import type { InlineAsset } from '../../renderer/src/components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 // The C2 server prints http://127.0.0.1:4319/#token=...; the fragment never
 // leaves the browser. Strip it from the visible URL and keep it for API calls.
-const TOKEN_KEY = 'comfyrizz.token';
-const fragmentToken = new URLSearchParams(location.hash.slice(1)).get('token');
-if (fragmentToken) {
-  sessionStorage.setItem(TOKEN_KEY, fragmentToken);
-  history.replaceState(null, '', `${location.pathname}${location.search}`);
-}
-const token = fragmentToken ?? sessionStorage.getItem(TOKEN_KEY);
-function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  if (token) headers.set('x-comfyrizz-token', token);
-  return fetch(input, { ...init, headers });
-}
+const token = installSessionToken();
 
 /* Lifted from Orbit's Grok Bots shell (MIT): escape, then a tiny markdown subset. */
 function esc(value: unknown): string {
@@ -44,7 +39,26 @@ const colabHost = document.getElementById('colab-card-host');
 if (colabHost) mountSettingsCard(colabHost, apiFetch);
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
+const editorStore = createEditorStore({ package: pkg as never });
+const saveStatusEl = document.getElementById('save-status');
+const paintSaveStatus = () => {
+  if (!saveStatusEl) return;
+  const status = editorStore.saveStatus();
+  saveStatusEl.textContent = editorStore.statusText();
+  saveStatusEl.dataset.state = status;
+};
+editorStore.subscribe(paintSaveStatus);
+paintSaveStatus();
+if (sessionToken()) {
+  const drafts = typeof indexedDB === 'undefined' ? createMemoryDraftStore() : createIndexedDbDraftStore();
+  createAutosave(editorStore, { save: payload => savePackageRequest(apiFetch, payload), drafts });
+}
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
+let editorApi: SceneTimelineHandle | null = null;
+function adoptEditorPackage(next: PackageV1): void {
+  pkg = next;
+  editorStore.replaceDocument({ package: next as never });
+}
 let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
@@ -846,6 +860,7 @@ async function applySceneChipFlow(sceneId: string, chip: string): Promise<void> 
     if (result.package) {
       pkg = result.package;
       if (result.revision != null) pkg.revision = result.revision;
+      adoptEditorPackage(pkg);
       updatePreview(pkg, timeline, generatedAssets);
       renderStoryboard();
     }
@@ -879,6 +894,7 @@ async function applyPresenterFlow(args: Record<string, unknown>, note: string): 
       pkg = result.package;
       if (result.revision != null) pkg.revision = result.revision;
       timeline.presenters = result.presenters ?? [];
+      adoptEditorPackage(pkg);
       updatePreview(pkg, timeline, generatedAssets);
       renderStoryboard();
     }
@@ -1354,6 +1370,7 @@ function replaceChatMessages(messages: Array<{ role: 'user' | 'assistant'; conte
 function adoptChatProject(project: ChatProject, built: boolean): void {
   pkg = project.package;
   timeline = project.timeline;
+  adoptEditorPackage(pkg);
   generatedAssets = project.generatedAssets;
   pendingGpu = project.pendingGpu as typeof pendingGpu;
   scrub.max = String(timeline.durationInFrames - 1);
@@ -1389,6 +1406,7 @@ async function runBrief(brief: string): Promise<void> {
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
     pkg = body.package as PackageV1;
     timeline = body.timeline as Timeline;
+    adoptEditorPackage(pkg);
     generatedAssets = body.generatedAssets as Record<string, InlineAsset>;
     pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu : [];
     scrub.max = String(timeline.durationInFrames - 1);
@@ -1428,16 +1446,43 @@ function init(): void {
 
   scrub = $<HTMLInputElement>('scrub');
   scrub.max = String(timeline.durationInFrames - 1);
+  const timelineHost = document.getElementById('scene-timeline');
+  const scriptHost = document.getElementById('script-audio-panel');
+  if (scriptHost) mountScriptAudioPanel(scriptHost, editorStore);
+  if (timelineHost) {
+    editorApi = mountSceneTimeline(timelineHost, editorStore, {
+      onDocument(next, compiled) {
+        pkg = next;
+        timeline = compiled;
+        scrub.max = String(Math.max(0, compiled.durationInFrames - 1));
+        const frame = player?.getCurrentFrame() ?? 0;
+        $('time').textContent = `${formatTime(frame, compiled.fps)} / ${formatTime(compiled.durationInFrames, compiled.fps)}`;
+        updatePreview(pkg, timeline, generatedAssets);
+        renderStoryboard();
+      },
+      seek(frame) {
+        player?.seekTo(Math.max(0, Math.floor(frame)));
+      },
+      togglePlay() {
+        player?.toggle();
+      },
+    });
+  }
+  let boundPlayer: PlayerRef | null = null;
   mountPreview($('player'), pkg, timeline, ref => {
     player = ref;
+    if (boundPlayer === ref) return;
+    boundPlayer = ref;
     const onFrame = () => {
       const frame = ref.getCurrentFrame();
+      editorApi?.followFrame(frame);
       scrub.value = String(frame);
       $('time').textContent = `${formatTime(frame, timeline.fps)} / ${formatTime(timeline.durationInFrames, timeline.fps)}`;
       const active = timeline.scenes.find(scene => frame >= scene.from && frame < scene.from + scene.durationInFrames)?.id;
       document.querySelectorAll('.scene-card').forEach(card => card.classList.toggle('active', card.getAttribute('data-scene-id') === active));
     };
     ref.addEventListener('frameupdate', onFrame);
+    editorApi?.followFrame(ref.getCurrentFrame());
     ref.addEventListener('play', () => ($('play').textContent = 'Pause'));
     ref.addEventListener('pause', () => ($('play').textContent = 'Play'));
     onFrame();
