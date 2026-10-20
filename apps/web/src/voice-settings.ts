@@ -4,13 +4,35 @@ import './voice-settings.css';
 
 type Voice = NonNullable<PackageV1['voice']>;
 type Client = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-type Options = { getPackage: () => PackageV1; changed: () => void; save: () => Promise<Record<string, unknown>>; api: Client };
+type CommandResult = { ok: boolean; error?: string };
+export type VoiceSaveResult = {
+  ok?: boolean;
+  packageId?: string;
+  baseRevision?: number;
+  revision?: number;
+  status?: string;
+  text?: string;
+};
+type Options = {
+  /** Read-only: every edit goes through setVoice/setNarrationStyle. */
+  getPackage: () => PackageV1;
+  /** Existing EditorStore SetVoice command, so undo and autosave see the edit. */
+  setVoice?: (voice: Voice | null) => CommandResult;
+  /** Existing scene command, so per-scene delivery is undoable and lock-aware. */
+  setNarrationStyle?: (sceneId: string, text: string | null) => CommandResult;
+  /** Flush shared autosave and return the revision /api/pipeline/plan expects. */
+  save: () => Promise<VoiceSaveResult>;
+  api: Client;
+  /** Repaint after external edits (undo/redo) without stealing focus. */
+  subscribe?: (listener: () => void) => () => void;
+};
 type Plan = { ready: boolean; requiresApproval: boolean; planHash: string; issues: { message: string; action: string }[] };
 type Run = { runId: string; status: string; baseRevision: number; currentStage?: string; stages: { id: string; label: string; status: string; progress?: { completed?: number; total?: number; unit?: string } }[]; error?: string | { message?: string }; result?: { files: { name: string; url: string }[] } };
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const option = (value: string, label: string, current?: string) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`;
-let host: HTMLElement;
-let options: Options;
+let host: HTMLElement | null = null;
+let options: Options | null = null;
+let unsubscribe: (() => void) | null = null;
 let run: Run | null = null;
 let busy = false;
 let message = '';
@@ -20,11 +42,13 @@ let runtime = 'local';
 let budget = 2;
 let narrationUnits = 2;
 let comfyuiUrl = '';
+let deliverySceneId = '';
 let timer: ReturnType<typeof setTimeout> | undefined;
 let restored = false;
-const active = () => run && ['running', 'cancelling', 'reconciling'].includes(run.status);
+const active = () => Boolean(run && ['running', 'cancelling', 'reconciling'].includes(run.status));
 
 async function request(path: string, body?: unknown) {
+  if (!options) throw new Error('Voice settings are not connected.');
   const response = await options.api(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const result = await response.json();
   if (!response.ok) throw Error(result.message ?? result.error ?? `HTTP ${response.status}`);
@@ -37,9 +61,9 @@ async function refreshRun() {
   catch (error) { message = `Status connection interrupted: ${String(error)}. Reconnecting…`; }
   // Status refreshes must not replace controls while someone is editing the next cut.
   if (active()) {
-    const progress = host.querySelector('[data-run-progress]');
+    const progress = host?.querySelector('[data-run-progress]');
     if (progress) progress.innerHTML = runProgress();
-    const status = host.querySelector('[data-voice-status]');
+    const status = host?.querySelector('[data-voice-status]');
     if (status) status.textContent = message;
     timer = setTimeout(refreshRun, 2000);
   } else render();
@@ -50,7 +74,17 @@ function runProgress() {
 }
 
 export function mountVoiceSettings(element: HTMLElement, configuration: Options) {
-  host = element; options = configuration;
+  unsubscribe?.();
+  host = element;
+  options = configuration;
+  if (!deliverySceneId) deliverySceneId = configuration.getPackage().scenes[0]?.id ?? '';
+  unsubscribe = configuration.subscribe?.(() => {
+    if (!host || busy || active()) return;
+    // The control that received the edit already repaints if it needs to.
+    if (host.contains(document.activeElement)) return;
+    plan = null;
+    render();
+  }) ?? null;
   render();
   if (!restored) {
     restored = true;
@@ -64,19 +98,59 @@ export function mountVoiceSettings(element: HTMLElement, configuration: Options)
   }
 }
 
-function changed() {
+function packageValue(): PackageV1 {
+  if (!options) throw new Error('Voice settings are not connected.');
+  return options.getPackage();
+}
+
+function cleanVoice(value: Voice): Voice {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Voice;
+}
+
+/** All voice edits are one SetVoice command, so undo/autosave cover them. */
+function commitVoice(next: Voice, repaint = true): boolean {
   plan = null;
-  options.changed();
+  const result = options?.setVoice?.(cleanVoice(next));
+  if (!result) {
+    message = 'Voice editing is not connected to the editor store.';
+    render();
+    return false;
+  }
+  if (!result.ok) {
+    message = result.error ?? 'Voice change failed.';
+    render();
+    return false;
+  }
+  message = '';
+  if (repaint) render();
+  return true;
+}
+
+function updateVoice(patch: Partial<Voice>, repaint = true): boolean {
+  return commitVoice({ ...(packageValue().voice ?? { enabled: false }), ...patch } as Voice, repaint);
 }
 
 function render() {
-  if (!host) return;
-  const voice = options.getPackage().voice ?? { enabled: false };
+  if (!host || !options) return;
+  const pkg = packageValue();
+  const voice = pkg.voice ?? { enabled: false };
   const mode = voice.engine === 'qwen3-tts' ? (voice.qwen_mode === 'custom' ? 'custom' : 'design') : 'kokoro';
   const language = voice.language ?? 'en-us';
   const blend = voice.blend;
   const selected = voice.voice ?? 'af_heart';
   const voices = mode === 'custom' ? QWEN_SPEAKERS.map(id => ({ id, label: id })) : KOKORO_VOICES;
+
+  if (!pkg.scenes.some(scene => scene.id === deliverySceneId)) deliverySceneId = pkg.scenes[0]?.id ?? '';
+  const deliveryScene = pkg.scenes.find(scene => scene.id === deliverySceneId);
+  const delivery = mode === 'custom' && options.setNarrationStyle ? `<fieldset class="voice-delivery">
+      <legend>Per-scene delivery</legend>
+      <div class="voice-grid">
+        <label>Delivery scene<select data-delivery-scene-select>${pkg.scenes.map(scene => option(scene.id, String(scene.copy?.headline ?? scene.id), scene.id === deliverySceneId ? scene.id : undefined)).join('')}</select></label>
+      </div>
+      <label>Scene delivery direction<textarea data-delivery-scene maxlength="240" rows="2" placeholder="Warm and conversational; emphasize the contrast, then finish calmly."${deliveryScene?.locked ? ' disabled' : ''}>${esc(deliveryScene?.narration_style ?? '')}</textarea></label>
+      <p class="hint">Overrides the default CustomVoice delivery for this scene.${deliveryScene?.locked ? ' This scene is locked; its saved direction is read only.' : ''} Design-mode Base cloning does not use scene directions.</p>
+    </fieldset>` : '';
+
   host.innerHTML = `<section class="voice-settings" aria-label="Voice and narration">
     <h3>Voice & narration</h3>
     <label><input data-enabled type="checkbox"${voice.enabled ? ' checked' : ''}> Enable generated narration</label>
@@ -91,6 +165,7 @@ function render() {
     </div>
     ${mode === 'design' ? `<label>Voice identity and reference performance<textarea data-persona maxlength="400" rows="3">${esc(voice.persona ?? 'A clear, warm, conversational narrator.')}</textarea></label><details><summary>Reference text</summary><textarea data-reference maxlength="1000" rows="3" placeholder="Use the default reference transcript">${esc(voice.reference_text ?? '')}</textarea></details>` : ''}
     ${mode !== 'kokoro' ? `<label>${mode === 'custom' ? 'Default delivery direction' : 'Additional reference direction'}<textarea data-delivery maxlength="400" rows="2" placeholder="Warm and conversational; emphasize the contrast, then finish calmly.">${esc(voice.delivery ?? '')}</textarea></label>` : ''}
+    ${delivery}
     <p class="hint">${mode === 'kokoro' ? 'Voice, speed and context affect synthesis. Paragraph mode preserves measured take length; sentence/word timing uses the existing estimated alignment.' : mode === 'custom' ? 'CustomVoice supports delivery instructions. A scene’s delivery direction overrides the default. Qwen runs strictly: no silent voice fallback.' : 'VoiceDesign creates the reference once; Base reuses it across scenes. Delivery direction shapes the reference, not individual Base-clone scenes.'} <a href="/tts-expression/index.html" target="_blank" rel="noopener">Hear the comparisons</a></p>
     <details class="voice-production" open><summary>Generate narrated video</summary>
       <div class="voice-grid"><label>Visual generation<select data-backend>${option('cpu', 'CPU · ready/local visuals', backend)}${option('colab', 'Colab GPU', backend)}${option('byo-comfyui', 'My ComfyUI', backend)}</select></label>
@@ -105,53 +180,73 @@ function render() {
     </details>
   </section>`;
   const bind = (selector: string, callback: (element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => void, event = 'change') => {
-    host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(selector).forEach(element => element.addEventListener(event, () => callback(element)));
+    host!.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(selector).forEach(element => element.addEventListener(event, () => callback(element)));
   };
-  const set = (update: Partial<Voice>) => { options.getPackage().voice = { ...options.getPackage().voice!, ...update }; changed(); render(); };
-  bind('[data-enabled]', e => set({ enabled: (e as HTMLInputElement).checked, engine: voice.engine === 'none' || !voice.engine ? 'kokoro' : voice.engine, voice: voice.voice ?? 'af_heart' }));
+
+  bind('[data-enabled]', e => updateVoice({ enabled: (e as HTMLInputElement).checked, engine: voice.engine === 'none' || !voice.engine ? 'kokoro' : voice.engine, voice: voice.voice ?? 'af_heart' }));
   bind('[data-preset]', e => {
     const preset = VOICE_PRESETS.find(p => p.id === e.value); if (!preset) return;
-    options.getPackage().voice = structuredClone(preset.voice) as Voice;
-    runtime = preset.voice.engine === 'qwen3-tts' ? 'colab' : 'local'; changed(); render();
+    runtime = preset.voice.engine === 'qwen3-tts' ? 'colab' : 'local';
+    commitVoice(structuredClone(preset.voice) as Voice);
   });
   bind('[data-mode]', e => {
     const preset = VOICE_PRESETS.find(p => p.id === ({ kokoro: 'heart', design: 'designed-conversational', custom: 'ryan-curious' }[e.value]))!;
-    options.getPackage().voice = structuredClone(preset.voice) as Voice; runtime = e.value === 'kokoro' ? 'local' : 'colab'; changed(); render();
+    runtime = e.value === 'kokoro' ? 'local' : 'colab';
+    commitVoice(structuredClone(preset.voice) as Voice);
   });
   bind('[data-speaker]', e => {
     const next: Partial<Voice> = { voice: e.value };
     if (mode === 'kokoro') { next.language = KOKORO_VOICES.find(v => v.id === e.value)?.language ?? language; next.blend = undefined; }
-    set(next);
+    updateVoice(next);
   });
-  bind('[data-speed]', e => { const n = Number(e.value); if (e.value && n >= 0.5 && n <= 2) set({ speed: n }); else { message = 'Speed must be between 0.5 and 2.'; render(); } });
-  bind('[data-chunking]', e => set({ chunking: e.value as Voice['chunking'] }));
-  bind('[data-blend]', e => set({ blend: (e as HTMLInputElement).checked ? [{ voice: selected, weight: 0.7 }, { voice: KOKORO_VOICES.find(v => v.language === language && v.id !== selected)!.id, weight: 0.3 }] : undefined }));
-  bind('[data-second]', e => set({ blend: [{ voice: selected, weight: blend![0].weight }, { voice: e.value, weight: blend![1].weight }] }));
-  bind('[data-weight]', e => { const n = Number(e.value) / 100; if (n >= 0.05 && n <= 0.95) set({ blend: [{ voice: selected, weight: 1 - n }, { voice: blend![1].voice, weight: n }] }); });
-  bind('[data-language]', e => set({ language: e.value, lang: e.value.split('-')[0] }));
-  bind('[data-fulltext]', e => set({ non_streaming: (e as HTMLInputElement).checked }));
+  bind('[data-speed]', e => { const n = Number(e.value); if (e.value && n >= 0.5 && n <= 2) updateVoice({ speed: n }, false); else { message = 'Speed must be between 0.5 and 2.'; render(); } });
+  bind('[data-chunking]', e => updateVoice({ chunking: e.value as Voice['chunking'] }));
+  bind('[data-blend]', e => updateVoice({ blend: (e as HTMLInputElement).checked ? [{ voice: selected, weight: 0.7 }, { voice: KOKORO_VOICES.find(v => v.language === language && v.id !== selected)!.id, weight: 0.3 }] : undefined }));
+  bind('[data-second]', e => updateVoice({ blend: [{ voice: selected, weight: blend![0].weight }, { voice: e.value, weight: blend![1].weight }] }));
+  bind('[data-weight]', e => { const n = Number(e.value) / 100; if (n >= 0.05 && n <= 0.95) updateVoice({ blend: [{ voice: selected, weight: 1 - n }, { voice: blend![1].voice, weight: n }] }, false); });
+  bind('[data-language]', e => updateVoice({ language: e.value, lang: e.value.split('-')[0] }));
+  bind('[data-fulltext]', e => updateVoice({ non_streaming: (e as HTMLInputElement).checked }));
   for (const [selector, field] of [['[data-persona]', 'persona'], ['[data-delivery]', 'delivery'], ['[data-reference]', 'reference_text']] as const) {
-    bind(selector, e => { options.getPackage().voice = { ...options.getPackage().voice!, [field]: e.value || undefined }; changed(); }, 'input');
+    bind(selector, e => updateVoice({ [field]: e.value || undefined }, false), 'input');
   }
+  bind('[data-delivery-scene-select]', e => { deliverySceneId = e.value; render(); });
+  bind('[data-delivery-scene]', e => {
+    const result = options!.setNarrationStyle?.(deliverySceneId, e.value.trim() ? e.value : null);
+    if (!result) { message = 'Per-scene delivery is not connected to the editor store.'; render(); return; }
+    if (!result.ok) { message = result.error ?? 'Scene delivery change failed.'; render(); return; }
+    plan = null;
+  }, 'input');
   bind('[data-backend]', e => { backend = e.value; plan = null; render(); });
   bind('[data-runtime]', e => { runtime = e.value; plan = null; render(); });
   bind('[data-budget]', e => { budget = Number(e.value); plan = null; render(); });
   bind('[data-narration-units]', e => { narrationUnits = Number(e.value); plan = null; render(); });
   bind('[data-comfyui]', e => { comfyuiUrl = e.value; plan = null; });
-  host.querySelector('[data-save]')?.addEventListener('click', () => perform(async () => { await options.save(); message = 'Voice settings saved to this project revision.'; }));
+  host.querySelector('[data-save]')?.addEventListener('click', () => perform(async () => {
+    await saveNow();
+    message = 'Voice settings saved to this project revision.';
+  }));
   host.querySelector('[data-plan]')?.addEventListener('click', () => perform(async () => {
-    if (options.getPackage().voice?.enabled && !options.getPackage().scenes.some(s => s.narration?.trim())) throw Error('Add narration text to at least one scene before generating the voice.');
-    const beforeSave = JSON.stringify({ ...options.getPackage(), revision: 0 });
-    const saved = await options.save();
-    if (JSON.stringify({ ...options.getPackage(), revision: 0 }) !== beforeSave) throw Error('Project changed while saving. Check the plan again.');
-    const snapshot = JSON.stringify(options.getPackage());
-    const body = { ...saved, backendId: backend, narrationRuntime: mode === 'kokoro' ? 'local' : runtime, budgetUnits: budget, narrationUnits, ...(comfyuiUrl ? { comfyuiUrl } : {}) };
+    if (packageValue().voice?.enabled && !packageValue().scenes.some(s => s.narration?.trim())) throw Error('Add narration text to at least one scene before generating the voice.');
+    const beforeSave = JSON.stringify({ ...packageValue(), revision: 0 });
+    const saved = await saveNow();
+    if (JSON.stringify({ ...packageValue(), revision: 0 }) !== beforeSave) throw Error('Project changed while saving. Check the plan again.');
+    if (!saved.packageId || typeof saved.baseRevision !== 'number') throw Error('Save did not return a package revision to plan against.');
+    const snapshot = JSON.stringify(packageValue());
+    const body = {
+      packageId: saved.packageId,
+      baseRevision: saved.baseRevision,
+      backendId: backend,
+      narrationRuntime: mode === 'kokoro' ? 'local' : runtime,
+      budgetUnits: budget,
+      narrationUnits,
+      ...(comfyuiUrl ? { comfyuiUrl } : {}),
+    };
     const value = await request('/api/pipeline/plan', body) as Plan;
     plan = { value, body, snapshot };
     message = value.ready ? (value.requiresApproval ? `Ready. Total ceiling ${budget} units; Qwen portion ${mode !== 'kokoro' && runtime === 'colab' ? narrationUnits : 0}. This is a limit, not an estimated charge.` : 'Ready to generate on the selected runtime.') : value.issues.map(i => `${i.message} ${i.action}`).join('\n');
   }));
   host.querySelector('[data-start]')?.addEventListener('click', () => perform(async () => {
-    if (!plan || plan.snapshot !== JSON.stringify(options.getPackage())) { plan = null; throw Error('Project changed. Check a fresh generation plan.'); }
+    if (!plan || plan.snapshot !== JSON.stringify(packageValue())) { plan = null; throw Error('Project changed. Check a fresh generation plan.'); }
     run = (await request('/api/pipeline', { ...plan.body, approvedPlanHash: plan.value.planHash })).run;
     if (run) sessionStorage.setItem('comfyrizz.voice-generation-run', run.runId);
     plan = null; message = 'Generation started.';
@@ -159,15 +254,25 @@ function render() {
   }));
   host.querySelector('[data-cancel]')?.addEventListener('click', () => perform(async () => { await request(`/api/pipeline/${run!.runId}/cancel`, {}); message = 'Cancellation requested; waiting for runtime cleanup.'; }));
   host.querySelectorAll<HTMLButtonElement>('[data-file]').forEach(button => button.addEventListener('click', () => perform(async () => {
-    const response = await options.api(button.dataset.file!); if (!response.ok) throw Error(`Download failed: HTTP ${response.status}`);
+    const response = await options!.api(button.dataset.file!); if (!response.ok) throw Error(`Download failed: HTTP ${response.status}`);
     const url = URL.createObjectURL(await response.blob()); const a = document.createElement('a'); a.href = url; a.download = button.dataset.name!; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
   })));
   if (busy) host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea').forEach(element => { element.disabled = true; });
 }
 
+/** Autosave is authoritative: never plan against a pending, rejected or offline revision. */
+async function saveNow(): Promise<VoiceSaveResult> {
+  if (!options) throw new Error('Voice settings are not connected.');
+  const saved = await options.save();
+  if (saved.ok === false || saved.status !== 'saved') {
+    throw Error(saved.text?.trim() || (saved.status ? `Save state: ${saved.status}` : 'Save not confirmed.'));
+  }
+  return saved;
+}
+
 async function perform(action: () => Promise<void>) {
   if (busy) return;
   busy = true; message = ''; render();
-  try { await action(); } catch (error) { message = String(error); }
+  try { await action(); } catch (error) { message = error instanceof Error ? error.message : String(error); }
   finally { busy = false; render(); }
 }

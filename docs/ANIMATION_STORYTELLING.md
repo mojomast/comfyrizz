@@ -82,6 +82,12 @@ inside the appropriate `scenePatches[].changes`, then build to apply the draft.
 
 Phrase-derived timing retains its provenance. Kokoro's syllable-fallback timestamps are estimates within measured audio, not forced alignment. The compiler stores resolutions in `timeline.scenes[].motionCues`, separately from the editable motion settings. Explicit seconds win; phrases use matching word cues or caption starts. Repeated phrases select the first occurrence with a diagnostic; phrases spanning caption boundaries remain unresolved. Missing, ambiguous and estimated anchors appear in `timeline.motionCueDiagnostics` and pipeline warning events.
 
+The timeline editor's caption-text overrides are display-only: motion phrases
+still resolve against the spoken narration/captions, so correcting a displayed
+caption does not move or invalidate a narration cue. Browser compilation, server
+compilation and MP4 export share the durations-report mapper, including known
+aligner and estimated Kokoro timing provenance.
+
 ## Rendering architecture
 
 Recipes follow the current Remotion frame clock. Geometry is bounded and reusable; animation state derives from frame number, scene duration, configuration and seed. Fonts/media are local to the render. Narration, captions and presenter timing stay under the full production pipeline.

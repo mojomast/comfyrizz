@@ -219,6 +219,14 @@ export interface NarrationChunk {
   timing?: NarrationTiming;
 }
 
+/** Caption wording correction. Timing stays on the compiled cue; speech text is untouched. */
+export interface CaptionOverride {
+  sceneId: string;
+  /** Index among that scene's caption cues, in compile order. */
+  index: number;
+  text: string;
+}
+
 export interface CompileOptions {
   /** Measured Kokoro chunks per scene id. Absent while narration is provisional. */
   narration?: Record<string, NarrationChunk[]>;
@@ -228,4 +236,6 @@ export interface CompileOptions {
   narrationPaddingSeconds?: number;
   /** Emit estimated caption cues when narration audio is not ready yet. Default true. */
   estimateCaptions?: boolean;
+  /** Replace caption cue text after timing is projected. Does not change scene.narration. */
+  captionOverrides?: CaptionOverride[];
 }

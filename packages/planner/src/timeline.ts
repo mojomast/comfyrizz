@@ -16,7 +16,6 @@
  *               a pacing advisory, never speeding up, clipping or cutting speech.
  */
 
-import { createHash } from 'node:crypto';
 import type {
   CompileOptions,
   ComfyrizzPackage,
@@ -27,6 +26,7 @@ import type {
   Scene,
   SceneLowerThird,
 } from './package-types.js';
+import { sha256Hex } from './sha256.js';
 
 export const TIMELINE_VERSION = 1;
 export const DEFAULT_FPS = 30;
@@ -266,7 +266,28 @@ function sortValue(value: unknown): unknown {
 
 export function hashTimeline(timeline: Omit<Timeline, 'hash'> | Timeline): string {
   const { hash: _ignored, ...rest } = timeline as Timeline;
-  return createHash('sha256').update(canonicalJson(rest)).digest('hex');
+  return sha256Hex(canonicalJson(rest));
+}
+
+/** Integer project fps. Non-finite or non-positive rates fall back to 30. */
+export function projectFps(format?: { fps?: number } | null): number {
+  return isFiniteNumber(format?.fps) && (format?.fps ?? 0) > 0 ? Math.floor(format!.fps) : DEFAULT_FPS;
+}
+
+/**
+ * Lower bound for TrimScene, in integer project frames.
+ * Measured speech (chunks + gap + padding) wins over the layout minimum.
+ * Unmeasured scenes use the layout minimum. Speech is never the thing being trimmed.
+ */
+export function speechFloorFrames(
+  scene: { id: string; layout: LayoutId },
+  options: CompileOptions,
+  fps: number,
+): { frames: number; measured: boolean } {
+  const limit = sceneLimit(scene.layout);
+  const spoken = narrationFrames(options.narration?.[scene.id], options, fps);
+  if (spoken === null) return { frames: limit.min, measured: false };
+  return { frames: spoken, measured: true };
 }
 
 function frameSecondsToFrames(seconds: number, fps: number): number {
@@ -579,6 +600,29 @@ function resolveMotionCues(
   return { byScene, diagnostics };
 }
 
+/**
+ * Editor caption corrections. Only cue text changes: frames, word cues, timing provenance and
+ * scene narration stay exactly as compiled. Motion cues keep resolving against the spoken
+ * captions below, so correcting display wording cannot move a cue in time.
+ */
+function applyCaptionOverrides(captions: TimelineCaption[], overrides: CompileOptions['captionOverrides']): TimelineCaption[] {
+  if (!overrides || overrides.length === 0) return captions;
+  const next = captions.map(cue => ({ ...cue }));
+  const byScene = new Map<string, number[]>();
+  next.forEach((cue, index) => {
+    const list = byScene.get(cue.sceneId) ?? [];
+    list.push(index);
+    byScene.set(cue.sceneId, list);
+  });
+  const ordered = [...overrides].sort((a, b) => a.sceneId.localeCompare(b.sceneId) || a.index - b.index);
+  for (const override of ordered) {
+    const at = byScene.get(override.sceneId)?.[override.index];
+    if (at === undefined) continue;
+    next[at] = { ...next[at]!, text: override.text };
+  }
+  return next;
+}
+
 function plateRetimes(pkg: ComfyrizzPackage, fps: number): PlateRetime[] {
   const used = new Set<string>();
   for (const scene of pkg.scenes) {
@@ -666,7 +710,7 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
   if (!pkg || !Array.isArray(pkg.scenes) || pkg.scenes.length === 0) {
     throw new TimelineError('empty-package', 'A package needs at least one scene.');
   }
-  const fps = isFiniteNumber(pkg.format?.fps) && pkg.format.fps > 0 ? Math.floor(pkg.format.fps) : DEFAULT_FPS;
+  const fps = projectFps(pkg.format);
   const ids = new Set<string>();
   for (const scene of pkg.scenes) {
     if (!scene.id || typeof scene.id !== 'string') throw new TimelineError('missing-scene-id', 'Every scene needs a string id.');
@@ -727,11 +771,13 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
     requiresAcceptance: requested !== null && requested !== actual,
   };
 
-  const { captions, warnings: captionWarnings } = buildCaptions(scenes, pkg, options, fps);
-  warnings.push(...captionWarnings);
+  const built = buildCaptions(scenes, pkg, options, fps);
+  const captions = applyCaptionOverrides(built.captions, options.captionOverrides);
+  warnings.push(...built.warnings);
 
-  // Storytelling cues: resolve after captions exist, but never change scene timing or narration.
-  const { byScene: motionCuesByScene, diagnostics: motionCueDiagnostics } = resolveMotionCues(pkg, scenes, captions, fps);
+  // Storytelling cues: resolve against the spoken captions (before display-only wording fixes),
+  // and never change scene timing or narration.
+  const { byScene: motionCuesByScene, diagnostics: motionCueDiagnostics } = resolveMotionCues(pkg, scenes, built.captions, fps);
   for (const scene of scenes) {
     const cues = motionCuesByScene.get(scene.id);
     if (cues) scene.motionCues = cues;
@@ -758,7 +804,7 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
     proposals,
     // Only emitted when a cue phrase needed a diagnostic, so ordinary packages are unchanged.
     ...(motionCueDiagnostics.length > 0 ? { motionCueDiagnostics } : {}),
-    sourceHash: createHash('sha256').update(canonicalJson(pkg)).digest('hex'),
+    sourceHash: sha256Hex(canonicalJson(pkg)),
   };
 
   return { ...withoutHash, hash: hashTimeline(withoutHash) };

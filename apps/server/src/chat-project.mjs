@@ -5,12 +5,12 @@ import { isDeepStrictEqual as equal } from 'node:util';
 import { createToolset, conversationPlanSchema, STYLE_PRESET_DEFAULTS, brandTheme } from '../../../packages/agent/dist/src/index.js';
 import { sanitizeSvg, renderCheck, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { compilePackage } from './compile-package.mjs';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 
 export function chatProjectResponse(pkg, runtimeDir) {
   return {
-    package: pkg, revision: pkg.revision, timeline: compileTimeline(pkg),
+    package: pkg, revision: pkg.revision, timeline: compilePackage(pkg, join(runtimeDir, 'packages')),
     generatedAssets: inlineGeneratedAssets(pkg, join(runtimeDir, 'packages')),
     svgAssets: Object.entries(pkg.assets ?? {}).filter(([, asset]) => ['svg', 'vector-anim'].includes(asset.kind)).map(([id]) => id),
     pendingGpu: Object.entries(pkg.assets ?? {}).filter(([, asset]) => asset.status === 'pending' && ['flux3-klein', 'ltx25'].includes(asset.gen?.generator))
@@ -353,7 +353,7 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   }
   // Use the natural timeline (including overlap and layout limits), so target
   // fitting cannot stretch manual timings or count deleted scenes.
-  const naturalTimeline = compileTimeline({ ...pkg, duration: { mode: 'flexible' } });
+  const naturalTimeline = compilePackage({ ...pkg, duration: { mode: 'flexible' } }, join(runtimeDir, 'packages'));
   pkg.duration = { mode: 'target', targetFrames: naturalTimeline.durationInFrames };
 
   signal?.throwIfAborted();
@@ -425,6 +425,6 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   signal?.throwIfAborted();
   const validation = validatePackage(draft);
   if (!validation.valid) throw new Error(`Project validation failed: ${validation.errors.slice(0, 5).map(error => `${error.path}: ${error.message}`).join('; ')}`);
-  compileTimeline(draft);
+  compilePackage(draft, join(runtimeDir, 'packages'));
   return draft;
 }

@@ -456,3 +456,40 @@ test('ANIM: a chunk without timing keeps the exact legacy caption and cue shape'
   assert.equal(cue.estimated, false);
   assert.equal(timeline.motionCueDiagnostics, undefined);
 });
+
+test('ANIM: a caption override changes display text but keeps cue frame, seconds and timing', () => {
+  const measured = {
+    narration: { s1: [{ text: CUE_TEXT, seconds: 4, words: CUE_WORDS, timing: 'aligner' as const }] },
+  };
+  const baseline = compileTimeline(cueFilm({ recipe: 'technical-flow', cue_phrases: ['reaches the worker'] }), measured);
+  const edited = compileTimeline(cueFilm({ recipe: 'technical-flow', cue_phrases: ['reaches the worker'] }), {
+    ...measured,
+    captionOverrides: [{ sceneId: 's1', index: 0, text: 'Corrected display line.' }],
+  });
+
+  assert.equal(edited.captions[0].text, 'Corrected display line.');
+  assert.deepEqual(edited.captions[0].words, baseline.captions[0].words);
+  assert.equal(edited.captions[0].timing, 'aligner');
+  assert.deepEqual(edited.scenes[0].motionCues, baseline.scenes[0].motionCues);
+  assert.equal(edited.scenes[0].motionCues![0].frame, 24);
+  assert.equal(edited.scenes[0].motionCues![0].seconds, 0.8);
+  assert.equal(edited.scenes[0].motionCues![0].timing, 'aligner');
+  assert.equal(edited.scenes[0].narration, baseline.scenes[0].narration, 'the spoken line is untouched');
+  assert.equal(edited.durationInFrames, baseline.durationInFrames, 'a wording fix never retimes the film');
+  assert.equal(edited.motionCueDiagnostics, undefined);
+});
+
+test('ANIM: a caption override never turns a spoken cue into an unresolved phrase', () => {
+  const measured = { narration: { s1: [{ text: CUE_TEXT, seconds: 4 }] } };
+  const baseline = compileTimeline(cueFilm({ recipe: 'technical-flow', cue_phrases: ['reaches the worker'] }), measured);
+  const edited = compileTimeline(cueFilm({ recipe: 'technical-flow', cue_phrases: ['reaches the worker'] }), {
+    ...measured,
+    captionOverrides: [{ sceneId: 's1', index: 0, text: 'A visually corrected line.' }],
+  });
+
+  assert.equal(edited.captions[0].text, 'A visually corrected line.');
+  assert.equal(edited.scenes[0].motionCues![0].source, 'measured-caption');
+  assert.equal(edited.scenes[0].motionCues![0].frame, baseline.scenes[0].motionCues![0].frame);
+  assert.equal(edited.scenes[0].motionCues![0].seconds, baseline.scenes[0].motionCues![0].seconds);
+  assert.equal(edited.motionCueDiagnostics, undefined);
+});

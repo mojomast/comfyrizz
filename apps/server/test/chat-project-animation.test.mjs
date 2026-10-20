@@ -1,14 +1,34 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
 import { animationOptions } from '../src/animation-options.mjs';
+import { chatProjectResponse } from '../src/chat-project.mjs';
+import { compilePackage } from '../src/compile-package.mjs';
 import { CONVERSATION_RECIPES, CONVERSATION_TRANSITIONS } from '../../../packages/agent/dist/src/index.js';
 
 const TOKEN = 'animation-options-test-token';
 const RECIPE_IDS = ['sketch', 'paper-cut', 'morph', 'technical-flow', 'focus', 'kinetic'];
+
+test('chat responses compile the same store-root narration sidecar and cue provenance as the editor', t => {
+  const runtime = mkdtempSync('/tmp/opencode/animation-chat-timing-');
+  t.after(() => rmSync(runtime, { recursive: true, force: true }));
+  const packageDir = join(runtime, 'packages');
+  mkdirSync(join(packageDir, 'audio'), { recursive: true });
+  const pkg = { id: 'pkg_timing', revision: 1, assets: {}, format: { width: 1280, height: 720, fps: 30 }, scenes: [
+    { id: 's_flow', layout: 'list', preferredFrames: 90, copy: { headline: 'A result', items: ['Result'] }, narration: 'Result', motion: { recipe: 'technical-flow', cue_phrases: ['Result'] } },
+  ] };
+  writeFileSync(join(packageDir, 'audio', 'durations.json'), JSON.stringify({ engine: 'kokoro', scenes: { s_flow: { chunks: [
+    { text: 'Result', seconds: 5, words: [{ text: 'Result', start: 1, end: 2 }], timing: 'syllable-fallback' },
+  ] } } }));
+  const timeline = chatProjectResponse(pkg, runtime).timeline;
+  assert.deepEqual(timeline, compilePackage(pkg, packageDir));
+  assert.ok(timeline.scenes[0].durationInFrames > 90);
+  assert.equal(timeline.scenes[0].motionCues[0].timing, 'syllable-fallback');
+  assert.equal(timeline.scenes[0].motionCues[0].estimated, true);
+});
 
 async function listen(t, server) {
   await new Promise(done => server.listen(0, '127.0.0.1', done));

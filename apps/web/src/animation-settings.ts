@@ -1,4 +1,5 @@
 import type { PackageV1 } from '../../../packages/schema/types';
+import type { Command } from './editor/commands.ts';
 import './animation-settings.css';
 import {
   MORPH_SHAPES,
@@ -35,8 +36,16 @@ type EditableScene = Omit<PackageV1['scenes'][number], 'motion' | 'transitionOut
   transitionOut?: EditableTransition;
 };
 type Timing = ReturnType<typeof timingProvenance>;
+type AnimationCommand = Extract<Command, { type: 'SetSceneMotion' | 'SetTransition' | 'ResetSceneTransition' }>;
 
 export type { Timing };
+
+export type SceneAnimationSaveResult = {
+  revision?: number;
+  status?: string;
+  text?: string;
+  ok?: boolean;
+};
 
 export type SceneAnimationOptions = {
   sceneId: string;
@@ -44,14 +53,17 @@ export type SceneAnimationOptions = {
   total: number;
   timing: Timing;
   fps: number;
-  getPackage: () => PackageV1;
-  changed: (reason: string) => void;
-  save: () => Promise<Record<string, unknown>>;
+  /** Read the live scene from the editor store; never mutate it here. */
+  getScene: () => EditableScene | undefined;
+  /** Every edit is an EditorStore command, so undo and autosave see it. */
+  apply: (command: AnimationCommand) => { ok: boolean; error?: string };
+  /** Flush the store's autosave and report the resulting revision/status. */
+  save: () => Promise<SceneAnimationSaveResult>;
   log?: (message: string) => void;
 };
 
 function sceneOf(options: SceneAnimationOptions): EditableScene | undefined {
-  return options.getPackage().scenes.find(scene => scene.id === options.sceneId) as unknown as EditableScene | undefined;
+  return options.getScene();
 }
 
 function motionOf(scene: EditableScene): EditableMotion {
@@ -62,15 +74,35 @@ function transitionOf(scene: EditableScene): EditableTransition | undefined {
   return scene.transitionOut && typeof scene.transitionOut === 'object' ? scene.transitionOut : undefined;
 }
 
-function setMotion(scene: EditableScene, motion: EditableMotion, options: SceneAnimationOptions, reason: string): void {
-  scene.motion = motion;
-  options.changed(`${scene.id}.${reason}`);
+function setStatus(host: HTMLElement, text: string): void {
+  const status = host.querySelector<HTMLElement>('[data-anim-status]');
+  if (status) status.textContent = text;
 }
 
-function setTransition(scene: EditableScene, transition: EditableTransition | undefined, options: SceneAnimationOptions, reason: string): void {
-  if (transition) scene.transitionOut = transition;
-  else delete scene.transitionOut;
-  options.changed(`${scene.id}.${reason}`);
+function setMotion(host: HTMLElement, motion: EditableMotion, options: SceneAnimationOptions, reason: string): boolean {
+  const result = options.apply({ type: 'SetSceneMotion', sceneId: options.sceneId, motion });
+  if (!result.ok) {
+    setStatus(host, result.error ?? 'Animation change failed.');
+    return false;
+  }
+  options.log?.(`${options.sceneId}.${reason}`);
+  return true;
+}
+
+function setTransition(host: HTMLElement, transition: EditableTransition | undefined, options: SceneAnimationOptions, reason: string): boolean {
+  const result = transition
+    ? options.apply({
+      type: 'SetTransition',
+      sceneId: options.sceneId,
+      transitionOut: { type: transition.type, frames: transitionFrames(transition), ...(transition.direction ? { direction: transition.direction } : {}) },
+    })
+    : options.apply({ type: 'ResetSceneTransition', sceneId: options.sceneId });
+  if (!result.ok) {
+    setStatus(host, result.error ?? 'Transition change failed.');
+    return false;
+  }
+  options.log?.(`${options.sceneId}.${reason}`);
+  return true;
 }
 
 /** Keep a focused animation field (and its caret) across a local re-render. */
@@ -147,7 +179,7 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
       if (!current) return;
       const target = event.target as HTMLSelectElement;
       const recipe = target.value || undefined;
-      setMotion(current, withRecipe(motionOf(current), recipe, current.id), options, 'motion.recipe');
+      setMotion(host, withRecipe(motionOf(current), recipe, current.id), options, 'motion.recipe');
       render();
     });
 
@@ -161,7 +193,7 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
         return;
       }
       input.setCustomValidity('');
-      setMotion(current, { ...motionOf(current), seed: value }, options, 'motion.seed');
+      setMotion(host, { ...motionOf(current), seed: value }, options, 'motion.seed');
     });
     host.querySelector<HTMLInputElement>('[data-anim-field="seed"]')?.addEventListener('blur', event => {
       const input = event.target as HTMLInputElement;
@@ -170,7 +202,7 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
         if (!current || current.locked) return;
         const next = { ...motionOf(current) };
         delete next.seed;
-        setMotion(current, next, options, 'motion.seed');
+        setMotion(host, next, options, 'motion.seed');
       }
     });
 
@@ -182,7 +214,7 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
       if (value === undefined) return;
       const output = host.querySelector<HTMLElement>('[data-anim-intensity-value]');
       if (output) output.textContent = String(value);
-      setMotion(current, { ...motionOf(current), intensity: value }, options, 'motion.intensity');
+      setMotion(host, { ...motionOf(current), intensity: value }, options, 'motion.intensity');
     });
 
     for (const field of ['from', 'to'] as const) {
@@ -193,7 +225,7 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
         if (!MORPH_SHAPES.includes(value)) return;
         const motion = motionOf(current);
         const morph = validMorph(motion.morph) ? motion.morph : defaultMorph();
-        setMotion(current, { ...motion, morph: { ...morph, [field]: value } }, options, `motion.morph.${field}`);
+        setMotion(host, { ...motion, morph: { ...morph, [field]: value } }, options, `motion.morph.${field}`);
       });
     }
 
@@ -210,7 +242,7 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
         return;
       }
       input.setCustomValidity('');
-      setMotion(current, { ...motion, focus: { ...focus, [key]: value } }, options, `motion.focus.${key}`);
+      setMotion(host, { ...motion, focus: { ...focus, [key]: value } }, options, `motion.focus.${key}`);
     }));
 
     host.querySelector<HTMLTextAreaElement>('[data-anim-field="cue_phrases"]')?.addEventListener('input', event => {
@@ -226,7 +258,7 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
       const motion = { ...motionOf(current) };
       if (phrases.length > 0) motion.cue_phrases = phrases;
       else delete motion.cue_phrases;
-      setMotion(current, motion, options, 'motion.cue_phrases');
+      setMotion(host, motion, options, 'motion.cue_phrases');
     });
 
     host.querySelector<HTMLSelectElement>('[data-anim-field="transition.type"]')?.addEventListener('change', event => {
@@ -234,11 +266,11 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
       if (!current) return;
       const type = (event.target as HTMLSelectElement).value;
       if (!type) {
-        setTransition(current, undefined, options, 'transitionOut');
+        setTransition(host, undefined, options, 'transitionOut');
         render();
         return;
       }
-      setTransition(current, nextTransition(transitionOf(current), type), options, 'transitionOut.type');
+      setTransition(host, nextTransition(transitionOf(current), type), options, 'transitionOut.type');
       render();
     });
 
@@ -254,7 +286,7 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
         return;
       }
       framesInput.setCustomValidity('');
-      setTransition(current, { ...transition, frames: value }, options, 'transitionOut.frames');
+      setTransition(host, { ...transition, frames: value }, options, 'transitionOut.frames');
       updateTransitionHint(host, current, options.fps);
     });
 
@@ -269,11 +301,9 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
       if (status) status.textContent = 'Saving…';
       try {
         const saved = await options.save();
-        const revisionNumber = typeof saved.revision === 'number'
-          ? saved.revision
-          : typeof saved.baseRevision === 'number' ? saved.baseRevision : undefined;
-        const revision = revisionNumber === undefined ? '' : ` revision ${revisionNumber}`;
-        if (status) status.textContent = `Saved${revision}.`;
+        const revision = typeof saved.revision === 'number' ? ` revision ${saved.revision}` : '';
+        if (saved.status && saved.status !== 'saved') status && (status.textContent = saved.text ?? 'Save not confirmed.');
+        else if (status) status.textContent = `Saved${revision}.`;
         options.log?.(`Saved animation edits for ${current.id}${revision}`);
       } catch (error) {
         if (status) status.textContent = `Save failed: ${String(error)}`;

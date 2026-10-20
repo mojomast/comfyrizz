@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { compileTimeline, measuredFromReport } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
 import { narrationWarning } from '../src/audio-model.js';
@@ -111,31 +111,7 @@ export function applyFinalRender(pkg, packageDir, final = {}) {
 export function narrationOptions(packageDir) {
   const durationsPath = join(packageDir, 'audio', 'durations.json');
   if (!existsSync(durationsPath)) return {};
-  const durations = JSON.parse(readFileSync(durationsPath, 'utf8'));
-  const engine = typeof durations.engine === 'string' ? durations.engine : '';
-  const narration = {};
-  for (const [sceneId, scene] of Object.entries(durations.scenes ?? {})) {
-    narration[sceneId] = (scene.chunks ?? []).map(chunk => {
-      const words = Array.isArray(chunk.words) && chunk.words.length > 0 ? chunk.words : undefined;
-      // Preserve explicit aligner/fallback provenance. Legacy Kokoro reports
-      // wrote word cues without `timing`; those are syllable fallback, not
-      // forced-aligned. An unknown engine keeps `timing` absent.
-      const timing = chunk.timing === 'aligner' || chunk.timing === 'syllable-fallback'
-        ? chunk.timing
-        : words && engine.startsWith('kokoro') ? 'syllable-fallback' : undefined;
-      return {
-        text: chunk.text,
-        seconds: chunk.seconds,
-        ...(words ? { words } : {}),
-        ...(timing ? { timing } : {}),
-      };
-    });
-  }
-  return {
-    narration,
-    narrationGapSeconds: durations.gapSeconds,
-    narrationPaddingSeconds: durations.paddingSeconds,
-  };
+  return measuredFromReport(JSON.parse(readFileSync(durationsPath, 'utf8')));
 }
 
 /**

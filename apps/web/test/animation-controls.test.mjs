@@ -28,6 +28,7 @@ import {
 
 const source = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
 const settings = readFileSync(fileURLToPath(new URL('../src/animation-settings.ts', import.meta.url)), 'utf8');
+const inspector = readFileSync(fileURLToPath(new URL('../src/editor/inspector/animation.ts', import.meta.url)), 'utf8');
 const css = readFileSync(fileURLToPath(new URL('../src/animation-settings.css', import.meta.url)), 'utf8');
 
 test('animation catalogue: the editor and schema expose the same fixed recipe vocabulary', () => {
@@ -207,15 +208,22 @@ test('transition choices add reveal types and keep only applicable fields', () =
   assert.equal(nextTransition({ type: 'fade', frames: 15 }, 'cut').frames, 0);
 });
 
-test('the storyboard mounts per-scene controls and keeps existing voice/preview wiring', () => {
-  assert.match(source, /mountSceneAnimation/);
-  assert.match(source, /timingProvenance/);
-  assert.match(source, /data-animation-scene=/);
-  assert.match(source, /save: \(\) => persistDraft\(true\)/);
-  assert.match(source, /scene\.locked \? '<span class="scene-lock">locked<\/span>'/);
-  assert.match(source, /restoreStoryboardFocus/);
+test('the inspector mounts per-scene controls through the editor store', () => {
+  assert.match(source, /mountAnimationInspector/);
   assert.match(source, /mountVoiceSettings/);
-  assert.match(source, /updateAnimationTiming/);
+  assert.match(source, /SetVoice/);
+  assert.match(source, /SetNarrationStyle/);
+  assert.match(source, /mountScriptAudioPanel\(scriptHost, editorStore\)/);
+  assert.match(source, /createAutosave/);
+  assert.match(source, /autosave\?\.flush\(\)/);
+  assert.match(source, /save: saveEditorNow/);
+  assert.match(inspector, /store\.subscribe/);
+  assert.match(inspector, /session\.selectedSceneIds/);
+  assert.match(inspector, /store\.dispatch\(command\)/);
+  assert.match(inspector, /timingProvenance/);
+  assert.match(inspector, /Math\.floor/);
+  assert.match(settings, /export function mountSceneAnimation/);
+  assert.match(settings, /SceneAnimationOptions/);
   assert.match(settings, /fresh\.locked/);
   assert.match(settings, /export function updateAnimationTiming/);
   assert.match(settings, /withRecipe/);

@@ -1,15 +1,18 @@
 # Handoff: animation/storytelling integration
 
-Prepared 20 October 2026 for the agent integrating this work with its own branch.
+Prepared 20 October 2026. The animation source series below is now being integrated
+with the timeline editor on `integ/animation-editor`, targeting `integ/editor` for
+Kyle's review. The target branch is not merged or rewritten by this work.
 
 ## Source and merge
 
 - Repository: `https://github.com/mojomast/comfyrizz`
-- Source branch: **`feat/pipeline-observability`**
+- Animation foundation branch: **`feat/pipeline-observability`**
+- Editor integration branch: **`integ/animation-editor`**, based on `d25bdef`
+  and integrating `origin/integ/editor` at `ca517c9`.
 - Research commit: **`af71b62`**
 - Implementation and verified showcases: **`1394399`**
-- Agent-knowledge/documentation follow-up: the subsequent commit containing this
-  handoff. Merge the remote branch tip to include it.
+- Agent-knowledge/documentation follow-up: **`d25bdef`**.
 - The production commit preceding this work was `2d4d88b`; inspect your target's
   ancestry before choosing a selective integration. The source branch also carries
   earlier pipeline/voice work, so a branch merge may include that history.
@@ -18,14 +21,63 @@ From the receiving agent's own integration branch, with its work committed:
 
 ```bash
 git fetch origin
-git log --oneline HEAD..origin/feat/pipeline-observability
-git diff --stat HEAD...origin/feat/pipeline-observability
-git merge --no-ff origin/feat/pipeline-observability
+git log --oneline HEAD..origin/integ/animation-editor
+git diff --stat HEAD...origin/integ/animation-editor
+git merge --no-ff origin/integ/animation-editor
 ```
 
 Resolve conflicts in context. If only the animation series is wanted, inspect
 the three commits above and their dependencies before cherry-picking in order.
 This handoff does not perform a merge into the receiving agent's branch.
+
+## Editor integration resolutions
+
+The integration keeps the CA-1/2/3 editor store, timeline, Script/Audio/Media
+inspector, revision-aware autosave and Playwright harness. Animation edits use
+store commands, undo/redo and the same save acknowledgement as other edits.
+
+The five textual conflicts from the initial editor merge were resolved as follows:
+
+- `apps/web/src/main.ts`: retain the editor/store boot and bind animation controls
+  to the selected scene; retain existing production functionality through store
+  adapters rather than direct package mutation.
+- `apps/server/src/app.mjs`: combine compile/editor/media ticket routes with
+  pipeline, voice catalogue and authenticated animation catalogue setup.
+- `packages/planner/src/index.ts`: union browser/compiler exports and animation
+  types, including caption overrides and cue diagnostics.
+- `packages/planner/src/timeline.ts`: use the browser-safe hash and floored-fps
+  timing helpers while retaining cue resolution. Resolve motion against spoken
+  captions before applying display-only caption corrections.
+- `apps/renderer/scripts/render-package-lib.mjs`: use the shared durations mapper;
+  move provenance preservation into that mapper so the browser and server have
+  the same semantics as export.
+
+`apps/renderer/src/components.tsx`, `packages/agent/src/conversation.ts` and
+`apps/server/src/chat-project.mjs` had no textual conflicts. Review additionally
+corrected chat compilation to read the actual flat PackageStore sidecar directory.
+
+Security/integration corrections include token-free preview source maps (blob or
+short-lived media ticket URLs), header-authenticated package media, blob-backed QA
+contact sheets, redacted E2E server bootstrap logs, and realpath containment for
+pipeline artifact downloads, including a replaced export-directory symlink.
+
+### Additional branch review
+
+- `origin/q/editor-phase0` (`03b428d`) has the Pi fixtures and original phase-0
+  document. `integ/editor` already incorporated its behavior manually; preserve
+  the reconciled phase-0 decisions and fuller test command when closing ancestry.
+- PR #14 (`b6b25b1`) needed hardening before integration: it accepted truncated
+  narration prefixes. The follow-up `bd9e0d8` requires the complete active span,
+  includes a partial final envelope window, uses waveform corroboration for very
+  short spans, and requires a fresh report consistent with the checker exit code.
+  Its 16 Python regressions and a check against the real narrated showcase passed.
+- At initial fetch, `po/docs-hygiene`, `po/files-realpath`, and commit `ea4257a`
+  (Q-P2) were absent. GitHub also could not resolve `d1601b2`, `fbd79d0` or
+  `ea4257a`. The files-route containment correction was implemented locally with
+  regression coverage; this is not a claim that an unavailable branch was merged.
+  The paired documentation-hygiene/Q-P2 series must be integrated when published.
+- The published Hermes history contains only the older dangling-link attempt;
+  the new G6-13/Q-H2 relinking fix was not available and was left untouched.
 
 ## Delivered capability
 

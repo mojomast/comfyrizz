@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
@@ -45,4 +45,14 @@ test('pipeline HTTP contract: revisions, responsive status, durable replay, prot
   assert.equal(media.status, 206); assert.equal(await media.text(), '2345');
   assert.equal((await fetch(base + path + '/files/video.mp4')).status, 401);
   assert.equal((await request(path + '/files/state.json')).status, 404);
+  const outside = join(runtimeDir, 'outside-export.mp4');
+  writeFileSync(outside, 'not an exported artifact');
+  rmSync(join(target, 'video.mp4'));
+  symlinkSync(outside, join(target, 'video.mp4'));
+  assert.equal((await request(path + '/files/video.mp4')).status, 404, 'manifest file symlink cannot escape export root');
+  rmSync(target, { recursive: true });
+  const outsideDir = join(runtimeDir, 'outside-exports');
+  mkdirSync(outsideDir); writeFileSync(join(outsideDir, 'video.mp4'), 'outside run');
+  symlinkSync(outsideDir, target, 'dir');
+  assert.equal((await request(path + '/files/video.mp4')).status, 404, 'export directory symlink cannot escape run');
 });
