@@ -29,27 +29,28 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
   const panel = document.createElement('section');
   panel.className = 'sa-panel';
   panel.setAttribute('aria-label', 'Script, audio and media');
+  panel.setAttribute('data-testid', 'script-audio');
   panel.innerHTML = `
     <div class="sa-head">
       <h2>Script and audio</h2>
-      <p class="sa-status" data-save-status role="status"></p>
+      <p class="sa-status" data-testid="script-save-status" data-save-status role="status"></p>
     </div>
     <div class="sa-row">
-      <label>Scene <select data-scene></select></label>
+      <label>Scene <select data-testid="scene-select" data-scene></select></label>
       <span class="sa-row">
         <button type="button" data-undo>Undo</button>
         <button type="button" data-redo>Redo</button>
       </span>
     </div>
-    <p class="sa-status" data-freshness role="status"></p>
-    <label>Narration<textarea data-narration maxlength="600"></textarea></label>
+    <p class="sa-status" data-testid="freshness" data-freshness role="status"></p>
+    <label>Narration<textarea data-testid="narration" data-narration maxlength="600"></textarea></label>
     <div class="sa-row">
-      <button type="button" data-apply-narration>Apply narration</button>
+      <button type="button" data-testid="apply-narration" data-apply-narration>Apply narration</button>
       <span class="hint">Applying narration marks this take, its alignment and the presenter stale.</span>
     </div>
-    <ol class="sa-sentences" data-sentences></ol>
-    <label>Caption correction<input data-caption maxlength="600" /></label>
-    <button type="button" data-apply-caption>Correct caption</button>
+    <ol class="sa-sentences" data-testid="sentences" data-sentences></ol>
+    <label>Caption correction<input data-testid="caption-text" data-caption maxlength="600" /></label>
+    <button type="button" data-testid="apply-caption" data-apply-caption>Correct caption</button>
     <div class="sa-row">
       <label>Voice engine
         <select data-engine>
@@ -68,8 +69,8 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
     <p class="hint" data-preview role="status"></p>
     <canvas class="sa-wave" data-wave width="640" height="72" aria-label="Narration waveform"></canvas>
     <div class="sa-row">
-      <label>Split at frame <input data-frame type="number" min="0" step="1" value="15" /></label>
-      <button type="button" data-split>Split scene</button>
+      <label>Split at frame <input data-testid="split-frame" data-frame type="number" min="0" step="1" value="15" /></label>
+      <button type="button" data-testid="split" data-split>Split scene</button>
     </div>
     <fieldset class="sa-fieldset">
       <legend>Mix audition</legend>

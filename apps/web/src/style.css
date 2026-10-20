@@ -172,6 +172,7 @@ main {
 .scene-log { margin-top: 6px; font-size: 10px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
 .scene-plan .event { font-size: 12px; }
 .palette { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.palette label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
 .palette input[type="color"] { width: 44px; height: 32px; padding: 2px; background: transparent; }
 .palette .hint { margin-left: auto; }
 

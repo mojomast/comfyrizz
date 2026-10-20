@@ -303,7 +303,7 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
 
   if (!compiled) {
     const diagnostic = state.derived.diagnostics[0] ?? 'Nothing to compile.';
-    return <div className="tl" data-timeline-root role="region" aria-label="Scene timeline"><p className="tl-message" role="status">{diagnostic}</p></div>;
+    return <div className="tl" data-testid="timeline" data-timeline-root role="region" aria-label="Scene timeline"><p className="tl-message" role="status">{diagnostic}</p></div>;
   }
 
   const duration = compiled.durationInFrames;
@@ -346,14 +346,14 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
   };
 
   return (
-    <div className="tl" data-timeline-root role="region" aria-label="Scene timeline" tabIndex={0} onKeyDown={onKeyDown}>
+    <div className="tl" data-testid="timeline" data-timeline-root data-duration={duration} data-fps={fps} role="region" aria-label="Scene timeline" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="tl-toolbar" role="toolbar" aria-label="Timeline">
         <button type="button" onClick={onTogglePlay} aria-keyshortcuts="Space">Play / pause</button>
         <button type="button" onClick={() => { const frame = Math.max(0, session.playheadFrame - 1); writeSession({ playheadFrame: frame }); onSeek(frame); }}>Step back</button>
         <button type="button" onClick={() => { const frame = session.playheadFrame + 1; writeSession({ playheadFrame: frame }); onSeek(frame); }}>Step forward</button>
         <span className="tl-time" ref={timeRef}>{`${formatTimecode(session.playheadFrame, fps)} / ${formatTimecode(duration, fps)}`}</span>
         <button type="button" onClick={() => writeSession({ zoom: zoomClamped(zoom, 0.8) })} aria-keyshortcuts="-">Zoom out</button>
-        <input aria-label="Zoom" type="range" min={0.2} max={14} step={0.1} value={zoom} onChange={event => writeSession({ zoom: Number(event.target.value) })} />
+        <input data-testid="zoom" aria-label="Zoom" type="range" min={0.2} max={14} step={0.1} value={zoom} onChange={event => writeSession({ zoom: Number(event.target.value) })} />
         <button type="button" onClick={() => writeSession({ zoom: zoomClamped(zoom, 1.25) })} aria-keyshortcuts="+">Zoom in</button>
         <button type="button" onClick={fit} aria-keyshortcuts="F">Fit</button>
         <button type="button" aria-pressed={snap} onClick={() => setSnap(value => !value)} aria-keyshortcuts="S">Snap</button>
@@ -393,7 +393,7 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
             </div>
             <div className="tl-playhead" ref={playheadRef} style={{ transform: `translateX(${session.playheadFrame * zoom}px)` }} />
             {insertFrame != null ? <div className="tl-insert" style={{ left: insertFrame * zoom }} data-insertion={moveCommand?.toIndex} /> : null}
-            <div className="tl-lane tl-lane-scenes" role="listbox" aria-label="Scenes" aria-multiselectable="true">
+            <div className="tl-lane tl-lane-scenes" role="group" aria-label="Scenes">
               {compiled.scenes.map(scene => {
                 const selected = session.selectedSceneIds.includes(scene.id);
                 const proposed = trimCommand?.sceneId === scene.id ? trimCommand.preferredFrames : null;
@@ -403,9 +403,11 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
                 return (
                   <div
                     key={scene.id}
-                    role="option"
-                    aria-selected={selected}
-                    tabIndex={0}
+                    data-testid="scene"
+                    data-scene-id={scene.id}
+                    data-from={scene.from}
+                    data-duration={scene.durationInFrames}
+                    data-selected={selected ? 'true' : 'false'}
                     className={selected ? 'tl-scene selected' : 'tl-scene'}
                     style={{ left: scene.from * zoom, width: Math.max(24, widthFrames * zoom) }}
                     onPointerDown={event => {
@@ -419,6 +421,7 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
                     <button
                       type="button"
                       className="tl-handle"
+                      data-testid="trim-start"
                       aria-label={`Trim the start of ${label}`}
                       onPointerDown={event => {
                         event.stopPropagation();
@@ -431,6 +434,7 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
                     <button
                       type="button"
                       className="tl-handle"
+                      data-testid="trim-end"
                       aria-label={`Trim the end of ${label}`}
                       onPointerDown={event => {
                         event.stopPropagation();
@@ -444,9 +448,9 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
               })}
             </div>
             {lanes.map(lane => (
-              <div key={lane.name} className="tl-lane" role="list" aria-label={`${lane.name} (read only)`} aria-readonly="true">
-                {lane.blocks.length === 0 ? <span className="tl-block readonly" style={{ left: 0, width: 120 }}>None</span> : lane.blocks.map(block => (
-                  <span key={block.key} className="tl-block readonly" title={block.title} data-scene-id={block.sceneId || undefined} style={{ left: block.from * zoom, width: Math.max(8, (block.to - block.from) * zoom) }}>{block.label}</span>
+              <div key={lane.name} className="tl-lane" role="listbox" aria-label={`${lane.name} (read only)`} aria-readonly="true">
+                {lane.blocks.length === 0 ? <span className="tl-block readonly" role="option" aria-selected="false" style={{ left: 0, width: 120 }}>None</span> : lane.blocks.map(block => (
+                  <span key={block.key} className="tl-block readonly" role="option" aria-selected="false" title={block.title} data-testid={lane.name === 'Captions' ? 'caption' : undefined} data-scene-id={block.sceneId || undefined} data-from={block.from} data-to={block.to} style={{ left: block.from * zoom, width: Math.max(8, (block.to - block.from) * zoom) }}>{block.label}</span>
                 ))}
               </div>
             ))}
@@ -483,7 +487,7 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
         range={backgroundRange?.startFrame != null ? { inFrame: backgroundRange.startFrame, outFrame: backgroundRange.endFrame ?? backgroundRange.startFrame + 1 } : undefined}
         sourceFrames={sourceFrames(doc, assetId)}
       />
-      <p className="tl-message" role="status" data-edit-status="">{message}</p>
+      <p className="tl-message" role="status" data-testid="edit-status" data-edit-status="">{message}</p>
       <span className="tl-sr" role="status">{announcement}</span>
       <details className="tl-help">
         <summary>Keyboard</summary>
