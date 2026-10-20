@@ -5,7 +5,7 @@ import { mountProjectChat, type ChatProject } from './project-chat';
 import { apiFetch, installSessionToken, savePackageRequest, sessionToken } from './editor/api.ts';
 import { createAutosave } from './editor/autosave.ts';
 import { createIndexedDbDraftStore, createMemoryDraftStore } from './editor/recovery.ts';
-import { createEditorStore, saveStatusText } from './editor/store.ts';
+import { createEditorStore } from './editor/store.ts';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
@@ -44,7 +44,7 @@ const saveStatusEl = document.getElementById('save-status');
 const paintSaveStatus = () => {
   if (!saveStatusEl) return;
   const status = editorStore.saveStatus();
-  saveStatusEl.textContent = saveStatusText(status);
+  saveStatusEl.textContent = editorStore.statusText();
   saveStatusEl.dataset.state = status;
 };
 editorStore.subscribe(paintSaveStatus);

@@ -92,6 +92,9 @@ export function createAutosave(store: Editor, options: {
         store.noteSave({ type: 'conflict', currentRevision: result.currentRevision });
       } else if (result.status === 'offline') {
         store.noteSave({ type: 'offline' });
+      } else if (result.status === 'rejected') {
+        // The edit stays local. This sequence is not retried; a later one can save.
+        store.noteSave({ type: 'rejected', error: result.error });
       }
       const newer = store.getState().doc.editSequence > attempted;
       if (newer && store.isDirty() && store.saveStatus() !== 'conflict') await runSave();

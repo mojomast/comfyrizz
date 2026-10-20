@@ -5,7 +5,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { nextSceneId, type Command } from '../commands.ts';
 import type { EditorExtras, EditorStore } from '../store.ts';
-import { saveStatusText } from '../store.ts';
 import { clampTrim, mediaRangeCommand, trimBounds, trimFloorMessage } from './bounds.ts';
 import {
   captionBlocks,
@@ -364,7 +363,7 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
         <button type="button" onClick={() => primary && run({ type: 'MoveScene', sceneId: primary, toIndex: Math.min(orderedIds.length - 1, orderedIds.indexOf(primary) + 1) })} disabled={!primary}>Move later</button>
         <button type="button" onClick={() => primary && duplicate(primary)} disabled={!primary} aria-keyshortcuts="Control+D">Duplicate</button>
         <button type="button" onClick={removeSelected} disabled={session.selectedSceneIds.length === 0} aria-keyshortcuts="Delete">Delete</button>
-        <span className="tl-status" role="status" data-save-status={store.saveStatus()}>{saveStatusText(store.saveStatus())}</span>
+        <span className="tl-status" role="status" data-save-status={store.saveStatus()}>{store.statusText()}</span>
       </div>
       <div className="tl-body">
         <div className="tl-labels">

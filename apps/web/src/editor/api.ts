@@ -66,14 +66,24 @@ export async function savePackageRequest(
       editSequence?: number;
       currentRevision?: number;
       error?: string;
+      details?: Array<{ message?: string; path?: string; code?: string }>;
     };
     if (response.status === 409) return { ok: false, status: 'conflict', currentRevision: body.currentRevision };
-    if (response.status === 400 || response.status === 422) return { ok: false, status: 'rejected', error: body.error };
+    if (response.status === 400 || response.status === 422) return { ok: false, status: 'rejected', error: rejectionError(body) };
     if (!response.ok) return { ok: false, status: 'offline' };
     return { ok: true, revision: Number(body.revision), editSequence: Number(body.editSequence ?? payload.editSequence) };
   } catch {
     return { ok: false, status: 'offline' };
   }
+}
+
+function rejectionError(body: { error?: string; details?: Array<{ message?: string; path?: string; code?: string }> }): string {
+  const details = Array.isArray(body.details) ? body.details : [];
+  const summary = details.slice(0, 3).map(item => {
+    const where = item.path ? `${item.path} ` : '';
+    return `${where}${item.message || item.code || ''}`.trim();
+  }).filter(Boolean).join('; ');
+  return [body.error, summary].filter(Boolean).join(': ');
 }
 
 /**

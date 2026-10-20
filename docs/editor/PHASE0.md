@@ -94,4 +94,8 @@ Preview and MP4 render share `resolvePackageComposition` / `PackageComposition`.
 
 ## Save
 
-Autosave is serialized and debounced. `saveStatus()` is `saved`, `pending`, `offline`, or `conflict`. The status line is in the shell (`#save-status`, `role="status"`). A save echoes the `editSequence` it accepted. An older acknowledgement does not mark newer edits saved. A failed attempt does not retry that same sequence. IndexedDB (memory in tests) keeps a draft and, on revision conflict, a recovery copy. The local document is not replaced.
+Autosave is serialized and debounced. `saveStatus()` is `saved`, `pending`, `offline`, `conflict`, or `rejected`. The status line is in the shell (`#save-status`, `role="status"`), and the same text is on the timeline and the script panel. A save echoes the `editSequence` it accepted. An older acknowledgement does not mark newer edits saved. A failed attempt does not retry that same sequence. IndexedDB (memory in tests) keeps a draft and, on revision conflict, a recovery copy. The local document is not replaced.
+
+A server 400 or 422 is `rejected`, not an in-progress save. The status line reads `Save rejected: <reason>` (the response error, plus validation details when the server sent them). The edit stays in the local document. A later edit, including undo, has a new `editSequence` and can save. `noteSave({ type: 'rejected', error })` is the additive notice for that; conflict still blocks further saves.
+
+`preferredFrames` below the speech floor or `layout.min` is a valid package value. The schema minimum is 1, and the preference is a scene field, not an editor-sidecar field. The server stores it. The compiler floors the compiled duration. A PATCH of that document is not a 422.

@@ -10,7 +10,6 @@ import { nextSceneId } from '../commands.ts';
 import { exportAudition, scriptView } from '../derive.ts';
 import { DEMO_SOURCE, demoSamples } from './demo.ts';
 import type { EditorStore, EditorExtras } from '../store.ts';
-import { saveStatusText } from '../store.ts';
 import type { SceneFreshness } from '../types.ts';
 
 type PanelStore = EditorStore & EditorExtras;
@@ -211,7 +210,7 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
     const selected = state.session.selectedSceneIds.find(id => ids.includes(id));
     if (selected) sceneSelect.value = selected;
     const statusName = store.saveStatus();
-    saveEl.textContent = saveStatusText(statusName);
+    saveEl.textContent = store.statusText();
     saveEl.dataset.tone = statusName === 'saved' ? 'fresh' : 'stale';
     saveEl.dataset.state = statusName;
     const status = view.status[selectedId()];

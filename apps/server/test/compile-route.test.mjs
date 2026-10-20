@@ -113,6 +113,22 @@ test('save acknowledges its edit sequence and stores the editor sidecar', async 
   const again = await request({ path: `/api/package/${seed.id}` });
   assert.equal(again.json.editor.captionOverrides[0].text, 'On screen');
   assert.equal(again.json.package.scenes[0].copy.headline, 'Saved from the editor');
+  // A preference below layout.min is schema-valid (minimum 1). The compiler floors it; the server stores it.
+  const floored = structuredClone(again.json.package);
+  floored.scenes[0].preferredFrames = 5;
+  const trimmed = await request({
+    method: 'PATCH',
+    path: `/api/package/${seed.id}`,
+    body: {
+      baseRevision: again.json.revision,
+      package: floored,
+      editor: { version: 1, captionOverrides: [] },
+      editSequence: 7,
+    },
+  });
+  assert.equal(trimmed.status, 200, JSON.stringify(trimmed.json));
+  assert.equal(trimmed.json.package.scenes[0].preferredFrames, 5);
+  assert.equal(trimmed.json.editSequence, 7);
 });
 
 test('package media is served with byte ranges and rejects traversal', async () => {

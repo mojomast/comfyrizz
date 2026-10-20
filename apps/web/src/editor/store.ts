@@ -7,7 +7,7 @@
  *   dispatch(cmd | cmd[]): Result     // array = one undo step
  *   preview(cmd) / cancelPreview()    // transient gesture; not an undo step
  *   undo / redo / canUndo / canRedo
- *   saveStatus(): 'saved' | 'pending' | 'offline' | 'conflict'
+ *   saveStatus(): 'saved' | 'pending' | 'offline' | 'conflict' | 'rejected'
  *
  * `createEditorStore` also returns additive helpers (setMeasured, setSession,
  * noteSave, applyCompileResult). Those are not part of the interface above.
@@ -73,7 +73,7 @@ export interface Result {
   floored?: boolean;
 }
 
-export type SaveStatus = 'saved' | 'pending' | 'offline' | 'conflict';
+export type SaveStatus = 'saved' | 'pending' | 'offline' | 'conflict' | 'rejected';
 
 export interface EditorStore {
   getState(): EditorSnapshot;
@@ -89,10 +89,12 @@ export interface EditorStore {
 }
 
 export interface SaveNotice {
-  type: 'start' | 'offline' | 'conflict' | 'ack';
+  type: 'start' | 'offline' | 'conflict' | 'ack' | 'rejected';
   editSequence?: number;
   revision?: number;
   currentRevision?: number;
+  /** Server reason for a rejected save (400/422). The local edit is kept. */
+  error?: string;
 }
 
 export interface CompileAck {
@@ -215,10 +217,11 @@ function trimReport(command: Command | Command[] | undefined, timeline: Compiled
   return { effective: scene.durationInFrames, floored: scene.durationInFrames > one.preferredFrames };
 }
 
-export function saveStatusText(status: SaveStatus): string {
+export function saveStatusText(status: SaveStatus, detail?: string): string {
   if (status === 'saved') return 'Saved';
   if (status === 'pending') return 'Saving changes';
   if (status === 'offline') return 'Offline. Changes are kept on this device';
+  if (status === 'rejected') return `Save rejected: ${detail?.trim() || 'the server refused this edit'}`;
   return 'Revision conflict. A recovery copy is kept on this device';
 }
 
@@ -244,7 +247,8 @@ export function createEditorStore(options: {
   let derived: DerivedState = { timeline: null, inputHash: null, compiledSequence: null, diagnostics: [], mediaRanges: [] };
   let snapshot: EditorSnapshot = { doc: committed, derived, session };
   let acked = 0;
-  let phase: 'idle' | 'saving' | 'offline' | 'conflict' = 'idle';
+  let phase: 'idle' | 'saving' | 'offline' | 'conflict' | 'rejected' = 'idle';
+  let rejectionReason = '';
   const undoStack: HistoryEntry[] = [];
   const redoStack: HistoryEntry[] = [];
   const listeners = new Set<() => void>();
@@ -400,6 +404,7 @@ export function createEditorStore(options: {
     canRedo: () => redoStack.length > 0,
     saveStatus() {
       if (phase === 'conflict') return 'conflict';
+      if (phase === 'rejected') return 'rejected';
       if (phase === 'offline' && store.isDirty()) return 'offline';
       if (store.isDirty() || phase === 'saving') return 'pending';
       return 'saved';
@@ -421,17 +426,32 @@ export function createEditorStore(options: {
     },
     noteSave(event) {
       if (event.type === 'start') {
-        if (phase !== 'conflict') phase = 'saving';
+        if (phase !== 'conflict') {
+          phase = 'saving';
+          rejectionReason = '';
+        }
         publish();
         return;
       }
       if (event.type === 'offline') {
-        if (phase !== 'conflict') phase = 'offline';
+        if (phase !== 'conflict') {
+          phase = 'offline';
+          rejectionReason = '';
+        }
         publish();
         return;
       }
       if (event.type === 'conflict') {
         phase = 'conflict';
+        rejectionReason = '';
+        publish();
+        return;
+      }
+      if (event.type === 'rejected') {
+        if (phase !== 'conflict') {
+          phase = 'rejected';
+          rejectionReason = event.error?.trim() || 'the server refused this edit';
+        }
         publish();
         return;
       }
@@ -440,7 +460,10 @@ export function createEditorStore(options: {
         if (preview) preview = { ...preview, doc: { ...preview.doc, package: { ...preview.doc.package, revision: event.revision } } };
       }
       if (typeof event.editSequence === 'number' && event.editSequence >= acked) acked = event.editSequence;
-      if (phase !== 'conflict') phase = 'idle';
+      if (phase !== 'conflict') {
+        phase = 'idle';
+        rejectionReason = '';
+      }
       publish();
     },
     applyCompileResult(result) {
@@ -454,7 +477,7 @@ export function createEditorStore(options: {
     },
     acknowledgedSequence: () => acked,
     isDirty: () => committed.editSequence !== acked,
-    statusText: () => saveStatusText(store.saveStatus()),
+    statusText: () => saveStatusText(store.saveStatus(), rejectionReason),
     measuredInput: () => measuredFor(visible(), measured),
     replaceDocument(next) {
       preview = null;
@@ -468,6 +491,7 @@ export function createEditorStore(options: {
       };
       acked = 0;
       phase = 'idle';
+      rejectionReason = '';
       session = {
         ...session,
         selectedSceneIds: committed.package.scenes[0] ? [committed.package.scenes[0].id] : [],
