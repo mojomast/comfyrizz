@@ -1,0 +1,82 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_licensing_demo",
+  "title": "Openverse licensing demo — CC BY approved, CC BY-NC refused",
+  "createdAt": "2026-10-20T00:00:00.000Z",
+  "format": { "width": 1280, "height": 720, "fps": 30 },
+  "duration": { "mode": "flexible", "flexibleCeilingFrames": 900 },
+  "theme": { "palette": ["#101827", "#2DD4BF", "#F8FAFC"], "font": "Inter" },
+  "voice": { "enabled": false, "engine": "none" },
+  "scenes": [
+    {
+      "id": "s_harbour",
+      "layout": "hero",
+      "preferredFrames": 150,
+      "copy": { "headline": "Morning fog over the harbour" },
+      "background": { "asset": "openverse-approved", "fit": "cover" },
+      "transitionOut": { "type": "cut", "frames": 0 }
+    },
+    {
+      "id": "s_city",
+      "layout": "hero",
+      "preferredFrames": 150,
+      "copy": { "headline": "City lights at midnight" },
+      "background": { "asset": "openverse-refused", "fit": "cover" },
+      "transitionOut": { "type": "cut", "frames": 0 }
+    }
+  ],
+  "assets": {
+    "openverse-approved": {
+      "kind": "image",
+      "origin": "stock",
+      "status": "ready",
+      "file": "assets/openverse-approved.jpg",
+      "source": {
+        "provider": "openverse",
+        "id": "ov-7f3a9c21",
+        "landing_url": "https://openverse.org/image/8f3a7c91-2d4e-4b6a-9f10-5c2d7e8a1b34",
+        "creator": "Marta Rivera",
+        "title": "Morning Fog over the Harbour",
+        "retrieved_at": "2026-10-20T00:00:00.000Z",
+        "original_file": "https://live.staticflickr.com/65535/54123789012_8c41d2f7a9_b.jpg"
+      },
+      "license": {
+        "id": "CC-BY-4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "“Morning Fog over the Harbour” by Marta Rivera, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)",
+        "approved_by_user": true,
+        "approved_at": "2026-10-20T00:00:00.000Z"
+      },
+      "redistributable": true,
+      "notes": "Approved after checking the Openverse licence metadata and source page."
+    },
+    "openverse-refused": {
+      "kind": "image",
+      "origin": "stock",
+      "status": "candidate",
+      "file": "assets/openverse-refused.jpg",
+      "source": {
+        "provider": "openverse",
+        "id": "ov-1c9e5b72",
+        "landing_url": "https://openverse.org/image/1c9e5b72-6a3f-4d81-b0e2-7f4a9c6d2e58",
+        "creator": "Leo Fischer",
+        "title": "City Lights at Midnight",
+        "retrieved_at": "2026-10-20T00:00:00.000Z",
+        "original_file": "https://images.pexels.com/photos/3184291/pexels-photo-3184291.jpeg"
+      },
+      "license": {
+        "id": "CC-BY-NC-4.0",
+        "url": "https://creativecommons.org/licenses/by-nc/4.0/",
+        "approved_by_user": false
+      },
+      "redistributable": false,
+      "notes": "Kept as a candidate: the non-commercial licence is blocked by the v0.1 policy."
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "warnings": ["Offline licensing demo; no media is downloaded and the asset bytes in the test are synthetic."]
+  }
+}
