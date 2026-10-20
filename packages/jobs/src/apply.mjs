@@ -38,7 +38,7 @@ export function mediaFor(job, cutout, output = null) {
       fps: measured.fps ?? job.fps,
       frames: measured.frames ?? job.frames,
       ...(measured.durationSeconds === undefined ? {} : { durationSeconds: measured.durationSeconds }),
-      audio: "muted",
+      audio: job.generator === "fasth3-omni" ? "present" : "muted",
     };
   }
   if (job.kind === "audio") return { audio: "present" };
@@ -104,8 +104,8 @@ export function applyManifestToPackage(pkg, { manifest, jobsDoc, outDir, backend
       file: relative,
       sha256: output.sha256,
       bytes: output.bytes ?? sizeOf(outDir, relative),
-      license: asset.license || { ...GENERATED_LICENSE },
-      redistributable: asset.redistributable ?? true,
+      license: asset.license || (generator === "fasth3-omni" ? { ...MODEL_LICENSES[generator] } : { ...GENERATED_LICENSE }),
+      redistributable: asset.redistributable ?? (generator !== "fasth3-omni"),
       ...(modelLicense ? { model_license: modelLicense } : {}),
       gen: provenance,
       ...(mediaFor(job, job?.cutout ?? asset.cutout, output) ? { media: mediaFor(job, job?.cutout ?? asset.cutout, output) } : {}),

@@ -105,7 +105,7 @@ LAYOUTS: dict[str, dict[str, Any]] = {
 }
 
 GENERATED_OUTPUT_LICENSE = {"id": "CC0-1.0", "redistributable": True}
-MODEL_GENERATORS = ("flux3-klein", "ltx25", "ltx25-a2v", "kokoro", "qwen3-tts")
+MODEL_GENERATORS = ("flux3-klein", "ltx25", "ltx25-a2v", "fasth3-omni", "kokoro", "qwen3-tts")
 FLEXIBLE_CEILING_FRAMES = 2700
 
 SCENE_ID_RE = re.compile(r"^s[A-Za-z0-9_-]{0,63}$")
@@ -822,14 +822,18 @@ def apply_defaults(doc: Any, schema: dict[str, Any] | None = None) -> Any:
     schema = schema or load_schema()
     out = json.loads(json.dumps(doc))
     _fill_defaults(out, schema, schema)
-    for asset in (out.get("assets") or {}).values():
+    for asset_id, asset in (out.get("assets") or {}).items():
         if not _is_obj(asset):
             continue
         if asset.get("origin", "generated") == "generated":
+            if isinstance(asset.get("gen"), dict) and asset["gen"].get("generator") == "fasth3-omni" and "redistributable" not in doc["assets"][asset_id]:
+                asset["redistributable"] = False
             if not _is_obj(asset.get("license")):
-                asset["license"] = {"id": GENERATED_OUTPUT_LICENSE["id"]}
+                asset["license"] = ({"id": "LicenseRef-MiniMax-H3-Community", "url": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE"}
+                                    if isinstance(asset.get("gen"), dict) and asset["gen"].get("generator") == "fasth3-omni"
+                                    else {"id": GENERATED_OUTPUT_LICENSE["id"]})
             if "redistributable" not in asset:
-                asset["redistributable"] = GENERATED_OUTPUT_LICENSE["redistributable"]
+                asset["redistributable"] = False if isinstance(asset.get("gen"), dict) and asset["gen"].get("generator") == "fasth3-omni" else GENERATED_OUTPUT_LICENSE["redistributable"]
     return out
 
 

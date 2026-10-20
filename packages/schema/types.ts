@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 81b3a7c74cb05f5930b4b7014f512aa65cee0c1ed1d5af75ea04178c695ad8f1
+// Schema sha256: 21820b1628e7415ea577e9bff9ce1d8f64860066bb140faf25518e3b5feee4dd
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -757,7 +757,7 @@ export interface Gen {
    * a scene's narration WAV); kokoro = Kokoro narration audio; qwen3-tts = optional Qwen3-TTS 1.7B
    * narration audio (Apache-2.0).
    */
-  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "kokoro" | "qwen3-tts";
+  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "fasth3-omni" | "kokoro" | "qwen3-tts";
   workflow?: RelativePath;
   workflow_sha256?: Sha256Hex;
   model?: string;

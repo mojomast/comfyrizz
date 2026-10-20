@@ -81,6 +81,7 @@ const OUTPUT_KIND = { still: "image", plate: "video", upscale: "video", audio: "
 const GENERATOR_KIND = {
   "flux3-klein": "still",
   ltx25: "plate",
+  "fasth3-omni": "plate",
   // H17: the presenter is LTX-2.5 audio-to-video - the same weights, a different graph, and its own
   // batch because it can only run once the narration it is generated from exists
   "ltx25-a2v": "presenter",
@@ -460,6 +461,7 @@ export function planJobs(pkg, opts = {}) {
   const sourceLattice = new Map();
   for (const [assetId, kind] of kinds) {
     if (kind !== "plate" && kind !== "upscale") continue;
+    if (assets[assetId]?.gen?.generator === "fasth3-omni") continue;
     const sourceId = assets[assetId]?.gen?.inputs?.image;
     if (typeof sourceId !== "string") continue;
     const lattice = DIM_MULTIPLE_BY_KIND[kind] ?? DIM_MULTIPLE_BY_KIND.still;
@@ -502,7 +504,7 @@ export function planJobs(pkg, opts = {}) {
     // Prompt defaults first, so the plate's upscale stage (which copies these params) inherits the
     // same guards, and so the guard is part of the cache key rather than a VM-side edit.
     let promptGuards = [];
-    if (kind === "still" || kind === "plate") {
+    if (kind === "still" || (kind === "plate" && gen.generator !== "fasth3-omni")) {
       const sourceInputs = (typeof inputs.image === "string" && assets[inputs.image]?.gen?.inputs) || {};
       const applied = applyPromptDefaults(params, {
         kind,
@@ -522,7 +524,7 @@ export function planJobs(pkg, opts = {}) {
     const roleInputs = (typeof inputs.image === "string" && assets[inputs.image]?.gen?.inputs) || {};
     const motionRole = typeof inputs.role === "string" ? inputs.role : typeof roleInputs.role === "string" ? roleInputs.role : null;
     delete params.role;
-    if (kind === "plate") {
+    if (kind === "plate" && gen.generator !== "fasth3-omni") {
       const motion = applyMotionRoleDefaults(params, {
         role: motionRole,
         kind,
@@ -624,6 +626,32 @@ export function planJobs(pkg, opts = {}) {
       if (params.height !== undefined) params.height = dims.height;
       if (params.cutout === true || asset.cutout === true) job.cutout = true;
       params.cutout = job.cutout === true;
+    } else if (kind === "plate" && gen.generator === "fasth3-omni") {
+      // Identity/context references are not first frames. H3 uses 17n+5 at 24 fps,
+      // without LTX's half-resolution stage or source-aspect coercion.
+      const width = Number(params.width ?? 832);
+      const height = Number(params.height ?? 480);
+      const requestedFrames = Number(params.frames ?? 124);
+      if (![width, height, requestedFrames].every(Number.isInteger) || width < 32 || height < 32 || requestedFrames < 5 || requestedFrames > 362) {
+        errors.push(`${assetId}: FastH3 requires positive integer dimensions and 5..362 requested frames`);
+      }
+      if (params.fps !== undefined && Number(params.fps) !== 24) errors.push(`${assetId}: FastH3 audio/video must use 24 fps`);
+      if (params.upscale) errors.push(`${assetId}: FastH3 does not support the LTX upscale stage`);
+      for (const name of ["image", "reference", "audio"]) {
+        if (typeof params[name] !== "string" || !params[name]) errors.push(`${assetId}: FastH3 template requires ${name}`);
+      }
+      const dims = resolveDimensions(width, height, 32);
+      const frames = Math.max(5, requestedFrames) + ((5 - Math.max(5, requestedFrames) % 17 + 17) % 17);
+      job.dims = { width: dims.width, height: dims.height };
+      job.dimsAdjusted = dims.adjusted;
+      job.frames = frames;
+      job.framesAdjusted = frames !== requestedFrames;
+      job.fps = 24;
+      job.output = `assets/${assetId}.mp4`;
+      Object.assign(params, { width: dims.width, height: dims.height, frames, fps: 24 });
+      castRefSha256 = sha256Hex(canonical(["image", "reference", "audio"].map(name => ({
+        name, asset: params[name], sha256: assets[params[name]]?.sha256 ?? null,
+      }))));
     } else if (kind === "plate") {
       // the default is a 64-multiple in 16:9 (N9); 960x544 used to be the default and came back
       // 960x512 from the graph, because half of 544 is 272 and LTX floors to 32
