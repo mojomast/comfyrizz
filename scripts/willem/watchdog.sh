@@ -3,5 +3,5 @@
 L=/workspace/willem-birthday/logs/watchdog.log
 sleep "$1"
 echo "$(date) watchdog firing" >> $L
-/home/box/.local/bin/colab stop -s comfyrizz-willem >> $L 2>&1
-/home/box/.local/bin/colab sessions >> $L 2>&1
+${COLAB_BIN:-$HOME/.local/bin/colab} stop -s comfyrizz-willem >> $L 2>&1
+${COLAB_BIN:-$HOME/.local/bin/colab} sessions >> $L 2>&1

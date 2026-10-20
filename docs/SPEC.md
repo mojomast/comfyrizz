@@ -513,4 +513,4 @@ GPU work still starts only after the CPU product exists, and every Google Colab 
 - Remotion: https://www.remotion.dev/license , https://www.remotion.dev/docs/transitions/transitionseries
 - Openverse: see §5.5. Pexels terms (deferred): https://www.pexels.com/terms-of-service/
 - Review input: ChatGPT's review of revision 2 (Oct 16); claims marked as cited there were not all re-verified.
-- Local (read-only): /home/box/orbitdesktop @ integ/live-tree-oct14
+- Local (read-only): <orbit checkout> @ integ/live-tree-oct14

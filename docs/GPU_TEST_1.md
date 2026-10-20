@@ -39,7 +39,7 @@ Measured setup steps: `colab new` 3 s; upload 8 small files about 10 s; ComfyUI 
 
 ## 2. FLUX 3 Klein (BF16, distilled: 16 steps, cfg 1, euler/simple)
 
-Workflow: `UNETLoader → CLIPLoader(type flux3) → CLIPTextEncode / ConditioningZeroOut → EmptyFlux2LatentImage → KSampler → VAEDecode → SaveImage` (`/home/box/comfyrizz/workflows/flux3_klein_t2i.api.json`). Prompts were written as full agent-style captions (subject, layout, palette with hex codes, lighting, negative space, "no text"), see `colab/make_jobs.py`.
+Workflow: `UNETLoader → CLIPLoader(type flux3) → CLIPTextEncode / ConditioningZeroOut → EmptyFlux2LatentImage → KSampler → VAEDecode → SaveImage` (`workflows/flux3_klein_t2i.api.json`). Prompts were written as full agent-style captions (subject, layout, palette with hex codes, lighting, negative space, "no text"), see `colab/make_jobs.py`.
 
 | Job | Size | Wall | ComfyUI exec | Peak VRAM (nvidia-smi) |
 |---|---|---|---|---|

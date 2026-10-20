@@ -13,7 +13,7 @@ Its estimates are separate from the original dates below.
 
 | Milestone | Target | Exit check |
 |---|---|---|
-| M0 Kickoff | Sat Oct 17 | Repo `/home/box/comfyrizz` scaffolded; Pi and Hermes started on A1/A2 and B1/B2/B3 |
+| M0 Kickoff | Sat Oct 17 | Repo `<repo root>` scaffolded; Pi and Hermes started on A1/A2 and B1/B2/B3 |
 | **M1 CPU vertical slice** | **Sun Oct 18, evening** | `examples/launch-demo` (5 layouts) previews in Remotion Studio/Player and exports a valid MP4 on CPU with no LLM or GPU; package validates against `comfyrizz.package/v1`; timeline compiler unit tests green; `pipeline-py` passes against a fake Comfy v2 server; Google Colab lifecycle passes against a fake `colab` CLI |
 | M2 Web shell + edit loop | Mon Oct 19 | Edit a headline and a chart value in `apps/web` → preview updates → MP4 (spec's old Day 2 check) |
 | M3 GPU spike (Kyle-gated) | Mon Oct 19 – Tue Oct 20 | Needs Kyle: HF licence acceptance + read token + approved unit budget. Two `.api.json` workflows (Klein still, LTX 97-frame 960×544 plate); model size, VRAM and times recorded |
@@ -44,8 +44,8 @@ Rule kept from the spec: GPU work starts only after the CPU product exists, and 
 
 ## Hard rules (in every task)
 1. **Do not spend Google Colab units or start Google Colab runtimes.** No `colab new`, `exec`, `run`, `ssh` or `stop` against real sessions. There is no HF token yet; Kyle approves GPU runs separately. Test against a fake `colab` binary / fake Comfy v2 server only. Read-only `colab --help` / `colab version` is fine.
-2. **Do not modify or restart live Orbit**, and do not edit anything in `/home/box/orbitdesktop`. Copy code out (and add the MIT relicence header + NOTICE line).
-3. **Work only inside `/home/box/comfyrizz`.** Commit locally; don't push; don't create GitHub repos.
+2. **Do not modify or restart live Orbit**, and do not edit anything in `<orbit checkout>`. Copy code out (and add the MIT relicence header + NOTICE line).
+3. **Work only inside `<repo root>`.** Commit locally; don't push; don't create GitHub repos.
 4. Write "Google Colab", never bare "Colab", in prose, UI copy and docs (identifiers like `colab/`, `colab-plan` are fine).
 5. Never print or commit secrets (ORBIT_TOKEN, app keys, Google Colab tokens, HF or LLM keys). No secrets via `colab exec --env`.
 6. No cloud agents or extra workers.
@@ -82,7 +82,7 @@ Rule kept from the spec: GPU work starts only after the CPU product exists, and 
 - Accept: pytest against a **local fake Comfy v2 server** (no GPU, no network): success path writes manifest; killed-mid-run leaves attempt records and reconcile polls instead of resubmitting; `submission_unknown` is surfaced, not retried; jobs planner unit tests (8n+1, ×64 for plates).
 
 **B3. Backends: Google Colab lifecycle + BYO ComfyUI URL** (`packages/backends/`, `colab/`; spec §6.5, §6.6, §6.7)
-- Copy (don't edit) `/home/box/orbitdesktop/server/colab-plan.mjs` helpers (`parseUsage`, `parseSessions`, `parseStatus`, `parseLs`, `parseNvidiaSmi`, `catalogFromHelp`, `redactSecrets`, `blockedLocalPath`, argv planning) and the detached worker / job-log pattern from `colab-orchestrator.mjs` / `colab-job-worker.mjs`; add the MIT relicence header.
+- Copy (don't edit) `<orbit checkout>/server/colab-plan.mjs` helpers (`parseUsage`, `parseSessions`, `parseStatus`, `parseLs`, `parseNvidiaSmi`, `catalogFromHelp`, `redactSecrets`, `blockedLocalPath`, argv planning) and the detached worker / job-log pattern from `colab-orchestrator.mjs` / `colab-job-worker.mjs`; add the MIT relicence header.
 - `Backend` interface (§6.5). Google Colab: argv arrays, no shell; preflight; **no secrets via `--env`** (HF token as a 0600 file via `colab upload`); manifest decides success; attempt-record download + reconcile; teardown verified via `colab sessions` → `stopped`, else retry + **`stop_unconfirmed`**; reserve formula `spent + committed + next_upper + collect_and_stop_reserve ≤ budget` checked before each job, warn at 80%; wall-clock cap; orphan reaper offers, never auto-deletes; spend labelled "estimate".
 - BYO: start `comfy-api-proxy --comfyui <url> --port <free>` locally, health (`/object_info` node types, models, smoke job), cancel only our own job.
 - `colab/bootstrap.py`, `health.py` drafted from `/workspace/comfy-hackathon/test/s2–s7*.py` (not executed on Google Colab).
@@ -137,7 +137,7 @@ Cut order: E is experimental and is cut before any core feature; if it wins, the
 
 ## Workstream C: frontend, server and agent (unassigned; next free agent, queued)
 
-**C1. Web shell port** (`apps/web/`): lift from `/home/box/orbitdesktop/apps/grokbots/index.html` (copy, don't edit): chat layout/CSS, `md()`/`esc()`, composer, cards, Activity panel, context meter; React island with the Remotion Player; storyboard card with inline edits (headline, chart values, palette). Accept: M2 check.
+**C1. Web shell port** (`apps/web/`): lift from `<orbit checkout>/apps/grokbots/index.html` (copy, don't edit): chat layout/CSS, `md()`/`esc()`, composer, cards, Activity panel, context meter; React island with the Remotion Player; storyboard card with inline edits (headline, chart values, palette). Accept: M2 check.
 **C2. Local server** (`apps/server/`): 127.0.0.1, token in fragment, Host/Origin checks, `/api/package/:id` with base revision, `/api/render`, `/api/events` SSE.
 **C3. LLM layer + agent tools** (`packages/llm/`, `packages/agent/`): AI SDK wrapper, 3 presets (OpenCode Go headers), probe, zod tools + repair loop, **asset-type router**, `generate_svg` via A5's `autoFix`, FLUX caption expansion. Accept: M4 check; agent picks SVG for an icon/diagram and FLUX for an illustration in a test brief.
 **C4. Openverse + uploads + licence policy + CREDITS + `package.zip` filter** (`packages/sources/`): M6.
@@ -170,3 +170,15 @@ The original group board (THE INSANE ASSYLYM) is at Orbit's 100-entry cap, so a 
 | D Kyle-gated: HF licences/token, GPU spike approval | kyle | `t_dddec6e24e254b75` |
 | E1 SVG-guided generation: CPU prep (experimental) | hermes | `t_5f7f30a026174551` |
 | E2 SVG-guided GPU sweep (Kyle-gated) | kyle | `t_28128f96b4974069` |
+
+## SCOPE FREEZE (Tue Oct 20, 2026)
+
+Until submission (Wed Oct 28) only the demo path in SPEC §11 and fixes ship. These move to **post-hackathon** (SPEC §12):
+
+- Music bed and SFX in the mix
+- Motion transitions (blur, push, zoom, iris). The schema vocabulary and motion lint stay; no renderer work
+- Qwen3-TTS voices (Kokoro stays the only TTS)
+- SVG-guided generation defaults from the `workflows/svg-guided/` sweep (stays experimental, off by default)
+- Comfy Cloud backend (Google Colab and your own ComfyUI stay the two backends)
+
+To reopen an item, Kyle approves it on the board.
