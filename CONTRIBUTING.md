@@ -42,7 +42,7 @@ All new assets added to the repository must follow these rules:
 
 2. **No secrets** - Never commit API keys, tokens, passwords, or private keys. If a secret is needed for development, add it to `scripts/release-scan.allow.json` with a valid reason and ensure it does not appear in tracked files.
 
-3. **Workspace/home paths** - Absolute `/workspace/<name>` and `/home/box` paths are prohibited. If a script needs a custom path, use a relative path or an environment variable instead.
+3. **Workspace/home paths** - Absolute workspace or home-directory paths from a personal machine are prohibited. If a script needs a custom path, use a relative path or an environment variable instead.
 
 4. **Tailnet hosts** - Tailnet host addresses (`.ts.net`) are prohibited for security reasons.
 
