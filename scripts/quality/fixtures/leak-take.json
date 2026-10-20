@@ -1,0 +1,87 @@
+{
+  "schema": "comfyrizz.temporal-review-fixture/v1",
+  "note": "Synthetic reviewer notes for the cloud/leak take from docs/research/MOCKUMENTARY_QUALITY_REVIEW_20261020.md section 3. Nell raises her hood while her boots stay on the floor, but around 04:34-04:38 she rises and the boots are visibly off the floor at 04:36.5. Observation t is take-local seconds; take.startS is the film offset.",
+  "take": {
+    "id": "cloud-leak-0430",
+    "description": "Cloud/leak shot: Nell raises her hood; boots remain on the workshop floor.",
+    "startS": 270,
+    "durationS": 10,
+    "fps": 24,
+    "cameraIntent": "static",
+    "licensedActions": [],
+    "expectedBodyCount": 1,
+    "expectedCharacters": ["nell"],
+    "thresholds": {
+      "scaleJumpRatio": 0.2,
+      "triagePixelDiff": 0.35,
+      "triageFlowDiff": 0.35
+    }
+  },
+  "observations": [
+    {
+      "t": 2.5,
+      "filmClock": "04:32.5",
+      "bodyCount": 1,
+      "characters": ["nell"],
+      "feetGrounded": true,
+      "scale": 1,
+      "propHolder": { "leak_bucket": "nell" },
+      "cameraMove": "static",
+      "pixelDiff": 0.12,
+      "flowDiff": 0.08,
+      "note": "Nell reaches for the hood; both boots on the floor."
+    },
+    {
+      "t": 4,
+      "filmClock": "04:34",
+      "bodyCount": 1,
+      "characters": ["nell"],
+      "feetGrounded": false,
+      "scale": 1.02,
+      "propHolder": { "leak_bucket": "nell" },
+      "cameraMove": "static",
+      "pixelDiff": 0.18,
+      "flowDiff": 0.11,
+      "note": "Hood rises; boots begin to leave the floor."
+    },
+    {
+      "t": 6.5,
+      "filmClock": "04:36.5",
+      "bodyCount": 1,
+      "characters": ["nell"],
+      "feetGrounded": false,
+      "scale": 1.05,
+      "propHolder": { "leak_bucket": "nell" },
+      "cameraMove": "static",
+      "pixelDiff": 0.62,
+      "flowDiff": 0.41,
+      "note": "Both boots visibly off the floor; the body rises into the upper frame."
+    },
+    {
+      "t": 8,
+      "filmClock": "04:38",
+      "bodyCount": 1,
+      "characters": ["nell"],
+      "feetGrounded": false,
+      "scale": 1.06,
+      "propHolder": { "leak_bucket": "nell" },
+      "cameraMove": "static",
+      "pixelDiff": 0.55,
+      "flowDiff": 0.37,
+      "note": "Still airborne at the end of the fragment."
+    },
+    {
+      "t": 9.5,
+      "filmClock": "04:39.5",
+      "bodyCount": 1,
+      "characters": ["nell"],
+      "feetGrounded": true,
+      "scale": 1.04,
+      "propHolder": { "leak_bucket": "nell" },
+      "cameraMove": "static",
+      "pixelDiff": 0.1,
+      "flowDiff": 0.06,
+      "note": "Boots settle back on the floor."
+    }
+  ]
+}
