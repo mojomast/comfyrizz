@@ -245,11 +245,31 @@ test('the generation plan uses the saved revision without starting a run', async
   expect(planBody!.packageId).toBe(env.packageId);
   expect(typeof planBody!.baseRevision).toBe('number');
   expect(planBody!.narrationRuntime).toBe('colab');
+  expect(planBody!.renderLocation).toBe('local');
   expect(planBody).not.toHaveProperty('status');
   expect(startCalls).toBe(0);
   await expect(voice(page).getByRole('button', { name: 'Generate video' })).toBeVisible();
   await page.getByTestId('scene-select').selectOption('s_body');
   await expect(voice(page).getByRole('button', { name: 'Generate video' })).toBeVisible();
+});
+
+test('the generation plan can render on the Google Colab VM', async ({ page }) => {
+  const env = loadEnv();
+  let planBody: Record<string, unknown> | null = null;
+  await page.route(/\/api\/pipeline\/plan$/, async route => {
+    planBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ready: true, requiresApproval: false, planHash: 'plan_e2e_render', issues: [], remoteRender: true }),
+    });
+  });
+  await openEditor(page, env);
+  await page.locator('#render-location').selectOption('colab');
+  await expect(voice(page).getByLabel('Final render')).toHaveValue('colab');
+  await voice(page).getByRole('button', { name: 'Check generation plan' }).click();
+  expect(planBody!.renderLocation).toBe('colab');
+  await expect(voice(page).locator('.hint', { hasText: 'Google Colab VM' })).toBeVisible();
 });
 
 test('a rejected voice save names the failure and keeps the edit', async ({ page }) => {

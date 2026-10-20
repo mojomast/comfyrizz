@@ -34,6 +34,8 @@ illustration of a nebula" becomes one SVG route and one FLUX route.
 | `assets.search` / `assets.attach` | Fallback metadata; attach requires approval |
 | `presenter.set` | Opt-in AI presenter (C-pres): coverage `none|bookends|all`, per-scene `off|pip|split`, placement/shape/size/label; returns `portrait_prompt` for `assets.generate_image` + advisory `presenter_fixes` |
 
+The agent does not choose where the MP4 is rendered and does not start a Google Colab session. That opt-in is the editor setting `renderLocation` (`local` by default, or `colab`).
+
 `createToolset({generateSvg, planImage, initialPackage})` injects the real generator.
 Wire A5's loop as:
 

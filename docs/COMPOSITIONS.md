@@ -280,3 +280,10 @@ records versions, frames, archive/video hashes and evidence limits. Raw evidence
 retained outside the repository under
 `/home/mojo/comfyrizz-gpu-tests/composition-implementation-20261020/`.
 All renders used local CPU resources and spent **zero Colab credits**.
+
+## Google Colab remote render
+
+The opt-in Google Colab final render (`renderLocation: 'colab'`) does not carry the
+composition/HyperFrames worker. When a run package has composition scenes, the
+pipeline collects the generated media, stops the held Colab VM, emits a
+`REMOTE_RENDER_COMPOSITIONS` warning and renders the final video locally.

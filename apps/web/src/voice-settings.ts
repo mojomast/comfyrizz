@@ -43,6 +43,21 @@ let runtime = 'local';
 let budget = 2;
 let narrationUnits = 2;
 let comfyuiUrl = '';
+export const RENDER_LOCATION_KEY = 'comfyrizz.renderLocation';
+export type RenderLocation = 'local' | 'colab';
+export function readRenderLocation(): RenderLocation {
+  try { return sessionStorage.getItem(RENDER_LOCATION_KEY) === 'colab' ? 'colab' : 'local'; }
+  catch { return 'local'; }
+}
+export function writeRenderLocation(value: string): RenderLocation {
+  const next: RenderLocation = value === 'colab' ? 'colab' : 'local';
+  try { sessionStorage.setItem(RENDER_LOCATION_KEY, next); } catch { /* private mode */ }
+  window.dispatchEvent(new CustomEvent('comfyrizz-render-location', { detail: next }));
+  const header = document.querySelector<HTMLSelectElement>('#render-location');
+  if (header && header.value !== next) header.value = next;
+  return next;
+}
+let renderLocation: RenderLocation = readRenderLocation();
 let deliverySceneId = '';
 let timer: ReturnType<typeof setTimeout> | undefined;
 let restored = false;
@@ -91,6 +106,13 @@ export function mountVoiceSettings(element: HTMLElement, configuration: Options)
     render();
   }) ?? null;
   render();
+  window.addEventListener('comfyrizz-render-location', (event) => {
+    const next = (event as CustomEvent<string>).detail === 'colab' ? 'colab' : 'local';
+    if (next === renderLocation) return;
+    renderLocation = next;
+    plan = null;
+    render();
+  });
   if (!restored) {
     restored = true;
     const saved = sessionStorage.getItem('comfyrizz.voice-generation-run');
@@ -176,12 +198,13 @@ function render() {
     ${delivery}
     <p class="hint">${mode === 'kokoro' ? 'Voice, speed and context affect synthesis. Paragraph mode preserves measured take length; sentence/word timing uses the existing estimated alignment.' : mode === 'custom' ? 'CustomVoice supports delivery instructions. A scene’s delivery direction overrides the default. Qwen runs strictly: no silent voice fallback.' : 'VoiceDesign creates the reference once; Base reuses it across scenes. Delivery direction shapes the reference, not individual Base-clone scenes.'} <a href="/tts-expression/index.html" target="_blank" rel="noopener">Hear the comparisons</a></p>
     <details class="voice-production" open><summary>Generate narrated video</summary>
-      <div class="voice-grid"><label>Visual generation<select data-backend>${option('cpu', 'CPU · ready/local visuals', backend)}${option('colab', 'Colab GPU', backend)}${option('byo-comfyui', 'My ComfyUI', backend)}</select></label>
-      ${mode !== 'kokoro' ? `<label>Qwen runtime<select data-runtime>${option('colab', 'Managed Colab GPU', runtime)}${option('local', 'Locally installed Qwen', runtime)}</select></label>` : ''}
+      <div class="voice-grid"><label>Visual generation<select data-backend>${option('cpu', 'CPU · ready/local visuals', backend)}${option('colab', 'Google Colab GPU', backend)}${option('byo-comfyui', 'My ComfyUI', backend)}</select></label>
+      ${mode !== 'kokoro' ? `<label>Qwen runtime<select data-runtime>${option('colab', 'Managed Google Colab GPU', runtime)}${option('local', 'Locally installed Qwen', runtime)}</select></label>` : ''}
+      <label>Final render<select data-render-location>${option('local', 'This machine', renderLocation)}${option('colab', 'Google Colab VM', renderLocation)}</select></label>
       ${backend === 'colab' || (mode !== 'kokoro' && runtime === 'colab') ? `<label>Total compute-unit ceiling<input data-budget type="number" min="0.5" step="0.5" value="${budget}"></label>${mode !== 'kokoro' && runtime === 'colab' ? `<label>Qwen allocation ceiling<input data-narration-units type="number" min="0.5" max="4" step="0.5" value="${narrationUnits}"></label>` : ''}` : ''}
       ${backend === 'byo-comfyui' ? `<label>ComfyUI URL<input data-comfyui value="${esc(comfyuiUrl)}" placeholder="http://127.0.0.1:8188"></label>` : ''}</div>
       <div class="voice-actions"><button data-save ${busy ? 'disabled' : ''}>Save voice settings</button><button data-plan ${busy || active() ? 'disabled' : ''}>Check generation plan</button>${plan?.value.ready ? `<button data-start ${busy ? 'disabled' : ''}>${plan.value.requiresApproval ? 'Approve ceiling & generate' : 'Generate video'}</button>` : ''}${active() ? '<button data-cancel>Cancel generation</button>' : ''}</div>
-      <p class="hint">Uses the full voice → measured timing → media → render → verification → editable export pipeline. Existing Render/Export actions reuse existing audio. Generate here to synthesize the selected voice.</p>
+      <p class="hint">Uses the full voice → measured timing → media → render → verification → editable export pipeline. ${renderLocation === 'colab' ? 'Google Colab VM renders the MP4 and checks the mix after generation, then stops. If that fails, this machine renders instead.' : 'The final MP4 is rendered on this machine.'} Existing Render/Export actions reuse existing audio. Generate here to synthesize the selected voice.</p>
       <div data-voice-status role="status" aria-live="polite">${esc(message)}</div>
       <div data-run-progress>${runProgress()}</div>
       <div class="voice-actions">${(run?.result?.files ?? []).map(f => `<button data-file="${esc(f.url)}" data-name="${esc(f.name)}">Download ${esc(f.name)}</button>`).join('')}</div>
@@ -225,6 +248,7 @@ function render() {
     plan = null;
   }, 'input');
   bind('[data-backend]', e => { backend = e.value; plan = null; render(); });
+  bind('[data-render-location]', e => { renderLocation = writeRenderLocation(e.value); plan = null; render(); });
   bind('[data-runtime]', e => { runtime = e.value; plan = null; render(); });
   bind('[data-budget]', e => { budget = Number(e.value); plan = null; render(); });
   bind('[data-narration-units]', e => { narrationUnits = Number(e.value); plan = null; render(); });
@@ -247,6 +271,7 @@ function render() {
       narrationRuntime: mode === 'kokoro' ? 'local' : runtime,
       budgetUnits: budget,
       narrationUnits,
+      renderLocation,
       ...(comfyuiUrl ? { comfyuiUrl } : {}),
     };
     const value = await request('/api/pipeline/plan', body) as Plan;

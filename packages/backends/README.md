@@ -115,6 +115,12 @@ in `test/b5-integration.test.mjs`. No test allocates a session or reaches the ne
 harness (`scripts/gpu4/g4_dryrun.mjs`, prepared and dry-run only) drives this same path against the same
 fakes, and the estimate it prints is the one the run panel would show.
 
+## Final render on the same Google Colab VM
+
+`src/colab-render-plan.mjs` plans an opt-in Remotion render (`renderLocation: "colab"`, default `local`) for a session that is already up. It does not allocate a VM. The job JSON lists cache paths, the bundle stamp, and which project files to upload versus link from `/content/comfyrizz/out`. `renderCommandArgv` is only `colab exec -f`; `--env` and credential-shaped values are refused. `decideRenderFallback` falls back to a local render only after the VM state is `stopped`. An unconfirmed shutdown aborts the fallback. `setCollectPolicy("manifest")` on the backend keeps generated media on the VM during generation; `"full"` is the fallback collect.
+
+`colab/render_dirs.py` and `colab/render_remote.py` are the cells the app uploads. Tests import the planner and the Python helpers. They do not call the `colab` binary or start a session.
+
 ## Tests: fakes only, zero Google Colab calls
 
 * `test/bin/fake-colab.mjs` — a fake `colab` executable, installed as a `sh` shim and executed

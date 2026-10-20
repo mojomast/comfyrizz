@@ -27,6 +27,8 @@ export {
 export type { CutdownResult, CutdownSeconds, PresenterPlan, VoiceFn, VoiceInput, VoiceResult } from './cutdown.js';
 export type { AgentTool, PlannedImage, SvgAssetResult, ToolsetOptions } from './tools.js';
 export { runAgent } from './agent.js';
+export { RENDER_LOCATIONS, DEFAULT_RENDER_LOCATION } from './render-location.js';
+export type { RenderLocation } from './render-location.js';
 export { runCpuSlice, defaultCpuScript } from './cpu-slice.js';
 export type { CpuSliceOptions, CpuSliceResult } from './cpu-slice.js';
 export { createScriptedModel } from './scripted-model.js';

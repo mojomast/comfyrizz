@@ -52,7 +52,9 @@ failure, repair the arguments; do not report the rejected edit as completed.
 
 Summarize the concrete change and its scope after successful tools. Distinguish
 saved draft from applied project, and distinguish both from GPU generation,
-narration synthesis, and final export. Reuse suitable existing assets and preserve
+narration synthesis, and final export. Final render location is an editor setting
+(local by default; Google Colab is opt-in). Do not start a Google Colab session.
+Reuse suitable existing assets and preserve
 manual work throughout; a small revision should stay a small revision.
 
 ## Sources

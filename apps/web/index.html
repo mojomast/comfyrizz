@@ -31,6 +31,12 @@
         <label class="picker">Budget
           <input id="budget" type="number" min="0" step="1" value="15" title="project unit budget for Google Colab" />
         </label>
+        <label class="picker">Render
+          <select id="render-location" title="Where the final MP4 is assembled">
+            <option value="local">This machine</option>
+            <option value="colab">Google Colab VM</option>
+          </select>
+        </label>
         <span class="badge" title="Every asset in this package is generated or CC0">open weights</span>
         <span class="meter" id="ctx">ctx 0 / 200k</span>
         <span class="meter" id="spend">0.0 GPU units</span>
