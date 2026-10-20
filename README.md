@@ -5,262 +5,290 @@
   <img src="docs/media/logo-light.svg" alt="Comfyrizz" width="420">
 </picture>
 
-### Chat in a brief. Get a narrated motion-graphics explainer.
+### Chat in a brief. Get a narrated motion-graphics explainer, rendered on open weights.
 
-Comfyrizz turns a short brief into a narrated motion-graphics video: exact type, real charts,
-generated vector art, FLUX 3 Klein stills, LTX-2.5 motion plates and Kokoro or Qwen3-TTS
-narration, cut on a frame-accurate timeline and rendered deterministically with Remotion.
-MIT licensed.
+Comfyrizz is a chat agent that turns a short brief into a 30–90 second narrated motion-graphics
+video. Type, charts and captions are exact because code draws them. FLUX 3 Klein stills and LTX-2.5
+motion plates are generated through the Comfy SDK on a Google Colab GPU that Comfyrizz starts and
+stops for you, or on your own ComfyUI. MIT licensed.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
-[![Node.js 22](https://img.shields.io/badge/node-22-339933?logo=nodedotjs&logoColor=white)](#quick-start)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](pipeline-py/)
+[![Node.js 20+](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=nodedotjs&logoColor=white)](#quick-start)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Comfy%20SDK-7c5cff)](https://github.com/comfyanonymous/ComfyUI)
 [![Remotion](https://img.shields.io/badge/render-Remotion-0b84f3)](https://www.remotion.dev)
-[![Hackathon](https://img.shields.io/badge/Comfy-Open%20Source%20Higgsfield%20hackathon-f59e0b)](#hackathon)
+[![Hackathon](https://img.shields.io/badge/Comfy-Open%20Source%20Higgsfield%20hackathon-f59e0b)](#hackathon-submission)
 
 <img src="docs/media/hero.webp" alt="Comfyrizz sizzle reel: example videos made with Comfyrizz" width="880">
 
 <sub>Every frame above came out of Comfyrizz. Labels, numbers and captions are drawn by code, never by the image model.</sub>
 
-[20-second hook](#20-second-hook) · [Quick start](#quick-start) · [Demo](#demo) · [Gallery](#gallery) · [How it is built](#how-it-is-built) · [Hackathon submission](#hackathon-submission-links) · [Licence](#licence)
+[Why it's different](#why-its-different) · [Tour](#feature-tour) · [Quick start](#quick-start) · [Offline demo](#offline-demo-with-a-cassette) · [Google Colab](#google-colab) · [Architecture](#architecture) · [Submission](#hackathon-submission)
 
 </div>
 
 ---
 
-## 20-second hook
+## Why it's different
 
-The 20-second launch hook is [examples/hook-20s](examples/hook-20s): 566 frames at 30 fps
-(18.867 s), 1920×1080, with procedural backgrounds, first-party SVG assets and measured Kokoro
-narration. It carries no GPU media, so it exports on CPU from a clean clone:
+- **A model-agnostic agent.** The chat agent runs a bounded tool loop against any OpenAI-compatible
+  endpoint: OpenRouter, OpenCode Go or your own server. A built-in scripted model runs the whole CPU
+  path offline, and recorded cassettes replay a real session under a different model.
+- **ComfyUI as a plate generator, not the whole product.** Generated pixels go through the Comfy SDK
+  as API-format workflows. Headlines, statistics, charts and captions are rendered by Remotion, so
+  an image model never invents a number or misspells a title.
+- **Google Colab automation with honest teardown.** Comfyrizz allocates a G4, bootstraps pinned
+  models, runs the jobs, collects results and stops the VM, behind a spend card and budget check.
+  It reports "VM stopped" only after the Google Colab CLI confirms it.
+- **Rights-aware export.** Every asset carries its source, creator and licence. `CREDITS.md` and a
+  rights-filtered `package.zip` ship only what may be redistributed.
 
-```bash
-pnpm --filter @comfyrizz/renderer render:package -- --example examples/hook-20s
-```
+## Feature tour
 
-Output: `examples/hook-20s/out/hook-20s.mp4` (git-ignored).
+### Chat agent and editor
+
+<img src="docs/media/ui-agent-editor.webp" alt="Comfyrizz web app: chat agent, brief, Remotion preview, timeline and run panel" width="880">
+
+The local app: chat on the left, the Remotion Player and frame-accurate timeline in the middle,
+backend runs, export and assets on the right. Captured offline with the **local · scripted model**
+and the CPU backend.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/media/ui-plan-questions.webp" alt="Plan mode asks up to three questions: length, look and data"></td>
+<td width="50%"><img src="docs/media/ui-look-picker.webp" alt="Editable brief with look tiles and the scene outline"></td>
+</tr>
+<tr>
+<td><b>Plan mode</b> asks up to three questions (length, look, real numbers) and builds nothing until you confirm.</td>
+<td><b>Editable brief</b>: pick a look, check the hook / point / proof / CTA outline and its timing, then build.</td>
+</tr>
+</table>
+
+### 24 named style recipes
+
+<img src="docs/media/style-recipes.webp" alt="Twelve of the 24 style recipes rendered as SVG style frames" width="880">
+
+Each look is a `comfyrizz.recipe/v1` file that binds a palette, a type pairing, an easing
+personality, entries, a transition grammar, a background pattern and a finishing stack. The agent's
+motion-style skill lists, suggests and applies them (`style.list`, `style.suggest`, `style.apply`).
+A seeded variety engine avoids repeating recent looks, and a look score checks the result.
+
+- **24 recipes** in [`scripts/motionkit/data/recipes/`](scripts/motionkit/data/recipes/), from Swiss grid and Blueprint to Cinematic noir, Risograph and VHS retro
+- **37 effects** ([`effects.json`](scripts/motionkit/data/effects.json)) and **25 transitions** ([`transitions.json`](scripts/motionkit/data/transitions.json)), each with a CPU fallback
+- **16 OFL-1.1 fonts** catalogued in [`assets.json`](scripts/motionkit/data/assets.json) and fetched with `node scripts/motionkit/fetch-assets.mjs`
+- A renderer finishing layer ([`look-layer.tsx`](apps/renderer/src/look-layer.tsx)) and a style gallery at [`docs/motion-gallery/index.html`](docs/motion-gallery/index.html)
+
+The frames above are `styleFrame()` output for 12 of the recipes. The full guide is
+[docs/MOTION_STYLES.md](docs/MOTION_STYLES.md).
+
+### Two-minute demo page
+
+<img src="docs/media/ui-demo-webapp.webp" alt="Comfyrizz live demo page in fixture mode" width="880">
+
+`apps/web/demo.html` walks the whole loop on one page: brief, storyboard, licence receipts, a spend
+estimate, the Google Colab run and iteration. Fixture mode (`?fixture=1`) needs no server, token, GPU
+or network. See [docs/DEMO_WEBAPP_RUNBOOK.md](docs/DEMO_WEBAPP_RUNBOOK.md).
+
+### Setup preflight
+
+<img src="docs/media/doctor-output.webp" alt="pnpm run doctor --offline on a fresh clone" width="760">
+
+`pnpm run doctor` checks every prerequisite in one screen and prints a fix command for each
+problem. It is read-only and never prints secret values. See [docs/DOCTOR.md](docs/DOCTOR.md).
+
+### Landing next
+
+These features are on their branches and not yet merged to `main`. The previews below were
+captured from those branches.
+
+| Feature | Branch | Preview |
+| --- | --- | --- |
+| Live Google Colab progress gauges: model download, sampler, nodes, frame render and encode | `feat/colab-progress` | <img src="docs/media/colab-gauges-preview.webp" alt="Google Colab progress gauges from a simulated run" width="360"> |
+| Quality QA CLI: story beat lint, caption reading rate and splitting, Foley cue sheets, motion review | `feat/quality-fixes` | <img src="docs/media/qa-cli-preview.webp" alt="QA CLI flagging caption and Foley issues on fixtures" width="360"> |
+| References panel: uploads, per-asset notes and roles, agent placement proposals | `feat/reference-assets` | <!-- TODO(screenshot): References panel; capture after feat/reference-assets merges (the panel is not mounted in the app on the branch yet) --> _Screenshot to follow after merge._ |
 
 ## Quick start
 
-Requirements: **Node.js 22**, **pnpm** 10, **ffmpeg**/**ffprobe**, and Chrome or Chromium for
-Remotion (`REMOTION_BROWSER` overrides the default `/usr/bin/google-chrome`). Python 3.10+ is
-optional and only needed for the GPU pipeline and Kokoro narration.
+Requirements: **Node.js 20+** (Node 22 recommended), **pnpm 10**, **ffmpeg** and Chrome or Chromium
+for Remotion (`REMOTION_BROWSER` overrides the default `/usr/bin/google-chrome`). Python 3.10+ is
+needed only for the GPU pipeline and Kokoro narration.
 
 ```bash
 git clone https://github.com/mojomast/comfyrizz
 cd comfyrizz
 pnpm install --frozen-lockfile
 pnpm -r --if-present run build
+pnpm run doctor --offline
 cd apps/server && npm start
 ```
 
 Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). The bundled
-`examples/launch-demo` loads in the Player: edit a headline or chart value, send a brief in
-**Plan** mode with the *local · scripted model*, then **Export MP4** or **Export bundle**.
-This CPU path needs no GPU and no API key.
+`examples/launch-demo` loads in the Player. Send a brief in **Plan** mode with the
+**local · scripted model**, edit a headline or a chart value, then **Export MP4** or
+**Export bundle**. This path needs no GPU and no API key.
 
-Render the bundled example straight from the CLI:
+> Use `pnpm run doctor`, not bare `pnpm doctor`: the bare form runs pnpm's own built-in command.
+
+Render the bundled example from the command line (about 90 seconds on CPU):
 
 ```bash
 pnpm --filter @comfyrizz/renderer render:example   # → examples/launch-demo/out/launch-demo.mp4
 ```
 
-For tests and the full clean-clone check, see [docs/RELEASE_CHECK.md](docs/RELEASE_CHECK.md).
-Agent providers are documented in [docs/AGENT_PROVIDERS.md](docs/AGENT_PROVIDERS.md).
+The full clean-clone check is in [docs/RELEASE_CHECK.md](docs/RELEASE_CHECK.md).
 
-## Demo
+## Offline demo with a cassette
 
-[docs/submission/DEMO_SCRIPT.md](docs/submission/DEMO_SCRIPT.md) is the two-minute shot list for
-the submission video, mapped to the beats in [docs/SPEC.md](docs/SPEC.md) section 11. The live demo
-is the local editor served by Quick start ([apps/web](apps/web/)); the standalone demo page is
-specified in [docs/specs/DEMO_WEBAPP.md](docs/specs/DEMO_WEBAPP.md).
+A cassette (`comfyrizz.cassette/v1`) records one agent session's LLM traffic with credentials
+redacted. Replay needs no key and no network, and because the request key ignores the model, the
+same session replays under any model.
 
-## Gallery
+<img src="docs/media/cassette-replay.webp" alt="Validating, inspecting and replaying the sample cassette" width="760">
 
-The static, dependency-free page is [docs/gallery/index.html](docs/gallery/index.html), rendered
-from [gallery.json](docs/gallery/gallery.json). It lists every `examples/*` package with its title,
-description and duration; rendered videos appear once you produce them locally, because `out/` is
-git-ignored. The public long-form collection is documented in
-[docs/GITHUB_PAGES.md](docs/GITHUB_PAGES.md).
+```bash
+node scripts/cassette/cli.mjs validate scripts/cassette/fixtures/launch-brief.cassette.json
+node scripts/cassette/cli.mjs stats scripts/cassette/fixtures/launch-brief.cassette.json
 
-## Features
+# serve the app with the agent answering from the cassette (use an absolute path)
+COMFYRIZZ_LLM_CASSETTE=play:$PWD/scripts/cassette/fixtures/launch-brief.cassette.json \
+  npm --prefix apps/server run start
+```
 
-- **Chat-first agent.** A bounded tool loop turns a brief into a `comfyrizz.package/v1` project.
-  The LLM is model-agnostic: OpenRouter, OpenCode Go, or any OpenAI-compatible endpoint; an offline
-  scripted model runs the CPU demo.
-- **CPU-only path.** SVG art, procedural fallbacks, timeline editing, preview, MP4 render, captions
-  and the export bundle all run locally without a GPU or API key.
-- **Two GPU backends.** Google Colab G4 (start, bootstrap, run, collect, verified stop) or your own
-  ComfyUI, behind a spend card and budget check. Jobs are submitted through the Comfy SDK.
-- **Exact information.** Eight layouts, charts from real CSV data, measured narration, SRT/VTT
-  captions and six frame-driven storytelling recipes. Chart values never come from an image model.
-- **Rights-aware export.** Every asset records source, creator and licence; `CREDITS.md` and a
-  rights-filtered `package.zip` ship only assets whose licence allows it.
+Recording with a free provider, replaying under a second model and the `diff --md` comparison table
+are covered in [docs/AGENT_CASSETTE.md](docs/AGENT_CASSETTE.md).
 
-## How it is built
+## Google Colab
+
+Comfyrizz drives your own Google Colab account through the official `google-colab-cli`
+(`python3 -m pip install --user google-colab-cli`, then sign in with the CLI).
+
+1. In the app, pick **Google Colab** as the backend. The status card shows whether the CLI is
+   installed and signed in; **Test connection** checks it.
+2. FLUX 3 Klein and LTX-2.5 are gated on Hugging Face. Accept both licences, put a read token in a
+   `0600` file and point `COMFYRIZZ_HF_TOKEN_FILE` at it.
+3. Approve the spend card. Comfyrizz allocates a G4, runs the scripts in [`colab/`](colab/)
+   (bootstrap, health, run, collect) and stops the VM, confirming the stop before it says so.
+4. Optionally render the final video on the same held VM (`renderLocation: 'colab'`), including
+   HyperFrames composition scenes. See [docs/COMPOSITIONS.md](docs/COMPOSITIONS.md#google-colab-remote-render).
+
+The suites never start a real runtime: `node scripts/gpu4/g4_dryrun.mjs` runs a whole Google Colab
+job against loopback fakes. Efficiency measurements are in
+[docs/COLAB_EFFICIENCY_RESULTS.md](docs/COLAB_EFFICIENCY_RESULTS.md). To use a GPU you already
+have, choose **My ComfyUI URL** instead.
+
+## Architecture
 
 ```mermaid
 flowchart TD
-    A["Chat brief"] --> B["Agent<br/>any OpenAI-compatible LLM"]
+    A["Chat brief"] --> B["Agent · any OpenAI-compatible LLM<br/>or cassette replay"]
+    B -->|style.list / suggest / apply| R["24 style recipes<br/>effects · transitions · fonts"]
+    R --> C
     B --> C["Package<br/>comfyrizz.package/v1"]
     C --> D["jobs.json<br/>FLUX 3 Klein stills · LTX-2.5 plates · upscale"]
     D --> S{"Spend card approved?"}
-    S -->|Google Colab| E["Colab G4<br/>up · bootstrap · run · collect · stop"]
+    S -->|Google Colab| E["Google Colab G4<br/>up · bootstrap · run · collect · verified stop"]
     S -->|BYO| F["Your ComfyUI<br/>+ comfy-api-proxy"]
     E --> G["Assets + manifest"]
     F --> G
     C -.->|"CPU path: SVG + procedural fallbacks"| H
-    G --> H["Remotion render<br/>narration · captions"]
+    G --> H["Remotion render<br/>narration · captions · finishing layer"]
     H --> I["Export bundle<br/>MP4 · SRT/VTT · CREDITS · package.zip"]
 ```
 
-- **The package is the contract.** [packages/schema](packages/schema/) holds the JSON Schema plus
-  TypeScript and Python validators. Paths are relative, ids resolve, and model licences are tracked
-  separately from output licences.
+- **The package is the contract.** [packages/schema](packages/schema/) holds the JSON Schema and
+  TypeScript and Python validators. Model licences are tracked separately from output licences.
 - **Workflows through the Comfy SDK.** [pipeline-py](pipeline-py/) submits the ordered, hashed jobs
-  in [workflows](workflows/) through the Comfy SDK. The graphs cover FLUX 3 Klein stills and
-  reference edits, LTX-2.5 text/image-to-video plates and an LTX ×2 upscale.
-- **Remotion for exact text and charts.** [apps/renderer](apps/renderer/) is deterministic:
-  frame = f(timeline, local assets, frame number). Compositions make no network calls, and copy that
-  does not fit fails visibly instead of clipping.
-- **A model-agnostic agent.** [packages/agent](packages/agent/) runs a bounded tool loop and routes
-  asset requests: SVG for icons, diagrams and charts, FLUX for illustrations, sketch-to-render for
-  styled heroes. GPU work is only planned; it runs after you approve a spend card.
+  in [workflows](workflows/). Each generated asset keeps the API-format graph it was made with
+  (seed, prompt, models), with secrets removed, so you can open it in ComfyUI.
+- **Deterministic rendering.** [apps/renderer](apps/renderer/) computes each frame from the
+  timeline, local assets and the frame number, with no network calls. Copy that doesn't fit fails
+  visibly instead of clipping.
 
-See [docs/SPEC.md](docs/SPEC.md) for the full design and [docs/PLAN.md](docs/PLAN.md) for the
-milestone plan.
+The full design is in [docs/SPEC.md](docs/SPEC.md).
 
-## Open in ComfyUI
+## Configuration
 
-Every generated still and plate keeps the API-format workflow that was submitted, with its seed,
-prompt, models and parameters, next to the asset and inside `package.zip`. Tokens, API keys and
-signed URLs are removed before the file is written. The graph is the API format, not a drag-and-drop
-UI workflow; replay it on a ComfyUI that has the same models. See [docs/SPEC.md](docs/SPEC.md).
-
-## Hackathon submission links
-
-Comfyrizz is the entry for **Comfy's Open Source Higgsfield hackathon**; submissions are due
-**Oct 30, 2026, 9:00 AM PT**.
-
-| Document | What it covers |
+| Setting | What it does |
 | --- | --- |
-| [WRITEUP.md](docs/submission/WRITEUP.md) | The entry: what it is, how it is built, why it is innovative, and the categories and bonuses it targets. |
-| [CHECKLIST.md](docs/submission/CHECKLIST.md) | Each official requirement with status, evidence and owner. |
-| [LICENSE_AUDIT.md](docs/submission/LICENSE_AUDIT.md) | Repository licence, model weights, partner nodes and the Open Weights Only check. |
-| [CREDITS.md](CREDITS.md) | Every bundled asset with source, creator, licence and approval. |
-| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Models, fonts and key dependencies, with what the repo states. |
+| **Agent settings** (in the app) | Add an OpenRouter, OpenCode Go or custom OpenAI-compatible profile, fetch models and test tool calling. Saved to `<runtime>/provider-settings.json` (mode `0600`, git-ignored). |
+| `OPENROUTER_API_KEY`, `OPENCODE_API_KEY` / `OPENCODE_GO_API_KEY`, `COMFYRIZZ_CUSTOM_API_KEY` + `COMFYRIZZ_CUSTOM_BASE_URL` | Provider keys from the environment; saved keys take precedence. |
+| `COMFYRIZZ_PORT` | Server port (default `4319`). |
+| `COMFYRIZZ_RUNTIME` | Runtime directory (default `apps/server/.runtime`). |
+| `COMFYRIZZ_LLM_CASSETTE` | `record:<file>` or `play:<file>` for agent cassettes. Off by default. |
+| `COMFYRIZZ_HF_TOKEN_FILE` | Path to a `0600` Hugging Face read token file for the gated models. |
+| `COMFYRIZZ_COLAB_BIN` | Path to the `colab` CLI, if it isn't in `~/.local/bin` or on `PATH`. |
+| `REMOTION_BROWSER` | Chrome or Chromium used for rendering. |
 
-Contributor setup and asset rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Provider details: [docs/AGENT_PROVIDERS.md](docs/AGENT_PROVIDERS.md).
 
-## Licence
-
-**Comfyrizz is MIT-licensed.** See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
-Models are not distributed with this repository; each user downloads them under the model's own
-licence (FLUX 3 Klein, LTX-2.5 and Kokoro-82M are gated or separately licensed). **Remotion** is
-source-available under the [Remotion License](https://www.remotion.dev/license), which is not OSI;
-it is free for individuals and organisations of up to 3 people, and larger companies need a Company
-License. Details and the full dependency list are in
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
-
-## Repo layout
+## Project structure
 
 ```
 apps/
-  web/          Vite + TypeScript UI: chat, brief card, Remotion Player, scene timeline, script/audio/media inspector, animation and voice production panels
-  server/       Loopback HTTP server: packages + revisions, agent, compile, media tickets, nine-stage pipeline, render, export, SSE
-  renderer/     Remotion project: eight layouts, motion transitions, six storytelling recipes, captions, CLI render scripts
+  web/          Vite + TypeScript UI: chat, brief, Remotion Player, timeline, inspectors; demo.html
+  server/       Loopback HTTP server: packages, agent, pipeline, render, export, SSE, cassette hook
+  renderer/     Remotion project: layouts, transitions, storytelling recipes, finishing layer, CLI renders
 packages/
-  schema/       comfyrizz.package/v1 + jobs/v1 JSON Schemas, TS + Python validators, motion lint
-  agent/        Tool loop, asset router, brief extractor, style presets, brand kit, CSV scenes
-  llm/          OpenAI-compatible adapter: OpenRouter, OpenCode Go, custom presets + probe
-  planner/      Timeline compiler (integer frames, transitions, caption cues, motion cue provenance)
-  jobs/         package → ordered, hashed jobs.json (stills → plates → upscale)
+  schema/       comfyrizz.package/v1 + jobs/v1 schemas, TS + Python validators, motion lint
+  agent/        Tool loop, asset router, brief extractor, skills (including motion-style), style recipes
+  llm/          OpenAI-compatible adapter: OpenRouter, OpenCode Go, custom presets
+  planner/      Timeline compiler (integer frames, transitions, caption cues)
+  jobs/         package → ordered, hashed jobs.json
   backends/     Google Colab lifecycle + BYO ComfyUI, budget, watchdog
-  vector/       SVG sanitiser, resvg render-check, auto-fix loop
-  tts/          Kokoro + Qwen3-TTS adapters, measured cues, SRT/VTT, loudness
+  vector/       SVG sanitiser, resvg render check, auto-fix loop
+  tts/          Kokoro + Qwen3-TTS adapters, measured cues, SRT/VTT
   sources/      Openverse search, uploads, licence policy, CREDITS + package.zip filter
-pipeline-py/    Comfy SDK runner, attempt records, manifest, reconcile, health; SVG-guided eval
-colab/          Scripts the Google Colab backend uploads to the VM (bootstrap, health, run, reconcile)
-workflows/      ComfyUI API-format graphs + params (FLUX 3 Klein t2i/img2img/ref-edit, LTX-2.5 t2v/i2v)
-examples/       Bundled packages (launch-demo, narrated-demo, product-explainer, csv-charts, …)
-docs/           SPEC, PLAN, GPU reports, editor notes, voice and pipeline contracts, media
+  compositions/ Native HTML/SVG composition templates
+pipeline-py/    Comfy SDK runner, attempt records, manifest, reconcile
+colab/          Scripts the Google Colab backend runs on the VM
+workflows/      ComfyUI API-format graphs (FLUX 3 Klein, LTX-2.5)
+scripts/        doctor/, cassette/, motionkit/, release scan, credits audit, gallery
+examples/       Bundled packages (launch-demo, hook-20s, csv-charts, licensing-demo, …)
+docs/           SPEC, guides, specs/, submission/, media
 ```
 
 ## Testing
 
 ```bash
-pnpm test             # every workspace package's node:test suite (builds what it needs first)
-pnpm run test:py      # pipeline-py pytest; needs .venv (see pipeline-py/requirements-dev.txt)
-pnpm run test:all     # both
+pnpm test                      # every workspace package's node:test suite (builds libraries first)
+pnpm run test:py               # pipeline-py pytest; needs .venv (pipeline-py/requirements-dev.txt)
+pnpm run test:scan             # release scan: no personal paths or secrets
+node --test scripts/doctor/*.test.mjs scripts/cassette/*.test.mjs
+pnpm --filter @comfyrizz/web test:e2e   # Playwright (Chromium, loopback only)
 ```
 
-GPU paths are tested against a **fake `colab` CLI** and a **fake Comfy v2 server**, so the suites start no runtime and spend nothing. Useful extras:
+GPU paths are tested against a fake `colab` CLI and a fake Comfy server, so no suite starts a
+runtime or spends anything. The motion library's tests are listed in
+[docs/MOTION_STYLES.md](docs/MOTION_STYLES.md#every-command).
 
-```bash
-python3 -m venv .venv && .venv/bin/pip install -r pipeline-py/requirements-dev.txt
-node packages/schema/bin/comfyrizz-validate.mjs examples/launch-demo/package.json
-node packages/jobs/bin/plan-jobs.mjs examples/launch-demo/package.json --out out/jobs.json
-node scripts/gpu4/g4_dryrun.mjs        # whole Google Colab run against loopback fakes
-pnpm --filter @comfyrizz/renderer layout:check
-```
+## Hackathon submission
 
-## Roadmap
+Comfyrizz is Kyle Durepos's entry for **Comfy's Open Source Higgsfield hackathon**. Submissions are
+due **Oct 30, 2026, 12:00 PM Toronto time (9:00 AM PT)**.
 
-Working now: everything under [Features](#features). Delivered for this integration:
-
-- [x] **Qwen3-TTS voices** alongside Kokoro: Quick presets, VoiceDesign → Base cloning, nine directed CustomVoice speakers, Kokoro blends and per-scene delivery, with strict no-fallback execution and managed Colab or isolated local runtimes.
-- [x] **Music, ambience and SFX** in the export mix, with ducking under narration and session-only mute/solo audition.
-- [x] **Motion transitions** (`blur`, `slide`, `push`, `wipe`, `zoom`, `iris`) and storytelling reveals (`paper-reveal`, `draw-reveal`, `shape-reveal`) in the renderer, with schema vocabulary and motion lint.
-- [x] **Integrated timeline editor** with undo/redo, trim-floor feedback, narration/caption corrections, take splits, source media ranges, waveform, animation inspector and voice production.
-- [x] **Open in ComfyUI**: each generated still and plate keeps the submitted API-format graph next to the asset, in `package.zip`, and behind **Open in ComfyUI** in the asset view. Drag-and-drop UI format is not generated; see [Open in ComfyUI](#open-in-comfyui).
-
-Still in progress or planned:
-
-- [ ] **Combined paid nine-stage Colab run**: the nine-stage CPU path and individual GPU stages are verified; a paid end-to-end run of the combined pipeline remains outstanding.
-- [x] Committed `pnpm-lock.yaml` for reproducible installs
-- [ ] SVG-guided generation defaults from the sweep in `workflows/svg-guided/` (experimental)
-
-Deferred until after the hackathon:
-
-- [ ] **Lottie/dotLottie assets, true shared-element handoffs, Three.js/shader scenes and Motion Canvas/Manim adapters**. These need dedicated adapters and render benchmarks; they are not part of the current CPU recipe contract.
-- [ ] **Comfy Cloud backend**: run the same open-weights graphs on Comfy Cloud through the Comfy SDK (bring your own Comfy API key), behind the same `runPackage()` as Google Colab and your own ComfyUI. LTX-2.5 already runs there unchanged. FLUX 3 Klein isn't on Cloud yet, so Klein stills would fall back to Google Colab or your own ComfyUI. This needs a Comfy account card, a spend card in credits, and a check before each run that the models are available. Research notes are in `docs/research/COMFY_SERVICES.md`.
-- [ ] **Comfy partner nodes and Comfy Router** as optional hosted models, kept separate from the open-weights path
-- [ ] **Qwen Image 2.1** as an opt-in second image model for transparent cutouts, ControlNet-guided SVG renders and text inside the scene, after a quality test against FLUX 3 Klein. Its weights are open but licensed for non-commercial use only, so it would stay off by default and be flagged in exports. Research notes are in `docs/research/QWEN_IMAGE.md`.
+| Document | What it covers |
+| --- | --- |
+| [WRITEUP.md](docs/submission/WRITEUP.md) | The entry: what it is, how it's built, why it's innovative, and the categories it targets |
+| [DEMO_SCRIPT.md](docs/submission/DEMO_SCRIPT.md) | The two-minute demo video shot list |
+| [CHECKLIST.md](docs/submission/CHECKLIST.md) | Each official requirement with status and evidence |
+| [LICENSE_AUDIT.md](docs/submission/LICENSE_AUDIT.md) | Repository licence, model weights and the Open Weights Only check |
+| [Gallery](docs/gallery/index.html) | Every bundled example package, with rendered videos once you produce them locally |
 
 ## Credits and licences
 
 **Comfyrizz is MIT-licensed.** See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-- **Motion timing.** Easing and timing values are re-expressed from [whaleyxbt/claude-motion](https://github.com/whaleyxbt/claude-motion) (MIT) and HeyGen's HyperFrames motion skills (Apache-2.0). Numbers only, no code copied.
-- **Orbit.** Portions derive from Orbit (mojomast/orbitdesktop), relicensed MIT by its owner.
-- **Built on.** [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (GPL-3.0, not vendored; cloned at runtime), the Comfy SDK and `comfy-api-proxy` (MIT), `google-colab-cli` (Apache-2.0, invoked as an external command), the Vercel AI SDK (Apache-2.0) and resvg (MPL-2.0).
-- **Remotion** is source-available under the [Remotion License](https://www.remotion.dev/license), which is not OSI. It is free for individuals and organisations of up to 3 people; larger companies need a Company License.
+- **Assets.** Every bundled asset is listed with source, creator and licence in [CREDITS.md](CREDITS.md); third-party notices are in [NOTICE](NOTICE).
+- **Fonts.** The style recipes use fonts under the SIL Open Font License 1.1. Bundled font files ship with their OFL text in [`apps/renderer/public/fonts/`](apps/renderer/public/fonts/).
+- **Models.** Not distributed with this repository. FLUX 3 Klein (FLUX Kommunity License), LTX-2.5 (LTX-2.x Community License), Kokoro-82M and Qwen3-TTS are downloaded by each user under their own licences.
+- **Remotion** is source-available under the [Remotion License](https://www.remotion.dev/license), which is not OSI: free for individuals and organisations of up to 3 people.
+- **Built on** [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (GPL-3.0, cloned at runtime, not vendored), the Comfy SDK and `comfy-api-proxy`, `google-colab-cli` (invoked as an external command), HyperFrames (Apache-2.0) and resvg.
 
-**Models are not distributed with this repository.** Each user downloads them under the model's own licence:
-
-| Model | Used for | Licence |
-|---|---|---|
-| FLUX 3 Image Klein | stills, reference edits, sketch-to-render | FLUX Kommunity License v1.0 (gated on Hugging Face) |
-| LTX-2.5 | text/image-to-video plates, ×2 upscale | LTX-2.x Community License (gated on Hugging Face) |
-| Kokoro-82M | narration | see the model card and NOTICE |
-| Qwen3-TTS 1.7B (VoiceDesign / Base) | designed, cloned and directed Qwen narration | Apache-2.0 [unverified]; see NOTICE |
-
-Your generated videos are yours, but check each model's licence for commercial use before you publish.
-
-## Hackathon
-
-Comfyrizz is Kyle Durepos's entry for **Comfy's Open Source Higgsfield hackathon** (submissions due Oct 30, 2026). It's open source on purpose. The whole loop runs on open weights (FLUX 3 Klein, LTX-2.5, Kokoro or Qwen3-TTS) through ComfyUI, on a GPU you rent by the minute on Google Colab or on one you already own.
+Full details: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ## Contributing
 
-Issues and PRs are welcome. The short version:
-
-- Read [`docs/SPEC.md`](docs/SPEC.md) for the design and [`docs/PLAN.md`](docs/PLAN.md) for the milestone plan.
-- Keep changes small, keep `pnpm test` (and `pnpm run test:py` for Python) green, and add a test with each fix.
-- The package schema is the contract. If you change `package-v1.schema.json`, regenerate the types (`pnpm --filter @comfyrizz/schema gen:types`).
-- No secrets in code, fixtures or logs. Tests must never start a real Google Colab runtime.
-- Write "Google Colab" in prose and UI copy.
+Issues and PRs are welcome. Setup, asset rules and the licence policy are in
+[CONTRIBUTING.md](CONTRIBUTING.md). In short: run `pnpm run doctor`, keep `pnpm test` green, add a
+test with each fix, never commit secrets, and write "Google Colab" in prose and UI copy.
 
 <div align="center"><sub>Made with ComfyUI, Remotion and a lot of SVG.</sub></div>
