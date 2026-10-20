@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "clay-soft",
+  "label": "Clay soft",
+  "taxonomy": { "era": "contemporary", "finish": "soft", "energy": "medium", "geometry": "organic", "type": "serif" },
+  "palette": [
+    { "role": "background", "hex": "#f4e9dd" },
+    { "role": "text", "hex": "#2b2320" },
+    { "role": "accent", "hex": "#c98a6b" },
+    { "role": "shadow", "hex": "#6d4b3a" }
+  ],
+  "fonts": { "display": "fraunces", "text": "inter" },
+  "easing": { "personality": "elastic", "entry": "land", "exit": "exit", "spring": "elastic" },
+  "entries": ["pop", "maskRise", "fadeUp"],
+  "emphasis": ["hero", "keyword"],
+  "transitions": { "primary": "shape-reveal", "accent": ["slide", "fade"] },
+  "storyRecipe": "morph",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "soft-shadow", "params": { "offsetY": 8, "blur": 20, "opacity": 0.28 } },
+    { "id": "grain-fine", "params": { "amount": 0.07, "size": 1.5 } }
+  ],
+  "rules": {
+    "do": ["rounded clay-like shapes with soft contact shadows", "warm dough palette"],
+    "dont": ["sharp corners", "neon accents"]
+  },
+  "prompt": "Claymation soft 3D scene, warm dough tones, rounded serif display, gentle elastic bounce"
+}
