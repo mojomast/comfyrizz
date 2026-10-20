@@ -16,6 +16,49 @@ export const COLLECT_AND_STOP_RESERVE_MINUTES = 6;
 /** The next job's upper bound is its point estimate plus this margin (measurement uncertainty). */
 export const NEXT_JOB_MARGIN = 1.35;
 
+/**
+ * PO-3: the G4 rate is the one number every spend computation divides by, and it was written out as
+ * 8.9 in six places (server admission, the server's media watchdog and wall-clock cap, the Qwen
+ * watchdog, the backend default and the run controller's default). Colab's rate is account state
+ * that can change, so it is configured once here and read from `colab usage` when the CLI reports it.
+ *
+ * Measured Oct 16: 1.90 units over a 14-minute window = 8.14/h, so 8.9 is the pessimistic assumption
+ * and stays the default.
+ */
+export const DEFAULT_RATE_PER_HOUR = 8.9;
+/**
+ * Headroom kept out of every deadline so teardown can still happen inside the ceiling. Qwen has always
+ * reserved 0.3 units (~2 minutes at the default rate); the media path reserved nothing, so its cap
+ * allowed a run to spend the whole allocation and leave nothing for collect-and-stop.
+ */
+export const TEARDOWN_RESERVE_UNITS = 0.3;
+
+/**
+ * One rate for every caller. Precedence: an explicit option, then COMFYRIZZ_COLAB_RATE_PER_HOUR, then a
+ * measured `colab usage` rate, then the default. Unparseable values are refused instead of silently
+ * becoming NaN in a spend calculation.
+ * @returns {number}
+ */
+export function resolveRatePerHour({ explicit = null, measured = null, env = process.env, fallback = DEFAULT_RATE_PER_HOUR } = {}) {
+  const candidates = [explicit, env?.COMFYRIZZ_COLAB_RATE_PER_HOUR, measured, fallback];
+  const chosen = candidates.find(value => value !== null && value !== undefined && value !== '');
+  const rate = Number(chosen);
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error(`Colab rate per hour must be a positive number (got ${JSON.stringify(chosen)})`);
+  return rate;
+}
+
+/**
+ * Minutes a budget of `units` buys once teardown headroom is taken out. Returns the 1-minute floor rather
+ * than 0 or a negative cap, so a too-small allocation is still bounded instead of unbounded.
+ * @returns {number}
+ */
+export function spendingMinutes(units, ratePerHour, { reserveUnits = TEARDOWN_RESERVE_UNITS, minimum = 1 } = {}) {
+  const usable = Number(units) - Number(reserveUnits);
+  const rate = Number(ratePerHour);
+  if (!Number.isFinite(usable) || usable <= 0 || !Number.isFinite(rate) || rate <= 0) return minimum;
+  return Math.max(minimum, Math.floor((usable / rate) * 60));
+}
+
 export function unitsForMinutes(minutes, ratePerHour) {
   const rate = Number(ratePerHour);
   const minutesValue = Number(minutes);

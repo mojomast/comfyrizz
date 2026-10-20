@@ -109,6 +109,17 @@ Response includes `version`, `planHash`, `inputHash`, `baseRevision`, `stages`,
 The detailed media estimate is recalculated after real narration fixes the clip
 lengths; if it exceeds the allocation, the pipeline stops before media allocation.
 
+The rate an allocation is priced with is not a constant. `COMFYRIZZ_COLAB_RATE_PER_HOUR`
+pins it (units per hour) for an account whose rate differs from G4's observed 8.90;
+when it is unset, the pre-allocation ceiling check uses the rate the account itself
+reports (`colab usage`) and only falls back to 8.9. Deadlines derived from a ceiling —
+the media watchdog, the wall-clock cap and the Qwen watchdog — subtract a 0.3-unit
+collect-and-stop reserve before converting the remainder to minutes, so a run cannot
+spend its whole allocation and then have nothing left with which to collect assets and
+stop the session. The decision is recorded in the run's events (`media_plan`,
+`media_spend_ceiling`: rate, its source, the required units and the balance), so an
+audited run states which rate it used rather than leaving it to be inferred.
+
 `POST /api/pipeline` uses the same body, adding `approvedPlanHash` when metered
 compute is required. Approval binds the entire input package and options, including
 voice and budget. Changed text/revisions/options require a fresh plan. Returns

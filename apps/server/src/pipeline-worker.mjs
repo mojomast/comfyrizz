@@ -13,7 +13,7 @@ import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { json, writeJson, preparePresenterInputs, correctPresenters } from './pipeline-media.mjs';
 import { summarizeJobs } from './pipeline-contract.mjs';
-import { assessBudget, nextJobUpperEstimate } from '../../../packages/backends/src/budget.mjs';
+import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, spendingMinutes, TEARDOWN_RESERVE_UNITS } from '../../../packages/backends/src/budget.mjs';
 
 export async function executePipeline(spec, { send = () => {}, signal = new AbortController().signal, runCommand = pipelineCommand, render = renderPipeline, colabFactory = createColabBackend, byoFactory = createByoBackend, qwenRunner = runQwenColab, presenterPreparation = preparePresenterInputs, presenterCorrection = correctPresenters } = {}) {
 const { runDir, workDir, plan, runId } = spec;
@@ -116,22 +116,42 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     const outDir = join(runDir, 'media-out'), scratch = join(runDir, 'media-runtime');
     const colab = plan.options.backendId === 'colab';
     const ceiling = plan.budget.mediaCeilingUnits;
-    const backend = colab ? colabFactory({ packageId: runId, packageDir: workDir, scratchDir: scratch, budgetUnits: ceiling, watchdogMinutes: Math.max(1, Math.floor(ceiling / 8.9 * 60)), wallClockCapMinutes: Math.max(1, Math.floor(ceiling / 8.9 * 60)) }) : byoFactory({ comfyuiUrl: plan.options.comfyuiUrl || 'http://127.0.0.1:8188', outDir });
+    // PO-3: one rate, and a deadline that cannot spend the whole ceiling before teardown starts. An operator
+    // pins the rate with COMFYRIZZ_COLAB_RATE_PER_HOUR (or the run's own option); otherwise the account's
+    // reported rate wins once `usage()` has been read, and 8.9 units/h is only the pessimistic fallback.
+    const configuredRate = process.env.COMFYRIZZ_COLAB_RATE_PER_HOUR || null;
+    const ratePerHour = resolveRatePerHour({ explicit: configuredRate });
+    const mediaMinutes = spendingMinutes(ceiling, ratePerHour);
+    const backend = colab ? colabFactory({ packageId: runId, packageDir: workDir, scratchDir: scratch, budgetUnits: ceiling, ratePerHour, watchdogMinutes: mediaMinutes, wallClockCapMinutes: mediaMinutes }) : byoFactory({ comfyuiUrl: plan.options.comfyuiUrl || 'http://127.0.0.1:8188', outDir });
     if (typeof backend.preflight === 'function') {
       const check = await backend.preflight();
       if (check.ok === false || check.ready === false) throw new Error(check.problems?.join('; ') || check.message || check.detail || 'Media backend preflight failed');
     }
     const estimate = await backend.estimate(jobs);
+    const upperFor = rate => nextJobUpperEstimate({ gpuMinutes: estimate.gpuMinutes ?? 0, overheadMinutes: estimate.overheadMinutes ?? 0, ratePerHour: rate });
     let admission = null;
     if (colab) {
-      admission = assessBudget({ budgetUnits: ceiling, ratePerHour: 8.9, nextJobUpperEstimate: nextJobUpperEstimate({ gpuMinutes: estimate.gpuMinutes ?? 0, overheadMinutes: estimate.overheadMinutes ?? 0, ratePerHour: 8.9 }) });
+      admission = assessBudget({ budgetUnits: ceiling, ratePerHour, nextJobUpperEstimate: upperFor(ratePerHour) });
       if (!admission.allowed) throw new Error(`${admission.message} Re-plan with a larger media allocation.`);
     }
-    send({ kind: 'task', stageId, detail: { event: 'media_plan', jobs: summarizeJobs(pkg, jobs), estimate, admission } });
+    send({ kind: 'task', stageId, detail: { event: 'media_plan', jobs: summarizeJobs(pkg, jobs), estimate, admission, spend: { ratePerHour, rateSource: configuredRate ? 'configured' : 'default', deadlineMinutes: mediaMinutes, reserveUnits: TEARDOWN_RESERVE_UNITS } } });
     let before, result, teardown;
     send({ kind: 'runtime', runtime: 'media', value: { state: 'allocating', ownership: colab ? 'managed' : 'external', spentUnits: null } });
     try {
-      if (colab) before = await backend.usage();
+      if (colab) {
+        before = await backend.usage();
+        // PO-3: the ceiling is checked before anything is allocated, not only after the balance delta says the
+        // money is gone, and the check is priced with the rate the account actually reports when there is one.
+        // `required` is the upper estimate plus the collect-and-stop reserve, so an account that cannot pay for
+        // the run and its teardown is refused while it is still free to walk away.
+        const measured = Number.isFinite(before?.ratePerHour) ? before.ratePerHour : null;
+        const spendRate = resolveRatePerHour({ explicit: configuredRate, measured });
+        const required = spendRate === ratePerHour ? admission?.required ?? null : assessBudget({ budgetUnits: ceiling, ratePerHour: spendRate, nextJobUpperEstimate: upperFor(spendRate) }).required;
+        send({ kind: 'task', stageId, detail: { event: 'media_spend_ceiling', ratePerHour: spendRate, rateSource: configuredRate ? 'configured' : measured ? 'measured' : 'default', required, balance: Number.isFinite(before?.balance) ? before.balance : null } });
+        if (Number.isFinite(before?.balance) && Number.isFinite(required) && before.balance < required) {
+          throw new Error(`The account balance (${before.balance} units) does not cover the estimated ${required} units for this run at ${spendRate} units/h, which already includes the ${TEARDOWN_RESERVE_UNITS}-unit teardown reserve. Nothing was allocated; reduce the media allocation or top the account up.`);
+        }
+      }
       result = await backend.runPackage(pkg, { workDir, outDir, budget: admission, approved: true, teardownMode: 'done', gateCommand: null, signal, onEvent: sourceEvent });
       teardown = result.teardown;
       if (!result.ok) throw new Error('Media generation did not complete; collected assets are retained for diagnosis');

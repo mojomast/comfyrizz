@@ -114,7 +114,8 @@ async function defaultBackendFactory(backendId, opts = {}) {
       packageDir: opts.workDir ?? undefined,
       scratchDir: opts.scratchDir ?? undefined,
       budgetUnits: opts.budgetUnits ?? 0,
-      ratePerHour: opts.ratePerHour ?? 8.9,
+      // PO-3: the rate lives in the backend budget module, not in a literal here.
+      ratePerHour: mod.resolveRatePerHour({ explicit: opts.ratePerHour }),
     });
   }
   if (backendId === 'byo-comfyui') {
