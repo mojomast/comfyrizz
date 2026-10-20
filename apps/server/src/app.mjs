@@ -1,4 +1,4 @@
-import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
@@ -32,6 +32,7 @@ import { stagePipelineInputs } from './pipeline-media.mjs';
 import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/tts/voices.mjs';
 import { animationOptions } from './animation-options.mjs';
 import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
+import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
@@ -236,12 +237,27 @@ export function createApp({
    * a throwaway file (C1 compatibility, never mutating the stored package); otherwise the stored
    * package is read and the base revision is checked.
    */
-  function resolveRenderTarget(body, suffix) {
+  function draftRenderTarget(pkg, suffix, response) {
+    let existing;
+    try {
+      if (typeof pkg.id !== 'string') throw new Error('invalid package id');
+      existing = store.read(pkg.id); // path() validates the ID before any filesystem lookup.
+    } catch (error) {
+      error.status = 400;
+      throw error;
+    }
+    const sourceDir = existing ? dirname(store.path(pkg.id)) : rendersDir;
+    const packagePath = join(sourceDir, `.draft-${suffix}-${randomUUID()}.package.json`);
+    writeFileSync(packagePath, JSON.stringify(pkg, null, 2), { flag: 'wx', mode: 0o600 });
+    const cleanup = () => rmSync(packagePath, { force: true });
+    response.once('finish', cleanup);
+    response.once('close', cleanup);
+    return { pkg, packagePath, revision: Number.isFinite(pkg.revision) ? pkg.revision : null };
+  }
+
+  function resolveRenderTarget(body, suffix, response) {
     if (body.package && typeof body.package === 'object') {
-      const pkg = body.package;
-      const packagePath = join(rendersDir, `${suffix}.package.json`);
-      writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
-      return { pkg, packagePath, revision: Number.isFinite(pkg.revision) ? pkg.revision : null };
+      return draftRenderTarget(body.package, suffix, response);
     }
     const id = body.packageId;
     if (!id) {
@@ -768,10 +784,7 @@ export function createApp({
       try {
         if (body.package && typeof body.package === 'object') {
           // C1 compatibility: an edited draft draft-exported without mutating the store.
-          pkg = body.package;
-          packagePath = join(rendersDir, `${exportId}.package.json`);
-          writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
-          revision = Number.isFinite(pkg.revision) ? pkg.revision : null;
+          ({ pkg, packagePath, revision } = draftRenderTarget(body.package, exportId, response));
         } else {
           const id = body.packageId;
           if (!id) return sendJson(response, 400, { error: 'packageId or package required' });
@@ -848,10 +861,12 @@ export function createApp({
       let revision = null;
       if (body.package && typeof body.package === 'object') {
         // C1 compatibility: an edited draft, rendered without mutating the stored package.
-        pkg = body.package;
-        packagePath = join(rendersDir, `${renderId}.package.json`);
-        writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
-        revision = Number.isFinite(pkg.revision) ? pkg.revision : null;
+        try {
+          ({ pkg, packagePath, revision } = draftRenderTarget(body.package, renderId, response));
+        } catch (error) {
+          activeRender = null;
+          return sendJson(response, error.status ?? 400, { error: error.message });
+        }
       } else {
         const id = body.packageId;
         if (!id) {
@@ -934,7 +949,7 @@ export function createApp({
       if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
       let target;
       try {
-        target = resolveRenderTarget(body, `chip_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+        target = resolveRenderTarget(body, `chip_${randomUUID().replaceAll('-', '').slice(0, 8)}`, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -994,7 +1009,7 @@ export function createApp({
       }
       let target;
       try {
-        target = resolveRenderTarget(body, `presenter_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+        target = resolveRenderTarget(body, `presenter_${randomUUID().replaceAll('-', '').slice(0, 8)}`, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -1062,7 +1077,7 @@ export function createApp({
       }
       let target;
       try {
-        target = resolveRenderTarget(body, `plan_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+        target = resolveRenderTarget(body, `plan_${randomUUID().replaceAll('-', '').slice(0, 8)}`, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -1096,7 +1111,7 @@ export function createApp({
       const renderId = `sr_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
       let target;
       try {
-        target = resolveRenderTarget(body, renderId);
+        target = resolveRenderTarget(body, renderId, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -1127,6 +1142,8 @@ export function createApp({
           timeline_sha256: result.timelineHash,
           rendered: result.rendered,
           reused: result.reused,
+          full: result.full ?? false,
+          reason: result.reason ?? null,
         });
         response.writeHead(200, {
           'content-type': 'video/mp4',
@@ -1139,6 +1156,8 @@ export function createApp({
           'x-comfyrizz-frames': String(result.frames),
           'x-comfyrizz-rendered': String(result.rendered.length),
           'x-comfyrizz-reused': String(result.reused.length),
+          'x-comfyrizz-full-render': result.full ? '1' : '0',
+          'x-comfyrizz-full-reason': result.reason ?? '',
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
         });
         createReadStream(result.output).pipe(response);
@@ -1166,7 +1185,7 @@ export function createApp({
       const renderId = `er_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
       let target;
       try {
-        target = resolveRenderTarget(body, renderId);
+        target = resolveRenderTarget(body, renderId, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -1175,7 +1194,9 @@ export function createApp({
       }
       const previous = lastRendered.get(target.pkg.id) ?? null;
       const nextTimeline = packageTimeline(target.packagePath, target.pkg);
-      const fullReason = timingChangeReason(previous?.timeline ?? null, nextTimeline);
+      const fullReason = loadCompositionManifest(dirname(target.packagePath), target.pkg)
+        ? 'compositions require a full render'
+        : timingChangeReason(previous?.timeline ?? null, nextTimeline);
       const full = Boolean(fullReason);
       activeSceneRender = renderId;
       const output = join(rendersDir, `${renderId}.mp4`);

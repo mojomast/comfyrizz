@@ -17,7 +17,8 @@ interface OpenverseResult {
 }
 
 function policyLicenses(policy: LicensePolicy): string {
-  const families = new Set(policy.allow.map(id => {
+  // MIT is supported for packaged assets, but is not an Openverse search licence.
+  const families = new Set(policy.allow.filter(id => canonicalLicenseId(id) !== 'MIT').map(id => {
     const family = licenseFamily(id);
     if (family === 'CC0') return 'cc0';
     if (family === 'PDM') return 'pdm';

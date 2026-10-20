@@ -119,6 +119,7 @@ Stills from example videos rendered with Comfyrizz (FLUX 3 Klein stills and refe
 | | |
 |---|---|
 | 💬 **Chat-first agent** | Chat or Express mode, persistent conversations, reviewable drafts and focused revisions. Four compact skills guide briefing, scripting, storyboarding and revision; validated tools preserve manual edits. See [conversation skills and evaluations](docs/CONVERSATION_AGENT.md). |
+| 🎬 **Curated CPU compositions** | Editable object-transfer, mechanism-journey and evidence-reveal scenes, compiled from a versioned source manifest. An optional pinned HyperFrames worker checks layout/motion, renders exact-length silent plates and preserves source in project ZIPs. Uses native frame functions without GSAP. See [composition authoring](docs/COMPOSITIONS.md). |
 | 🔌 **Model-agnostic LLM** | Configure OpenCode Go, OpenRouter, or named OpenAI-compatible connections in **Agent settings**. Discover or enter model IDs and test tool calling. Saved keys stay on the server. |
 | 🎛️ **Frame-accurate timeline** | Drag to trim or reorder scenes at project fps, with snap, zoom, keyboard control and undo/redo. Narration, caption, presenter and music lanes are linked read-only projections. Trims below the speech or layout floor are accepted as preferences and floored by the compiler, with the requested and effective lengths shown. See [Phase 0 decisions](docs/editor/PHASE0.md). |
 | ✏️ **Script, caption and media edits** | Edit narration, store display-only caption corrections, split takes at a frame, trim source media ranges and inspect the narration waveform. Every edit shares one command history, revision-aware autosave and save status. |
@@ -171,6 +172,8 @@ flowchart TD
 
 See the [animation and storytelling research (19 October 2026)](docs/research/ANIMATION_STORYTELLING_2026.md) for the current capability audit, MIT-library shortlist, proposed visual styles and prioritized integration plan.
 The [content-quality research and skill updates (20 October 2026)](docs/CONTENT_QUALITY_RESEARCH.md) connect demo findings to worked-example storytelling, shot coverage, caption-aware direction and evidence-based agent evaluation.
+The [HyperFrames integration research](docs/research/HYPERFRAMES_2026.md) evaluates richer CPU-rendered scenes, visual diagnostics and reusable design contracts, including a tested HyperFrames-to-Comfyrizz video bridge and a phased implementation proposal.
+The [GSAP licensing follow-up](docs/research/GSAP_LICENSING_2026.md) maps official guidance to Comfyrizz's editor, documents distribution requirements and verifies a HyperFrames scene-rendering path without loading GSAP.
 The shipped CPU pack, agent usage and verification are documented in the [animation guide](docs/ANIMATION_STORYTELLING.md); agents combining branches should use the [integration handoff](docs/handoffs/ANIMATION_INTEGRATION.md). [Production voice options](docs/VOICE_GENERATION.md) covers presets, blends, Qwen modes and delivery; the [pipeline contract](docs/PIPELINE_OBSERVABILITY.md) documents the nine stages and recovery.
 
 ## Quickstart

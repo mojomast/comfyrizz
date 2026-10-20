@@ -2,7 +2,7 @@ import type { LicenseDecision, LicensePolicy, PackageAssetLike } from './types.j
 
 export const DEFAULT_LICENSE_POLICY: LicensePolicy = {
   name: 'comfyrizz-v0.1',
-  allow: ['CC0-1.0', 'PDM-1.0', 'CC-BY-4.0'],
+  allow: ['CC0-1.0', 'PDM-1.0', 'CC-BY-4.0', 'MIT'],
   blockShareAlike: true,
   blockNonCommercial: true,
   blockNoDerivatives: true,
@@ -13,6 +13,7 @@ export const DEFAULT_LICENSE_POLICY: LicensePolicy = {
 export function canonicalLicenseId(raw: string | undefined, version?: string | number): string {
   const value = (raw ?? '').trim().toLowerCase().replace(/[\s_.]+/g, '-');
   if (!value) return 'UNKNOWN';
+  if (value === 'mit') return 'MIT';
   if (value === 'cc0' || value === 'cc0-1.0' || value === 'cc-zero' || value === 'creativecommons-cc0') return 'CC0-1.0';
   if (value === 'pdm' || value === 'pdm-1.0' || value === 'public-domain-mark') return 'PDM-1.0';
   if (value === 'by' || value === 'cc-by' || value === 'cc-by-4.0') return version ? `CC-BY-${normalizeVersion(version)}` : 'CC-BY-4.0';
@@ -33,6 +34,7 @@ function normalizeVersion(version: string | number): string {
 export function licenseFamily(id: string): LicenseDecision['family'] {
   if (id === 'CC0-1.0') return 'CC0';
   if (id === 'PDM-1.0') return 'PDM';
+  if (id === 'MIT') return 'MIT';
   if (id === 'User-Upload') return 'UPLOAD';
   if (id.startsWith('CC-BY-SA')) return 'CC-BY-SA';
   if (id.startsWith('CC-BY-NC')) return 'CC-BY-NC';
@@ -52,12 +54,25 @@ export interface EvaluateLicenseOptions {
  * v0.1 policy: CC0, PDM and CC BY pass; share-alike, non-commercial and
  * no-derivatives are blocked until their obligations exist. CC BY only becomes
  * redistributable once a human approved it and an attribution string is stored.
+ * MIT permits redistribution with stored attribution and bundled licence notices,
+ * for both native/generated assets and external assets, without user approval.
  */
 export function evaluateLicense(rawId: string | undefined, options: EvaluateLicenseOptions = {}): LicenseDecision {
   const policy = options.policy ?? DEFAULT_LICENSE_POLICY;
   const canonicalId = canonicalLicenseId(rawId);
   const family = licenseFamily(canonicalId);
   const base = { canonicalId, family, redistributable: false, requiresAttribution: false, reason: '' };
+  if (family === 'MIT') {
+    const allowed = policy.allow.includes('MIT');
+    const hasAttribution = Boolean(options.attribution?.trim());
+    return {
+      ...base,
+      allowed,
+      redistributable: allowed && hasAttribution,
+      requiresAttribution: true,
+      reason: !allowed ? 'MIT is outside the licence allow list' : !hasAttribution ? 'MIT needs a stored attribution/notice string' : 'MIT with stored attribution and bundled licence notice',
+    };
+  }
   if (options.origin === 'generated' && (canonicalId === 'CC0-1.0' || canonicalId === 'UNKNOWN')) {
     return { ...base, canonicalId: canonicalId === 'UNKNOWN' ? 'CC0-1.0' : canonicalId, family: 'GENERATED', allowed: true, redistributable: true, reason: 'generated output defaults to CC0-1.0' };
   }
@@ -115,6 +130,7 @@ export function licenseUrl(id: string): string | undefined {
   const version = id.split('-').pop();
   if (family === 'CC0') return 'https://creativecommons.org/publicdomain/zero/1.0/';
   if (family === 'PDM') return 'https://creativecommons.org/publicdomain/mark/1.0/';
+  if (family === 'MIT') return 'https://opensource.org/license/mit/';
   if (family === 'CC-BY') return `https://creativecommons.org/licenses/by/${version ?? '4.0'}/`;
   if (family === 'CC-BY-SA') return `https://creativecommons.org/licenses/by-sa/${version ?? '4.0'}/`;
   if (family === 'CC-BY-NC') return `https://creativecommons.org/licenses/by-nc/${version ?? '4.0'}/`;

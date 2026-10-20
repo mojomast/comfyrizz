@@ -12,6 +12,7 @@ import { listMediaFiles } from '../src/media-model.js';
 import { narrationWarning } from '../src/audio-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { normalizeMixLoudness } from './mix-loudness.mjs';
+import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '..', '..', '..');
@@ -147,12 +148,23 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   }
   // A9: the final-export option overrides the format to 1920×1080 and prefers upscaled media.
   const applied = final ? applyFinalRender(raw, packageDir, typeof final === 'boolean' ? {} : final) : null;
-  const pkg = applied?.pkg ?? raw;
+  let pkg = applied?.pkg ?? raw;
   // L1: a language variant has its own narration text, so callers pass the
   // variant's measured durations (or `{}` to re-estimate from the translated
   // `scene.narration`) instead of the base package's English durations.
   const compileOptions = narration !== undefined ? narration : narrationOptions(packageDir);
-  const timeline = compileTimeline(pkg, compileOptions);
+  let timeline = compileTimeline(pkg, compileOptions);
+  if (loadCompositionManifest(packageDir, pkg)) {
+    if (pkg.voice?.enabled && timeline.provisional) throw new Error('Composition narration timing is still provisional');
+    const task = spawnSync(process.execPath, [join(here, 'composition-task.mjs')], {
+      input: JSON.stringify({ pkg, packageDir: resolve(packageDir), timeline }),
+      encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15 * 60 * 1000,
+    });
+    if (task.status !== 0) throw new Error(`Composition preparation failed: ${(task.stderr || task.error?.message || '').slice(-1500)}`);
+    pkg = JSON.parse(task.stdout).pkg;
+    if (!validatePackage(pkg).valid) throw new Error('Materialized render package failed validation');
+    timeline = compileTimeline(pkg, compileOptions);
+  }
   if (applied) {
     onLog(`final render ${applied.width}×${applied.height}${applied.used.length > 0 ? `, ${applied.used.length} upscaled variant(s)` : ', no upscaled variants'}`);
     for (const item of applied.used) onLog(`using upscaled ${item.id}: ${item.file}`);

@@ -19,7 +19,8 @@ import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
-import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
+import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir, renderPackage } from './render-package-lib.mjs';
+import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 import { muxPackageAudio } from './incremental-audio.mjs';
 import { narrationAudio, narrationWarning } from '../src/audio-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
@@ -145,6 +146,23 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
     throw new Error(`package invalid: ${detail}`);
   }
   const packageDir = dirname(packagePath);
+  if (loadCompositionManifest(packageDir, pkg)) {
+    const reason = 'compositions require a full render';
+    onLog(`full render: ${reason}`);
+    const result = (options.renderFull ?? renderPackage)(packagePath, outputPath, options);
+    const segments = planSegments(result.package, result.timeline);
+    return {
+      ...result,
+      full: true,
+      reason,
+      timelineHash: result.hash,
+      cacheDir: cacheDir ?? join(rendererDir, '.cache', pkg.id),
+      audio: result.mixLoudness ?? null,
+      segments,
+      rendered: segments.map(segment => segment.key),
+      reused: [],
+    };
+  }
   // The committed timeline.json is the timing source of truth; only compile when
   // an example has not been compiled yet (e.g. an in-memory agent draft).
   const timelinePath = join(packageDir, 'timeline.json');
