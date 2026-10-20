@@ -342,3 +342,9 @@ downloaded, validated and exported on the host with HyperFrames configuration
 removed. The runtime was stopped and the measured account balance delta was zero.
 This live probe used the silent three-component fixture; Dipsy's separate GPU
 generation attempts were rejected for unavailable G4 capacity.
+
+The later [full Dipsy comparison](research/dipsy-cpu-comparison-20261020.json)
+rendered all 4,011 frames on both Colab CPU and the local host. It also verified
+the linked-media staging fix: public assets are copied as file bytes before
+Remotion bundles them, so generated clips linked from the VM's media directory
+remain available to the final compositor.

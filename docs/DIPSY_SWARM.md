@@ -63,7 +63,37 @@ rendered into a verified 480-frame movie. The returned resources exported on the
 host with HyperFrames configuration removed. The CPU VM was stopped, zero active
 assignments remained, and its measured account balance delta was zero.
 
-This proves the live build and return-resource path with the three-component
-fixture. Dipsy's 18 generated motion sequences and finished movie remain blocked
-by G4 capacity; no finished Dipsy movie has been published. The campaign remains
-at **10.62 / 30 credits**, with **19.38 remaining**.
+The next GPU retry succeeded and generated all 18 motion sequences. Dependency
+builds and all three HyperFrames renders also succeeded on that VM. Final assembly
+exposed a linked-media staging bug: Remotion's bundle omitted the symlinked clips.
+The recovered clips were retained, and public staging now copies declared asset
+bytes, including linked videos and brand fonts.
+
+The complete film subsequently rendered and passed technical verification both
+locally and on a fresh Colab CPU instance. The CPU run also exercised a generated
+clip linked from the VM media directory, confirming the staging fix. Both outputs
+have 4,011 frames, 1080p video and verified narration. The Colab movie was delivered
+through a Tailscale-only player; the 45.1 MB copy retains all frames, 1080p and audio.
+
+### CPU comparison
+
+| Phase | Local: 4 vCPUs | Colab CPU: 2 vCPUs |
+|---|---:|---:|
+| Dependency setup/build | 27 s | 1m 18s |
+| Three HyperFrames scenes | 57 s | 1m 49s |
+| Remotion bundle | 14 s | 30 s |
+| Final render/encode | 5m 56s | 22m 53s |
+| Audio normalization | 32 s | 59 s |
+| Verification and packaging | 36 s | 56 s |
+| End-to-end, including remote transfers where applicable | **8m 45s** | **29m 16s** |
+
+Colab reported **0.08 credits/hour**; the estimated 0.039-credit CPU cost matched
+the observed **0.04-credit** balance change. The CPU runtime stopped successfully.
+The settled GPU generation/failed-assembly charge was **2.15 credits**, making
+Dipsy's total **2.19 credits**. The overall campaign is **12.81 / 30 credits**, with
+**17.19 remaining**.
+
+This is an indicative single-run comparison. A local Node permission failure
+delayed that run; its Node archive was cached, and some local validation/transcoding
+overlapped it. CPU counts and concurrency differ, and host electricity/rental costs
+are excluded. See the [timings and evidence limits](research/dipsy-cpu-comparison-20261020.json).

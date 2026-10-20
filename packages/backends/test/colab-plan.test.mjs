@@ -2,6 +2,8 @@
 // the rule that no secret can reach an argv or the CLI environment.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   assertNoSecrets,
   argvDownload,
@@ -112,7 +114,7 @@ test("a credential can never be planned into an argv", () => {
 });
 
 test("the CLI token file and SSH keys can never be uploaded", () => {
-  for (const path of ["/home/box/.config/colab-cli/token.json", "/home/box/.ssh/id_rsa", "/tmp/credentials.json", "/srv/service-account.json"]) {
+  for (const path of [join(homedir(), ".config/colab-cli/token.json"), join(homedir(), ".ssh/id_rsa"), "/tmp/credentials.json", "/srv/service-account.json"]) {
     assert.equal(blockedLocalPath(path), true, path);
     assert.throws(() => argvUpload({ session: "comfyrizz-demo", localPath: path, remotePath: "/content/x" }), /credential file/);
   }
@@ -120,7 +122,7 @@ test("the CLI token file and SSH keys can never be uploaded", () => {
 });
 
 test("the HF token plan is a 0600 file, never an argument or an environment variable", () => {
-  const plan = hfTokenPlan({ localTokenPath: "/home/box/.config/comfyrizz/hf-token" });
+  const plan = hfTokenPlan({ localTokenPath: join(homedir(), ".config/comfyrizz/hf-token") });
   assert.equal(plan.remotePath, "/content/.hf/token");
   assert.equal(plan.fileMode, "0600");
   assert.equal(plan.directoryMode, "0700");
