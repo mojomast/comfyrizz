@@ -11,18 +11,20 @@ import test from "node:test";
 
 import { writeGpu6Package } from "../../../scripts/gpu6/g6_package.mjs";
 
-test("a dangling workflows symlink is left alone instead of throwing EEXIST (G6-14a)", () => {
+test("a dangling workflows symlink is re-pointed at this repo, not left dangling (G6-14a)", () => {
   const dir = mkdtempSync(join(tmpdir(), "comfyrizz-qh2-symlink-"));
   const workflows = join(dir, "workflows");
-  // the link exists but its target does not: existsSync follows the link and says false
+  // the link exists but its target does not: existsSync follows the link and says false. Left alone, the
+  // bundle then ships with no workflow files at all, which is a failed run rather than a failed link.
   symlinkSync(join(dir, "does-not-exist"), workflows);
   assert.equal(existsSync(workflows), false, "the fixture is a dangling link");
   assert.ok(lstatSync(workflows), "but the entry itself is there");
 
   const pkg = writeGpu6Package(dir);
   assert.equal(pkg.id, "pkg_gpu6run0001");
-  assert.ok(readdirSync(dir).includes("workflows"), "the link survives the write");
-  assert.doesNotThrow(() => lstatSync(workflows), "and it is still the same entry");
+  assert.ok(existsSync(workflows), "the link resolves after the write");
+  const entries = readdirSync(workflows);
+  assert.ok(entries.includes("ltx25_a2v_2stage.api.json"), `the graphs are reachable: ${entries.slice(0, 4).join(", ")}`);
 });
 
 test("a missing workflows symlink is created (G6-14a)", () => {
