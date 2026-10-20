@@ -150,7 +150,7 @@ export function RemotionRoot() {
         id="PackageDemo"
         component={PackageDemo}
         defaultProps={{ pkg, timeline }}
-        calculateMetadata={packageMetadata}
+        calculateMetadata={packageMetadata as unknown as CalculateMetadataFunction<Record<string, unknown>>}
       />
       <Composition
         id="NarratedDemo"

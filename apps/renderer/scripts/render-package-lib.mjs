@@ -112,13 +112,24 @@ export function narrationOptions(packageDir) {
   const durationsPath = join(packageDir, 'audio', 'durations.json');
   if (!existsSync(durationsPath)) return {};
   const durations = JSON.parse(readFileSync(durationsPath, 'utf8'));
+  const engine = typeof durations.engine === 'string' ? durations.engine : '';
   const narration = {};
   for (const [sceneId, scene] of Object.entries(durations.scenes ?? {})) {
-    narration[sceneId] = (scene.chunks ?? []).map(chunk =>
-      chunk.words && chunk.words.length > 0
-        ? { text: chunk.text, seconds: chunk.seconds, words: chunk.words }
-        : { text: chunk.text, seconds: chunk.seconds },
-    );
+    narration[sceneId] = (scene.chunks ?? []).map(chunk => {
+      const words = Array.isArray(chunk.words) && chunk.words.length > 0 ? chunk.words : undefined;
+      // Preserve explicit aligner/fallback provenance. Legacy Kokoro reports
+      // wrote word cues without `timing`; those are syllable fallback, not
+      // forced-aligned. An unknown engine keeps `timing` absent.
+      const timing = chunk.timing === 'aligner' || chunk.timing === 'syllable-fallback'
+        ? chunk.timing
+        : words && engine.startsWith('kokoro') ? 'syllable-fallback' : undefined;
+      return {
+        text: chunk.text,
+        seconds: chunk.seconds,
+        ...(words ? { words } : {}),
+        ...(timing ? { timing } : {}),
+      };
+    });
   }
   return {
     narration,

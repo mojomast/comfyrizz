@@ -53,6 +53,7 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_AUDIO_UNKNOWN_SCENE",
   "SEM_LAYOUT_REQUIRES_MEDIA",
   "SEM_CODE_REQUIRED",
+  "SEM_MOTION_FOCUS_RECT",
 ]);
 
 // Published layout contract (PLAN.md A5 / SPEC.md 6.3). The schema holds the loose
@@ -437,6 +438,21 @@ function checkScenes(scenes, assets, datasets, errors) {
             "SEM_MEDIA_ONLY_NO_MEDIA",
             `${at}/media_only`,
             "media_only skips the layout, so it needs a media background (background.asset) or at least one foreground item; this scene would render an empty frame",
+          ),
+        );
+      }
+    }
+    // Storytelling recipe focus window (ANIMATION_STORYTELLING_2026): a normalised rect must
+    // stay inside the frame. JSON Schema can bound each number but cannot sum x + width, so
+    // this cross-field rule is semantic.
+    if (isObj(scene.motion) && isObj(scene.motion.focus)) {
+      const { x, y, width, height } = scene.motion.focus;
+      if ([x, y, width, height].every(isFiniteNumber) && (x + width > 1 + 1e-9 || y + height > 1 + 1e-9)) {
+        errors.push(
+          error(
+            "SEM_MOTION_FOCUS_RECT",
+            `${at}/motion/focus`,
+            "focus rectangle must stay inside the frame (x + width <= 1 and y + height <= 1)",
           ),
         );
       }

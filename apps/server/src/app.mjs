@@ -27,12 +27,14 @@ import { serveStaticFile } from './static-file.mjs';
 import { createPipelineController } from './pipeline.mjs';
 import { stagePipelineInputs } from './pipeline-media.mjs';
 import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/tts/voices.mjs';
+import { animationOptions } from './animation-options.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.ttf': 'font/ttf',
   '.woff2': 'font/woff2',
@@ -343,6 +345,10 @@ export function createApp({
           qwenCustom: { runtime: 'local-or-colab', controls: ['voice', 'delivery', 'non_streaming', 'language'], perSceneDelivery: true },
         },
       });
+    }
+
+    if (url.pathname === '/api/animation-options' && request.method === 'GET') {
+      return sendJson(response, 200, animationOptions());
     }
 
     // Full-production API. Existing /api/run remains the media-only API.

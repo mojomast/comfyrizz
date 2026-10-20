@@ -443,6 +443,12 @@ export const MUTATIONS = [
     schemaCodes: ["SCHEMA_UNEVALUATEDPROPERTIES"],
   },
   {
+    name: "motion-focus-outside-frame",
+    base: "motion-fields",
+    ops: [["set", "scenes.0.motion.focus", { x: 0.7, y: 0.2, width: 0.5, height: 0.4 }]],
+    expect: { schemaOk: true, semantic: ["SEM_MOTION_FOCUS_RECT"] },
+  },
+  {
     name: "split-without-media",
     base: "layout-pack-v2",
     ops: [["del", "scenes.0.media"]],
@@ -520,6 +526,34 @@ export const DERIVED_VALID = [
       ["set", "scenes.2.transitionOut", { type: "zoom", frames: 9, direction: "out" }],
       ["set", "scenes.3.motion", { entry: "pop", spring: "settle" }],
       ["set", "scenes.3.transitionOut", { type: "cut", frames: 0 }],
+    ],
+    expect: { schemaOk: true, semantic: [], warnings: [] },
+  },
+  {
+    // ANIM: the shared storytelling contract - recipe ids, bounded seed/intensity, a normalised
+    // focus window, a bounded morph, cue_phrases plus explicit cue_seconds, and the three reveal
+    // transitions. A package without any of these still validates and renders as before.
+    name: "animation-contract",
+    base: "generated-first",
+    ops: [
+      [
+        "set",
+        "scenes.0.motion",
+        {
+          recipe: "focus",
+          seed: 42,
+          intensity: 0.7,
+          focus: { x: 0.08, y: 0.12, width: 0.5, height: 0.6 },
+          cue_phrases: ["a free asset", "the router"],
+          cue_seconds: [0.4, 2.1],
+        },
+      ],
+      ["set", "scenes.0.transitionOut", { type: "paper-reveal", frames: 15 }],
+      ["set", "scenes.1.motion", { recipe: "technical-flow", seed: 2147483647, intensity: 1, cue_phrases: ["the router picks"] }],
+      ["set", "scenes.1.transitionOut", { type: "draw-reveal", frames: 18 }],
+      ["set", "scenes.2.motion", { recipe: "morph", intensity: 0, morph: { from: "circle", to: "blob" } }],
+      ["set", "scenes.2.transitionOut", { type: "shape-reveal", frames: 12 }],
+      ["set", "scenes.3.motion", { recipe: "kinetic" }],
     ],
     expect: { schemaOk: true, semantic: [], warnings: [] },
   },

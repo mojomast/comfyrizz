@@ -9,6 +9,12 @@ import {
 
 const readSource = (id: string) => readFileSync(new URL(`../../src/skills/${id}/SKILL.md`, import.meta.url), 'utf8');
 const words = (text: string) => text.trim().split(/\s+/).length;
+const VERSIONS: Record<string, string> = {
+  'video-brief': '1.0.0',
+  'explainer-script': '1.0.0',
+  'storyboard-direction': '1.1.0',
+  'project-revision': '1.0.0',
+};
 
 test('skills: deterministic selection includes drafting guidance and at most three skills', () => {
   for (const hasProject of [false, true]) {
@@ -17,9 +23,9 @@ test('skills: deterministic selection includes drafting guidance and at most thr
         const context = { hasPlan, hasProject, mode };
         const composed = composeConversationSkills(context);
         assert.deepEqual(composed.skills, [
-          { id: hasPlan ? 'project-revision' : 'video-brief', version: '1.0.0' },
-          { id: 'explainer-script', version: '1.0.0' },
-          { id: 'storyboard-direction', version: '1.0.0' },
+          { id: hasPlan ? 'project-revision' : 'video-brief', version: VERSIONS[hasPlan ? 'project-revision' : 'video-brief'] },
+          { id: 'explainer-script', version: VERSIONS['explainer-script'] },
+          { id: 'storyboard-direction', version: VERSIONS['storyboard-direction'] },
         ]);
         assert.deepEqual(composeConversationSkills(context), composed);
         assert.ok(!composed.text.includes('../../untrusted'));
@@ -28,7 +34,7 @@ test('skills: deterministic selection includes drafting guidance and at most thr
       }
     }
   }
-  assert.equal(SKILL_CATALOG_VERSION, '1.0.0');
+  assert.equal(SKILL_CATALOG_VERSION, '1.1.0');
 });
 
 test('skills: compiled loader includes canonical bodies and excludes metadata and research links', () => {
@@ -75,5 +81,5 @@ test('skills: returned metadata cannot mutate the bundled catalog', () => {
   result.skills.pop();
   const fresh = composeConversationSkills(context);
   assert.equal(fresh.skills.length, 3);
-  assert.ok(fresh.skills.every(skill => skill.version === '1.0.0'));
+  assert.ok(fresh.skills.every(skill => skill.version === VERSIONS[skill.id]));
 });

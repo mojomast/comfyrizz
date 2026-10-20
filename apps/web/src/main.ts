@@ -3,6 +3,7 @@ import { mountSettingsCard } from './colab-card';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
 import { mountVoiceSettings } from './voice-settings';
+import { mountSceneAnimation, timingProvenance, updateAnimationTiming } from './animation-settings';
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
@@ -265,8 +266,54 @@ function mixBar(): string {
   </div>`;
 }
 
+type StoryboardFocus = { selector: string; start: number | null; end: number | null; value?: string; validity?: string };
+
+/** Identify a focused storyboard control from its data attributes, so a refresh can put focus back. */
+function storyboardSelector(element: HTMLElement): string | null {
+  if (element.id) return `#${CSS.escape(element.id)}`;
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(element.dataset)) {
+    if (!value) continue;
+    const attribute = `data-${key.replace(/[A-Z]/g, char => `-${char.toLowerCase()}`)}`;
+    parts.push(`[${attribute}="${CSS.escape(value)}"]`);
+  }
+  if (parts.length === 0) return null;
+  const scene = element.closest<HTMLElement>('[data-animation-scene]')?.dataset.animationScene;
+  return `${scene ? `[data-animation-scene="${CSS.escape(scene)}"] ` : ''}${element.tagName.toLowerCase()}${parts.join('')}`;
+}
+
+function captureStoryboardFocus(host: HTMLElement): StoryboardFocus | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !host.contains(active)) return null;
+  const selector = storyboardSelector(active);
+  if (!selector) return null;
+  const selectable = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+  return { selector, start: selectable ? active.selectionStart : null, end: selectable ? active.selectionEnd : null,
+    ...(selectable ? { value: active.value, validity: active.validationMessage } : {}) };
+}
+
+/** Restore an in-progress animation/focus edit after the storyboard is rebuilt. */
+function restoreStoryboardFocus(host: HTMLElement, snapshot: StoryboardFocus | null): void {
+  if (!snapshot) return;
+  const target = host.querySelector<HTMLElement>(snapshot.selector);
+  if (!target) return;
+  if (snapshot.value !== undefined && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+    target.value = snapshot.value;
+    target.setCustomValidity(snapshot.validity ?? '');
+  }
+  target.focus({ preventScroll: true });
+  if (snapshot.start !== null && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+    try {
+      target.setSelectionRange(snapshot.start, snapshot.end ?? snapshot.start);
+    } catch {
+      // number/range inputs do not expose a text selection
+    }
+  }
+}
+
 function renderStoryboard(): void {
   const host = $('storyboard');
+  const focus = captureStoryboardFocus(host);
   host.innerHTML = '<div id="voice-settings-host"></div>' + presenterBar() + mixBar() + pkg.scenes
     .map((scene, index) => {
       const copy = (scene.copy ?? {}) as Record<string, unknown>;
@@ -282,7 +329,7 @@ function renderStoryboard(): void {
         : '';
       const editStatus = editState.status.get(scene.id);
       return `<div class="scene-card" data-scene-id="${esc(scene.id)}"${editStatus ? ` data-render-status="${editStatus}"` : ''}>
-        <div class="scene-top"><span class="idx">${index + 1}</span><b>${esc(scene.id)}</b><span class="layout">${esc(scene.layout)}${scene.variant ? ` · ${esc(scene.variant)}` : ''}</span>${editStatus ? `<span class="render-status ${editStatus}">${editStatus === 'rendered' ? 're-rendered' : 'reused'}</span>` : ''}</div>
+        <div class="scene-top"><span class="idx">${index + 1}</span><b>${esc(scene.id)}</b><span class="layout">${esc(scene.layout)}${scene.variant ? ` · ${esc(scene.variant)}` : ''}</span>${scene.locked ? '<span class="scene-lock">locked</span>' : ''}${editStatus ? `<span class="render-status ${editStatus}">${editStatus === 'rendered' ? 're-rendered' : 'reused'}</span>` : ''}</div>
         <label>Headline</label>
         <input type="text" data-scene="${esc(scene.id)}" data-field="headline" value="${esc(copy.headline ?? '')}" placeholder="Add a headline…" maxlength="64" />
         <label>Sub / body</label>
@@ -298,6 +345,7 @@ function renderStoryboard(): void {
           <option value="pip"${scene.presenter === 'pip' ? ' selected' : ''}>pip</option>
           <option value="split"${scene.presenter === 'split' ? ' selected' : ''}>split (hero only)</option>
         </select>
+        <div class="animation-slot" data-animation-scene="${esc(scene.id)}"></div>
         <div class="scene-actions">
           <button type="button" data-scene-action="rerender" data-scene="${esc(scene.id)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${sceneState.rendering === scene.id ? 'Re-rendering…' : 'Re-render scene'}</button>
           <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Regenerate media</button>
@@ -309,9 +357,31 @@ function renderStoryboard(): void {
     .join('');
 
   mountVoiceSettings($('voice-settings-host'), { getPackage: () => pkg, changed: () => markDirty('voice settings'), save: () => persistDraft(true), api: apiFetch });
+  host.querySelectorAll<HTMLElement>('[data-animation-scene]').forEach(slot => {
+    const sceneId = slot.dataset.animationScene!;
+    const scene = pkg.scenes.find(item => item.id === sceneId);
+    const index = pkg.scenes.findIndex(item => item.id === sceneId);
+    if (!scene) return;
+    mountSceneAnimation(slot, {
+      sceneId,
+      index,
+      total: pkg.scenes.length,
+      timing: timingProvenance(scene.narration, timeline, sceneId),
+      fps: timeline.fps ?? pkg.format.fps,
+      getPackage: () => pkg,
+      changed: reason => markDirty(reason),
+      save: () => persistDraft(true),
+      log: logActivity,
+    });
+  });
   host.querySelectorAll<HTMLTextAreaElement>('[data-narration]').forEach(input => input.addEventListener('input', () => {
     const scene = pkg.scenes.find(s => s.id === input.dataset.narration);
-    if (scene) { scene.narration = input.value || undefined; markDirty(`${scene.id}.narration`); }
+    if (scene) {
+      scene.narration = input.value || undefined;
+      markDirty(`${scene.id}.narration`);
+      const slot = host.querySelector<HTMLElement>(`[data-animation-scene="${CSS.escape(scene.id)}"]`);
+      if (slot) updateAnimationTiming(slot, timingProvenance(scene.narration, timeline, scene.id));
+    }
   }));
   host.querySelectorAll<HTMLInputElement>('[data-delivery-scene]').forEach(input => input.addEventListener('input', () => {
     const scene = pkg.scenes.find(s => s.id === input.dataset.deliveryScene);
@@ -382,6 +452,9 @@ function renderStoryboard(): void {
     audioMixEnabled = mixToggle.checked;
     logActivity(`Sound design ${audioMixEnabled ? 'on' : 'off'} for the next render/export`);
   });
+  // A status refresh rebuilds the storyboard. Put the caret back so an unsaved
+  // animation/focus edit is not interrupted.
+  restoreStoryboardFocus(host, focus);
 }
 
 function renderPalette(): void {

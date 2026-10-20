@@ -27,7 +27,7 @@ export const MOTION_VOCABULARY = Object.freeze({
   staggers: Object.freeze(["none", "word", "listItem", "dot"]),
   entries: Object.freeze(["none", "fadeUp", "maskRise", "pop", "countUp", "waterfall", "drawOn"]),
   emphasis: Object.freeze(["none", "keyword", "hero"]),
-  transitionTypes: Object.freeze(["none", "cut", "fade", "blur", "slide", "push", "wipe", "zoom", "iris"]),
+  transitionTypes: Object.freeze(["none", "cut", "fade", "blur", "slide", "push", "wipe", "zoom", "iris", "paper-reveal", "draw-reveal", "shape-reveal"]),
   transitionDirections: Object.freeze(["left", "right", "up", "down", "in", "out"]),
 });
 
@@ -47,13 +47,19 @@ export const TRANSITIONS = Object.freeze({
   wipe: Object.freeze({ axis: "planar", minSeconds: 0.25, maxSeconds: 0.6 }),
   zoom: Object.freeze({ axis: "depth", minSeconds: 0.15, maxSeconds: 0.4 }),
   iris: Object.freeze({ axis: "depth", minSeconds: 0.25, maxSeconds: 0.45 }),
+  // Storytelling reveals (animation research 2026 section 4): no travel axis, so a
+  // direction on them is MOTION_DIRECTION_UNUSED. Bands leave room for a drawn or
+  // paper motion without letting a reveal become a scene-long effect.
+  "paper-reveal": Object.freeze({ axis: null, minSeconds: 0.3, maxSeconds: 0.8 }),
+  "draw-reveal": Object.freeze({ axis: null, minSeconds: 0.35, maxSeconds: 0.9 }),
+  "shape-reveal": Object.freeze({ axis: null, minSeconds: 0.25, maxSeconds: 0.6 }),
 });
 
 /** The transition family each energy reads as (research 4.5). Outside it is an info finding. */
 export const ENERGY_TRANSITIONS = Object.freeze({
-  calm: Object.freeze(["none", "cut", "fade", "blur"]),
-  medium: Object.freeze(["none", "cut", "fade", "slide", "push", "wipe"]),
-  high: Object.freeze(["none", "cut", "push", "zoom", "iris"]),
+  calm: Object.freeze(["none", "cut", "fade", "blur", "paper-reveal", "draw-reveal"]),
+  medium: Object.freeze(["none", "cut", "fade", "slide", "push", "wipe", "paper-reveal", "draw-reveal", "shape-reveal"]),
+  high: Object.freeze(["none", "cut", "push", "zoom", "iris", "shape-reveal"]),
 });
 
 /** Mirrors ENERGY_PROFILES and STAGGER_SECONDS of the renderer (checked by a test). */

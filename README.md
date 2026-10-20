@@ -83,6 +83,7 @@ Stills from example videos rendered with Comfyrizz (FLUX 3 Klein stills and refe
 | 🗣️ **Kokoro narration + captions** | Per-sentence synthesis on CPU, measured durations drive the timeline, loudness-normalised mix, burned-in captions plus SRT/VTT. |
 | 🎙️ **Optional Qwen3-TTS** | VoiceDesign → Base cloning for a consistent synthetic narrator, separate ASR/forced-alignment QA, pinned Colab setup and strict engine selection. See [voice setup](packages/tts/README.md#optional-qwen3-tts-r3). |
 | 🔗 **Animated diagrams** | Editable flow and hub cards with scene-local cue times, animated connections and caption-safe landscape layouts. See [renderer motion diagrams](apps/renderer/README.md#motion-diagrams). |
+| 🎬 **Storytelling recipes** | Frame-driven sketch, paper-cut, morph, technical-flow, focus and kinetic styles, with editable settings, narration phrase cues and paper/draw/shape reveal transitions. See the [animation pack guide](docs/ANIMATION_STORYTELLING.md). |
 | 🌍 **Multilingual + aspect variants** | Export per-language and 16:9 / 9:16 / 1:1 variants with re-flowed layouts. |
 | ☁️ **Google Colab backend** | Spins up a G4, bootstraps ComfyUI with pinned models, runs batches, downloads results and stops the runtime, verified against `colab sessions`. Watchdog, budget formula and `stop_unconfirmed` reporting. |
 | 🖥️ **Bring your own ComfyUI** | Point the same jobs at your own ComfyUI (plus `comfy-api-proxy`). Not metered, never called free. |

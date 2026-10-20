@@ -32,22 +32,93 @@ function mergeField(target, key, before, after, label) {
   else target[key] = structuredClone(after);
 }
 
+const DATA_LAYOUTS = new Set(['stat', 'chart']);
+const PLATE_LAYOUTS = new Set(['split', 'compare']);
+
 function planCopy(scene) {
+  if (scene.layout === 'code') {
+    return {
+      ...(scene.headline ? { headline: scene.headline } : {}),
+      ...(scene.sub ? { sub: scene.sub } : {}),
+    };
+  }
   return {
-    headline: scene.headline,
+    ...(scene.headline ? { headline: scene.headline } : {}),
     ...(scene.sub ? { sub: scene.sub } : {}),
-    ...(scene.layout === 'hero' && scene.body ? { body: scene.body } : {}),
-    ...(scene.layout === 'list' ? { items: scene.items } : {}),
+    ...(['hero', 'stat'].includes(scene.layout) && scene.body ? { body: scene.body } : {}),
+    ...(scene.layout === 'list' && scene.items.length ? { items: scene.items } : {}),
+    ...(DATA_LAYOUTS.has(scene.layout) && scene.footnote ? { footnote: scene.footnote } : {}),
+  };
+}
+
+function planData(scene) {
+  if (!scene.data) return undefined;
+  // Copy the author's reference verbatim: the package schema owns the display default.
+  return {
+    dataset: scene.data.dataset,
+    ...(scene.data.display ? { display: scene.data.display } : {}),
   };
 }
 
 function variant(scene, index, length) {
-  return scene.layout === 'title' ? (index === length - 1 && index > 0 ? 'outro' : 'centered')
-    : scene.layout === 'hero' ? 'split' : 'bullets';
+  if (scene.layout === 'title') return index === length - 1 && index > 0 ? 'outro' : 'centered';
+  if (scene.layout === 'hero') return 'split';
+  if (scene.layout === 'list') return 'bullets';
+  if (scene.layout === 'chart') return 'bar';
+  return undefined;
 }
 
 function narration(scene) {
   return scene.narration.trim() ? scene.narration : undefined;
+}
+
+function proceduralPlate(plate) {
+  return {
+    procedural: {
+      pattern: plate.pattern ?? 'mesh',
+      ...(plate.seed !== undefined ? { seed: plate.seed } : {}),
+      ...(plate.palette ? { palette: plate.palette } : {}),
+    },
+    ...(plate.label ? { label: plate.label } : {}),
+  };
+}
+
+function allPlatesProcedural(scene) {
+  return (scene.plates ?? []).every(plate => plate.mediaType === 'procedural');
+}
+
+function proceduralMedia(scene) {
+  if (!PLATE_LAYOUTS.has(scene.layout) || !allPlatesProcedural(scene)) return undefined;
+  return scene.plates.map(proceduralPlate);
+}
+
+/** Outgoing transition the plan asks for. The actual final scene drops it after ordering. */
+function planTransition(scene) {
+  const transition = scene.transition ?? scene.transitionOut;
+  if (!transition) return { ...DEFAULT_TRANSITION };
+  const frames = transition.frames ?? (transition.type === 'none' || transition.type === 'cut' ? 0 : 12);
+  return {
+    type: transition.type,
+    frames,
+    ...(transition.direction ? { direction: transition.direction } : {}),
+  };
+}
+
+/** Field-level motion merge, so a plan can change one token without erasing manual work. */
+function mergeMotion(result, oldMotion, newMotion, label) {
+  const keys = new Set([...Object.keys(oldMotion ?? {}), ...Object.keys(newMotion ?? {})]);
+  if (!keys.size) return;
+  if (!result.motion && newMotion) result.motion = {};
+  if (!result.motion) return;
+  for (const key of keys) {
+    const before = oldMotion?.[key];
+    const after = newMotion?.[key];
+    if (equal(before, after)) continue;
+    if (!equal(result.motion[key], before) && !equal(result.motion[key], after)) throw conflict(`${label}.${key} was manually edited`);
+    if (after === undefined) delete result.motion[key];
+    else result.motion[key] = structuredClone(after);
+  }
+  if (Object.keys(result.motion).length === 0) delete result.motion;
 }
 
 const ASPECTS = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
@@ -64,7 +135,7 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   const pkg = previous ? structuredClone(previous) : {
     $schema: 'https://comfyrizz.example/schema/package-v1.json', schemaVersion: 1,
     id: `pkg_${randomUUID().replaceAll('-', '')}`, revision: 1,
-    createdAt: new Date().toISOString(), assets: {}, datasets: {},
+    createdAt: new Date().toISOString(), assets: {}, datasets: structuredClone(plan.datasets ?? {}),
     voice: { enabled: false, engine: 'none' }, compliance: { open_weights_only: false }, renders: [],
   };
   if (!previous) {
@@ -113,8 +184,13 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
       if (!equal(oldPlan, scene)) throw conflict(`scene ${scene.id} was manually deleted`);
       return;
     }
-    const visualChanged = !oldPlan || ['visual', 'mediaType', 'svg'].some(key => !equal(oldPlan[key], scene[key]));
-    const regenerate = visualChanged || (scene.mediaType === 'image' && styleChanged) || (scene.mediaType === 'svg' && paletteChanged);
+    const visualChanged = !oldPlan || ['visual', 'mediaType', 'svg', 'plates'].some(key => !equal(oldPlan[key], scene[key]));
+    const platesNeeded = PLATE_LAYOUTS.has(scene.layout) && (!oldPlan || oldPlan.layout !== scene.layout || !equal(oldPlan.plates, scene.plates));
+    const platesMissing = PLATE_LAYOUTS.has(scene.layout) && (!existing?.media || existing.media.length !== 2);
+    const plateTypes = new Set((scene.plates ?? []).map(plate => plate.mediaType));
+    const imageMedia = scene.mediaType === 'image' || plateTypes.has('image');
+    const svgMedia = scene.mediaType === 'svg' || plateTypes.has('svg');
+    const regenerate = visualChanged || platesNeeded || platesMissing || (imageMedia && styleChanged) || (svgMedia && paletteChanged);
     if (existing?.locked) {
       if (!equal(oldPlan, scene) || regenerate || !equal(previous.format, pkg.format) || !equal(previous.theme, pkg.theme)) {
         throw conflict(`locked scene ${scene.id} cannot be modified`);
@@ -122,17 +198,25 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
       merged.set(scene.id, existing);
       return;
     }
+    const sceneVariant = variant(scene, index, plan.scenes.length);
+    const sceneData = planData(scene);
+    const sceneTransition = planTransition(scene);
+    const sceneMedia = proceduralMedia(scene);
     const result = existing ?? {
-      id: scene.id, layout: scene.layout, variant: variant(scene, index, plan.scenes.length),
+      id: scene.id, layout: scene.layout, ...(sceneVariant ? { variant: sceneVariant } : {}),
       preferredFrames: Math.round(scene.seconds * fps), copy: planCopy(scene),
+      ...(sceneData ? { data: structuredClone(sceneData) } : {}),
+      ...(scene.code ? { code: structuredClone(scene.code) } : {}),
+      ...(sceneMedia ? { media: structuredClone(sceneMedia) } : {}),
+      ...(scene.motion ? { motion: structuredClone(scene.motion) } : {}),
       ...(narration(scene) ? { narration: narration(scene) } : {}), notes: scene.visual,
-      ...(index < plan.scenes.length - 1 ? { transitionOut: { ...DEFAULT_TRANSITION } } : {}),
+      ...(sceneTransition ? { transitionOut: sceneTransition } : {}),
     };
     if (oldPlan) {
       const label = key => `scene ${scene.id}.${key}`;
       mergeField(result, 'layout', oldPlan.layout, scene.layout, label('layout'));
       if (oldPlan.layout !== scene.layout) {
-        mergeField(result, 'variant', variant(oldPlan, baseline.scenes.indexOf(oldPlan), baseline.scenes.length), variant(scene, index, plan.scenes.length), label('variant'));
+        mergeField(result, 'variant', variant(oldPlan, baseline.scenes.indexOf(oldPlan), baseline.scenes.length), sceneVariant, label('variant'));
       }
       if (oldPlan.seconds !== scene.seconds) {
         mergeField(result, 'preferredFrames', Math.round(oldPlan.seconds * fps), Math.round(scene.seconds * fps), label('preferredFrames'));
@@ -140,10 +224,44 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
       const oldCopy = planCopy(oldPlan);
       const newCopy = planCopy(scene);
       result.copy ??= {};
+      const owns = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
       for (const key of new Set([...Object.keys(oldCopy), ...Object.keys(newCopy)])) {
-        // A layout switch is not a request to erase otherwise unchanged copy.
-        if (equal(oldPlan[key], scene[key])) continue;
-        mergeField(result.copy, key, oldCopy[key], newCopy[key], label(`copy.${key}`));
+        const oldVisible = owns(oldCopy, key);
+        const newVisible = owns(newCopy, key);
+        const current = result.copy[key];
+        if (!oldVisible && !newVisible) continue;
+        if (oldVisible && newVisible) {
+          // Both layouts show the field. Preserve a manual value when the plan
+          // itself has not changed it.
+          if (equal(oldCopy[key], newCopy[key])) continue;
+          mergeField(result.copy, key, oldCopy[key], newCopy[key], label(`copy.${key}`));
+        } else if (oldVisible && !newVisible) {
+          // The field becomes hidden. Keep a manual hidden value; otherwise the
+          // plan-owned value can leave the copy object.
+          if (!owns(result.copy, key) || !equal(current, oldCopy[key])) continue;
+          delete result.copy[key];
+        } else {
+          // The field becomes visible for the first time. Add it even when the
+          // raw plan value was already present but hidden (hero items -> list).
+          if (!owns(result.copy, key) || equal(current, newCopy[key]) || (owns(oldPlan, key) && equal(current, oldPlan[key]))) {
+            result.copy[key] = structuredClone(newCopy[key]);
+          }
+          // A different existing value is a manual edit to hidden content.
+        }
+      }
+      mergeField(result, 'data', planData(oldPlan), sceneData, label('data'));
+      mergeField(result, 'code', oldPlan.code, scene.code, label('code'));
+      mergeMotion(result, oldPlan.motion, scene.motion, label('motion'));
+      // The plan's final scene has no next scene, but a manual scene may follow it.
+      // Keep its existing transition here; the post-order pass removes it only when
+      // it really is last. A scene moving out of the final slot now gets a transition.
+      if (index < plan.scenes.length - 1) {
+        const oldWasFinal = baseline.scenes.indexOf(oldPlan) === baseline.scenes.length - 1;
+        // A transition manually placed on a formerly-final scene becomes a real
+        // boundary when a new scene follows. Preserve it unless the plan names one.
+        if (!(oldWasFinal && !(scene.transition ?? scene.transitionOut) && result.transitionOut !== undefined)) {
+          mergeField(result, 'transitionOut', oldWasFinal ? undefined : planTransition(oldPlan), sceneTransition, label('transitionOut'));
+        }
       }
       const currentNarration = result.narration;
       mergeField(result, 'narration', narration(oldPlan), narration(scene), label('narration'));
@@ -160,6 +278,7 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
       // background. Explicit visual edits also reset the procedural backdrop.
       if (visualChanged) result.background = { procedural: { pattern: 'mesh', seed: index + 1 } };
       result.foreground = [];
+      if (PLATE_LAYOUTS.has(scene.layout)) delete result.media;
       generate.add(scene.id);
     }
     merged.set(scene.id, result);
@@ -186,12 +305,51 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   }
   pkg.scenes = order.map(id => merged.get(id));
   if (!pkg.scenes.length) throw conflict('the resulting project has no scenes');
+  if (baseline) {
+    // Datasets are shared, so a dataset owned by the plan is removed only when no
+    // surviving manual scene still cites it. Provenance is copied verbatim.
+    pkg.datasets ??= {};
+    const oldDatasets = baseline.datasets ?? {};
+    const newDatasets = plan.datasets ?? {};
+    const referenced = new Set(pkg.scenes.flatMap(scene => scene.data?.dataset ? [scene.data.dataset] : []));
+    const lockedByDataset = new Map(pkg.scenes.filter(scene => scene.locked && scene.data?.dataset).map(scene => [scene.data.dataset, scene.id]));
+    for (const id of new Set([...Object.keys(oldDatasets), ...Object.keys(newDatasets)])) {
+      const before = oldDatasets[id];
+      const after = newDatasets[id];
+      if (equal(before, after)) continue;
+      if (lockedByDataset.has(id) && !equal(pkg.datasets[id], after)) throw conflict(`locked scene ${lockedByDataset.get(id)} cannot use a changed dataset ${id}`);
+      if (after === undefined) {
+        // A manual provenance edit is user data. Keep it when the plan drops the
+        // dataset, even if its last plan scene was also removed. Only an
+        // unchanged plan-owned dataset can disappear.
+        if (referenced.has(id) || !equal(pkg.datasets[id], before)) continue;
+      }
+      mergeField(pkg.datasets, id, before, after, `dataset ${id}`);
+    }
+  }
   const last = pkg.scenes.at(-1);
   if (last.transitionOut?.frames > 0 && !['none', 'cut'].includes(last.transitionOut.type)) {
-    if (last.locked || (currentScenes.has(last.id) && !oldScenes.has(last.id)) || !equal(last.transitionOut, DEFAULT_TRANSITION)) {
+    const finalPlanScene = plan.scenes.at(-1);
+    const planFinalId = finalPlanScene?.id;
+    const plannedFinal = finalPlanScene ? planTransition(finalPlanScene) : undefined;
+    // Recognise the transition this same scene owned in the previous plan, not
+    // just the previous final scene's. A reordered former-middle scene is still
+    // plan-owned when its own old transition is what remains.
+    const oldOwnPlan = oldScenes.get(last.id);
+    const oldOwnPlanned = oldOwnPlan ? planTransition(oldOwnPlan) : undefined;
+    // The timeline rejects any outgoing transition on the true last scene. Drop a
+    // plan/default transition there; a divergent manual or locked one is preserved
+    // by refusing the revision rather than silently erasing it.
+    if (last.locked) {
       throw conflict(`scene ${last.id} has a transition that cannot be preserved at the end`);
+    } else if (last.id === planFinalId) {
+      if (equal(last.transitionOut, DEFAULT_TRANSITION) || equal(last.transitionOut, plannedFinal) || equal(last.transitionOut, oldOwnPlanned)) delete last.transitionOut;
+      else throw conflict(`scene ${last.id} has a transition that cannot be preserved at the end`);
+    } else if ((currentScenes.has(last.id) && !oldScenes.has(last.id)) || !equal(last.transitionOut, DEFAULT_TRANSITION)) {
+      throw conflict(`scene ${last.id} has a transition that cannot be preserved at the end`);
+    } else {
+      delete last.transitionOut;
     }
-    delete last.transitionOut;
   }
   // Use the natural timeline (including overlap and layout limits), so target
   // fitting cannot stretch manual timings or count deleted scenes.
@@ -220,21 +378,47 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
         renderCheck: { ...check, version: SANITIZER_VERSION } };
     },
   });
+  const generatedVisuals = new Map();
   for (const scene of plan.scenes) {
     signal?.throwIfAborted();
     if (!generate.has(scene.id)) continue;
-    if (scene.mediaType === 'svg') {
+    if (PLATE_LAYOUTS.has(scene.layout)) {
+      const media = [];
+      for (const [plateIndex, plate] of (scene.plates ?? []).entries()) {
+        signal?.throwIfAborted();
+        const intent = plate.visual ?? `${scene.visual} — ${plate.label ?? `plate ${plateIndex + 1}`}`;
+        if (plate.mediaType === 'svg') {
+          activeSvg = plate.svg;
+          const result = await tools['assets.generate_svg'].run({ scene_id: scene.id, kind: 'diagram', intent });
+          signal?.throwIfAborted();
+          media.push({ asset: result.asset.id, ...(plate.label ? { label: plate.label } : {}) });
+        } else if (plate.mediaType === 'image') {
+          const result = await tools['assets.generate_image'].run({ scene_id: scene.id, intent, kind: 'illustration', style: plan.stylePreset });
+          signal?.throwIfAborted();
+          media.push({ asset: result.asset.id, ...(plate.label ? { label: plate.label } : {}) });
+        } else {
+          media.push(proceduralPlate(plate));
+        }
+      }
+      // Generate tools mutate their own snapshot; apply the authored placement after
+      // the loop so a later tool call cannot overwrite this scene.
+      generatedVisuals.set(scene.id, { foreground: [], media });
+    } else if (scene.mediaType === 'svg') {
       activeSvg = scene.svg;
       const result = await tools['assets.generate_svg'].run({ scene_id: scene.id, kind: 'diagram', intent: scene.visual });
       signal?.throwIfAborted();
-      const target = draft.scenes.find(item => item.id === scene.id);
-      target.foreground = [{ asset: result.asset.id, x: scene.layout === 'hero' ? 0.76 : 0.5, y: scene.layout === 'hero' ? 0.52 : 0.8, w: scene.layout === 'hero' ? 0.35 : 0.12, anim: 'fade-in' }];
+      generatedVisuals.set(scene.id, { foreground: [{ asset: result.asset.id, x: scene.layout === 'hero' ? 0.76 : 0.5, y: scene.layout === 'hero' ? 0.52 : 0.8, w: scene.layout === 'hero' ? 0.35 : 0.12, anim: 'fade-in' }] });
     } else if (scene.mediaType === 'image') {
       const result = await tools['assets.generate_image'].run({ scene_id: scene.id, intent: scene.visual, kind: 'illustration', style: plan.stylePreset });
       signal?.throwIfAborted();
-      const target = draft.scenes.find(item => item.id === scene.id);
-      target.foreground = [{ asset: result.asset.id, x: 0.76, y: 0.5, w: 0.4, anim: 'fade-in' }];
+      generatedVisuals.set(scene.id, { foreground: [{ asset: result.asset.id, x: 0.76, y: 0.5, w: 0.4, anim: 'fade-in' }] });
     }
+  }
+  if (generatedVisuals.size) {
+    draft.scenes = draft.scenes.map(scene => {
+      const visual = generatedVisuals.get(scene.id);
+      return visual ? { ...scene, ...visual } : scene;
+    });
   }
   draft.revision = previous?.revision ?? 1;
   draft.renders = [];

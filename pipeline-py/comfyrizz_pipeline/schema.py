@@ -86,6 +86,7 @@ SEMANTIC_CODES = (
     "SEM_AUDIO_UNKNOWN_SCENE",
     "SEM_LAYOUT_REQUIRES_MEDIA",
     "SEM_CODE_REQUIRED",
+    "SEM_MOTION_FOCUS_RECT",
 )
 
 # Published layout contract (PLAN.md A5 / SPEC.md 6.3); the schema holds the loose
@@ -495,6 +496,22 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
                         "foreground item; this scene would render an empty frame",
                     )
                 )
+        # Storytelling recipe focus window: JSON Schema bounds each number but cannot sum
+        # x + width, so this cross-field rule is semantic (same as semantic.mjs).
+        motion = scene.get("motion")
+        focus = motion.get("focus") if _is_obj(motion) and _is_obj(motion.get("focus")) else None
+        if focus is not None:
+            values = [focus.get(key) for key in ("x", "y", "width", "height")]
+            if all(_is_number(value) for value in values):
+                x, y, width, height = values
+                if x + width > 1 + 1e-9 or y + height > 1 + 1e-9:
+                    errors.append(
+                        _err(
+                            "SEM_MOTION_FOCUS_RECT",
+                            f"{at}/motion/focus",
+                            "focus rectangle must stay inside the frame (x + width <= 1 and y + height <= 1)",
+                        )
+                    )
 
 
 def _check_presenter(doc, scenes, assets, errors) -> None:

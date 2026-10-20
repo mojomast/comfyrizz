@@ -30,7 +30,13 @@ export { runAgent } from './agent.js';
 export { runCpuSlice, defaultCpuScript } from './cpu-slice.js';
 export type { CpuSliceOptions, CpuSliceResult } from './cpu-slice.js';
 export { createScriptedModel } from './scripted-model.js';
-export { conversationPlanSchema, CONVERSATION_TOOLS, CONVERSATION_LIMITS, CONVERSATION_PROMPT_VERSION, runConversationTurn, patchConversationPlan, conversationPlanWarnings, budgetConversationMessages } from './conversation.js';
+export {
+  conversationPlanSchema, CONVERSATION_TOOLS, CONVERSATION_LIMITS, CONVERSATION_PROMPT_VERSION,
+  CONVERSATION_LAYOUTS, CONVERSATION_RECIPES, CONVERSATION_MORPH_SHAPES, CONVERSATION_TRANSITIONS,
+  CONVERSATION_TRANSITION_DIRECTIONS, CONVERSATION_ENTRIES, CONVERSATION_EASES, CONVERSATION_SPRINGS,
+  CONVERSATION_STAGGERS, CONVERSATION_EMPHASIS, CONVERSATION_ENERGIES, CONVERSATION_PATTERNS,
+  runConversationTurn, patchConversationPlan, conversationPlanWarnings, budgetConversationMessages,
+} from './conversation.js';
 export type { ConversationPlan } from './conversation.js';
 export { composeConversationSkills, SKILL_CATALOG_VERSION, BUNDLED_SKILL_IDS } from './skills/index.js';
 export type { ScriptedCall } from './scripted-model.js';

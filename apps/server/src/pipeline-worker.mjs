@@ -102,6 +102,9 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     await command(process.execPath, [join(repoRoot, 'packages/tts/scripts/narrate.mjs'), '--example', workDir]);
     pkg = json(packagePath);
     const timeline = compileTimeline(pkg, narrationOptions(workDir));
+    for (const diagnostic of timeline.motionCueDiagnostics ?? []) {
+      send({ kind: 'warning', stageId, code: diagnostic.code, sceneId: diagnostic.scene, message: diagnostic.message });
+    }
     const durations = json(join(workDir, 'audio/durations.json'));
     for (const scene of timeline.scenes) {
       if (durations.scenes[scene.id] && scene.durationInFrames / timeline.fps + 0.001 < durations.scenes[scene.id].seconds) throw new Error(`${scene.id}: narration exceeds scene duration`);
