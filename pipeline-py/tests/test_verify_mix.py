@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 import wave
 from pathlib import Path
 
@@ -123,8 +124,10 @@ def test_missing_narration_fails():
     mix = music(len(voice), amplitude=0.2, seed=11)
     report = verify_mix.compare(mix, voice)
     assert report["passed"] is False
-    assert report["envelopeCorrelation"] is not None
-    assert report["envelopeCorrelation"] < 0.85
+    if report["envelopeCorrelation"] is None:
+        assert report["reason"] == "Narration span is not fully present in the mix"
+    else:
+        assert report["envelopeCorrelation"] < 0.85
 
 
 def test_wrong_narration_fails():
@@ -133,7 +136,87 @@ def test_wrong_narration_fails():
     count = min(len(voice), len(other))
     report = verify_mix.compare(other[:count], voice[:count])
     assert report["passed"] is False
-    assert report["envelopeCorrelation"] < 0.85
+    if report["envelopeCorrelation"] is None:
+        assert report["reason"] == "Narration span is not fully present in the mix"
+    else:
+        assert report["envelopeCorrelation"] < 0.85
+
+
+def test_shorter_trailing_silence_still_passes():
+    voice = speech()
+    reference = np.concatenate([voice, np.zeros(SAMPLE_RATE)])
+    mix = np.concatenate([voice, np.zeros(SAMPLE_RATE // 4)])
+    report = verify_mix.compare(mix, reference)
+    assert report["passed"] is True
+    assert report["durationDifferenceMs"] < 0
+
+
+def test_dropping_leading_silence_still_passes():
+    voice = speech()
+    reference = np.concatenate([np.zeros(SAMPLE_RATE // 2), voice])
+    report = verify_mix.compare(voice, reference)
+    assert report["passed"] is True
+    assert abs(report["lagMs"] + 500) <= 20
+
+
+def test_truncated_prefix_fails():
+    voice = speech()
+    report = verify_mix.compare(voice[:SAMPLE_RATE], voice)
+    assert report["passed"] is False
+    assert "not fully present" in report["reason"]
+    assert report["durationDifferenceMs"] < 0
+
+
+def test_late_start_fails():
+    voice = speech()
+    report = verify_mix.compare(voice[4000:], voice)
+    assert report["passed"] is False
+    assert "not fully present" in report["reason"]
+
+
+def test_final_partial_window_is_not_dropped_from_coverage():
+    tail = np.random.default_rng(9).normal(0, 0.2, SAMPLE_RATE // 10)
+    voice = np.concatenate([speech(), tail])
+    assert verify_mix.compare(voice, voice)["passed"] is True
+    report = verify_mix.compare(voice[:-len(tail)], voice)
+    assert report["passed"] is False
+    assert "not fully present" in report["reason"]
+
+
+def test_silent_mix_fails():
+    voice = speech()
+    report = verify_mix.compare(np.zeros(len(voice)), voice)
+    assert report["passed"] is False
+    assert report["envelopeCorrelation"] == 0.0
+
+
+def test_short_narration_uses_waveform_corroboration():
+    voice = speech(seconds=0.5, seed=4)
+    report = verify_mix.compare(voice, voice)
+    assert report["windows"] < verify_mix.MIN_ENVELOPE_WINDOWS
+    assert report["envelopeCorrelation"] is None
+    assert report["passed"] is True
+    assert report["waveformCorrelation"] > 0.99
+
+
+def test_short_narration_tolerates_a_small_lag():
+    voice = speech(seconds=0.5, seed=4)
+    shift = int(0.1 * SAMPLE_RATE)
+    mix = np.concatenate([np.zeros(shift), voice])
+    report = verify_mix.compare(mix, voice)
+    assert report["windows"] < verify_mix.MIN_ENVELOPE_WINDOWS
+    assert report["passed"] is True
+    assert abs(report["lagMs"] - 100) <= 20
+
+
+def test_short_wrong_narration_fails(monkeypatch):
+    voice = speech(seconds=0.5, seed=4)
+    other = speech(seconds=0.5, seed=9, rate=0.57, burst=0.07, lead=0.05)
+    monkeypatch.setattr(verify_mix, "_best_lag", lambda *args: 0)
+    report = verify_mix.compare(other, voice)
+    assert report["windows"] < verify_mix.MIN_ENVELOPE_WINDOWS
+    assert report["passed"] is False
+    assert "waveform" in report["reason"]
 
 
 def write_wav(path: Path, samples: np.ndarray):
@@ -148,7 +231,7 @@ def write_wav(path: Path, samples: np.ndarray):
 
 def run_script(video: Path, narration: Path, out: Path):
     completed = subprocess.run(
-        ["python3", str(SCRIPT), "--video", str(video), "--narration", str(narration), "--out", str(out)],
+        [sys.executable, str(SCRIPT), "--video", str(video), "--narration", str(narration), "--out", str(out)],
         check=False,
         capture_output=True,
         text=True,
@@ -167,7 +250,7 @@ def test_cli_writes_a_verdict_for_pass_and_failure(tmp_path: Path):
     write_wav(trailing, np.concatenate([voice, np.zeros(SAMPLE_RATE)]))
     write_wav(wrong, speech(seed=9, rate=0.57, burst=0.07))
 
-    passed_out = tmp_path / "passed.json"
+    passed_out = tmp_path / "nested" / "passed.json"
     passed = run_script(same, narration, passed_out)
     assert passed.returncode == 0, passed.stderr
     assert json.loads(passed_out.read_text())["passed"] is True
