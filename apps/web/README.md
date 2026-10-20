@@ -22,6 +22,15 @@ the island only receives the compiled timeline and playhead.
   has **Open in ComfyUI** (downloads the API-format workflow that was submitted) and **How to open**.
   The control stays disabled until the job has succeeded. Drag-and-drop UI format is not offered.
 
+## Demo page
+
+`demo.html` (entry: `src/demo/main.mjs`) is the two-minute live-demo surface: chat, Remotion
+preview with instant chart edits, storyboard chips with per-scene re-run, licence receipts, a
+labelled spend estimate and the VM→health→jobs→collected→stopped activity stepper. `?fixture=1`
+runs the whole page offline against a deterministic canned backend — no server, token, GPU or
+network. Start commands, the 7-beat script (SPEC §11) mapped to UI actions, and troubleshooting
+live in the [demo runbook](../../docs/DEMO_WEBAPP_RUNBOOK.md).
+
 ## Run
 
 ```bash

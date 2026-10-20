@@ -20,15 +20,11 @@ pnpm --filter @comfyrizz/renderer render:example
 | CPU example export | **pass**: `examples/launch-demo/out/launch-demo.mp4`, 1920×1080 h264, 30 fps, 1100 frames, 36.7 s, 3.35 MB, rendered in 81 s |
 
 ## Release scan
-`node scripts/release-scan.mjs` scans tracked files and prints only file:line and the rule, never the value. Exit 1 = findings.
+`node scripts/release-scan.mjs` scans tracked files and prints only file:line and the rule, never the value. Exit 1 = non-allowlisted findings. `--json` prints `{findings, allowed}` with file:line and rule only.
 
-At `chore/quick-wins`: 115 findings in 1003 files.
+The scanner has a `workspace-path` rule for absolute `/workspace/<name>` paths and reads `scripts/release-scan.allow.json`. Each allowlist entry is `{path, rules, reason}`; `path` is a glob or a prefix. Matching hits are counted separately as `allowed`, printed per rule with their reason, and never fail the run.
 
-| Rule | Count | Assessment |
-|---|---|---|
-| hf-token / openai-style-key / google-oauth | 5 / 2 / 1 | All in `packages/backends/test/colab-*.test.mjs`: fake fixtures for the redaction tests (they contain obvious fake patterns). No real secrets found |
-| assigned-secret | 26 | Test-only `TOKEN = '…'` constants in `apps/server/test`, `apps/web/test`, `packages/*/test`, `pipeline-py/tests` |
-| home-box-path | 81 | Personal path in `workflows/svg-guided/sweeps/e2.json` (20+), `docs/PLAN.md`, `docs/tasks/*.md`, `packages/backends/README.md` and `src/cli.mjs`, `scripts/gpu2|gpu6|willem` watchdogs and runners, `colab/make_jobs.py`, a few tests. **Fix before tagging:** replace with repo-relative paths or `$HOME` |
-| tailnet hosts, 100.x IPs, Windows/macOS user paths, private keys | 0 | — |
+At base `678cbd3`: 0 home-box findings and 0 non-allowlisted findings in 1004 tracked files. The 57 allowed hits are intentional test fixtures (26 assigned-secret, 5 hf-token, 2 openai-style-key, 1 google-oauth) and historical GPU-run references (23 workspace-path) under `scripts/gpu*/`, `scripts/willem/`, `docs/`, the Colab/workflows README notes and one render regression-test comment.
 
-Before v0.1.0: fix the home-box paths (or move the GPU-run scripts to an ops folder outside the release), then re-run the scan; for the test fixtures add `--allow 'test'` or keep them as known-fake.
+`pnpm run test:scan` runs the scanner unit tests and then the scan. Test fixtures are only allowlisted for the four fake-secret rules; anything else in a test still fails.
+

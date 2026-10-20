@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d0f14'/%3E%3Ccircle cx='32' cy='32' r='18' fill='none' stroke='%236d8cff' stroke-width='7'/%3E%3C/svg%3E" />
+    <title>Comfyrizz — live demo</title>
+    <link rel="stylesheet" href="/src/demo/demo.css" />
+  </head>
+  <body class="demo-body">
+    <a class="demo-skip" href="#chat">Skip to chat</a>
+    <header class="demo-header">
+      <div class="demo-brand">
+        <span class="demo-mark" aria-hidden="true">◑</span>
+        <div>
+          <h1>Comfyrizz <span>live demo</span></h1>
+          <p class="demo-tagline">Brief → storyboard → receipts → compute → iterate, in one page.</p>
+        </div>
+      </div>
+      <div class="demo-header-meta">
+        <span id="demo-mode" class="demo-pill" data-mode="live">live server</span>
+        <span id="demo-events" class="demo-pill demo-events" data-state="idle" role="status" aria-live="polite">events idle</span>
+        <a class="demo-link" href="?fixture=1">Try fixture mode</a>
+      </div>
+    </header>
+
+    <main class="demo-grid">
+      <section id="chat" data-region="chat" class="demo-region demo-chat-region" aria-label="Chat">
+        <noscript><p>This demo needs JavaScript.</p></noscript>
+      </section>
+
+      <section id="preview" data-region="preview" class="demo-region demo-preview-region" aria-label="Preview">
+        <header class="demo-region-head">
+          <h2>Preview</h2>
+          <span class="demo-hint">instant edits, no GPU</span>
+        </header>
+        <div id="demo-preview-player" class="demo-preview-player"></div>
+        <form id="demo-instant-edit" class="demo-instant-edit" data-instant-edit="chart" aria-label="Instant chart edit">
+          <label>Scene
+            <select id="demo-edit-scene" name="sceneId"></select>
+          </label>
+          <label>Chart point
+            <input id="demo-edit-index" name="index" type="number" min="0" step="1" value="0" />
+          </label>
+          <label>Value
+            <input id="demo-edit-value" name="value" type="number" step="1" required />
+          </label>
+          <button type="submit">Update chart</button>
+          <span id="demo-edit-status" class="demo-hint" role="status" aria-live="polite"></span>
+        </form>
+      </section>
+
+      <section id="storyboard" data-region="storyboard" class="demo-region demo-storyboard-region" aria-label="Storyboard"></section>
+
+      <section id="licences" data-region="licences" class="demo-region demo-licences-region" aria-label="Asset licences">
+        <header class="demo-region-head"><h2>Licence chips</h2><span class="demo-hint">receipts, not guesses</span></header>
+        <div id="licence-chips" class="demo-nested"></div>
+      </section>
+
+      <section id="spend" data-region="spend" class="demo-region demo-spend-region" aria-label="Spend">
+        <header class="demo-region-head"><h2>Spend</h2><span class="demo-hint">labelled estimates</span></header>
+        <div id="spend-card" class="demo-nested"></div>
+      </section>
+
+      <section id="activity" data-region="activity" class="demo-region demo-activity-region" aria-label="Activity"></section>
+    </main>
+
+    <footer class="demo-footer">
+      <span>MIT · open weights · every asset is generated or CC0</span>
+      <nav aria-label="Project links">
+        <a href="https://github.com/mojomast/comfyrizz" target="_blank" rel="noopener">repo</a>
+        <a href="https://github.com/mojomast/comfyrizz/tree/main/workflows" target="_blank" rel="noopener">workflows</a>
+        <a href="https://github.com/mojomast/comfyrizz/blob/main/NOTICE" target="_blank" rel="noopener">credits</a>
+        <a href="https://github.com/mojomast/comfyrizz/blob/main/examples/hook-20s/CREDITS.md" target="_blank" rel="noopener">hook credits</a>
+      </nav>
+    </footer>
+
+    <script type="module" src="/src/demo/main.mjs"></script>
+  </body>
+</html>
