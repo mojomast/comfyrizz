@@ -8,6 +8,7 @@ import type { InlineAsset } from './components';
 import { dbToLinear } from './audio-mix-model.js';
 import { resolvePackageComposition } from './composition-model.js';
 import { resolveMediaSrc } from './media-src.js';
+import { LookLayer, type LookSidecar } from './look-layer';
 
 export type MediaSources = Record<string, string>;
 
