@@ -42,6 +42,6 @@ Call `scoreLook(pkg, recipe, {frameQa})` → score 0-100 with parts `adherence`,
 
 ## Sources
 
-- MOTION-UPGRADE spec section 6: `docs/specs/MOTION_UPGRADE.md`
-- Recipe library: `docs/specs/MOTION_UPGRADE.md` section 3.3 (24 looks)
-- Look score: `docs/specs/MOTION_UPGRADE.md` section 8
+- [Material Design 3: easing and duration tokens](https://m3.material.io/styles/motion/easing-and-duration/tokens-specs)
+- [Apple Human Interface Guidelines: Motion](https://developer.apple.com/design/human-interface-guidelines/motion)
+- [easings.net: easing functions gallery](https://easings.net/)
