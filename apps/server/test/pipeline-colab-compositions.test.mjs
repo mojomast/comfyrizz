@@ -42,4 +42,3 @@ test('packageHasCompositions detects the example manifest and ignores packages w
   const plain = JSON.parse(readFileSync(new URL('../../../examples/data-story/package.json', import.meta.url)));
   assert.equal(packageHasCompositions(new URL('../../../examples/data-story/', import.meta.url).pathname, plain), false);
 });
-
