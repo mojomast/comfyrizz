@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { PRESETS, resolveProvider, listModels, probeToolUse } from '../../../packages/llm/dist/src/index.js';
+import { cassetteFetch } from './cassette-hook.mjs';
 
 const LABELS = { 'opencode-go': 'OpenCode Go', openrouter: 'OpenRouter', custom: 'Custom · OpenAI-compatible' };
 const fail = message => { throw Object.assign(new Error(message), { status: 400 }); };
@@ -20,7 +21,7 @@ function endpoint(value, name) {
 }
 
 /** Server-owned profiles. Public snapshots deliberately omit credential values. */
-export function createProviderSettings({ runtimeDir, env = process.env, fetchImpl = fetch } = {}) {
+export function createProviderSettings({ runtimeDir, env = process.env, fetchImpl = cassetteFetch(env, fetch) } = {}) {
   mkdirSync(runtimeDir, { recursive: true });
   const path = join(runtimeDir, 'provider-settings.json');
   let state = existsSync(path)
