@@ -3,8 +3,8 @@
 //
 // Kyle runs this, not the harness:
 //
-//   python3 -c "import os,pathlib; p=pathlib.Path('/home/box/.hf_token'); p.write_text(os.environ['HF_TOKEN']); p.chmod(0o600)"
-//   node scripts/gpu6/g6_run.mjs --token-file /home/box/.hf_token --out /workspace/comfy-hackathon/test/gpu6
+//   python3 -c "import os,pathlib; p=pathlib.Path.home()/'.hf_token'; p.write_text(os.environ['HF_TOKEN']); p.chmod(0o600)"
+//   node scripts/gpu6/g6_run.mjs --token-file ~/.hf_token --out /workspace/comfy-hackathon/test/gpu6
 //
 // What it guarantees, in the order it matters:
 //

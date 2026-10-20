@@ -22,11 +22,11 @@ function bundleOfSize(bytes) {
 test("a bundle over the ceiling is refused, with its size and where to look (G6-1)", () => {
   const path = bundleOfSize(BUNDLE_MAX_BYTES + 2 * 1024 * 1024);
   assert.throws(
-    () => assertBundleSize(path, { packageDir: "/home/box/comfyrizz" }),
+    () => assertBundleSize(path, { packageDir: "/srv/comfyrizz" }),
     (error) => {
       assert.match(error.message, /over the 128 MB ceiling/);
       assert.match(error.message, /130 MB/);
-      assert.match(error.message, /packageDir is \/home\/box\/comfyrizz/);
+      assert.match(error.message, /packageDir is \/srv\/comfyrizz/);
       return true;
     },
   );

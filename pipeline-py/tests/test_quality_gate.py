@@ -191,7 +191,7 @@ def test_probe_media_is_honest_about_what_it_could_not_do():
 
 
 def test_probe_media_reads_a_real_file_when_one_is_there():
-    candidates = sorted(Path("/home/box/comfyrizz/examples").glob("*/out/*.mp4"))
+    candidates = sorted((Path(__file__).resolve().parents[2] / "examples").glob("*/out/*.mp4"))
     if not candidates:
         pytest.skip("no rendered example mp4 in the tree to probe")
     report = probe_media(str(candidates[0]))
