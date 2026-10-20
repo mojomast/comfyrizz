@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { colabProgressHtml, gaugePercent, formatEta } from '../src/colab-progress.ts';
+import { colabProgressHtml, gaugePercent, formatEta, compact } from '../src/colab-progress.ts';
 
 const SRC = readFileSync(new URL('../src/colab-progress.ts', import.meta.url), 'utf8');
 const MAIN = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
@@ -26,6 +26,7 @@ test('helpers', () => {
   assert.equal(gaugePercent({ job: 'j', stage: 'tqdm', label: '', n: 1, total: 4 }), 25);
   assert.equal(gaugePercent({ job: 'j', stage: 'tqdm', label: '', n: 1, total: null }), null);
   assert.equal(formatEta(125), '2m05s');
+  assert.equal(compact(8.2e9), '8.20G');
   assert.equal(formatEta(3725), '1h02m');
 });
 

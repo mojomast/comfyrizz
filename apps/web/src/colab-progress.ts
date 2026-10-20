@@ -36,6 +36,15 @@ export function formatEta(seconds: number | null | undefined): string {
   return s >= 3600 ? `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m` : s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${s}s`;
 }
 
+/** 8200000000 -> 8.20G: tqdm's unit_scale bars report bytes. */
+export function compact(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}G`;
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (abs >= 1e4) return `${(value / 1e3).toFixed(1)}k`;
+  return String(+value.toFixed(1));
+}
+
 export function gaugePercent(gauge: ColabGauge): number | null {
   if (gauge.state === 'done') return 100;
   if (typeof gauge.n !== 'number' || typeof gauge.total !== 'number' || gauge.total <= 0) return null;
@@ -44,8 +53,8 @@ export function gaugePercent(gauge: ColabGauge): number | null {
 
 export function gaugeHtml(gauge: ColabGauge): string {
   const pct = gaugePercent(gauge);
-  const count = typeof gauge.n === 'number' ? `${+gauge.n.toFixed(1)}${typeof gauge.total === 'number' ? `/${+gauge.total.toFixed(1)}` : ''}` : '';
-  const rate = typeof gauge.rate === 'number' && gauge.rate > 0 ? (gauge.rate >= 1 ? `${gauge.rate.toFixed(2)}/s` : `${(1 / gauge.rate).toFixed(1)}s/it`) : '';
+  const count = typeof gauge.n === 'number' ? `${compact(gauge.n)}${typeof gauge.total === 'number' ? `/${compact(gauge.total)}` : ''}` : '';
+  const rate = typeof gauge.rate === 'number' && gauge.rate > 0 ? (gauge.rate >= 1 ? `${gauge.rate >= 1e4 ? compact(gauge.rate) : gauge.rate.toFixed(2)}/s` : `${(1 / gauge.rate).toFixed(1)}s/it`) : '';
   const eta = formatEta(gauge.eta);
   const meta = [count, rate, eta && `ETA ${eta}`, gauge.state, gauge.current].filter(Boolean).join(' · ');
   return `<div class="colab-gauge" data-stage="${esc(gauge.stage)}" data-state="${esc(gauge.state ?? '')}">
