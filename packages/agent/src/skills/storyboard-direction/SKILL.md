@@ -1,7 +1,7 @@
 ---
 name: storyboard-direction
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 description: Make each scene communicate through a concrete, consistent visual mechanism.
 ---
 # Storyboard direction
@@ -13,11 +13,20 @@ for steps or a small set; stat for one sourced number; chart for a sourced serie
 split or compare for exactly two labeled plates; code for real terminal or code
 evidence. Reuse a narrow set of forms across the film.
 
+In visual (<=512 characters), name the subject, framing, observable relationship or
+action, resulting state, and continuity anchor. Example: "Same teal receipt, now
+grouped beneath Project Atlas; close detail makes the project label readable;
+cream background, lower caption band clear." This is direction, not executable
+animation. Procedural renders a mesh/text layout plus supported recipes; use actual
+SVG geometry for diagrams, real supplied evidence for product claims, and label
+reconstructions as illustrative. Keep exact labels in editable text or SVG, not
+generated pixels. A generic dashboard cannot prove a workflow.
+
 Keep visual semantics stable. The same entity should retain its color, shape, label,
 and relative role. Use the supplied palette and reuse recognizable motifs instead of
 changing metaphors in every scene. Make reading order obvious, leave breathing room,
 and keep detail legible at the intended aspect ratio. Pair color distinctions with
-labels or shapes.
+labels or shapes. Reserve caption space without deleting essential comparison labels.
 
 Choose motion by storytelling purpose, never for random variety. Sketch suits
 mechanisms and informal explanations; paper-cut suits history, profiles, and community
@@ -53,7 +62,16 @@ Explicit cue_seconds are scene-local and override phrase timing; clear old secon
 when switching to phrases. Resolution happens after narration synthesis. Missing
 phrases fall back with diagnostics; repeated phrases select the first occurrence.
 Kokoro syllable-fallback timing is estimated within measured audio, not forced
-alignment. Paper-cut and focus currently enter at scene start, not phrase cues.
+alignment. Measured zero audio lag can coexist with estimated word boundaries;
+neither invalidates the other. Paper-cut and focus currently enter at scene start,
+not phrase cues.
+
+When reviewing existing footage, compare trimmed source duration / playback speed
+with measured scene duration. A 4s plate at 0.4x covers 10s, leaving a 14s scene
+4s short. Revise copy, split into supported scenes, or plan additional coverage;
+slowdown and looping need an intentional visual reason. Check loop seams and final
+holds in playback. Chat plans cannot set video speed, generate plates, or guarantee
+multi-shot continuity; do not invent tool fields for them.
 
 Choose transitions from the relationship between adjacent beats. Hard cuts punctuate;
 fade or blur carry calm continuity; slide, push, or wipe show directed progress; zoom
@@ -73,9 +91,20 @@ export finished.
 These recipes render on CPU. Lottie/dotLottie, Three.js/shaders, shared-element
 handoffs and Motion Canvas/Manim adapters are future work, not available tools.
 
+Before saving an initial draft, check through-line, visual contribution, feasible
+timing, readable text, continuity and supported execution. Every depicted object
+needs actual asset geometry or a supported recipe: a procedural scene describing
+a drifting receipt still renders no receipt. Remove that promise or author the asset.
+Respect explicit media restrictions in every scene, including title cards.
+Fix the weakest beat in
+one focused pass. With rendered evidence, review opening, action, ending and cuts;
+a midpoint contact sheet cannot establish motion quality. Name unreviewed evidence
+rather than claiming visual, audio or timing checks passed.
+
 ## Sources
 
 Original guidance informed by multimedia learning, consistent visual meaning and animated data graphics:
 - [Richard Mayer: multimedia learning research](https://psych.ucsb.edu/people/faculty/richard-mayer)
 - [Heer & Robertson: animated transitions in statistical graphics](https://idl.cs.washington.edu/files/2007-AnimatedTransitions-InfoVis.pdf)
 - [Nielsen Norman Group: usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/)
+- [LTX prompting guide, accessed 2026-10-20](https://docs.ltx.io/open-source-model/usage-guides/prompting-guide)

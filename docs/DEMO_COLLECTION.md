@@ -1,5 +1,14 @@
 # Rich storytelling demo collection
 
+**Follow-up:** [Anonymous, in Triplicate](ANONYMOUS_DEMO.md) applies the subsequent
+quality review: narration-first coverage, normal-speed generated motion, a recurring
+teal form, shorter captions and scene-aware sound. Its separate 19-job batch used
+0.74 credits, bringing cumulative demo-campaign spend at that stage to 2.22/30 credits.
+
+**Latest collection:** [Five worlds](LONGFORM_COLLECTION.md) adds five longer films,
+now [public on GitHub Pages](https://mojomast.github.io/comfyrizz/). After that batch,
+cumulative demo-campaign spend is **10.62/30 credits**, leaving **19.38**.
+
 Three films exercise the integrated animation, narration and generation pipeline:
 
 | Film | Direction | Story |
@@ -102,7 +111,9 @@ inputs, not measured spend.
 The single G4 session completed **38/38 jobs**: **21 generated stills and 17 LTX
 motion plates**. All outputs were collected and applied. Teardown was verified
 against the runtime list. Account balance moved from **359.35 to 357.87**:
-**1.48 credits spent**, **28.52 of the 30-credit authorization remaining**.
+At completion of this original batch: **1.48 credits spent**, **28.52 of the
+30-credit authorization remaining**. See the latest cumulative total above before
+planning further generation.
 The point estimate was 2.32 credits and the conservative reservation 4.024.
 
 ### Final verification

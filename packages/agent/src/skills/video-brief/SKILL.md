@@ -1,7 +1,7 @@
 ---
 name: video-brief
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 description: Turn a conversational request into a focused, actionable video brief.
 ---
 # Video brief
@@ -29,7 +29,17 @@ an extra approval round. Treat tool schemas as the authoritative format.
 
 Build toward one coherent idea rather than a catalogue of features. An educational
 video can end with a useful takeaway; a promotional call to action is optional
-and should serve the user's goal. Building applies a project draft. It does not
+and should serve the user's goal. Choose a concrete viewer question and an observable
+payoff. A software film can follow one task from input through intervention to result;
+fiction can follow one character or object through escalation and payoff. Choose
+scene count and pacing from that progression, unless the user specifies them.
+Record the through-line, recurring visual identifiers, evidence available, intended
+viewing size and any production budget in the brief. Spend on missing explanatory
+coverage or alternate takes, rather than maximizing asset or recipe counts.
+Preserve explicitly requested story premises and recurring props: a teal form is
+not interchangeable with a teal character. Creative additions must support them.
+
+Building applies a project draft. It does not
 mean narration audio, GPU-generated imagery, or a video export has completed.
 Report only results confirmed by successful tools.
 

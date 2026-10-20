@@ -52,6 +52,32 @@ No GPU? The whole loop (brief → package → SVG art → timeline edits → pre
 
 ## Gallery
 
+### Five worlds — long-form collection
+
+![Forest, clockwork, architecture, food and deep-sea visual styles](docs/media/longform-collection.jpg)
+
+**[Watch all five films](https://mojomast.github.io/comfyrizz/)** —
+20 minutes 41 seconds across fungal ecology, a fictional railway mystery, urban
+cooling, fermentation and deep-sea life. Each film has its own visual direction,
+narrator and original score. The 140-scene collection uses 98 selected generated
+motion shots and 42 authored animated inserts, with captions, chapter navigation,
+MP4s and editable downloads. The 202-job generation batch used **8.40 credits**.
+See [production details, individual links and verification](docs/LONGFORM_COLLECTION.md).
+The public gallery uses [GitHub Pages](docs/GITHUB_PAGES.md), with 720p web playback
+and original 1080p/project downloads in GitHub Releases.
+
+### Anonymous, in Triplicate — quality follow-up
+
+![A teal suggestion form inspected under a brass magnifying glass](docs/media/still-anonymous.jpg)
+
+A 62.5-second fictional Ministry short follows one teal form through a bureaucratic
+paradox. **8 fresh stills, 11 normal-speed motion shots, 5 editable SVG inserts**, and
+a scene-aware original score apply the updated direction guidance. Narration was
+measured before GPU shot lengths were planned; the 19-job batch used **0.74 credits**.
+See the [film, production decisions and reproduction guide](docs/ANONYMOUS_DEMO.md).
+[Watch the published short](https://mail.tailec998.ts.net:8451/rich-anonymous/index.html)
+or [download the MP4](https://mail.tailec998.ts.net:8451/rich-anonymous/video.mp4).
+
 ### Rich storytelling collection
 
 Three twelve-scene films combine **21 fresh generated stills, 17 LTX motion
@@ -144,6 +170,7 @@ flowchart TD
 - **The render.** `apps/renderer` (Remotion) supports Title, Hero, Stat, Chart, List, Split, Compare and Code layouts, motion tokens, the six storytelling recipes, animated diagrams, motion transitions and procedural backgrounds when no plate exists. Measured speech can extend a scene beyond its default visual pacing limit.
 
 See the [animation and storytelling research (19 October 2026)](docs/research/ANIMATION_STORYTELLING_2026.md) for the current capability audit, MIT-library shortlist, proposed visual styles and prioritized integration plan.
+The [content-quality research and skill updates (20 October 2026)](docs/CONTENT_QUALITY_RESEARCH.md) connect demo findings to worked-example storytelling, shot coverage, caption-aware direction and evidence-based agent evaluation.
 The shipped CPU pack, agent usage and verification are documented in the [animation guide](docs/ANIMATION_STORYTELLING.md); agents combining branches should use the [integration handoff](docs/handoffs/ANIMATION_INTEGRATION.md). [Production voice options](docs/VOICE_GENERATION.md) covers presets, blends, Qwen modes and delivery; the [pipeline contract](docs/PIPELINE_OBSERVABILITY.md) documents the nine stages and recovery.
 
 ## Quickstart

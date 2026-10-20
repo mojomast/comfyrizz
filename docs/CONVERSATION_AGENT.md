@@ -68,9 +68,10 @@ Canonical Markdown lives under `packages/agent/src/skills/`:
 | `storyboard-direction` | Choose concrete, consistent visuals within actual rendering capabilities |
 | `project-revision` | Make scoped corrections while preserving unrelated work and stable scene IDs |
 
-The runtime prompt is `2.2.0` and skill catalogue is `1.2.0`.
-`storyboard-direction` is `1.2.0`, `project-revision` is `1.1.0`, and the briefing
-and scripting skills remain `1.0.0`.
+The runtime prompt is `2.2.0` and skill catalogue is `1.3.0`.
+`storyboard-direction` is `1.3.0`, `project-revision` is `1.2.0`, and the briefing
+and scripting skills are `1.1.0`. Selected instructions are bounded by 2,000 words
+and 14,500 characters in the skill contract tests.
 At most three skills are injected per model request. Once a draft exists,
 `project-revision` replaces `video-brief`. The loader resolves fixed bundled
 paths; compiled packages include the canonical source Markdown. Source links in
@@ -167,6 +168,18 @@ node packages/agent/scripts/eval-conversation.mjs \
 
 Local evidence for the completed run is `.runtime/evals/animation-handoff.json`;
 credentials and evaluation artifacts stay outside source control.
+
+### Content-quality skills follow-up: October 20, 2026
+
+Catalog **1.3.0** translates the rich-demo review and current primary-source guidance
+into the four bundled skills. It adds observable visual outcomes, worked examples,
+continuity, intentional pacing, caption access, plate-coverage reasoning and
+evidence-limited critique. See [research and capability mapping](CONTENT_QUALITY_RESEARCH.md).
+
+Four additional scenarios in `conversation-cases.json` exercise these behaviors.
+Their state/constraint assertions run in the existing harness; creative judgments
+use the [evidence-anchored rubric](../packages/agent/evals/CONTENT_QUALITY.md).
+These are distinct results: a passing assertion is not a rendered-quality rating.
 
 ### Reproduce
 

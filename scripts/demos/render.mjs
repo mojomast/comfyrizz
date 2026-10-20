@@ -14,7 +14,7 @@ for(const slug of readdirSync(input)){
   const source=join(input,slug), packageFile=join(source,'package.json');
   if(!existsSync(packageFile))continue;
   const pkg=JSON.parse(readFileSync(packageFile));
-  const name=['ussy','hermes','ministry'].find(value=>pkg.id===`pkg_rich${value}20261020`);
+  const name=['ussy','hermes','ministry'].find(value=>pkg.id===`pkg_rich${value}20261020`)??slug;
   if(!name||!selected.includes(name))continue;
   if(planJobs(pkg).jobs.length)throw Error(`${name}: GPU media is still pending; CPU render will not allocate a runtime`);
   const out=join(root,'productions',name), resultFile=join(out,'result.json');

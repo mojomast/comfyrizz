@@ -1,5 +1,31 @@
 # Rich-demo media runner
 
+For new productions, use the [content-quality production playbook](../../docs/CONTENT_QUALITY_RESEARCH.md#production-playbook-for-the-next-film):
+plan a narrated rough cut before final GPU coverage, then recheck coverage after
+measured timing. The workflow below reproduces the original showcase batch; its
+successful generation counts are not a creative-quality score.
+
+The subsequent [Anonymous, in Triplicate demo](../../docs/ANONYMOUS_DEMO.md) uses
+`anonymous.mjs` and `anonymous-score.py` for narration-first shot planning and a
+scene-aware score. `render.mjs --only <package-slug>` also accepts follow-up package
+slugs; `verify-published.mjs` accepts optional `production-name:player-directory`
+pairs. `temporal-review.py` extracts opening/action/end samples for each scene.
+
+The [five-film long-form collection](../../docs/LONGFORM_COLLECTION.md) adds
+`longform-stories.mjs`, `longform.mjs`, and `longform-score.py` for distinct scripts,
+styles, measured coverage, animated graphics and scores. `longform-assemble.mjs`
+merges the independent editorial and GPU work; `longform-polish.mjs` applies the
+review-selected crops. `longform-assets-review.py` produces source temporal sheets,
+and `longform-gallery.mjs` builds the verified collection's landing page.
+
+The collection is [public on GitHub Pages](https://mojomast.github.io/comfyrizz/).
+`github-pages.mjs` packages verified publications as 720p web players with original
+1080p/project downloads in GitHub Releases; `verify-pages.mjs` checks the gallery
+and players in Chromium, including repository-subpath links and chapter seeking.
+See [Pages deployment and verification](../../docs/GITHUB_PAGES.md) for commands.
+Current cumulative generation spend is **10.62/30 credits**, leaving **19.38**;
+historical batch budgets below must not be reused as a fresh campaign balance.
+
 `scripts/demos/run.mjs` turns the three built package directories into GPU media sets in **one
 managed Google Colab session**, then stops at collected/applied media. It does **not** narrate,
 polish, render, verify, export or publish. Those are parent pipeline stages:

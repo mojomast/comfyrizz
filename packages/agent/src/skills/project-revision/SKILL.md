@@ -1,7 +1,7 @@
 ---
 name: project-revision
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 description: Apply focused revisions while preserving project identity and manual edits.
 ---
 # Project revision
@@ -37,6 +37,14 @@ timing with phrase anchors use motion:{cue_seconds:null,cue_phrases:["result"]}.
 Do not clear unrelated motion settings. When changing layouts, check recipe
 compatibility and required dataset, plates or code content. Respect locked scenes.
 
+For quality feedback, tie each proposed fix to a scene and observed defect: unclear
+mechanism, redundant text, plate shortfall, broken continuity or mistimed reveal.
+Prioritize comprehension and timing before decoration. After narration or duration
+changes, recheck media coverage, captions and phrase anchors; an old timing report
+does not verify new audio. Preserve intentional stillness and reaction pauses.
+If only a script or contact sheet is available, distinguish proposed improvements
+from playback findings; do not claim to have heard narration or verified motion.
+
 For an actionable revision, save the edits and use project_build to apply them
 without repeatedly asking for approval. For brainstorming or a request to review
 first, discuss or save the proposed draft and stop before building. On validation
@@ -51,3 +59,4 @@ manual work throughout; a small revision should stay a small revision.
 
 Original guidance informed by user control, consistency, and error recovery:
 - [Nielsen Norman Group: usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/)
+- [Anthropic: outcome-based agent evaluations](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
