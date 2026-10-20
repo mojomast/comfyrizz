@@ -179,14 +179,14 @@ The ids are derived from the shared catalogue in
 `packages/schema/src/animation.mjs` (`ANIMATION_RECIPE_IDS`), so the renderer,
 planner and editor cannot drift.
 
-| Recipe | Renderer effect | Main layouts |
+| Recipe | Renderer effect | Recommended layouts (shared catalogue) |
 |---|---|---|
-| `sketch` | Seeded Rough.js outlines, perfect-freehand ticks/arrows and sketched cards around editable copy. List cards reveal on planner cue frames. | title, hero, stat, chart, list, split/compare, code (frame only) |
-| `paper-cut` | Torn-paper layers, offset shadows, sheets behind headlines/list rows and paper tabs on split labels. | title, hero, stat, chart, list, split, compare |
-| `morph` | Bounded Flubber interpolation between `circle`, `square`, `triangle` and `blob`, with endpoint ghosts and a speech-anchored window. | title, hero, list, chart, split/compare |
+| `sketch` | Seeded Rough.js outlines, perfect-freehand ticks/arrows and sketched cards around editable copy. List cards reveal on planner cue frames. | title, hero, list, chart, code |
+| `paper-cut` | Torn-paper layers, offset shadows, sheets behind headlines/list rows and paper tabs on split labels. | title, hero, split, compare, list |
+| `morph` | Bounded Flubber interpolation between `circle`, `square`, `triangle` and `blob`, with endpoint ghosts and a speech-anchored window. | title, hero, compare, list |
 | `technical-flow` | Dagre node/edge layout from `copy.items`, speech-cued node reveals, active-node emphasis, routed connectors and analytic packets. Replaces the list layout; compact graph overlay is used on hero/chart when the visual area is free. | hero, list, chart |
-| `focus` | A dimmed surround with a transparent focus window, accent frame and corner brackets over existing media. The image inside stays fully visible. | any layout, incl. media-only |
-| `kinetic` | Masked phrase/headline reveals grouped by `motion.cue_phrases` and anchored by resolved timings. Copy is never replaced. | title, hero, list, stat, chart |
+| `focus` | A dimmed surround with a transparent focus window, accent frame and corner brackets over existing media, entering at scene start. The image inside stays fully visible. | hero, split, compare, chart, code |
+| `kinetic` | Masked phrase/headline reveals grouped by `motion.cue_phrases` and anchored by resolved timings. Copy is never replaced. | title, hero, list, stat |
 
 Optional parameters: `seed` (integer 1..2147483647), `intensity` (0..1),
 `focus` (`{x,y,width,height}` normalized), `morph` (`{from,to}` shape ids) and
@@ -196,6 +196,9 @@ source. The renderer consumes the planner's `timeline.scenes[].motionCues`
 subtracting `scene.from`; unresolved phrases get a bounded deterministic
 fallback plus `data-cue-source` / `data-cue-fallback` / `data-cue-missing`
 attributes and one process warning, never silent decoration.
+This cue plan drives sketch items, technical-flow, morph and kinetic; paper-cut
+and focus use scene-entry timing. The renderer tolerates additional layout/recipe
+combinations, but authoring should use the recommended catalogue above.
 
 `paper-reveal`, `draw-reveal` and `shape-reveal` are appended to the transition
 vocabulary. They are non-directional reveal masks (no shared-element identity,

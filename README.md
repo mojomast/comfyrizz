@@ -116,6 +116,7 @@ flowchart TD
 - **The render.** `apps/renderer` (Remotion) supports Title, Hero, Stat, Chart, List, Split, Compare and Code layouts, motion tokens, animated diagrams and procedural backgrounds when no plate exists. Measured speech can extend a scene beyond its default visual pacing limit.
 
 See the [animation and storytelling research (19 October 2026)](docs/research/ANIMATION_STORYTELLING_2026.md) for the current capability audit, MIT-library shortlist, proposed visual styles and prioritized integration plan.
+The shipped CPU pack, agent usage and verification are documented in the [animation guide](docs/ANIMATION_STORYTELLING.md); agents combining branches should use the [integration handoff](docs/handoffs/ANIMATION_INTEGRATION.md).
 
 ## Quickstart
 

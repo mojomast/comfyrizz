@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { CONVERSATION_TOOLS, CONVERSATION_RECIPES, CONVERSATION_TRANSITIONS, conversationPlanSchema, patchConversationPlan } from '../../../packages/agent/dist/src/index.js';
-import { ANIMATION_RECIPE_IDS, ANIMATION_TRANSITIONS } from '../../../packages/schema/src/animation.mjs';
+import { CONVERSATION_TOOLS, CONVERSATION_RECIPES, CONVERSATION_TRANSITIONS, conversationPlanSchema, patchConversationPlan, runConversationTurn } from '../../../packages/agent/dist/src/index.js';
+import { ANIMATION_RECIPES, ANIMATION_RECIPE_IDS, ANIMATION_TRANSITIONS } from '../../../packages/schema/src/animation.mjs';
 
 const require = createRequire(new URL('../../../packages/schema/package.json', import.meta.url));
 const Ajv = require('ajv');
@@ -32,4 +32,41 @@ test('model-visible patch schema and executor both accept partial and cleared mo
 test('conversation tool vocabulary matches the shared animation catalogue', () => {
   assert.deepEqual(CONVERSATION_RECIPES, ANIMATION_RECIPE_IDS);
   assert.deepEqual(CONVERSATION_TRANSITIONS, ANIMATION_TRANSITIONS);
+});
+
+test('actual drafting and revision model requests receive current recipe capabilities and usage limits', async () => {
+  const plan = conversationPlanSchema.parse({ title: 'Flow', brief: 'Explain a workflow', audience: 'Developers', aspect: '16:9', stylePreset: 'cinematic-dark',
+    scenes: [{ id: 's_flow', layout: 'list', headline: 'Follow the work', items: ['Request', 'Worker', 'Result'], narration: 'A request reaches the worker and produces a result.', seconds: 8, visual: 'A process',
+      motion: { recipe: 'technical-flow', seed: 42, entry: 'maskRise', cue_seconds: [1, 2, 3] } }] });
+  for (const mode of ['chat', 'express']) for (const existing of [null, plan]) {
+    let request;
+    const result = await runConversationTurn({
+      model: { id: 'contract', async *stream(input) { request = input; yield { type: 'text', delta: 'Here is the guidance.' }; } },
+      plan: existing, projectContext: existing ? { packageId: 'pkg_flow' } : undefined, mode,
+      messages: [{ role: 'user', content: 'Explain available animation settings without changing my project.' }],
+      sessionId: 'animation-instructions', signal: AbortSignal.timeout(5000), build: async () => { throw Error('Advice must not build'); },
+    });
+    for (const recipe of ANIMATION_RECIPES) assert.ok(request.system.includes(`- ${recipe.id}: ${recipe.layouts.join(', ')}.`), `model guidance matches catalogue for ${recipe.id}`);
+    assert.match(request.system, /Paper-cut and focus currently enter at scene start/);
+    assert.match(request.system, /not forced\s+alignment/);
+    assert.match(request.system, /no shared-object continuity/);
+    assert.match(request.system, /future work, not available tools/);
+    assert.equal(result.trace.promptVersion, '2.2.0');
+    assert.ok(result.trace.skills.some(skill => skill.id === 'storyboard-direction' && skill.version === '1.2.0'));
+    if (existing) {
+      assert.match(request.system, /cue_seconds:null,cue_phrases/);
+      assert.match(request.system, /motion:\{recipe:null\}/);
+    }
+    const tools = JSON.stringify(request.tools);
+    assert.match(tools, /Whole-frame normalized rectangle/);
+    assert.match(tools, /Explicit scene-local seconds/);
+    assert.equal(result.built, false);
+  }
+  const switchToPhrases = { scenePatches: [{ id: 's_flow', changes: { motion: { cue_seconds: null, cue_phrases: ['request', 'worker', 'result'] } } }] };
+  assert.equal(accepts(switchToPhrases), true);
+  const updated = patchConversationPlan(plan, switchToPhrases);
+  assert.equal(updated.scenes[0].motion.cue_seconds, undefined);
+  assert.deepEqual(updated.scenes[0].motion.cue_phrases, ['request', 'worker', 'result']);
+  assert.equal(updated.scenes[0].motion.seed, 42);
+  assert.equal(updated.scenes[0].motion.entry, 'maskRise');
 });

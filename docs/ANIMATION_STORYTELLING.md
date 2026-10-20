@@ -36,6 +36,12 @@ Authorization: Bearer <existing-server-token>
 
 It returns `{ "version": 1, "recipes": [{ "id", "label", "description", "layouts" }], "transitions": [...] }`. The browser-safe source is `packages/schema/src/animation.mjs`.
 
+The authoring agent receives the same recommended recipe/layout combinations in
+its versioned storyboard skill, verified against this catalogue by a model-request
+contract test. Its tool descriptions cover parameter bounds, cue precedence and
+partial/null patches. See [agent usage](CONVERSATION_AGENT.md#animation-and-richer-layouts)
+and the [integration handoff](handoffs/ANIMATION_INTEGRATION.md).
+
 ## Saved contract
 
 Recipes live inside `scene.motion`, alongside existing entry, diagram and emphasis settings:
@@ -58,6 +64,21 @@ Recipes live inside `scene.motion`, alongside existing entry, diagram and emphas
 - `morph`: `{ "from": "circle", "to": "square" }`.
 - `cue_phrases`: up to six narration phrases; resolve after narration timing is available.
 - Existing `cue_seconds` supplies explicit scene-local times and takes precedence over phrase matching.
+
+Phrase anchors drive sketch item reveals, technical-flow nodes, morph timing and
+kinetic headline groups. For kinetic, use phrases present in both narration and
+headline. Paper-cut and focus currently use scene-entry timing. Focus coordinates
+are relative to the entire frame, so inspect the rectangle after an aspect change.
+Morph endpoints are bounded shapes, not arbitrary images; equal endpoints remain
+static. Reveal effects have no direction or shared-object continuity.
+
+For a targeted conversational patch, omitted motion fields are preserved, including
+nested focus/morph fields. For example, `{"motion":{"focus":{"x":0.2}}}` changes
+only x if the completed rectangle is valid. `{"motion":{"recipe":null}}` removes
+the recipe while retaining other animation settings; `{"motion":null}` clears the
+whole motion object. To replace explicit timing, send
+`{"motion":{"cue_seconds":null,"cue_phrases":["request","worker","result"]}}`
+inside the appropriate `scenePatches[].changes`, then build to apply the draft.
 
 Phrase-derived timing retains its provenance. Kokoro's syllable-fallback timestamps are estimates within measured audio, not forced alignment. The compiler stores resolutions in `timeline.scenes[].motionCues`, separately from the editable motion settings. Explicit seconds win; phrases use matching word cues or caption starts. Repeated phrases select the first occurrence with a diagnostic; phrases spanning caption boundaries remain unresolved. Missing, ambiguous and estimated anchors appear in `timeline.motionCueDiagnostics` and pipeline warning events.
 
@@ -108,6 +129,11 @@ Playback was verified over Tailscale for both showcases and all five previous pl
 Verification results: schema **140**, planner **32**, renderer **213**, agent **110**, web **19**, and TTS **17** passing tests; full server suite **157/157**, plus two subsequently added tool-schema contract tests. Python pipeline and targeted production regressions passed. Web and renderer TypeScript checks and the production frontend build passed. A live `opencode-go/deepseek-v4.1-flash` authoring turn built a valid six-scene project containing title, list, chart, compare and code layouts, with the requested technical-flow cues and no pending GPU work.
 
 Reproduction evidence is stored outside the repository at `/home/mojo/comfyrizz-gpu-tests/animation-implementation-20261020`, including the portrait run, baseline report, deterministic-still verification, browser checks and deployment hashes. This animation work consumed no Colab units; cumulative authorization remains 10.22 of 20 units spent.
+
+The agent-knowledge follow-up (prompt 2.2.0) passed all **110 agent tests**, **five
+targeted catalogue/tool-contract tests**, and a **2/2-turn live DeepSeek evaluation**
+covering creation with all six recipes and scoped motion revisions. See the
+[merge handoff](handoffs/ANIMATION_INTEGRATION.md) for integration and deployment.
 
 ## Subsequent research directions
 

@@ -285,22 +285,24 @@ const sceneProperties = {
   },
   motion: {
     type: 'object', additionalProperties: false,
-    description: 'Optional storytelling motion. Choose a recipe by the scene\'s story role, not for random variety. Omitted fields keep the current package values.',
+    description: 'Optional CPU storytelling motion. Choose a recipe and compatible layout from the storyboard guidance, by story role. In project_patch_plan, omitted fields merge and null clears; a full draft replacement must carry forward intended settings.',
     properties: {
       recipe: { type: 'string', enum: [...CONVERSATION_RECIPES] },
       seed: { type: 'integer', minimum: 1, maximum: 2147483647 },
       intensity: { type: 'number', minimum: 0, maximum: 1 },
       focus: {
         type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'],
+        description: 'Whole-frame normalized rectangle: x+width <= 1 and y+height <= 1. Positive dimensions. Enters at scene start, not a phrase cue; inspect framing after changing aspect.',
         properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } },
       },
       morph: {
         type: 'object', additionalProperties: false, required: ['from', 'to'],
+        description: 'Bounded shape interpolation only, not arbitrary asset morphing. Equal endpoints remain static.',
         properties: { from: { type: 'string', enum: [...CONVERSATION_MORPH_SHAPES] }, to: { type: 'string', enum: [...CONVERSATION_MORPH_SHAPES] } },
       },
-      cue_phrases: { type: 'array', maxItems: 6, items: string(CONVERSATION_LIMITS.cuePhrase), description: 'Phrases from this scene\'s narration that anchor beats, in order.' },
+      cue_phrases: { type: 'array', maxItems: 6, items: string(CONVERSATION_LIMITS.cuePhrase), description: 'Ordered phrases from this scene\'s narration, resolved after synthesis for sketch items, flow, morph or kinetic. Explicit cue_seconds win; clear them when switching. Missing/repeated/estimated anchors get diagnostics. Kokoro syllable-fallback is estimated, not forced alignment. Focus/paper-cut use scene-start entry.' },
       diagram: { type: 'string', enum: ['flow', 'hub'] },
-      cue_seconds: { type: 'array', maxItems: 6, items: { type: 'number', minimum: 0, maximum: 20 } },
+      cue_seconds: { type: 'array', maxItems: 6, items: { type: 'number', minimum: 0, maximum: 20 }, description: 'Explicit scene-local seconds, overriding phrase anchors. Keep within scene duration; preserve unless changing timing intentionally.' },
       entry: { type: 'string', enum: [...CONVERSATION_ENTRIES] },
       ease: { type: 'string', enum: [...CONVERSATION_EASES] },
       spring: { type: 'string', enum: [...CONVERSATION_SPRINGS] },
@@ -312,7 +314,7 @@ const sceneProperties = {
   },
   transition: {
     type: 'object', additionalProperties: false, required: ['type'],
-    description: 'Optional outgoing transition. Choose it from the relationship to the next beat. The final scene has no outgoing transition. Omitted means the existing fade default.',
+    description: 'Outgoing boundary effect. Reveal types have no direction or shared-object continuity. Cut/none have zero overlap. Final scene has no outgoing transition. On patch, omission preserves existing settings; on a new scene omission uses the fade default.',
     properties: {
       type: { type: 'string', enum: [...CONVERSATION_TRANSITIONS] },
       frames: { type: 'integer', minimum: 0, maximum: 120 },
@@ -488,7 +490,7 @@ export const CONVERSATION_TOOLS: ToolDef[] = [
   },
 ];
 
-export const CONVERSATION_PROMPT_VERSION = '2.1.0';
+export const CONVERSATION_PROMPT_VERSION = '2.2.0';
 const SYSTEM = `You are Comfyrizz, a conversational video producer. Do the creative work: write the copy, narration script and storyboard yourself.
 Ask at most one high-value clarification at a time; use known answers and safe defaults (30s, 16:9, cinematic-dark). Avoid repeated questions and unnecessary approvals.
 For a creation request, draft and build when enough is known. For brainstorming, advice, or a request to review first, discuss or save a draft without building. When the user later says build/go ahead, build the existing draft without rewriting it. For feedback on a built project, patch and build unless the user asks for draft-only changes.

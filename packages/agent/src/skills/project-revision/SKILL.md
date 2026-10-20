@@ -1,7 +1,7 @@
 ---
 name: project-revision
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 description: Apply focused revisions while preserving project identity and manual edits.
 ---
 # Project revision
@@ -27,6 +27,15 @@ complete replacement is genuinely needed, carrying forward all unaffected work.
 If a project exists without a draft, reconstruct the draft from the current
 snapshot rather than starting from a generic template. Do not assume that
 building merges missing fields or restores content omitted from a replacement.
+
+Motion patches merge omitted fields, including nested focus/morph fields. For
+example, scenePatches:[{id:"s_detail",changes:{motion:{focus:{x:0.2}}}}] moves
+only x, provided the resulting rectangle stays inside the frame. Null explicitly
+clears a token: motion:{recipe:null} returns to the default recipe while retaining
+entry/easing; motion:null clears the whole motion object. To replace explicit
+timing with phrase anchors use motion:{cue_seconds:null,cue_phrases:["result"]}.
+Do not clear unrelated motion settings. When changing layouts, check recipe
+compatibility and required dataset, plates or code content. Respect locked scenes.
 
 For an actionable revision, save the edits and use project_build to apply them
 without repeatedly asking for approval. For brainstorming or a request to review

@@ -76,7 +76,7 @@ export const ANIMATION_RECIPES = Object.freeze(
       id: "focus",
       label: "Evidence focus window",
       description:
-        "A speech-cued focus rectangle over media or code, with restrained annotation; for screenshots, sourced claims and product demonstrations.",
+        "A scene-entry focus rectangle over media or code, with restrained annotation; for screenshots, sourced claims and product demonstrations.",
       layouts: Object.freeze(["hero", "split", "compare", "chart", "code"]),
     },
     {
