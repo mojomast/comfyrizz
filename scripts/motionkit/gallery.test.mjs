@@ -158,3 +158,21 @@ test("every entry has a non-empty label", () => {
     assert.ok(r.label.trim().length > 0, `entry ${r.id} has empty label`);
   }
 });
+// ---- test: cards use each recipe's real palette via styleFrame ----
+test("gallery cards render each recipe's own palette (not one default)", async () => {
+  const { renderCardSvg } = await import("./gallery.mjs");
+  const recipes = readRecipes();
+  const recipesDir = join(__dirname, "data", "recipes");
+  const backgrounds = new Set();
+  for (const r of recipes) {
+    const raw = JSON.parse(readFileSync(join(recipesDir, `${r.id}.json`), "utf8"));
+    const svg = renderCardSvg(r, 0);
+    for (const c of raw.palette) {
+      assert.ok(svg.toLowerCase().includes(c.hex.toLowerCase()), `${r.id} card missing palette colour ${c.hex}`);
+    }
+    backgrounds.add(raw.palette.find((c) => c.role === "background").hex.toLowerCase());
+  }
+  assert.ok(backgrounds.size >= 12, `expected distinct backgrounds, got ${backgrounds.size}`);
+  const html = renderIndexHtml(recipes);
+  assert.ok(html.includes("#120428") || html.toLowerCase().includes("#120428"), "synthwave background missing from index.html");
+});

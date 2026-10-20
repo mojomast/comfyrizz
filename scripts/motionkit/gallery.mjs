@@ -5,6 +5,7 @@
 // directory (which would throw EISDIR on some Node versions).
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { styleFrame } from "./style-frame.mjs";
 
 // ---- injected fs dependency (for testability) ----
 const FS_READ = readFileSync;
@@ -144,6 +145,10 @@ const KNOWN_RECIPE_FILENAMES = [
   "y2k-chrome.json",
 ];
 
+// Full recipe documents keyed by id, so cards render with each recipe's real
+// palette/background/finish via styleFrame (gallery.json stays a summary).
+const RAW_RECIPES = new Map();
+
 // Read all 24 recipe JSON entries from the known filenames.
 function readRecipes() {
   const entries = [];
@@ -154,6 +159,7 @@ function readRecipes() {
       const data = JSON.parse(content);
       const entry = buildGalleryEntry(data);
       if (entry.id) {
+        RAW_RECIPES.set(entry.id, data);
         entries.push(entry);
       }
     } catch {
@@ -172,249 +178,13 @@ function writeGalleryJson(recipes) {
   return content;
 }
 
-// Render a minimal SVG background pattern (mirrors style-frame.mjs logic)
-function renderBackgroundPattern(pattern, palette, width, height) {
-  const { background, accent, extra, muted } = palette;
-  const bg = background || "#f2f0eb";
-  const ac = accent || "#e3241b";
-  const ex = extra || "#9a9a9a";
-  const mu = muted || "#8a8f98";
-
-  if (pattern === "grid") {
-    return [
-      `<linearGradient id="bg-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="100%" y2="100%">`,
-      `<stop offset="0" stop-color="${ac}" stop-opacity="0.85"/>`,
-      `<stop offset="0.5" stop-color="${ex}" stop-opacity="0.7"/>`,
-      `<stop offset="1" stop-color="${bg}"/>`,
-      `</linearGradient>`,
-      `<pattern id="bg-grid" width="40" height="40" patternUnits="userSpaceOnUse">`,
-      `<path d="M40 0 V40 H0" fill="none" stroke="${mu}" stroke-width="1" opacity="0.18"/>`,
-      `</pattern>`,
-    ];
-  }
-  if (pattern === "dots") {
-    const cell = Math.max(8, Math.round(Math.min(width, height) / 9));
-    return [
-      `<pattern id="bg-dots" width="${cell}" height="${cell}" patternUnits="userSpaceOnUse">`,
-      `<circle cx="${Math.round(cell / 2)}" cy="${Math.round(cell / 2)}" r="${Math.max(1, Math.round(cell * 0.09))}" fill="${ac}" opacity="0.55"/>`,
-      `</pattern>`,
-    ];
-  }
-  // grain (default) – feTurbulence grain patch
-  return [
-    `<filter id="bg-grain" x="0%" y="0%" width="100%" height="100%">`,
-    `<feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" seed="42" result="n"/>`,
-    `<feColorMatrix in="n" type="saturate" values="0"/>`,
-    `</filter>`,
-  ];
-}
-
-// Render the first finish effect as SVG filter/defs, matching style-frame.mjs kind map.
-function renderFinishEffect(finish, width, height) {
-  if (!Array.isArray(finish) || finish.length === 0) return "";
-
-  const first = finish[0];
-  const effectId = typeof first === "string" ? first : (first && typeof first.id === "string" ? first.id : "");
-
-  // kind mapping: which CSS/SVG category the effect falls into
-  const kindMap = {
-    grain: "grain",
-    "grain-fine": "grain",
-    "paper-grain": "grain",
-    "paper-texture": "grain",
-    dust: "grain",
-    halftone: "halftone",
-    "pixelate-in": "halftone",
-    vignette: "vignette",
-    "vignette-soft": "vignette",
-    "vignette-hard": "vignette",
-    scanlines: "scanlines",
-    "scanlines-soft": "scanlines",
-    "crt-curve": "scanlines",
-    "vhs-tracking": "scanlines",
-    duotone: "duotone",
-    "mono-grade": "duotone",
-    "sepia-grade": "duotone",
-    "teal-orange": "duotone",
-    lut: "duotone",
-    chroma: "chroma",
-    "chroma-shift": "chroma",
-    glitch: "chroma",
-    riso: "chroma",
-    "riso-misregister": "chroma",
-    halftone2: "chroma",
-    glow: "glow",
-    "glow-text": "glow",
-    soft: "glow",
-    chrome: "glow",
-    smear: "smear",
-    shadow: "shadow",
-    "hard-shadow": "shadow",
-    drop: "shadow",
-    "soft-shadow": "shadow",
-    boil: "grain",
-    "push-in": "grain",
-    drift: "grain",
-    parallax: "grain",
-    rack: "grain",
-  };
-
-  const category = kindMap[effectId] ?? "grain";
-
-  // Helper: clamp a value to [0,1]
-  const clamp = (v) => Math.min(1, Math.max(0, Number(v) || 0));
-
-  if (category === "grain") {
-    const params = (first.params && typeof first.params === "object" && !Array.isArray(first.params)) ? first.params : {};
-    const amount = clamp(params.amount);
-    const size = (params.size !== undefined ? params.size : 2);
-    const freq = 0.9 / Math.max(0.1, size);
-    return [
-      `<filter id="finish" x="0%" y="0%" width="100%" height="100%">`,
-      `<feTurbulence type="fractalNoise" baseFrequency="${freq}" numOctaves="3" seed="42" result="n"/>`,
-      `<feColorMatrix in="n" type="saturate" values="0"/>`,
-      `</filter>`,
-    ];
-  }
-
-  if (category === "vignette") {
-    const params = (first.params && typeof first.params === "object" && !Array.isArray(first.params)) ? first.params : {};
-    const amount = clamp(params.amount);
-    const radius = clamp(params.radius !== undefined ? params.radius : 0.6);
-    return [
-      `<radialGradient id="finish" cx="50%" cy="50%" r="70%">`,
-      `<stop offset="${radius}" stop-color="#000000" stop-opacity="0"/>`,
-      `<stop offset="1" stop-color="#000000" stop-opacity="${amount}"/>`,
-      `</radialGradient>`,
-    ];
-  }
-
-  if (category === "scanlines") {
-    const params = (first.params && typeof first.params === "object" && !Array.isArray(first.params)) ? first.params : {};
-    const count = Math.max(20, Math.min(600, params.count || 240));
-    const spacing = Math.min(16, Math.max(2, Math.round((height * 2) / count)));
-    return [
-      `<pattern id="finish" width="${width}" height="${spacing}" patternUnits="userSpaceOnUse">`,
-      `<rect width="${width}" height="1" fill="#000000" fill-opacity="0.35"/>`,
-      `</pattern>`,
-    ];
-  }
-
-  if (category === "duotone") {
-    const shadowHex = "#111111";
-    const highlightHex = "#ffffff";
-    const amount = clamp(first.params && first.params.amount !== undefined ? first.params.amount : 0.9);
-    const rows = [
-      [`${1 - amount * 0.2126}`, `${0 - amount * 0.7152}`, `${0 - amount * 0.0722}`, "0", "0"],
-      [`${0 - amount * 0.2126}`, `${1 - amount * 0.7152}`, `${0 - amount * 0.0722}`, "0", "0"],
-      [`${0 - amount * 0.2126}`, `${0 - amount * 0.7152}`, `${1 - amount * 0.0722}`, "0", "0"],
-      ["0", "0", "0", "1", "0"],
-    ];
-    return [
-      `<filter id="finish" x="0%" y="0%" width="100%" height="100%">`,
-      `<feColorMatrix type="matrix">${rows[0].concat(rows[1]).concat(rows[2]).concat(rows[3]).join(" ")}</feColorMatrix>`,
-      `</filter>`,
-    ];
-  }
-
-  if (category === "chroma") {
-    const off = clamp(first.params && first.params.offset !== undefined ? first.params.offset : 2);
-    return [
-      `<filter id="finish" x="0%" y="0%" width="100%" height="100%">`,
-      `<feOffset in="SourceGraphic" dx="-${off}" dy="0" result="ro"/>`,
-      `<feColorMatrix in="ro" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="rc"/>`,
-      `<feOffset in="SourceGraphic" dx="${off}" dy="0" result="bo"/>`,
-      `<feColorMatrix in="bo" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 1 0" result="bc"/>`,
-      `<feBlend in="rc" in2="bc" mode="screen" result="rg"/>`,
-      `<feBlend in="rg" in2="bc" mode="screen"/>`,
-      `</filter>`,
-    ];
-  }
-
-  // fallback grain
-  return [
-    `<filter id="finish" x="0%" y="0%" width="100%" height="100%">`,
-    `<feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" seed="42" result="n"/>`,
-    `<feColorMatrix in="n" type="saturate" values="0"/>`,
-    `</filter>`,
-  ];
-}
-
-// Escape text for XML text nodes and double-quoted attribute values.
-function escapeXml(value) {
-  if (typeof value !== "string") return String(value);
-  return value.replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case "&": return "&";
-      case "<": return "<";
-      case ">": return ">";
-      case '"': return '"';
-      default: return "&apos;";
-    }
-  });
-}
-
-// Render one card's SVG using a simplified version of styleFrame logic.
+// Render one card's SVG through the recipe code's own renderer (styleFrame),
+// using the full recipe document so each card gets its real palette.
 function renderCardSvg(recipe, index) {
   const rec = recipe && typeof recipe === "object" && !Array.isArray(recipe) ? recipe : {};
-  const id = rec.id || `look-${index}`;
-  const label = rec.label || id;
-  const taxonomy = rec.taxonomy || { energy: "medium", finish: "", geometry: "", type: "", era: "" };
-  const fonts = rec.fonts || { display: "", text: "", mono: "" };
-  const finish = rec.finish && Array.isArray(rec.finish) ? rec.finish : [];
-
-  const energy = typeof taxonomy.energy === "string" ? taxonomy.energy : "medium";
-  const pattern = (taxonomy.pattern || "grid").toString().trim() || "grid";
-
-  // Readable palette – use the first four palette entries if available,
-  // otherwise a safe default.
-  const palette = rec.palette && Array.isArray(rec.palette) ? rec.palette : [
-    { role: "background", hex: "#f2f0eb" },
-    { role: "text", hex: "#111111" },
-    { role: "accent", hex: "#e3241b" },
-    { role: "muted", hex: "#9a9a9a" },
-  ];
-  const colors = palette.slice(0, 4).map((c) => c.hex || "#000000");
-
-  const background = colors[0] || "#f2f0eb";
-  const text = colors[1] || "#111111";
-  const accent = colors[2] || "#e3241b";
-  const muted = colors[3] || "#9a9a9a";
-
-  const fontDisplay = (fonts.display || "sans-serif").toString().trim() || "sans-serif";
-  const fontText = (fonts.text || "sans-serif").toString().trim() || "sans-serif";
-
-  // Build SVG string – self-contained, no external URLs, deterministic
-  const svgParts = [];
-
-  svgParts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180" role="img" data-recipe="${escapeXml(id)}" aria-label="Style frame: ${escapeXml(label)}">`);
-  svgParts.push(`<title>Style frame: ${escapeXml(label)}</title>`);
-
-  // Defs – background pattern + finish effect
-  const defs = [];
-
-  defs.push(...renderBackgroundPattern(pattern, { background, accent, muted, extra: muted }, 320, 180));
-  defs.push(...renderFinishEffect(finish, 320, 180));
-
-  svgParts.push(`<defs>${defs.join("")}</defs>`);
-
-  svgParts.push('<g data-part="frame">');
-  svgParts.push(`<rect width="320" height="180" fill="${escapeXml(background)}" data-part="background"/>`);
-  svgParts.push(`<g data-part="background-pattern" data-pattern="${escapeXml(pattern)}">`);
-  svgParts.push(`<rect width="320" height="180" fill="url(#bg-gradient)"/>`);
-  svgParts.push(`</g>`);
-  svgParts.push(`<rect x="8" y="8" width="264" height="3" fill="${escapeXml(accent)}" data-part="accent-rule"/>`);
-  svgParts.push(`<text x="8" y="34" font-family="${escapeXml(fontDisplay)}" font-size="14" fill="${escapeXml(text)}" opacity="0.9" data-part="label">${escapeXml(label)}</text>`);
-  svgParts.push(`<text x="8" y="58" font-family="${escapeXml(fontText)}" font-size="11" fill="${escapeXml(muted)}" data-part="meta">energy: ${escapeXml(energy)} · finish: ${escapeXml(pattern || "no-finish")} · geometry: ${escapeXml(taxonomy.geometry || "flat")}</text>`);
-  svgParts.push(`<g transform="translate(252 164) scale(0.6)" data-part="transition-glyph" data-glyph="cut">`);
-  svgParts.push(`<rect x="4" y="4" width="24" height="20" fill="${escapeXml(accent)}"/>`);
-  svgParts.push(`<rect x="32" y="4" width="24" height="20" fill="none" stroke="${escapeXml(text)}" stroke-width="2"/>`);
-  svgParts.push(`</g>`);
-  svgParts.push(`<text x="276" y="188" text-anchor="end" font-family="${escapeXml(fontText)}" font-size="11" fill="${escapeXml(muted)}" data-part="transition-label">cut</text>`);
-  svgParts.push(`</g>`);
-  svgParts.push(`</svg>`);
-
-  return svgParts.join("\n");
+  const full = (rec.id && RAW_RECIPES.get(rec.id)) || rec;
+  const doc = full.id ? full : { ...full, id: `look-${index}` };
+  return styleFrame(doc, { width: 320, height: 180 }).replace(/^<\?xml[^>]*>\s*/, "");
 }
 
 // Generate the full index.html – a static grid of 24 style-frame cards
@@ -502,7 +272,7 @@ const recipes = readRecipes();
 writeGalleryJson(recipes);
 renderIndexHtml(recipes);
 
-export { readRecipes, buildGalleryEntry, writeGalleryJson, renderIndexHtml, computeLicences };
+export { readRecipes, buildGalleryEntry, writeGalleryJson, renderIndexHtml, renderCardSvg, computeLicences };
 
 // Bootstrapping: if this module is executed directly via `node scripts/motionkit/gallery.mjs`,
 // the code above already ran during import evaluation.  For direct execution we
