@@ -7,297 +7,162 @@
 
 ### Chat in a brief. Get a narrated motion-graphics explainer.
 
-Open-source AI explainer videos: exact type, real charts, generated vector art, FLUX 3 Klein stills,<br>
-LTX-2.5 motion plates and Kokoro or Qwen3-TTS narration, cut on a frame-accurate timeline<br>
-and rendered deterministically with Remotion.
+Comfyrizz turns a short brief into a narrated motion-graphics video: exact type, real charts,
+generated vector art, FLUX 3 Klein stills, LTX-2.5 motion plates and Kokoro or Qwen3-TTS
+narration, cut on a frame-accurate timeline and rendered deterministically with Remotion.
+MIT licensed.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
-[![Node.js 22](https://img.shields.io/badge/node-22-339933?logo=nodedotjs&logoColor=white)](#requirements)
+[![Node.js 22](https://img.shields.io/badge/node-22-339933?logo=nodedotjs&logoColor=white)](#quick-start)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](pipeline-py/)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Comfy%20SDK-7c5cff)](https://github.com/comfyanonymous/ComfyUI)
 [![Remotion](https://img.shields.io/badge/render-Remotion-0b84f3)](https://www.remotion.dev)
 [![Hackathon](https://img.shields.io/badge/Comfy-Open%20Source%20Higgsfield%20hackathon-f59e0b)](#hackathon)
 
-<img src="docs/media/hero.webp" alt="Comfyrizz sizzle reel: nine example videos made with Comfyrizz" width="880">
+<img src="docs/media/hero.webp" alt="Comfyrizz sizzle reel: example videos made with Comfyrizz" width="880">
 
-<sub>Every frame above came out of Comfyrizz: nine example videos from one Google Colab G4 session. Labels, numbers and captions are drawn by code, never by the image model.</sub>
+<sub>Every frame above came out of Comfyrizz. Labels, numbers and captions are drawn by code, never by the image model.</sub>
 
-[Quickstart](#quickstart) · [Features](#features) · [How it works](#how-it-works) · [Configuration](#configuration) · [Roadmap](#roadmap) · [Spec](docs/SPEC.md)
+[20-second hook](#20-second-hook) · [Quick start](#quick-start) · [Demo](#demo) · [Gallery](#gallery) · [How it is built](#how-it-is-built) · [Hackathon submission](#hackathon-submission-links) · [Licence](#licence)
 
 </div>
 
 ---
 
-## What it does
+## 20-second hook
 
-1. **Brief.** Describe a talk, launch or lesson in chat. With a live provider, the agent writes the copy, narration script and storyboard. Brainstorm, review a draft, ask for corrections, then build an editable project and keep revising it. Express mode favors reasonable defaults. The offline scripted flow also offers chip questions and an editable brief.
-2. **Package.** A model-agnostic agent turns the brief into a `comfyrizz.package/v1`: scenes, copy, charts from your CSV, sanitised SVG art, and planned FLUX 3 Klein / LTX-2.5 jobs.
-3. **Generate.** GPU jobs run through the Comfy SDK on a **Google Colab** G4 runtime that Comfyrizz starts, runs, collects and verifiably stops, or on **your own ComfyUI**. Nothing is spent without a spend card you approve.
-4. **Refine.** A scene timeline and script panel share one undo/redo store. Trim or reorder scenes, correct captions, split narration takes, set source media ranges, audition the mix, and tune each scene's animation recipe and the project voice. A trim below the measured speech or layout floor is accepted as a preference and floored by the compiler. The animation inspector and voice panel write through the same revision-checked autosave.
-5. **Render.** Remotion renders a 1080p MP4 on CPU with measured narration and captions, then exports a bundle: `video.mp4`, `captions.srt/.vtt`, `CREDITS.md` and a rights-filtered `package.zip`. Kokoro is the default CPU voice; optional Qwen3-TTS adds designed, cloned or directed preset voices. **Generate narrated video** runs the complete nine-stage production pipeline from a saved revision and refuses to start unless autosave is confirmed.
-
-No GPU? The whole loop (brief → package → SVG art → timeline edits → preview → MP4 → bundle) runs on CPU with procedural fallbacks and a scripted agent. No API key needed.
-
-## Screenshots
-
-<table>
-  <tr>
-    <td width="50%"><img src="docs/media/ui-editor-timeline.png" alt="Scene timeline with trim handles, narration, caption, presenter and music lanes, undo and redo"><br><sub><b>Timeline.</b> Trim, reorder, snap and zoom scenes at project fps. Narration, caption, presenter and music lanes stay linked and read-only; undo/redo covers every edit, and a trim below the speech floor reports the requested and effective length.</sub></td>
-    <td width="50%"><img src="docs/media/ui-animation-inspector.png" alt="Animation inspector with storytelling recipe, seed, intensity, focus and cue controls"><br><sub><b>Animation inspector.</b> Six frame-deterministic recipes, seed and intensity, focus rectangles, bounded morph shapes, reveal transitions, and narration phrase cues with explicit-second precedence.</sub></td>
-  </tr>
-  <tr>
-    <td colspan="2"><img src="docs/media/ui-voice-production.png" alt="Voice and narration panel with Kokoro and Qwen presets, blend controls, per-scene delivery and generation stages"><br><sub><b>Voice production.</b> Kokoro voices and blends, Qwen designed and directed custom voices, ten quick presets, per-scene delivery, and the nine-stage production run. The panel refuses to plan or start unless the latest edit is saved.</sub></td>
-  </tr>
-</table>
-
-## Gallery
-
-### Five worlds — long-form collection
-
-![Forest, clockwork, architecture, food and deep-sea visual styles](docs/media/longform-collection.jpg)
-
-**[Watch all five films](https://mojomast.github.io/comfyrizz/)** —
-20 minutes 41 seconds across fungal ecology, a fictional railway mystery, urban
-cooling, fermentation and deep-sea life. Each film has its own visual direction,
-narrator and original score. The 140-scene collection uses 98 selected generated
-motion shots and 42 authored animated inserts, with captions, chapter navigation,
-MP4s and editable downloads. The 202-job generation batch used **8.40 credits**.
-See [production details, individual links and verification](docs/LONGFORM_COLLECTION.md).
-The public gallery uses [GitHub Pages](docs/GITHUB_PAGES.md), with 720p web playback
-and original 1080p/project downloads in GitHub Releases.
-
-### Anonymous, in Triplicate — quality follow-up
-
-![A teal suggestion form inspected under a brass magnifying glass](docs/media/still-anonymous.jpg)
-
-A 62.5-second fictional Ministry short follows one teal form through a bureaucratic
-paradox. **8 fresh stills, 11 normal-speed motion shots, 5 editable SVG inserts**, and
-a scene-aware original score apply the updated direction guidance. Narration was
-measured before GPU shot lengths were planned; the 19-job batch used **0.74 credits**.
-See the [film, production decisions and reproduction guide](docs/ANONYMOUS_DEMO.md).
-[Watch the published short](https://<your-host>/rich-anonymous/index.html)
-or [download the MP4](https://<your-host>/rich-anonymous/video.mp4).
-
-### Rich storytelling collection
-
-Three twelve-scene films combine **21 fresh generated stills, 17 LTX motion
-plates, original SVG artwork, all eight layouts and six animation recipes**.
-Each film has measured Kokoro narration, captions, an original instrumental
-score, and an editable project export. The shared GPU batch used **1.48 Colab
-credits** and was verifiably stopped before CPU rendering.
-
-<table>
-  <tr>
-    <td width="33%"><img src="docs/media/still-rich-ussy.jpg" alt="Slop Illustrated: generated editorial imagery and animated typography"><br><sub><b>ussy.host — Slop Illustrated.</b> Software stories with a point of view and source receipts.</sub></td>
-    <td width="33%"><img src="docs/media/still-rich-hermes.jpg" alt="Hermes Agent: generated technical imagery with precise editable typography"><br><sub><b>Hermes Agent — The Threshold.</b> A sourced tour of the stable release and its practical capabilities.</sub></td>
-    <td width="33%"><img src="docs/media/still-rich-ministry.jpg" alt="The Ministry of Mandatory Spontaneity: a fictional civic bureaucracy"><br><sub><b>Mandatory Spontaneity.</b> A deadpan institution requires citizens to schedule their surprises.</sub></td>
-  </tr>
-</table>
-
-See the [collection, production evidence and reproduction guide](docs/DEMO_COLLECTION.md)
-and [complete scripts and source ledger](scripts/demos/STORYBOARDS.md).
-
-### Earlier examples
-
-Stills from example videos rendered with Comfyrizz (FLUX 3 Klein stills and reference edits, LTX-2.5 plates, Kokoro narration, Remotion type and charts).
-
-<table>
-  <tr>
-    <td width="33%"><img src="docs/media/still-papercut.jpg" alt="Paper-cut science explainer: How plants make food"><br><sub>Paper-cut science explainer</sub></td>
-    <td width="33%"><img src="docs/media/still-solar-chart.jpg" alt="Editorial data story with an animated bar chart of world solar capacity"><br><sub>Data story from real CSV data</sub></td>
-    <td width="33%"><img src="docs/media/still-lune.jpg" alt="Glossy product ad for fictional Lune earbuds"><br><sub>Product ad (fictional product)</sub></td>
-  </tr>
-  <tr>
-    <td width="33%"><img src="docs/media/still-wind.jpg" alt="How wind becomes power: title over an LTX-2.5 plate of an offshore wind farm"><br><sub>LTX-2.5 plate under Remotion type</sub></td>
-    <td width="33%"><img src="docs/media/still-orbit.jpg" alt="Glass-style product explainer of a multi-agent desktop"><br><sub>Software explainer from SVG mockups</sub></td>
-    <td width="33%" align="center"><img src="docs/media/still-sky-vertical.jpg" alt="Kids' 9:16 short: Why is the sky blue?" width="62%"><br><sub>9:16 kids' short</sub></td>
-  </tr>
-</table>
-
-## Features
-
-| | |
-|---|---|
-| 💬 **Chat-first agent** | Chat or Express mode, persistent conversations, reviewable drafts and focused revisions. Four compact skills guide briefing, scripting, storyboarding and revision; validated tools preserve manual edits. See [conversation skills and evaluations](docs/CONVERSATION_AGENT.md). |
-| 🎬 **Curated CPU compositions** | Editable object-transfer, mechanism-journey and evidence-reveal scenes, compiled from a versioned source manifest. An optional pinned HyperFrames worker checks layout/motion, renders exact-length silent plates and preserves source in project ZIPs. Uses native frame functions without GSAP. See [composition authoring](docs/COMPOSITIONS.md). |
-| 🔌 **Model-agnostic LLM** | Configure OpenCode Go, OpenRouter, or named OpenAI-compatible connections in **Agent settings**. Discover or enter model IDs and test tool calling. Saved keys stay on the server. |
-| 🎛️ **Frame-accurate timeline** | Drag to trim or reorder scenes at project fps, with snap, zoom, keyboard control and undo/redo. Narration, caption, presenter and music lanes are linked read-only projections. Trims below the speech or layout floor are accepted as preferences and floored by the compiler, with the requested and effective lengths shown. See [Phase 0 decisions](docs/editor/PHASE0.md). |
-| ✏️ **Script, caption and media edits** | Edit narration, store display-only caption corrections, split takes at a frame, trim source media ranges and inspect the narration waveform. Every edit shares one command history, revision-aware autosave and save status. |
-| 🎚️ **Mix audition** | Music, ambience and SFX export buses with ducking under narration, plus session-only mute/solo audition controls. The panel reads the same mix numbers as the MP4. See [audio mix](docs/editor/AUDIO_MIX.md). |
-| 🎨 **Style presets + brand kit** | Clay, Glass, Editorial flat, Isometric tech, Paper cut, Cinematic dark, with CPU/SVG thumbnails. Brand palette, fonts (licence-checked), tone and logo. |
-| 📐 **Generated-first vector art** | The agent writes SVG for icons, diagrams, patterns and animated parts. Every SVG is sanitised, rasterised with resvg and render-checked, with up to two automatic repairs. |
-| ✏️ **Sketch to render** | An agent-drawn SVG layout becomes the reference image for a FLUX 3 Klein edit, so the styled still keeps the composition. |
-| 🎞️ **LTX-2.5 plates** | Text-to-video and image-to-video moving backgrounds, trimmed, looped and retimed to the 30 fps timeline. |
-| 📊 **Charts from CSV** | Paste, upload or fetch a CSV; the exact values become chart, stat and list scenes with the source on screen. Missing numbers stay visible placeholders, never invented. |
-| 🗣️ **Kokoro narration + captions** | 29 selectable voices, speed, sentence or connected-paragraph delivery and two-voice blends. Per-sentence synthesis runs on CPU; measured durations drive the timeline, the loudness-normalised mix, burned-in captions and SRT/VTT. |
-| 🎙️ **Qwen3-TTS presets + design** | Ten quick presets, including Kokoro blends and directed Qwen voices. Qwen offers VoiceDesign → Base cloning, nine CustomVoice speakers, language and full-text conditioning, and per-scene delivery directions. Strict mode refuses silent fallback. Run on a managed Colab allocation or isolated local TTS/ASR environments. See [voice production](docs/VOICE_GENERATION.md) and [setup](packages/tts/README.md#optional-qwen3-tts-r3). |
-| 🔗 **Animated diagrams** | Editable flow and hub cards with scene-local cue times, animated connections and caption-safe landscape layouts. See [renderer motion diagrams](apps/renderer/README.md#motion-diagrams). |
-| 🎬 **Storytelling recipes + eight layouts** | The animation inspector edits six frame-deterministic recipes: sketch, paper-cut, morph, technical-flow, focus and kinetic. Controls cover seed, intensity, focus rectangles, bounded morph shapes and paper/draw/shape reveal transitions. Narration phrase cues resolve after timing; explicit seconds win, and known aligner versus estimated Kokoro timing keeps its provenance. Conversation authoring covers all eight layouts: title, hero, stat, chart, list, split, compare and code. See the [animation pack guide](docs/ANIMATION_STORYTELLING.md). |
-| 🌍 **Multilingual + aspect variants** | Export per-language and 16:9 / 9:16 / 1:1 variants with re-flowed layouts. |
-| ☁️ **Google Colab backend** | Spins up a G4, bootstraps ComfyUI with pinned models, runs batches, downloads results and stops the runtime, verified against `colab sessions`. Watchdog, budget formula and `stop_unconfirmed` reporting. |
-| 🖥️ **Bring your own ComfyUI** | Point the same jobs at your own ComfyUI (plus `comfy-api-proxy`). Not metered, never called free. |
-| 🔍 **Open in ComfyUI** | Every generated still and plate keeps the API-format graph that was submitted (seed, prompt, models, parameters). Download it from the asset view. Drag-and-drop UI format is not generated; see [Open in ComfyUI](#open-in-comfyui). |
-| 🔁 **Per-scene re-render** | Re-render one scene or regenerate one scene's media; ×2 upscale for final plates. |
-| 🚀 **Nine-stage generation** | **Generate narrated video** plans against the saved revision, then runs preflight → voice/alignment → timing → presenter inputs → media → presenter sync → render → verify → export. Metered plans require approval; a pending, offline, conflict or rejected save refuses plan and start. Each result is an isolated, revision-bound cut. See the [pipeline contract](docs/PIPELINE_OBSERVABILITY.md). |
-| 🔐 **Token-free media** | Preview and waveform reads use authenticated byte ranges or short-lived `POST /api/media-ticket` URLs. The session token is never placed in a media URL, editor sidecar or exported file. |
-| 📦 **Rights-aware export** | `CREDITS.md` and a `package.zip` that ships only assets whose licence allows it and lists every refusal with its reason. |
-| 🧪 **Deterministic render** | Frame = f(timeline, local assets, frame number). No network in compositions; copy that doesn't fit fails visibly instead of clipping. |
-
-## How it works
-
-```mermaid
-flowchart TD
-    A["💬 Chat brief<br/>plan mode · presets · brand kit"] --> B["🤖 Agent<br/>any OpenAI-compatible LLM"]
-    B --> C["📦 Package<br/>comfyrizz.package/v1<br/>scenes · SVG · datasets"]
-    C --> D["🧾 jobs.json<br/>FLUX 3 Klein stills → LTX-2.5 plates<br/>→ ×2 upscale"]
-    D --> S{"Spend card<br/>approve?"}
-    S -->|Google Colab| E["☁️ Google Colab G4<br/>up → bootstrap → run → collect → stop"]
-    S -->|BYO| F["🖥️ Your ComfyUI<br/>+ comfy-api-proxy"]
-    E --> G["🖼️ Assets + manifest"]
-    F --> G
-    C -.->|"CPU path: SVG + procedural fallbacks"| H
-    G --> H["🎬 Remotion render<br/>Kokoro / Qwen narration · captions"]
-    H --> I["📤 Export bundle<br/>MP4 · SRT/VTT · CREDITS · package.zip"]
-```
-
-- **The package is the contract.** `packages/schema` holds the JSON Schema plus TS and Python validators. Paths are relative, ids resolve, model licences are tracked separately from output licences.
-- **The agent.** `packages/agent` runs a bounded tool loop (`storyboard.propose`, `storyboard.edit`, `assets.route`, `assets.generate_svg`, `assets.generate_image`, `assets.sketch_to_render`). An asset router picks SVG for icons, diagrams and charts, FLUX for illustrations and textures, and sketch-to-render for styled heroes. Conversation authoring covers all eight layouts — title, hero, stat, chart, list, split, compare and code — including dataset provenance, paired plates and real code content. Invalid tool arguments go back to the model (max two repairs); partial streamed arguments never execute. GPU work is only ever *planned* by the agent. It runs after you approve the spend card.
-- **The jobs.** `packages/jobs` turns a package into an ordered, hashed `jobs.json` (stills before plates, LTX sizes in multiples of 64 and 8n+1 frames). `pipeline-py` submits the jobs with the Comfy SDK, writes an attempt record *before* each submit, and treats an atomic `out/manifest.json` as the only proof of success. A lost submission is reconciled, never blindly resubmitted.
-- **The timeline.** `packages/planner` compiles the package plus measured narration into integer-frame `timeline.json` at `floor(format.fps)` (30 fps by default), with transition overlaps, plate retiming, sentence-level caption cues and speech-anchored motion cues. Explicit `cue_seconds` win over phrase matching; resolved anchors keep source and estimated-timing provenance, and missing or ambiguous cues become diagnostics and pipeline warnings.
-- **The editor.** A custom scene timeline and script/audio/media inspector share one `EditorStore`. Every edit is a command with undo/redo, revision-aware autosave and a save status of `saved`, `pending`, `offline`, `conflict` or `rejected`. Trims below the speech or layout minimum stay as preferences and are floored by the compiler with visible feedback. Caption-text overrides are display-only and do not move spoken narration cues. See [Phase 0 decisions](docs/editor/PHASE0.md) and [audio mix](docs/editor/AUDIO_MIX.md).
-- **The animation inspector.** Six frame-driven recipes keep editable scene copy and media: sketch, paper-cut, morph, technical-flow, focus and kinetic. Seed and intensity, focus rectangles, bounded morph shapes and reveal transitions are validated; locked scenes stay read-only and the final scene has no outgoing transition. Recipe timing resolves against spoken narration/captions, not caption corrections.
-- **The production pipeline.** The voice panel plans against the saved revision and runs nine ordered stages: preflight, narration, timing, presenter inputs, media, presenter sync, render, verify and export. Autosave is authoritative: any save status other than `saved` refuses planning and generation. Metered compute requires an approved plan hash, and generated results stay isolated from edits made during the run. See the [pipeline contract](docs/PIPELINE_OBSERVABILITY.md).
-- **Media delivery.** The Player uses authenticated byte ranges where it can send the API header; native media and waveform playback use short-lived `/api/media/<ticket>` URLs. API tokens and tickets are not written into editor sidecars or exports.
-- **The render.** `apps/renderer` (Remotion) supports Title, Hero, Stat, Chart, List, Split, Compare and Code layouts, motion tokens, the six storytelling recipes, animated diagrams, motion transitions and procedural backgrounds when no plate exists. Measured speech can extend a scene beyond its default visual pacing limit.
-
-See the [animation and storytelling research (19 October 2026)](docs/research/ANIMATION_STORYTELLING_2026.md) for the current capability audit, MIT-library shortlist, proposed visual styles and prioritized integration plan.
-The [content-quality research and skill updates (20 October 2026)](docs/CONTENT_QUALITY_RESEARCH.md) connect demo findings to worked-example storytelling, shot coverage, caption-aware direction and evidence-based agent evaluation.
-The [HyperFrames integration research](docs/research/HYPERFRAMES_2026.md) evaluates richer CPU-rendered scenes, visual diagnostics and reusable design contracts, including a tested HyperFrames-to-Comfyrizz video bridge and a phased implementation proposal.
-The [GSAP licensing follow-up](docs/research/GSAP_LICENSING_2026.md) maps official guidance to Comfyrizz's editor, documents distribution requirements and verifies a HyperFrames scene-rendering path without loading GSAP.
-The shipped CPU pack, agent usage and verification are documented in the [animation guide](docs/ANIMATION_STORYTELLING.md); agents combining branches should use the [integration handoff](docs/handoffs/ANIMATION_INTEGRATION.md). [Production voice options](docs/VOICE_GENERATION.md) covers presets, blends, Qwen modes and delivery; the [pipeline contract](docs/PIPELINE_OBSERVABILITY.md) documents the nine stages and recovery.
-
-## Quickstart
-
-### Requirements
-
-- **Node.js 22** (`engines` is `>=20`; 20.19 is also tested), **pnpm** 10, **ffmpeg**/**ffprobe**
-- **Chrome or Chromium** for Remotion. Scripts default to `/usr/bin/google-chrome`; override with `REMOTION_BROWSER=/path/to/chrome`
-- **Python 3.10+** for the GPU pipeline and Kokoro narration (optional for the CPU demo)
-
-### 1. CPU-only demo (no GPU, no API key)
+The 20-second launch hook is [examples/hook-20s](examples/hook-20s): 566 frames at 30 fps
+(18.867 s), 1920×1080, with procedural backgrounds, first-party SVG assets and measured Kokoro
+narration. It carries no GPU media, so it exports on CPU from a clean clone:
 
 ```bash
-git clone https://github.com/mojomast/comfyrizz && cd comfyrizz
-pnpm install                       # no lockfile is committed yet, so this resolves fresh
-pnpm -r --if-present run build     # packages/* dist + apps/web dist
-
-cd apps/server && npm start        # builds, then serves http://127.0.0.1:4319/#token=…
+pnpm --filter @comfyrizz/renderer render:package -- --example examples/hook-20s
 ```
 
-Open the printed URL. The bundled `examples/launch-demo` loads in the Player. Edit a headline or a chart value, trim a scene on the timeline, send a brief in **Plan** mode with the *local · scripted model*, then press **Export MP4** or **Export bundle**. Everything runs locally on CPU.
+Output: `examples/hook-20s/out/hook-20s.mp4` (git-ignored).
 
-Render the bundled example straight from the CLI, with an ffprobe frame check:
+## Quick start
+
+Requirements: **Node.js 22**, **pnpm** 10, **ffmpeg**/**ffprobe**, and Chrome or Chromium for
+Remotion (`REMOTION_BROWSER` overrides the default `/usr/bin/google-chrome`). Python 3.10+ is
+optional and only needed for the GPU pipeline and Kokoro narration.
+
+```bash
+git clone https://github.com/mojomast/comfyrizz
+cd comfyrizz
+pnpm install --frozen-lockfile
+pnpm -r --if-present run build
+cd apps/server && npm start
+```
+
+Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). The bundled
+`examples/launch-demo` loads in the Player: edit a headline or chart value, send a brief in
+**Plan** mode with the *local · scripted model*, then **Export MP4** or **Export bundle**.
+This CPU path needs no GPU and no API key.
+
+Render the bundled example straight from the CLI:
 
 ```bash
 pnpm --filter @comfyrizz/renderer render:example   # → examples/launch-demo/out/launch-demo.mp4
-pnpm --filter @comfyrizz/renderer studio           # Remotion Studio
 ```
 
-The whole fresh-clone path (clone → install → build → serve → brief → MP4 → bundle → ffprobe) runs non-interactively as one script:
+For tests and the full clean-clone check, see [docs/RELEASE_CHECK.md](docs/RELEASE_CHECK.md).
+Agent providers are documented in [docs/AGENT_PROVIDERS.md](docs/AGENT_PROVIDERS.md).
 
-```bash
-bash apps/server/scripts/clean-clone-e2e.sh        # KEEP=1 to inspect the temp dir
+## Demo
+
+[docs/submission/DEMO_SCRIPT.md](docs/submission/DEMO_SCRIPT.md) is the two-minute shot list for
+the submission video, mapped to the beats in [docs/SPEC.md](docs/SPEC.md) section 11. The live demo
+is the local editor served by Quick start ([apps/web](apps/web/)); the standalone demo page is
+specified in [docs/specs/DEMO_WEBAPP.md](docs/specs/DEMO_WEBAPP.md).
+
+## Gallery
+
+The static, dependency-free page is [docs/gallery/index.html](docs/gallery/index.html), rendered
+from [gallery.json](docs/gallery/gallery.json). It lists every `examples/*` package with its title,
+description and duration; rendered videos appear once you produce them locally, because `out/` is
+git-ignored. The public long-form collection is documented in
+[docs/GITHUB_PAGES.md](docs/GITHUB_PAGES.md).
+
+## Features
+
+- **Chat-first agent.** A bounded tool loop turns a brief into a `comfyrizz.package/v1` project.
+  The LLM is model-agnostic: OpenRouter, OpenCode Go, or any OpenAI-compatible endpoint; an offline
+  scripted model runs the CPU demo.
+- **CPU-only path.** SVG art, procedural fallbacks, timeline editing, preview, MP4 render, captions
+  and the export bundle all run locally without a GPU or API key.
+- **Two GPU backends.** Google Colab G4 (start, bootstrap, run, collect, verified stop) or your own
+  ComfyUI, behind a spend card and budget check. Jobs are submitted through the Comfy SDK.
+- **Exact information.** Eight layouts, charts from real CSV data, measured narration, SRT/VTT
+  captions and six frame-driven storytelling recipes. Chart values never come from an image model.
+- **Rights-aware export.** Every asset records source, creator and licence; `CREDITS.md` and a
+  rights-filtered `package.zip` ship only assets whose licence allows it.
+
+## How it is built
+
+```mermaid
+flowchart TD
+    A["Chat brief"] --> B["Agent<br/>any OpenAI-compatible LLM"]
+    B --> C["Package<br/>comfyrizz.package/v1"]
+    C --> D["jobs.json<br/>FLUX 3 Klein stills · LTX-2.5 plates · upscale"]
+    D --> S{"Spend card approved?"}
+    S -->|Google Colab| E["Colab G4<br/>up · bootstrap · run · collect · stop"]
+    S -->|BYO| F["Your ComfyUI<br/>+ comfy-api-proxy"]
+    E --> G["Assets + manifest"]
+    F --> G
+    C -.->|"CPU path: SVG + procedural fallbacks"| H
+    G --> H["Remotion render<br/>narration · captions"]
+    H --> I["Export bundle<br/>MP4 · SRT/VTT · CREDITS · package.zip"]
 ```
 
-Optional narration (Kokoro-82M on CPU):
+- **The package is the contract.** [packages/schema](packages/schema/) holds the JSON Schema plus
+  TypeScript and Python validators. Paths are relative, ids resolve, and model licences are tracked
+  separately from output licences.
+- **Workflows through the Comfy SDK.** [pipeline-py](pipeline-py/) submits the ordered, hashed jobs
+  in [workflows](workflows/) through the Comfy SDK. The graphs cover FLUX 3 Klein stills and
+  reference edits, LTX-2.5 text/image-to-video plates and an LTX ×2 upscale.
+- **Remotion for exact text and charts.** [apps/renderer](apps/renderer/) is deterministic:
+  frame = f(timeline, local assets, frame number). Compositions make no network calls, and copy that
+  does not fit fails visibly instead of clipping.
+- **A model-agnostic agent.** [packages/agent](packages/agent/) runs a bounded tool loop and routes
+  asset requests: SVG for icons, diagrams and charts, FLUX for illustrations, sketch-to-render for
+  styled heroes. GPU work is only planned; it runs after you approve a spend card.
 
-```bash
-python3 -m venv .venv && .venv/bin/pip install -r packages/tts/py/requirements.txt
-packages/tts/scripts/fetch-models.sh               # kokoro-v1.0.onnx + voices (not committed)
-```
-
-For **Qwen3-TTS 1.7B**, choose a Qwen preset or designed voice in **Voice & narration**. The integrated pipeline can run Qwen on a managed Colab allocation or in isolated local TTS/ASR environments; select `voice.engine: "qwen3-tts"` and `voice.strict: true`, and keep `voice.speed: 1` because Qwen uses natural-language delivery for pacing. The pinned TTS and ASR packages require different Transformers versions, so they run in separate Python environments. The standalone `scripts/tts/qwen_colab.mjs` workflow remains available for synthesis/QA outside the app, but it is not required for in-app generation. See the [separate-environment setup and Colab commands](packages/tts/README.md#optional-qwen3-tts-r3) and [voice production options](docs/VOICE_GENERATION.md).
-
-Recent production evidence:
-
-- [Comfyrizz full-pipeline test](docs/COMFYRIZZ_FULL_PIPELINE_TEST.md): delivered 29.2-second Kokoro/GPU example.
-- [Hermes video status and verification](docs/HERMES_VIDEO_STATUS.md): longer Qwen-narrated example and current checks.
-- [Hermes research and implementation decisions](docs/HERMES_VIDEO_RESEARCH.md): primary release sources, voice setup and presenter synchronization.
-
-### 2. Google Colab (G4 GPU)
-
-1. Install and sign in to the `google-colab-cli` (`colab`). Comfyrizz finds it via `COMFYRIZZ_COLAB_BIN`, then `~/.local/bin/colab`, then `PATH`.
-2. On Hugging Face, accept the **FLUX 3 Image Klein** and **LTX-2.5** licences (both repos are gated), create a **read** token, and store it in a file only you can read:
-   ```bash
-   install -m 600 /dev/null ~/.config/comfyrizz-hf-token && $EDITOR ~/.config/comfyrizz-hf-token
-   export COMFYRIZZ_HF_TOKEN_FILE=~/.config/comfyrizz-hf-token
-   ```
-   The token is uploaded as a 0600 file, used, and deleted from the VM before it stops. It is never passed with `--env` and never printed.
-3. Start the server, pick **Google Colab G4** as the backend, set a unit **Budget** and press **Run on backend**. Review the spend card (GPU minutes, setup, units against budget) and press **Start**.
-
-Comfyrizz creates one runtime, bootstraps ComfyUI with the models pinned in `colab/models.lock.json`, runs the batches, downloads the results, applies them to the package, re-renders, and stops the runtime. The stop is verified, and anything else is reported as `stop_unconfirmed`. A detached watchdog stops the runtime if the app dies. The media path was run end to end on a real G4 runtime on Oct 18, 2026 (GPU test 5). The full nine-stage CPU production path has also completed all applicable stages with measured narration, rendering and verification; a combined paid nine-stage Colab run remains an explicit roadmap check.
-
-> Google Colab is for your own interactive compute. Don't use the Google Colab backend to serve other people.
-
-### 3. Bring your own ComfyUI
-
-```bash
-scripts/setup-local-comfy.sh --dry-run             # see the plan first
-hf auth login                                      # gated model repos
-scripts/setup-local-comfy.sh --comfyui-ref v0.41.3
-```
-
-Run ComfyUI and `comfy-api-proxy`, then pick **BYO ComfyUI** in the app (default `http://127.0.0.1:8188`), or drive the pipeline from the CLI. See [`packages/backends/BYO-COMFYUI.md`](packages/backends/BYO-COMFYUI.md) for health checks and `plan-jobs` → `comfyrizz_pipeline.runner`.
+See [docs/SPEC.md](docs/SPEC.md) for the full design and [docs/PLAN.md](docs/PLAN.md) for the
+milestone plan.
 
 ## Open in ComfyUI
 
-When a still, plate or ×2 upscale finishes, Comfyrizz writes the API-format workflow that was actually submitted next to the file:
+Every generated still and plate keeps the API-format workflow that was submitted, with its seed,
+prompt, models and parameters, next to the asset and inside `package.zip`. Tokens, API keys and
+signed URLs are removed before the file is written. The graph is the API format, not a drag-and-drop
+UI workflow; replay it on a ComfyUI that has the same models. See [docs/SPEC.md](docs/SPEC.md).
 
-- `assets/<id>.workflow.api.json` (a plate under `out/intermediates/` uses that same stem)
-- `assets/<id>.workflow.md` explains how to replay it
+## Hackathon submission links
 
-The graph includes the seed, prompt, model filenames and parameters. Tokens, API keys and signed URLs are removed before the file is written. The same files are copied into `package.zip` (`OPEN-IN-COMFYUI.md` in the archive is the short version).
+Comfyrizz is the entry for **Comfy's Open Source Higgsfield hackathon**; submissions are due
+**Oct 30, 2026, 9:00 AM PT**.
 
-ComfyUI's drag-and-drop Load button expects the UI workflow format (`nodes`, `links`, and widget values in each node's own order). The API graph does not record that order — it comes from the running install's node definitions — so a converted file would open as a broken graph. Comfyrizz does not generate one. Replay the API file on a ComfyUI that has the same models:
+| Document | What it covers |
+| --- | --- |
+| [WRITEUP.md](docs/submission/WRITEUP.md) | The entry: what it is, how it is built, why it is innovative, and the categories and bonuses it targets. |
+| [CHECKLIST.md](docs/submission/CHECKLIST.md) | Each official requirement with status, evidence and owner. |
+| [LICENSE_AUDIT.md](docs/submission/LICENSE_AUDIT.md) | Repository licence, model weights, partner nodes and the Open Weights Only check. |
+| [CREDITS.md](CREDITS.md) | Every bundled asset with source, creator, licence and approval. |
+| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Models, fonts and key dependencies, with what the repo states. |
 
-```bash
-curl -sS http://127.0.0.1:8188/prompt \
-  -H 'content-type: application/json' \
-  --data-binary @- <<EOF
-{"prompt": $(cat assets/your-still.workflow.api.json)}
-EOF
-```
+Contributor setup and asset rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The same JSON is the `workflow` body of a Comfy API v2 job (`POST /api/v2/jobs`). In the app, a generated still or plate has **Open in ComfyUI** (downloads the API graph) and **How to open**. `GET /api/package/<id>/assets/<assetId>/workflow` serves the file; `?format=readme` serves the instructions; `?variant=upscaled` serves the ×2 graph.
+## Licence
 
-## Configuration
+**Comfyrizz is MIT-licensed.** See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Open **Agent settings** in the top bar to add provider connections, save an API key,
-choose a model, and test tool calling. OpenCode Go and OpenRouter have presets;
-**+ Add provider** supports additional named OpenAI-compatible connections.
-Settings persist server-side and take effect immediately. Saved keys are never
-returned to the browser. See [Agent provider settings](docs/AGENT_PROVIDERS.md).
-
-Environment variables are also supported by the local server:
-
-| Variable | Purpose |
-|---|---|
-| `OPENROUTER_API_KEY` | OpenRouter preset |
-| `OPENCODE_API_KEY` (or `OPENCODE_GO_API_KEY`) | OpenCode Go preset, e.g. DeepSeek v4.1 |
-| `COMFYRIZZ_CUSTOM_BASE_URL`, `COMFYRIZZ_CUSTOM_API_KEY` | Any OpenAI-compatible endpoint (vLLM, Ollama, a proxy). Default base URL `http://127.0.0.1:8000/v1` |
-| `COMFYRIZZ_HF_TOKEN_FILE` | Path to a 0600 file holding a Hugging Face **read** token for the gated FLUX 3 Klein and LTX-2.5 repos |
-| `COMFYRIZZ_PYTHON` | Host Python with narration, NumPy and pipeline dependencies |
-| `COMFYRIZZ_QWEN_TTS_PYTHON`, `COMFYRIZZ_QWEN_ASR_PYTHON` | Isolated local Qwen TTS and QA environments for `narrationRuntime: local`; managed Colab creates its pinned environments in the VM |
-| `COMFYRIZZ_SYNCNET_PYTHON`, `COMFYRIZZ_SYNCNET_DIR` | Installed SyncNet environment and checkout containing `syncnet_v2.model`, used for presenter timing checks |
-| `COMFYRIZZ_COLAB_BIN` | Path to the `colab` CLI if it isn't on `PATH` |
-| `COMFYRIZZ_PORT` | Server port (default `4319`, loopback only) |
-| `COMFYRIZZ_RUNTIME` | State directory (default `apps/server/.runtime`, git-ignored) |
-| `COMFYRIZZ_TOKEN` | Fix the URL-fragment session token (tests). Otherwise one is generated into `.runtime/server-token` (0600) |
-| `REMOTION_BROWSER` | Chrome/Chromium used for rendering |
-
-Check that a model can actually call tools before you rely on it: `pnpm --filter @comfyrizz/llm probe` refuses text-only models. It reads the key from the environment and never prints it.
-
-> **Never commit secrets.** Keys live in your shell environment, the HF token lives in a 0600 file outside the repo, and `.env`, `.runtime/`, `out/` and `runs/` are git-ignored. The server binds to `127.0.0.1`, keeps its token in the URL fragment, and checks Host and Origin on every request.
+Models are not distributed with this repository; each user downloads them under the model's own
+licence (FLUX 3 Klein, LTX-2.5 and Kokoro-82M are gated or separately licensed). **Remotion** is
+source-available under the [Remotion License](https://www.remotion.dev/license), which is not OSI;
+it is free for individuals and organisations of up to 3 people, and larger companies need a Company
+License. Details and the full dependency list are in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ## Repo layout
 
@@ -354,7 +219,7 @@ Working now: everything under [Features](#features). Delivered for this integrat
 Still in progress or planned:
 
 - [ ] **Combined paid nine-stage Colab run**: the nine-stage CPU path and individual GPU stages are verified; a paid end-to-end run of the combined pipeline remains outstanding.
-- [ ] Committed `pnpm-lock.yaml` for reproducible installs
+- [x] Committed `pnpm-lock.yaml` for reproducible installs
 - [ ] SVG-guided generation defaults from the sweep in `workflows/svg-guided/` (experimental)
 
 Deferred until after the hackathon:

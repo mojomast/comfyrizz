@@ -8,8 +8,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm run build:libs && pnpm -r --if-present test",
     "test:py": "cd pipeline-py && ../.venv/bin/python -m pytest -q",
-    "test:all": "pnpm test && pnpm run test:py"
+    "test:scan": "node --test scripts/release-scan.test.mjs && node scripts/release-scan.mjs",
+    "test:all": "pnpm test && pnpm run test:py && pnpm run test:scan",
+    "build:libs": "pnpm -r --filter './packages/**' --if-present run build"
   }
 }
