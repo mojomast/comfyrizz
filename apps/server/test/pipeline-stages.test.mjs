@@ -71,6 +71,19 @@ test('a generation failure still cleans up and never invokes sync/render/export'
   assert.ok(f.events.some(e => e.kind === 'failed'));
 });
 
+test('an allocation rejection preserves the capacity error without inventing an active runtime', async t => {
+  const f = fixture(t), factory = f.adapters.colabFactory;
+  f.adapters.colabFactory = () => ({ ...factory(), runPackage: async () => {
+    const error = new Error('Google Colab has no G4 capacity');
+    error.runPackage = { teardown: { state: 'not_owned' } };
+    throw error;
+  } });
+  assert.equal(await executePipeline(f.spec, f.adapters), 1);
+  assert.equal(f.events.at(-1).message, 'Google Colab has no G4 capacity');
+  assert.equal(f.events.find(e => e.kind === 'runtime' && e.runtime === 'media' && e.value.state === 'stopped').value.spentUnits, 0);
+  assert.equal(f.calls.includes('render'), false);
+});
+
 test('a failed sync diagnostic prevents rendering a misleading successful video', async t => {
   const f = fixture(t);
   f.adapters.presenterCorrection = async () => { throw new Error('Unreliable mouth alignment'); };

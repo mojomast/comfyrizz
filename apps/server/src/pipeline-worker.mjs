@@ -181,8 +181,11 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         if (colab) {
           try { const after = await backend.usage(); if (Number.isFinite(before?.balance) && Number.isFinite(after.balance)) spentUnits = Number((before.balance - after.balance).toFixed(3)); } catch { /* unknown is not zero */ }
         }
-        send({ kind: 'runtime', runtime: 'media', value: { state: teardown?.state ?? 'stop_unconfirmed', ownership: colab ? 'managed' : 'external', spentUnits, costSource: colab ? 'account_balance_delta' : 'external_unknown' } });
-        if (colab && teardown?.state !== 'stopped') throw new Error('Media runtime shutdown is unconfirmed');
+        // A rejected allocation never creates an owned runtime. Preserve its real
+        // failure (for example, no GPU capacity), just as releaseHeld does above.
+        const state = teardown?.state === 'not_owned' ? 'stopped' : (teardown?.state ?? 'stop_unconfirmed');
+        send({ kind: 'runtime', runtime: 'media', value: { state, ownership: colab ? 'managed' : 'external', spentUnits, costSource: colab ? 'account_balance_delta' : 'external_unknown' } });
+        if (colab && state !== 'stopped') throw new Error('Media runtime shutdown is unconfirmed');
         if (colab && spentUnits !== null && spentUnits > ceiling) throw new Error('Media spend exceeded its allocation; no further work will start');
       }
     }
