@@ -4,6 +4,9 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 import {
   rgbToGray, lumaStats, frameDiff, findStaticRuns, findFlashes, runQa,
   checkVideo, qaJson, analyzeVideo, BLACK_MEAN_MAX, STATIC_SECONDS,
@@ -123,10 +126,10 @@ test('checkVideo flags a static clip and a black first frame', () => {
 });
 
 test('checkVideo clears the committed launch-demo render with no errors', () => {
-  const mp4 = '/home/box/comfyrizz/examples/launch-demo/out/launch-demo.mp4';
+  const mp4 = join(REPO_ROOT, 'examples/launch-demo/out/launch-demo.mp4');
   if (!existsSync(mp4)) return; // render is gitignored; skip when absent
-  const timeline = JSON.parse(readFileSync('/home/box/comfyrizz/examples/launch-demo/timeline.json', 'utf8'));
-  const pkg = JSON.parse(readFileSync('/home/box/comfyrizz/examples/launch-demo/package.json', 'utf8'));
+  const timeline = JSON.parse(readFileSync(join(REPO_ROOT, 'examples/launch-demo/timeline.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'examples/launch-demo/package.json'), 'utf8'));
   const report = checkVideo({ mp4, timeline, pkg });
   const errors = report.findings.filter(item => item.severity === 'error');
   assert.deepEqual(errors, [], JSON.stringify(errors));

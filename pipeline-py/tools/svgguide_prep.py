@@ -29,10 +29,18 @@ from svgguide.controlmaps import (  # noqa: E402
     region_mask,
     write_gray_png,
 )
-from svgguide.paths import SAMPLES_DIR, SWEEPS_DIR  # noqa: E402
+from svgguide.paths import REPO_ROOT, SAMPLES_DIR, SWEEPS_DIR  # noqa: E402
 from svgguide.raster import rasterize, sanitize_svg  # noqa: E402
 from svgguide.sweeps import APPROACH_GEOMETRY, build_sweep_spec, write_sweep_spec  # noqa: E402
 from svgguide.templates import caption_provenance, render_caption  # noqa: E402
+
+
+def _repo_relative(path: str) -> str:
+    """Record guide paths relative to the repo so sweep specs carry no machine paths."""
+    try:
+        return Path(path).resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
 from svgguide.workflows import CONTROLNET_STATUS, build_approach, write_approach  # noqa: E402
 
 
@@ -152,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "id": item["scene"],
                 "role": item["role"],
-                "guide": item["raster"]["file"],
+                "guide": _repo_relative(item["raster"]["file"]),
                 "caption": item["caption"]["text"],
                 "template_id": item["caption"]["template_id"],
             }

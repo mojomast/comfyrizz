@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-20",
+  "project": "pkg_dipsy_swarm20261020",
+  "movie": { "frames": 4011, "fps": 30, "width": 1920, "height": 1080, "seconds": 133.7, "generatedMotionScenes": 18, "hyperframesScenes": 3 },
+  "method": "Same recovered project, source-only renderer bundle and HyperFrames 0.8.181; no AI clip regeneration. Host timestamps of streamed phase events.",
+  "local": {
+    "cpu": "AMD EPYC 7742",
+    "logicalCpus": 4,
+    "memoryBytes": 16777064448,
+    "renderConcurrency": 4,
+    "node": "22.20.0",
+    "setupSeconds": 27.361,
+    "compositionSeconds": 57.343,
+    "bundlingSeconds": 13.968,
+    "renderAndEncodeSeconds": 356.389,
+    "normalizationSeconds": 32.041,
+    "verificationAndPackagingSeconds": 35.752,
+    "totalSeconds": 524.922,
+    "allTechnicalChecksPassed": true,
+    "narrationEnvelopeCorrelation": 0.9982573775996129,
+    "colabCredits": 0
+  },
+  "colabCpu": {
+    "cpu": "Intel Xeon @ 2.20 GHz",
+    "logicalCpus": 2,
+    "memoryKiB": 13286944,
+    "renderConcurrency": 2,
+    "node": "22.20.0",
+    "setupSeconds": 77.673,
+    "compositionSeconds": 109.118,
+    "bundlingSeconds": 30.46,
+    "renderAndEncodeSeconds": 1372.605,
+    "normalizationSeconds": 59.026,
+    "verificationAndPackagingSeconds": 55.667,
+    "totalSecondsIncludingAllocationTransfersAndHostValidation": 1756.346,
+    "liveCreditsPerHour": 0.08,
+    "estimatedCreditsAtMeasuredWallTime": 0.03903,
+    "observedAccountBalanceDeltaCredits": 0.04,
+    "allTechnicalChecksPassed": true,
+    "narrationEnvelopeCorrelation": 0.9982575390937807,
+    "linkedVideoRegressionPassed": true,
+    "runtimeStopped": true,
+    "activeAssignmentsAfter": 0
+  },
+  "delivery": {
+    "tailscalePlayerAndRangeDownloadsVerified": true,
+    "originalMp4Bytes": 109991980,
+    "smaller1080pMp4Bytes": 45125135,
+    "smallerCopyFrames": 4011,
+    "smallerCopyAudioPresent": true
+  },
+  "costAccounting": {
+    "dipsyGpuGenerationAndFailedGpuFinalRenderSettledCredits": 2.15,
+    "successfulCpuFinalRenderCredits": 0.04,
+    "dipsyTotalObservedCredits": 2.19,
+    "campaignSpentCredits": 12.81,
+    "campaignAuthorizedCredits": 30,
+    "campaignRemainingCredits": 17.19,
+    "note": "Immediate GPU shutdown reading was 1.41 credits; subsequent balance settlement increased the observed charge to 2.15. Account deltas are account-wide."
+  },
+  "limitations": [
+    "Single indicative measurement, not a repeated controlled hardware benchmark",
+    "Local startup initially failed because extracted Node lacked executable permissions; repaired local run started later and overlapped only part of the CPU run",
+    "Local Node archive was cached on retry; npm workspaces, browser and HyperFrames installation were fresh",
+    "Short validation tests and smaller-copy transcoding also ran on the local host during the local measurement",
+    "Different CPU counts and renderer concurrency: four locally versus two on Colab",
+    "Remote large-project upload used chunked transfer in the benchmark adapter",
+    "Local electricity and host rental costs are not included"
+  ]
+}

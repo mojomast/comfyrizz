@@ -1,6 +1,6 @@
 // Shared CPU render path: validate package -> A2 compile -> Remotion render -> ffprobe-free
 // metadata. Used by the C1 dev route and the C2 local server. No network.
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,18 +40,17 @@ export function inlineGeneratedAssets(pkg, packageDir) {
   return assets;
 }
 
-function assetDirs(pkg) {
-  const dirs = new Set();
+function assetFiles(pkg) {
+  const files = new Set();
   const add = file => {
     if (typeof file !== 'string') return;
-    const [top] = file.split('/');
-    if (top && top !== file) dirs.add(top);
+    files.add(file);
   };
   for (const asset of Object.values(pkg.assets ?? {})) add(asset?.file);
   // B1: a brand font lives in `theme.fonts[].file`, not in `assets`, but the
-  // renderer still loads it through `staticFile`, so its directory must be copied.
+  // renderer still loads it through `staticFile`, so its bytes must be copied.
   for (const font of pkg.theme?.fonts ?? []) add(font?.file);
-  return [...dirs];
+  return [...files];
 }
 
 function needsMediaPublicDir(pkg) {
@@ -125,13 +124,19 @@ export function missingMediaFiles(pkg, packageDir) {
   return listMediaFiles(pkg).filter(item => !existsSync(join(packageDir, item.file)));
 }
 
-/** Copy fonts + the package's asset folders into a throwaway Remotion public dir. */
+/** Copy fonts + declared asset bytes into a throwaway Remotion public dir. */
 export function preparePublicDir(pkg, packageDir) {
   const temp = mkdtempSync(join(tmpdir(), 'comfyrizz-public-'));
   cpSync(join(rendererDir, 'public', 'fonts'), join(temp, 'fonts'), { recursive: true });
-  for (const dir of assetDirs(pkg)) {
-    const source = join(packageDir, dir);
-    if (existsSync(source)) cpSync(source, join(temp, dir), { recursive: true });
+  for (const file of assetFiles(pkg)) {
+    const source = join(packageDir, file);
+    // Colab links generated media into the project. Remotion's bundle copy skips
+    // symlinks, so stage real bytes before handing the public directory to it.
+    if (existsSync(source)) {
+      const dest = join(temp, file);
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(source, dest);
+    }
   }
   return temp;
 }

@@ -1,6 +1,6 @@
 # Comfy's services: what exists and how Comfyrizz could use them
 
-Researched Sun Oct 18, 2026, 2:00–2:30 PM EDT (Toronto), for Kyle. The repo was read only; nothing in `/home/box/comfyrizz` was changed. Every web source was read on Oct 18, 2026 unless another date is given.
+Researched Sun Oct 18, 2026, 2:00–2:30 PM EDT (Toronto), for Kyle. The repo was read only; nothing in `<repo root>` was changed. Every web source was read on Oct 18, 2026 unless another date is given.
 
 Tags used here: **[verified]** = checked against a primary source (Comfy docs, Comfy-Org source code, a live public endpoint) or on this box. **[inferred]** = follows from verified facts but wasn't tested. **[unverified]** = couldn't be checked: it needs a paid key, a Discord answer, or a GPU run.
 
