@@ -1,0 +1,53 @@
+{
+  "schema": "comfyrizz.reference-manifest/v1",
+  "createdAt": "2026-10-20T00:00:00.000Z",
+  "synthetic": true,
+  "scenes": [
+    { "id": "scene_1" },
+    { "id": "scene_2" },
+    { "id": "scene_3" },
+    { "id": "scene_4" }
+  ],
+  "references": [
+    {
+      "id": "ref_1111111111111111",
+      "label": "grain-texture.png",
+      "kind": "image",
+      "role": "style",
+      "note": "Use this warm film grain and muted palette on every scene; keep contrast soft.",
+      "width": 640,
+      "height": 480,
+      "assignedTo": [],
+      "needsAnswer": false
+    },
+    {
+      "id": "ref_2222222222222222",
+      "label": "grinder.png",
+      "kind": "image",
+      "role": "product",
+      "note": "Hero product. Keep the label readable and the hopper in frame; use in scenes 2 and 4.",
+      "width": 800,
+      "height": 800,
+      "assignedTo": [],
+      "needsAnswer": false
+    },
+    {
+      "id": "ref_3333333333333333",
+      "label": "pour.mp4",
+      "kind": "video",
+      "role": "motion",
+      "note": "",
+      "width": 1280,
+      "height": 720,
+      "durationSec": 8,
+      "frames": [
+        { "index": 0, "atSec": 0.8 },
+        { "index": 1, "atSec": 2.9 },
+        { "index": 2, "atSec": 5.1 },
+        { "index": 3, "atSec": 7.2 }
+      ],
+      "assignedTo": [],
+      "needsAnswer": true
+    }
+  ]
+}
