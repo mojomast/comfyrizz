@@ -102,7 +102,7 @@ button, input, select, textarea { font: inherit; }
   grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.5fr) minmax(280px, 0.8fr);
   grid-template-areas:
     'chat preview storyboard'
-    'licences spend preview'
+    'licences preview spend'
     'activity activity activity';
   gap: 16px;
   padding: 18px 24px 28px;
