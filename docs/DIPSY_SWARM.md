@@ -56,4 +56,14 @@ Two live GPU runs were rejected for unavailable G4 capacity after six allocation
 requests in total; no GPU session was allocated and no credits were charged.
 The retry correctly retained the capacity error after fixing a pipeline cleanup
 path that had mislabeled rejected allocations as unconfirmed shutdowns.
-Final rendering and publication are not yet verified.
+The separate [live Colab CPU build probe](research/hyperframes-colab-live-20261020.json)
+**passed**: Node 22.20.0, npm dependencies and HyperFrames 0.8.181 were installed
+on the VM; planner/vector were built from source; all three test components were
+rendered into a verified 480-frame movie. The returned resources exported on the
+host with HyperFrames configuration removed. The CPU VM was stopped, zero active
+assignments remained, and its measured account balance delta was zero.
+
+This proves the live build and return-resource path with the three-component
+fixture. Dipsy's 18 generated motion sequences and finished movie remain blocked
+by G4 capacity; no finished Dipsy movie has been published. The campaign remains
+at **10.62 / 30 credits**, with **19.38 remaining**.

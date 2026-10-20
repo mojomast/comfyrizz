@@ -333,3 +333,12 @@ The host adapter then accepted the results/media ZIPs and exported a complete
 editable archive with HyperFrames environment variables removed. This validates
 the dependency and return-resource path; a live Colab allocation and fresh-image
 apt installation were not exercised. No Colab credits were spent.
+
+A subsequent [live Google Colab CPU probe](research/hyperframes-colab-live-20261020.json)
+passed the same source-only path: Node 22.20.0 download, npm installs, planner/vector
+builds, browser preparation, pinned HyperFrames installation, all three component
+checks/renders and final 480-frame assembly. Results and editable media were
+downloaded, validated and exported on the host with HyperFrames configuration
+removed. The runtime was stopped and the measured account balance delta was zero.
+This live probe used the silent three-component fixture; Dipsy's separate GPU
+generation attempts were rejected for unavailable G4 capacity.

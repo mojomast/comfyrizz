@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-20",
+  "integrationCommit": "00ebbd5",
+  "execution": "Live Google Colab CPU runtime, source-only bundle uploaded through colab CLI",
+  "fixture": "examples/composition-stories",
+  "bootstrap": {
+    "nodeDownloaded": "22.20.0",
+    "npmInstalls": ["renderer", "schema", "planner", "vector"],
+    "builtOnVm": ["planner", "vector"],
+    "browser": "Remotion headless browser ensured on VM",
+    "hyperframesInstalledOnVm": "0.8.181",
+    "hostNodeModulesUploaded": false,
+    "hostPlannerVectorDistUploaded": false,
+    "hostHyperframesPathsRequired": false
+  },
+  "render": {
+    "location": "colab",
+    "frames": 480,
+    "fps": 30,
+    "width": 1280,
+    "height": 720,
+    "seconds": 16,
+    "sceneFrames": [150, 180, 150],
+    "allThreeComponentsPassedLintRuntimeLayoutMotionContrast": true,
+    "exactFrameDimensionsAndDurationChecksPassed": true,
+    "sampledContactSheetReviewed": true,
+    "sha256": "c37f1586cbd8228d0b7acf4696e9ff50f5b2ecc158729ad35e94134e19ac6084"
+  },
+  "delivery": {
+    "resultsAndMediaArchivesReturned": true,
+    "hostValidatedEffectivePackageSourceTimingAndArtifactBytes": true,
+    "hostExportWithHyperframesConfigurationRemoved": true,
+    "verifiedMovieReused": true,
+    "editableArchiveComplete": true,
+    "archiveEntries": 23,
+    "portableCompositionReceipts": 3,
+    "manifestAndFullMitNoticeIncluded": true,
+    "archiveSha256": "29d742c9cb235ee5f02b7b45847abd89546d971512e0063a8e76d64b3e18cf7d"
+  },
+  "teardown": { "confirmedStopped": true, "activeAssignmentsAfter": 0 },
+  "accountBalanceDeltaCredits": 0,
+  "limits": [
+    "Silent three-component fixture, not the Dipsy film",
+    "No GPU generation was exercised by this CPU build probe",
+    "Two Dipsy GPU runs failed before allocation: six G4 assignment requests rejected for unavailable capacity"
+  ]
+}
