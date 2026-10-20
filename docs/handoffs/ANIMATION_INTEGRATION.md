@@ -268,6 +268,21 @@ new rich demo productions** (ussy.host, Hermes Agent and an absurdist comedy),
 after the verified integration/docs push to main. This is a separate new demo
 budget; track measured spend and confirmed teardown in an external runtime ledger.
 
+### Rich demo follow-up delivery
+
+The three requested films are complete and published at `/rich-ussy/index.html`,
+`/rich-hermes/index.html` and `/rich-ministry/index.html` on the application host.
+They contain 36 scenes, 21 fresh stills and 17 LTX plates, plus original SVGs,
+scores, measured narration and editable ZIP exports. Actual GPU spend was
+**1.48 of 30 credits**, with verified shutdown and **28.52 remaining**. See
+[the collection report](../DEMO_COLLECTION.md) for durations and verification.
+
+Scene review found and fixed the non-looping video background flex-flow bug at
+`0e9ae49`. The fix was pushed to main, backed up and deployed; 217 renderer tests,
+web/renderer typechecks and 30 Chromium editor tests passed. The new production
+tooling was pushed at `cfc74fd`; subsequent delivery commits record the final
+gallery, caption-safe comparisons and published-download verification.
+
 Broader outstanding work from previous production: combined paid cloud-pipeline
 validation, general low-resolution caption scaling and human review of the Hermes
 presenter tail. These are not completion claims of this animation series.

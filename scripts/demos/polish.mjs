@@ -50,7 +50,9 @@ for(const name of readdirSync(root)){
     if(scene.id==='s_u07')scene.code.code='if (state.circuitState === "open") {\n  if (!state.circuitOpenUntil ||\n      state.circuitOpenUntil > now) {\n    return false;\n  }\n  state.circuitState = "half-open";\n}';
     if(scene.id==='s_u11')scene.code.code='export function hashBytes(bytes) {\n  if (!(bytes instanceof Uint8Array)) {\n    throw new TypeError("hashBytes requires bytes");\n  }\n  return createHash("sha256")\n    .update(bytes).digest("hex");\n}';
     if(scene.code){const fit=measureCode(scene.code.code,pkg.format.width,pkg.format.height);if(fit.lines>fit.maxLines||fit.longest>fit.maxChars)throw Error(JSON.stringify({scene:scene.id,fit}));}
-    const comparisonTitles={s_u05:'Proposal → receipt',s_u06:'One arena. Two apps.',s_h06:'Trust the channel.',s_m04:'Compliant. Joyless.',s_m09:'Unsigned. Rejected.'};
+    // The comparison layout's lower labels share the sentence-caption band.
+    // Express the paired labels in the headline, leaving that band to narration.
+    const comparisonTitles={s_u05:'Model → server',s_u06:'Browser / native',s_h06:'Main → stable',s_h11:'Fixed / known issue',s_m04:'Compliance ≠ joy',s_m09:'Signed / anonymous'};
     if(comparisonTitles[scene.id])scene.copy.headline=comparisonTitles[scene.id];
     if(scene.layout==='chart'){
       // Compact release-date labels fit their real chart columns at full HD.
@@ -81,6 +83,7 @@ for(const name of readdirSync(root)){
       pkg.assets[id]={kind:'image',origin:'upload',status:'ready',file:path,bytes:data.length,sha256:hash(data),redistributable:true,license:{id:'CC0-1.0'},source:{provider:'repo',title:'Original comparison illustration',creator:'Comfyrizz showcase'}};
       return {asset:id,fit:'cover',label:plate.label};
     });
+    for(const plate of scene.media)delete plate.label;
     delete scene.foreground;
     if(scene.motion?.recipe==='focus')scene.motion.focus={x:.59,y:.31,width:.32,height:.43};
   }

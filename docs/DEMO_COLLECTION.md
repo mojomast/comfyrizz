@@ -8,6 +8,24 @@ Three films exercise the integrated animation, narration and generation pipeline
 | **Hermes Agent: The Threshold** | Precise technical diagrams, architectural light and moving systems | The current stable release, its practical capabilities, and its stated limits |
 | **The Ministry of Mandatory Spontaneity** | Institutional teal, cream paper, absurd civic ceremony | A fictional bureaucracy tries to enforce surprise through forms and metrics |
 
+## Completed films
+
+All three films are published on the configured application host (`APP_URL`). Each
+player has twelve seekable chapters, an MP4 download, the editable project ZIP,
+captions, script, credits and the technical verification report.
+
+| Film | Player path | Duration | Frames at 30 fps | Fresh stills / plates |
+|---|---|---:|---:|---:|
+| ussy.host | `$APP_URL/rich-ussy/index.html` | 130.645 s | 3,919 | 6 / 5 |
+| Hermes Agent | `$APP_URL/rich-hermes/index.html` | 132.074 s | 3,962 | 8 / 5 |
+| Mandatory Spontaneity | `$APP_URL/rich-ministry/index.html` | 117.034 s | 3,511 | 7 / 7 |
+
+The collection contains **36 scenes**, **21 generated stills**, **17 generated
+motion plates**, **12 original SVG compositions** and three original scores.
+The films are 1920×1080 with 48 kHz audio. Each player directory contains
+`video.mp4`, `package.zip`, `captions.srt`, `captions.vtt`, `script.md`,
+`CREDITS.md`, `chapters.json` and `verification.json`.
+
 The scripts and public source ledger are in
 [`scripts/demos/STORYBOARDS.md`](../scripts/demos/STORYBOARDS.md).
 Generated illustrations are conceptual imagery, not product screenshots. The
@@ -87,5 +105,31 @@ against the runtime list. Account balance moved from **359.35 to 357.87**:
 **1.48 credits spent**, **28.52 of the 30-credit authorization remaining**.
 The point estimate was 2.32 credits and the conservative reservation 4.024.
 
-CPU production is in progress. Final durations, verification results and
-published paths will be recorded here after delivery.
+### Final verification
+
+- All three production controllers completed narration, timing, render,
+  technical verification and rights-aware export.
+- Frame count, dimensions, duration, audio stream, non-silent audio and full
+  narration-envelope coverage passed for every film. Measured lag was **0 ms**;
+  envelope correlations were **0.996427** (ussy), **0.992729** (Hermes) and
+  **0.999616** (Ministry).
+- All 36 representative scene frames were visually reviewed. Comparison titles
+  carry the paired labels so the lower band remains clear for sentence captions.
+- All three live players played in Chromium and passed chapter-seeking checks.
+  MP4, editable ZIP, WebVTT and credits downloads were fetched over HTTPS and
+  their SHA-256 hashes matched the local verified exports.
+- Editable ZIPs passed archive integrity, path-containment and private-path /
+  token-URL checks. Generated media and runtime records stay outside Git; the
+  README contains curated frames from the final MP4s.
+- The one-shot background fix passed **217 renderer tests**, renderer/web
+  typechecks, and **30 Chromium editor tests**. Budget and job-isolation
+  regressions passed **3/3**. Existing integration checks remain documented in
+  [the handoff](handoffs/ANIMATION_INTEGRATION.md).
+- The seven pre-existing media pages remain intact. All 153 original publication
+  files retained their hashes after deployment of the renderer fix.
+
+Runtime evidence is stored under the external campaign root:
+`budget-ledger.json`, `production-results.json`, `productions/*/result.json`,
+`review/*/contact-sheet.jpg`, and `published-verification.json`. The final account
+check still showed **357.87 credits**, **0.00 credits/hour**, and **zero active
+assignments**.

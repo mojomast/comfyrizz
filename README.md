@@ -52,6 +52,27 @@ No GPU? The whole loop (brief → package → SVG art → timeline edits → pre
 
 ## Gallery
 
+### Rich storytelling collection
+
+Three twelve-scene films combine **21 fresh generated stills, 17 LTX motion
+plates, original SVG artwork, all eight layouts and six animation recipes**.
+Each film has measured Kokoro narration, captions, an original instrumental
+score, and an editable project export. The shared GPU batch used **1.48 Colab
+credits** and was verifiably stopped before CPU rendering.
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/media/still-rich-ussy.jpg" alt="Slop Illustrated: generated editorial imagery and animated typography"><br><sub><b>ussy.host — Slop Illustrated.</b> Software stories with a point of view and source receipts.</sub></td>
+    <td width="33%"><img src="docs/media/still-rich-hermes.jpg" alt="Hermes Agent: generated technical imagery with precise editable typography"><br><sub><b>Hermes Agent — The Threshold.</b> A sourced tour of the stable release and its practical capabilities.</sub></td>
+    <td width="33%"><img src="docs/media/still-rich-ministry.jpg" alt="The Ministry of Mandatory Spontaneity: a fictional civic bureaucracy"><br><sub><b>Mandatory Spontaneity.</b> A deadpan institution requires citizens to schedule their surprises.</sub></td>
+  </tr>
+</table>
+
+See the [collection, production evidence and reproduction guide](docs/DEMO_COLLECTION.md)
+and [complete scripts and source ledger](scripts/demos/STORYBOARDS.md).
+
+### Earlier examples
+
 Stills from example videos rendered with Comfyrizz (FLUX 3 Klein stills and reference edits, LTX-2.5 plates, Kokoro narration, Remotion type and charts).
 
 <table>

@@ -27,7 +27,7 @@ try{
     const playback=await page.locator('video').evaluate(video=>{video.pause();return {duration:video.duration,width:video.videoWidth,height:video.videoHeight,seekedTo:video.currentTime};});
     const downloads=[];
     for(const filename of ['video.mp4','package.zip','captions.vtt','CREDITS.md']){
-      const response=await fetch(new URL(filename,url));if(!response.ok())throw Error(`${name}/${filename}: HTTP ${response.status}`);
+      const response=await fetch(new URL(filename,url));if(!response.ok)throw Error(`${name}/${filename}: HTTP ${response.status}`);
       const digest=createHash('sha256');let bytes=0;
       for await(const chunk of response.body){bytes+=chunk.length;digest.update(chunk);}
       const expected=createHash('sha256').update(readFileSync(join(exports,filename))).digest('hex');
