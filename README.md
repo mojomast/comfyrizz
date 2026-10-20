@@ -72,6 +72,11 @@ personality, entries, a transition grammar, a background pattern and a finishing
 motion-style skill lists, suggests and applies them (`style.list`, `style.suggest`, `style.apply`).
 A seeded variety engine avoids repeating recent looks, and a look score checks the result.
 
+<img src="docs/media/motion-gallery.webp" alt="The motion gallery: all 24 style recipes rendered as style-frame cards in their own palettes" width="880">
+
+The full gallery (`node scripts/motionkit/gallery.mjs` → [`docs/motion-gallery/index.html`](docs/motion-gallery/index.html))
+renders every recipe through the same `styleFrame` code the agent uses, with energy and finish filters.
+
 - **24 recipes** in [`scripts/motionkit/data/recipes/`](scripts/motionkit/data/recipes/), from Swiss grid and Blueprint to Cinematic noir, Risograph and VHS retro
 - **37 effects** ([`effects.json`](scripts/motionkit/data/effects.json)) and **25 transitions** ([`transitions.json`](scripts/motionkit/data/transitions.json)), each with a CPU fallback
 - **16 OFL-1.1 fonts** catalogued in [`assets.json`](scripts/motionkit/data/assets.json) and fetched with `node scripts/motionkit/fetch-assets.mjs`
