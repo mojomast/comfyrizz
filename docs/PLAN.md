@@ -170,3 +170,15 @@ The original group board (THE INSANE ASSYLYM) is at Orbit's 100-entry cap, so a 
 | D Kyle-gated: HF licences/token, GPU spike approval | kyle | `t_dddec6e24e254b75` |
 | E1 SVG-guided generation: CPU prep (experimental) | hermes | `t_5f7f30a026174551` |
 | E2 SVG-guided GPU sweep (Kyle-gated) | kyle | `t_28128f96b4974069` |
+
+## SCOPE FREEZE (Tue Oct 20, 2026)
+
+Until submission (Wed Oct 28) only the demo path in SPEC §11 and fixes ship. These move to **post-hackathon** (SPEC §12):
+
+- Music bed and SFX in the mix
+- Motion transitions (blur, push, zoom, iris). The schema vocabulary and motion lint stay; no renderer work
+- Qwen3-TTS voices (Kokoro stays the only TTS)
+- SVG-guided generation defaults from the `workflows/svg-guided/` sweep (stays experimental, off by default)
+- Comfy Cloud backend (Google Colab and your own ComfyUI stay the two backends)
+
+To reopen an item, Kyle approves it on the board.
