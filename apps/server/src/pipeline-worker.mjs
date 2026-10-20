@@ -221,6 +221,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exitCode = 0;
     for (const [runtime, value] of Object.entries(spec.runtimes)) {
       if (value.ownership === 'external' || value.state === 'stopped') continue;
+      // PO-4: a reconcile must be interruptible. Stopping before a teardown starts is safe: the untried
+      // runtimes keep the state they were recorded with, so the run stays unsettled and still blocks a new
+      // one. A teardown that has already started is never abandoned half-way.
+      if (abort.signal.aborted) {
+        send({ kind: 'diagnostic', message: 'Reconciliation was cancelled; runtimes not yet confirmed stopped are unchanged.' });
+        process.exitCode = 1;
+        break;
+      }
       const narration = runtime === 'narration';
       const backend = createColabBackend({ packageId: narration ? `${spec.plan.packageId}_qwen` : spec.runId, scratchDir: narration ? join(spec.runDir, 'qwen/scratch') : join(spec.runDir, 'media-runtime') });
       try {

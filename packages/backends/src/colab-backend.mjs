@@ -528,7 +528,7 @@ export function createColabBackend({
     },
 
     /** Allocate only if needed. The caller has already shown the spend approval card. */
-    async ensureUp({ approved = false, onEvent = null } = {}) {
+    async ensureUp({ approved = false, onEvent = null, signal = null } = {}) {
       const found = await sessions();
       const existing = found.sessions.find((entry) => entry.name === session && !entry.orphan);
       if (existing && owns()) {
@@ -546,7 +546,11 @@ export function createColabBackend({
       // seen 10:04 EDT Oct 19). That is capacity, not a bad request, so retry a couple of times with backoff.
       let result = null;
       for (let attempt = 1; attempt <= newAttempts; attempt += 1) {
-        result = await step(argvNew({ session, gpu }), { label: attempt === 1 ? "new" : `new-${attempt}`, wallMs: NEW_WALL_MS, silenceMs: NEW_WALL_MS });
+        // PO-4: allocation is the slowest, most expensive step in the run (~60 s of silence), so a cancel
+        // has to be able to interrupt it. The CLI kills the child on abort; the caller's abort reason is
+        // rethrown here rather than being reported as "colab new failed".
+        result = await step(argvNew({ session, gpu }), { label: attempt === 1 ? "new" : `new-${attempt}`, wallMs: NEW_WALL_MS, silenceMs: NEW_WALL_MS, signal });
+        signal?.throwIfAborted();
         if (result.code === 0 || !isAssignUnavailable(result.output) || attempt === newAttempts) break;
         emit(onEvent, { type: "assign_retry", session, attempt, reason: "503 Service Unavailable from POST /tun/m/assign" });
         await sleep(newRetryMs * attempt);

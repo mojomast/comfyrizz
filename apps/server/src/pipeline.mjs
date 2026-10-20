@@ -1,6 +1,7 @@
 // Durable application pipeline. Heavy work lives in a child, never the HTTP/SSE loop.
 import { fork } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +9,10 @@ import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
 import { planPipeline } from './pipeline-contract.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
+// PO-4: reconciliation stops Colab runtimes one at a time; without a deadline a CLI that never answers
+// leaves the run permanently blocking every new pipeline, with no way to cancel it.
+const RECONCILE_TIMEOUT_MS = 360000;
+const RECONCILE_STOP_GRACE_MS = 10000;
 const safe = value => JSON.parse(redactForLog(JSON.stringify(value)));
 function readJournal(path) {
   const entries = [];
@@ -18,20 +23,67 @@ function readJournal(path) {
   }
   return entries;
 }
+
+/**
+ * PO-4: replay used to re-read and re-parse the whole journal on every poll (every 2 s from the UI, and
+ * every heartbeat added a line). The journal is append-only, so only the bytes written since the last read
+ * are fetched: the offset always sits just past a newline, so a multi-byte character is never split.
+ */
+function readJournalFrom(path, offset) {
+  if (!existsSync(path)) return { offset: 0, text: '' };
+  const size = statSync(path).size;
+  if (size <= offset) return { offset: size < offset ? 0 : offset, text: '' };
+  const buffer = Buffer.allocUnsafe(size - offset);
+  const fd = openSync(path, 'r');
+  let read = 0;
+  try { read = readSync(fd, buffer, 0, buffer.length, offset); } finally { closeSync(fd); }
+  return { offset, text: buffer.subarray(0, read).toString('utf8') };
+}
+
+function processAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+}
 export function launchPipeline(spec, onMessage, onExit) {
   const child = fork(fileURLToPath(new URL('./pipeline-worker.mjs', import.meta.url)), [spec], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   child.on('message', onMessage);
   child.stderr.on('data', data => onMessage({ kind: 'diagnostic', message: data.toString().slice(-2000) }));
   child.on('error', error => onMessage({ kind: 'failed', message: error.message }));
   child.on('exit', (code, signal) => onExit(code, signal));
-  return { cancel: () => child.connected && child.send({ kind: 'cancel' }) };
+  return { cancel: () => child.connected && child.send({ kind: 'cancel' }), kill: signal => { try { child.kill(signal); } catch { /* already gone */ } } };
 }
 
-export function createPipelineController({ runtimeDir, events, stageInputs, launch = launchPipeline, env = process.env, isBusy = () => false }) {
+export function createPipelineController({ runtimeDir, events, stageInputs, launch = launchPipeline, env = process.env, isBusy = () => false, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = RECONCILE_STOP_GRACE_MS }) {
   const dir = join(runtimeDir, 'pipelines');
   mkdirSync(dir, { recursive: true });
-  const records = new Map(), workers = new Map();
-  let starting = false;
+  const records = new Map(), workers = new Map(), journals = new Map();
+  let starting = false, lastPersist = 0, ownsLock = false;
+  /**
+   * PO-4: the busy flag was in-memory only, so two servers pointed at one runtime directory both accepted
+   * runs and both replayed the same journals. One process owns the directory; a stale lock is taken over
+   * when its pid is gone, and a live owner from another host is never second-guessed.
+   */
+  function claimOwner() {
+    const path = join(dir, 'owner.json');
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        writeFileSync(path, JSON.stringify({ pid: process.pid, host: hostname(), startedAt: new Date().toISOString() }), { flag: 'wx', mode: 0o600 });
+        ownsLock = true;
+        return;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        let owner = null;
+        try { owner = JSON.parse(readFileSync(path, 'utf8')); } catch { /* a torn lock is stale by definition */ }
+        if (!owner?.pid) { try { unlinkSync(path); } catch { /* another starter won; the next attempt decides */ } continue; }
+        // Same process: a test or a supervisor re-creating the controller for the same runtime directory.
+        if (owner.pid === process.pid) return;
+        const foreign = Boolean(owner.host) && owner.host !== hostname();
+        if (foreign || processAlive(owner.pid)) throw new Error(`This runtime directory belongs to another Comfyrizz server (pid ${owner.pid} on ${owner.host ?? 'this host'}). Two servers on one runtime directory would both accept runs and both rewrite the same journals. Stop the other one, or start this one with a different COMFYRIZZ_RUNTIME_DIR.`);
+        try { unlinkSync(path); } catch { /* raced again; retry */ }
+      }
+    }
+    throw new Error(`Could not take ownership of ${dir}: another Comfyrizz server keeps taking it.`);
+  }
+  claimOwner();
   const save = record => {
     const path = join(dir, record.runId, 'state.json');
     writeFileSync(`${path}.tmp`, JSON.stringify(record, null, 2), { mode: 0o600 });
@@ -43,8 +95,25 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     record.sequence += 1; record.updatedAt = at;
     const entry = safe({ version: 1, type: 'pipeline.event', runId: record.runId, packageId: record.packageId, baseRevision: record.baseRevision, sequence: record.sequence, at, kind, ...payload });
     appendFileSync(join(dir, record.runId, 'events.jsonl'), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+    lastPersist = Date.now();
     save(record);
     events?.publish(entry);
+  }
+  /** The journal as parsed so far, reading only the lines appended since the last call. */
+  function journalFor(runId) {
+    const cache = journals.get(runId) ?? { offset: 0, entries: [] };
+    const { offset, text } = readJournalFrom(join(dir, runId, 'events.jsonl'), cache.offset);
+    if (offset !== cache.offset) cache.offset = offset;
+    const complete = text.lastIndexOf('\n');
+    if (complete >= 0) {
+      for (const line of text.slice(0, complete).split('\n')) {
+        if (!line.trim()) continue;
+        try { cache.entries.push(JSON.parse(line)); } catch { /* a torn line stays out of the replay */ }
+      }
+      cache.offset += Buffer.byteLength(text.slice(0, complete + 1));
+    }
+    journals.set(runId, cache);
+    return cache.entries;
   }
   for (const name of readdirSync(dir)) {
     const file = join(dir, name, 'state.json');
@@ -75,6 +144,14 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
   function receive(record, message) {
     if (TERMINAL.has(record.status)) return;
     const data = safe(message);
+    // PO-4: a 10 s heartbeat is not a durable fact. Journaling it rewrote state.json and appended a line
+    // every ten seconds for the whole run; it is now persisted at most once a minute and always in memory.
+    if (data.kind === 'heartbeat') {
+      record.lastHeartbeatAt = new Date().toISOString();
+      if (data.stageId) record.heartbeatStage = data.stageId;
+      if (Date.now() - lastPersist > 60000) { lastPersist = Date.now(); save(record); }
+      return;
+    }
     if (data.kind === 'stage') {
       const stage = record.stages.find(s => s.id === data.stageId);
       if (!stage) return;
@@ -134,7 +211,7 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
       mkdirSync(workDir, { recursive: true });
       await stageInputs(pkg, sourceDir, workDir);
       writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg, null, 2));
-      const record = { version: 1, runId, packageId: pkg.id, baseRevision: pkg.revision, inputHash: plan.inputHash, planHash: plan.planHash, status: 'running', sequence: 0, startedAt: new Date().toISOString(), updatedAt: null, finishedAt: null, currentStage: null, stages: plan.stages, budget: plan.budget, runtimes: {}, tasks: {}, warnings: [], error: null, result: null };
+      const record = { version: 1, runId, packageId: pkg.id, baseRevision: pkg.revision, inputHash: plan.inputHash, planHash: plan.planHash, status: 'running', sequence: 0, startedAt: new Date().toISOString(), updatedAt: null, finishedAt: null, currentStage: null, stages: plan.stages, budget: plan.budget, runtimes: {}, tasks: {}, warnings: [], error: null, result: null, reconcile: null };
       records.set(runId, record);
       const spec = join(runDir, 'spec.json');
       writeFileSync(spec, JSON.stringify({ runId, runDir, workDir, plan }), { mode: 0o600 });
@@ -156,6 +233,14 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
   function cancel(runId) {
     const record = records.get(runId);
     if (!record) return null;
+    // PO-4: a reconcile is cancellable too. Its record keeps the run's own status, so the cancel asks the
+    // worker to stop instead of pretending the run itself was cancelled.
+    if (record.status === 'reconciling') {
+      record.reconcile = { ...record.reconcile, cancelled: true, message: 'Reconciliation was cancelled; any runtime it had not confirmed stopped still blocks a new run.' };
+      emit(record, 'diagnostic', { stageId: null, message: record.reconcile.message });
+      workers.get(runId)?.cancel?.();
+      return publicRecord(record);
+    }
     if (TERMINAL.has(record.status)) return publicRecord(record);
     record.status = 'cancelling'; emit(record, 'cancelling', { message: 'Stopping work and verifying runtime shutdown. This may take several minutes.' });
     workers.get(runId)?.cancel();
@@ -166,18 +251,46 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     if (!record) return null;
     if (starting || active() || isBusy()) return { status: 409, error: 'pipeline busy' };
     const previousStatus = record.status;
-    record.status = 'reconciling'; emit(record, 'reconciling');
+    record.status = 'reconciling';
+    record.reconcile = { startedAt: new Date().toISOString(), finishedAt: null, confirmed: null, timedOut: false, cancelled: false, message: null };
+    emit(record, 'reconciling');
     const original = JSON.parse(readFileSync(join(dir, runId, 'spec.json')));
     const spec = join(dir, runId, 'reconcile.json');
     writeFileSync(spec, JSON.stringify({ ...original, action: 'reconcile', runtimes: record.runtimes }), { mode: 0o600 });
+    let timer = null, killTimer = null;
+    const clearTimers = () => { if (timer) clearTimeout(timer); if (killTimer) clearTimeout(killTimer); timer = killTimer = null; };
+    const settle = (confirmed, message) => {
+      clearTimers();
+      workers.delete(runId);
+      // PO-4: the outcome is part of the run's durable record, not only a journal event. A reconcile that
+      // did not confirm shutdown leaves the run unsettled (which is what actually blocks a new run), and the
+      // record says why instead of silently restoring the previous status.
+      record.reconcile = { ...record.reconcile, finishedAt: new Date().toISOString(), confirmed, message };
+      record.status = previousStatus;
+      emit(record, 'reconciled', { confirmed, timedOut: record.reconcile.timedOut, message });
+    };
     try {
-      workers.set(runId, launch(spec, message => {
+      const handle = launch(spec, message => {
         if (message.kind === 'runtime' || message.kind === 'diagnostic') receive(record, message);
       }, code => {
-        workers.delete(runId); record.status = previousStatus;
-        emit(record, 'reconciled', { confirmed: code === 0 && !unsettled(record), message: code === 0 && !unsettled(record) ? 'Managed runtimes are confirmed stopped. A fresh run can be planned.' : 'Runtime shutdown remains unconfirmed.' });
-      }));
-    } catch (error) { record.status = previousStatus; emit(record, 'reconciled', { confirmed: false, message: error.message }); }
+        const confirmed = code === 0 && !unsettled(record);
+        settle(confirmed, confirmed ? 'Managed runtimes are confirmed stopped. A fresh run can be planned.' : record.reconcile.timedOut ? `Runtime shutdown was not confirmed within ${Math.round(reconcileTimeoutMs / 60000)} minutes; the reconcile worker was stopped.` : 'Runtime shutdown remains unconfirmed.');
+      });
+      workers.set(runId, handle);
+      timer = setTimeout(() => {
+        record.reconcile = { ...record.reconcile, timedOut: true };
+        emit(record, 'diagnostic', { stageId: null, message: 'Reconciliation is taking too long; asking the worker to stop.' });
+        handle.cancel?.();
+        killTimer = setTimeout(() => handle.kill?.('SIGKILL'), reconcileStopGraceMs);
+        killTimer.unref?.();
+      }, reconcileTimeoutMs);
+      timer.unref?.();
+    } catch (error) {
+      clearTimers();
+      record.reconcile = { ...record.reconcile, finishedAt: new Date().toISOString(), confirmed: false, message: error.message };
+      record.status = previousStatus;
+      emit(record, 'reconciled', { confirmed: false, message: error.message });
+    }
     return { status: 202, run: publicRecord(record) };
   }
   return {
@@ -188,8 +301,11 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     directory: runId => records.has(runId) ? join(dir, runId) : null,
     replay(runId, after = 0) {
       if (!records.has(runId)) return null;
-      return readJournal(join(dir, runId, 'events.jsonl')).filter(event => event.sequence > after).slice(0, 500);
+      return journalFor(runId).filter(event => event.sequence > after).slice(0, 500);
     },
-    close: () => { for (const record of records.values()) if (!TERMINAL.has(record.status)) cancel(record.runId); },
+    close: () => {
+      for (const record of records.values()) if (!TERMINAL.has(record.status)) cancel(record.runId);
+      if (ownsLock) { try { unlinkSync(join(dir, 'owner.json')); } catch { /* already released */ } ownsLock = false; }
+    },
   };
 }
