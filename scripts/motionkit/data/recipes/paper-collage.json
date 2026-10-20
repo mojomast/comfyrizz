@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "paper-collage",
+  "label": "Paper collage",
+  "taxonomy": { "era": "handmade", "finish": "grain", "energy": "medium", "geometry": "organic", "type": "handwritten" },
+  "palette": [
+    { "role": "background", "hex": "#fdf6e3" },
+    { "role": "text", "hex": "#2d2a26" },
+    { "role": "accent", "hex": "#e0b13c" },
+    { "role": "secondary", "hex": "#3f7d5a" }
+  ],
+  "fonts": { "display": "caveat", "text": "fraunces" },
+  "easing": { "personality": "heavy", "entry": "land", "exit": "exit", "spring": "heavy" },
+  "entries": ["maskRise", "waterfall", "fadeUp"],
+  "emphasis": ["hero"],
+  "transitions": { "primary": "paper-reveal", "accent": ["slide", "cut"] },
+  "storyRecipe": "paper-cut",
+  "background": { "pattern": "grain" },
+  "finish": [
+    { "id": "paper-texture", "params": { "scale": 1, "opacity": 0.4 } },
+    { "id": "drop-shadow", "params": { "offsetY": 10, "blur": 12, "opacity": 0.3 } }
+  ],
+  "rules": {
+    "do": ["torn paper edges and layered cut shapes", "handwritten annotations"],
+    "dont": ["perfect vector edges", "dark mode"]
+  },
+  "prompt": "Cut-paper collage poster, cream stock, handwritten script, gold and green paper shapes"
+}

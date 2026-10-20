@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "neo-brutalist",
+  "label": "Neo brutalist",
+  "taxonomy": { "era": "contemporary", "finish": "raw", "energy": "high", "geometry": "hard-edge", "type": "grotesk" },
+  "palette": [
+    { "role": "background", "hex": "#fffb00" },
+    { "role": "text", "hex": "#000000" },
+    { "role": "accent", "hex": "#ff3ea5" },
+    { "role": "surface", "hex": "#ffffff" }
+  ],
+  "fonts": { "display": "archivo-black", "text": "space-grotesk" },
+  "easing": { "personality": "snappy", "entry": "enter", "exit": "exit", "spring": "snap" },
+  "entries": ["pop", "fadeUp", "waterfall"],
+  "emphasis": ["hero", "keyword"],
+  "transitions": { "primary": "cut", "accent": ["push", "zoom"] },
+  "storyRecipe": "kinetic",
+  "background": { "pattern": "dots" },
+  "finish": [
+    { "id": "hard-shadow", "params": { "offset": 10, "blur": 0 } },
+    { "id": "halftone", "params": { "dotSize": 2, "angle": 45 } }
+  ],
+  "rules": {
+    "do": ["thick black borders and raw layout offsets", "acid yellow field with hot pink hits"],
+    "dont": ["subtle gradients", "rounded corners"]
+  },
+  "prompt": "Raw web brutalism poster, acid yellow field, heavy black type, hot pink accents, hard shadows"
+}

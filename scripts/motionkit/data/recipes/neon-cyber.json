@@ -1,0 +1,29 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "neon-cyber",
+  "label": "Cyberpunk HUD",
+  "taxonomy": { "era": "futurist", "finish": "neon", "energy": "high", "geometry": "flat", "type": "mono" },
+  "palette": [
+    { "role": "background", "hex": "#05010d" },
+    { "role": "text", "hex": "#e7f9ff" },
+    { "role": "accent", "hex": "#00f0ff" },
+    { "role": "muted", "hex": "#ff003c" }
+  ],
+  "fonts": { "display": "orbitron", "text": "jetbrains-mono", "mono": "jetbrains-mono" },
+  "easing": { "personality": "snappy", "entry": "enter", "exit": "exit", "spring": "snap" },
+  "entries": ["pop", "maskRise", "countUp"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "cut", "accent": ["zoom", "push"] },
+  "storyRecipe": "technical-flow",
+  "background": { "pattern": "grid" },
+  "finish": [
+    { "id": "glitch-slice", "params": { "slices": 8, "offset": 18 } },
+    { "id": "chroma-shift", "params": { "offset": 2, "angle": 0 } },
+    { "id": "glow-text", "params": { "intensity": 0.6, "spread": 12 } }
+  ],
+  "rules": {
+    "do": ["cyan HUD on near-black with red alerts", "hard cuts and glitch slices"],
+    "dont": ["soft pastels", "long fades"]
+  },
+  "prompt": "Cyberpunk HUD, cyan and red on near-black, glitch slices, chroma shift, glowing mono type"
+}

@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "mono-terminal",
+  "label": "Mono terminal",
+  "taxonomy": { "era": "contemporary", "finish": "crt", "energy": "medium", "geometry": "flat", "type": "mono" },
+  "palette": [
+    { "role": "background", "hex": "#0b0f0c" },
+    { "role": "text", "hex": "#c8facc" },
+    { "role": "accent", "hex": "#39ff88" },
+    { "role": "muted", "hex": "#4a5a4e" }
+  ],
+  "fonts": { "display": "jetbrains-mono", "text": "ibm-plex-mono" },
+  "easing": { "personality": "mechanical", "entry": "linear", "exit": "linear", "spring": "snap" },
+  "entries": ["fadeUp", "waterfall", "countUp"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "cut", "accent": ["wipe", "fade"] },
+  "storyRecipe": "technical-flow",
+  "background": { "pattern": "grid" },
+  "finish": [
+    { "id": "scanlines-soft", "params": { "count": 120, "opacity": 0.18 } },
+    { "id": "glow-text", "params": { "intensity": 0.55, "spread": 10 } }
+  ],
+  "rules": {
+    "do": ["monospaced type on a dark terminal field", "crisp hard cuts between beats"],
+    "dont": ["serif type", "soft shadows"]
+  },
+  "prompt": "Developer terminal scene, phosphor green mono type on near-black, soft scanlines and glow"
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "data-journalism",
+  "label": "FT/Bloomberg charts",
+  "taxonomy": { "era": "modernist", "finish": "paper", "energy": "medium", "geometry": "flat", "type": "serif-editorial" },
+  "palette": [
+    { "role": "background", "hex": "#fff1e5" },
+    { "role": "text", "hex": "#262a33" },
+    { "role": "accent", "hex": "#0f5499" },
+    { "role": "muted", "hex": "#990f3d" }
+  ],
+  "fonts": { "display": "instrument-serif", "text": "ibm-plex-mono", "mono": "ibm-plex-mono" },
+  "easing": { "personality": "editorial", "entry": "enter", "exit": "exit", "spring": "settle" },
+  "entries": ["countUp", "fadeUp", "maskRise"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "slide", "accent": ["wipe", "fade"] },
+  "storyRecipe": "technical-flow",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "paper-grain", "params": { "amount": 0.06, "contrast": 0.5 } }
+  ],
+  "rules": {
+    "do": ["thin rules and small caps labels", "one chart accent in navy or crimson"],
+    "dont": ["decorative illustration", "heavy gradients"]
+  },
+  "prompt": "Financial Times data page, cream paper, navy and crimson accents, thin rules, serif headlines"
+}

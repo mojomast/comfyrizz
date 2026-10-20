@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "editorial-serif",
+  "label": "Editorial serif",
+  "taxonomy": { "era": "contemporary", "finish": "print", "energy": "medium", "geometry": "flat", "type": "serif" },
+  "palette": [
+    { "role": "background", "hex": "#faf7f2" },
+    { "role": "text", "hex": "#1c1a17" },
+    { "role": "accent", "hex": "#b0412e" },
+    { "role": "muted", "hex": "#d9cfc1" }
+  ],
+  "fonts": { "display": "playfair-display", "text": "inter" },
+  "easing": { "personality": "editorial", "entry": "enter", "exit": "exit", "spring": "settle" },
+  "entries": ["fadeUp", "maskRise"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "fade", "accent": ["slide", "cut"] },
+  "storyRecipe": "focus",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "paper-grain", "params": { "amount": 0.05 } },
+    { "id": "vignette-soft", "params": { "amount": 0.3, "radius": 0.7 } }
+  ],
+  "rules": {
+    "do": ["flush-left serif display with airy leading", "one warm terracotta accent per scene"],
+    "dont": ["centered body copy", "harsh pure white"]
+  },
+  "prompt": "Magazine feature spread, warm paper ground, high-contrast serif headlines, terracotta accent, soft vignette"
+}
