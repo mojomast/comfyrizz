@@ -1,0 +1,868 @@
+{
+  "schema": "comfyrizz.cassette/v1",
+  "createdAt": "2026-10-20T00:00:00.000Z",
+  "model": "demo-launch-model",
+  "provider": "synthetic-fixture-provider",
+  "entries": [
+    {
+      "key": "ac80d98b0a57979c6cb8831e073b569f6bb29c1084e7c09baec76e9aeb3a3a1e",
+      "request": {
+        "model": "demo-launch-model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a synthetic launch-video agent used only by this cassette fixture. Every product, person and number here is invented."
+          },
+          {
+            "role": "user",
+            "content": "Brief a 30-second launch video for the fictional Nimbus Kettle. The hero moment is the lid opening."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "storyboard.propose",
+              "description": "Create a package draft from a brief.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "brief": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "brief"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.route",
+              "description": "Choose an asset source for a scene need.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "need": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "need"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.generate_image",
+              "description": "Plan a FLUX still without running a GPU job.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string"
+                  },
+                  "aspect": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "intent"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "presenter.set",
+              "description": "Turn the AI presenter on or off.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "coverage": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "tool_choice": "auto",
+        "temperature": 0.2
+      },
+      "response": {
+        "status": 200,
+        "stream": true,
+        "body": {
+          "id": "chatcmpl-synth-launch",
+          "object": "chat.completion",
+          "created": 1700000000,
+          "model": "demo-launch-model",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_synth_0001",
+                    "type": "function",
+                    "function": {
+                      "name": "storyboard.propose",
+                      "arguments": "{\"brief\":\"Fictional 30-second launch video for the Nimbus Kettle; hero moment is the lid opening with a curl of steam.\",\"title\":\"Nimbus Kettle Launch\",\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\",\"copy\":{\"headline\":\"Nimbus Kettle\",\"sub\":\"A fictional launch demo\"}},{\"id\":\"s2\",\"layout\":\"hero\",\"copy\":{\"headline\":\"The lid opens\",\"sub\":\"Invented example footage\"}}]}"
+                    }
+                  }
+                ]
+              },
+              "finish_reason": "tool_calls"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "39f159c9d34c332d4b97549c9a2d11368cff8ef1af489107e71ed25a20979bc5",
+      "request": {
+        "model": "demo-launch-model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a synthetic launch-video agent used only by this cassette fixture. Every product, person and number here is invented."
+          },
+          {
+            "role": "user",
+            "content": "Brief a 30-second launch video for the fictional Nimbus Kettle. The hero moment is the lid opening."
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0001",
+                "type": "function",
+                "function": {
+                  "name": "storyboard.propose",
+                  "arguments": "{\"brief\":\"Fictional 30-second launch video for the Nimbus Kettle; hero moment is the lid opening with a curl of steam.\",\"title\":\"Nimbus Kettle Launch\",\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\",\"copy\":{\"headline\":\"Nimbus Kettle\",\"sub\":\"A fictional launch demo\"}},{\"id\":\"s2\",\"layout\":\"hero\",\"copy\":{\"headline\":\"The lid opens\",\"sub\":\"Invented example footage\"}}]}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0001",
+            "content": "{\"package\":{\"id\":\"pkg_synth\",\"title\":\"Nimbus Kettle Launch\",\"revision\":1,\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\"},{\"id\":\"s2\",\"layout\":\"hero\"}]},\"revision\":1,\"placeholders\":[]}"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "storyboard.propose",
+              "description": "Create a package draft from a brief.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "brief": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "brief"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.route",
+              "description": "Choose an asset source for a scene need.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "need": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "need"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.generate_image",
+              "description": "Plan a FLUX still without running a GPU job.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string"
+                  },
+                  "aspect": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "intent"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "presenter.set",
+              "description": "Turn the AI presenter on or off.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "coverage": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "tool_choice": "auto",
+        "temperature": 0.2
+      },
+      "response": {
+        "status": 200,
+        "stream": true,
+        "body": {
+          "id": "chatcmpl-synth-launch",
+          "object": "chat.completion",
+          "created": 1700000000,
+          "model": "demo-launch-model",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_synth_0002",
+                    "type": "function",
+                    "function": {
+                      "name": "assets.route",
+                      "arguments": "{\"scene_id\":\"s2\",\"need\":\"hero background of a kettle with steam\",\"kind\":\"image\",\"source\":\"generate\"}"
+                    }
+                  }
+                ]
+              },
+              "finish_reason": "tool_calls"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "92122d36ea0072d14c6ce70c8b4ce62a37c811699b45b11bfca832c38f0d6591",
+      "request": {
+        "model": "demo-launch-model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a synthetic launch-video agent used only by this cassette fixture. Every product, person and number here is invented."
+          },
+          {
+            "role": "user",
+            "content": "Brief a 30-second launch video for the fictional Nimbus Kettle. The hero moment is the lid opening."
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0001",
+                "type": "function",
+                "function": {
+                  "name": "storyboard.propose",
+                  "arguments": "{\"brief\":\"Fictional 30-second launch video for the Nimbus Kettle; hero moment is the lid opening with a curl of steam.\",\"title\":\"Nimbus Kettle Launch\",\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\",\"copy\":{\"headline\":\"Nimbus Kettle\",\"sub\":\"A fictional launch demo\"}},{\"id\":\"s2\",\"layout\":\"hero\",\"copy\":{\"headline\":\"The lid opens\",\"sub\":\"Invented example footage\"}}]}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0001",
+            "content": "{\"package\":{\"id\":\"pkg_synth\",\"title\":\"Nimbus Kettle Launch\",\"revision\":1,\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\"},{\"id\":\"s2\",\"layout\":\"hero\"}]},\"revision\":1,\"placeholders\":[]}"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0002",
+                "type": "function",
+                "function": {
+                  "name": "assets.route",
+                  "arguments": "{\"scene_id\":\"s2\",\"need\":\"hero background of a kettle with steam\",\"kind\":\"image\",\"source\":\"generate\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0002",
+            "content": "{\"scene_id\":\"s2\",\"decision\":{\"source\":\"generate\",\"kind\":\"image\"}}"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "storyboard.propose",
+              "description": "Create a package draft from a brief.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "brief": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "brief"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.route",
+              "description": "Choose an asset source for a scene need.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "need": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "need"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.generate_image",
+              "description": "Plan a FLUX still without running a GPU job.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string"
+                  },
+                  "aspect": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "intent"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "presenter.set",
+              "description": "Turn the AI presenter on or off.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "coverage": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "tool_choice": "auto",
+        "temperature": 0.2
+      },
+      "response": {
+        "status": 200,
+        "stream": true,
+        "body": {
+          "id": "chatcmpl-synth-launch",
+          "object": "chat.completion",
+          "created": 1700000000,
+          "model": "demo-launch-model",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_synth_0003",
+                    "type": "function",
+                    "function": {
+                      "name": "assets.generate_image",
+                      "arguments": "{\"scene_id\":\"s2\",\"intent\":\"hero shot of the fictional Nimbus Kettle, lid opening, steam\",\"aspect\":\"16:9\",\"text\":false}"
+                    }
+                  }
+                ]
+              },
+              "finish_reason": "tool_calls"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "a2d4b18a00b3d69f80b6dc7b6580d8a05bae540c154d74122a34f6545fb42d12",
+      "request": {
+        "model": "demo-launch-model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a synthetic launch-video agent used only by this cassette fixture. Every product, person and number here is invented."
+          },
+          {
+            "role": "user",
+            "content": "Brief a 30-second launch video for the fictional Nimbus Kettle. The hero moment is the lid opening."
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0001",
+                "type": "function",
+                "function": {
+                  "name": "storyboard.propose",
+                  "arguments": "{\"brief\":\"Fictional 30-second launch video for the Nimbus Kettle; hero moment is the lid opening with a curl of steam.\",\"title\":\"Nimbus Kettle Launch\",\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\",\"copy\":{\"headline\":\"Nimbus Kettle\",\"sub\":\"A fictional launch demo\"}},{\"id\":\"s2\",\"layout\":\"hero\",\"copy\":{\"headline\":\"The lid opens\",\"sub\":\"Invented example footage\"}}]}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0001",
+            "content": "{\"package\":{\"id\":\"pkg_synth\",\"title\":\"Nimbus Kettle Launch\",\"revision\":1,\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\"},{\"id\":\"s2\",\"layout\":\"hero\"}]},\"revision\":1,\"placeholders\":[]}"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0002",
+                "type": "function",
+                "function": {
+                  "name": "assets.route",
+                  "arguments": "{\"scene_id\":\"s2\",\"need\":\"hero background of a kettle with steam\",\"kind\":\"image\",\"source\":\"generate\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0002",
+            "content": "{\"scene_id\":\"s2\",\"decision\":{\"source\":\"generate\",\"kind\":\"image\"}}"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0003",
+                "type": "function",
+                "function": {
+                  "name": "assets.generate_image",
+                  "arguments": "{\"scene_id\":\"s2\",\"intent\":\"hero shot of the fictional Nimbus Kettle, lid opening, steam\",\"aspect\":\"16:9\",\"text\":false}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0003",
+            "content": "{\"scene_id\":\"s2\",\"asset\":{\"id\":\"a_img_synth\",\"status\":\"pending\"},\"requires_approval\":\"spend\"}"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "storyboard.propose",
+              "description": "Create a package draft from a brief.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "brief": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "brief"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.route",
+              "description": "Choose an asset source for a scene need.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "need": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "need"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.generate_image",
+              "description": "Plan a FLUX still without running a GPU job.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string"
+                  },
+                  "aspect": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "intent"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "presenter.set",
+              "description": "Turn the AI presenter on or off.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "coverage": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "tool_choice": "auto",
+        "temperature": 0.2
+      },
+      "response": {
+        "status": 200,
+        "stream": true,
+        "body": {
+          "id": "chatcmpl-synth-launch",
+          "object": "chat.completion",
+          "created": 1700000000,
+          "model": "demo-launch-model",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_synth_0004",
+                    "type": "function",
+                    "function": {
+                      "name": "presenter.set",
+                      "arguments": "{\"enabled\":true,\"coverage\":\"bookends\"}"
+                    }
+                  }
+                ]
+              },
+              "finish_reason": "tool_calls"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "ab72b0ba9e363ca9322a4b1fdee9ffd55015d6969630de124bfd58afe795c8e2",
+      "request": {
+        "model": "demo-launch-model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a synthetic launch-video agent used only by this cassette fixture. Every product, person and number here is invented."
+          },
+          {
+            "role": "user",
+            "content": "Brief a 30-second launch video for the fictional Nimbus Kettle. The hero moment is the lid opening."
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0001",
+                "type": "function",
+                "function": {
+                  "name": "storyboard.propose",
+                  "arguments": "{\"brief\":\"Fictional 30-second launch video for the Nimbus Kettle; hero moment is the lid opening with a curl of steam.\",\"title\":\"Nimbus Kettle Launch\",\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\",\"copy\":{\"headline\":\"Nimbus Kettle\",\"sub\":\"A fictional launch demo\"}},{\"id\":\"s2\",\"layout\":\"hero\",\"copy\":{\"headline\":\"The lid opens\",\"sub\":\"Invented example footage\"}}]}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0001",
+            "content": "{\"package\":{\"id\":\"pkg_synth\",\"title\":\"Nimbus Kettle Launch\",\"revision\":1,\"scenes\":[{\"id\":\"s1\",\"layout\":\"title\"},{\"id\":\"s2\",\"layout\":\"hero\"}]},\"revision\":1,\"placeholders\":[]}"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0002",
+                "type": "function",
+                "function": {
+                  "name": "assets.route",
+                  "arguments": "{\"scene_id\":\"s2\",\"need\":\"hero background of a kettle with steam\",\"kind\":\"image\",\"source\":\"generate\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0002",
+            "content": "{\"scene_id\":\"s2\",\"decision\":{\"source\":\"generate\",\"kind\":\"image\"}}"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0003",
+                "type": "function",
+                "function": {
+                  "name": "assets.generate_image",
+                  "arguments": "{\"scene_id\":\"s2\",\"intent\":\"hero shot of the fictional Nimbus Kettle, lid opening, steam\",\"aspect\":\"16:9\",\"text\":false}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0003",
+            "content": "{\"scene_id\":\"s2\",\"asset\":{\"id\":\"a_img_synth\",\"status\":\"pending\"},\"requires_approval\":\"spend\"}"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_synth_0004",
+                "type": "function",
+                "function": {
+                  "name": "presenter.set",
+                  "arguments": "{\"enabled\":true,\"coverage\":\"bookends\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_synth_0004",
+            "content": "{\"revision\":2,\"summary\":\"presenter enabled for bookends\"}"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "storyboard.propose",
+              "description": "Create a package draft from a brief.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "brief": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "brief"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.route",
+              "description": "Choose an asset source for a scene need.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "need": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "need"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "assets.generate_image",
+              "description": "Plan a FLUX still without running a GPU job.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "scene_id": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string"
+                  },
+                  "aspect": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scene_id",
+                  "intent"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "presenter.set",
+              "description": "Turn the AI presenter on or off.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "coverage": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "tool_choice": "auto",
+        "temperature": 0.2
+      },
+      "response": {
+        "status": 200,
+        "stream": true,
+        "body": {
+          "id": "chatcmpl-synth-launch",
+          "object": "chat.completion",
+          "created": 1700000000,
+          "model": "demo-launch-model",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "Draft ready: a fictional 30-second launch video for the Nimbus Kettle with a title card, a hero shot and a presenter. This is synthetic fixture text."
+              },
+              "finish_reason": "stop"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
