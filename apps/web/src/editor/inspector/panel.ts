@@ -123,9 +123,11 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
   });
   q<HTMLButtonElement>('set-voice').addEventListener('click', () => {
     const engine = panel.querySelector<HTMLSelectElement>('[data-engine]')!.value as 'kokoro' | 'qwen3-tts' | 'none';
+    const existing = store.getState().doc.package.voice;
     run({
       type: 'SetVoice',
       voice: {
+        ...(existing?.engine === engine ? existing : {}),
         enabled: engine !== 'none',
         engine,
         voice: panel.querySelector<HTMLInputElement>('[data-voice-id]')!.value || 'af_heart',
@@ -196,8 +198,18 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
     ctx.stroke();
   }
 
+  let observedVoice = store.getState().doc.package.voice;
   function render(): void {
     const state = store.getState();
+    if (state.doc.package.voice !== observedVoice) {
+      observedVoice = state.doc.package.voice;
+      const engine = panel.querySelector<HTMLSelectElement>('[data-engine]')!;
+      const voiceId = panel.querySelector<HTMLInputElement>('[data-voice-id]')!;
+      const speed = panel.querySelector<HTMLInputElement>('[data-speed]')!;
+      if (document.activeElement !== engine) engine.value = observedVoice?.engine ?? 'kokoro';
+      if (document.activeElement !== voiceId) voiceId.value = observedVoice?.voice ?? '';
+      if (document.activeElement !== speed) speed.value = String(observedVoice?.speed ?? 1);
+    }
     const view = scriptView(state.doc, state.derived.timeline);
     const ids = state.doc.package.scenes.map(scene => scene.id);
     if ([...sceneSelect.options].map(option => option.value).join() !== ids.join()) {

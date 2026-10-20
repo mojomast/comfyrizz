@@ -141,7 +141,7 @@ function transitionHint(scene: EditableScene, fps: number): string {
   const transition = transitionOf(scene);
   if (transition && !transitionNeedsFrames(transition.type)) return 'Hard boundary with no overlapping frames.';
   if (!transition || !transitionNeedsFrames(transition.type)) {
-    return 'The package uses the default fade. Choose Fade to set a duration; export recompiles the overlap. The final scene has no outgoing transition.';
+    return 'Uses the package/compiler transition default. Choose an explicit transition to set its duration; export recompiles the overlap. The final scene has no outgoing transition.';
   }
   const frames = transitionFrames(transition);
   return `${(frames / (fps > 0 ? fps : 30)).toFixed(2)} s at ${fps > 0 ? fps : 30} fps. The next scene overlaps by this many frames; export recompiles the overlap. The final scene has no outgoing transition.`;

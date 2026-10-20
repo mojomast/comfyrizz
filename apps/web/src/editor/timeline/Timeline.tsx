@@ -3,6 +3,8 @@
  * Pointer moves call preview (the store compiles the gesture); release commits one command.
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { ANIMATION_TRANSITIONS } from '../../../../../packages/schema/src/animation.mjs';
+import { nextTransition } from '../../animation-controls.mjs';
 import { nextSceneId, type Command } from '../commands.ts';
 import type { EditorExtras, EditorStore } from '../store.ts';
 import { clampTrim, mediaRangeCommand, trimBounds, trimFloorMessage } from './bounds.ts';
@@ -552,7 +554,7 @@ function Inspector(props: {
   }
   const preferred = props.preferred ?? props.compiledFrames;
   const delta = props.compiledFrames - preferred;
-  const types = ['cut', 'none', 'fade', 'blur', 'slide', 'push', 'wipe', 'zoom', 'iris'];
+  const types = ANIMATION_TRANSITIONS;
   return (
     <div className="tl-inspector" aria-label="Transition and trim inspector">
       <b>{props.primary}</b>
@@ -572,8 +574,8 @@ function Inspector(props: {
           value={props.transition?.type ?? 'cut'}
           onChange={event => {
             const type = event.target.value;
-            const frames = type === 'cut' || type === 'none' ? 0 : Math.max(1, props.transition?.frames || 15);
-            props.onTransition(type, frames, props.transition?.direction);
+            const next = nextTransition(props.transition, type);
+            props.onTransition(type, next.frames, next.direction);
           }}
         >
           {types.map(type => <option key={type} value={type}>{type}</option>)}

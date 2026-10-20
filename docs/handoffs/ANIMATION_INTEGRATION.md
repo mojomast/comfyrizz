@@ -1,8 +1,9 @@
 # Handoff: animation/storytelling integration
 
-Prepared 20 October 2026. The animation source series below is now being integrated
-with the timeline editor on `integ/animation-editor`, targeting `integ/editor` for
-Kyle's review. The target branch is not merged or rewritten by this work.
+Updated 20 October 2026. The animation source series is integrated with the
+timeline editor on `integ/animation-editor`. Kyle subsequently requested that the
+verified integration, refreshed README and current screenshots be merged and
+pushed to `main`; this supersedes the original PR-only delivery instruction.
 
 ## Source and merge
 
@@ -28,13 +29,19 @@ git merge --no-ff origin/integ/animation-editor
 
 Resolve conflicts in context. If only the animation series is wanted, inspect
 the three commits above and their dependencies before cherry-picking in order.
-This handoff does not perform a merge into the receiving agent's branch.
+The commands above are for other receiving branches; the main integration is
+performed separately under Kyle's updated instruction.
 
 ## Editor integration resolutions
 
 The integration keeps the CA-1/2/3 editor store, timeline, Script/Audio/Media
 inspector, revision-aware autosave and Playwright harness. Animation edits use
 store commands, undo/redo and the same save acknowledgement as other edits.
+The existing voice presets, blends, Qwen controls, scene delivery directions and
+full narrated-generation panel remain available through the same store. Voice
+freshness fingerprints include the additional production parameters; changing a
+blend or delivery setting invalidates the old take and undo restores freshness.
+Selection/playhead changes do not discard a checked generation plan.
 
 The five textual conflicts from the initial editor merge were resolved as follows:
 
@@ -60,6 +67,10 @@ Security/integration corrections include token-free preview source maps (blob or
 short-lived media ticket URLs), header-authenticated package media, blob-backed QA
 contact sheets, redacted E2E server bootstrap logs, and realpath containment for
 pipeline artifact downloads, including a replaced export-directory symlink.
+`SetTransition(null)` retains the incoming cut/zero-overlap contract. The new
+`ResetSceneTransition` command intentionally removes an override to use compiler
+defaults. Editor sidecar word timing keeps its provenance through compilation and
+word-based splits.
 
 ### Additional branch review
 
@@ -78,6 +89,30 @@ pipeline artifact downloads, including a replaced export-directory symlink.
   The paired documentation-hygiene/Q-P2 series must be integrated when published.
 - The published Hermes history contains only the older dangling-link attempt;
   the new G6-13/Q-H2 relinking fix was not available and was left untouched.
+
+The `q/editor-phase0` ancestry merge (`512f711`) conflicted in
+`apps/web/package.json` and `docs/editor/PHASE0.md`. Both retained the already
+reconciled editor versions: the complete test command/dependencies and the newer
+editor decisions. The reviewed PR #14 plus hardening merged as `a33c3d7`.
+
+### Integrated verification
+
+Suites were run sequentially. Shared packages passed **521** tests (agent 110,
+backends 119, jobs 61, LLM 11, planner 39, schema 140, sources 12, TTS 17,
+vector 12). Renderer passed **216**, server **174**, and web **82**. Python passed
+**357**, with one existing optional real-MP4 probe skipped because its example
+file was absent. Web and renderer TypeScript checks passed. The real published
+narration mix also passed the hardened checker (envelope correlation 0.99999544).
+
+New browser coverage exercises animation persistence and undo, reveal transitions,
+compatibility/locked controls, invalid focus, rejected saves, voice blend
+preservation through the compact editor, delivery directions, generation-plan
+revision checks, token-free QA sheets and failed scene-render recovery.
+All **30 Chromium E2E tests** passed (17 incoming editor tests plus 13 integration
+tests). The timeline's compact transition selector also shares the complete
+transition catalogue with the animation inspector, so selecting a reveal never
+appears as a cut or carries an inapplicable direction. Current README screenshots
+are captured from the running editor with a six-scene animation project.
 
 ## Delivered capability
 
@@ -191,11 +226,11 @@ output and cleans its temporary runtime. Never copy keys into the handoff or rep
 
 ## Deployment and evidence
 
-- App: <https://mail.tailec998.ts.net:8451/>
-- Landscape + same-audio baseline: <https://mail.tailec998.ts.net:8451/animation-showcase/index.html>
-- Portrait: <https://mail.tailec998.ts.net:8451/animation-showcase-portrait/index.html>
+- App: the deployment's configured base URL (`APP_URL`).
+- Landscape + same-audio baseline: `$APP_URL/animation-showcase/index.html`.
+- Portrait: `$APP_URL/animation-showcase-portrait/index.html`.
 - Both players offer MP4 and editable ZIP downloads.
-- Evidence: `/home/mojo/comfyrizz-gpu-tests/animation-implementation-20261020`;
+- Evidence: the deployment's external `animation-implementation-20261020` directory;
   portrait artifacts are in its `portrait/` subdirectory. Runtime evidence is
   host-local, not in Git. Reproduction/publication commands are in
   `docs/ANIMATION_STORYTELLING.md`.
@@ -216,6 +251,11 @@ Credentials, model weights, runtime outputs and the local untracked
 receiving branch rather than replacing its lockfile with this host's local one.
 Animation work used no Colab units: prior cumulative usage is **10.22/20**, with
 **9.78 remaining**. No new GPU allocation is required for this integration.
+
+Subsequent authorization: Kyle approved **up to 30 Colab credits total for three
+new rich demo productions** (ussy.host, Hermes Agent and an absurdist comedy),
+after the verified integration/docs push to main. This is a separate new demo
+budget; track measured spend and confirmed teardown in an external runtime ledger.
 
 Broader outstanding work from previous production: combined paid cloud-pipeline
 validation, general low-resolution caption scaling and human review of the Hermes

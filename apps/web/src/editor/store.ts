@@ -199,6 +199,7 @@ export function measuredFor(doc: ProjectDoc, base: MeasuredInput): MeasuredInput
       text: chunk.text,
       seconds: chunk.seconds,
       ...(chunk.words ? { words: chunk.words } : {}),
+      ...(chunk.timing ? { timing: chunk.timing } : {}),
     }));
   }
   return { ...base, narration };

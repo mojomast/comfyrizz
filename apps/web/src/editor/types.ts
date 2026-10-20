@@ -95,6 +95,7 @@ export interface AlignmentWord {
 
 /** Planner-compatible measured chunk. Times are scene-local once the chunk is placed. */
 export interface AlignmentChunk {
+  timing?: 'aligner' | 'syllable-fallback';
   text: string;
   seconds: number;
   words?: AlignmentWord[];

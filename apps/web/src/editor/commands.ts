@@ -106,7 +106,7 @@ export interface SetTransition {
   sceneId: string;
   transitionOut: { type: string; frames: number; direction?: string } | null;
 }
-/** Explicitly remove the override so the compiler's default fade applies. */
+/** Explicitly remove the override so the package/compiler transition default applies. */
 export interface ResetSceneTransition { type: 'ResetSceneTransition'; sceneId: string }
 export interface SplitScene {
   type: 'SplitScene';

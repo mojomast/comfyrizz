@@ -248,8 +248,8 @@ export function splitChunk(chunk: AlignmentChunk, localCut: number): { left: Ali
     else rightWords.push({ text: word.text, start: 0, end: Math.max(0, word.end - cut) });
   }
   return {
-    left: { text: leftWords.map(word => word.text).join(' '), seconds: cut, words: leftWords },
-    right: { text: rightWords.map(word => word.text).join(' '), seconds: Math.max(0, seconds - cut), words: rightWords },
+    left: { text: leftWords.map(word => word.text).join(' '), seconds: cut, words: leftWords, ...(chunk.timing ? { timing: chunk.timing } : {}) },
+    right: { text: rightWords.map(word => word.text).join(' '), seconds: Math.max(0, seconds - cut), words: rightWords, ...(chunk.timing ? { timing: chunk.timing } : {}) },
   };
 }
 

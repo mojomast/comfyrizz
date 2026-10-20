@@ -85,8 +85,6 @@ const animation = (page: Page) => page.locator('[data-animation-section]');
 const animationStatus = (page: Page) => page.locator('[data-anim-status]');
 const voice = (page: Page) => page.locator('#voice-panel').locator('[aria-label="Voice and narration"]');
 
-test.describe.configure({ mode: 'serial' });
-
 test.beforeEach(() => {
   resetProject(loadEnv());
 });
@@ -99,7 +97,8 @@ test('animation edits use autosave and survive reload', async ({ page }) => {
   await first.getByLabel('Recipe').selectOption('kinetic');
   await first.getByLabel(/Seed/).fill('4242');
   await first.getByLabel(/Phrase cues/).fill('one two\nthree four');
-  await first.getByLabel('Transition', { exact: true }).selectOption('fade');
+  await first.getByRole('combobox', { name: 'Transition', exact: true }).selectOption('paper-reveal');
+  await expect(page.getByRole('combobox', { name: 'Transition type', exact: true })).toHaveValue('paper-reveal');
   await first.getByLabel('Duration (frames)').fill('18');
   await expect(first.locator('[data-animation-timing]')).toContainText(/measured for this scene/i);
 
@@ -112,7 +111,7 @@ test('animation edits use autosave and survive reload', async ({ page }) => {
   expect(scene?.motion?.recipe).toBe('kinetic');
   expect(scene?.motion?.seed).toBe(4242);
   expect(scene?.motion?.cue_phrases).toEqual(['one two', 'three four']);
-  expect(scene?.transitionOut).toEqual({ type: 'fade', frames: 18 });
+  expect(scene?.transitionOut).toEqual({ type: 'paper-reveal', frames: 18 });
 
   await page.reload();
   await expect(page.getByTestId('scene')).toHaveCount(3);
@@ -122,7 +121,9 @@ test('animation edits use autosave and survive reload', async ({ page }) => {
   await expect(reloaded.getByLabel('Recipe')).toHaveValue('kinetic');
   await expect(reloaded.getByLabel(/Seed/)).toHaveValue('4242');
   await expect(reloaded.getByLabel(/Phrase cues/)).toHaveValue('one two\nthree four');
-  await expect(reloaded.getByLabel('Transition', { exact: true })).toHaveValue('fade');
+  await expect(reloaded.getByRole('combobox', { name: 'Transition', exact: true })).toHaveValue('paper-reveal');
+  await page.getByRole('combobox', { name: 'Transition type', exact: true }).selectOption('shape-reveal');
+  await expect(reloaded.getByRole('combobox', { name: 'Transition', exact: true })).toHaveValue('shape-reveal');
   await expect(reloaded.getByLabel('Duration (frames)')).toHaveValue('18');
 });
 
@@ -148,7 +149,7 @@ test('voice presets undo, save and reload with their blend', async ({ page }) =>
   await expect(voice(page).getByLabel('Voice engine')).toHaveValue('kokoro');
   await expect(voice(page).getByLabel('Speaker')).toHaveValue('am_michael');
   await expect(voice(page).getByLabel('Blend a second voice')).toBeChecked();
-  await expect(voice(page).getByLabel('Second voice', { exact: true })).toHaveValue('am_fenrir');
+  await expect(voice(page).getByRole('combobox', { name: 'Second voice', exact: true })).toHaveValue('am_fenrir');
   await expect(voice(page).getByLabel('Second voice share (%)')).toHaveValue('30');
 
   const toolbar = page.getByRole('toolbar', { name: 'Timeline' });
@@ -156,6 +157,9 @@ test('voice presets undo, save and reload with their blend', async ({ page }) =>
   await expect(voice(page).getByLabel('Voice engine')).toHaveValue('design');
   await toolbar.getByRole('button', { name: 'Redo' }).click();
   await expect(voice(page).getByLabel('Voice engine')).toHaveValue('kokoro');
+  // The compact editor must not erase the blend/chunking chosen in production controls.
+  await page.getByTestId('script-audio').getByLabel('Speed', { exact: true }).fill('1.1');
+  await page.getByTestId('script-audio').getByRole('button', { name: 'Set voice', exact: true }).click();
 
   await voice(page).getByRole('button', { name: 'Save voice settings' }).click();
   await expect(page.locator('#save-status')).toHaveText('Saved');
@@ -164,6 +168,7 @@ test('voice presets undo, save and reload with their blend', async ({ page }) =>
     enabled: true,
     engine: 'kokoro',
     voice: 'am_michael',
+    speed: 1.1,
     chunking: 'paragraph',
     blend: [{ voice: 'am_michael', weight: 0.7 }, { voice: 'am_fenrir', weight: 0.3 }],
   });
@@ -173,7 +178,7 @@ test('voice presets undo, save and reload with their blend', async ({ page }) =>
   await expect(voice(page).getByLabel('Voice engine')).toHaveValue('kokoro');
   await expect(voice(page).getByLabel('Speaker')).toHaveValue('am_michael');
   await expect(voice(page).getByLabel('Blend a second voice')).toBeChecked();
-  await expect(voice(page).getByLabel('Second voice', { exact: true })).toHaveValue('am_fenrir');
+  await expect(voice(page).getByRole('combobox', { name: 'Second voice', exact: true })).toHaveValue('am_fenrir');
   await expect(voice(page).getByLabel('Second voice share (%)')).toHaveValue('30');
 });
 
@@ -243,6 +248,8 @@ test('the generation plan uses the saved revision without starting a run', async
   expect(planBody).not.toHaveProperty('status');
   expect(startCalls).toBe(0);
   await expect(voice(page).getByRole('button', { name: 'Generate video' })).toBeVisible();
+  await page.getByTestId('scene-select').selectOption('s_body');
+  await expect(voice(page).getByRole('button', { name: 'Generate video' })).toBeVisible();
 });
 
 test('a rejected voice save names the failure and keeps the edit', async ({ page }) => {
@@ -274,7 +281,7 @@ test('a saved recipe the layout does not offer is shown but not selectable', asy
 
   const section = animation(page);
   await expect(section.getByLabel('Recipe')).toHaveValue('technical-flow');
-  await expect(section.locator('option[value="technical-flow"]')).toBeDisabled();
+  await expect(section.locator('option[value="technical-flow"]')).toHaveAttribute('disabled', '');
   await expect(section.locator('.animation-recipe-description')).toContainText('not offered for the title layout');
   await expect(section.locator('[data-animation-transition="final"]')).toBeVisible();
 });
@@ -320,7 +327,7 @@ test('a locked scene disables animation editing and saving', async ({ page }) =>
   await expect(section.getByLabel('Recipe')).toBeDisabled();
   await expect(section.locator('[data-anim-field="seed"]')).toBeDisabled();
   await expect(section.locator('[data-anim-field="cue_phrases"]')).toBeDisabled();
-  await expect(section.getByLabel('Transition', { exact: true })).toBeDisabled();
+  await expect(section.getByRole('combobox', { name: 'Transition', exact: true })).toBeDisabled();
   await expect(section.getByRole('button', { name: 'Save animation' })).toBeDisabled();
 });
 

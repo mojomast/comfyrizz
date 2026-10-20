@@ -35,6 +35,7 @@ let options: Options | null = null;
 let unsubscribe: (() => void) | null = null;
 let run: Run | null = null;
 let busy = false;
+let applyingVoice = false;
 let message = '';
 let plan: { value: Plan; body: Record<string, unknown>; snapshot: string } | null = null;
 let backend = 'cpu';
@@ -78,11 +79,15 @@ export function mountVoiceSettings(element: HTMLElement, configuration: Options)
   host = element;
   options = configuration;
   if (!deliverySceneId) deliverySceneId = configuration.getPackage().scenes[0]?.id ?? '';
+  let observedPackage = configuration.getPackage();
   unsubscribe = configuration.subscribe?.(() => {
-    if (!host || busy || active()) return;
+    const nextPackage = configuration.getPackage();
+    if (nextPackage === observedPackage) return; // playhead, selection and save-status updates are not edits
+    observedPackage = nextPackage;
+    plan = null;
+    if (!host || busy || applyingVoice || active()) return;
     // The control that received the edit already repaints if it needs to.
     if (host.contains(document.activeElement)) return;
-    plan = null;
     render();
   }) ?? null;
   render();
@@ -110,7 +115,10 @@ function cleanVoice(value: Voice): Voice {
 /** All voice edits are one SetVoice command, so undo/autosave cover them. */
 function commitVoice(next: Voice, repaint = true): boolean {
   plan = null;
-  const result = options?.setVoice?.(cleanVoice(next));
+  applyingVoice = true;
+  let result: CommandResult | undefined;
+  try { result = options?.setVoice?.(cleanVoice(next)); }
+  finally { applyingVoice = false; }
   if (!result) {
     message = 'Voice editing is not connected to the editor store.';
     render();

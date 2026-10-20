@@ -87,7 +87,16 @@ export function mountAnimationInspector(host: HTMLElement, store: InspectorStore
         const result = store.dispatch(command);
         return { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
       },
-      save: options.save,
+      save: async () => {
+        const result = await options.save();
+        // The server acknowledgement can replace the selected-scene DOM.
+        // Write to the current status node, not a detached pre-save element.
+        if (selectedSceneId() === sceneId) {
+          const status = host.querySelector<HTMLElement>('[data-anim-status]');
+          if (status) status.textContent = result.text ?? (result.status === 'saved' ? 'Saved' : 'Save not confirmed.');
+        }
+        return result;
+      },
       log: options.log,
     });
   };

@@ -29,13 +29,15 @@ test('SetTransition(null) keeps cut/0; ResetSceneTransition removes the override
   assert.deepEqual(scene(editor.getState().doc, 's_mid')?.transitionOut, { type: 'cut', frames: 0 });
 
   editor.undo();
-  assert.deepEqual(editor.getState().doc, before);
+  assert.deepEqual(editor.getState().doc.package, before.package);
+  assert.deepEqual(editor.getState().doc.editor, before.editor);
+  assert.ok(editor.getState().doc.editSequence > before.editSequence, 'undo is a new autosave sequence');
   editor.redo();
   assert.deepEqual(scene(editor.getState().doc, 's_mid')?.transitionOut, { type: 'cut', frames: 0 });
 
   const reset = editor.dispatch({ type: 'ResetSceneTransition', sceneId: 's_mid' });
   assert.equal(reset.ok, true, reset.error);
-  assert.equal('transitionOut' in (scene(editor.getState().doc, 's_mid') ?? {}), false, 'the default fade is represented by an absent override');
+  assert.equal('transitionOut' in (scene(editor.getState().doc, 's_mid') ?? {}), false, 'the package/compiler default is represented by an absent override');
   assert.equal(editor.getState().derived.timeline?.scenes.find(item => item.id === 's_mid')?.transitionOutFrames, 0);
 
   editor.undo();

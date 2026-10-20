@@ -354,7 +354,7 @@ export function animationMarkup({
       <div class="animation-grid">
         <label>Transition
           <select data-anim-scene="${esc(sceneId)}" data-anim-field="transition.type"${disabled}${confirm}>
-            ${option('', 'Default (fade)', !explicit)}
+            ${option('', 'Package default', !explicit)}
             ${explicit && !type ? option('', 'Unknown saved value', true, true) : ''}
             <optgroup label="Standard">${TRANSITION_OPTIONS.filter(item => item.group === 'standard').map(item => option(item.id, item.label, item.id === type)).join('')}</optgroup>
             <optgroup label="Reveal">${TRANSITION_OPTIONS.filter(item => item.group === 'reveal').map(item => option(item.id, item.label, item.id === type)).join('')}</optgroup>

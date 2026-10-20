@@ -3,7 +3,7 @@ import test from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { readFileSync } from 'node:fs';
 import { applyCommand } from '../src/editor/commands.ts';
-import { createEditorStore } from '../src/editor/store.ts';
+import { createEditorStore, measuredFor } from '../src/editor/store.ts';
 import { sha256 } from '../src/editor/hash.ts';
 import { clearWaveformCache } from '../src/editor/audio/waveform-cache.ts';
 import { loadPeaks } from '../src/editor/audio/waveform.ts';
@@ -24,7 +24,7 @@ import { resolveVoicePreview } from '../src/editor/audio/voice-preview.ts';
 import { containsSecret, editorExportSidecar } from '../src/editor/media/export-doc.ts';
 import { LONG_MEDIA_BYTES, mediaPlaybackUrl, peaksFromRangedWav, peaksOfPcm } from '../src/editor/media/range-reader.ts';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
-import { conditioningHash, narrationInputFingerprint, textFingerprint } from '../src/editor/audio/speech.ts';
+import { conditioningHash, narrationInputFingerprint, textFingerprint, splitChunk } from '../src/editor/audio/speech.ts';
 
 function speechDoc() {
   const narration = 'one two three four';
@@ -109,6 +109,23 @@ test('production voice controls invalidate existing takes and undo restores thei
     assert.equal(sceneStatus(store.getState().doc, 's1').alignment, 'stale');
     store.undo();
     assert.equal(sceneStatus(store.getState().doc, 's1').take, 'fresh');
+  }
+});
+
+test('editor sidecar compilation and word-based splits preserve timing provenance', () => {
+  for (const timing of ['aligner', 'syllable-fallback', undefined]) {
+    const doc = speechDoc();
+    const chunk = doc.editor.alignment.s1.chunks[0];
+    if (timing) chunk.timing = timing;
+    doc.package.scenes[0].motion = { recipe: 'kinetic', cue_phrases: ['three four'] };
+    const measured = measuredFor(doc, {});
+    assert.equal(measured.narration.s1[0].timing, timing);
+    const timeline = createEditorStore(doc).getState().derived.timeline;
+    assert.equal(timeline.scenes[0].motionCues[0].timing, timing);
+    const split = splitChunk(chunk, .5);
+    assert.equal(split.left.timing, timing);
+    assert.equal(split.right.timing, timing);
+    assert.equal(split.right.words[0].start, 0);
   }
 });
 
