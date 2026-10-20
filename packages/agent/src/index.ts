@@ -39,7 +39,27 @@ export {
   CONVERSATION_STAGGERS, CONVERSATION_EMPHASIS, CONVERSATION_ENERGIES, CONVERSATION_PATTERNS,
   runConversationTurn, patchConversationPlan, conversationPlanWarnings, budgetConversationMessages,
 } from './conversation.js';
-export type { ConversationPlan } from './conversation.js';
+export type { ConversationPlan, ConversationReferences } from './conversation.js';
+export {
+  REFERENCE_NOTE_MAX_CHARS,
+  REFERENCE_QUESTION_MAX_CHARS,
+  REFERENCE_REASON_MAX_CHARS,
+  REFERENCE_RULES,
+  REFERENCE_SLOTS,
+  REFERENCE_TOOLS,
+  REFERENCE_TOOL_NAMES,
+  isReferenceToolName,
+  runReferenceTool,
+} from './reference-tools.js';
+export type {
+  ReferenceManifestEntry,
+  ReferenceProposal,
+  ReferenceProposeResult,
+  ReferenceSlot,
+  ReferenceToolCall,
+  ReferenceToolContext,
+  ReferenceToolResult,
+} from './reference-tools.js';
 export { composeConversationSkills, SKILL_CATALOG_VERSION, BUNDLED_SKILL_IDS } from './skills/index.js';
 export type { ScriptedCall } from './scripted-model.js';
 export { DEFAULT_PALETTE, defaultCpuDatasets, defaultCpuScenes, foregroundFor, titleFor } from './package.js';

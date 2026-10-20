@@ -152,7 +152,7 @@ Replay is the same hook in `play` mode: `play:<file>`. The player answers
 every matching request from the file and never touches the network.
 
 ```bash
-COMFYRIZZ_LLM_CASSETTE=play:scripts/cassette/fixtures/launch-brief.cassette.json npm --prefix apps/server run start
+COMFYRIZZ_LLM_CASSETTE=play:$PWD/scripts/cassette/fixtures/launch-brief.cassette.json npm --prefix apps/server run start
 ```
 
 - Matching is **strict by request key**: the sha256 of the canonical request
@@ -290,7 +290,7 @@ Examples:
 
 ```bash
 COMFYRIZZ_LLM_CASSETTE=record:apps/server/.runtime/session.cassette.json npm --prefix apps/server run start
-COMFYRIZZ_LLM_CASSETTE=play:scripts/cassette/fixtures/launch-brief.cassette.json npm --prefix apps/server run start
+COMFYRIZZ_LLM_CASSETTE=play:$PWD/scripts/cassette/fixtures/launch-brief.cassette.json npm --prefix apps/server run start
 ```
 
 ## Review before committing
