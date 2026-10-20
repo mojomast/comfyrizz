@@ -8,6 +8,7 @@ import type { InlineAsset } from './components';
 import { dbToLinear } from './audio-mix-model.js';
 import { resolvePackageComposition } from './composition-model.js';
 import { resolveMediaSrc } from './media-src.js';
+import { LookLayer, type LookSidecar } from './look-layer';
 
 export type MediaSources = Record<string, string>;
 
@@ -38,6 +39,7 @@ export function PackageComposition({
   mediaDims,
   mixAudio = true,
   mediaSources = null,
+  look = null,
 }: {
   pkg: PackageV1;
   timeline: Timeline;
@@ -48,6 +50,7 @@ export function PackageComposition({
   mediaDims?: MediaDimsMap;
   mixAudio?: boolean;
   mediaSources?: MediaSources | null;
+  look?: LookSidecar | null;
 }) {
   const resolved = useMemo(
     () => resolvePackageComposition(pkg, timeline, { missingMedia, mixAudio }),
@@ -80,16 +83,18 @@ export function PackageComposition({
           )}
         </>
       ) : null}
-      <TimelinePlayer
-        pkg={pkg}
-        timeline={timeline}
-        {...(scenes ? { scenes } : {})}
-        generatedAssets={generatedAssets}
-        media={media}
-        missingMedia={missingMedia}
-        mediaDims={mediaDims}
-        {...(resolved.captions ? { captions: resolved.captions } : {})}
-      />
+      <LookLayer look={look} palette={pkg.theme?.palette}>
+        <TimelinePlayer
+          pkg={pkg}
+          timeline={timeline}
+          {...(scenes ? { scenes } : {})}
+          generatedAssets={generatedAssets}
+          media={media}
+          missingMedia={missingMedia}
+          mediaDims={mediaDims}
+          {...(resolved.captions ? { captions: resolved.captions } : {})}
+        />
+      </LookLayer>
     </>
   );
 }

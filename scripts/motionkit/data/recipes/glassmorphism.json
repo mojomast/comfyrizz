@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "glassmorphism",
+  "label": "Glassmorphism",
+  "taxonomy": { "era": "futurist", "finish": "clean", "energy": "calm", "geometry": "soft", "type": "display" },
+  "palette": [
+    { "role": "background", "hex": "#0b1020" },
+    { "role": "text", "hex": "#eef3ff" },
+    { "role": "accent", "hex": "#4f6bff" },
+    { "role": "secondary", "hex": "#9fe8ff" }
+  ],
+  "fonts": { "display": "syne", "text": "inter" },
+  "easing": { "personality": "floaty", "entry": "move", "exit": "exit", "spring": "settle" },
+  "entries": ["fadeUp", "maskRise"],
+  "emphasis": ["hero"],
+  "transitions": { "primary": "blur", "accent": ["fade", "cut"] },
+  "storyRecipe": "focus",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "bloom", "params": { "intensity": 0.45, "radius": 20 } },
+    { "id": "grain-fine", "params": { "amount": 0.05, "size": 1 } }
+  ],
+  "rules": {
+    "do": ["frosted translucent panels over a deep navy field", "floaty blur dissolves"],
+    "dont": ["hard drop shadows", "rapid cuts"]
+  },
+  "prompt": "Frosted glassmorphism UI, deep indigo night, soft blue glow panels, airy floaty motion"
+}

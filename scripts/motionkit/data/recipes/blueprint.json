@@ -1,0 +1,28 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "blueprint",
+  "label": "Blueprint",
+  "taxonomy": { "era": "industrial", "finish": "print", "energy": "medium", "geometry": "line", "type": "mono" },
+  "palette": [
+    { "role": "background", "hex": "#0f2a4a" },
+    { "role": "text", "hex": "#e8f1fb" },
+    { "role": "accent", "hex": "#7cc4ff" },
+    { "role": "muted", "hex": "#3d6a99" }
+  ],
+  "fonts": { "display": "ibm-plex-mono", "text": "inter" },
+  "easing": { "personality": "editorial", "entry": "enter", "exit": "exit", "spring": "settle" },
+  "entries": ["drawOn", "fadeUp", "maskRise"],
+  "emphasis": ["hero", "keyword"],
+  "transitions": { "primary": "draw-reveal", "accent": ["wipe", "fade"] },
+  "storyRecipe": "technical-flow",
+  "background": { "pattern": "grid" },
+  "finish": [
+    { "id": "paper-grain", "params": { "amount": 0.04 } },
+    { "id": "vignette-soft", "params": { "amount": 0.35, "radius": 0.65 } }
+  ],
+  "rules": {
+    "do": ["thin cyan grid lines and drawn-on strokes", "white annotation type on deep blue"],
+    "dont": ["warm colours", "heavy fills"]
+  },
+  "prompt": "Engineering blueprint, deep navy field, cyan grid and drawn line work, mono annotations"
+}

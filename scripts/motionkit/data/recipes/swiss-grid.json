@@ -1,0 +1,25 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "swiss-grid",
+  "label": "Swiss grid",
+  "taxonomy": { "era": "modernist", "finish": "clean", "energy": "medium", "geometry": "flat", "type": "grotesk" },
+  "palette": [
+    { "role": "background", "hex": "#f2f0eb" },
+    { "role": "text", "hex": "#111111" },
+    { "role": "accent", "hex": "#e3241b" },
+    { "role": "muted", "hex": "#9a9a9a" }
+  ],
+  "fonts": { "display": "space-grotesk", "text": "inter", "mono": "jetbrains-mono" },
+  "easing": { "personality": "editorial", "entry": "enter", "exit": "exit", "spring": "settle" },
+  "entries": ["maskRise", "fadeUp", "waterfall"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "wipe", "accent": ["push", "cut"] },
+  "storyRecipe": "kinetic",
+  "background": { "pattern": "grid" },
+  "finish": [{ "id": "paper-grain", "params": { "amount": 0.04 } }],
+  "rules": {
+    "do": ["flush-left headlines on a 12-col grid"],
+    "dont": ["centered text", "drop shadows"]
+  },
+  "prompt": "Swiss International Style poster, strict grid, red accent, flat colour, no gradients"
+}

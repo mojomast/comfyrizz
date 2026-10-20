@@ -1,0 +1,32 @@
+{
+  "schema": "comfyrizz.transitions/v1",
+  "version": 1,
+  "note": "MOTION-UPGRADE M05 transitions catalog (spec section 4.2). Every entry resolves to a native schema transition type via resolveTransition(id, {fps, webgl}). GL shaders are vendored only when their own header says MIT; glsl entries here name MIT shaders only.",
+  "entries": [
+    { "id": "hard-cut", "label": "Hard cut", "grammar": "cut", "native": "cut", "frames": 0, "sfx": null, "glsl": null, "overlayEffect": null },
+    { "id": "luma-fade", "label": "Luma fade", "grammar": "fade", "native": "fade", "direction": null, "frames": 15, "sfx": null, "glsl": { "name": "luma", "license": "MIT" }, "overlayEffect": null },
+    { "id": "dip-to-black", "label": "Dip to black", "grammar": "fade", "native": "fade", "direction": null, "frames": 15, "sfx": null, "glsl": { "name": "fadecolor", "license": "MIT" }, "overlayEffect": null },
+    { "id": "dip-to-white", "label": "Dip to white", "grammar": "fade", "native": "fade", "direction": null, "frames": 15, "sfx": null, "glsl": { "name": "fadecolor", "license": "MIT" }, "overlayEffect": null },
+    { "id": "linear-wipe", "label": "Linear wipe", "grammar": "wipe", "native": "wipe", "direction": "left", "frames": 12, "sfx": "whoosh-soft", "glsl": { "name": "directionalwipe", "license": "MIT" }, "overlayEffect": null },
+    { "id": "radial-wipe", "label": "Radial wipe", "grammar": "wipe", "native": "iris", "direction": "in", "frames": 10, "sfx": null, "glsl": { "name": "radial", "license": "MIT" }, "overlayEffect": null },
+    { "id": "clock-wipe", "label": "Clock wipe", "grammar": "wipe", "native": "iris", "direction": "in", "frames": 10, "sfx": null, "glsl": { "name": "angular", "license": "MIT" }, "overlayEffect": null },
+    { "id": "barn-door", "label": "Barn door", "grammar": "wipe", "native": "wipe", "direction": "left", "frames": 12, "sfx": null, "glsl": { "name": "doorway", "license": "MIT" }, "overlayEffect": null },
+    { "id": "push", "label": "Push", "grammar": "depth", "native": "push", "direction": "left", "frames": 12, "sfx": "whoosh", "glsl": { "name": "directional-easing", "license": "MIT" }, "overlayEffect": null },
+    { "id": "whip-pan", "label": "Whip pan", "grammar": "depth", "native": "push", "direction": "left", "frames": 6, "sfx": "whoosh, motion-smear", "glsl": { "name": "directional-easing", "license": "MIT" }, "overlayEffect": null },
+    { "id": "slide-over", "label": "Slide over", "grammar": "wipe", "native": "slide", "direction": "left", "frames": 12, "sfx": null, "glsl": null, "overlayEffect": null },
+    { "id": "zoom-through", "label": "Zoom through", "grammar": "depth", "native": "zoom", "direction": "in", "frames": 8, "sfx": "whoosh", "glsl": { "name": "crosszoom", "license": "MIT" }, "overlayEffect": null },
+    { "id": "iris-open", "label": "Iris open", "grammar": "mask", "native": "iris", "direction": "in", "frames": 10, "sfx": null, "glsl": { "name": "circleopen", "license": "MIT" }, "overlayEffect": null },
+    { "id": "iris-close", "label": "Iris close", "grammar": "mask", "native": "iris", "direction": "out", "frames": 10, "sfx": null, "glsl": { "name": "circleopen", "license": "MIT" }, "overlayEffect": null },
+    { "id": "shape-mask", "label": "Shape mask", "grammar": "mask", "native": "shape-reveal", "direction": null, "frames": 15, "sfx": "pop", "glsl": null, "overlayEffect": null },
+    { "id": "ink-bleed", "label": "Ink bleed", "grammar": "mask", "native": "paper-reveal", "direction": null, "frames": 15, "sfx": "paper", "glsl": null, "overlayEffect": null },
+    { "id": "paper-tear", "label": "Paper tear", "grammar": "mask", "native": "paper-reveal", "direction": null, "frames": 15, "sfx": "paper", "glsl": null, "overlayEffect": null },
+    { "id": "line-draw", "label": "Line draw", "grammar": "mask", "native": "draw-reveal", "direction": null, "frames": 18, "sfx": "pencil", "glsl": null, "overlayEffect": null },
+    { "id": "blur-dissolve", "label": "Blur dissolve", "grammar": "fade", "native": "blur", "direction": null, "frames": 12, "sfx": null, "glsl": null, "overlayEffect": null },
+    { "id": "glitch-cut", "label": "Glitch cut", "grammar": "overlay", "native": "cut", "direction": null, "frames": 0, "sfx": "glitch", "glsl": { "name": "glitchdisplace", "license": "MIT" }, "overlayEffect": "glitch-slice" },
+    { "id": "light-leak-cut", "label": "Light-leak cut", "grammar": "overlay", "native": "fade", "direction": null, "frames": 12, "sfx": null, "glsl": null, "overlayEffect": "light-leak" },
+    { "id": "film-burn", "label": "Film burn", "grammar": "overlay", "native": "fade", "direction": null, "frames": 12, "sfx": null, "glsl": { "name": "burn", "license": "MIT" }, "overlayEffect": "light-leak" },
+    { "id": "pixel-dissolve", "label": "Pixel dissolve", "grammar": "overlay", "native": "fade", "direction": null, "frames": 12, "sfx": "blip", "glsl": { "name": "pixelize", "license": "MIT" }, "overlayEffect": "pixelate-in" },
+    { "id": "match-cut-shape", "label": "Match cut (shape)", "grammar": "match", "native": "cut", "direction": null, "frames": 0, "sfx": null, "glsl": null, "overlayEffect": null },
+    { "id": "match-cut-colour", "label": "Match cut (colour)", "grammar": "match", "native": "cut", "direction": null, "frames": 0, "sfx": null, "glsl": null, "overlayEffect": null }
+  ]
+}
