@@ -35,7 +35,7 @@
         <span class="meter" id="ctx">ctx 0 / 200k</span>
         <span class="meter" id="spend">0.0 GPU units</span>
         <span class="spacer"></span>
-        <span id="save-status" role="status" aria-live="polite" data-state="saved">Saved</span>
+        <span id="save-status" data-testid="save-status" role="status" aria-live="polite" data-state="saved">Saved</span>
         <button id="run-backend">Run on backend</button>
         <div id="colab-card-host" class="colab-card-host"></div>
         <button id="render" class="primary">Export MP4</button>
@@ -66,7 +66,7 @@
           <div id="player" aria-label="Remotion preview"></div>
           <div id="transport">
             <button id="play">Play</button>
-            <input id="scrub" type="range" min="0" max="100" value="0" />
+            <input id="scrub" type="range" min="0" max="100" value="0" aria-label="Playhead" />
             <span id="time" class="mono">00:00 / 00:36</span>
           </div>
           <div id="scene-timeline"></div>

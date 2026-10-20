@@ -59,6 +59,33 @@ function adoptEditorPackage(next: PackageV1): void {
   pkg = next;
   editorStore.replaceDocument({ package: next as never });
 }
+
+/**
+ * `?package=<id>` plus the session token opens that stored project instead of
+ * the bundled demo. Reload then shows the autosaved document. No query leaves
+ * the demo in place.
+ */
+async function openRequestedPackage(): Promise<void> {
+  const loc = globalThis.location;
+  if (!loc || !sessionToken()) return;
+  const requested = new URLSearchParams(loc.search).get('package');
+  if (!requested) return;
+  try {
+    const response = await apiFetch(`/api/package/${encodeURIComponent(requested)}`);
+    if (!response.ok) return;
+    const body = await response.json() as { package?: PackageV1; editor?: unknown };
+    if (!body.package || typeof body.package !== 'object') return;
+    editorStore.replaceDocument({
+      package: body.package as never,
+      ...(body.editor && typeof body.editor === 'object' ? { editor: body.editor as never } : {}),
+    });
+    pkg = body.package;
+    const compiled = editorStore.getState().derived.timeline;
+    if (compiled) timeline = compiled as unknown as Timeline;
+  } catch (error) {
+    console.error('package open failed', error);
+  }
+}
 let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
@@ -302,7 +329,7 @@ function renderStoryboard(): void {
         <input type="text" data-scene="${esc(scene.id)}" data-field="${scene.layout === 'hero' ? 'body' : 'sub'}" value="${esc(copy[scene.layout === 'hero' ? 'body' : 'sub'] ?? '')}" placeholder="Add supporting copy…" maxlength="240" />
         ${chart}
         <label>Presenter</label>
-        <select data-presenter-scene="${esc(scene.id)}">
+        <select data-presenter-scene="${esc(scene.id)}" aria-label="Presenter for ${esc(scene.id)}">
           <option value=""${!scene.presenter ? ' selected' : ''}>default</option>
           <option value="off"${scene.presenter === 'off' ? ' selected' : ''}>off</option>
           <option value="pip"${scene.presenter === 'pip' ? ' selected' : ''}>pip</option>
@@ -390,7 +417,7 @@ function renderPalette(): void {
   if (!theme) return;
   const colors = (theme.palette ??= ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee']);
   host.innerHTML = colors
-    .map((color, index) => `<input type="color" data-color="${index}" value="${esc(color)}" title="palette ${index}" />`)
+    .map((color, index) => `<label>Palette ${index + 1}<input type="color" data-color="${index}" value="${esc(color)}" /></label>`)
     .join('');
   host.querySelectorAll<HTMLInputElement>('input[data-color]').forEach(input => {
     input.addEventListener('input', () => {
@@ -1720,4 +1747,5 @@ function init(): void {
   });
 }
 
+await openRequestedPackage();
 init();
