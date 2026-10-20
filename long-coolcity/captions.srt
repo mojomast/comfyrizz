@@ -1,0 +1,227 @@
+1
+00:00:00,000 --> 00:00:02,933
+Walk from a bare parking lot into a shaded street.
+
+2
+00:00:03,100 --> 00:00:07,800
+The weather has not changed, but your experience of heat can change immediately.
+
+3
+00:00:08,567 --> 00:00:11,533
+Pavement and buildings absorb solar energy.
+
+4
+00:00:11,700 --> 00:00:17,100
+Later, they release heat, helping some urban places stay warmer than their surroundings.
+
+5
+00:00:17,867 --> 00:00:20,800
+Cooling a city starts with an energy question.
+
+6
+00:00:20,967 --> 00:00:24,967
+What arrives, what is reflected, what is stored, and what can leave?
+
+7
+00:00:25,733 --> 00:00:28,233
+A hot afternoon does not end at sunset.
+
+8
+00:00:28,400 --> 00:00:32,800
+Stored heat can keep escaping from streets and walls into the evening air.
+
+9
+00:00:33,567 --> 00:00:36,500
+A city average cannot describe every corner.
+
+10
+00:00:36,667 --> 00:00:42,200
+A bus stop, a playground, and an apartment bedroom create different kinds of exposure.
+
+11
+00:00:42,967 --> 00:00:47,133
+Surface temperature, air temperature, and human heat exposure differ.
+
+12
+00:00:47,300 --> 00:00:51,933
+A cooler surface is useful evidence, but it is not the whole story.
+
+13
+00:00:52,733 --> 00:00:56,667
+Shade intercepts sunlight before it reaches a person or surface.
+
+14
+00:00:56,833 --> 00:00:59,767
+That can make a waiting place much more comfortable.
+
+15
+00:01:00,500 --> 00:01:02,933
+Trees create shade with living structure.
+
+16
+00:01:03,100 --> 00:01:08,900
+Their size, placement, species, and survival determine where that shade actually falls.
+
+17
+00:01:09,667 --> 00:01:11,733
+Plants also release water vapor.
+
+18
+00:01:11,900 --> 00:01:18,633
+Evapotranspiration uses energy, linking cooling to healthy plants and an available water supply.
+
+19
+00:01:19,400 --> 00:01:22,467
+A tree is not street furniture in a tiny hole.
+
+20
+00:01:22,633 --> 00:01:26,600
+Roots need space, suitable soil, water, and long-term care.
+
+21
+00:01:27,367 --> 00:01:30,567
+A planting strategy should fit local conditions.
+
+22
+00:01:30,733 --> 00:01:37,267
+Climate, drought, utilities, accessibility, and maintenance all affect which choices remain useful.
+
+23
+00:01:38,033 --> 00:01:40,733
+Imagine a walk from home to a bus stop.
+
+24
+00:01:40,900 --> 00:01:45,733
+A shaded destination helps, but the exposed route can still be difficult.
+
+25
+00:01:46,500 --> 00:01:50,300
+A connected route can combine trees, awnings, and shelters.
+
+26
+00:01:50,467 --> 00:01:53,700
+The goal is shade where people move and where they wait.
+
+27
+00:01:54,500 --> 00:01:59,167
+A reflective roof sends more sunlight away than a darker alternative.
+
+28
+00:01:59,333 --> 00:02:02,533
+Its effects depend on the building and local climate.
+
+29
+00:02:03,333 --> 00:02:06,433
+Cool roofs can reduce absorbed solar energy.
+
+30
+00:02:06,600 --> 00:02:13,067
+They do not replace insulation, ventilation design, or reliable access to indoor cooling.
+
+31
+00:02:13,867 --> 00:02:17,133
+Green roofs use vegetation and growing media.
+
+32
+00:02:17,300 --> 00:02:22,800
+They can offer benefits, but need structural planning, drainage, and ongoing maintenance.
+
+33
+00:02:23,567 --> 00:02:27,033
+Reflective pavement changes more than surface temperature.
+
+34
+00:02:27,200 --> 00:02:33,167
+Glare and reflected radiation can affect pedestrians, so the surrounding geometry matters.
+
+35
+00:02:33,933 --> 00:02:37,933
+Compare alternatives using the conditions people experience.
+
+36
+00:02:38,100 --> 00:02:42,833
+Include shade, time of day, humidity, wind, and reflected radiation.
+
+37
+00:02:43,567 --> 00:02:45,100
+Buildings shape airflow.
+
+38
+00:02:45,267 --> 00:02:52,100
+Urban design can preserve useful ventilation, but wind patterns depend on the specific site and season.
+
+39
+00:02:52,867 --> 00:02:56,267
+Vehicles, equipment, and air conditioners release heat.
+
+40
+00:02:56,433 --> 00:03:01,233
+Reducing waste heat can complement shade and changes to urban materials.
+
+41
+00:03:02,033 --> 00:03:06,200
+Cooling investment should follow need, not just available space.
+
+42
+00:03:06,367 --> 00:03:11,367
+Examine exposure, vulnerability, and access to practical relief together.
+
+43
+00:03:12,167 --> 00:03:14,900
+A pilot project creates a chance to learn.
+
+44
+00:03:15,067 --> 00:03:20,733
+Measure conditions before and after, using comparable locations, times, and weather.
+
+45
+00:03:21,533 --> 00:03:24,633
+A dramatic thermal image can attract attention.
+
+46
+00:03:24,800 --> 00:03:29,967
+But one image is a snapshot, not proof that every resident is cooler all day.
+
+47
+00:03:30,700 --> 00:03:33,733
+The strongest plan usually combines measures.
+
+48
+00:03:33,900 --> 00:03:40,333
+Buildings, streets, vegetation, and services address different parts of the same lived experience.
+
+49
+00:03:41,100 --> 00:03:42,733
+Return to the bus stop.
+
+50
+00:03:42,900 --> 00:03:48,967
+A shaded bench, a clear walkway, and nearby drinking water make a practical improvement visible.
+
+51
+00:03:49,733 --> 00:03:51,833
+A dead tree cannot shade a street.
+
+52
+00:03:52,000 --> 00:03:54,433
+A blocked fountain cannot provide water.
+
+53
+00:03:54,600 --> 00:03:58,467
+Cooling plans need operating budgets as well as drawings.
+
+54
+00:03:59,200 --> 00:04:02,067
+A livable city makes relief easier to reach.
+
+55
+00:04:02,233 --> 00:04:07,967
+It connects comfortable routes, resilient buildings, and services that people can actually use.
+
+56
+00:04:08,733 --> 00:04:11,667
+The city keeps cool through many small decisions.
+
+57
+00:04:11,833 --> 00:04:17,467
+Together, they decide whether the next hot day feels like a trap or a manageable journey.

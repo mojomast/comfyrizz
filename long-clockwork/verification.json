@@ -1,0 +1,40 @@
+{
+  "checks": {
+    "frames": true,
+    "dimensions": true,
+    "duration": true,
+    "narrationStream": true,
+    "nonSilentAudio": true,
+    "narrationEnvelope": true
+  },
+  "probe": {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_type": "video",
+        "width": 1920,
+        "height": 1080,
+        "nb_read_frames": "7206"
+      },
+      {
+        "codec_type": "audio",
+        "sample_rate": "48000",
+        "nb_read_frames": "11260"
+      }
+    ],
+    "format": {
+      "duration": "240.213000"
+    }
+  },
+  "note": "Technical checks do not replace perceptual review.",
+  "narration": {
+    "durationDifferenceMs": 13.31,
+    "envelopeCorrelation": 0.9990991254094201,
+    "lagMs": 0,
+    "narrationSpanMs": 239200,
+    "windows": 1196,
+    "method": "200ms RMS envelope over the fully covered narration span; lag bound 500ms; ducked music under the voice tolerated; threshold 0.85; spans shorter than 5 windows require normalized waveform correlation 0.6",
+    "passed": true
+  }
+}

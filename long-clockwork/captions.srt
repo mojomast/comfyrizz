@@ -1,0 +1,235 @@
+1
+00:00:00,000 --> 00:00:03,300
+In Bellweather, every train followed the station clock.
+
+2
+00:00:03,467 --> 00:00:07,633
+Nobody remembered who had decided that the clock should be trusted.
+
+3
+00:00:08,400 --> 00:00:11,800
+At eleven each night, the last train crossed the river.
+
+4
+00:00:11,967 --> 00:00:16,567
+Its windows passed the clockmaker’s workshop like a row of little suns.
+
+5
+00:00:17,333 --> 00:00:20,233
+Then one Tuesday, the whistle did not come.
+
+6
+00:00:20,400 --> 00:00:24,933
+The workshop clocks kept ticking, but the river outside remained dark.
+
+7
+00:00:25,700 --> 00:00:28,067
+The timetable promised a train.
+
+8
+00:00:28,233 --> 00:00:31,200
+The station clock insisted it was early.
+
+9
+00:00:31,367 --> 00:00:34,033
+Both could not describe the same moment.
+
+10
+00:00:34,767 --> 00:00:37,333
+Mara opened her father’s old drawer.
+
+11
+00:00:37,500 --> 00:00:43,233
+Inside lay a silver pocket watch, a red ribbon, and a key with one broken tooth.
+
+12
+00:00:44,000 --> 00:00:46,200
+The pocket watch said eleven.
+
+13
+00:00:46,367 --> 00:00:51,433
+Mara had wound it that morning, using the noon bell from the hill above town.
+
+14
+00:00:52,167 --> 00:00:54,800
+A clock, a timetable, and a watch.
+
+15
+00:00:54,967 --> 00:00:59,500
+Mara placed them side by side, looking for the one that disagreed.
+
+16
+00:01:00,233 --> 00:01:03,233
+She followed the rails through the sleeping town.
+
+17
+00:01:03,400 --> 00:01:07,767
+At the bridge, a red signal burned above a perfectly empty track.
+
+18
+00:01:08,533 --> 00:01:11,167
+Beyond the bend, the train was waiting.
+
+19
+00:01:11,333 --> 00:01:16,267
+Steam slipped from its wheels, and the driver pointed toward the signal tower.
+
+20
+00:01:17,033 --> 00:01:19,400
+Nothing was wrong with the engine.
+
+21
+00:01:19,567 --> 00:01:24,900
+The automatic signal refused to open until the station clock reached eleven.
+
+22
+00:01:25,667 --> 00:01:28,100
+One clock controlled one signal.
+
+23
+00:01:28,267 --> 00:01:30,700
+One signal controlled the bridge.
+
+24
+00:01:30,867 --> 00:01:34,967
+An entire journey depended on a single delayed instruction.
+
+25
+00:01:35,700 --> 00:01:38,000
+Mara climbed into the tower.
+
+26
+00:01:38,167 --> 00:01:45,133
+Behind the enormous dial, she found gears turning with the solemn confidence of something already believed.
+
+27
+00:01:45,900 --> 00:01:48,867
+A tiny wheel slipped once each revolution.
+
+28
+00:01:49,033 --> 00:01:53,967
+The clock was losing minutes while everything downstream continued to obey it.
+
+29
+00:01:54,767 --> 00:01:56,367
+The fault was small.
+
+30
+00:01:56,533 --> 00:01:58,500
+Its consequence was not.
+
+31
+00:01:58,667 --> 00:02:03,533
+Repeating the same small error had pushed the whole railway behind the night.
+
+32
+00:02:04,300 --> 00:02:06,600
+Mara could force the hands forward.
+
+33
+00:02:06,767 --> 00:02:11,867
+But moving the hands would hide the fault, and tomorrow the delay would return.
+
+34
+00:02:12,633 --> 00:02:14,633
+She took out the broken key.
+
+35
+00:02:14,800 --> 00:02:20,133
+Its missing tooth matched a notch in a small service hatch beneath the slipping wheel.
+
+36
+00:02:20,900 --> 00:02:23,533
+The hatch opened onto a spare wheel.
+
+37
+00:02:23,700 --> 00:02:29,200
+Her father had left the part where only somebody investigating the fault would find it.
+
+38
+00:02:29,967 --> 00:02:32,467
+The spare wheel was not a shortcut.
+
+39
+00:02:32,633 --> 00:02:37,433
+It was an invitation to fix the cause instead of adjusting the appearance.
+
+40
+00:02:38,233 --> 00:02:40,300
+Mara stopped the mechanism.
+
+41
+00:02:40,467 --> 00:02:44,833
+For the first time in her life, the tower was silent enough to hear the river.
+
+42
+00:02:45,600 --> 00:02:48,700
+She replaced the slipping wheel and checked the fit.
+
+43
+00:02:48,867 --> 00:02:52,600
+Tooth met tooth, and the mechanism turned without a stumble.
+
+44
+00:02:53,367 --> 00:02:57,433
+Before restarting the signal, she compared the tower with her watch.
+
+45
+00:02:57,600 --> 00:03:01,667
+Agreement mattered more than the authority of the larger dial.
+
+46
+00:03:02,433 --> 00:03:04,833
+At last, the bridge signal changed.
+
+47
+00:03:05,000 --> 00:03:09,667
+Green light fell onto the rails, and the waiting train answered with a whistle.
+
+48
+00:03:10,433 --> 00:03:12,967
+Mara watched the windows cross the river.
+
+49
+00:03:13,133 --> 00:03:18,300
+Behind each one was somebody whose evening had been waiting for a tiny wheel.
+
+50
+00:03:19,067 --> 00:03:22,267
+Inside the wrapping, her father had left a note.
+
+51
+00:03:22,433 --> 00:03:26,133
+Trust a clock, it said, only after you have checked another.
+
+52
+00:03:26,867 --> 00:03:30,367
+The following morning, Mara installed a second clock.
+
+53
+00:03:30,533 --> 00:03:35,267
+It used a separate mechanism and faced the people waiting on the platform.
+
+54
+00:03:36,033 --> 00:03:39,367
+Bellweather did not become a town without mistakes.
+
+55
+00:03:39,533 --> 00:03:43,100
+It became a town with one more way to notice them.
+
+56
+00:03:43,867 --> 00:03:46,833
+Mara kept the silver watch beside her tools.
+
+57
+00:03:47,000 --> 00:03:51,567
+The red ribbon marked its place, and the broken key stayed in the drawer.
+
+58
+00:03:52,333 --> 00:03:54,967
+That night, the last train crossed on time.
+
+59
+00:03:55,133 --> 00:03:59,433
+Mara heard its whistle, looked at both clocks, and went back to work.

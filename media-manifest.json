@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "repository": "mojomast/comfyrizz",
+  "releaseTag": "films-2026-10-20",
+  "films": [
+    {
+      "key": "forest",
+      "frames": 7487,
+      "web": {
+        "file": "long-forest/video.mp4",
+        "bytes": 37184524,
+        "sha256": "49147453a117fa49f2649a3ce357a91c678cbcb66ce3f6a8bc26727e0c91b334",
+        "width": 1280,
+        "height": 720
+      },
+      "downloads": [
+        {
+          "name": "forest-1080p.mp4",
+          "bytes": 181319579,
+          "sha256": "9a774ea3626d25ccc28b97666c68f4dc27b836c5b24e82e0164efb0f7ff2b66a",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/forest-1080p.mp4"
+        },
+        {
+          "name": "forest-project.zip",
+          "bytes": 155059499,
+          "sha256": "0e9f8fd32de8b2f527e3bf7ef2c23307a15d7454cb444f8d99889c9e17a1f950",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/forest-project.zip"
+        }
+      ]
+    },
+    {
+      "key": "clockwork",
+      "frames": 7206,
+      "web": {
+        "file": "long-clockwork/video.mp4",
+        "bytes": 34990803,
+        "sha256": "f36156e29de69bd3b7344e0134ee65fc6102f71257dca12d53defd2a2f088917",
+        "width": 1280,
+        "height": 720
+      },
+      "downloads": [
+        {
+          "name": "clockwork-1080p.mp4",
+          "bytes": 165991863,
+          "sha256": "6825488babb54914920b2279bbb0530d7d08bc3c983c62d50cc3d946436df718",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/clockwork-1080p.mp4"
+        },
+        {
+          "name": "clockwork-project.zip",
+          "bytes": 176761030,
+          "sha256": "7409a9da8ace104f2e86ef38712078a7c95f1331802da124d9cd4f807a1432c3",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/clockwork-project.zip"
+        }
+      ]
+    },
+    {
+      "key": "coolcity",
+      "frames": 7746,
+      "web": {
+        "file": "long-coolcity/video.mp4",
+        "bytes": 37073869,
+        "sha256": "eedd5363f13f444b0dd3f427722b263a15e687e06ae6396a595891344f67c29f",
+        "width": 1280,
+        "height": 720
+      },
+      "downloads": [
+        {
+          "name": "coolcity-1080p.mp4",
+          "bytes": 173078165,
+          "sha256": "e5e31c55fe5e7c04c2c6eb9e9ffcbe3dfdae2ab79bc377d185c17e50bc2e675d",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/coolcity-1080p.mp4"
+        },
+        {
+          "name": "coolcity-project.zip",
+          "bytes": 169044106,
+          "sha256": "9def93e66897e0702e246dd2e4c0b86d26a5c757dcc5ffee68e6e6fe79b6817d",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/coolcity-project.zip"
+        }
+      ]
+    },
+    {
+      "key": "ferment",
+      "frames": 7094,
+      "web": {
+        "file": "long-ferment/video.mp4",
+        "bytes": 28586068,
+        "sha256": "569d863d26dd1e531068152313996c052d627cab157f3e230085527e74ea07e8",
+        "width": 1280,
+        "height": 720
+      },
+      "downloads": [
+        {
+          "name": "ferment-1080p.mp4",
+          "bytes": 126855873,
+          "sha256": "0265c5c05847c5268f6e581f5b6d6cc4ce942ca1e3a3bd9be28502b207ca5368",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/ferment-1080p.mp4"
+        },
+        {
+          "name": "ferment-project.zip",
+          "bytes": 139028107,
+          "sha256": "c510ade120587d19dcdaad16cfd55bd9342b40152d567b4f5073205ea97035fb",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/ferment-project.zip"
+        }
+      ]
+    },
+    {
+      "key": "abyss",
+      "frames": 7682,
+      "web": {
+        "file": "long-abyss/video.mp4",
+        "bytes": 27540707,
+        "sha256": "d3e180b813cc3ba3817c9cc970dfc313cef6fef36efcad2b60b30bc29cc1a994",
+        "width": 1280,
+        "height": 720
+      },
+      "downloads": [
+        {
+          "name": "abyss-1080p.mp4",
+          "bytes": 132538920,
+          "sha256": "1a5e14c095d889eb70f5698b4823f258c366d37b898e538a02aa80a48fcfd10f",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/abyss-1080p.mp4"
+        },
+        {
+          "name": "abyss-project.zip",
+          "bytes": 127793514,
+          "sha256": "69e30a8982c2ac67a5e1c8d6c07842f04cc0395e4c9cc8e182da27fc0da09a5e",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/films-2026-10-20/abyss-project.zip"
+        }
+      ]
+    }
+  ]
+}
