@@ -124,9 +124,9 @@ test('a fake secret in the environment never reaches stdout or stderr', () => {
 test('the root package.json exposes the doctor script', () => {
   const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts.doctor, 'node scripts/doctor/doctor.mjs');
-  assert.equal(pkg.scripts.test, 'pnpm -r --if-present test');
+  assert.equal(pkg.scripts.test, 'pnpm run build:libs && pnpm -r --if-present test');
   assert.equal(pkg.scripts['test:py'], 'cd pipeline-py && ../.venv/bin/python -m pytest -q');
-  assert.equal(pkg.scripts['test:all'], 'pnpm test && pnpm run test:py');
+  assert.equal(pkg.scripts['test:all'], 'pnpm test && pnpm run test:py && pnpm run test:scan');
 });
 
 test('the CLI source contains no secret-looking values', () => {

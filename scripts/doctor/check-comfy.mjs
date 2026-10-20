@@ -125,7 +125,6 @@ export async function runComfyCheck(ctx = {}) {
       controller?.abort?.();
       resolve(TIMED_OUT);
     }, timeoutMs);
-    timer?.unref?.();
   });
 
   let response;
