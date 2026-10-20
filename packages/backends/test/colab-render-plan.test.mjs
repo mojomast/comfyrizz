@@ -13,6 +13,7 @@ import {
   planColabRenderJob,
   remoteRenderDecision,
   renderCommandArgv,
+  renderBundleStamp,
 } from "../src/colab-render-plan.mjs";
 
 test("render location defaults to local and rejects unknown values", () => {
@@ -20,6 +21,24 @@ test("render location defaults to local and rejects unknown values", () => {
   assert.equal(normalizeRenderLocation(""), "local");
   assert.equal(normalizeRenderLocation("colab"), "colab");
   assert.throws(() => normalizeRenderLocation("remote"), /Unknown render location/);
+});
+
+test('composition jobs require VM Node 22 and pinned HyperFrames setup', () => {
+  const job = planColabRenderJob({ compositions: true });
+  assert.equal(job.nodeMajor, 22);
+  assert.equal(job.compositions, true);
+  assert.equal(job.bootstrap.find(step => step.id === 'hyperframes').version, '0.8.181');
+  assert.ok(job.bootstrap.some(step => step.id === 'workspace-build'));
+  assert.equal(planColabRenderJob().bootstrap.some(step => step.id === 'hyperframes'), false);
+});
+
+test('equal-length source edits change the bundle cache stamp', t => {
+  const root = mkdtempSync(join(tmpdir(), 'render-stamp-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, 'source.mjs');
+  const files = [{ name: 'source.mjs', path, bytes: 3 }];
+  writeFileSync(path, 'one'); const before = renderBundleStamp(files);
+  writeFileSync(path, 'two'); assert.notEqual(renderBundleStamp(files), before);
 });
 
 test("Google Colab render needs that backend and a generated-media session", () => {

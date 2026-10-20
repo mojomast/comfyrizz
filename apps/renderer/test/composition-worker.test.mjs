@@ -3,10 +3,40 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm, readdir, symlink, mkdir, cp } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { materializeCompositions, compositionCommand, compositionFingerprint, verifyCompositionProbe, collectCompositionCacheExtras } from '../scripts/composition-worker.mjs';
+import { materializeCompositions, compositionCommand, compositionFingerprint, verifyCompositionProbe, collectCompositionCacheExtras, verifyPreparedCompositions } from '../scripts/composition-worker.mjs';
 
 const checkResult = () => ({ ok: true, browserSkipped: false,
   ...Object.fromEntries(['lint', 'runtime', 'layout', 'motion', 'contrast'].map(key => [key, { ok: true, errorCount: 0, findings: [], enabled: true, samples: [0, 0.5] }])) });
+
+test('VM-produced compositions export offline only when source, timing and bytes still agree', async t => {
+  const { options, state, packageDir } = await fixture(t);
+  const { compileTimeline } = await import('../../../packages/planner/dist/src/index.js');
+  const compiler = await import('../../../packages/compositions/src/index.mjs');
+  await cp(new URL('../../../examples/composition-stories/', import.meta.url), packageDir, { recursive: true });
+  options.pkg = JSON.parse(await readFile(join(packageDir, 'package.json')));
+  options.timeline = compileTimeline(options.pkg);
+  options.loadCompositionManifest = compiler.loadCompositionManifest;
+  options.compileComposition = input => { const result = compiler.compileComposition(input); state.probe = probeResult(result.frames); return result; };
+  const rendered = await materializeCompositions(options);
+  const command = async (bin, args) => {
+    assert.equal(bin, 'ffprobe', 'portable verification must not invoke Node or HyperFrames');
+    const scene = rendered.report.scenes.find(scene => args.at(-1).endsWith(scene.file));
+    return { stdout: JSON.stringify(probeResult(scene.probe.frames)) };
+  };
+  const verify = pkg => verifyPreparedCompositions({ pkg, packageDir, timeline: compileTimeline(pkg), env: {}, command });
+  assert.equal((await verify(rendered.pkg)).report.scenes.length, 3);
+  assert.equal(state.renders, 3);
+  const retimed = structuredClone(rendered.pkg); retimed.scenes[0].preferredFrames += 30;
+  await assert.rejects(verify(retimed), /Stale prepared composition/);
+  const manifestPath = join(packageDir, 'compositions/manifest.json');
+  const original = await readFile(manifestPath);
+  const manifest = JSON.parse(original); manifest.scenes[0].params.resultLabel = 'Changed after rendering';
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await assert.rejects(verify(rendered.pkg), /Stale prepared composition/);
+  await writeFile(manifestPath, original);
+  await writeFile(join(packageDir, rendered.report.scenes[0].file), 'tampered');
+  await assert.rejects(verify(rendered.pkg), /cached video hash mismatch/);
+});
 function probeResult(frames = 30) {
   return { streams: [{ codec_type: 'video', codec_name: 'h264', pix_fmt: 'yuv420p', width: 1280, height: 720, r_frame_rate: '30/1', avg_frame_rate: '30/1', nb_read_frames: String(frames) }] };
 }

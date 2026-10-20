@@ -11,7 +11,7 @@ import { argvExec, assertNoSecrets } from "./colab-plan.mjs";
 
 export const RENDER_LOCATIONS = Object.freeze(["local", "colab"]);
 export const DEFAULT_RENDER_LOCATION = "local";
-export const RENDER_BUNDLE_VERSION = 1;
+export const RENDER_BUNDLE_VERSION = 2;
 export const RENDER_CACHE_ROOT = "/content/comfyrizz/render-cache";
 export const RENDER_WORK_ROOT = "/content/comfyrizz/render";
 export const RENDER_MEDIA_ROOT = "/content/comfyrizz/out";
@@ -22,24 +22,33 @@ export const RENDER_OUTPUTS = Object.freeze([
   "verification.json",
   "audio-verification.json",
   "video.props.json",
+  "composition-files.json",
 ]);
 
 /** Directories copied into the render bundle. Tests and fixtures stay on the host. */
 export const RENDER_BUNDLE_DIRS = Object.freeze([
   "apps/renderer/src",
   "apps/renderer/scripts",
+  "apps/renderer/public/fonts",
   "packages/schema/src",
-  "packages/planner/dist",
-  "packages/vector/dist",
+  "packages/planner/src",
+  "packages/vector/src",
+  "packages/compositions/src",
 ]);
 
 export const RENDER_BUNDLE_FILES = Object.freeze([
   "apps/renderer/package.json",
   "apps/renderer/remotion.config.ts",
+  "apps/renderer/tsconfig.json",
   "packages/schema/package.json",
   "packages/schema/package-v1.schema.json",
   "packages/schema/jobs-v1.schema.json",
   "packages/vector/package.json",
+  "packages/vector/tsconfig.json",
+  "packages/planner/package.json",
+  "packages/planner/tsconfig.json",
+  "packages/compositions/package.json",
+  "packages/schema/types.ts",
   "scripts/tts/verify_mix.py",
 ]);
 
@@ -116,6 +125,7 @@ export function planColabRenderJob({
   uploadFiles = [],
   archiveFiles = [],
   stamp = null,
+  compositions = false,
 } = {}) {
   const workRoot = RENDER_WORK_ROOT;
   const outDir = `${workRoot}/out`;
@@ -136,16 +146,19 @@ export function planColabRenderJob({
     stamp,
     voiced: Boolean(voiced),
     presenters: Boolean(presenters),
+    compositions: Boolean(compositions),
     linkFiles: linkFiles.map(assertSafeRelative),
     uploadFiles: uploadFiles.map(assertSafeRelative),
     archiveFiles: archiveFiles.map(assertSafeRelative),
-    nodeMajor: 20,
+    nodeMajor: 22,
     outputs: [...RENDER_OUTPUTS],
     bootstrap: [
-      { id: "node", cache: `${RENDER_CACHE_ROOT}/node`, skipWhen: "node major >= 20 is already cached or on PATH" },
+      { id: "node", cache: `${RENDER_CACHE_ROOT}/node`, skipWhen: "node major >= 22 is already cached or on PATH" },
       { id: "ffmpeg", cache: null, skipWhen: "ffmpeg and ffprobe are already on PATH" },
       { id: "chromium", cache: `${RENDER_CACHE_ROOT}/browser`, skipWhen: "a cached headless browser or system Chromium exists" },
       { id: "renderer-deps", cache: `${RENDER_CACHE_ROOT}/npm`, skipWhen: "the bundle stamp matches and node_modules is present" },
+      { id: "workspace-build", cache: `${workRoot}/repo`, skipWhen: "the content stamp matches and planner/vector build outputs exist" },
+      ...(compositions ? [{ id: "hyperframes", version: "0.8.181", cache: `${RENDER_CACHE_ROOT}/hyperframes`, skipWhen: "the pinned CLI installation is verified" }] : []),
     ],
     secrets: "none",
     envArgs: false,
@@ -238,7 +251,7 @@ export function renderBundleStamp(files) {
   for (const file of files) {
     hash.update(file.name);
     hash.update("\0");
-    hash.update(String(file.bytes ?? 0));
+    hash.update(readFileSync(file.path));
     hash.update("\0");
   }
   return hash.digest("hex");

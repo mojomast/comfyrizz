@@ -12,8 +12,10 @@ What the option changes:
 
 - Generated plates stay on the VM through Remotion. The media stage returns a manifest, not every asset, while the VM is held.
 - Remotion concurrency on the VM is the host CPU count, capped at 8. The local renderer default remains 2.
-- Node.js 22.20.0, npm packages (renderer, schema, vector, including the native resvg binding), ffmpeg, and a headless browser are installed only when missing, under `/content/comfyrizz/render-cache`.
+- Node.js 22+ (22.20.0 download fallback), npm packages (renderer, schema, planner, vector, including TypeScript and the native resvg binding), ffmpeg, and a headless browser are prepared on the VM. Planner/vector are built there from source, not uploaded host `dist` output. Source-content stamps and install/build markers control reuse.
+- Composition projects install and verify `hyperframes@0.8.181` in the VM cache, using VM-local Node/browser paths. They compile, check and render their plates before final assembly. The bundle includes the native composition compiler and bundled fonts; it excludes host `node_modules`. See [composition remote rendering](COMPOSITIONS.md#google-colab-remote-render).
 - After the render, two zip archives come back: the MP4 plus verification reports, and one media archive so the editable export can still check asset bytes. That is one post-render transfer instead of a serial download of every plate before a local render.
+- Composition delivery also returns the effective package and generated plate/source/cache files. Host export validates source/timing and bytes, then reuses those resources without a host HyperFrames install.
 - The VM is stopped before host verification, export, or a local fallback. A failed remote render logs `REMOTE_RENDER_FALLBACK` and renders locally only after a confirmed stop.
 
 The cold install can cost more than a short local render, which is why the default stays on this machine. A later Google Colab session does not inherit the previous VM's cache. Do not treat the Hermes collection gaps (about 109 seconds in the recorded harness) as a promised saving: bootstrap, Chromium, and the post-render archive are unpaid in that log.

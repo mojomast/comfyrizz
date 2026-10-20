@@ -17,13 +17,6 @@ import { assessBudget, nextJobUpperEstimate } from '../../../packages/backends/s
 import { decideRenderFallback } from '../../../packages/backends/src/colab-render-plan.mjs';
 import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
 import { runColabRender } from './pipeline-colab-render.mjs';
-import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
-
-/** True when the run package has composition scenes (an invalid manifest counts, so the local renderer reports it). */
-export function packageHasCompositions(packageDir, pkg) {
-  try { return (loadCompositionManifest(packageDir, structuredClone(pkg))?.scenes?.length ?? 0) > 0; }
-  catch { return true; }
-}
 
 export async function executePipeline(spec, { send = () => {}, signal = new AbortController().signal, runCommand = pipelineCommand, render = renderPipeline, colabFactory = createColabBackend, byoFactory = createByoBackend, qwenRunner = runQwenColab, presenterPreparation = preparePresenterInputs, presenterCorrection = correctPresenters, colabRender = runColabRender } = {}) {
 const { runDir, workDir, plan, runId } = spec;
@@ -96,7 +89,7 @@ async function main() {
     if (!validation.valid) throw new Error('Invalid pipeline input');
     await command('ffmpeg', ['-version']); await command('ffprobe', ['-version']);
     if (plan.voiced) await command(process.env.COMFYRIZZ_PYTHON || 'python3', ['-c', 'import numpy']);
-    if (!existsSync(process.env.REMOTION_BROWSER || '/usr/bin/google-chrome') && render === renderPipeline) throw new Error('Configure REMOTION_BROWSER with an installed headless browser before starting generation.');
+    if (!remoteRender && !existsSync(process.env.REMOTION_BROWSER || '/usr/bin/google-chrome') && render === renderPipeline) throw new Error('Configure REMOTION_BROWSER with an installed headless browser before starting generation.');
     cpSync(join(repoRoot, 'workflows'), join(workDir, 'workflows'), { recursive: true });
     if (plan.presenters) await command(process.env.COMFYRIZZ_SYNCNET_PYTHON, ['-c', 'import cv2, torch, numpy; assert hasattr(cv2, "CascadeClassifier")']);
     if (plan.voiced && !plan.remoteVoice) {
@@ -226,28 +219,16 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       renderResult.location = 'local';
       writeJson(join(runDir, 'render.json'), renderResult);
     };
-    // The Colab render bundle does not carry the composition/HyperFrames worker, so a
-    // package with composition scenes collects its media and renders locally instead.
-    if (heldBackend && packageHasCompositions(workDir, json(packagePath))) {
-      send({ kind: 'warning', stageId: 'render', code: 'REMOTE_RENDER_COMPOSITIONS', message: 'Composition scenes render locally: the Google Colab render does not support compositions yet. The Colab runtime was released and this video renders on this machine.' });
-      try {
-        if (typeof heldBackend.setCollectPolicy === 'function') heldBackend.setCollectPolicy('full');
-        if (typeof heldBackend.collectOut === 'function') {
-          progress('Collecting generated media for the local render', null);
-          const collected = await heldBackend.collectOut({ onEvent: sourceEvent });
-          copyNamedAssets({ pkg: json(packagePath), outputDir: collected.local || join(runDir, 'media-runtime', 'out'), packageDir: workDir });
-        }
-      } catch (collectError) {
-        send({ kind: 'warning', stageId: 'render', code: 'REMOTE_RENDER_COLLECT', message: redactForLog(collectError.message || 'Could not collect generated media') });
-      }
-      await releaseHeld('compositions render locally');
-    }
     if (heldBackend) {
       let delivered = false;
       try {
         progress('Rendering on the Google Colab VM', null);
         const remote = await colabRender({ backend: heldBackend, workDir, runDir, voiced: plan.voiced, presenters: plan.presenters, signal, onEvent: event => progress(event.message || event.phase || 'rendering', event.progress ?? null) });
         renderResult = remote.renderResult;
+        if (renderResult.package) {
+          pkg = renderResult.package;
+          writeJson(packagePath, pkg);
+        }
         if (!existsSync(join(runDir, 'loudness.json'))) {
           progress('Normalizing the final audio mix', null);
           await command(process.execPath, [fileURLToPath(new URL('./pipeline-cpu-task.mjs', import.meta.url)), 'normalize', workDir, runDir]);

@@ -14,7 +14,7 @@ const require = createRequire(import.meta.resolve('@remotion/cli/package.json'))
 const { bundle } = require('@remotion/bundler');
 const { selectComposition, renderMedia, makeCancelSignal } = require('@remotion/renderer');
 
-export async function renderPipeline(packagePath, output, { signal, onEvent = () => {}, concurrency = 2 } = {}) {
+export async function renderPipeline(packagePath, output, { signal, onEvent = () => {}, concurrency = 2, entryPoint = join(rendererDir, 'src/index.ts') } = {}) {
   const packageDir = join(packagePath, '..');
   let pkg = JSON.parse(readFileSync(packagePath));
   const validation = validatePackage(pkg);
@@ -38,7 +38,7 @@ export async function renderPipeline(packagePath, output, { signal, onEvent = ()
   try {
     signal?.throwIfAborted();
     onEvent({ phase: 'bundling', progress: null });
-    serveUrl = await bundle({ entryPoint: join(rendererDir, 'src/index.ts'), publicDir });
+    serveUrl = await bundle({ entryPoint, publicDir });
     signal?.throwIfAborted();
     const browserExecutable = process.env.REMOTION_BROWSER || '/usr/bin/google-chrome';
     const composition = await selectComposition({ serveUrl, id: 'PackageDemo', inputProps: props, browserExecutable });

@@ -253,6 +253,39 @@ async function runtimeIdentity({ env, command, signal, timeoutMs }) {
   return { ...paths, env: childEnv, fingerprint: { nodeVersion, cliVersion: HYPERFRAMES_VERSION, cliHash: await fileHash(paths.cli), browserVersion, browserHash: await fileHash(paths.browser), browserConfig: { path: paths.browser, gpu: false, locale: childEnv.LANG, fontconfigPath: childEnv.FONTCONFIG_PATH, fontconfigFile: childEnv.FONTCONFIG_FILE }, platform: process.platform, arch: process.arch } };
 }
 
+/** Verify portable, already-rendered plates against today's source and timeline.
+ * Used after VM delivery and for exporting that verified movie on a host without
+ * HyperFrames. This never falls back to rendering or accepts stale source hashes.
+ */
+export async function verifyPreparedCompositions({ pkg, packageDir, timeline, signal,
+  command = compositionCommand, env = process.env } = {}) {
+  signal?.throwIfAborted();
+  const { loadCompositionManifest, compileComposition } = await import('../../../packages/compositions/src/index.mjs');
+  const manifest = loadCompositionManifest(packageDir, pkg);
+  if (!manifest?.scenes.length) return { pkg, report: { status: 'noop', scenes: [] } };
+  const extras = await collectCompositionCacheExtras(pkg, packageDir);
+  const receipts = new Map(extras.filter(extra => extra.path.endsWith('.composition.json')).map(extra => [extra.path, JSON.parse(extra.data)]));
+  const root = await realpath(resolve(packageDir));
+  const scenes = [];
+  for (const entry of manifest.scenes) {
+    signal?.throwIfAborted();
+    const scene = pkg.scenes.find(scene => scene.id === entry.sceneId);
+    const timelineScene = timeline.scenes.find(scene => scene.id === entry.sceneId);
+    const asset = pkg.assets?.[scene?.background?.asset];
+    const receipt = receipts.get(asset?.file?.replace(/\.mp4$/, '.composition.json'));
+    if (!receipt || scene.media_only !== true || scene.motion?.recipe ||
+        canonical(scene.background) !== canonical({ asset: scene.background.asset, fit: 'contain', scrim: 0, muted: true, speed: 1, loop: false })) throw new Error(`Missing prepared composition for ${entry.sceneId}`);
+    const compiled = compileComposition({ entry, pkg, scene, timelineScene, timeline });
+    validateCompiled(compiled, timelineScene, timeline);
+    if (receipt.sourceHash !== compiled.sourceHash || receipt.htmlHash !== hash(compiled.html) || receipt.motionHash !== hash(compiled.motionSpec)) throw new Error(`Stale prepared composition for ${entry.sceneId}`);
+    const file = await safePath(root, asset.file);
+    const result = await command(env.COMFYRIZZ_FFPROBE || 'ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,codec_name,pix_fmt,width,height,r_frame_rate,avg_frame_rate,nb_read_frames', '-of', 'json', file], { signal });
+    const probe = verifyCompositionProbe(JSON.parse(result.stdout), compiled);
+    scenes.push({ sceneId: entry.sceneId, file: asset.file, sourceHash: compiled.sourceHash, videoHash: receipt.videoHash, probe, cache: 'verified-portable' });
+  }
+  return { pkg, report: { status: 'ready', scenes } };
+}
+
 /** Test-only injections are trusted functions, never loaded from package data. */
 export async function materializeCompositions({ pkg, packageDir, timeline, signal, onEvent = () => {},
   loadCompositionManifest, compileComposition, command = compositionCommand, env = process.env, timeoutMs = 180000,

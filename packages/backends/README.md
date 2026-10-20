@@ -121,6 +121,14 @@ fakes, and the estimate it prints is the one the run panel would show.
 
 `colab/render_dirs.py` and `colab/render_remote.py` are the cells the app uploads. Tests import the planner and the Python helpers. They do not call the `colab` binary or start a session.
 
+The source bundle includes the composition compiler, planner/vector sources and
+bundled fonts. It excludes host dependencies and built `dist` outputs. The VM
+installs/builds these dependencies with Node 22+, and installs pinned HyperFrames
+0.8.181 only for composition projects. Bundle stamps hash file content; matching
+byte sizes alone cannot reuse an old build. Returned archives include the exact
+VM-built composition plates and portable cache/source companions for host export.
+See [the composition bootstrap and delivery contract](../../docs/COMPOSITIONS.md#google-colab-remote-render).
+
 ## Tests: fakes only, zero Google Colab calls
 
 * `test/bin/fake-colab.mjs` — a fake `colab` executable, installed as a `sh` shim and executed

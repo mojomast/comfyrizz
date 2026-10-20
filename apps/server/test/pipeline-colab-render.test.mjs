@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prepareRenderJob, projectTransferLists } from '../src/pipeline-colab-render.mjs';
 
-test('the render job ships host edits and links media that is still on the VM', () => {
+test('the render job ships host edits and links media that is still on the VM', async () => {
   const workDir = mkdtempSync(join(tmpdir(), 'colab-render-job-'));
   try {
     const pkg = JSON.parse(readFileSync(new URL('../../../examples/data-story/package.json', import.meta.url)));
@@ -17,7 +17,7 @@ test('the render job ships host edits and links media that is still on the VM', 
     assert.ok(lists.uploadFiles.includes('package.json'));
     assert.ok(lists.uploadFiles.includes('audio/narration.norm.wav'));
     assert.equal(lists.uploadFiles.some(file => file.includes('..')), false);
-    const prepared = prepareRenderJob(workDir, { voiced: true, presenters: false });
+    const prepared = await prepareRenderJob(workDir, { voiced: true, presenters: false });
     assert.equal(prepared.job.location, 'colab');
     assert.equal(prepared.job.envArgs, false);
     assert.equal(JSON.stringify(prepared.job).includes('--env'), false);
@@ -26,6 +26,8 @@ test('the render job ships host edits and links media that is still on the VM', 
     assert.match(readFileSync(join(workDir, 'timeline.json'), 'utf8'), /Edited on the host before render/);
     assert.ok(prepared.bundleFiles.some(file => file.name === 'apps/renderer/scripts/render-remote-entry.mjs'));
     assert.ok(prepared.bundleFiles.some(file => file.name === 'scripts/tts/verify_mix.py'));
+    for (const name of ['packages/compositions/src/index.mjs', 'packages/planner/src/index.ts', 'packages/vector/src/index.ts', 'packages/planner/tsconfig.json', 'apps/renderer/public/fonts/Inter-Variable.ttf']) assert.ok(prepared.bundleFiles.some(file => file.name === name), name);
+    assert.equal(prepared.bundleFiles.some(file => file.name.includes('/dist/')), false);
     assert.equal(prepared.bundleFiles.some(file => /node_modules|token|\.env/.test(file.name)), false);
   } finally {
     rmSync(workDir, { recursive: true, force: true });

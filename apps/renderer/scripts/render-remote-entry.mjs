@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderPipeline } from './render-pipeline.mjs';
 import { normalizeMixLoudness } from './mix-loudness.mjs';
+import { collectCompositionCacheExtras } from './composition-worker.mjs';
 
 export function remoteConcurrency(cpuCount = cpus().length) {
   const count = Number(cpuCount);
@@ -16,7 +17,14 @@ export function remoteConcurrency(cpuCount = cpus().length) {
 export async function renderOnVm(packagePath, output, { onEvent = () => {} } = {}) {
   const concurrency = remoteConcurrency();
   onEvent({ phase: 'rendering', progress: null, concurrency });
-  const rendered = await renderPipeline(packagePath, output, { concurrency, onEvent });
+  const entryPoint = fileURLToPath(new URL('../src/remote.tsx', import.meta.url));
+  const rendered = await renderPipeline(packagePath, output, { concurrency, onEvent, entryPoint });
+  // Return the exact VM-built plates and portable receipts alongside the effective
+  // package in render.json. The host must never regenerate them for ZIP export.
+  const extras = await collectCompositionCacheExtras(rendered.package, dirname(packagePath));
+  for (const extra of extras) writeFileSync(resolve(dirname(packagePath), extra.path), extra.data);
+  const files = [...new Set([...(rendered.compositions?.scenes ?? []).map(scene => scene.file), ...extras.map(extra => extra.path)])];
+  writeFileSync(joinDir(output, 'composition-files.json'), JSON.stringify(files));
   let loudness = null;
   try {
     onEvent({ phase: 'normalizing', progress: null });

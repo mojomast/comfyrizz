@@ -283,7 +283,53 @@ All renders used local CPU resources and spent **zero Colab credits**.
 
 ## Google Colab remote render
 
-The opt-in Google Colab final render (`renderLocation: 'colab'`) does not carry the
-composition/HyperFrames worker. When a run package has composition scenes, the
-pipeline collects the generated media, stops the held Colab VM, emits a
-`REMOTE_RENDER_COMPOSITIONS` warning and renders the final video locally.
+The opt-in Google Colab final render (`renderLocation: 'colab'`) prepares composition
+scenes on the held Colab VM before assembling the final movie. The host sends the
+validated generic or package-scoped manifest, referenced inputs, bundled fonts,
+and source code. Host `node_modules` and planner/vector `dist` files are excluded.
+
+On the VM, the render bootstrap:
+
+1. Ensures Node **22+** (downloads **22.20.0** when needed), npm and FFmpeg/ffprobe.
+2. Installs renderer, schema, planner and vector dependencies, including TypeScript
+   and the VM-compatible native resvg binding; builds planner/vector from source.
+3. Ensures a working headless browser, including Remotion's own download location
+   and Linux library installation when necessary. Native compositions use available
+   local sans-serif fonts; fontconfig/Liberation fonts are provisioned if absent.
+4. For composition projects, installs and verifies **`hyperframes@0.8.181`** under
+   `/content/comfyrizz/render-cache/hyperframes/0.8.181`. It sets the CLI, Node and
+   browser paths from the VM's own installation and disables telemetry.
+5. Compiles the native templates, checks/renders exact-length silent plates, then
+   runs the final Remotion render using the measured timeline.
+
+Dependencies/build outputs are reused only when their markers and the source
+content hash match. Equal-size source edits invalidate the bundle stamp. Cached
+HyperFrames installations must pass both package-version and CLI-version checks.
+No host HyperFrames installation or CLI environment variables are required for a
+successful remote render or its subsequent host export.
+
+The returned media archive includes the new plates plus generated HTML, motion
+specs and portable receipts. The effective package is validated before updating
+the isolated run snapshot. The host checks unchanged scene/caption timing and
+recompiles source hashes, verifies artifact bytes and probes each clip before
+reuse. Export packages those verified VM-built resources and MIT notices without
+running HyperFrames again. Source or timing edits invalidate portable reuse.
+
+The existing session policy remains: remote rendering uses the Colab VM held after
+media generation. It does not allocate a new VM for a composition-only project
+with no generated-media jobs. A real remote failure collects available media and
+stops the VM before attempting the configured local fallback; that fallback needs
+the normal local renderer/HyperFrames setup. Composition presence alone no longer
+forces a local fallback.
+
+### Bootstrap verification
+
+The [source-only bootstrap probe](research/hyperframes-colab-build-20261020.json)
+ran the actual Colab Python bootstrap and remote renderer in an isolated local
+directory. It installed npm dependencies, built planner/vector, downloaded the
+browser, installed pinned HyperFrames and produced the three-scene **480-frame /
+16-second** example. The production entry point requires no demo fixtures.
+The host adapter then accepted the results/media ZIPs and exported a complete
+editable archive with HyperFrames environment variables removed. This validates
+the dependency and return-resource path; a live Colab allocation and fresh-image
+apt installation were not exercised. No Colab credits were spent.

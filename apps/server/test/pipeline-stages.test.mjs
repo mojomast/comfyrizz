@@ -216,6 +216,11 @@ function enableRemote(f, { teardownState = 'stopped' } = {}) {
 test('a Google Colab render returns the MP4 and stops the VM before local verification', async t => {
   const f = fixture(t);
   enableRemote(f);
+  // No installed host browser is needed when bootstrap/render happen on the VM.
+  const browser = process.env.REMOTION_BROWSER;
+  process.env.REMOTION_BROWSER = '/missing/host/browser';
+  t.after(() => { if (browser === undefined) delete process.env.REMOTION_BROWSER; else process.env.REMOTION_BROWSER = browser; });
+  delete f.adapters.render;
   f.adapters.colabRender = async () => {
     f.calls.push('remote-render');
     writeFileSync(join(f.spec.runDir, 'video.mp4'), 'remote-video');
@@ -287,19 +292,27 @@ test('cancelling during generation waits for cleanup before the cancelled event'
   assert.ok(!f.calls.includes('render'));
 });
 
-test('a composition package does not render on Google Colab: the VM stops and the render is local with a warning', async t => {
+test('a composition package renders on Colab and persists its effective package before export', async t => {
   const f = fixture(t);
   enableRemote(f);
   mkdirSync(join(f.spec.workDir, 'compositions'), { recursive: true });
   writeFileSync(join(f.spec.workDir, 'compositions', 'manifest.json'), JSON.stringify({ version: 1, scenes: [{ sceneId: 's_hero', component: 'object-transfer',
     params: { title: 'A receipt finds its project', objectLabel: 'Receipt', fromLabel: 'Inbox', toLabel: 'Project', resultLabel: 'Assigned', qualifier: 'Illustrative' } }] }));
-  f.adapters.colabRender = async () => { f.calls.push('remote-render'); throw new Error('must not render compositions remotely'); };
+  f.adapters.colabRender = async () => {
+    f.calls.push('remote-render');
+    writeFileSync(join(f.spec.runDir, 'video.mp4'), 'remote-video');
+    writeFileSync(join(f.spec.runDir, 'loudness.json'), '{}');
+    const pkg = JSON.parse(readFileSync(join(f.spec.workDir, 'package.json')));
+    pkg.title = 'Effective remote package';
+    return { renderResult: { frames: 30, fps: 30, width: 640, height: 360, location: 'colab', package: pkg } };
+  };
   assert.equal(await executePipeline(f.spec, f.adapters), 0, JSON.stringify(f.events.at(-1)));
   assert.ok(f.calls.includes('hold:never'));
-  assert.equal(f.calls.includes('remote-render'), false);
-  assert.ok(f.calls.includes('collect-full'));
-  assert.ok(f.calls.indexOf('teardown:compositions render locally') < f.calls.indexOf('local-render'));
-  assert.match(f.events.find(event => event.code === 'REMOTE_RENDER_COMPOSITIONS').message, /renders on this machine/);
+  assert.equal(f.calls.includes('remote-render'), true);
+  assert.equal(f.calls.includes('collect-full'), false);
+  assert.equal(f.calls.includes('local-render'), false);
+  assert.ok(f.calls.indexOf('teardown:render done') < f.calls.indexOf('export'));
+  assert.equal(JSON.parse(readFileSync(join(f.spec.workDir, 'package.json'))).title, 'Effective remote package');
   assert.equal(f.events.some(event => event.code === 'REMOTE_RENDER_FALLBACK'), false);
-  assert.equal(f.events.find(event => event.kind === 'result').result.renderLocation, 'local');
+  assert.equal(f.events.find(event => event.kind === 'result').result.renderLocation, 'colab');
 });
