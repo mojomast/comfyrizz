@@ -108,5 +108,8 @@ export default defineConfig({
   },
   server: { host: '127.0.0.1', port: 4174, fs: { allow: [repoRoot] } },
   preview: { host: '127.0.0.1', port: 4173 },
-  build: { target: 'es2022' },
+  build: {
+    target: 'es2022',
+    rollupOptions: { input: { main: 'index.html', demo: 'demo.html' } },
+  },
 });

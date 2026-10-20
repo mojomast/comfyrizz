@@ -1,0 +1,152 @@
+[
+  {
+    "id": "brand-kit",
+    "title": "Brand kit example",
+    "description": "B1 lets an owner describe their brand once and have it followed everywhere: the brief card, the generation prompts and the rendered video.",
+    "durationSec": null,
+    "video": null,
+    "poster": null,
+    "readme": "examples/brand-kit/README.md",
+    "tags": []
+  },
+  {
+    "id": "cast-mascot",
+    "title": "Pip the mascot",
+    "description": "CAST1 example: the same fictional character in every scene, via a FLUX 3 Klein reference edit.",
+    "durationSec": null,
+    "video": null,
+    "poster": null,
+    "readme": "examples/cast-mascot/README.md",
+    "tags": []
+  },
+  {
+    "id": "composition-stories",
+    "title": "Three composition stories — illustrative",
+    "description": "Source-only example: 1280×720, 30 fps, no narration, three hard-cut scenes totaling 480 frames (16 seconds). No generated media is checked in.",
+    "durationSec": null,
+    "video": null,
+    "poster": null,
+    "readme": "examples/composition-stories/README.md",
+    "tags": []
+  },
+  {
+    "id": "csv-charts",
+    "title": "CSV chart scenes",
+    "description": "data.csv is the source of truth; package.json is generated from it by the same pure functions the server uses (datasetFromCsv + proposeChartScenes), so every label and value the renderer draws comes from the CSV.",
+    "durationSec": null,
+    "video": null,
+    "poster": null,
+    "readme": "examples/csv-charts/README.md",
+    "tags": []
+  },
+  {
+    "id": "data-story",
+    "title": "Comfyrizz data story",
+    "description": null,
+    "durationSec": 44,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "hook-20s",
+    "title": "Comfyrizz — 20 second hook",
+    "description": null,
+    "durationSec": 18.87,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "launch-demo",
+    "title": "Comfyrizz launch demo",
+    "description": null,
+    "durationSec": 36.67,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "licensing-demo",
+    "title": "Openverse licensing demo — CC BY approved, CC BY-NC refused",
+    "description": "A deterministic, offline example of the real @comfyrizz/sources rights gate.",
+    "durationSec": null,
+    "video": null,
+    "poster": null,
+    "readme": "examples/licensing-demo/README.md",
+    "tags": []
+  },
+  {
+    "id": "narrated-demo",
+    "title": "Launch demo — narrated (Kokoro CPU)",
+    "description": null,
+    "durationSec": 43.73,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "presenter-demo",
+    "title": "Comfyrizz presenter demo",
+    "description": null,
+    "durationSec": 22.5,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "product-explainer",
+    "title": "Comfyrizz product explainer",
+    "description": null,
+    "durationSec": 44.97,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "showcase-gpu2",
+    "title": "How solar power works: Comfyrizz GPU showcase (GPU test 2)",
+    "description": null,
+    "durationSec": 43.73,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "showcase-gpu3",
+    "title": "How wind becomes power: Comfyrizz GPU showcase (GPU test 3)",
+    "description": null,
+    "durationSec": 36.4,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "tools",
+    "title": "tools",
+    "description": null,
+    "durationSec": null,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  },
+  {
+    "id": "willem-birthday",
+    "title": "Joyeux 3e anniversaire, Willem !",
+    "description": null,
+    "durationSec": 51.8,
+    "video": null,
+    "poster": null,
+    "readme": null,
+    "tags": []
+  }
+]
