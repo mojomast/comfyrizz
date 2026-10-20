@@ -278,7 +278,7 @@ node --test scripts/compositions/build.test.mjs
 The [machine-readable evidence](research/composition-implementation-20261020.json)
 records versions, frames, archive/video hashes and evidence limits. Raw evidence is
 retained outside the repository under
-`/home/mojo/comfyrizz-gpu-tests/composition-implementation-20261020/`.
+`~/comfyrizz-gpu-tests/composition-implementation-20261020/`.
 All renders used local CPU resources and spent **zero Colab credits**.
 
 ## Google Colab remote render

@@ -156,7 +156,7 @@ Changing the guard from a `typeof !== 'undefined'` test to `window.gsap != null`
 fixed that false positive. The stub is not the GSAP library.
 
 Raw source, checks, failed-guard log and successful render are retained under
-`/home/mojo/comfyrizz-gpu-tests/hyperframes-research-20261020/frame-source/`.
+`~/comfyrizz-gpu-tests/hyperframes-research-20261020/frame-source/`.
 The [evidence summary](hyperframes-evidence-20261020.json) records the successful
 output and source hashes. This experiment spent **zero Colab credits**.
 
@@ -251,7 +251,7 @@ Thank you.
 
 Retrieved license/forum/contact HTML snapshots and SHA-256 source manifest are
 retained outside the repository in
-`/home/mojo/comfyrizz-gpu-tests/hyperframes-research-20261020/licensing/`.
+`~/comfyrizz-gpu-tests/hyperframes-research-20261020/licensing/`.
 
 [license]: https://gsap.com/community/standard-license/
 [presets]: https://gsap.com/community/forums/topic/45477-gsap-lisence/

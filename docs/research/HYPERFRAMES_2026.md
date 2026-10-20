@@ -141,7 +141,7 @@ network-isolation test. CLI telemetry was disabled for the check/render runs.
 Machine-readable summary: [hyperframes-evidence-20261020.json](hyperframes-evidence-20261020.json).
 Source: [receipt fixture](fixtures/hyperframes-receipt/index.html) and
 [motion assertions](fixtures/hyperframes-receipt/index.motion.json).
-Raw local evidence: `/home/mojo/comfyrizz-gpu-tests/hyperframes-research-20261020/`.
+Raw local evidence: `~/comfyrizz-gpu-tests/hyperframes-research-20261020/`.
 
 ## 4. Highest-value ideas to adopt
 
