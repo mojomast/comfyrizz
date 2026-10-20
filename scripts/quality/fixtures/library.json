@@ -1,0 +1,65 @@
+{
+  "schema": "comfyrizz.asset-library/v1",
+  "assets": [
+    {
+      "id": "raccoon_portrait",
+      "version": 1,
+      "kind": "artwork",
+      "label": "Courtroom raccoon portrait",
+      "file": "assets/raccoon_portrait@1.png",
+      "sha256": "2d1c0837512faa7e9d0a7b77d07a439f8330a5a2f86628d1e3d66ce2ead73120",
+      "approvedBy": "continuity-lead",
+      "notes": "Approved courtroom picture: raccoon subject in a judicial robe inside the signed frame. Opening (00:00-00:10) and payoff (09:00-09:20) must show this exact asset; a human figure or a different raccoon is an ARTWORK_SWAP."
+    },
+    {
+      "id": "sandwich_01",
+      "version": 1,
+      "kind": "prop",
+      "label": "Workshop bench sandwich",
+      "file": "assets/sandwich_01@1.png",
+      "sha256": "3f2571c284de1d5b5ff0d31e37621419987889f71819ec0b4f55f5664a2da9ec",
+      "approvedBy": "continuity-lead",
+      "notes": "Stays visibly out of reach through \"Today I can't reach my sandwich\"; any shot that hands it to the painter contradicts the beat."
+    },
+    {
+      "id": "paid_leave_cardigan",
+      "version": 1,
+      "kind": "costume",
+      "label": "Ada's paid-leave cardigan",
+      "file": "assets/paid_leave_cardigan@1.png",
+      "sha256": "ff1fa495a3be2d98f5016ef97cc7a57eec2a7df67f77d96ccd68e7c8cf8f3f5e",
+      "approvedBy": "costume-review",
+      "notes": "Closing-scene costume worn over the apron/teal outfit; the 09:00-09:20 recognition scene must pay it off."
+    },
+    {
+      "id": "ada_workshop_view",
+      "version": 1,
+      "kind": "character",
+      "label": "Ada at the workshop bench",
+      "file": "assets/ada_workshop_view@1.png",
+      "sha256": "e5ba89c69b378e6699f5071ea3662ece3e834d0d008187c76d5fb020f08e616d",
+      "approvedBy": "continuity-lead",
+      "notes": "Approved character view for identity and eyeline checks."
+    },
+    {
+      "id": "workshop_layout",
+      "version": 1,
+      "kind": "set",
+      "label": "Workshop bench layout",
+      "file": "assets/workshop_layout@1.png",
+      "sha256": "0c8bd6f2d4a18c9258493ecc92ad84981d6ad4c36dd0bd4dc8838087fa53238f",
+      "approvedBy": "continuity-lead",
+      "notes": "Reference layout for prop positions and screen direction between shots."
+    },
+    {
+      "id": "work_stoppage_sign",
+      "version": 1,
+      "kind": "sign",
+      "label": "Work stoppage notice",
+      "file": "assets/work_stoppage_sign@1.png",
+      "sha256": "ea19442dc2761697c1448f1a06fa1cf493440cf25571a565db7b1ef1f3507e68",
+      "approvedBy": "picture-editor",
+      "notes": "Blank-surface notice; lettering is composed deterministically, never generated into the plate."
+    }
+  ]
+}
