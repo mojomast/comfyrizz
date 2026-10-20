@@ -35,7 +35,7 @@ committed to the repository.
 
 ## Four-minute production
 
-**GPU: Graphite Processing Unit** is a 467-word, 30-shot, 240-second workshop
+**GPU: Graphite Processing Unit** is a roughly 480-word, 30-shot, 240-second workshop
 mockumentary: impossible lighthouse commission → dubious optimization → lunch
 outage → chairs and credit → the client's raccoon revision. It uses four fixed
 character/voice references from the prior production. The script lets the absurd
@@ -124,3 +124,58 @@ is performed. ASR and temporal samples do not substitute for a listening review.
 
 **At the integration checkpoint:** the 30-shot production is running; the final
 four-minute export is not yet delivered. Subsequent results belong below.
+
+### Main generation completed
+
+All 30 initial production shots succeeded and their downloaded hashes matched
+their receipts. They total 246.375 seconds of source footage (before editing),
+with 2,021.63 seconds of summed generation/VM-save time, a median 66.08 seconds
+per shot, and 8.21 seconds of computation per source-video second.
+
+For comparison, the preceding film's 39 successful LTX-2.5 motion clips at
+1024×576 took a median 22.00 seconds for roughly ten-second clips, or 2.24 seconds
+per source-video second, on the same G4 GPU class. H3's current run therefore uses
+about 3.67× the time per video second, at 1.75× the pixel count and with reference-
+conditioned spoken performances. This is a production-workload comparison, not
+an equal-resolution controlled benchmark. It excludes startup, transfers and
+rejected/repair takes. The published 11.9× claim compares against base MiniMax-H3.
+
+Full-film sample and speech review identified unwanted suffix speech in s03,
+s14 and s24. s03 was trimmed cleanly; the two short questions were regenerated
+with longer relevant lines. The s27 lighthouse line was also revised to make
+the visible omission of the underwater requirement an explicit joke rather than
+a contradiction. All three replacement takes matched their scripts in ASR.
+Source captures, old takes, and raw ASR remain outside Git.
+
+### Final delivery
+
+The completed short contains 30 shots and a 481-word screenplay, with native
+FastH3 dialogue and sound. The final edit is exactly **5,760 frames / 240 seconds**
+at 24 fps, delivered as 1920×1080 H.264 with stereo AAC and 63 caption cues.
+The source generation resolution was 1344×768; the export is upscaled.
+SRT, WebVTT and an embedded subtitle track accompany the film.
+
+- Master: `gpu-artists-1080p.mp4`, 149,449,168 bytes;
+  SHA-256 `5e7e1aacc38a345052b63c67919fb93e6b1c04907062011a6dab6737c07b36c3`.
+- Compact copy: `gpu-artists-small.mp4`, 62,535,495 bytes;
+  SHA-256 `13ca211c36e794b7e40c9adc1681b14ca06d10b5f4a79417f8db072891430517`.
+- Both exports passed full FFmpeg decode checks. Master integrated loudness is
+  −17.9 LUFS, loudness range 4.2 LU, and true peak −1.9 dBFS.
+- The private player and both files returned HTTP 200; a compact-copy byte-range
+  request returned HTTP 206 with the requested 1,024 bytes. Browser captions are
+  served through WebVTT.
+- Review used full-film temporal samples, targeted repair samples, final-export
+  samples and CPU ASR. Full real-time audiovisual review was not performed.
+  Remaining visible limitations include occasional background workers, manager
+  wardrobe variation, and pseudo-lettering in workshop notes.
+
+`gpu-artists-apply.mjs <production-directory>` creates a validated
+`package.ready.json` with selected workflow graphs, output hashes and the final
+5,760-frame editorial timing. Replaced takes and original ASR reports are retained
+alongside the local production evidence.
+
+The G4 session was explicitly stopped after all media was recovered. Colab
+reported no sessions, zero active assignments and 0.00 credits/hour. The observed
+balance fell from 341.56 to 333.21: **8.35 credits** for this experiment and
+**13.33 / 25 credits** across the combined project, leaving 11.67. The balance
+remained 333.21 on the final check. Final assembly and compression ran locally.

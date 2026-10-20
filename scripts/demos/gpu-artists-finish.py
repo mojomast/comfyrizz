@@ -82,6 +82,8 @@ def finish(root, film):
     edits = []
     for shot in film['shots']:
         reviewed = json.loads((root / 'review' / f'{shot["id"]}.json').read_text())
+        if reviewed['expected'] != shot['line']:
+            raise ValueError('Review predates script revision: '+shot['id'])
         video = next(s for s in reviewed['probe']['streams'] if s['codec_type']=='video')
         available = int(video['nb_frames'])
         extra = reviewed.get('extraSpeechStart')
@@ -131,6 +133,13 @@ def finish(root, film):
             if chunk and (len(' '.join(w['text'] for w in chunk+[word])) > 70 or word['end']-chunk[0]['start'] > 4):
                 cues.append((shot['start']+chunk[0]['start'],shot['start']+chunk[-1]['end'],' '.join(w['text'] for w in chunk)))
                 chunk=[]
+            # These are homophone/number typography corrections, not rewritten
+            # performances. Keep observed word boundaries and the raw ASR report.
+            word = dict(word)
+            if shot['id'] == 's07' and word['text'].lower().rstrip('.,') == 'brakes':
+                word['text'] = word['text'].replace('brakes','breaks').replace('Brakes','Breaks')
+            if shot['id'] == 's22' and word['text'] == '1230.':
+                word['text'] = '12:30.'
             chunk.append(word)
         if chunk:
             cues.append((shot['start']+chunk[0]['start'],shot['start']+chunk[-1]['end'],' '.join(w['text'] for w in chunk)))
@@ -153,6 +162,7 @@ def finish(root, film):
     import textwrap
     captions.write_text('\n\n'.join(f'{i}\n{timestamp(a)} --> {timestamp(b)}\n'+ '\n'.join(textwrap.wrap(t,width=42))
                                     for i,(a,b,t) in enumerate(cues,1))+'\n')
+    (out/'captions.vtt').write_text('WEBVTT\n\n'+re.sub(r'(\d{2}:\d{2}:\d{2}),(\d{3})',r'\1.\2',captions.read_text()))
     listing = out / 'parts.txt'
     listing.write_text(''.join(f"file 'parts/{s['id']}.mkv'\n" for s in film['shots']))
     movie = out / 'gpu-artists-1080p.mp4'
