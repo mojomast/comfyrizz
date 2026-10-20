@@ -128,5 +128,34 @@
         }
       ]
     }
+  ],
+  "editions": [
+    {
+      "key": "forest-hyperframes",
+      "basedOn": "forest",
+      "releaseTag": "mushroom-hyperframes-2026-10-20",
+      "frames": 7487,
+      "web": {
+        "file": "long-forest-hyperframes/video.mp4",
+        "bytes": 35403732,
+        "sha256": "4125594335e3cd998c6a01c63a62952bbc1e01de619376b6b6a8584715a2fa7b",
+        "width": 1280,
+        "height": 720
+      },
+      "downloads": [
+        {
+          "name": "forest-hyperframes-1080p.mp4",
+          "bytes": 171612315,
+          "sha256": "a53a377face89430818198f4a28e5ee053ad466252e67400602745d9b12ee5c3",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/mushroom-hyperframes-2026-10-20/forest-hyperframes-1080p.mp4"
+        },
+        {
+          "name": "forest-hyperframes-project.zip",
+          "bytes": 156446546,
+          "sha256": "213167997cd8a6c8e656f141ec7dfb6217242ccec68de33116e22a759ce3d265",
+          "url": "https://github.com/mojomast/comfyrizz/releases/download/mushroom-hyperframes-2026-10-20/forest-hyperframes-project.zip"
+        }
+      ]
+    }
   ]
 }

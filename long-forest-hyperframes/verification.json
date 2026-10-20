@@ -1,0 +1,712 @@
+{
+  "date": "2026-10-20",
+  "title": "The City Beneath the Forest — HyperFrames Edition",
+  "frames": 7487,
+  "fps": 30,
+  "durationSeconds": 249.56666666666666,
+  "dimensions": [
+    1920,
+    1080
+  ],
+  "hyperframesScenes": [
+    {
+      "sceneId": "s_09",
+      "frames": 266,
+      "videoHash": "54d05334cf04612c6dc7782363f20d73718e6930395f64776bb153ccacc26353",
+      "diagnostics": [
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_09",
+          "slot": "action",
+          "phrase": "Enzymes",
+          "frame": 64,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_09",
+          "slot": "result",
+          "phrase": "resulting products",
+          "frame": 207,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_INTENTIONAL_HOLD",
+          "sceneId": "s_09",
+          "fromFrame": 207,
+          "throughFrame": 265,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_NOT_BEFORE",
+          "sceneId": "s_09",
+          "frame": 207,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_ASPECT",
+          "aspect": "landscape",
+          "captionSafeBottom": 864
+        }
+      ],
+      "checks": {
+        "lint": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "runtime": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "layout": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "motion": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "contrast": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    {
+      "sceneId": "s_12",
+      "frames": 287,
+      "videoHash": "eec57e64b18f95610d7cc2070f2657d31108ee930545722babff116c10f38e8b",
+      "diagnostics": [
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_12",
+          "slot": "action",
+          "phrase": "carbon compounds",
+          "frame": 23,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_12",
+          "slot": "result",
+          "phrase": "Fungi can help",
+          "frame": 96,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_INTENTIONAL_HOLD",
+          "sceneId": "s_12",
+          "fromFrame": 96,
+          "throughFrame": 286,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_NOT_BEFORE",
+          "sceneId": "s_12",
+          "frame": 96,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_ASPECT",
+          "aspect": "landscape",
+          "captionSafeBottom": 864
+        }
+      ],
+      "checks": {
+        "lint": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "runtime": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "layout": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "motion": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "contrast": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    {
+      "sceneId": "s_15",
+      "frames": 262,
+      "videoHash": "e0df53d7241f32c517446fa0d73b63767cf3d83190b4d2bac84fbc26c8077690",
+      "diagnostics": [
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_15",
+          "slot": "action",
+          "phrase": "connected roots",
+          "frame": 15,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_15",
+          "slot": "result",
+          "phrase": "additional evidence",
+          "frame": 194,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_INTENTIONAL_HOLD",
+          "sceneId": "s_15",
+          "fromFrame": 194,
+          "throughFrame": 261,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_NOT_BEFORE",
+          "sceneId": "s_15",
+          "frame": 194,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_ASPECT",
+          "aspect": "landscape",
+          "captionSafeBottom": 864
+        }
+      ],
+      "checks": {
+        "lint": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "runtime": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "layout": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "motion": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "contrast": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    {
+      "sceneId": "s_17",
+      "frames": 266,
+      "videoHash": "dab3d640c26d2d1a6455e0063a93e763e2b9eb0b1d1a616880a389f629918d98",
+      "diagnostics": [
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_17",
+          "slot": "action",
+          "phrase": "label carbon",
+          "frame": 26,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_17",
+          "slot": "result",
+          "phrase": "other routes",
+          "frame": 173,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_INTENTIONAL_HOLD",
+          "sceneId": "s_17",
+          "fromFrame": 173,
+          "throughFrame": 265,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_NOT_BEFORE",
+          "sceneId": "s_17",
+          "frame": 173,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_ASPECT",
+          "aspect": "landscape",
+          "captionSafeBottom": 864
+        }
+      ],
+      "checks": {
+        "lint": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "runtime": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "layout": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "motion": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "contrast": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    {
+      "sceneId": "s_21",
+      "frames": 288,
+      "videoHash": "31c34d6f4af2da83015e54de224ba69dc07ae1bb54f2baa6237b33986db7203f",
+      "diagnostics": [
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_21",
+          "slot": "action",
+          "phrase": "Some carbon",
+          "frame": 100,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_21",
+          "slot": "result",
+          "phrase": "where its persistence",
+          "frame": 183,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_INTENTIONAL_HOLD",
+          "sceneId": "s_21",
+          "fromFrame": 183,
+          "throughFrame": 287,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_NOT_BEFORE",
+          "sceneId": "s_21",
+          "frame": 183,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_ASPECT",
+          "aspect": "landscape",
+          "captionSafeBottom": 864
+        }
+      ],
+      "checks": {
+        "lint": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "runtime": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "layout": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "motion": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "contrast": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    {
+      "sceneId": "s_23",
+      "frames": 287,
+      "videoHash": "f25e1eb7d9d26b0765cc360f03dafeafd0ad65bafbe623fa001d88b87c33cc6f",
+      "diagnostics": [
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_23",
+          "slot": "action",
+          "phrase": "Dispersal",
+          "frame": 74,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_23",
+          "slot": "result",
+          "phrase": "though most journeys",
+          "frame": 181,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_INTENTIONAL_HOLD",
+          "sceneId": "s_23",
+          "fromFrame": 181,
+          "throughFrame": 286,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_NOT_BEFORE",
+          "sceneId": "s_23",
+          "frame": 181,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_ASPECT",
+          "aspect": "landscape",
+          "captionSafeBottom": 864
+        }
+      ],
+      "checks": {
+        "lint": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "runtime": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "layout": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "motion": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "contrast": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    {
+      "sceneId": "s_24",
+      "frames": 281,
+      "videoHash": "6a365deb95f27428d4b24e0608ea9447b06e05ce3cd8238e118730f7d635d985",
+      "diagnostics": [
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_24",
+          "slot": "action",
+          "phrase": "Spore",
+          "frame": 0,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_CUE",
+          "sceneId": "s_24",
+          "slot": "result",
+          "phrase": "conditions determine",
+          "frame": 171,
+          "source": "word-cues",
+          "estimated": true,
+          "timing": "syllable-fallback",
+          "occurrence": 1,
+          "matches": 1
+        },
+        {
+          "code": "COMPOSITION_INTENTIONAL_HOLD",
+          "sceneId": "s_24",
+          "fromFrame": 171,
+          "throughFrame": 280,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_NOT_BEFORE",
+          "sceneId": "s_24",
+          "frame": 171,
+          "selector": "#result"
+        },
+        {
+          "code": "COMPOSITION_ASPECT",
+          "aspect": "landscape",
+          "captionSafeBottom": 864
+        }
+      ],
+      "checks": {
+        "lint": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "runtime": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "layout": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "motion": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        },
+        "contrast": {
+          "ok": true,
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    }
+  ],
+  "narrationAndMusicBytesUnchanged": true,
+  "timelineAndCaptionsUnchanged": true,
+  "cueProvenance": "Original syllable-fallback estimated word timings; not forced alignment",
+  "loudness": {
+    "integratedLufs": -16.39,
+    "truePeakDbtp": -3.85,
+    "rangeLu": 2.3,
+    "thresholdLufs": -26.96,
+    "targetOffsetDb": -0.03
+  },
+  "original": {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "h264",
+        "codec_type": "video",
+        "width": 1920,
+        "height": 1080,
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "7487"
+      },
+      {
+        "codec_name": "aac",
+        "codec_type": "audio",
+        "sample_rate": "48000",
+        "r_frame_rate": "0/0",
+        "nb_read_frames": "11699"
+      }
+    ],
+    "format": {
+      "duration": "249.579000",
+      "size": "171612315"
+    }
+  },
+  "web": {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "h264",
+        "codec_type": "video",
+        "width": 1280,
+        "height": 720,
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "7487"
+      },
+      {
+        "codec_name": "aac",
+        "codec_type": "audio",
+        "sample_rate": "48000",
+        "r_frame_rate": "0/0",
+        "nb_read_frames": "11699"
+      }
+    ],
+    "format": {
+      "duration": "249.578000",
+      "size": "35403732"
+    }
+  },
+  "archiveEntries": 205,
+  "mitNotices": true,
+  "videoSha256": "a53a377face89430818198f4a28e5ee053ad466252e67400602745d9b12ee5c3",
+  "projectSha256": "213167997cd8a6c8e656f141ec7dfb6217242ccec68de33116e22a759ce3d265",
+  "colabCreditsSpent": 0,
+  "samples": [
+    {
+      "sceneId": "s_09",
+      "frame": 2235,
+      "seconds": 74.5
+    },
+    {
+      "sceneId": "s_12",
+      "frame": 2935,
+      "seconds": 97.83333333333333
+    },
+    {
+      "sceneId": "s_15",
+      "frame": 3860,
+      "seconds": 128.66666666666666
+    },
+    {
+      "sceneId": "s_17",
+      "frame": 4374,
+      "seconds": 145.8
+    },
+    {
+      "sceneId": "s_21",
+      "frame": 5495,
+      "seconds": 183.16666666666666
+    },
+    {
+      "sceneId": "s_23",
+      "frame": 6031,
+      "seconds": 201.03333333333333
+    },
+    {
+      "sceneId": "s_24",
+      "frame": 6308,
+      "seconds": 210.26666666666668
+    }
+  ],
+  "archiveRoundtrip": {
+    "frames": 7487,
+    "scenes": [
+      {
+        "sceneId": "s_09",
+        "cache": "hit"
+      },
+      {
+        "sceneId": "s_12",
+        "cache": "hit"
+      },
+      {
+        "sceneId": "s_15",
+        "cache": "hit"
+      },
+      {
+        "sceneId": "s_17",
+        "cache": "hit"
+      },
+      {
+        "sceneId": "s_21",
+        "cache": "hit"
+      },
+      {
+        "sceneId": "s_23",
+        "cache": "hit"
+      },
+      {
+        "sceneId": "s_24",
+        "cache": "hit"
+      }
+    ],
+    "passed": true
+  },
+  "privacy": {
+    "passed": true,
+    "entries": 205,
+    "findings": [],
+    "genericComfyUiReplayExamples": 39
+  },
+  "visualReview": {
+    "scenes": 7,
+    "samplesPerScene": 4,
+    "captionCollisionsObserved": false,
+    "clippingObserved": false,
+    "resultHoldsReviewed": true
+  },
+  "localPlayback": {
+    "passed": true,
+    "viewports": [
+      "1440x1000",
+      "390x844"
+    ],
+    "chapterButtons": 28,
+    "seekPlaybackPositions": [
+      72.213337,
+      98.211852,
+      127.216369,
+      145.206385,
+      183.210245,
+      202.212106,
+      211.222891,
+      246.209188
+    ]
+  }
+}
