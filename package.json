@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "doctor": "node scripts/doctor/doctor.mjs",
     "test": "pnpm -r --if-present test",
     "test:py": "cd pipeline-py && ../.venv/bin/python -m pytest -q",
     "test:all": "pnpm test && pnpm run test:py"
