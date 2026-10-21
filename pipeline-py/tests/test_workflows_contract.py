@@ -31,7 +31,7 @@ KNOWN_PARAMS = {
     "still": {"prompt", "image", "reference", "mask", "audio", "width", "height", "seed", "steps", "denoise", "megapixels", "cutout"},
     # R1: `strength` (stage-1 LTXVImgToVideoInplace) and `stage2_strength` (the stage-2 one) are the
     # knobs that hold a UI/diagram frame still; the graph's own default is 0.7
-    "plate": {"prompt", "image", "reference", "width", "height", "frames", "fps", "seed", "stage2_seed", "stage2_sigmas", "upscale", "strength", "stage2_strength"},
+    "plate": {"prompt", "image", "reference", "audio", "width", "height", "frames", "fps", "seed", "stage2_seed", "stage2_sigmas", "upscale", "strength", "stage2_strength"},
     "upscale": {"prompt", "image", "width", "height", "frames", "fps", "seed", "source", "upscale", "strength", "stage2_strength"},
     "audio": {"text", "voice", "speed", "language", "sample_rate"},
     # H17: the presenter graph takes the portrait as its first frame and the narration as its audio
@@ -68,9 +68,10 @@ def test_presenter_freezes_original_audio_in_both_sampling_stages():
     assert graph["12"]["inputs"]["sampler_name"] == "euler"
 
 
-def test_the_gpu_test_1_workflow_set_is_present():
+def test_the_committed_workflow_set_is_present():
     names = {p.name for p in GRAPH_FILES}
     assert names == {
+        "fasth3_omni_ref2va.api.json",
         "flux3_klein_t2i.api.json",
         "flux3_klein_img2img.api.json",
         "flux3_klein_ref_edit.api.json",

@@ -2,6 +2,7 @@
 // sha256 of each committed workflow graph, keyed by the package-relative
 // `gen.workflow` path, so the agent can stamp `gen.workflow_sha256`.
 export const WORKFLOW_SHA256: Record<string, string> = {
+  'workflows/fasth3_omni_ref2va.api.json': '8e6038252666a21233cb947bd43dc52b2a8eb1ceb18e995bd2ce1f79e6690b3f',
   'workflows/flux3_klein_img2img.api.json': '91d4b539ed813532895c278505bdb29efdc359fdd7a44b07191c79606be980aa',
   'workflows/flux3_klein_ref_edit.api.json': 'ecf1b281737c8f3bad5afe7be79e76d7aa3595146b97a8df3e8098c21c080e09',
   'workflows/flux3_klein_t2i.api.json': 'e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689',

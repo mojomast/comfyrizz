@@ -103,6 +103,27 @@
       "license": { "id": "LicenseRef-User-Supplied" },
       "redistributable": false
     },
+    "a_fasth3": {
+      "kind": "video",
+      "origin": "generated",
+      "status": "pending",
+      "gen": {
+        "generator": "fasth3-omni",
+        "workflow": "workflows/fasth3_omni_ref2va.api.json",
+        "workflow_sha256": "8e6038252666a21233cb947bd43dc52b2a8eb1ceb18e995bd2ce1f79e6690b3f",
+        "inputs": {
+          "prompt": "The workshop artist says: Lunch is a feature.",
+          "image": "a_still",
+          "reference": "a_ref",
+          "audio": "a_narr",
+          "width": 1344,
+          "height": 768,
+          "frames": 192,
+          "fps": 24,
+          "seed": 17
+        }
+      }
+    },
     "a_presenter": {
       "kind": "video",
       "origin": "generated",
