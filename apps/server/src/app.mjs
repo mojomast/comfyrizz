@@ -19,6 +19,10 @@ import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
+import { ingestRun } from './takes/ingest.mjs';
+import { selectTake } from './takes/select.mjs';
+import { createTakeStore } from './takes/store.mjs';
+import { TAKES_SCHEMA } from './takes/model.mjs';
 import { applySceneChip, sceneChipList } from '../../../packages/agent/dist/src/index.js';
 import { applyPresenterSet, presenterChips, presenterPresets } from '../../../packages/agent/dist/src/index.js';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
@@ -156,6 +160,7 @@ export function createApp({
   const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
   const store = new PackageStore(join(runtimeDir, 'packages'));
+  const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
   const projectChat = createProjectChat({ runtimeDir, store, providerSettings, prepareBrand });
   const events = new EventLog();
 
@@ -185,6 +190,50 @@ export function createApp({
     const id = pkg.id;
     const packageDir = dirname(store.path(id));
     const collectedAssets = join(record.outputDir, 'assets');
+    if (record.mode === 'take') {
+      // TR07: snapshot the run's outputs as takes *before* the collected assets are copied over
+      // the package's own files. The take store keeps the bytes, so a later overwrite cannot
+      // destroy the take that produced it.
+      const ingested = ingestRun({
+        pkg,
+        manifest: result.manifest,
+        jobsDoc: result.jobsDoc,
+        outputDir: record.outputDir,
+        store: takeStore,
+        corrections: record.corrections ?? {},
+        runId: record.runId,
+        backend: record.backendId,
+      });
+      if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
+      const copied = copyNamedAssets({ pkg: result.package, outputDir: record.outputDir, packageDir });
+      if (copied.length) {
+        events.publish({ type: 'run.log', runId: record.runId, line: `collected ${copied.length} package file(s): ${copied.join(', ')}` });
+      }
+      // ingestRun has already written the new takes (including lastJob), so read the fresh doc
+      // before applying the auto-selected takes to the package.
+      const takeDoc = takeStore.read(id) ?? { schema: TAKES_SCHEMA, packageId: id, clips: {}, overrides: [] };
+      let next = result.package;
+      for (const [assetId, takeId] of Object.entries(ingested.selected)) {
+        next = selectTake(next, takeDoc, assetId, takeId);
+      }
+      takeStore.write(id, takeDoc);
+      const current = store.read(id);
+      const saved = current ? store.save(id, next, pkg.revision) : store.write(next);
+      events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
+      const landed = new Map();
+      for (const take of ingested.takes) landed.set(take.assetId, take);
+      for (const [assetId, take] of landed) {
+        events.publish({
+          type: 'clip.take.landed',
+          packageId: id,
+          assetId,
+          takeId: take.takeId,
+          selected: ingested.selected[assetId] ?? null,
+          runId: record.runId,
+        });
+      }
+      return { revision: saved.revision, render: null };
+    }
     if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
     // G5-10: the applied package can also name files outside `assets/` (the runner's
     // non-upscaled plates live at `out/intermediates/<id>.plate.mp4`), so copy every path it
@@ -714,6 +763,8 @@ export function createApp({
           teardownMode: body.teardownMode,
           includeReady: body.includeReady === true,
           assets: body.assets,
+          mode: body.mode,
+          corrections: body.corrections,
         });
         return sendJson(response, result.status === 409 ? 409 : 200, result);
       } catch (error) {
