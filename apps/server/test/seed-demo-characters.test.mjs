@@ -18,6 +18,7 @@ import {
   loadExampleCharacters,
   pinProjectSnapshot,
   seedDemoCharacters,
+  createCompatCharacterStore,
 } from '../src/seed-demo-characters.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 
@@ -281,7 +282,9 @@ test('PN11: the seeded example passes the shared package validator and is unchan
 
 test('PN11: a checkout without the character modules still seeds through the compat store', (t) => {
   const runtimeDir = tempDir(t, 'seed-characters-runtime');
-  const first = seedDemoCharacters({ runtimeDir, exampleDir });
+  // Simulate a checkout without characters/store.mjs by handing the seeder the compat store directly.
+  const compat = () => createCompatCharacterStore({ runtimeDir });
+  const first = seedDemoCharacters({ runtimeDir, exampleDir, store: compat() });
   assert.equal(first.changed, true);
   assert.equal(first.noop, false);
   assert.deepEqual(first.written, ['characters']);
@@ -290,7 +293,7 @@ test('PN11: a checkout without the character modules still seeds through the com
   assert.equal(existsSync(libraryPath), true);
   assert.deepEqual(JSON.parse(readFileSync(libraryPath, 'utf8')), sourceLibrary);
 
-  const second = seedDemoCharacters({ runtimeDir, exampleDir });
+  const second = seedDemoCharacters({ runtimeDir, exampleDir, store: compat() });
   assert.equal(second.noop, true);
   assert.deepEqual(second.written, []);
   assert.deepEqual(JSON.parse(readFileSync(libraryPath, 'utf8')), sourceLibrary);
@@ -332,3 +335,23 @@ test('PN11: the report and both source files carry no credentials', () => {
 function relativeRepo(path) {
   return resolve(path).slice(repoRoot.length).replace(/^[/\\]/, '');
 }
+
+test('PN11: with the merged character store the seeder writes every character through create() and keeps ids', async (t) => {
+  const { createCharacterStore } = await import('../src/characters/store.mjs');
+  const runtimeDir = tempDir(t, 'seed-characters-real');
+  const first = seedDemoCharacters({ runtimeDir, exampleDir });
+  assert.equal(first.changed, true);
+  assert.deepEqual(first.written, ['characters']);
+  assert.equal(first.method, 'create');
+  const store = createCharacterStore({ rootDir: runtimeDir });
+  const ids = store.list().map(entry => entry.id).sort();
+  assert.deepEqual(ids, sourceLibrary.characters.map(c => c.id).sort());
+  for (const source of sourceLibrary.characters) {
+    const got = store.get(source.id);
+    assert.equal(got.name, source.name);
+    assert.equal(got.handle, source.handle);
+  }
+  const second = seedDemoCharacters({ runtimeDir, exampleDir });
+  assert.equal(second.noop, true);
+  assert.deepEqual(second.written, []);
+});

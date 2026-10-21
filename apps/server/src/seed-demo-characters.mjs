@@ -48,6 +48,8 @@ const CHARACTER_METHODS = [
   'saveCharacter',
   'upsertCharacter',
   'createCharacter',
+  // The merged store (characters/store.mjs) writes one character at a time with create(); it keeps the id.
+  'create',
 ];
 const STORE_MODULES = [
   './characters/store.mjs',
