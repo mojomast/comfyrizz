@@ -173,6 +173,28 @@
   --font-numeric-tabular: tabular-nums;
   --tabular-nums: tabular-nums;
 
+  /* Density: --d is 0 for compact and 1 for comfortable.
+     Mode sets the default (Easy comfortable, Advanced compact); an explicit
+     density choice writes data-density and survives mode changes. */
+  --d: 1;
+  --control-height-compact: 24px;
+  --control-height-comfortable: 32px;
+  --row-height-compact: 28px;
+  --row-height-comfortable: 36px;
+  --panel-padding-compact: 8px;
+  --panel-padding-comfortable: 16px;
+  --gap-compact: 4px;
+  --gap-comfortable: 8px;
+  --control-height-sm: calc(24px + var(--d) * 4px);
+  --control-height: calc(24px + var(--d) * 8px);
+  --row-height: calc(28px + var(--d) * 8px);
+  --panel-padding: calc(8px + var(--d) * 8px);
+  --gap: calc(4px + var(--d) * 4px);
+  --control-h: var(--control-height);
+  --row-h: var(--row-height);
+  --panel-pad: var(--panel-padding);
+  --density-gap: var(--gap);
+
   /* Spacing: 4px base scale (4, 8, 12, 16, 24, 32) */
   --space-base: 4px;
   --space-1: 4px;
@@ -231,6 +253,22 @@
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --transition-fast: var(--duration-fast) var(--ease-standard);
   --transition-normal: var(--duration-normal) var(--ease-standard);
+}
+
+html[data-density="compact"] {
+  --d: 0;
+}
+
+html[data-density="comfortable"] {
+  --d: 1;
+}
+
+html[data-mode="easy"]:not([data-density]) {
+  --d: 1;
+}
+
+html[data-mode="advanced"]:not([data-density]) {
+  --d: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
