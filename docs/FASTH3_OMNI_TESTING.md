@@ -197,3 +197,15 @@ Deployment uses the existing private app service and saved runtime. The previous
 runtime, frontend and untracked local files are backed up outside Git. The built
 frontend is overlaid onto the live dist directory to retain published media;
 deployment verification compares all 274 existing published files by SHA-256.
+
+Deployment completed at `275e366`. All 1,251 workspace JavaScript tests passed
+(backend tests were run serially to avoid watchdog timing contention); the
+additional reference/quality suites above also passed. The private app's health,
+catalogue, pipeline, run and reference-library endpoints returned HTTP 200.
+Headless Chromium displayed the new References panel without page errors or
+mobile horizontal overflow. All 274 published files retained their hashes, all
+18 published pages responded, and all three separate film players responded.
+The two older standalone player processes were absent at verification time and
+were restarted under user-service supervision. Runtime credentials and existing
+untracked work were retained; the formerly untracked local lockfile was archived
+before switching the deployment checkout to the tested revision.
