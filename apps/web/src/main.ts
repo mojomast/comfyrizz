@@ -2,6 +2,7 @@ import './style.css';
 import './project-chat.css';
 import './characters/characters.css';
 import './ui/look-picker.css';
+import { initShellLayout } from './ui/splitter';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { readRunSnapshot } from './run-progress.ts';
@@ -36,6 +37,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 // The C2 server prints http://127.0.0.1:4319/#token=...; the fragment never
 // leaves the browser. Strip it from the visible URL and keep it for API calls.
 const token = installSessionToken();
+initShellLayout();
 
 /* Lifted from Orbit's Grok Bots shell (MIT): escape, then a tiny markdown subset. */
 function esc(value: unknown): string {

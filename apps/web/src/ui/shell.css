@@ -28,21 +28,28 @@ body {
 }
 
 html body #app {
+  /* DN02: column widths are written by src/ui/splitter.ts. The separator
+     tracks are a full WCAG 2.5.8 target wide; their visible line is 1px. */
+  --left-w: 280px;
+  --right-w: 300px;
+  --inspector-w: 460px;
+  --story-w: 400px;
+  --split-w: var(--target-min);
+  --left-split-w: var(--split-w);
+  --right-split-w: var(--split-w);
+  --inspector-split-w: var(--split-w);
   display: grid;
-  grid-template-columns:
-    calc(var(--space-6) * 9 + var(--space-3))
-    minmax(0, 1fr)
-    calc(var(--space-6) * 10);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows:
     calc(var(--space-5) * 2)
     minmax(0, 1fr)
     auto
     calc(var(--space-5) + var(--space-2));
   grid-template-areas:
-    'topbar topbar topbar'
-    'left center right'
-    'timeline timeline timeline'
-    'statusbar statusbar statusbar';
+    'topbar'
+    'workspace'
+    'timeline'
+    'statusbar';
   width: 100%;
   max-width: 100vw;
   height: 100vh;
@@ -50,6 +57,23 @@ html body #app {
   max-height: 100vh;
   overflow: hidden;
   background: var(--bg-0);
+}
+
+/* Panels are hidden, never unmounted: every input keeps its value. */
+html body #app[data-shell-left='off'] {
+  --left-w: 0px;
+  --left-split-w: 0px;
+}
+
+html body #app[data-shell-right='off'] {
+  --right-w: 0px;
+  --right-split-w: 0px;
+}
+
+html body #app[data-shell-right='off'] #activity-pane,
+html body #app[data-shell-left='off'] #chat-pane,
+html body #app[data-shell-timeline='off'] #timeline-dock {
+  display: none;
 }
 
 /* ==========================================================================
@@ -188,20 +212,94 @@ html body #app #topbar .render-bar-override:not([hidden]) {
    ========================================================================== */
 
 html body #app main.shell-main {
+  grid-area: workspace;
   grid-column: 1 / -1;
   grid-row: 2;
   display: grid;
   grid-template-columns:
-    calc(var(--space-6) * 9 + var(--space-3))
+    var(--left-w)
+    var(--left-split-w)
     minmax(0, 1fr)
-    calc(var(--space-6) * 10);
+    var(--right-split-w)
+    var(--right-w);
   grid-template-rows: minmax(0, 1fr);
-  grid-template-areas: 'left center right';
+  grid-template-areas: 'left split-left center split-right right';
   min-width: 0;
   min-height: 0;
   height: 100%;
   overflow: hidden;
   background: var(--bg-0);
+}
+
+/* Separators: 24px hit target, 1px hairline drawn by ::before. */
+html body #app .shell-splitter {
+  position: relative;
+  z-index: 5;
+  display: block;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--target-min);
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+html body #app .shell-splitter[hidden] {
+  display: none;
+}
+
+html body #app .shell-splitter[data-split='left'] {
+  grid-area: split-left;
+}
+
+html body #app .shell-splitter[data-split='right'] {
+  grid-area: split-right;
+}
+
+html body #app .shell-splitter::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--border);
+}
+
+html body #app .shell-splitter:hover::before,
+html body #app .shell-splitter:focus-visible::before {
+  width: 2px;
+  left: calc(50% - 1px);
+  background: var(--accent);
+}
+
+html body #app .shell-splitter:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(0px - var(--focus-ring-offset));
+}
+
+html.shell-resizing,
+html.shell-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* DN02: centre pane wrappers. They are transparent until the wide layout needs
+   real columns, so the normal stacked order is unchanged. */
+html body #app .shell-preview-col,
+html body #app .shell-inspector-col,
+html body #app .shell-storyboard-col {
+  display: contents;
+}
+
+/* Easy keeps the inspector out of the way; the approval drawer owns takes. */
+html[data-mode='easy'] body #app .shell-inspector-col,
+html[data-mode='easy'] body #app .shell-splitter[data-split='inspector'] {
+  display: none;
 }
 
 html body #app .pane.panel {
@@ -448,17 +546,133 @@ html body #app #statusbar #save-status[data-state='rejected'] {
 }
 
 /* ==========================================================================
-   5. Narrow viewport fallback (< 80rem)
+   5. Wide layout: 120rem+ (1920px and up)
+
+   Advanced moves the inspector beside the preview instead of stacking it
+   underneath. Easy gives the storyboard its own 400px column next to the
+   preview. Both keep the same DOM and the same live inputs.
+   ========================================================================== */
+
+@media (min-width: 120rem) {
+  html body #app {
+    --left-w: 320px;
+    --right-w: 320px;
+  }
+
+  html[data-mode='easy'] body #app {
+    --left-w: 360px;
+  }
+
+  html body #app[data-shell-inspector='on'] #work-pane {
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1fr)
+      var(--inspector-split-w)
+      var(--inspector-w);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      'preview-top inspector-split inspector'
+      'preview-bottom inspector-split inspector';
+    overflow: hidden;
+  }
+
+  html body #app[data-shell-inspector='on'] #work-pane .shell-preview-col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+  }
+
+  html body #app[data-shell-inspector='on'] #work-pane .shell-preview-col[data-shell-col='preview-top'] {
+    grid-area: preview-top;
+  }
+
+  html body #app[data-shell-inspector='on'] #work-pane .shell-preview-col[data-shell-col='preview-bottom'] {
+    grid-area: preview-bottom;
+    overflow-y: auto;
+  }
+
+  html body #app[data-shell-inspector='on'] #work-pane .shell-inspector-col {
+    grid-area: inspector;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border-left: var(--elevation-border-1);
+  }
+
+  html body #app[data-shell-inspector='on'] #work-pane .shell-storyboard-col {
+    display: contents;
+  }
+
+  html body #app #work-pane .shell-splitter[data-split='inspector'] {
+    grid-area: inspector-split;
+  }
+
+  html body #app[data-shell-inspector='on'] #work-pane .shell-splitter[data-split='inspector'] {
+    display: block;
+  }
+
+  html body #app[data-shell-inspector='on'] #work-pane #player {
+    max-width: min(100%, 72vh);
+  }
+
+  /* Easy at 120rem+: chat 360 | preview 1fr | storyboard cards 400. */
+  html[data-mode='easy'] body #app #work-pane {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--story-w);
+    grid-auto-rows: auto;
+    column-gap: var(--space-3);
+    align-items: start;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  html[data-mode='easy'] body #app #work-pane .shell-preview-col {
+    display: contents;
+  }
+
+  html[data-mode='easy'] body #app #work-pane .shell-preview-col > :not(.shell-storyboard-col) {
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  html[data-mode='easy'] body #app #work-pane .shell-preview-col .pane-head,
+  html[data-mode='easy'] body #app #work-pane .shell-preview-col #player,
+  html[data-mode='easy'] body #app #work-pane .shell-preview-col #transport {
+    width: 100%;
+  }
+
+  html[data-mode='easy'] body #app #work-pane .shell-storyboard-col {
+    grid-column: 2;
+    grid-row: 1 / span 100;
+    display: flex;
+    flex-direction: column;
+    align-self: start;
+    min-width: 0;
+    border-left: var(--elevation-border-1);
+  }
+
+  html[data-mode='easy'] body #app #work-pane #player {
+    max-width: min(100%, calc((100vh - 16rem) * 16 / 9));
+  }
+}
+
+/* ==========================================================================
+   6. Narrow viewport fallback (< 80rem)
    ========================================================================== */
 
 @media (max-width: 68.75rem) {
-  html body #app,
   html body #app main.shell-main {
-    grid-template-columns: calc(var(--space-6) * 9 + var(--space-3)) minmax(0, 1fr);
-    grid-template-areas: 'left center';
+    grid-template-columns: var(--left-w) var(--left-split-w) minmax(0, 1fr);
+    grid-template-areas: 'left split-left center';
   }
 
-  html body #app #activity-pane {
+  html body #app #activity-pane,
+  html body #app .shell-splitter[data-split='right'] {
     display: none;
   }
 }
@@ -472,7 +686,7 @@ html body #app #statusbar #save-status[data-state='rejected'] {
     grid-template-rows: auto auto auto auto;
     grid-template-areas:
       'topbar'
-      'center'
+      'workspace'
       'timeline'
       'statusbar';
   }
@@ -485,6 +699,10 @@ html body #app #statusbar #save-status[data-state='rejected'] {
       'center';
     height: auto;
     overflow: visible;
+  }
+
+  html body #app .shell-splitter {
+    display: none;
   }
 
   html body #app .pane.panel {
