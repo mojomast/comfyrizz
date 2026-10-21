@@ -1,6 +1,7 @@
 import './style.css';
 import './project-chat.css';
 import './characters/characters.css';
+import './ui/look-picker.css';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { mountAgentSettings } from './agent-settings';
@@ -1446,7 +1447,7 @@ function renderBriefCard(panel: HTMLElement): void {
   const presetCards: PresetCard[] = briefState.presets.length
     ? briefState.presets
     : presetIds.map(id => ({ id, label: id, palette: [], font: '', attributes: '', thumbnail: '' }));
-  const presetPicker = `<div class="brief-presets">${presetCards.map(card => `<button type="button" class="preset ${card.id === currentPreset ? 'selected' : ''}" data-brief-preset="${esc(card.id)}" title="${esc(card.attributes)}">${card.thumbnail}<span>${esc(card.label)}</span></button>`).join('')}<select data-brief-field="style.preset" hidden>${presetIds.map(id => `<option value="${esc(id)}" ${id === currentPreset ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></div>`;
+  const presetPicker = `<div class="look-picker">${presetCards.map(card => `<button type="button" class="look-option ${card.id === currentPreset ? 'selected' : ''}" data-brief-preset="${esc(card.id)}" title="${esc(card.attributes)}"><span class="look-thumb">${card.thumbnail || '<span class="look-thumb-empty" aria-hidden="true"></span>'}</span><span class="look-caption"><span class="look-label">${esc(card.label)}</span><span class="look-check" aria-hidden="true"></span></span></button>`).join('')}<select data-brief-field="style.preset" hidden>${presetIds.map(id => `<option value="${esc(id)}" ${id === currentPreset ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></div>`;
   // C-pres: the presenter chip (off by default). Writes brief.presenter; the build maps it to
   // package.presenter coverage. Per-scene overrides stay on the storyboard.
   const presenterOptions: [string, string][] = [['none', 'No presenter (default)'], ['bookends', 'Intro + outro'], ['all', 'All scenes']];
@@ -1464,12 +1465,17 @@ function renderBriefCard(panel: HTMLElement): void {
     <ol class="brief-outline">${beats}</ol>
     <div class="brief-actions"><span class="hint">${esc(summary)}</span><button type="button" id="brief-refresh" ${briefState.busy ? 'disabled' : ''}>Update outline</button><button type="button" id="brief-build" ${briefState.busy ? 'disabled' : ''}>Build video</button></div>
     ${notes ? `<ul class="brief-notes">${notes}</ul>` : ''}`;
+  const presetSelect = panel.querySelector<HTMLSelectElement>('select[data-brief-field="style.preset"]');
   panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
     button.addEventListener('click', () => {
       const id = button.getAttribute('data-brief-preset') as string;
-      const selectEl = panel.querySelector<HTMLSelectElement>('select[data-brief-field="style.preset"]');
-      if (selectEl) selectEl.value = id;
+      if (presetSelect) presetSelect.value = id;
       panel.querySelectorAll('[data-brief-preset]').forEach(other => other.classList.toggle('selected', other === button));
+    });
+  });
+  presetSelect?.addEventListener('change', () => {
+    panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
+      button.classList.toggle('selected', button.getAttribute('data-brief-preset') === presetSelect.value);
     });
   });
   panel.querySelectorAll<HTMLInputElement>('[data-brand-field]').forEach(input => {

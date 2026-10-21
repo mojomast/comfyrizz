@@ -1,0 +1,102 @@
+/* UO16: the six looks as thumbnail cards.
+   Built from tokens.css only; the hidden style.preset select stays the form value. */
+
+.look-picker {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-6) * 4), 1fr));
+  gap: var(--space-2);
+}
+
+.look-picker .look-option {
+  display: flex;
+  flex-direction: column;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg-1);
+  color: var(--text-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.look-thumb {
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--bg-2);
+  border-bottom: var(--elevation-border-1);
+}
+
+.look-thumb svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.look-thumb-empty {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-2);
+}
+
+.look-caption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--space-5);
+  padding: var(--space-2);
+}
+
+.look-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+  line-height: var(--line-height-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.look-check {
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
+  background: transparent;
+  border: var(--elevation-border-1);
+  border-color: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+
+.look-picker .look-option:hover {
+  background: var(--bg-2);
+  border-color: var(--border-strong);
+}
+
+.look-picker .look-option.selected {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+
+.look-picker .look-option.selected .look-thumb {
+  border-bottom-color: var(--accent);
+}
+
+.look-picker .look-option.selected .look-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.look-picker .look-option:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
