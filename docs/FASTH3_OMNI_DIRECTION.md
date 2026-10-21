@@ -120,6 +120,13 @@ acting validation. Exact-line conditioning addresses an observed production
 failure; it is a **project mitigation awaiting FastH3 A/B validation**, not an
 official guarantee of verbatim speech. Finished dialogue remains FastH3 audio.
 
+The first bounded [direction validation](NRCU_DIRECTION_VALIDATION.md) rejected
+two replacement references for missing beam contact and an extra glove. A console
+reference also began in the wrong diagram state. Prompt compliance must be checked
+in the pixels. If a flawed reference is used for a narrower diagnostic (such as
+offscreen speech), record that limitation and do not promote the result as an
+approved action or production take.
+
 ## Sources
 
 1. [FastH3 Omni Comfy model card](https://huggingface.co/FastVideo/FastH3-Omni-Comfy)
