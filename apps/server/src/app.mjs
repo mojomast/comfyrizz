@@ -8,13 +8,11 @@ import { startColabAuth } from './colab-auth.mjs';
 import { readColabProgress } from '../../../packages/backends/src/colab-progress.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
-import { buildVariants } from './variant.mjs';
 import { buildDataset } from './dataset.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { loadAssetWorkflow } from './workflow.mjs';
-import { runFrameQa, createQaRegistry } from './qa.mjs';
-import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
-import { packageTimeline, timingChangeReason } from './edit.mjs';
+import { createQaRegistry } from './qa.mjs';
+import { sceneJobsPlan } from './scene.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
 import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
@@ -44,7 +42,7 @@ import { createOperationCoordinator } from './operations.mjs';
 import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/tts/voices.mjs';
 import { animationOptions } from './animation-options.mjs';
 import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
-import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
+import { createRenderRoutes } from './routes/render.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
@@ -307,25 +305,6 @@ export function createApp({
   // render routes. The lease is taken before the request body is read, so a second request
   // is refused as busy instead of starting a second job on the same CPU/GPU budget.
   const operations = createOperationCoordinator();
-
-  /**
-   * Take the shared slot for one request. The lease is released on every exit: an explicit
-   * release on the error paths, the response's finish/close events (a finished download or a
-   * client that went away) and the route's finally block.
-   */
-  function holdOperation(kind, id, response) {
-    const lease = operations.tryAcquire(kind, id);
-    if (lease.busy) return { busy: true, holder: lease.holder };
-    let released = false;
-    const release = () => {
-      if (released) return;
-      released = true;
-      lease.release();
-    };
-    response.once('finish', release);
-    response.once('close', release);
-    return { busy: false, holder: null, release };
-  }
 
   // RL10c: the pipeline controller takes the same shared slot for the whole life of a Google
   // Colab generation run, so an export or a render during the run is refused with the holder
@@ -611,12 +590,27 @@ export function createApp({
     mediaTickets,
     measuredFor: pkg => measuredOptionsFromDir(dirname(store.path(pkg.id))),
   });
-  // C13: the last successfully rendered timeline per package, so an edit can be diffed
-  // against what the frame grid actually was. In-memory: a server restart just makes the
-  // next edit a first render (the A6 cache still reuses unchanged segments).
-  const lastRendered = new Map();
-
   const sceneCacheDir = (packageId) => join(runtimeDir, 'scene-cache', packageId);
+
+  // RL11: the export and render routes live in src/routes/render.mjs. This is a pure
+  // delegation: the handlers, the shared operation slot and the C13 rendered-timeline
+  // bookkeeping are the route module's, the wiring stays here.
+  const renderRoutes = createRenderRoutes({
+    store,
+    events,
+    exporter,
+    render,
+    renderScene,
+    qa,
+    rendersDir,
+    sceneCacheDir,
+    operations,
+    renderGate,
+    draftRenderTarget,
+    resolveRenderTarget,
+    sendJson,
+    readJson,
+  });
 
   /**
    * Resolve a render target the same way for every render route: an in-memory draft is written to
@@ -1172,176 +1166,9 @@ export function createApp({
       return;
     }
 
-    if (url.pathname === '/api/export' && request.method === 'POST') {
-      // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
-      // this export with the holder instead of a second job on the same budget.
-      // RL06: take the shared slot before the body is read, so a slow request cannot let a
-      // second export through the same door.
-      const exportId = `x_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
-      const hold = holdOperation('export', exportId, response);
-      if (hold.busy) return sendJson(response, 409, { error: 'export busy', busy: true, holder: hold.holder });
-      try {
-        const body = await readJson(request);
-        let pkg;
-        let packagePath;
-        let revision = null;
-        try {
-          if (body.package && typeof body.package === 'object') {
-            // C1 compatibility: an edited draft draft-exported without mutating the store.
-            ({ pkg, packagePath, revision } = draftRenderTarget(body.package, exportId, response));
-          } else {
-            const id = body.packageId;
-            if (!id) return sendJson(response, 400, { error: 'packageId or package required' });
-            pkg = store.read(id);
-            if (!pkg) return sendJson(response, 404, { error: 'package not found' });
-            if (body.baseRevision != null && Number(body.baseRevision) !== pkg.revision) {
-              return sendJson(response, 409, { error: 'conflict', currentRevision: pkg.revision });
-            }
-            packagePath = store.path(id);
-            revision = pkg.revision;
-          }
-          events.publish({ type: 'export.started', exportId, packageId: pkg.id, revision });
-          if (body.variants && typeof body.variants === 'object') {
-            // L1: one bundle per language/aspect variant plus a variants.json manifest.
-            const plan = buildVariants(pkg, body.variants);
-            const result = await exporter.variants({
-              pkg,
-              packagePath,
-              variants: plan,
-              force: body.force === true,
-              onLog: line => events.publish({ type: 'export.log', exportId, line }),
-              ...(body.mixAudio === false ? { mixAudio: false } : {}),
-            });
-            events.publish({
-              type: 'export.finished',
-              exportId,
-              packageId: pkg.id,
-              revision,
-              kind: 'variants',
-              dir: result.dir,
-              variants: result.manifest.variants.length,
-            });
-            return sendJson(response, 200, { exportId, packageId: pkg.id, dir: result.dir, manifestPath: result.manifestPath, manifest: result.manifest });
-          }
-          const result = await exporter({
-            pkg,
-            packagePath,
-            revision,
-            force: body.force === true,
-            onLog: line => events.publish({ type: 'export.log', exportId, line }),
-            ...(body.mixAudio === false ? { mixAudio: false } : {}),
-          });
-          events.publish({
-            type: 'export.finished',
-            exportId,
-            packageId: pkg.id,
-            revision,
-            dir: result.dir,
-            files: result.files.map(file => file.name),
-            social: (result.social ?? []).map(file => file.name),
-            frames: result.frames,
-            captions: result.captions,
-            complete: result.complete,
-            excluded: result.excluded,
-          });
-          return sendJson(response, 200, { exportId, ...result });
-        } catch (error) {
-          events.publish({ type: 'export.failed', exportId, packageId: pkg?.id, message: error.message });
-          return sendJson(response, error.status ?? 500, { error: error.message, exportId });
-        }
-      } finally {
-        hold.release();
-      }
-    }
-
-    if (url.pathname === '/api/render' && request.method === 'POST') {
-      // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
-      // this render with the holder instead of a second job on the same budget.
-      // RL06: the shared slot is taken before the body is read, so two parallel renders
-      // cannot both start; the loser is told who holds the slot.
-      const renderId = `r_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
-      const hold = holdOperation('render', renderId, response);
-      if (hold.busy) return sendJson(response, 409, { error: 'render busy', busy: true, holder: hold.holder });
-      try {
-        const body = await readJson(request);
-        const output = join(rendersDir, `${renderId}.mp4`);
-        let pkg;
-        let packagePath;
-        let revision = null;
-        if (body.package && typeof body.package === 'object') {
-          // C1 compatibility: an edited draft, rendered without mutating the stored package.
-          try {
-            ({ pkg, packagePath, revision } = draftRenderTarget(body.package, renderId, response));
-          } catch (error) {
-            return sendJson(response, error.status ?? 400, { error: error.message });
-          }
-        } else {
-          const id = body.packageId;
-          if (!id) {
-            return sendJson(response, 400, { error: 'packageId or package required' });
-          }
-          pkg = store.read(id);
-          if (!pkg) {
-            return sendJson(response, 404, { error: 'package not found' });
-          }
-          if (body.baseRevision != null && Number(body.baseRevision) !== pkg.revision) {
-            return sendJson(response, 409, { error: 'conflict', currentRevision: pkg.revision });
-          }
-          packagePath = store.path(id);
-          revision = pkg.revision;
-        }
-
-        const gate = renderGate(pkg, body, url.pathname);
-        if (gate) {
-          return sendJson(response, gate.status, gate.body);
-        }
-
-        events.publish({ type: 'render.started', renderId, packageId: pkg.id, revision });
-        try {
-          const result = await render(packagePath, output, {
-            onLog: line => events.publish({ type: 'render.log', renderId, line }),
-            ...(body.mixAudio === false ? { mixAudio: false } : {}),
-          });
-          events.publish({
-            type: 'render.finished',
-            renderId,
-            packageId: pkg.id,
-            revision,
-            bytes: result.bytes,
-            frames: result.frames,
-            timeline_sha256: result.hash,
-          });
-          // MS4: the "look at your own frames" gate. Non-fatal: a QA failure is
-          // reported, never a reason to lose a render the owner asked for.
-          if (result.timeline) {
-            try {
-              const qaResult = runFrameQa({ mp4: result.output, timeline: result.timeline, pkg, outDir: rendersDir });
-              qa.record(renderId, pkg.id, qaResult);
-              events.publish({ type: 'qa.result', renderId, packageId: pkg.id, ok: qaResult.ok, findings: qaResult.findings.length, sheet: qaResult.sheet ?? null });
-            } catch (error) {
-              events.publish({ type: 'qa.failed', renderId, packageId: pkg.id, message: error.message });
-            }
-          }
-          response.writeHead(200, {
-            'content-type': 'video/mp4',
-            'content-length': result.bytes,
-            'cache-control': 'no-store',
-            'content-disposition': `attachment; filename="comfyrizz-${renderId}.mp4"`,
-            'x-comfyrizz-render-id': renderId,
-            'x-comfyrizz-timeline-sha256': result.hash,
-            'x-comfyrizz-frames': String(result.frames),
-            ...(revision == null ? {} : { 'x-comfyrizz-revision': String(revision) }),
-          });
-          createReadStream(result.output).pipe(response);
-        } catch (error) {
-          events.publish({ type: 'render.failed', renderId, packageId: pkg.id, message: error.message });
-          sendJson(response, 500, { error: error.message, renderId });
-        }
-      } finally {
-        hold.release();
-      }
-      return;
-    }
+    // RL11: the export and render routes live in src/routes/render.mjs: /api/export,
+    // /api/render, /api/scene/render and /api/render/edited.
+    if (await renderRoutes.handle(request, response, url)) return;
 
     // R2 step 5: the per-scene edit chips. "Warmer / Calmer motion / More depth / Less busy" are
     // fixed, deterministic scene-local edits (packages/agent scene-chips) — no model, no network,
@@ -1510,185 +1337,6 @@ export function createApp({
       } catch (error) {
         return sendJson(response, error.status ?? 500, { error: error.message });
       }
-    }
-
-    // C11: re-render just one scene. The renderer's incremental renderer reuses every cached
-    // segment whose key did not change (A6), then re-stitches and muxes; the response is the
-    // full-length MP4.
-    if (url.pathname === '/api/scene/render' && request.method === 'POST') {
-      // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
-      // this scene render with the holder instead of a second job on the same budget.
-      // RL06: the shared slot is taken before the body is read, so a scene render cannot
-      // start while an export or a full render holds the machine.
-      const renderId = `sr_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
-      const hold = holdOperation('scene-render', renderId, response);
-      if (hold.busy) return sendJson(response, 409, { error: 'scene render busy', busy: true, holder: hold.holder });
-      try {
-        const body = await readJson(request);
-        let target;
-        try {
-          target = resolveRenderTarget(body, renderId, response);
-        } catch (error) {
-          return sendJson(response, error.status ?? 400, {
-            error: error.message,
-            ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
-          });
-        }
-        if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
-        const assets = sceneAssetIds(target.pkg, body.sceneId, measuredOptionsFromDir(dirname(target.packagePath)));
-        if (assets === null) return sendJson(response, 404, { error: `unknown scene ${body.sceneId}` });
-        const output = join(rendersDir, `${renderId}.mp4`);
-        const cacheDir = sceneCacheDir(target.pkg.id);
-        events.publish({ type: 'scene.render.started', renderId, packageId: target.pkg.id, revision: target.revision, sceneId: body.sceneId, assets });
-        try {
-          const result = await renderScene(target.packagePath, output, {
-            cacheDir,
-            force: body.force === true,
-            onLog: line => events.publish({ type: 'scene.render.log', renderId, sceneId: body.sceneId, line }),
-          });
-          events.publish({
-            type: 'scene.render.finished',
-            renderId,
-            packageId: target.pkg.id,
-            revision: target.revision,
-            sceneId: body.sceneId,
-            bytes: result.bytes,
-            frames: result.frames,
-            timeline_sha256: result.timelineHash,
-            rendered: result.rendered,
-            reused: result.reused,
-            full: result.full ?? false,
-            reason: result.reason ?? null,
-          });
-          response.writeHead(200, {
-            'content-type': 'video/mp4',
-            'content-length': result.bytes,
-            'cache-control': 'no-store',
-            'content-disposition': `attachment; filename="comfyrizz-${renderId}.mp4"`,
-            'x-comfyrizz-render-id': renderId,
-            'x-comfyrizz-scene-id': String(body.sceneId),
-            'x-comfyrizz-timeline-sha256': result.timelineHash,
-            'x-comfyrizz-frames': String(result.frames),
-            'x-comfyrizz-rendered': String(result.rendered.length),
-            'x-comfyrizz-reused': String(result.reused.length),
-            'x-comfyrizz-full-render': result.full ? '1' : '0',
-            'x-comfyrizz-full-reason': result.reason ?? '',
-            ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
-          });
-          createReadStream(result.output).pipe(response);
-        } catch (error) {
-          events.publish({ type: 'scene.render.failed', renderId, packageId: target.pkg.id, sceneId: body.sceneId, message: error.message });
-          sendJson(response, 500, { error: error.message, renderId });
-        }
-      } finally {
-        hold.release();
-      }
-      return;
-    }
-
-    // C13: an agent edit only re-renders the scenes whose compiled segment changed. The new
-    // package is diffed against the last rendered timeline; a scene-local change goes through
-    // the A6 incremental cache, a timing change falls back to a full render with a reason.
-    if (url.pathname === '/api/render/edited' && request.method === 'POST') {
-      // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
-      // this edited render with the holder instead of a second job on the same budget.
-      // RL06: an edited render shares the scene render slot, taken before the body is read.
-      const renderId = `er_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
-      const hold = holdOperation('scene-render', renderId, response);
-      if (hold.busy) return sendJson(response, 409, { error: 'scene render busy', busy: true, holder: hold.holder });
-      try {
-        let body;
-        try {
-          body = await readJson(request);
-        } catch (error) {
-          return sendJson(response, error.status ?? 400, { error: error.message });
-        }
-        let target;
-        try {
-          target = resolveRenderTarget(body, renderId, response);
-        } catch (error) {
-          return sendJson(response, error.status ?? 400, {
-            error: error.message,
-            ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
-          });
-        }
-        const previous = lastRendered.get(target.pkg.id) ?? null;
-        const nextTimeline = packageTimeline(target.packagePath, target.pkg);
-        const fullReason = loadCompositionManifest(dirname(target.packagePath), target.pkg)
-          ? 'compositions require a full render'
-          : timingChangeReason(previous?.timeline ?? null, nextTimeline);
-        const full = Boolean(fullReason);
-        const output = join(rendersDir, `${renderId}.mp4`);
-        const cacheDir = sceneCacheDir(target.pkg.id);
-        events.publish({
-          type: 'edit.render.started',
-          renderId,
-          packageId: target.pkg.id,
-          revision: target.revision,
-          previousRevision: previous?.revision ?? null,
-          full,
-          reason: fullReason,
-        });
-        try {
-          let result;
-          let renderedSceneIds;
-          let reusedSceneIds;
-          if (full) {
-            result = await render(target.packagePath, output, { onLog: line => events.publish({ type: 'edit.render.log', renderId, line }) });
-            renderedSceneIds = (nextTimeline.scenes ?? []).map(scene => scene.id);
-            reusedSceneIds = [];
-          } else {
-            result = await renderScene(target.packagePath, output, {
-              cacheDir,
-              force: false,
-              onLog: line => events.publish({ type: 'edit.render.log', renderId, line }),
-            });
-            const renderedKeys = new Set(result.rendered);
-            const reusedKeys = new Set(result.reused);
-            renderedSceneIds = result.segments.filter(segment => renderedKeys.has(segment.key)).map(segment => segment.sceneId);
-            reusedSceneIds = result.segments.filter(segment => reusedKeys.has(segment.key)).map(segment => segment.sceneId);
-          }
-          lastRendered.set(target.pkg.id, { timeline: nextTimeline, revision: target.revision, at: Date.now() });
-          const timelineHash = result.timelineHash ?? result.hash ?? null;
-          const reason = fullReason ?? (previous ? 'content changes only' : 'first render');
-          events.publish({
-            type: 'edit.render.finished',
-            renderId,
-            packageId: target.pkg.id,
-            revision: target.revision,
-            full,
-            reason,
-            bytes: result.bytes,
-            frames: result.frames,
-            timeline_sha256: timelineHash,
-            rendered: renderedSceneIds,
-            reused: reusedSceneIds,
-          });
-          response.writeHead(200, {
-            'content-type': 'video/mp4',
-            'content-length': result.bytes,
-            'cache-control': 'no-store',
-            'content-disposition': `attachment; filename="comfyrizz-${renderId}.mp4"`,
-            'x-comfyrizz-render-id': renderId,
-            'x-comfyrizz-full-render': full ? '1' : '0',
-            'x-comfyrizz-full-reason': fullReason ?? '',
-            'x-comfyrizz-rendered': renderedSceneIds.join(','),
-            'x-comfyrizz-rendered-count': String(renderedSceneIds.length),
-            'x-comfyrizz-reused': reusedSceneIds.join(','),
-            'x-comfyrizz-reused-count': String(reusedSceneIds.length),
-            'x-comfyrizz-timeline-sha256': String(timelineHash ?? ''),
-            'x-comfyrizz-frames': String(result.frames),
-            ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
-          });
-          createReadStream(result.output ?? output).pipe(response);
-        } catch (error) {
-          events.publish({ type: 'edit.render.failed', renderId, packageId: target.pkg.id, message: error.message });
-          sendJson(response, 500, { error: error.message, renderId });
-        }
-      } finally {
-        hold.release();
-      }
-      return;
     }
 
     if (await takeRoutes.handle(request, response, url)) return;
