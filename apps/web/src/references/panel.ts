@@ -145,6 +145,8 @@ export type ReferenceApi = {
   delete(id: string): Promise<void>;
   thumbUrl?(ref: Reference): string | undefined;
   fileUrl?(ref: Reference): string | undefined;
+  /** Authed thumb fetch -> object URL, or undefined when it cannot load. */
+  loadThumb?(ref: Reference): Promise<string | undefined>;
 };
 
 export type ConfirmFn = (message: string) => boolean | Promise<boolean>;
@@ -368,6 +370,127 @@ export type RenderOptions = {
   thumbUrl?: (ref: Reference) => string | undefined;
 };
 
+/**
+ * `/api` media sits behind the session token, so the browser cannot load it
+ * from an `<img src>`; those thumbnails are rendered as placeholders and
+ * hydrated from an authed blob by the mount helper.
+ */
+export function isAuthedThumbUrl(url: string | undefined | null): boolean {
+  return typeof url === 'string' && url.startsWith('/api/');
+}
+
+export type ThumbLoadApi = {
+  loadThumb?(ref: Reference): Promise<string | undefined>;
+};
+
+/** Cache key: one thumb per reference revision. */
+export function thumbKey(ref: Reference): string {
+  return `${ref.id}\u0000${String(ref.updatedAt ?? '')}`;
+}
+
+function revokeObjectUrl(url: string | undefined): void {
+  if (!url) return;
+  try {
+    const objectUrls = globalThis.URL;
+    if (typeof objectUrls?.revokeObjectURL === 'function') objectUrls.revokeObjectURL(url);
+  } catch { /* nothing to clean up */ }
+}
+
+/**
+ * Owns the object URLs for reference thumbnails. A URL is cached by
+ * `id + updatedAt`, re-used while the same card is on screen, and revoked as
+ * soon as that card is replaced, removed or the panel unmounts.
+ */
+export class ReferenceThumbCache {
+  api: ThumbLoadApi;
+  entries: Map<string, { refId: string; url: string }>;
+  pending: Map<string, Promise<string | undefined>>;
+  live: Set<string>;
+  destroyed: boolean;
+
+  constructor(api: ThumbLoadApi) {
+    this.api = api;
+    this.entries = new Map();
+    this.pending = new Map();
+    this.live = new Set();
+    this.destroyed = false;
+  }
+
+  current(ref: Reference): string | undefined {
+    return this.entries.get(thumbKey(ref))?.url;
+  }
+
+  /**
+   * Declares which cards are currently rendered and revokes every cached URL
+   * whose reference revision is no longer present.
+   */
+  retain(references: readonly Reference[]): Set<string> {
+    if (this.destroyed) return new Set();
+    const next = new Set(references.map(ref => thumbKey(ref)));
+    for (const [key, entry] of Array.from(this.entries)) {
+      if (next.has(key)) continue;
+      this.entries.delete(key);
+      revokeObjectUrl(entry.url);
+    }
+    for (const key of Array.from(this.pending.keys())) {
+      if (!next.has(key)) this.pending.delete(key);
+    }
+    this.live = next;
+    return next;
+  }
+
+  load(ref: Reference): Promise<string | undefined> {
+    const key = thumbKey(ref);
+    if (this.destroyed || !this.live.has(key)) return Promise.resolve(undefined);
+    const cached = this.entries.get(key);
+    if (cached) return Promise.resolve(cached.url);
+    const inFlight = this.pending.get(key);
+    if (inFlight) return inFlight;
+    const loadThumb = this.api.loadThumb;
+    if (typeof loadThumb !== 'function') return Promise.resolve(undefined);
+
+    const task = (async () => {
+      let url: string | undefined;
+      try {
+        url = await loadThumb.call(this.api, ref);
+      } catch {
+        url = undefined;
+      }
+      this.pending.delete(key);
+      if (!url) return undefined;
+      if (this.destroyed || !this.live.has(key)) {
+        revokeObjectUrl(url);
+        return undefined;
+      }
+      const previous = this.entries.get(key);
+      if (previous && previous.url !== url) revokeObjectUrl(previous.url);
+      this.entries.set(key, { refId: ref.id, url });
+      return url;
+    })();
+    this.pending.set(key, task);
+    return task;
+  }
+
+  /** Forget one deleted reference even before the next render. */
+  release(refId: string): void {
+    for (const [key, entry] of Array.from(this.entries)) {
+      if (entry.refId !== refId) continue;
+      this.entries.delete(key);
+      this.live.delete(key);
+      this.pending.delete(key);
+      revokeObjectUrl(entry.url);
+    }
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    for (const entry of this.entries.values()) revokeObjectUrl(entry.url);
+    this.entries.clear();
+    this.pending.clear();
+    this.live.clear();
+  }
+}
+
 function renderAssignmentChips(ref: Reference, assignments: readonly ReferenceAssignment[]): string {
   const chips = assignments
     .filter(assignment => assignment.refId === ref.id)
@@ -390,9 +513,11 @@ export function renderReferenceCard(
   const video = ref.kind === 'video';
   const id = escapeHtml(ref.id);
   const thumb = options.thumbUrl?.(ref) ?? ref.thumbUrl ?? ref.thumb ?? ref.posterUrl;
-  const media = thumb
-    ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(label)}" loading="lazy" />`
-    : `<span class="ref-thumb-placeholder" role="img" aria-label="${escapeHtml(label)}">${video ? 'Video' : 'Image'}</span>`;
+  const media = isAuthedThumbUrl(thumb)
+    ? `<span class="ref-thumb-placeholder ref-thumb-loading" data-ref-thumb="${escapeHtml(thumb)}" data-ref-id="${id}" data-ref-updated="${escapeHtml(ref.updatedAt ?? '')}" role="img" aria-label="${escapeHtml(label)}">${video ? 'Video' : 'Image'}</span>`
+    : thumb
+      ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(label)}" loading="lazy" />`
+      : `<span class="ref-thumb-placeholder" role="img" aria-label="${escapeHtml(label)}">${video ? 'Video' : 'Image'}</span>`;
   const duration = video
     ? `<span class="ref-duration" data-duration="${escapeHtml(formatDuration(ref.durationSec))}" aria-label="Duration ${escapeHtml(formatDuration(ref.durationSec))}">${escapeHtml(formatDuration(ref.durationSec))}</span>`
     : '';
@@ -966,7 +1091,46 @@ export function mountReferencePanel(el: HTMLElement, options: MountOptions): Ref
     confirm,
   });
   const renderOptions: RenderOptions = {
-    thumbUrl: ref => options.api.thumbUrl?.(ref) ?? ref.thumbUrl ?? ref.posterUrl,
+    thumbUrl: ref => {
+      const direct = ref.thumbUrl ?? ref.thumb ?? ref.posterUrl;
+      if (direct && !isAuthedThumbUrl(direct)) return direct;
+      return options.api.thumbUrl?.(ref) ?? direct;
+    },
+  };
+  const thumbs = new ReferenceThumbCache(options.api);
+  let thumbGeneration = 0;
+  const applyThumb = (slot: Element, url: string) => {
+    const document = slot.ownerDocument;
+    if (!document) return;
+    const image = document.createElement('img');
+    image.src = url;
+    image.alt = slot.getAttribute('aria-label') ?? '';
+    image.loading = 'lazy';
+    slot.replaceWith(image);
+  };
+  const hydrateThumbs = (state: PanelState) => {
+    const generation = ++thumbGeneration;
+    thumbs.retain(state.references);
+    const slots = Array.from(el.querySelectorAll<HTMLElement>('[data-ref-thumb]'));
+    for (const slot of slots) {
+      const refId = slot.getAttribute('data-ref-id') ?? '';
+      const ref = state.references.find(item => item.id === refId);
+      if (!ref) continue;
+      const cached = thumbs.current(ref);
+      if (cached) {
+        applyThumb(slot, cached);
+        continue;
+      }
+      void thumbs.load(ref).then(url => {
+        if (!url || generation !== thumbGeneration) return;
+        const current = thumbs.current(ref);
+        if (current !== url) return;
+        const still = Array.from(el.querySelectorAll<HTMLElement>('[data-ref-thumb]')).find(node =>
+          node.getAttribute('data-ref-id') === ref.id
+          && node.getAttribute('data-ref-updated') === String(ref.updatedAt ?? ''));
+        if (still) applyThumb(still, url);
+      });
+    }
   };
   el.innerHTML = renderReferencePanel(controller.getState(), { ...renderOptions, idPrefix: prefix });
   const input = el.querySelector<HTMLInputElement>('[data-ref-file]');
@@ -986,7 +1150,10 @@ export function mountReferencePanel(el: HTMLElement, options: MountOptions): Ref
   };
   const updateCards = (state: PanelState) => {
     const cards = el.querySelector<HTMLElement>('[data-ref-cards]');
-    if (cards) cards.innerHTML = renderReferenceCardList(state, renderOptions);
+    if (cards) {
+      cards.innerHTML = renderReferenceCardList(state, renderOptions);
+      hydrateThumbs(state);
+    }
     const count = el.querySelector<HTMLElement>('[data-ref-count]');
     if (count) {
       const size = state.references.length;
@@ -1118,6 +1285,7 @@ export function mountReferencePanel(el: HTMLElement, options: MountOptions): Ref
     destroy() {
       unsubscribe();
       controller.destroy();
+      thumbs.destroy();
       el.removeEventListener('click', onClick);
       el.removeEventListener('change', onChange);
       el.removeEventListener('focusout', onFocusOut);
