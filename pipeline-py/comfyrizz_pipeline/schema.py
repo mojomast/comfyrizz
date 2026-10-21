@@ -11,6 +11,10 @@ lives in packages/schema/package-v1.schema.json and is the single source of trut
 CCL4a (optional ``scene.speaker`` = a cast id and optional ``cast[].voice``) is
 deliberately structural. Both bindings load the same schema file, so these fields
 need no Python-only rule and the two validators agree by construction.
+
+CCL5b (``cast[].kind`` defaults to fictional and ``real_authorized`` requires a
+``consentRef``) is likewise structural: the conditional lives in the shared JSON
+Schema, so both bindings enforce it identically without a Python-only rule.
 """
 
 from __future__ import annotations
