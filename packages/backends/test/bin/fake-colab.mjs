@@ -69,11 +69,13 @@ if (command === "usage") out(state.usage || "Current balance: 387.05 compute uni
 if (command === "sessions") out(state.stopped ? "No active sessions found on server.\n" : state.sessions);
 if (command === "help") out(state.help || "GPU accelerator\n  Supported: G4, H100, A100\n");
 if (command === "new") {
-  if (state.allowNew === false) out("[colab] Error: cannot create a session right now", 1);
+  if (state.allowNew === false) out(state.newOutput || "[colab] Error: cannot create a session right now", 1);
   const session = sessionOf(argv) || "session";
   state.stopped = false;
   state.sessions = `[${session}] fake123 | Hardware: ${state.hardware || "G4"} | Shape: STANDARD | Variant: GPU | Status: IDLE\n`;
   save(state);
+  // PO-4 review: the assign POST already provisioned the VM when the CLI is killed mid-request.
+  if (state.newHangs) await new Promise(() => setInterval(() => {}, 1000));
   out(`Created session ${session} (READY)`);
 }
 if (command === "stop") {

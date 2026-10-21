@@ -12,7 +12,14 @@ const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 // PO-4: reconciliation stops Colab runtimes one at a time; without a deadline a CLI that never answers
 // leaves the run permanently blocking every new pipeline, with no way to cancel it.
 const RECONCILE_TIMEOUT_MS = 360000;
-const RECONCILE_STOP_GRACE_MS = 10000;
+// PO-4 review: after a reconcile timeout the worker is asked to stop, and it may be mid-teardown. A
+// `colab stop` alone is bounded at 90 s, so the grace must cover at least one full stop plus the
+// `colab sessions` check that confirms it. 10 s killed teardowns in flight.
+const RECONCILE_STOP_GRACE_MS = 120000;
+// PO-4 review: a lock from another host could never go stale. The owner now refreshes heartbeatAt every
+// minute; a lock whose heartbeat (or startedAt, for older locks) is older than this is treated as stale.
+const OWNER_STALE_MINUTES = 10;
+const OWNER_HEARTBEAT_MS = 60000;
 const safe = value => JSON.parse(redactForLog(JSON.stringify(value)));
 function readJournal(path) {
   const entries = [];
@@ -52,21 +59,25 @@ export function launchPipeline(spec, onMessage, onExit) {
   return { cancel: () => child.connected && child.send({ kind: 'cancel' }), kill: signal => { try { child.kill(signal); } catch { /* already gone */ } } };
 }
 
-export function createPipelineController({ runtimeDir, events, stageInputs, launch = launchPipeline, env = process.env, isBusy = () => false, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = RECONCILE_STOP_GRACE_MS }) {
+export function createPipelineController({ runtimeDir, events, stageInputs, launch = launchPipeline, env = process.env, isBusy = () => false, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = Math.max(90000, Number(env.COMFYRIZZ_RECONCILE_STOP_GRACE_MS) || RECONCILE_STOP_GRACE_MS), takeOver = env.COMFYRIZZ_TAKE_OVER === '1' || process.argv.includes('--take-over'), ownerStaleMs = (Number(env.COMFYRIZZ_OWNER_STALE_MINUTES) || OWNER_STALE_MINUTES) * 60000, ownerHeartbeatMs = OWNER_HEARTBEAT_MS }) {
   const dir = join(runtimeDir, 'pipelines');
   mkdirSync(dir, { recursive: true });
   const records = new Map(), workers = new Map(), journals = new Map();
   let starting = false, lastPersist = 0, ownsLock = false;
   /**
    * PO-4: the busy flag was in-memory only, so two servers pointed at one runtime directory both accepted
-   * runs and both replayed the same journals. One process owns the directory; a stale lock is taken over
-   * when its pid is gone, and a live owner from another host is never second-guessed.
+   * runs and both replayed the same journals. One process owns the directory. A lock is stale, and taken
+   * over, when its pid is gone (same host) or its heartbeat is older than ownerStaleMs (any host: a pid
+   * on another host cannot be checked). `--take-over` (or COMFYRIZZ_TAKE_OVER=1) overrides a live lock.
    */
+  let ownerHeartbeat = null;
+  const ownerPath = join(dir, 'owner.json');
+  const ownerRecord = startedAt => ({ pid: process.pid, host: hostname(), startedAt, heartbeatAt: new Date().toISOString() });
   function claimOwner() {
-    const path = join(dir, 'owner.json');
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const path = ownerPath;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        writeFileSync(path, JSON.stringify({ pid: process.pid, host: hostname(), startedAt: new Date().toISOString() }), { flag: 'wx', mode: 0o600 });
+        writeFileSync(path, JSON.stringify(ownerRecord(new Date().toISOString())), { flag: 'wx', mode: 0o600 });
         ownsLock = true;
         return;
       } catch (error) {
@@ -75,15 +86,31 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
         try { owner = JSON.parse(readFileSync(path, 'utf8')); } catch { /* a torn lock is stale by definition */ }
         if (!owner?.pid) { try { unlinkSync(path); } catch { /* another starter won; the next attempt decides */ } continue; }
         // Same process: a test or a supervisor re-creating the controller for the same runtime directory.
-        if (owner.pid === process.pid) return;
+        if (owner.pid === process.pid && (!owner.host || owner.host === hostname())) return;
         const foreign = Boolean(owner.host) && owner.host !== hostname();
-        if (foreign || processAlive(owner.pid)) throw new Error(`This runtime directory belongs to another Comfyrizz server (pid ${owner.pid} on ${owner.host ?? 'this host'}). Two servers on one runtime directory would both accept runs and both rewrite the same journals. Stop the other one, or start this one with a different COMFYRIZZ_RUNTIME_DIR.`);
+        const lastSeen = Date.parse(owner.heartbeatAt ?? owner.startedAt ?? '');
+        const stale = !Number.isFinite(lastSeen) || Date.now() - lastSeen > ownerStaleMs;
+        const live = !stale && (foreign || processAlive(owner.pid));
+        if (live && !takeOver) {
+          throw new Error(`This runtime directory belongs to another Comfyrizz server (pid ${owner.pid} on ${owner.host ?? 'this host'}, last heartbeat ${owner.heartbeatAt ?? owner.startedAt ?? 'unknown'}). Two servers on one runtime directory would both accept runs and both rewrite the same journals. Stop the other one, or start this one with a different COMFYRIZZ_RUNTIME_DIR. If that server is gone, delete ${path} or start with --take-over (COMFYRIZZ_TAKE_OVER=1); the lock also goes stale on its own ${Math.round(ownerStaleMs / 60000)} minutes after its last heartbeat.`);
+        }
         try { unlinkSync(path); } catch { /* raced again; retry */ }
       }
     }
-    throw new Error(`Could not take ownership of ${dir}: another Comfyrizz server keeps taking it.`);
+    throw new Error(`Could not take ownership of ${dir}: another Comfyrizz server keeps taking it. Lock file: ${path}`);
   }
   claimOwner();
+  if (ownsLock && ownerHeartbeatMs > 0) {
+    ownerHeartbeat = setInterval(() => {
+      if (!ownsLock) return;
+      try {
+        const current = JSON.parse(readFileSync(ownerPath, 'utf8'));
+        if (current.pid !== process.pid || current.host !== hostname()) { ownsLock = false; return; } // taken over
+        writeFileSync(ownerPath, JSON.stringify({ ...current, heartbeatAt: new Date().toISOString() }), { mode: 0o600 });
+      } catch { /* a missing lock is re-claimed by the next start, not here */ }
+    }, ownerHeartbeatMs);
+    ownerHeartbeat.unref?.();
+  }
   const save = record => {
     const path = join(dir, record.runId, 'state.json');
     writeFileSync(`${path}.tmp`, JSON.stringify(record, null, 2), { mode: 0o600 });
@@ -280,6 +307,9 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
       timer = setTimeout(() => {
         record.reconcile = { ...record.reconcile, timedOut: true };
         emit(record, 'diagnostic', { stageId: null, message: 'Reconciliation is taking too long; asking the worker to stop.' });
+        // A teardown already in progress gets reconcileStopGraceMs (>= 90 s) to finish its stop and
+        // confirm it. Past that the worker is SIGKILLed; the run then settles as *unconfirmed* (never as
+        // stopped), the VM's own watchdog stays armed, and a later reconcile can try again.
         handle.cancel?.();
         killTimer = setTimeout(() => handle.kill?.('SIGKILL'), reconcileStopGraceMs);
         killTimer.unref?.();
@@ -305,6 +335,7 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     },
     close: () => {
       for (const record of records.values()) if (!TERMINAL.has(record.status)) cancel(record.runId);
+      if (ownerHeartbeat) { clearInterval(ownerHeartbeat); ownerHeartbeat = null; }
       if (ownsLock) { try { unlinkSync(join(dir, 'owner.json')); } catch { /* already released */ } ownsLock = false; }
     },
   };

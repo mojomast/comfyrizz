@@ -44,3 +44,52 @@ test('the abort reason is not reported as a Colab failure', async t => {
   assert.equal(error?.name, 'AbortError');
   assert.doesNotMatch(error.message, /colab new failed/);
 });
+
+// PO-4 review (BLOCKER 1): a cancel that lands after the assign POST provisioned the VM used to leave the
+// session unregistered, so teardown answered not_owned and the run reported "stopped" while it spent.
+test('a cancel while `colab new` hangs stops the session it created before reporting clean', async t => {
+  const { backend, fake, commands } = backendFor(t, { stopped: true, newHangs: true });
+  const controller = new AbortController();
+  const pending = backend.ensureUp({ approved: true, signal: controller.signal }).then(() => null, e => e);
+  // wait until the fake has provisioned (state lists the session) and is hanging
+  const { readState } = await import('./helpers.mjs');
+  for (let i = 0; i < 200 && !String(readState(fake.statePath).sessions || '').includes('['); i += 1) await new Promise(r => setTimeout(r, 25));
+  controller.abort(new Error('owner cancelled mid-allocation'));
+  const error = await pending;
+  assert.match(error?.message ?? '', /owner cancelled mid-allocation/);
+  assert.equal(error.allocationCleanup?.confirmedGone, true);
+  assert.equal(error.allocationCleanup?.listedEver, true);
+  const seen = commands();
+  assert.ok(seen.includes('new') && seen.includes('sessions') && seen.includes('stop'), `expected new, sessions, stop; got ${seen}`);
+  assert.equal(readState(fake.statePath).stopped, true, 'the VM must actually be stopped');
+  const teardown = await backend.teardown('after cancel');
+  assert.equal(teardown.state, 'not_owned', 'nothing left to own once the stop is confirmed');
+});
+
+test('an unconfirmed stop after a cancelled allocation keeps ownership and is not reported clean', async t => {
+  const { backend, fake } = backendFor(t, { stopped: true, newHangs: true, keepAfterStop: true });
+  const controller = new AbortController();
+  const pending = backend.ensureUp({ approved: true, signal: controller.signal }).then(() => null, e => e);
+  const { readState } = await import('./helpers.mjs');
+  for (let i = 0; i < 200 && !String(readState(fake.statePath).sessions || '').includes('['); i += 1) await new Promise(r => setTimeout(r, 25));
+  controller.abort(new Error('owner cancelled'));
+  const error = await pending;
+  assert.match(error?.message ?? '', /not confirmed stopped/);
+  assert.equal(error.detail?.allocationCleanup?.confirmedGone, false);
+  const teardown = await backend.teardown('after cancel');
+  assert.equal(teardown.state, 'stop_unconfirmed', 'a still-listed session must never map to stopped');
+  await backend.disarmWatchdog?.('test');
+});
+
+test('the 503 retry wait is abort-aware', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'comfyrizz-po4-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const fake = installFakeColab(dir, { state: { stopped: true, allowNew: false, newOutput: 'Failed to issue request POST https://colab.research.google.com/tun/m/assign?accelerator=G4: Service Unavailable' } });
+  const backend = createColabBackend({ cli: makeCli(fake), packageId: 'pkg_po4cancel02', scratchDir: join(dir, 'scratch'), logDir: join(dir, 'logs'), packageDir: null, hfTokenPath: null, watchdogMinutes: 0.02, newRetryMs: 60000 });
+  const controller = new AbortController();
+  const started = Date.now();
+  setTimeout(() => controller.abort(new Error('cancel during backoff')), 300);
+  const error = await backend.ensureUp({ approved: true, signal: controller.signal }).then(() => null, e => e);
+  assert.ok(error);
+  assert.ok(Date.now() - started < 20000, 'ensureUp must not sit out a 60 s backoff after cancel');
+});

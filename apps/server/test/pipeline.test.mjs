@@ -215,6 +215,33 @@ test('one runtime directory admits one server process, and a dead owner does not
   assert.doesNotThrow(() => createPipelineController(f.dependencies));
 });
 
+// PO-4 review: a lock written by another host could never go stale, and the error did not name the file.
+test('a foreign-host lock goes stale after its heartbeat ages out, and --take-over overrides a live one', async t => {
+  const f = fixture(t);
+  const lock = join(f.dependencies.runtimeDir, 'pipelines', 'owner.json');
+  const fresh = new Date().toISOString();
+  writeFileSync(lock, JSON.stringify({ pid: 4242, host: 'some-other-host', startedAt: fresh, heartbeatAt: fresh }));
+  assert.throws(() => createPipelineController(f.dependencies), error => error.message.includes(lock) && /--take-over/.test(error.message));
+  // An explicit takeover replaces a live foreign lock.
+  const taken = createPipelineController({ ...f.dependencies, takeOver: true });
+  assert.equal(JSON.parse(readFileSync(lock)).host, hostname());
+  taken.close();
+  // A foreign lock whose heartbeat is older than the staleness window is taken over without a flag.
+  const old = new Date(Date.now() - 11 * 60000).toISOString();
+  writeFileSync(lock, JSON.stringify({ pid: 4242, host: 'some-other-host', startedAt: old, heartbeatAt: old }));
+  const reclaimed = createPipelineController(f.dependencies);
+  const owner = JSON.parse(readFileSync(lock));
+  assert.equal(owner.pid, process.pid);
+  assert.ok(owner.heartbeatAt, 'the new owner records a heartbeat');
+  reclaimed.close();
+  // An old lock with only startedAt (written before heartbeats) also ages out.
+  writeFileSync(lock, JSON.stringify({ pid: 4242, host: 'some-other-host', startedAt: old }));
+  assert.doesNotThrow(() => createPipelineController(f.dependencies).close());
+  // ...but the window is configurable.
+  writeFileSync(lock, JSON.stringify({ pid: 4242, host: 'some-other-host', startedAt: old, heartbeatAt: old }));
+  assert.throws(() => createPipelineController({ ...f.dependencies, ownerStaleMs: 60 * 60000 }), /belongs to another Comfyrizz server/);
+});
+
 // PO-4: replay re-read and re-parsed the whole journal on every poll.
 test('replay reads only the events appended since the last poll, and tolerates a torn tail', async t => {
   const f = fixture(t), { run } = await f.controller.start(example, { backendId: 'cpu' }, '.');
