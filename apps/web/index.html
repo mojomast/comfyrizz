@@ -3,8 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d0f14'/%3E%3Ccircle cx='32' cy='32' r='18' fill='none' stroke='%236d8cff' stroke-width='7'/%3E%3C/svg%3E" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="/site.webmanifest" />
     <link rel="stylesheet" href="/src/ui/tokens.css" />
+    <link rel="stylesheet" href="/src/ui/brand.css" />
     <link rel="stylesheet" href="/src/ui/components.css" />
     <link rel="stylesheet" href="/src/ui/shell.css" />
     <link rel="stylesheet" href="/src/ui/topbar.css" />
@@ -14,7 +18,7 @@
     <div id="app" class="app-shell" data-shell="grid">
       <header id="topbar" class="toolbar shell-topbar" data-region="topbar">
         <div class="topbar-brand-group">
-          <div class="brand"><span class="mark">◑</span><span>Comfyrizz</span><small>CPU slice</small></div>
+          <div class="brand" aria-label="Comfyrizz"><img src="/favicon.svg" width="24" height="24" alt="Comfyrizz" /><span class="sr-only">Comfyrizz</span></div>
           <span class="topbar-divider" aria-hidden="true">/</span>
           <span class="topbar-project-name" id="project-name" title="Project name">Pip’s Night Shift</span>
         </div>

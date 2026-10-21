@@ -1,0 +1,36 @@
+{
+  "method": "WCAG relative luminance formula; opaque sRGB token colors only",
+  "note": "These ratios do not verify generated raster pixel colors or all actual UI states. Validate focus rings, borders, disabled states and typography in the application.",
+  "pairs": [
+    {
+      "foreground": "paper",
+      "background": "ink",
+      "ratio": 16.96
+    },
+    {
+      "foreground": "paper",
+      "background": "violet",
+      "ratio": 5.72
+    },
+    {
+      "foreground": "ink",
+      "background": "mint",
+      "ratio": 9.97
+    },
+    {
+      "foreground": "mint",
+      "background": "paper",
+      "ratio": 1.7
+    },
+    {
+      "foreground": "mutedOnDark",
+      "background": "ink",
+      "ratio": 9.5
+    },
+    {
+      "foreground": "violet",
+      "background": "ink",
+      "ratio": 2.97
+    }
+  ]
+}
