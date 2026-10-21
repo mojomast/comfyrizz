@@ -12,6 +12,7 @@ import type {
   ClipGen,
   ClipSummary,
   ClipTake,
+  ClipsResponse,
   CorrectionChange,
   CorrectionDiff,
   JsonObject,
@@ -21,6 +22,9 @@ import type {
   TakesResponse,
 } from './api.ts';
 
+/** The optional clip listing used by the sticky header's clip picker. */
+type ListClipsFn = (this: TakesApi, packageId: string) => Promise<ClipsResponse>;
+
 export const MAX_NOTE_CHARS = 1000;
 export const MAX_INPUT_CHARS = 200;
 export const MAX_DIFF_CHARS = 180;
@@ -28,6 +32,25 @@ export const MAX_DIFF_CHARS = 180;
 export type PreviewHandler = (takeId: string | null) => void;
 
 export type SeedMode = 'new' | 'keep' | 'custom';
+
+/**
+ * The four sections of the takes inspector. They are a view filter over one
+ * data model: switching tabs never unmounts the form state or clears a field.
+ */
+export type TakeTab = 'actions' | 'changes' | 'correct' | 'inputs';
+
+export const TAKE_TABS: readonly TakeTab[] = ['actions', 'changes', 'correct', 'inputs'];
+
+export const TAKE_TAB_LABELS: Record<TakeTab, string> = {
+  actions: 'Actions',
+  changes: 'Changes',
+  correct: 'Correct',
+  inputs: 'Inputs',
+};
+
+export function isTakeTab(value: unknown): value is TakeTab {
+  return typeof value === 'string' && (TAKE_TABS as readonly string[]).includes(value);
+}
 
 export type CorrectionField =
   | 'note'
@@ -56,6 +79,8 @@ export type PendingApproval = {
 export type TakePanelState = {
   packageId: string;
   clipId: string;
+  /** Every clip of the package, used by the sticky header's clip picker. */
+  clips: ClipSummary[];
   data: TakesResponse | null;
   loading: boolean;
   busy: boolean;
@@ -64,6 +89,8 @@ export type TakePanelState = {
   previewTakeId: string | null;
   form: CorrectionFormState;
   approval: PendingApproval | null;
+  /** The visible section of the inspector body. */
+  tab: TakeTab;
 };
 
 export type InputField = {
@@ -459,7 +486,7 @@ export type TakePanelControllerOptions = {
 
 type Listener = (state: TakePanelState, change: ChangeKind) => void;
 
-export type ChangeKind = 'all' | 'data' | 'preview' | 'message' | 'busy' | 'form';
+export type ChangeKind = 'all' | 'data' | 'preview' | 'message' | 'busy' | 'form' | 'tab';
 
 /**
  * State and actions for the takes panel. Nothing is requested until load() is
@@ -488,6 +515,7 @@ export class TakePanelController {
     this.state = {
       packageId: this.packageId,
       clipId: this.clipId,
+      clips: [],
       data: null,
       loading: false,
       busy: false,
@@ -496,6 +524,7 @@ export class TakePanelController {
       previewTakeId: null,
       form: emptyCorrectionForm(),
       approval: null,
+      tab: 'actions',
     };
   }
 
@@ -512,6 +541,7 @@ export class TakePanelController {
     return {
       packageId: this.state.packageId,
       clipId: this.state.clipId,
+      clips: this.state.clips.map(clip => ({ ...clip })),
       data: cloneData(this.state.data),
       loading: this.state.loading,
       busy: this.state.busy,
@@ -530,6 +560,7 @@ export class TakePanelController {
             },
           }
         : null,
+      tab: this.state.tab,
     };
   }
 
@@ -571,6 +602,7 @@ export class TakePanelController {
     this.state.loading = true;
     this.notify('message');
     try {
+      await this.loadClipList();
       const data = await this.api.getTakes(this.packageId, this.clipId);
       this.state.data = cloneData(data);
       if (data.packageId) {
@@ -590,6 +622,59 @@ export class TakePanelController {
       this.notify('all');
     }
     return this.snapshot();
+  }
+
+  /**
+   * Fills the sticky header's clip picker. The list is optional: a host that
+   * already knows its clips passes them in, and an API without `listClips`
+   * simply leaves the picker on the current clip.
+   */
+  private async loadClipList(): Promise<void> {
+    if (this.state.clips.length > 0) return;
+    const listClips = (this.api as unknown as { listClips?: ListClipsFn }).listClips;
+    if (typeof listClips !== 'function') return;
+    try {
+      const response = await listClips.call(this.api, this.packageId);
+      if (Array.isArray(response?.clips)) {
+        this.state.clips = response.clips.filter(clip => Boolean(clip?.clipId));
+      }
+    } catch {
+      /* the clip list is a convenience: a failure must not break the panel */
+    }
+  }
+
+  /** The clips the header's clip picker offers. */
+  setClips(clips: readonly ClipSummary[]): void {
+    const next = Array.isArray(clips)
+      ? clips.filter(clip => Boolean(clip?.clipId)).map(clip => ({ ...clip }))
+      : [];
+    this.state.clips = next;
+    this.notify('data');
+  }
+
+  /** Switches the visible section of the inspector body. */
+  setTab(tab: TakeTab): boolean {
+    if (!isTakeTab(tab) || this.state.tab === tab) return false;
+    this.state.tab = tab;
+    this.notify('tab');
+    return true;
+  }
+
+  tab(): TakeTab {
+    return this.state.tab;
+  }
+
+  /** Points the panel at another clip of the same package and reloads it. */
+  async selectClip(clipId: string): Promise<boolean> {
+    const next = String(clipId ?? '').trim();
+    if (!next || next === this.clipId) return false;
+    this.clipId = next;
+    this.state.clipId = next;
+    this.state.previewTakeId = null;
+    this.state.approval = null;
+    this.state.form = emptyCorrectionForm();
+    await this.load();
+    return true;
   }
 
   refresh(): Promise<TakePanelState> {
@@ -924,7 +1009,6 @@ function renderTakeCard(
   ].filter(Boolean).join(' ');
   const itemClasses = [
     'take-item',
-    'panel',
     selected ? 'is-selected' : '',
     previewed ? 'is-previewed' : '',
     take.purged ? 'is-purged' : '',
@@ -942,13 +1026,17 @@ function renderTakeCard(
         ${note ? `<span class="take-card-note">${escapeHtml(note)}</span>` : ''}
       </span>
     </button>
-    <div class="take-card-actions toolbar">
+    <div class="take-card-actions">
       <button type="button" class="btn btn-sm btn-primary take-card-approve" data-take-card-approve="${id}" aria-label="Approve take ${n}"${disabled}>Approve</button>
       <button type="button" class="btn btn-sm btn-secondary take-card-redo" data-take-card-redo="${id}" aria-label="Redo take ${n}"${disabled}>Redo</button>
     </div>
   </li>`;
 }
 
+/**
+ * The take strip: a horizontal, always open row of take cards. It is the
+ * preview switcher, so it stays visible above the tabbed body.
+ */
 export function renderTakeStrip(state: TakePanelState): string {
   const takes = visibleTakes(state.data);
   if (takes.length === 0) {
@@ -963,17 +1051,17 @@ export function renderTakeStrip(state: TakePanelState): string {
     take.takeId === state.data?.selected,
     take.takeId === activeId,
   )).join('');
-  return `<div class="take-strip-wrap" data-take-strip>
-    <div class="take-strip-head panel-header">
-      <h3 id="take-strip-title" class="panel-header-title">Take strip</h3>
-      <div class="take-strip-nav toolbar">
+  return `<section class="take-strip-wrap" data-take-strip aria-labelledby="take-strip-title">
+    <div class="take-strip-head">
+      <h3 id="take-strip-title" class="take-section-title">Take strip</h3>
+      <div class="take-strip-nav">
         <button type="button" class="btn btn-secondary btn-sm take-step" data-take-step="-1" aria-label="Previous take" aria-keyshortcuts="["${takes.length < 2 ? ' disabled' : ''}>‹</button>
         <span class="take-position badge" data-take-position>${activeIndex + 1} / ${takes.length}</span>
         <button type="button" class="btn btn-secondary btn-sm take-step" data-take-step="1" aria-label="Next take" aria-keyshortcuts="]"${takes.length < 2 ? ' disabled' : ''}>›</button>
       </div>
     </div>
     <ol class="take-strip" aria-labelledby="take-strip-title">${cards}</ol>
-  </div>`;
+  </section>`;
 }
 
 function renderVerdictChips(state: TakePanelState): string {
@@ -1006,21 +1094,63 @@ export function renderDiff(state: TakePanelState): string {
         <span class="take-diff-values"><span class="take-diff-before">${escapeHtml(formatDiffValue(row.before))}</span><span class="take-diff-arrow" aria-hidden="true">→</span><span class="take-diff-after">${escapeHtml(formatDiffValue(row.after))}</span></span>
       </li>`).join('')}</ul>`
     : `<p class="take-diff-empty" data-take-diff-empty>${previous ? 'No recorded differences from the previous take.' : 'Take 1 has no earlier take to compare with.'}</p>`;
-  return `<section class="take-diff panel" data-take-diff aria-label="${escapeHtml(heading)}">
-    <div class="panel-header">
-      <h3 class="panel-header-title">${escapeHtml(heading)}</h3>
-    </div>
-    <div class="panel-body">
-      ${note ? `<p class="take-diff-note" data-take-diff-note>Correction: ${escapeHtml(note)}</p>` : ''}
-      ${body}
-    </div>
+  return `<section class="take-diff take-section" data-take-diff aria-label="${escapeHtml(heading)}">
+    <h3 class="take-section-title">${escapeHtml(heading)}</h3>
+    ${note ? `<p class="take-diff-note" data-take-diff-note>Correction: ${escapeHtml(note)}</p>` : ''}
+    ${body}
   </section>`;
 }
 
+/** The "Correct" tab: the note, the prompt edits and the seed of a redo. */
 function renderCorrectionForm(state: TakePanelState): string {
   const form = state.form ?? emptyCorrectionForm();
-  const inputs = form.inputs ?? {};
   const note = String(form.note ?? '');
+  const disabled = state.busy ? ' disabled' : '';
+  return `<div class="take-correction take-section" data-take-correction>
+    <p class="take-hint">Only this clip is regenerated and the current take is kept. The seed changes unless you choose to keep it.</p>
+    <label class="take-field take-field-wide field">
+      <span class="field-label">Correction note</span>
+      <textarea class="field-control" data-field="note" rows="3" maxlength="${MAX_NOTE_CHARS}" placeholder="Slower push-in, keep the logo readable, no people"${disabled}>${escapeHtml(note)}</textarea>
+    </label>
+    <div class="take-note-meta">
+      <span class="take-count-hint" data-note-count aria-live="polite">${note.length} / ${MAX_NOTE_CHARS}</span>
+    </div>
+    <div class="take-grid">
+      <label class="take-field field">
+        <span class="field-label">Prompt append</span>
+        <input class="field-control" type="text" data-field="promptAppend" value="${escapeHtml(form.promptAppend)}" maxlength="2000" autocomplete="off"${disabled} />
+      </label>
+      <label class="take-field field">
+        <span class="field-label">Prompt replace</span>
+        <input class="field-control" type="text" data-field="promptReplace" value="${escapeHtml(form.promptReplace)}" maxlength="2000" autocomplete="off"${disabled} />
+      </label>
+      <label class="take-field field">
+        <span class="field-label">Negative append</span>
+        <input class="field-control" type="text" data-field="negativeAppend" value="${escapeHtml(form.negativeAppend)}" maxlength="2000" autocomplete="off"${disabled} />
+      </label>
+      <label class="take-field field">
+        <span class="field-label">Seed</span>
+        <select class="field-control" data-field="seedMode"${disabled}>
+          <option value="new"${form.seedMode === 'new' ? ' selected' : ''}>New seed</option>
+          <option value="keep"${form.seedMode === 'keep' ? ' selected' : ''}>Keep seed</option>
+          <option value="custom"${form.seedMode === 'custom' ? ' selected' : ''}>Fixed seed</option>
+        </select>
+      </label>
+      ${form.seedMode === 'custom' ? `<label class="take-field field">
+        <span class="field-label">Seed number</span>
+        <input class="field-control" type="number" data-field="seedValue" value="${escapeHtml(form.seedValue)}" step="1" min="0"${disabled} />
+      </label>` : ''}
+    </div>
+    <div class="take-form-actions">
+      <button type="button" class="btn btn-primary take-regenerate" data-take-regenerate${disabled}>Regenerate this clip</button>
+      <span class="take-hint">Google Colab spend is shown before it is charged.</span>
+    </div>
+  </div>`;
+}
+
+/** The "Inputs" tab: the allow-listed workflow inputs of a redo. */
+function renderInputFields(state: TakePanelState): string {
+  const inputs = state.form?.inputs ?? {};
   const disabled = state.busy ? ' disabled' : '';
   const fields = INPUT_FIELDS.map(field => {
     const value = inputs[field.key] ?? '';
@@ -1030,142 +1160,135 @@ function renderCorrectionForm(state: TakePanelState): string {
       <input class="field-control" type="${field.numeric ? 'number' : 'text'}" data-input-field="${escapeHtml(field.key)}" value="${escapeHtml(value)}" inputmode="${inputMode}"${field.numeric ? ' step="any"' : ''} maxlength="${MAX_INPUT_CHARS}" autocomplete="off"${field.hint ? ` aria-description="${escapeHtml(field.hint)}"` : ''}${disabled} />
     </label>`;
   }).join('');
-  const hasInputs = Object.values(inputs).some(value => String(value ?? '').trim() !== '');
-  return `<form class="take-correction panel" data-take-form aria-label="Correction">
-    <div class="panel-header">
-      <h3 class="panel-header-title">Correct this clip</h3>
-    </div>
-    <div class="panel-body">
-      <p class="take-hint">Only this clip is regenerated and the current take is kept. The seed changes unless you choose to keep it.</p>
-      <label class="take-field take-field-wide field">
-        <span class="field-label">Correction note</span>
-        <textarea class="field-control" data-field="note" rows="3" maxlength="${MAX_NOTE_CHARS}" placeholder="Slower push-in, keep the logo readable, no people"${disabled}>${escapeHtml(note)}</textarea>
-      </label>
-      <div class="take-note-meta">
-        <span class="take-count-hint" data-note-count aria-live="polite">${note.length} / ${MAX_NOTE_CHARS}</span>
-      </div>
-      <div class="take-grid">
-        <label class="take-field field">
-          <span class="field-label">Prompt append</span>
-          <input class="field-control" type="text" data-field="promptAppend" value="${escapeHtml(form.promptAppend)}" maxlength="2000" autocomplete="off"${disabled} />
-        </label>
-        <label class="take-field field">
-          <span class="field-label">Prompt replace</span>
-          <input class="field-control" type="text" data-field="promptReplace" value="${escapeHtml(form.promptReplace)}" maxlength="2000" autocomplete="off"${disabled} />
-        </label>
-        <label class="take-field field">
-          <span class="field-label">Negative append</span>
-          <input class="field-control" type="text" data-field="negativeAppend" value="${escapeHtml(form.negativeAppend)}" maxlength="2000" autocomplete="off"${disabled} />
-        </label>
-        <label class="take-field field">
-          <span class="field-label">Seed</span>
-          <select class="field-control" data-field="seedMode"${disabled}>
-            <option value="new"${form.seedMode === 'new' ? ' selected' : ''}>New seed</option>
-            <option value="keep"${form.seedMode === 'keep' ? ' selected' : ''}>Keep seed</option>
-            <option value="custom"${form.seedMode === 'custom' ? ' selected' : ''}>Fixed seed</option>
-          </select>
-        </label>
-        ${form.seedMode === 'custom' ? `<label class="take-field field">
-          <span class="field-label">Seed number</span>
-          <input class="field-control" type="number" data-field="seedValue" value="${escapeHtml(form.seedValue)}" step="1" min="0"${disabled} />
-        </label>` : ''}
-      </div>
-      <details class="take-inputs"${hasInputs ? ' open' : ''}>
-        <summary>Workflow inputs (allow-listed)</summary>
-        <div class="take-grid">${fields}</div>
-      </details>
-      <p class="take-hint">Allowed inputs: reference, reference_2 to reference_10, image, strength, denoise and motion.*. Other fields are ignored.</p>
-      <div class="take-form-actions toolbar">
-        <button type="button" class="btn btn-primary take-regenerate" data-take-regenerate${disabled}>Regenerate this clip</button>
-        <span class="take-hint">Google Colab spend is shown before it is charged.</span>
-      </div>
-    </div>
-  </form>`;
+  return `<div class="take-inputs take-section" data-take-inputs>
+    <h3 class="take-section-title">Workflow inputs (allow-listed)</h3>
+    <div class="take-grid">${fields}</div>
+    <p class="take-hint">Allowed inputs: reference, reference_2 to reference_10, image, strength, denoise and motion.*. Other fields are ignored.</p>
+  </div>`;
 }
 
+/**
+ * The spend approval is an inline banner, shown only while a regeneration is
+ * waiting for it. It is never a nested panel.
+ */
 function renderApproval(state: TakePanelState): string {
   const approval = state.approval;
   if (!approval) return '';
   const disabled = state.busy ? ' disabled' : '';
-  return `<section class="take-approval panel" data-take-approval role="group" aria-label="Spend approval">
-    <div class="panel-header">
-      <h3 class="panel-header-title">Approve the regeneration</h3>
-    </div>
-    <div class="panel-body">
+  return `<div class="take-approval" data-take-approval role="group" aria-label="Spend approval">
+    <div class="take-approval-text">
       <p class="take-estimate" data-take-estimate>${escapeHtml(formatEstimate(approval.estimate, approval.budget))}</p>
       <p class="take-hint">This approval covers this regeneration only. Nothing has been charged yet.</p>
       <p class="take-plan-hint">Plan <code data-take-plan>${escapeHtml(approval.planHash)}</code></p>
-      <div class="take-action-row toolbar">
-        <button type="button" class="btn btn-primary take-approve-spend" data-take-approve-spend${disabled}>Approve and regenerate</button>
-        <button type="button" class="btn btn-secondary" data-take-cancel-approval${disabled}>Cancel</button>
-      </div>
     </div>
-  </section>`;
+    <div class="take-action-row">
+      <button type="button" class="btn btn-primary take-approve-spend" data-take-approve-spend${disabled}>Approve and regenerate</button>
+      <button type="button" class="btn btn-secondary" data-take-cancel-approval${disabled}>Cancel</button>
+    </div>
+  </div>`;
 }
 
+/** The "Actions" tab: what can be done with the take in the preview. */
 function renderActions(state: TakePanelState): string {
   const takes = visibleTakes(state.data);
   const activeId = activeTakeId(state);
   const active = takes.find(take => take.takeId === activeId);
-  if (!active) return '';
+  if (!active) return '<p class="take-hint">No take to review for this clip yet.</p>';
   const disabled = state.busy || active.purged;
   const attrs = disabled ? ' disabled' : '';
   const selected = active.takeId === state.data?.selected;
   const n = escapeHtml(active.n);
   const previewActive = state.previewTakeId != null;
-  return `<section class="take-actions panel" aria-label="Take actions">
-    <div class="panel-header">
-      <h3 class="panel-header-title">Take actions</h3>
-      <span class="panel-header-meta">Take ${n}</span>
+  const note = textOf(active.correction?.note).trim();
+  return `<div class="take-actions take-section" data-take-actions aria-label="Take actions">
+    <div class="take-action-row">
+      <button type="button" class="btn btn-secondary" data-take-select${selected ? ' disabled' : attrs}>Use take ${n}</button>
+      <button type="button" class="btn btn-secondary" data-take-revert${attrs}>Revert</button>
+      ${previewActive ? `<button type="button" class="btn btn-secondary" data-take-clear-preview${attrs}>Preview selected take</button>` : ''}
     </div>
-    <div class="panel-body">
-      <div class="take-action-row toolbar">
-        <button type="button" class="btn btn-secondary" data-take-select${selected ? ' disabled' : attrs}>Use take ${n}</button>
-        <button type="button" class="take-approve btn btn-primary" data-take-approve aria-keyshortcuts="A"${attrs}>Approve</button>
-        <button type="button" class="take-reject btn btn-secondary" data-take-reject${attrs}>Redo</button>
-        <button type="button" class="btn btn-secondary" data-take-revert${attrs}>Revert</button>
-        ${previewActive ? `<button type="button" class="btn btn-secondary" data-take-clear-preview${attrs}>Preview selected take</button>` : ''}
-      </div>
-      <p class="take-hint">Approve or redo the take shown in the preview. Revert restores the previous selection.</p>
-    </div>
-  </section>`;
+    ${renderVerdictChips(state)}
+    ${note ? `<p class="take-active-note">Correction on take ${n}: ${escapeHtml(note)}</p>` : ''}
+    <p class="take-hint">Approve or redo the take shown in the preview. Revert restores the previous selection.</p>
+  </div>`;
+}
+
+/** The sticky header's clip picker. */
+function renderClipPicker(state: TakePanelState): string {
+  const current = state.clipId;
+  const known = state.clips.length > 0
+    ? state.clips
+    : (state.data?.clip ? [state.data.clip] : []);
+  const options = known.length > 0
+    ? known.map(clip => `<option value="${escapeHtml(clip.clipId)}"${clip.clipId === current ? ' selected' : ''}>${escapeHtml(clip.clipId)}${clip.slot ? ` · ${escapeHtml(clip.slot)}` : ''}</option>`).join('')
+    : `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)}</option>`;
+  return `<label class="take-clip-field field">
+    <span class="field-label">Clip</span>
+    <select class="field-control take-clip-picker" data-take-clip-picker aria-label="Clip">${options}</select>
+  </label>`;
+}
+
+/** The tab bar of the inspector body (ARIA tabs pattern). */
+function renderTabs(state: TakePanelState, prefix: string): string {
+  const tabs = TAKE_TABS.map(tab => {
+    const selected = state.tab === tab;
+    return `<button type="button" role="tab" class="tab" id="${prefix}-tab-${tab}" aria-controls="${prefix}-panel-${tab}" aria-selected="${selected ? 'true' : 'false'}" tabindex="${selected ? '0' : '-1'}" data-take-tab="${tab}">${escapeHtml(TAKE_TAB_LABELS[tab])}</button>`;
+  }).join('');
+  return `<div class="take-tabs" role="tablist" aria-label="Takes inspector sections" aria-orientation="horizontal" data-take-tabs>${tabs}</div>`;
+}
+
+/** One tab panel of the inspector body. Inactive panels stay in the DOM. */
+function renderTabPanel(prefix: string, state: TakePanelState, tab: TakeTab, body: string): string {
+  const selected = state.tab === tab;
+  return `<div role="tabpanel" class="take-tabpanel" id="${prefix}-panel-${tab}" aria-labelledby="${prefix}-tab-${tab}" data-take-tabpanel="${tab}" tabindex="0"${selected ? '' : ' hidden'}>${body}</div>`;
 }
 
 export function renderTakePanel(state: TakePanelState, options: RenderOptions = {}): string {
-  const prefix = options.idPrefix ?? 'take-panel';
+  const prefix = escapeHtml(options.idPrefix ?? 'take-panel');
   const takes = visibleTakes(state.data);
   const data = state.data;
   const clipState = clipStateLabel(data?.clip?.state);
-  const slot = textOf(data?.clip?.slot);
   const newTakes = finiteNumber(data?.clip?.newTakes) ?? 0;
   const countLabel = `${takes.length} take${takes.length === 1 ? '' : 's'}`;
   const statusClass = state.messageError ? 'take-status is-error' : 'take-status';
   const clipStateRaw = textOf(data?.clip?.state) || 'unknown';
   const clipStatus = clipStateRaw === 'rejected' ? 'redo' : clipStateRaw === 'review' || clipStateRaw === 'planned' || clipStateRaw === 'unknown' ? 'pending' : clipStateRaw;
   const clipTone = clipStateRaw === 'approved' ? 'ok' : clipStateRaw === 'rejected' || clipStateRaw === 'failed' ? 'danger' : clipStateRaw === 'generating' || clipStateRaw === 'queued' ? 'info' : 'warn';
-  const header = `<header class="take-head panel-header">
-    <div>
-      <h2 id="${escapeHtml(prefix)}-title" class="panel-header-title">Takes <span class="take-count badge" data-take-count aria-label="${countLabel}">${takes.length}</span></h2>
-      <p class="take-clip panel-header-meta">${escapeHtml(state.clipId)}${slot ? ` · ${escapeHtml(slot)}` : ''}</p>
+  const active = takes.find(take => take.takeId === activeTakeId(state));
+  const headerAttrs = state.busy || !active || active.purged ? ' disabled' : '';
+  const header = `<header class="take-head panel-header" data-take-header>
+    <div class="take-head-main">
+      ${renderClipPicker(state)}
+      <h2 id="${prefix}-title" class="panel-header-title take-title">Takes <span class="take-count badge" data-take-count aria-label="${countLabel}">${takes.length}</span></h2>
+      <div class="take-head-state">
+        <span class="take-state take-state-${escapeHtml(clipStateRaw)}" data-status="${escapeHtml(clipStatus)}" data-tone="${clipTone}" data-take-state>${escapeHtml(clipState)}</span>
+        ${newTakes > 0 ? `<span class="take-new badge badge-info" data-take-new data-status="pending">+${escapeHtml(newTakes)} new</span>` : ''}
+      </div>
     </div>
-    <div class="take-head-state">
-      <span class="take-state take-state-${escapeHtml(clipStateRaw)}" data-status="${escapeHtml(clipStatus)}" data-tone="${clipTone}" data-take-state>${escapeHtml(clipState)}</span>
-      ${newTakes > 0 ? `<span class="take-new badge badge-info" data-take-new data-status="pending">+${escapeHtml(newTakes)} new</span>` : ''}
+    <div class="take-head-actions">
+      <button type="button" class="btn btn-primary take-approve" data-take-approve aria-keyshortcuts="A"${headerAttrs}>Approve</button>
+      <button type="button" class="btn btn-secondary take-reject" data-take-reject aria-keyshortcuts="D"${headerAttrs}>Redo</button>
     </div>
   </header>`;
+  const tabs = renderTabs(state, prefix);
+  const panels = [
+    renderTabPanel(prefix, state, 'actions', renderActions(state)),
+    renderTabPanel(prefix, state, 'changes', renderDiff(state)),
+    renderTabPanel(prefix, state, 'correct', renderCorrectionForm(state)),
+    renderTabPanel(prefix, state, 'inputs', renderInputFields(state)),
+  ].join('');
   const body = !data && state.loading
     ? '<p class="take-empty" data-take-loading>Loading takes…</p>'
     : `${renderTakeStrip(state)}
-      ${renderVerdictChips(state)}
-      ${renderActions(state)}
-      ${renderDiff(state)}
-      ${renderCorrectionForm(state)}
-      ${renderApproval(state)}`;
-  return `<section class="take-panel" data-take-panel aria-labelledby="${escapeHtml(prefix)}-title"${state.busy ? ' aria-busy="true"' : ''}>
+      <form class="take-form" data-take-form aria-label="Correction">
+        ${tabs}
+        ${panels}
+      </form>`;
+  return `<section class="take-panel" data-take-panel aria-labelledby="${prefix}-title"${state.busy ? ' aria-busy="true"' : ''}>
     ${header}
     <p class="${statusClass}" data-take-status role="status" aria-live="polite">${escapeHtml(state.message)}</p>
+    ${renderApproval(state)}
     ${body}
-    <p class="take-keys" data-take-keys>Keyboard: <kbd>[</kbd> and <kbd>]</kbd> cycle takes, <kbd>A</kbd> approves the take in the preview.</p>
+    <p class="take-keys" data-take-keys>Keyboard: <kbd>[</kbd> and <kbd>]</kbd> cycle takes, <kbd>A</kbd> approves the take in the preview, <kbd>D</kbd> redoes it.</p>
   </section>`;
 }
 
@@ -1194,17 +1317,56 @@ export type TakePanelMountOptions = {
   backendId?: string;
   onPreview?: PreviewHandler;
   idPrefix?: string;
+  /** The clips the sticky header's clip picker offers. */
+  clips?: readonly ClipSummary[];
 };
 
 export type TakePanelHandle = {
   controller: TakePanelController;
   refresh(): Promise<TakePanelState>;
+  /** Replaces the clip list of the sticky header's clip picker. */
+  setClips(clips: readonly ClipSummary[]): void;
   destroy(): void;
 };
 
 function resolvePackageId(api: TakesApi, explicit: string | undefined): string {
   const value = textOf(explicit) || textOf((api as TakesApi & { packageId?: unknown }).packageId);
   return value.trim();
+}
+
+/**
+ * The hooks that keep the keyboard focus on the same control after a
+ * re-render. The panel re-renders as a whole, so the focus has to be put
+ * back by hand.
+ */
+const FOCUS_HOOKS: readonly string[] = [
+  'data-take-tab',
+  'data-take-preview',
+  'data-take-card-approve',
+  'data-take-card-redo',
+  'data-take-step',
+  'data-take-approve',
+  'data-take-reject',
+  'data-take-revert',
+  'data-take-select',
+  'data-take-clear-preview',
+  'data-take-regenerate',
+  'data-take-approve-spend',
+  'data-take-cancel-approval',
+  'data-take-clip-picker',
+  'data-field',
+  'data-input-field',
+];
+
+function focusKeyOf(element: HTMLElement | null): string | null {
+  if (!element || typeof element.closest !== 'function') return null;
+  for (const hook of FOCUS_HOOKS) {
+    const holder = element.closest<HTMLElement>(`[${hook}]`);
+    if (!holder) continue;
+    const value = holder.getAttribute(hook);
+    return value ? `[${hook}="${value.replace(/"/g, '\\"')}"]` : `[${hook}]`;
+  }
+  return null;
 }
 
 export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions): TakePanelHandle {
@@ -1218,9 +1380,19 @@ export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions):
     backendId: options.backendId,
     onPreview: options.onPreview,
   });
+  if (options.clips?.length) controller.setClips(options.clips);
 
+  let focusKey: string | null = null;
   const render = () => {
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (!focusKey && active instanceof HTMLElement && el.contains(active)) {
+      focusKey = focusKeyOf(active);
+    }
     el.innerHTML = renderTakePanel(controller.getState(), { idPrefix: prefix });
+    if (!focusKey) return;
+    const target = el.querySelector<HTMLElement>(focusKey);
+    focusKey = null;
+    if (target && typeof target.focus === 'function') target.focus();
   };
   render();
 
@@ -1245,10 +1417,15 @@ export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions):
     const target = event.target as HTMLElement | null;
     if (!target || typeof target.closest !== 'function') return;
     const action = target.closest<HTMLElement>(
-      '[data-take-preview],[data-take-step],[data-take-select],[data-take-approve],[data-take-reject],[data-take-revert],[data-take-clear-preview],[data-take-regenerate],[data-take-approve-spend],[data-take-cancel-approval],[data-take-card-approve],[data-take-card-redo]',
+      '[data-take-preview],[data-take-step],[data-take-select],[data-take-approve],[data-take-reject],[data-take-revert],[data-take-clear-preview],[data-take-regenerate],[data-take-approve-spend],[data-take-cancel-approval],[data-take-card-approve],[data-take-card-redo],[data-take-tab]',
     );
     if (!action || !el.contains(action)) return;
 
+    const tab = action.getAttribute('data-take-tab');
+    if (tab && isTakeTab(tab)) {
+      controller.setTab(tab);
+      return;
+    }
     const cardApprove = action.getAttribute('data-take-card-approve');
     if (cardApprove) {
       void controller.approve(cardApprove);
@@ -1299,6 +1476,10 @@ export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions):
   const onChange = (event: Event) => {
     const target = event.target as HTMLSelectElement | null;
     if (!target) return;
+    if (target.hasAttribute('data-take-clip-picker')) {
+      void controller.selectClip(target.value);
+      return;
+    }
     if (target.getAttribute('data-field') === 'seedMode') {
       controller.setSeedMode(target.value);
     }
@@ -1308,9 +1489,35 @@ export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions):
     event.preventDefault();
   };
 
+  /** ARIA tabs: arrow keys move between the tabs, Home and End jump. */
+  const onTabKeyDown = (event: KeyboardEvent) => {
+    const list = event.target instanceof HTMLElement
+      ? event.target.closest<HTMLElement>('[data-take-tabs]')
+      : null;
+    if (!list) return;
+    const tabs = Array.from(list.querySelectorAll<HTMLElement>('[role="tab"]'));
+    if (tabs.length === 0) return;
+    const current = Math.max(0, tabs.findIndex(tab => tab.getAttribute('aria-selected') === 'true'));
+    let next = -1;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (current + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (current - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    if (next < 0) return;
+    const target = tabs[next];
+    const name = target?.getAttribute('data-take-tab');
+    if (!target || !name || !isTakeTab(name)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    focusKey = `[data-take-tab="${name}"]`;
+    controller.setTab(name);
+  };
+
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (isEditable(event.target)) return;
+    const inTabs = event.target instanceof HTMLElement && Boolean(event.target.closest('[data-take-tabs]'));
+    if (inTabs) return;
     if (event.key === '[' || event.key === ']' || event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End') {
       const takes = controller.takes().filter(take => !take.purged);
       if (takes.length < 2) return;
@@ -1322,10 +1529,17 @@ export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions):
       controller.preview(take.takeId);
       return;
     }
-    if (event.key.toLowerCase() === 'a') {
+    const key = event.key.toLowerCase();
+    if (key === 'a') {
       if (!controller.activeTake()) return;
       event.preventDefault();
       void controller.approve();
+      return;
+    }
+    if (key === 'd') {
+      if (!controller.activeTake()) return;
+      event.preventDefault();
+      void controller.reject();
     }
   };
 
@@ -1333,12 +1547,14 @@ export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions):
   el.addEventListener('input', onInput);
   el.addEventListener('change', onChange);
   el.addEventListener('submit', onSubmit);
+  el.addEventListener('keydown', onTabKeyDown);
   el.addEventListener('keydown', onKeyDown);
   void controller.load();
 
   return {
     controller,
     refresh: () => controller.load(),
+    setClips: (clips: readonly ClipSummary[]) => controller.setClips(clips),
     destroy() {
       unsubscribe();
       controller.destroy();
@@ -1346,6 +1562,7 @@ export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions):
       el.removeEventListener('input', onInput);
       el.removeEventListener('change', onChange);
       el.removeEventListener('submit', onSubmit);
+      el.removeEventListener('keydown', onTabKeyDown);
       el.removeEventListener('keydown', onKeyDown);
       el.innerHTML = '';
     },

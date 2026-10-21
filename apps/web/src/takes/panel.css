@@ -1,15 +1,18 @@
 @import '../ui/tokens.css';
 @import '../ui/components.css';
 
-/* UO14: Takes review panel (PLAN section 5).
-   Calm, dense ComfyUI-like dark pro tool: borders over shadows, single indigo accent, no gradients/glows. */
+/* DN04: takes inspector (PLAN 3.5).
+   Sticky header (clip picker, status, approve/redo), a horizontal take strip
+   that is always open, and a tabbed body (Actions, Changes, Correct, Inputs).
+   Sections are flat: a hairline divider instead of a nested panel, no double
+   padding. Borders over shadows, one indigo accent, no gradients or glows. */
 
 .take-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--gap);
   min-width: 0;
-  padding: var(--space-4);
+  padding: var(--panel-padding);
   color: var(--text-1);
   background: var(--bg-1);
   border: var(--elevation-border-1);
@@ -35,12 +38,70 @@
   font-weight: var(--font-weight-600);
 }
 
+/* --------------------------------------------------------------------------
+   Sticky header: clip picker, status and the approve/redo pair stay visible
+   -------------------------------------------------------------------------- */
+
 .take-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--gap) var(--panel-padding);
+  background: var(--bg-1);
+  border-bottom: var(--elevation-border-1);
+}
+
+.take-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  min-width: 0;
+}
+
+.take-title {
+  white-space: nowrap;
+}
+
+.take-clip-field {
+  flex-direction: row;
+  gap: var(--gap);
+  align-items: center;
+  min-width: 0;
+}
+
+.take-clip-field .field-label {
+  white-space: nowrap;
+}
+
+.take-clip-picker {
+  width: auto;
+  min-width: 120px;
+  max-width: 240px;
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  text-overflow: ellipsis;
+}
+
+.take-head-state {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
+}
+
+.take-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  margin-left: auto;
 }
 
 .take-count {
@@ -56,20 +117,6 @@
   background: var(--bg-2);
   border: var(--elevation-border-1);
   border-radius: var(--radius-pill);
-}
-
-.take-clip {
-  margin: var(--space-1) 0 0;
-  color: var(--text-2);
-  font-size: var(--font-size-12);
-  overflow-wrap: anywhere;
-}
-
-.take-head-state {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
 }
 
 .take-state,
@@ -142,7 +189,7 @@
 }
 
 .take-keys kbd,
-kbd {
+.take-panel kbd {
   padding: 0 var(--space-1);
   font-family: var(--font-mono);
   font-size: var(--font-size-12);
@@ -152,17 +199,24 @@ kbd {
   border-radius: var(--radius-control);
 }
 
+/* --------------------------------------------------------------------------
+   Take strip: horizontal, always open, one line of cards
+   -------------------------------------------------------------------------- */
+
 .take-strip-wrap {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--gap);
+  min-width: 0;
+  padding-top: var(--gap);
+  border-top: var(--elevation-border-1);
 }
 
 .take-strip-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--gap);
 }
 
 .take-strip-nav {
@@ -172,8 +226,8 @@ kbd {
 }
 
 .take-step {
-  min-width: calc(var(--space-5) + var(--space-1));
-  min-height: calc(var(--space-5) + var(--space-1));
+  min-width: var(--target-min);
+  min-height: var(--control-height);
   padding: 0 var(--space-2);
   font-size: var(--font-size-15);
   line-height: 1;
@@ -187,23 +241,27 @@ kbd {
   text-align: center;
 }
 
-/* Card grid: one .panel per take */
 .take-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-6) * 6), 1fr));
-  gap: var(--space-3);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--gap);
   margin: 0;
-  padding: 0;
+  padding: 0 0 var(--gap);
   list-style: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .take-item {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
+  width: calc(var(--space-6) * 4.5);
   min-width: 0;
   background: var(--bg-1);
   border: var(--elevation-border-1);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-control);
   overflow: hidden;
   transition: border-color var(--transition-fast);
 }
@@ -218,20 +276,19 @@ kbd {
 
 .take-item.is-previewed {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
 }
 
 .take-item.is-purged {
   opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .take-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
   width: 100%;
-  padding: var(--space-2);
+  min-height: var(--target-min);
+  padding: var(--space-1) var(--space-2);
   color: var(--text-1);
   text-align: left;
   background: transparent;
@@ -254,9 +311,9 @@ kbd {
 .take-filmstrip {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
   width: 100%;
-  padding: var(--space-1);
+  padding: 2px;
   background: var(--bg-0);
   border: var(--elevation-border-1);
   border-radius: var(--radius-control);
@@ -265,7 +322,7 @@ kbd {
 
 .take-filmstrip-sprockets {
   display: block;
-  height: var(--space-1);
+  height: 2px;
   width: 100%;
   background: var(--border-subtle);
   border-radius: var(--radius-control);
@@ -274,16 +331,16 @@ kbd {
 
 .take-filmstrip-frames {
   display: flex;
-  gap: var(--space-1);
+  gap: 2px;
   align-items: stretch;
-  min-height: calc(var(--space-6) + var(--space-4));
+  min-height: calc(var(--space-6) + var(--space-2));
 }
 
 .take-frame {
   flex: 1 1 0;
   min-width: 0;
-  min-height: calc(var(--space-6) + var(--space-4));
-  padding: var(--space-1);
+  min-height: calc(var(--space-6) + var(--space-2));
+  padding: 2px;
   background: var(--bg-2);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
@@ -291,7 +348,8 @@ kbd {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
+  gap: 2px;
+  overflow: hidden;
 }
 
 .take-frame-marker {
@@ -325,7 +383,7 @@ kbd {
 .take-card-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
   min-width: 0;
 }
 
@@ -354,14 +412,15 @@ kbd {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2) var(--space-2);
+  margin-top: auto;
+  padding: var(--space-1) var(--space-2);
   border-top: var(--elevation-border-1);
   background: var(--bg-1);
 }
 
 .take-card-actions .btn {
   flex: 1 1 0;
-  min-height: calc(var(--space-5) + var(--space-1));
+  min-height: var(--control-height);
   font-size: var(--font-size-12);
 }
 
@@ -415,29 +474,101 @@ kbd {
   list-style: none;
 }
 
-.take-actions,
-.take-diff,
-.take-correction,
-.take-approval {
+/* --------------------------------------------------------------------------
+   Tabs and flat sections
+   -------------------------------------------------------------------------- */
+
+.take-form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  background: var(--bg-1);
-  border: var(--elevation-border-1);
-  border-radius: var(--radius-panel);
+  gap: var(--gap);
+  min-width: 0;
+  margin: 0;
+  border-top: var(--elevation-border-1);
+  padding-top: var(--gap);
+}
+
+.take-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--gap);
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border-bottom: var(--elevation-border-1);
+}
+
+.take-tabs .tab {
+  flex: 0 0 auto;
+  min-height: var(--control-height);
+  min-width: var(--target-min);
+  padding: var(--space-1) var(--space-3);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  white-space: nowrap;
+}
+
+.take-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+  padding-top: var(--gap);
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
+}
+
+.take-tabpanel[hidden] {
+  display: none;
+}
+
+.take-tabpanel:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.take-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+}
+
+.take-section + .take-section {
+  padding-top: var(--gap);
+  border-top: var(--elevation-border-1);
+}
+
+.take-section-title {
+  margin: 0;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  color: var(--text-1);
 }
 
 .take-action-row,
 .take-form-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--gap);
   align-items: center;
 }
 
+.take-active-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Controls
+   -------------------------------------------------------------------------- */
+
 .take-panel button {
-  min-height: var(--space-6);
+  min-height: var(--control-height);
   min-width: var(--target-min);
   padding: var(--space-1) var(--space-3);
   color: var(--text-1);
@@ -584,15 +715,15 @@ kbd {
 
 .take-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-6) * 5), 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: var(--gap);
 }
 
 .take-panel input,
 .take-panel select,
 .take-panel textarea {
   width: 100%;
-  min-height: var(--space-6);
+  min-height: var(--control-height);
   padding: var(--space-1) var(--space-2);
   color: var(--text-1);
   font: inherit;
@@ -620,26 +751,27 @@ kbd {
   font-variant-numeric: var(--tabular-nums);
 }
 
-.take-inputs {
-  padding: var(--space-2);
-  border: var(--elevation-border-1);
-  border-radius: var(--radius-control);
-  background: var(--bg-2);
-}
-
-.take-inputs summary {
-  color: var(--text-2);
-  font-size: var(--font-size-12);
-  cursor: pointer;
-}
-
-.take-inputs[open] summary {
-  margin-bottom: var(--space-2);
-}
+/* --------------------------------------------------------------------------
+   Spend approval: an inline banner, shown only while it is needed
+   -------------------------------------------------------------------------- */
 
 .take-approval {
-  border-color: var(--warn-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--gap) var(--panel-padding);
   background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-control);
+}
+
+.take-approval-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .take-estimate {
