@@ -12,6 +12,7 @@ import wave
 
 import numpy as np
 from PIL import Image
+from nrcu_shot_conditioning import speech_prompt, write_conditioning
 
 STYLE='Cinematic painterly 2.5D animated film, teal shadows and amber practical lights, coherent bodies and objects. Single landscape film frame. No lettering, captions, logos, collage or extra characters. '
 DESIGN={
@@ -124,9 +125,13 @@ def main():
         keys.append({'id':sid,'title':title,'refs':[] if sid in ['a14','a16'] else [f'refs/assets/{x}.png' for x in names],'prompt':prompt})
         source=max(5,seconds,6 if len(line.split())>7 else 5);frames=source*24;frames+=(5-frames%17)%17
         voice={'don':'Preserve the written broken English exactly; earnest, cheeky bass-baritone. ', 'molty':'Deep gravelly bass, cold contempt, mocking and menacing, never friendly. ', 'hermes':'Dry precise disembodied male computer voice; no face or mouth in this shot. ', 'witcheer':'Sly, brisk, amused merchant voice. ', 'sidbin':'Quiet low voice with urgent measured delivery. '}.get(speaker,'')
-        speech=(f'Use <Audio 1> for voice identity only, not its words. {voice}The only spoken words are: "{line}" Start at 0.25 seconds, finish before {source-.35:.2f} seconds, then remain silent. ' if line else 'No speech, narration or vocalizations. Mouths stay closed. ')
+        speech=voice+speech_prompt({'line':line,'speaker':speaker,'seconds':seconds})
+        conditioning=f'refs/dialogue/{sid}.wav' if line else 'refs/silence.wav'
+        conditioning_seconds=None
+        if line:
+            _,conditioning_seconds=write_conditioning(k,registry[speaker],line,root/conditioning)
         vp='Single continuous animated film shot. Both pictures show the SAME scene and same characters, never additional figures. '+action+' '+speech+'Preserve exact character count, costumes, anatomy, objects and solid contact. Quiet relevant location sound. No music, titles, captions, written text, cuts or extra people.'
-        shots.append({'id':sid,'title':title,'start':cursor,'seconds':seconds,'sourceSeconds':source,'frames':frames,'fps':24,'width':1344,'height':768,'seed':2026102200+len(shots),'speaker':speaker,'line':line,'action':action,'prompt':vp,'image':f'refs/keyframes/{sid}.png','reference':f'refs/keyframes/{sid}.png','audio':f'refs/{speaker or "silence"}.wav','section':'opening' if sid.startswith('a') else 'repair' if sid.startswith('b') else 'aftermath' if sid.startswith('c') else 'archive'})
+        shots.append({'id':sid,'title':title,'start':cursor,'seconds':seconds,'sourceSeconds':source,'frames':frames,'fps':24,'width':1344,'height':768,'seed':2026102200+len(shots),'speaker':speaker,'line':line,'action':action,'prompt':vp,'image':f'refs/keyframes/{sid}.png','reference':f'refs/keyframes/{sid}.png','audio':conditioning,'conditioningSeconds':conditioning_seconds,'conditioningFitsSlot':conditioning_seconds is None or conditioning_seconds<=seconds,'section':'opening' if sid.startswith('a') else 'repair' if sid.startswith('b') else 'aftermath' if sid.startswith('c') else 'archive'})
         cursor+=seconds
     for row in OPENING:new(row)
     previous=json.loads((recut/'film.json').read_text());prior_overrides=json.loads((recut/'review-overrides.json').read_text())

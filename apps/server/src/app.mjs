@@ -11,6 +11,7 @@ import { createExporter } from './export.mjs';
 import { buildVariants } from './variant.mjs';
 import { buildDataset } from './dataset.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
+import { mergeRunMedia, changedRunMedia } from './run-media-merge.mjs';
 import { loadAssetWorkflow } from './workflow.mjs';
 import { runFrameQa, createQaRegistry } from './qa.mjs';
 import { sceneAssetIds, sceneJobsPlan } from './scene.mjs';
@@ -186,7 +187,7 @@ export function createApp({
           const staged = readJsonFile(join(record.workDir, 'package.json'));
           const pkg = staged?.id ? store.read(staged.id) : null;
           if (pkg) {
-            const ingested = ingestRun({ pkg, manifest: event.event.manifest,
+            const ingested = ingestRun({ pkg: staged, manifest: event.event.manifest,
               jobsDoc: readJsonFile(join(record.workDir, 'jobs.json')), outputDir: event.event.outputDir,
               store: takeStore, runId: event.runId, backend: record.backendId });
             for (const take of ingested.takes) publishEntry({ type: 'clip.take.landed', packageId: pkg.id,
@@ -278,16 +279,24 @@ export function createApp({
       }
       return { revision: saved.revision, render: null };
     }
-    if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
+    const current = store.read(id);
+    const merged = mergeRunMedia({ staged: pkg, current, generated: result.package });
+    // Snapshot all finished full-run outputs as takes too: interruption must not
+    // strand generated footage outside the review UI.
+    if (result.manifest?.jobs) {
+      const ingested = ingestRun({ pkg, manifest: result.manifest, jobsDoc: result.jobsDoc,
+        outputDir: record.outputDir, store: takeStore, runId: record.runId, backend: record.backendId });
+      for (const take of ingested.takes) events.publish({ type: 'clip.take.landed', packageId: id,
+        assetId: take.assetId, takeId: take.takeId, runId: record.runId });
+    }
     // G5-10: the applied package can also name files outside `assets/` (the runner's
     // non-upscaled plates live at `out/intermediates/<id>.plate.mp4`), so copy every path it
     // names — otherwise the renderer falls back to placeholders.
-    const copied = copyNamedAssets({ pkg: result.package, outputDir: record.outputDir, packageDir });
+    const copied = copyNamedAssets({ pkg: changedRunMedia(current, merged), outputDir: record.outputDir, packageDir });
     if (copied.length) {
       events.publish({ type: 'run.log', runId: record.runId, line: `collected ${copied.length} package file(s): ${copied.join(', ')}` });
     }
-    const current = store.read(id);
-    const saved = current ? store.save(id, result.package, pkg.revision) : store.write(result.package);
+    const saved = current ? store.save(id, merged, current.revision) : store.write(merged);
     events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
     // A partial run keeps its finished plates (H8 already applied them), but there is nothing
     // honest to render when the manifest says the run did not complete.

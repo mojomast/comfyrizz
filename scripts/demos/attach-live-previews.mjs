@@ -26,8 +26,7 @@ const collector = createLivePreviewCollector({
     await execute(resolveColabBinary().bin, argvDownload({ session, remotePath: remote, localPath: local }), { timeout: 60000, maxBuffer: 1024 * 1024 });
   },
   onReady: ({ manifest, outputDir }) => {
-    const pkg = readJson(join(runtimeDir, 'packages', `${staged.id}.json`));
-    const result = ingestRun({ pkg, manifest, jobsDoc, outputDir, store, runId, backend: 'colab' });
+    const result = ingestRun({ pkg: staged, manifest, jobsDoc, outputDir, store, runId, backend: 'colab' });
     if (result.failed.length) throw Error(result.failed.map(item => item.error).join('; '));
     console.log(JSON.stringify({ at: new Date().toISOString(), landed: result.takes.map(take => take.assetId) }));
   },

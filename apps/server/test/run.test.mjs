@@ -182,6 +182,48 @@ test('a verified live preview lands before run completion without changing the e
   } finally { release(); app.close(); rmSync(runtime, { recursive: true, force: true }); }
 });
 
+test('full-run completion preserves intervening timeline edits and existing file bytes', async () => {
+  let release, entered;
+  const startedWork = new Promise(resolve => { entered = resolve; });
+  const held = new Promise(resolve => { release = resolve; });
+  const factory = async id => ({ id, describe: async () => ({ costVisibility: 'external-unknown' }),
+    async runPackage(pkg, opts) {
+      const jobsDoc = { jobs: [{ id: 'a_live.still', kind: 'still', generator: 'flux3-klein', dims: { width: 16, height: 16 } }] };
+      if (opts.dryRun) return { jobsDoc, estimate: { gpuMinutes: 0, overheadMinutes: 0 } };
+      entered(); await held;
+      mkdirSync(join(opts.outDir, 'assets'), { recursive: true });
+      writeFileSync(join(opts.outDir, 'assets/a_live.png'), 'new output');
+      writeFileSync(join(opts.outDir, pkg.assets.a_icon_check.file), 'must not overwrite the original');
+      const generated = structuredClone(pkg);
+      generated.assets.a_live = { ...generated.assets.a_live, status: 'ready', file: 'assets/a_live.png',
+        sha256: createHash('sha256').update('new output').digest('hex'), bytes: 10, license: { id: 'CC0-1.0' }, model_license: { id: 'Apache-2.0' }, redistributable: true };
+      return { package: generated, ok: true, jobsDoc, manifest: { complete: true, jobs: [] }, teardown: { state: 'stopped' } };
+    },
+  });
+  const { app, runtime } = makeApp({ factory });
+  try {
+    const pkg = fixturePackage();
+    pkg.assets.a_live = { kind: 'image', origin: 'generated', status: 'pending', gen: { generator: 'flux3-klein', inputs: { prompt: 'test' } } };
+    app.store.write(pkg);
+    mkdirSync(join(runtime, 'packages/assets'), { recursive: true });
+    const original = join(runtime, 'packages', pkg.assets.a_icon_check.file);
+    writeFileSync(original, 'owner bytes');
+    const started = await app.runs.start({ backendId: 'byo-comfyui', pkg });
+    await startedWork;
+    const edited = structuredClone(pkg);
+    edited.scenes[0].preferredFrames += 24;
+    app.store.save(pkg.id, edited, pkg.revision);
+    release();
+    const finished = await app.runs.wait(started.runId);
+    assert.equal(finished.status, 'done', finished.renderError ?? JSON.stringify(finished.events));
+    const saved = app.store.read(pkg.id);
+    assert.equal(saved.scenes[0].preferredFrames, edited.scenes[0].preferredFrames);
+    assert.equal(saved.assets.a_live.status, 'ready');
+    assert.equal(readFileSync(original, 'utf8'), 'owner bytes');
+    assert.equal(readFileSync(join(runtime, 'packages/assets/a_live.png'), 'utf8'), 'new output');
+  } finally { release(); app.close(); rmSync(runtime, { recursive: true, force: true }); }
+});
+
 test('an unconfirmed stop is surfaced honestly', async () => {
   const factory = async (id) => fakeBackend(id, { teardownState: 'stop_unconfirmed' });
   const { app, runtime } = makeApp({ factory });

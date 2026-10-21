@@ -2,14 +2,17 @@
 
 ## Status
 
-The user-started run `run_e73e113be46f` is generating on Colab session
-`comfyrizz-nrcu_episode2`. All 53 still jobs completed; FastH3 video generation
-is in progress. Earlier allocation failures were overcome. Spending must be
-reconciled after teardown; the earlier 326.34-credit balance predates this run.
+The user requested a stop for accuracy review. Run `run_e73e113be46f` has stopped;
+Colab reports zero sessions/assignments and zero usage rate. All 53 stills and 28
+video takes are preserved locally. The review found dialogue contamination,
+timing problems and visual mismatches: **do not resume the old plan unchanged**.
+See [the stopped-run review](NRCU_EPISODE_TWO_REVIEW.md).
 
 The user selected the full four-minute episode and authorized up to **14.5 credits**
 for this render, increasing the combined ceiling to **34.70 credits**. Previous
-combined spending before this run was **20.20 credits**.
+combined spending before this run was **20.20 credits**. The observed balance
+delta is **4.88**, leaving **9.62 credits** of episode authorization; the live
+budget-default sidecar reflects that remaining ceiling.
 
 ### Incremental timeline previews
 
@@ -23,10 +26,9 @@ to recover missed events. Final collection remains the authoritative run verdict
 
 The active server was not restarted to install the backend changes. For this
 already-running episode, `scripts/demos/attach-live-previews.mjs` uses the same
-verified collector and take store. One attached process is running; its log is
-`live-previews.log` in the production root. It exits when generation ends. Do not
-start a duplicate or restart the main server during this run. Future runs use the
-built-in backend integration after a normal server restart.
+verified collector and take store. The attachment is now stopped; its log is
+`live-previews.log` in the production root. Future runs use the built-in backend
+integration after a normal server restart.
 
 Attachment command for an existing run (only when no attachment is running):
 

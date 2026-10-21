@@ -318,6 +318,9 @@ export function createTakeStore(options = {}) {
     };
     if (isPlainObject(input.correction)) take.correction = clone(input.correction);
     if (typeof input.runId === 'string' && input.runId) take.runId = input.runId;
+    if (typeof input.sourceGenFingerprint === 'string' && SHA256_RE.test(input.sourceGenFingerprint)) {
+      take.sourceGenFingerprint = input.sourceGenFingerprint.toLowerCase();
+    }
     if (typeof input.verdictNote === 'string') take.verdictNote = input.verdictNote;
 
     copyTake(pkgId, assetId, takeId, ext, bytes);

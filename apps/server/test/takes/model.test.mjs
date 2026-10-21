@@ -20,6 +20,16 @@ const TAKE_ID = `tk_${SHA.slice(0, 12)}`;
 
 const clone = value => JSON.parse(JSON.stringify(value));
 
+test('resolved job filenames do not make a newly landed take stale, but owner prompt edits do', () => {
+  const authored = { inputs: { image: 'a_keyframe', audio: 'a_voice', prompt: 'Say hello.' } };
+  const resolved = { inputs: { image: 'assets/keyframe.png', audio: 'assets/voice.wav', prompt: 'Say hello.', width: 1344 }, prompt: 'Say hello.' };
+  const take = makeTake({ gen: resolved, sourceGenFingerprint: genFingerprint(authored), verdict: 'unreviewed' });
+  const takes = { selected: take.takeId, takes: [take] };
+  assert.equal(deriveClipState({ takes, assetGen: authored }), 'review');
+  assert.equal(deriveClipState({ takes, assetGen: resolved }), 'review');
+  assert.equal(deriveClipState({ takes, assetGen: { inputs: { ...authored.inputs, prompt: 'Say goodbye.' } } }), 'stale');
+});
+
 function makeTake(overrides = {}) {
   return {
     takeId: TAKE_ID,
