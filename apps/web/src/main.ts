@@ -1775,6 +1775,7 @@ function init(opened: OpenedProject): void {
       togglePlay() {
         player?.toggle();
       },
+      clips: clipStore,
     });
   }
   let boundPlayer: PlayerRef | null = null;

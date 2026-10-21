@@ -277,9 +277,8 @@ test('s3 shows two takes for A/B review and approving take 2 unlocks the render 
   await expect(bar.locator('[data-render-open-override]')).toHaveText('Render anyway');
   await expect(bar.locator('[data-render-run]')).toHaveCount(0);
 
-  // The timeline's clip chip needs main.ts to pass the clips map into the
-  // react timeline (it does not in this branch), so the render bar's blocker
-  // row is the surface that names the same clip state.
+  const s3Chip = page.locator('[data-testid="scene"][data-scene-id="s3_juno"] [data-testid="clip-chip"]');
+  await expect(s3Chip).toHaveAttribute('data-state', 'review');
   const s3Blocker = bar.locator('[data-render-blocker]');
   await expect(s3Blocker).toHaveCount(1);
   await expect(s3Blocker).toContainText('s3_juno');
