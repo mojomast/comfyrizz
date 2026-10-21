@@ -1,6 +1,6 @@
 # CHARACTER_CREATOR: define a video's characters once, reuse them everywhere
 
-Status: **plan, awaiting Kyle's approval** (2026-10-20). Branch `feat/character-creator` (from main 06339ce), orchestration feature `CHARACTER-CREATOR`, tasks CC01-CC18 (all `planned`, none dispatched, nothing on the board). Hackathon due 2026-10-30 12:00 PM Toronto.
+Status: **approved by Kyle 2026-10-20** (recommended defaults, see "Resolved decisions"). Branch `feat/character-creator` (from main 06339ce), orchestration feature `CHARACTER-CREATOR`, tasks CC01-CC18 on the board; CC14-CC18 gated on feat/timeline-review merging to main. Hackathon due 2026-10-30 12:00 PM Toronto.
 
 ## Resolved decisions (Kyle, 2026-10-20)
 
