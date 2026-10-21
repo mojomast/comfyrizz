@@ -110,6 +110,6 @@ export default defineConfig({
   preview: { host: '127.0.0.1', port: 4173 },
   build: {
     target: 'es2022',
-    rollupOptions: { input: { main: 'index.html', demo: 'demo.html' } },
+    rollupOptions: { input: { main: 'index.html', demo: 'demo.html', 'ui-kit': 'ui-kit.html' } },
   },
 });

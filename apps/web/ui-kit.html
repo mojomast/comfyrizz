@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Comfyrizz — UI component kit</title>
+    <link rel="stylesheet" href="/src/ui/tokens.css" />
+    <link rel="stylesheet" href="/src/ui/components.css" />
+  </head>
+  <body class="ui-kit-body">
+    <header class="ui-kit-header">
+      <div>
+        <h1 class="ui-kit-title">Comfyrizz UI component kit</h1>
+        <p class="ui-kit-subtitle">Token-driven class contracts across default, hover, focus, disabled and error states.</p>
+      </div>
+      <div class="ui-kit-row">
+        <span class="badge badge-info" data-tone="info">UO03 reference</span>
+        <span class="chip chip-cc0" data-licence="cc0">CC0 ready</span>
+      </div>
+    </header>
+
+    <nav class="ui-kit-nav" aria-label="Component sections">
+      <a class="btn btn-ghost btn-sm" href="#section-btn">Buttons</a>
+      <a class="btn btn-ghost btn-sm" href="#section-panel">Panels &amp; toolbars</a>
+      <a class="btn btn-ghost btn-sm" href="#section-field">Fields</a>
+      <a class="btn btn-ghost btn-sm" href="#section-chip">Chips &amp; badges</a>
+      <a class="btn btn-ghost btn-sm" href="#section-tabs">Tabs</a>
+      <a class="btn btn-ghost btn-sm" href="#section-overlays">Drawer &amp; popover</a>
+      <a class="btn btn-ghost btn-sm" href="#section-empty">Empty state</a>
+      <a class="btn btn-ghost btn-sm" href="#section-meters">Progress &amp; gauge</a>
+      <a class="btn btn-ghost btn-sm" href="#section-feedback">Keyboard &amp; toast</a>
+    </nav>
+
+    <main id="main-content" class="ui-kit-main">
+      <!-- 1. Buttons -->
+      <section id="section-btn" class="ui-kit-section" aria-labelledby="heading-btn" data-component="btn">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-btn" class="ui-kit-section-title">Buttons (.btn)</h2>
+          <p class="ui-kit-section-desc">Variants: primary, secondary, ghost, danger · Sizes: sm (28), md (32) · Icon button (&gt;= 28)</p>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Primary (.btn-primary)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <button type="button" class="btn btn-primary btn--primary primary btn-md" data-variant="primary" data-size="md">Export MP4</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <button type="button" class="btn btn-primary btn--primary primary btn-md is-hover" data-variant="primary" data-size="md">Export MP4</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <button type="button" class="btn btn-primary btn--primary primary btn-md is-focus" data-variant="primary" data-size="md">Export MP4</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <button type="button" class="btn btn-primary btn--primary primary btn-md is-disabled" data-variant="primary" data-size="md" disabled>Export MP4</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <button type="button" class="btn btn-primary btn--primary primary btn-md is-error" data-variant="primary" data-size="md" data-state="error">Export failed</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Secondary (.btn-secondary)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <button type="button" class="btn btn-secondary btn--secondary secondary btn-md" data-variant="secondary" data-size="md">Run on Google Colab</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <button type="button" class="btn btn-secondary btn--secondary secondary btn-md is-hover" data-variant="secondary" data-size="md">Run on Google Colab</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <button type="button" class="btn btn-secondary btn--secondary secondary btn-md is-focus" data-variant="secondary" data-size="md">Run on Google Colab</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <button type="button" class="btn btn-secondary btn--secondary secondary btn-md is-disabled" data-variant="secondary" data-size="md" disabled>Run on Google Colab</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <button type="button" class="btn btn-secondary btn--secondary secondary btn-md is-error" data-variant="secondary" data-size="md" data-state="error">Retry Google Colab</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Ghost (.btn-ghost)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <button type="button" class="btn btn-ghost btn--ghost ghost btn-md" data-variant="ghost" data-size="md">Reset view</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <button type="button" class="btn btn-ghost btn--ghost ghost btn-md is-hover" data-variant="ghost" data-size="md">Reset view</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <button type="button" class="btn btn-ghost btn--ghost ghost btn-md is-focus" data-variant="ghost" data-size="md">Reset view</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <button type="button" class="btn btn-ghost btn--ghost ghost btn-md is-disabled" data-variant="ghost" data-size="md" disabled>Reset view</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <button type="button" class="btn btn-ghost btn--ghost ghost btn-md is-error" data-variant="ghost" data-size="md" data-state="error">Reset error</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Danger (.btn-danger)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <button type="button" class="btn btn-danger btn--danger danger btn-md" data-variant="danger" data-size="md">Delete take</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <button type="button" class="btn btn-danger btn--danger danger btn-md is-hover" data-variant="danger" data-size="md">Delete take</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <button type="button" class="btn btn-danger btn--danger danger btn-md is-focus" data-variant="danger" data-size="md">Delete take</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <button type="button" class="btn btn-danger btn--danger danger btn-md is-disabled" data-variant="danger" data-size="md" disabled>Delete take</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <button type="button" class="btn btn-danger btn--danger danger btn-md is-error" data-variant="danger" data-size="md" data-state="error">Delete failed</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Sizes (.btn-sm, .btn-md) and icon buttons (.btn-icon)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default (sm / md / icon)</span>
+              <div class="ui-kit-row">
+                <button type="button" class="btn btn-secondary btn-sm btn--sm sm" data-size="sm">Small 28</button>
+                <button type="button" class="btn btn-secondary btn-md btn--md md" data-size="md">Medium 32</button>
+                <button type="button" class="btn btn-secondary btn-icon btn--icon icon btn-sm" data-icon="true" data-size="sm" aria-label="Play clip">▶</button>
+                <button type="button" class="btn btn-secondary btn-icon btn--icon icon btn-md" data-icon="true" data-size="md" aria-label="Close panel">✕</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <div class="ui-kit-row">
+                <button type="button" class="btn btn-secondary btn-sm btn--sm sm is-hover" data-size="sm">Small 28</button>
+                <button type="button" class="btn btn-secondary btn-icon btn--icon icon is-hover" data-icon="true" aria-label="Close panel hover">✕</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <div class="ui-kit-row">
+                <button type="button" class="btn btn-secondary btn-sm btn--sm sm is-focus" data-size="sm">Small 28</button>
+                <button type="button" class="btn btn-secondary btn-icon btn--icon icon is-focus" data-icon="true" aria-label="Close panel focus">✕</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <div class="ui-kit-row">
+                <button type="button" class="btn btn-secondary btn-sm btn--sm sm is-disabled" data-size="sm" disabled>Small 28</button>
+                <button type="button" class="btn btn-secondary btn-icon btn--icon icon is-disabled" data-icon="true" aria-label="Close panel disabled" disabled>✕</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <div class="ui-kit-row">
+                <button type="button" class="btn btn-secondary btn-sm btn--sm sm is-error" data-size="sm" data-state="error">Small 28</button>
+                <button type="button" class="btn btn-secondary btn-icon btn--icon icon is-error" data-icon="true" data-state="error" aria-label="Close panel error">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Panels, Panel Headers, Toolbars -->
+      <section id="section-panel" class="ui-kit-section" aria-labelledby="heading-panel" data-component="panel">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-panel" class="ui-kit-section-title">Panels, panel headers &amp; toolbars (.panel, .panel-header, .toolbar)</h2>
+          <p class="ui-kit-section-desc">Surface containers with 10 radius for panels and 6 radius for controls.</p>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Panel &amp; panel header (.panel, .panel-header)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <div class="panel">
+                <div class="panel-header">
+                  <span class="panel-header-title">Storyboard</span>
+                  <span class="panel-header-meta">3 scenes</span>
+                </div>
+                <div class="panel-body">Compiled timeline ready for instant preview.</div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <div class="panel is-hover">
+                <div class="panel-header is-hover">
+                  <span class="panel-header-title">Storyboard</span>
+                  <span class="panel-header-meta">hovered</span>
+                </div>
+                <div class="panel-body">Panel and header in hover state.</div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <div class="panel is-focus" tabindex="0">
+                <div class="panel-header is-focus">
+                  <span class="panel-header-title">Storyboard</span>
+                  <span class="panel-header-meta">focused</span>
+                </div>
+                <div class="panel-body">Panel and header with visible accent focus ring.</div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <div class="panel is-disabled" aria-disabled="true">
+                <div class="panel-header is-disabled" aria-disabled="true">
+                  <span class="panel-header-title">Storyboard</span>
+                  <span class="panel-header-meta">locked</span>
+                </div>
+                <div class="panel-body">Disabled while Google Colab render finishes.</div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <div class="panel is-error" data-state="error">
+                <div class="panel-header is-error" data-state="error">
+                  <span class="panel-header-title">Storyboard</span>
+                  <span class="panel-header-meta">invalid</span>
+                </div>
+                <div class="panel-body">Scene timing conflicts with narration track.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Toolbar (.toolbar)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <div class="toolbar" role="toolbar" aria-label="Timeline actions default">
+                <button type="button" class="btn btn-secondary btn-sm">Split</button>
+                <button type="button" class="btn btn-ghost btn-sm">Undo</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <div class="toolbar is-hover" role="toolbar" aria-label="Timeline actions hover">
+                <button type="button" class="btn btn-secondary btn-sm is-hover">Split</button>
+                <button type="button" class="btn btn-ghost btn-sm">Undo</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <div class="toolbar is-focus" role="toolbar" aria-label="Timeline actions focus">
+                <button type="button" class="btn btn-secondary btn-sm is-focus">Split</button>
+                <button type="button" class="btn btn-ghost btn-sm">Undo</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <div class="toolbar is-disabled" role="toolbar" aria-label="Timeline actions disabled" aria-disabled="true">
+                <button type="button" class="btn btn-secondary btn-sm is-disabled" disabled>Split</button>
+                <button type="button" class="btn btn-ghost btn-sm is-disabled" disabled>Undo</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <div class="toolbar is-error" role="toolbar" aria-label="Timeline actions error" data-state="error">
+                <span>Timeline sync failed</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Form Fields -->
+      <section id="section-field" class="ui-kit-section" aria-labelledby="heading-field" data-component="field">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-field" class="ui-kit-section-title">Fields (.field)</h2>
+          <p class="ui-kit-section-desc">Label (.field-label), control (.field-control: input, select, textarea) and hint (.field-hint).</p>
+        </div>
+
+        <div class="ui-kit-states">
+          <div class="ui-kit-state-cell" data-state="default">
+            <span class="ui-kit-state-label">default</span>
+            <div class="field">
+              <label class="field-label" for="kit-field-default">Scene headline</label>
+              <input id="kit-field-default" class="field-control" type="text" value="Open weights motion pipeline" />
+              <span class="field-hint">Shown in the lower-third title card.</span>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="hover">
+            <span class="ui-kit-state-label">hover (.is-hover)</span>
+            <div class="field is-hover">
+              <label class="field-label" for="kit-field-hover">Compute backend</label>
+              <select id="kit-field-hover" class="field-control is-hover">
+                <option value="cpu">CPU · no network</option>
+                <option value="colab">Google Colab G4</option>
+              </select>
+              <span class="field-hint">Select where GPU jobs execute.</span>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="focus">
+            <span class="ui-kit-state-label">focus (.is-focus)</span>
+            <div class="field is-focus">
+              <label class="field-label" for="kit-field-focus">Prompt brief</label>
+              <textarea id="kit-field-focus" class="field-control is-focus" rows="2">Explain the frame budget clearly.</textarea>
+              <span class="field-hint">Press Enter to update scene copy.</span>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="disabled">
+            <span class="ui-kit-state-label">disabled</span>
+            <div class="field is-disabled" aria-disabled="true">
+              <label class="field-label" for="kit-field-disabled">Agent model</label>
+              <input id="kit-field-disabled" class="field-control is-disabled" type="text" value="scripted" disabled />
+              <span class="field-hint">Choose an LLM provider to unlock.</span>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="error">
+            <span class="ui-kit-state-label">error (.is-error)</span>
+            <div class="field is-error" data-state="error">
+              <label class="field-label" for="kit-field-error">Google Colab budget</label>
+              <input id="kit-field-error" class="field-control is-error" type="number" value="-5" aria-invalid="true" aria-describedby="kit-field-error-hint" />
+              <span id="kit-field-error-hint" class="field-hint field-error">Budget must be zero or greater.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Chips & Badges -->
+      <section id="section-chip" class="ui-kit-section" aria-labelledby="heading-chip" data-component="chip-badge">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-chip" class="ui-kit-section-title">Chips (.chip) &amp; badges (.badge)</h2>
+          <p class="ui-kit-section-desc">Licence chips (CC0, PDM, MIT, CC-BY, CC-BY-SA, CC-BY-NC, CC-BY-ND, upload, blocked) and semantic badges.</p>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Licence &amp; status chips (.chip)</h3>
+          <div class="ui-kit-row">
+            <span class="chip chip-cc0" data-licence="cc0">CC0</span>
+            <span class="chip chip-pdm" data-licence="pdm">PDM</span>
+            <span class="chip chip-mit" data-licence="mit">MIT</span>
+            <span class="chip chip-cc-by" data-licence="cc-by">CC-BY</span>
+            <span class="chip chip-cc-by-sa" data-licence="cc-by-sa">CC-BY-SA</span>
+            <span class="chip chip-cc-by-nc" data-licence="cc-by-nc">CC-BY-NC</span>
+            <span class="chip chip-cc-by-nd" data-licence="cc-by-nd">CC-BY-ND</span>
+            <span class="chip chip-upload" data-licence="upload">Upload</span>
+            <span class="chip chip-blocked" data-licence="blocked">Blocked</span>
+          </div>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <button type="button" class="chip chip-ok" data-tone="ok">Tighten pacing</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <button type="button" class="chip chip-ok is-hover" data-tone="ok">Tighten pacing</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <button type="button" class="chip chip-ok is-focus" data-tone="ok">Tighten pacing</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <button type="button" class="chip is-disabled" disabled>Tighten pacing</button>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <button type="button" class="chip chip-danger is-error" data-tone="danger" data-state="error">Licence missing</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Badges (.badge)</h3>
+          <div class="ui-kit-row">
+            <span class="badge">open weights</span>
+            <span class="badge badge-ok" data-tone="ok">Saved</span>
+            <span class="badge badge-warn" data-tone="warn">Stale audio</span>
+            <span class="badge badge-danger" data-tone="danger">Blocked</span>
+            <span class="badge badge-info" data-tone="info">Google Colab G4</span>
+          </div>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <span class="badge badge-ok" data-tone="ok">Verified receipt</span>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <span class="badge badge-ok is-hover" data-tone="ok">Verified receipt</span>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <span class="badge badge-ok is-focus" tabindex="0" data-tone="ok">Verified receipt</span>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <span class="badge is-disabled" aria-disabled="true">Unverified</span>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <span class="badge badge-danger is-error" data-tone="danger" data-state="error">Receipt rejected</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. Tabs -->
+      <section id="section-tabs" class="ui-kit-section" aria-labelledby="heading-tabs" data-component="tabs">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-tabs" class="ui-kit-section-title">Tabs (.tabs, role="tablist" / role="tab")</h2>
+          <p class="ui-kit-section-desc">Accessible tablist and tab buttons across all interaction states.</p>
+        </div>
+
+        <div class="ui-kit-states">
+          <div class="ui-kit-state-cell" data-state="default">
+            <span class="ui-kit-state-label">default</span>
+            <div class="tabs" role="tablist" aria-label="Workspace view default">
+              <button type="button" class="tab is-active" role="tab" id="tab-default-1" aria-selected="true" aria-controls="tabpanel-default-1">Storyboard</button>
+              <button type="button" class="tab" role="tab" id="tab-default-2" aria-selected="false">Timeline</button>
+            </div>
+            <div id="tabpanel-default-1" class="tab-panel" role="tabpanel" aria-labelledby="tab-default-1">Active storyboard panel content.</div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="hover">
+            <span class="ui-kit-state-label">hover (.is-hover)</span>
+            <div class="tabs" role="tablist" aria-label="Workspace view hover">
+              <button type="button" class="tab is-hover" role="tab" aria-selected="true">Storyboard</button>
+              <button type="button" class="tab is-hover" role="tab" aria-selected="false">Timeline</button>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="focus">
+            <span class="ui-kit-state-label">focus (.is-focus)</span>
+            <div class="tabs" role="tablist" aria-label="Workspace view focus">
+              <button type="button" class="tab is-focus" role="tab" aria-selected="true">Storyboard</button>
+              <button type="button" class="tab" role="tab" aria-selected="false">Timeline</button>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="disabled">
+            <span class="ui-kit-state-label">disabled</span>
+            <div class="tabs is-disabled" role="tablist" aria-label="Workspace view disabled">
+              <button type="button" class="tab is-disabled" role="tab" aria-selected="false" disabled>Storyboard</button>
+              <button type="button" class="tab is-disabled" role="tab" aria-selected="false" disabled>Timeline</button>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="error">
+            <span class="ui-kit-state-label">error (.is-error)</span>
+            <div class="tabs is-error" role="tablist" aria-label="Workspace view error">
+              <button type="button" class="tab is-error" role="tab" aria-selected="true" data-state="error">QA issues (2)</button>
+              <button type="button" class="tab" role="tab" aria-selected="false">Timeline</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. Drawer & Popover -->
+      <section id="section-overlays" class="ui-kit-section" aria-labelledby="heading-overlays" data-component="drawer-popover">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-overlays" class="ui-kit-section-title">Drawer (.drawer) &amp; popover (.popover)</h2>
+          <p class="ui-kit-section-desc">Elevated inspection surfaces using border-strong and two-level elevation tokens.</p>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Drawer (.drawer)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <aside class="drawer" aria-label="Agent settings drawer default">
+                <div class="drawer-header">
+                  <span>Agent settings</span>
+                  <button type="button" class="btn btn-ghost btn-icon btn-sm" aria-label="Close default drawer">✕</button>
+                </div>
+                <div class="drawer-body">Keys stay on the local server and are never written to browser storage.</div>
+                <div class="drawer-footer">
+                  <button type="button" class="btn btn-primary btn-sm">Save</button>
+                </div>
+              </aside>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <aside class="drawer is-hover" aria-label="Agent settings drawer hover">
+                <div class="drawer-header"><span>Agent settings</span></div>
+                <div class="drawer-body">Hovered drawer surface.</div>
+              </aside>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <aside class="drawer is-focus" tabindex="0" aria-label="Agent settings drawer focus">
+                <div class="drawer-header"><span>Agent settings</span></div>
+                <div class="drawer-body">Focused drawer container.</div>
+              </aside>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <aside class="drawer is-disabled" aria-disabled="true" aria-label="Agent settings drawer disabled">
+                <div class="drawer-header"><span>Agent settings</span></div>
+                <div class="drawer-body">Drawer disabled while run is active.</div>
+              </aside>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <aside class="drawer is-error" data-state="error" aria-label="Agent settings drawer error">
+                <div class="drawer-header"><span>Connection error</span></div>
+                <div class="drawer-body">Could not reach local provider endpoint.</div>
+              </aside>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Popover (.popover)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <div class="popover" role="region" aria-label="Licence receipt popover default">
+                <p class="popover-title">Asset receipt</p>
+                <p class="popover-body">Procedural SVG · generated locally · CC0.</p>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <div class="popover is-hover" role="region" aria-label="Licence receipt popover hover">
+                <p class="popover-title">Asset receipt</p>
+                <p class="popover-body">Hovered popover surface.</p>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <div class="popover is-focus" tabindex="0" role="region" aria-label="Licence receipt popover focus">
+                <p class="popover-title">Asset receipt</p>
+                <p class="popover-body">Focused popover surface.</p>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <div class="popover is-disabled" aria-disabled="true" role="region" aria-label="Licence receipt popover disabled">
+                <p class="popover-title">Asset receipt</p>
+                <p class="popover-body">Receipt inspection unavailable.</p>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <div class="popover is-error" data-state="error" role="region" aria-label="Licence receipt popover error">
+                <p class="popover-title">Missing licence</p>
+                <p class="popover-body">Export is blocked until attribution is resolved.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. Empty State -->
+      <section id="section-empty" class="ui-kit-section" aria-labelledby="heading-empty" data-component="empty-state">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-empty" class="ui-kit-section-title">Empty state (.empty-state)</h2>
+          <p class="ui-kit-section-desc">Structured empty state with icon (.empty-state-icon), title (.empty-state-title), one-line copy (.empty-state-line) and CTA (.empty-state-cta).</p>
+        </div>
+
+        <div class="ui-kit-states">
+          <div class="ui-kit-state-cell" data-state="default">
+            <span class="ui-kit-state-label">default</span>
+            <div class="empty-state">
+              <span class="empty-state-icon" aria-hidden="true">◑</span>
+              <h3 class="empty-state-title">No Google Colab runs yet</h3>
+              <p class="empty-state-line">Pick a backend and start a run to stream live gauges.</p>
+              <div class="empty-state-cta">
+                <button type="button" class="btn btn-primary btn-sm">Run on backend</button>
+              </div>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="hover">
+            <span class="ui-kit-state-label">hover (.is-hover)</span>
+            <div class="empty-state is-hover">
+              <span class="empty-state-icon" aria-hidden="true">◑</span>
+              <h3 class="empty-state-title">No Google Colab runs yet</h3>
+              <p class="empty-state-line">Pick a backend and start a run to stream live gauges.</p>
+              <div class="empty-state-cta">
+                <button type="button" class="btn btn-primary btn-sm is-hover">Run on backend</button>
+              </div>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="focus">
+            <span class="ui-kit-state-label">focus (.is-focus)</span>
+            <div class="empty-state is-focus" tabindex="0">
+              <span class="empty-state-icon" aria-hidden="true">◑</span>
+              <h3 class="empty-state-title">No Google Colab runs yet</h3>
+              <p class="empty-state-line">Pick a backend and start a run to stream live gauges.</p>
+              <div class="empty-state-cta">
+                <button type="button" class="btn btn-primary btn-sm is-focus">Run on backend</button>
+              </div>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="disabled">
+            <span class="ui-kit-state-label">disabled</span>
+            <div class="empty-state is-disabled" aria-disabled="true">
+              <span class="empty-state-icon" aria-hidden="true">◑</span>
+              <h3 class="empty-state-title">Backend offline</h3>
+              <p class="empty-state-line">Start the local server to enable Google Colab runs.</p>
+              <div class="empty-state-cta">
+                <button type="button" class="btn btn-secondary btn-sm is-disabled" disabled>Run on backend</button>
+              </div>
+            </div>
+          </div>
+          <div class="ui-kit-state-cell" data-state="error">
+            <span class="ui-kit-state-label">error (.is-error)</span>
+            <div class="empty-state is-error" data-state="error">
+              <span class="empty-state-icon" aria-hidden="true">!</span>
+              <h3 class="empty-state-title">Google Colab CLI not signed in</h3>
+              <p class="empty-state-line">Sign in to the Google Colab CLI to continue.</p>
+              <div class="empty-state-cta">
+                <button type="button" class="btn btn-danger btn-sm">Sign in</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8. Progress & Gauge -->
+      <section id="section-meters" class="ui-kit-section" aria-labelledby="heading-meters" data-component="progress-gauge">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-meters" class="ui-kit-section-title">Progress (.progress) &amp; gauge (.gauge)</h2>
+          <p class="ui-kit-section-desc">Tabular numeral bars for CPU export and Google Colab sampler progress.</p>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Progress (.progress)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <div class="progress">
+                <div class="progress-header"><span>Rendering MP4</span><span>60%</span></div>
+                <div class="progress-track" role="progressbar" aria-label="Rendering MP4 default" aria-valuemin="0" aria-valuemax="100" aria-valuenow="60">
+                  <i class="progress-fill"></i>
+                </div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <div class="progress is-hover">
+                <div class="progress-header"><span>Rendering MP4</span><span>60%</span></div>
+                <div class="progress-track" role="progressbar" aria-label="Rendering MP4 hover" aria-valuemin="0" aria-valuemax="100" aria-valuenow="60">
+                  <i class="progress-fill"></i>
+                </div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <div class="progress is-focus" tabindex="0">
+                <div class="progress-header"><span>Rendering MP4</span><span>60%</span></div>
+                <div class="progress-track" role="progressbar" aria-label="Rendering MP4 focus" aria-valuemin="0" aria-valuemax="100" aria-valuenow="60">
+                  <i class="progress-fill"></i>
+                </div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <div class="progress is-disabled" aria-disabled="true">
+                <div class="progress-header"><span>Render queued</span><span>0%</span></div>
+                <div class="progress-track" role="progressbar" aria-label="Rendering MP4 disabled" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                  <i class="progress-fill"></i>
+                </div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <div class="progress is-error" data-state="error">
+                <div class="progress-header"><span>Render aborted</span><span>60%</span></div>
+                <div class="progress-track" role="progressbar" aria-label="Rendering MP4 error" aria-valuemin="0" aria-valuemax="100" aria-valuenow="60">
+                  <i class="progress-fill"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Gauge (.gauge)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <div class="gauge">
+                <div class="gauge-head"><span>Sampler · KSampler</span><span>50%</span></div>
+                <div class="gauge-bar" role="progressbar" aria-label="Sampler gauge default" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+                  <i class="gauge-fill"></i>
+                </div>
+                <div class="gauge-meta">15/30 · 2.50/s · ETA 6s</div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <div class="gauge is-hover">
+                <div class="gauge-head"><span>Sampler · KSampler</span><span>50%</span></div>
+                <div class="gauge-bar" role="progressbar" aria-label="Sampler gauge hover" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+                  <i class="gauge-fill"></i>
+                </div>
+                <div class="gauge-meta">15/30 · 2.50/s · ETA 6s</div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <div class="gauge is-focus" tabindex="0">
+                <div class="gauge-head"><span>Sampler · KSampler</span><span>50%</span></div>
+                <div class="gauge-bar" role="progressbar" aria-label="Sampler gauge focus" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+                  <i class="gauge-fill"></i>
+                </div>
+                <div class="gauge-meta">15/30 · 2.50/s · ETA 6s</div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <div class="gauge is-disabled" aria-disabled="true">
+                <div class="gauge-head"><span>Sampler · idle</span><span>0%</span></div>
+                <div class="gauge-bar" role="progressbar" aria-label="Sampler gauge disabled" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                  <i class="gauge-fill"></i>
+                </div>
+                <div class="gauge-meta">Waiting for Google Colab runtime</div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <div class="gauge is-error" data-state="error">
+                <div class="gauge-head"><span>Sampler · failed</span><span>50%</span></div>
+                <div class="gauge-bar" role="progressbar" aria-label="Sampler gauge error" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+                  <i class="gauge-fill"></i>
+                </div>
+                <div class="gauge-meta">Out of memory on Google Colab worker</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9. Keyboard Shortcuts & Toasts -->
+      <section id="section-feedback" class="ui-kit-section" aria-labelledby="heading-feedback" data-component="kbd-toast">
+        <div class="ui-kit-section-head">
+          <h2 id="heading-feedback" class="ui-kit-section-title">Keyboard shortcuts (.kbd) &amp; toasts (.toast)</h2>
+          <p class="ui-kit-section-desc">Monospace keycaps and non-blocking status notifications.</p>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Keyboard keycap (.kbd)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <div class="ui-kit-row">
+                <kbd class="kbd">Space</kbd>
+                <kbd class="kbd">⌘K</kbd>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <kbd class="kbd is-hover">Space</kbd>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <kbd class="kbd is-focus" tabindex="0">Space</kbd>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <kbd class="kbd is-disabled" aria-disabled="true">Space</kbd>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <kbd class="kbd is-error" data-state="error">Esc</kbd>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-kit-group">
+          <h3 class="ui-kit-group-title">Toast (.toast)</h3>
+          <div class="ui-kit-states">
+            <div class="ui-kit-state-cell" data-state="default">
+              <span class="ui-kit-state-label">default</span>
+              <div class="toast" role="status">
+                <div class="toast-content">
+                  <p class="toast-title">Package saved</p>
+                  <p class="toast-message">Revision 14 written to disk.</p>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm">Dismiss</button>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="hover">
+              <span class="ui-kit-state-label">hover (.is-hover)</span>
+              <div class="toast is-hover" role="status">
+                <div class="toast-content">
+                  <p class="toast-title">Package saved</p>
+                  <p class="toast-message">Hovered notification surface.</p>
+                </div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="focus">
+              <span class="ui-kit-state-label">focus (.is-focus)</span>
+              <div class="toast is-focus" tabindex="0" role="status">
+                <div class="toast-content">
+                  <p class="toast-title">Package saved</p>
+                  <p class="toast-message">Focused notification surface.</p>
+                </div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="disabled">
+              <span class="ui-kit-state-label">disabled</span>
+              <div class="toast is-disabled" aria-disabled="true" role="status">
+                <div class="toast-content">
+                  <p class="toast-title">Notifications muted</p>
+                  <p class="toast-message">Background updates paused.</p>
+                </div>
+              </div>
+            </div>
+            <div class="ui-kit-state-cell" data-state="error">
+              <span class="ui-kit-state-label">error (.is-error)</span>
+              <div class="toast toast-danger is-error" data-tone="danger" data-state="error" role="alert">
+                <div class="toast-content">
+                  <p class="toast-title">Save rejected</p>
+                  <p class="toast-message">Revision conflict with local server.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="ui-kit-footer">
+      <span>Comfyrizz UI kit · WCAG 2.2 AA dark pro tool surfaces · Google Colab ready</span>
+    </footer>
+  </body>
+</html>

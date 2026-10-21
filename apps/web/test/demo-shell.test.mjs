@@ -53,7 +53,7 @@ test('main.mjs imports every demo module', () => {
 });
 
 test('vite builds both the main app and demo.html', () => {
-  assert.match(viteSource, /rollupOptions:\s*\{\s*input:\s*\{\s*main:\s*'index\.html',\s*demo:\s*'demo\.html'\s*\}/);
+  assert.match(viteSource, /rollupOptions:\s*\{\s*input:\s*\{\s*main:\s*'index\.html',\s*demo:\s*'demo\.html'[^}]*\}/);
 });
 
 test('fixture state boots from data alone with no network and no DOM', () => {
