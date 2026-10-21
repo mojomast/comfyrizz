@@ -193,7 +193,7 @@ export function castRole(entry: Pick<CastEntry, 'overrides' | 'snapshot'> | null
   return base && ROLE_ORDER.includes(base) ? base : 'supporting';
 }
 
-export function castName(entry: Pick<CastEntry, 'snapshot'> | null | undefined): string {
+export function castName(entry: (Pick<CastEntry, 'snapshot'> & Partial<Pick<CastEntry, 'castId'>>) | null | undefined): string {
   return textOf(entry?.snapshot?.name).trim() || textOf(entry?.castId).trim() || 'Character';
 }
 
