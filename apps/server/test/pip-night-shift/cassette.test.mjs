@@ -23,7 +23,7 @@ const characterSource = (() => {
   for (const name of ['character-tools.ts', 'characters.ts', 'cast-tools.ts']) {
     try {
       const source = readFileSync(new URL(`../../../../packages/agent/src/${name}`, import.meta.url), 'utf8');
-      if (source.includes('character_list') || source.includes('propose_cast')) return { name, source };
+      if (source.includes('character_list') || source.includes('character_propose_cast')) return { name, source };
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
@@ -33,7 +33,7 @@ const characterSource = (() => {
 
 const MAX_BYTES = 40 * 1024;
 const JUNO_CLIP_ID = 's3_juno:a_juno_plate';
-const CHARACTER_TOOLS = ['character_list', 'propose_cast'];
+const CHARACTER_TOOLS = ['character_list', 'character_propose_cast'];
 const REQUIRED_ARGS = {
   reference_list: [],
   reference_get: ['ref_id'],
@@ -42,8 +42,8 @@ const REQUIRED_ARGS = {
   clip_get: ['clip_id'],
   clip_render_readiness: [],
   clip_propose_verdict: ['clip_id', 'verdict', 'reason'],
-  character_list: [],
-  propose_cast: ['character_id', 'scene_id', 'reason'],
+  character_list: ['scope'],
+  character_propose_cast: ['character_id', 'scenes', 'reason'],
 };
 
 function assistantCalls(document) {
@@ -252,51 +252,54 @@ test('PN12: the character turn lists the library and proposes @pip and @juno in 
 
   const listCalls = calls.filter(call => call.name === 'character_list');
   assert.equal(listCalls.length, 1);
+  assert.deepEqual(listCalls[0].args, { scope: 'project' });
   const listed = results.get(listCalls[0].id);
   assert.equal(listed.ok, true);
   assert.equal(listed.status, 'listed');
   assert.deepEqual(listed.characters.map(character => character.handle), ['pip', 'juno']);
-  assert.deepEqual(listed.characters.map(character => character.mention), ['@pip', '@juno']);
+  assert.deepEqual(listed.characters.map(character => `@${character.handle}`), ['@pip', '@juno']);
   assert.deepEqual(listed.characters.map(character => character.character_id), libraryDoc.characters.map(character => character.id));
   for (const row of listed.characters) {
-    assert.equal(row.kind, 'fictional');
     assert.match(row.cast_id, /^c_[a-z]+$/);
   }
+  for (const character of libraryDoc.characters) {
+    assert.equal(character.kind, 'fictional');
+  }
 
-  const proposals = calls.filter(call => call.name === 'propose_cast');
+  const proposals = calls.filter(call => call.name === 'character_propose_cast');
   assert.equal(proposals.length, 2);
   const placements = new Map(charactersDoc.placements.map(placement => [placement.sceneId, placement.castId]));
   for (const proposal of proposals) {
     const member = charactersDoc.cast.find(item => item.characterId === proposal.args.character_id);
-    assert.ok(member, 'propose_cast names a cast character');
-    assert.equal(proposal.args.handle, member.handle);
-    assert.equal(placements.get(proposal.args.scene_id), member.castId);
+    assert.ok(member, 'character_propose_cast names a cast character');
+    assert.deepEqual(Object.keys(proposal.args).sort(), ['character_id', 'reason', 'scenes']);
+    assert.equal(proposal.args.scenes.length, 1);
+    const [sceneId] = proposal.args.scenes;
+    assert.equal(placements.get(sceneId), member.castId);
     assert.match(proposal.args.reason, new RegExp(`@${member.handle}`));
 
     const result = results.get(proposal.id);
     assert.equal(result.ok, true);
     assert.equal(result.status, 'proposed');
     assert.equal(result.applied, false);
-    assert.equal(result.placement.characterId, member.characterId);
-    assert.equal(result.placement.handle, member.handle);
-    assert.equal(result.placement.sceneId, proposal.args.scene_id);
-    assert.equal(result.placement.confirmed, false);
+    assert.equal(result.proposal.action, 'cast');
+    assert.equal(result.proposal.characterId, member.characterId);
+    assert.deepEqual(result.proposal.scenes, proposal.args.scenes);
+    assert.equal(result.proposal.reason, proposal.args.reason);
     assert.match(result.message, /Waiting for the user to confirm/i);
   }
 
-  const pipProposal = proposals.find(call => call.args.handle === 'pip');
-  const junoProposal = proposals.find(call => call.args.handle === 'juno');
-  assert.equal(pipProposal.args.scene_id, 's2_counter');
-  assert.equal(junoProposal.args.scene_id, 's3_juno');
-  assert.equal(pipProposal.args.character_id, charactersDoc.cast.find(member => member.handle === 'pip').characterId);
-  assert.equal(junoProposal.args.character_id, charactersDoc.cast.find(member => member.handle === 'juno').characterId);
+  const pipProposal = proposals.find(call => call.args.character_id === charactersDoc.cast.find(member => member.handle === 'pip').characterId);
+  const junoProposal = proposals.find(call => call.args.character_id === charactersDoc.cast.find(member => member.handle === 'juno').characterId);
+  assert.deepEqual(pipProposal.args.scenes, ['s2_counter']);
+  assert.deepEqual(junoProposal.args.scenes, ['s3_juno']);
 
   assert.doesNotMatch(raw, /"applied"\s*:\s*true/);
   assert.match(raw, /@pip/);
   assert.match(raw, /@juno/);
 });
 
-test('PN12: character_list and propose_cast are declared and used', () => {
+test('PN12: character_list and character_propose_cast are declared and used', () => {
   const declared = requestToolNames(cassette);
   const used = new Set(assistantCalls(cassette).map(call => call.name));
   const schemas = toolSchemas(cassette);
