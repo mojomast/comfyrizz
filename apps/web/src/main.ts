@@ -1903,13 +1903,44 @@ function init(opened: OpenedProject): void {
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   const renderButton = $('render');
   const splitGroup = document.getElementById('render-split-button');
-  const renderBarHost = document.createElement('div');
-  renderBarHost.id = 'render-bar-host';
-  (splitGroup ?? renderButton).before(renderBarHost);
+  let renderBarHost = document.getElementById('render-bar-host');
+  if (!renderBarHost) {
+    renderBarHost = document.createElement('div');
+    renderBarHost.id = 'render-bar-host';
+    (splitGroup ?? renderButton).before(renderBarHost);
+  }
   renderBar = mountRenderBar(renderBarHost, {
+    clips: () => clipStore.all(),
     gate: () => clipStore.gate(),
     onRender: reason => exportMp4(reason),
     onSelectBlocker: selectClipForReview,
+    onApprove: async clip => {
+      try {
+        await takesApi.verdict(String(pkg.id ?? ''), clip.clipId, 'approved', clip.selected ? { takeId: clip.selected } : {});
+        void refreshClips();
+        return true;
+      } catch (error) {
+        logActivity(`Could not approve ${clip.clipId}: ${(error as Error).message}`);
+        return false;
+      }
+    },
+    onRedo: async clip => {
+      try {
+        const result = await takesApi.regenerate(String(pkg.id ?? ''), clip.clipId, {
+          change: { note: 'Redo take from review drawer', seed: 'new', by: 'user' },
+        });
+        if (result.kind === 'approval') {
+          logActivity(`Redo for ${clip.clipId} needs spend approval in the Takes inspector`);
+          return false;
+        }
+        void refreshClips();
+        return true;
+      } catch (error) {
+        logActivity(`Could not redo ${clip.clipId}: ${(error as Error).message}`);
+        return false;
+      }
+    },
+    onOpenTakes: clipId => { selectClipForReview(clipId); },
   });
   renderButton.addEventListener('click', () => void beginExport());
   const renderLocation = $<HTMLSelectElement>('render-location');
