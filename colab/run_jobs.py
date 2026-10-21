@@ -54,6 +54,18 @@ def runner_command(jobs_file: Path, out_dir: Path, batch: str = "") -> list[str]
     return command
 
 
+def _progress_tap(batch: str):
+    """Live gauges (colab_progress lines) for this batch; None when the helper was not uploaded."""
+    try:
+        sys.path.insert(0, str(REMOTE_ROOT))
+        import progress_tap  # uploaded next to this script by the backend
+
+        emitter, close = progress_tap.start_run_observers(batch or "run", comfy_url=COMFYUI_URL, comfy_log="/content/comfyui.log")
+        return progress_tap.LineTap(emitter), close
+    except Exception:  # noqa: BLE001 - gauges are optional; the run is not
+        return None, (lambda: None)
+
+
 def main() -> int:
     if not BUNDLE.is_file():
         print(f"no bundle at {BUNDLE}: the backend must upload jobs.zip first", file=sys.stderr, flush=True)
@@ -74,11 +86,15 @@ def main() -> int:
     if batch:
         print(f"$ batch selector: {batch}", flush=True)
     print(f"$ {' '.join(command)}", flush=True)
+    tap, close_tap = _progress_tap(batch)
     process = subprocess.Popen(command, cwd=str(workdir), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     assert process.stdout is not None
     for line in process.stdout:
         print(line.rstrip(), flush=True)
+        if tap:
+            tap.feed(line)
     process.wait()
+    close_tap()
     print(f"runner exit {process.returncode}", flush=True)
     # The exit code is not the verdict: the backend downloads out/manifest.json and lets it decide.
     return 0

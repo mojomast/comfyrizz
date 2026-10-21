@@ -5,6 +5,7 @@ import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { colabStatus } from './colab-status.mjs';
 import { startColabAuth } from './colab-auth.mjs';
+import { readColabProgress } from '../../../packages/backends/src/colab-progress.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
 import { buildVariants } from './variant.mjs';
@@ -19,6 +20,7 @@ import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
+import { createCharacterRoutes } from './characters/routes.mjs';
 import { ingestRun } from './takes/ingest.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
@@ -131,7 +133,8 @@ async function defaultBackendFactory(backendId, opts = {}) {
       packageDir: opts.workDir ?? undefined,
       scratchDir: opts.scratchDir ?? undefined,
       budgetUnits: opts.budgetUnits ?? 0,
-      ratePerHour: opts.ratePerHour ?? 8.9,
+      // PO-3: the rate lives in the backend budget module, not in a literal here.
+      ratePerHour: mod.resolveRatePerHour({ gpu: opts.gpu, explicit: opts.ratePerHour }),
     });
   }
   if (backendId === 'byo-comfyui') {
@@ -142,6 +145,7 @@ async function defaultBackendFactory(backendId, opts = {}) {
 
 export function createApp({
   root = repoRoot,
+  colabProgressDir = null,
   token,
   runtimeDir = join(root, 'apps', 'server', '.runtime'),
   exportsDir = join(runtimeDir, 'out', 'export'),
@@ -293,7 +297,7 @@ export function createApp({
     };
   }
 
-  const runs = createRunController({ backendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun });
+  const runs = createRunController({ backendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun, isBusy: () => Boolean(pipelines?.active()) });
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
   // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
   // package's working resolution.
@@ -845,6 +849,12 @@ export function createApp({
     if (url.pathname === '/api/colab/status' && request.method === 'GET') {
       const status = await colabStatus({ backendFactory });
       return sendJson(response, 200, status);
+    }
+
+    // Live gauges of Google Colab runs (tqdm, ComfyUI sampler/node progress, render frames), read from
+    // the per-run JSONL files the backend writes as the VM's colab_progress lines arrive.
+    if (url.pathname === '/api/colab/progress' && request.method === 'GET') {
+      return sendJson(response, 200, readColabProgress(colabProgressDir ? { dir: colabProgressDir } : {}));
     }
 
     // U2: the guided sign-in. `colab auth` prints a URL and waits; every line it prints is relayed to
@@ -1637,6 +1647,7 @@ export function createApp({
     }
 
     if (await takeRoutes.handle(request, response, url)) return;
+    if (await createCharacterRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     if (await createReferenceRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     return sendJson(response, 404, { error: 'not found' });
   }

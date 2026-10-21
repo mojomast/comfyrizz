@@ -44,6 +44,7 @@ import {
   WARN_FRACTION,
   assessBudget,
   nextJobUpperEstimate,
+  resolveRatePerHour,
   spendEstimate,
   unitsForMinutes,
   wallClockCheck,
@@ -129,6 +130,22 @@ export const BOOTSTRAP_SILENCE_MS = 180000;
 /** G6-6: wall (and silence) budget for `colab new`; the assign POST is silent and can exceed 60 s. */
 export const NEW_WALL_MS = 300000;
 /** G6-6: the CLI output of an assign the Google frontend gave up on (HTTP 503 after ~60 s). */
+/**
+ * PO-4 review: a `colab sessions` reading is only clean when it positively says there is nothing of ours:
+ * "No active sessions", or rows that all parsed with a name and none named ours. An unnamed ('?') row may
+ * be the VM an interrupted `colab new` created before it was named, and output with no rows and no
+ * "No active sessions" line proves nothing, so both count as *not* gone.
+ */
+export function sessionsCheck(found, session) {
+  const rows = Array.isArray(found?.sessions) ? found.sessions : [];
+  const ours = rows.some((entry) => entry.name === session);
+  const orphans = rows.filter((entry) => entry.orphan || !entry.name);
+  const parsed = Boolean(found?.empty) || rows.length > 0;
+  const clean = parsed && !ours && orphans.length === 0;
+  const note = clean ? `colab sessions does not list ${session}` : ours ? `colab sessions still lists ${session}` : orphans.length ? `colab sessions lists ${orphans.length} unnamed (orphan) session(s) [${orphans.map((o) => `${o.hardware || "?"}/${o.status || "?"}`).join(", ")}] that may be ours` : "colab sessions output could not be parsed";
+  return { clean, ours, orphans, parsed, note };
+}
+
 export const isAssignUnavailable = (output) => /Service Unavailable/.test(String(output || "")) && /assign/.test(String(output || ""));
 
 /**
@@ -141,6 +158,7 @@ export const isAssignUnavailable = (output) => /Service Unavailable/.test(String
 export const READY_WAIT_SECONDS = 600;
 
 import { progressLines } from './progress-lines.mjs';
+import { colabProgressDir, createColabProgressSink, tapColabProgress } from './colab-progress.mjs';
 import { entriesForCollect } from './colab-render-plan.mjs';
 
 export function createColabBackend({
@@ -155,7 +173,7 @@ export function createColabBackend({
   scratchDir = null,
   logDir = null,
   budgetUnits = 0,
-  ratePerHour = 8.9,
+  ratePerHour = null,
   wallClockCapMinutes = 180,
   gpu = "G4",
   reserveMinutes = COLLECT_AND_STOP_RESERVE_MINUTES,
@@ -170,6 +188,9 @@ export function createColabBackend({
   healthScript = join(REPO, "colab", "health.py"),
   runJobsScript = join(REPO, "colab", "run_jobs.py"),
   reconcileScript = join(REPO, "colab", "reconcile.py"),
+  // live gauges: the VM-side helper the run/render cells import, and where the box keeps their lines
+  progressTapScript = join(REPO, "colab", "progress_tap.py"),
+  progressDir = process.env.COMFYRIZZ_COLAB_PROGRESS_DIR || (process.env.NODE_TEST_CONTEXT ? null : colabProgressDir()),
   hfTokenPath = process.env.COMFYRIZZ_HF_TOKEN_FILE || null,
   pythonBin = process.env.COMFYRIZZ_PYTHON || "python3",
   teardownRetries = 3,
@@ -179,7 +200,10 @@ export function createColabBackend({
   zipCommand = null,
   newAttempts = 3,
   newRetryMs = 20000,
+  allocationCleanupChecks = 6,
 } = {}) {
+  // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
+  ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
   if (!packageId) throw new Error("createColabBackend needs a packageId (it names the session)");
   const session = sessionNameFor(packageId);
   const scratch = scratchDir || join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${packageId}`);
@@ -250,6 +274,26 @@ export function createColabBackend({
       );
     }
     return result;
+  }
+
+  /** One gauge file per exec step; null when gauges are switched off (no progressDir). */
+  function progressSink(stepName) {
+    if (!progressDir) return null;
+    const stamp = new Date(now()).toISOString().replace(/[:.]/g, "-");
+    return createColabProgressSink({ runId: `${session}.${stepName}.${stamp}`, dir: progressDir, now });
+  }
+
+  /** Put colab/progress_tap.py next to the cells once per backend. Optional: a cell without it still runs. */
+  let progressTapUploaded = false;
+  async function uploadProgressTap() {
+    if (progressTapUploaded || !progressDir || !progressTapScript || !existsSync(progressTapScript)) return;
+    try {
+      const sent = await step(argvUpload({ session, localPath: progressTapScript, remotePath: `${REMOTE_ROOT}/progress_tap.py` }), {
+        label: "upload-progress-tap",
+        wallMs: 120000,
+      });
+      progressTapUploaded = sent.code === 0;
+    } catch { /* gauges are optional */ }
   }
 
   /**
@@ -472,6 +516,65 @@ export function createColabBackend({
     return { signal, pid: watchdog.pid, disarmed: gone };
   }
 
+  function abortableSleep(ms, signal) {
+    if (!signal) return sleep(ms);
+    signal.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
+      const onAbort = () => { clearTimeout(timer); reject(signal.reason); };
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  /**
+   * PO-4 review: after an aborted or failed `colab new`, the VM may exist even though the CLI never said
+   * so. Only report clean once `colab sessions` stops listing our session on consecutive checks; until
+   * then the provisional registry entry stays, so a later teardown still owns (and stops) it.
+   */
+  async function stopAfterFailedAllocation(onEvent) {
+    let listedEver = false;
+    let notListedChecks = 0;
+    let orphans = [];
+    let lastNote = "";
+    for (let attempt = 1; attempt <= allocationCleanupChecks; attempt += 1) {
+      let found;
+      try {
+        found = await sessions();
+      } catch (error) {
+        lastNote = `colab sessions failed: ${error.message}`;
+        await sleep(teardownRetryMs);
+        continue;
+      }
+      const check = sessionsCheck(found, session);
+      if (check.clean) {
+        notListedChecks += 1;
+        if (notListedChecks >= 2) {
+          forgetSession();
+          state.createdByUs = false;
+          const cleanup = { confirmedGone: true, listedEver, note: check.note };
+          emit(onEvent, { type: "allocation_cleanup", ...cleanup });
+          return cleanup;
+        }
+      } else {
+        notListedChecks = 0;
+        lastNote = check.note;
+        orphans = check.orphans;
+        if (check.ours) {
+          listedEver = true;
+          const stopped = await step(argvStop({ session }), { label: `alloc-stop-${attempt}`, wallMs: 90000 });
+          lastNote = `${check.note}; last stop: ${redactTail(stopped).slice(-160)}`;
+        }
+      }
+      await sleep(teardownRetryMs);
+    }
+    // keep the provisional entry and arm the watchdog: it may be the only thing that ends the spend
+    // (armed whenever the session is not confirmed gone, including when every `colab sessions` call failed)
+    armWatchdog();
+    const cleanup = { confirmedGone: false, listedEver, orphans, note: lastNote || `could not confirm ${session} is gone` };
+    emit(onEvent, { type: "allocation_cleanup", ...cleanup });
+    return cleanup;
+  }
+
   // -- the Backend interface (SPEC.md 6.5) --------------------------------------------
   const backend = {
     id: "colab",
@@ -531,7 +634,7 @@ export function createColabBackend({
     },
 
     /** Allocate only if needed. The caller has already shown the spend approval card. */
-    async ensureUp({ approved = false, onEvent = null } = {}) {
+    async ensureUp({ approved = false, onEvent = null, signal = null } = {}) {
       const found = await sessions();
       const existing = found.sessions.find((entry) => entry.name === session && !entry.orphan);
       if (existing && owns()) {
@@ -547,16 +650,38 @@ export function createColabBackend({
       // 60 s silence watchdog SIGTERMed the CLI mid-request. Silence is normal here; bound it by the wall.
       // Past its ~60 s deadline Google's frontend answers the assign POST with a 503 (no VM, nothing billed;
       // seen 10:04 EDT Oct 19). That is capacity, not a bad request, so retry a couple of times with backoff.
+      // PO-4 review: a cancel can land after the assign POST has already provisioned the VM. Write a
+      // provisional registry entry *before* `colab new`, so a teardown always owns what the allocation
+      // may have created, and on abort or failure ask `colab sessions` and stop anything listed.
+      rememberSession({ provisional: true });
       let result = null;
-      for (let attempt = 1; attempt <= newAttempts; attempt += 1) {
-        result = await step(argvNew({ session, gpu }), { label: attempt === 1 ? "new" : `new-${attempt}`, wallMs: NEW_WALL_MS, silenceMs: NEW_WALL_MS });
-        if (result.code === 0 || !isAssignUnavailable(result.output) || attempt === newAttempts) break;
-        emit(onEvent, { type: "assign_retry", session, attempt, reason: "503 Service Unavailable from POST /tun/m/assign" });
-        await sleep(newRetryMs * attempt);
-      }
-      if (result.code !== 0) {
-        const why = isAssignUnavailable(result.output) ? ` (Google Colab answered 503 Service Unavailable to the ${gpu} assign ${newAttempts}x: no capacity right now)` : "";
-        throw new ColabCliError(`colab new failed (exit ${result.code ?? result.signal})${why}: ${result.output.slice(-300)}`, { session });
+      try {
+        for (let attempt = 1; attempt <= newAttempts; attempt += 1) {
+          // PO-4: allocation is the slowest, most expensive step in the run (~60 s of silence), so a cancel
+          // has to be able to interrupt it. The CLI kills the child on abort; the caller's abort reason is
+          // rethrown here rather than being reported as "colab new failed".
+          result = await step(argvNew({ session, gpu }), { label: attempt === 1 ? "new" : `new-${attempt}`, wallMs: NEW_WALL_MS, silenceMs: NEW_WALL_MS, signal });
+          signal?.throwIfAborted();
+          if (result.code === 0 || !isAssignUnavailable(result.output) || attempt === newAttempts) break;
+          emit(onEvent, { type: "assign_retry", session, attempt, reason: "503 Service Unavailable from POST /tun/m/assign" });
+          await abortableSleep(newRetryMs * attempt, signal);
+        }
+        if (result.code !== 0) {
+          const why = isAssignUnavailable(result.output) ? ` (Google Colab answered 503 Service Unavailable to the ${gpu} assign ${newAttempts}x: no capacity right now)` : "";
+          throw new ColabCliError(`colab new failed (exit ${result.code ?? result.signal})${why}: ${result.output.slice(-300)}`, { session });
+        }
+      } catch (error) {
+        const cleanup = await stopAfterFailedAllocation(onEvent);
+        if (error && typeof error === "object") {
+          try { error.allocationCleanup = cleanup; } catch { /* frozen reason */ }
+        }
+        if (!cleanup.confirmedGone) {
+          throw new ColabCliError(
+            `allocation was interrupted and the session it may have created is not confirmed stopped: ${cleanup.note}. Stop it with: colab stop -s ${session}`,
+            { session, cause: error, allocationCleanup: cleanup },
+          );
+        }
+        throw error;
       }
       rememberSession();
       state.startedAtMs = now();
@@ -716,7 +841,8 @@ export function createColabBackend({
           emit(onEvent, { type: "batch_start", batch: name, jobs: subset.length });
         }
 
-        const progress = progressLines(onEvent);
+        await uploadProgressTap();
+        const progress = progressLines(tapColabProgress(onEvent, progressSink(name ? `run-${name}` : "run")));
         const exec = await execScript(runJobsScript, {
           step: "run",
           timeout: 3600,
@@ -807,12 +933,14 @@ export function createColabBackend({
       const droppedOutcome = execOutcome(dropped, "drop-token");
       emit(null, { type: "drop_token", ok: droppedOutcome.ok, note: droppedOutcome.ok ? null : droppedOutcome.note });
       let lastEvidence = "";
+      let lastCheck = null;
       for (let attempt = 1; attempt <= teardownRetries; attempt += 1) {
         const stopped = await step(argvStop({ session }), { label: `stop-${attempt}`, wallMs: 90000 });
         lastEvidence = redactTail(stopped);
         await sleep(teardownRetryMs);
         const after = await sessions();
-        if (after.empty || !after.sessions.some((entry) => entry.name === session)) {
+        lastCheck = sessionsCheck(after, session);
+        if (lastCheck.clean) {
           forgetSession();
           const watchdog = await disarmWatchdog();
           return {
@@ -826,8 +954,9 @@ export function createColabBackend({
       const after = await sessions();
       return {
         state: "stop_unconfirmed",
-        evidence: `the VM may still be running and units are draining: colab stop was accepted but colab sessions still lists ${session}. Last output: ${lastEvidence.slice(-160)}`,
-        listed: after.sessions.map((entry) => entry.name),
+        evidence: `the VM may still be running and units are draining: colab stop was accepted but ${sessionsCheck(after, session).note}. Last output: ${lastEvidence.slice(-160)}`,
+        listed: after.sessions.map((entry) => entry.name || "(orphan)"),
+        orphans: sessionsCheck(after, session).orphans,
         manual: `colab stop -s ${session}`,
         // deliberately not disarmed: an unconfirmed stop is exactly when the watchdog has to stay
         // armed, because it may be the only thing that ends the spend
@@ -903,9 +1032,10 @@ export function createColabBackend({
      * never `--env`. `onEvent` receives JSON progress lines the script prints.
      */
     async execStep(script, stepName, { timeout = 900, silenceMs = null, signal = null, onEvent = null } = {}) {
-      const progress = progressLines((event) => {
+      await uploadProgressTap();
+      const progress = progressLines(tapColabProgress((event) => {
         if (typeof onEvent === "function") onEvent(event);
-      });
+      }, progressSink(stepName)));
       const exec = await execScript(script, {
         step: stepName,
         timeout,
@@ -930,6 +1060,16 @@ export function createColabBackend({
     },
     admit,
     armWatchdog,
+    /**
+     * PO-3 review: a VM held past media for the Google Colab render keeps the media deadline's watchdog,
+     * which can fire mid-render. Replace it (disarm first, so two watchdogs never race) with a fresh one
+     * sized for the render. Only for a session we own.
+     */
+    async rearmWatchdog({ minutes } = {}) {
+      if (!owns()) return null;
+      await disarmWatchdog();
+      return armWatchdog({ minutes });
+    },
     collectOut,
     state,
   };

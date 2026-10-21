@@ -1,8 +1,13 @@
 import './style.css';
+import './project-chat.css';
+import './characters/characters.css';
 import { mountSettingsCard } from './colab-card';
+import { mountRemoteGpuProgress } from './colab-progress';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
 import { createReferenceApi } from './references/api.ts';
+import { createCharacterApi } from './characters/api.ts';
+import { mountCharactersTab } from './characters/mount.ts';
 import { mountReferencePanel } from './references/panel';
 import { apiFetch, installSessionToken, savePackageRequest, sessionToken } from './editor/api.ts';
 import { createAutosave } from './editor/autosave.ts';
@@ -44,6 +49,9 @@ function md(value: string): string {
 // credential on its behalf.
 const colabHost = document.getElementById('colab-card-host');
 if (colabHost) mountSettingsCard(colabHost, apiFetch);
+// Live gauges of Google Colab runs: the notebook's bars, polled from /api/colab/progress.
+const colabProgressHost = document.getElementById('colab-progress-host');
+if (colabProgressHost) mountRemoteGpuProgress(colabProgressHost, apiFetch);
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 const editorStore = createEditorStore({ package: pkg as never });
@@ -121,6 +129,7 @@ let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
 let projectChat: ReturnType<typeof mountProjectChat>;
+let charactersTab: ReturnType<typeof mountCharactersTab> | null = null;
 let referencePanel: ReturnType<typeof mountReferencePanel> | null = null;
 
 // TIMELINE-REVIEW TR17: one clips map shared by the render bar and the Takes tab.
@@ -2049,13 +2058,31 @@ function init(): void {
     brand: brandPayload,
     log: logActivity,
     referenceLabel: refId => referencePanel?.controller.findReference(refId)?.label,
+    characterLabel: characterId => charactersTab?.library.controller.getState().characters
+      .find(character => character.id === characterId)?.name,
+    castLabel: castId => {
+      const entry = charactersTab?.cast?.controller.getState().cast.find(item => item.castId === castId);
+      return entry?.snapshot?.name || castId;
+    },
+    sceneLabel: sceneId => {
+      const scenes = projectChat.conversation?.plan?.scenes ?? [];
+      const index = scenes.findIndex(scene => scene.id === sceneId);
+      return index >= 0 ? `Scene ${index + 1}` : sceneId;
+    },
     onReferencesChanged: () => { void referencePanel?.refresh(); },
+    onCastChanged: () => { void charactersTab?.refreshCast(); },
     onReset: () => { void referencePanel?.refresh(); },
     onChangeAssignment: () => {
       const prompt = $<HTMLTextAreaElement>('prompt');
       if (!prompt) return;
       prompt.focus();
       if (!prompt.value.trim()) prompt.value = 'Change the reference placement: ';
+    },
+    onChangeCastProposal: () => {
+      const prompt = $<HTMLTextAreaElement>('prompt');
+      if (!prompt) return;
+      prompt.focus();
+      if (!prompt.value.trim()) prompt.value = 'Change the character placement: ';
     },
   });
 
@@ -2068,6 +2095,43 @@ function init(): void {
       chatId: () => projectChat.conversationId,
       ensureChatId: () => projectChat.ensureConversationId(),
     }),
+  });
+
+  const castStripHost = document.createElement('div');
+  castStripHost.id = 'cast-strip-host';
+  castStripHost.className = 'cast-strip-host';
+  $('composer').before(castStripHost);
+
+  const charactersTabButton = document.createElement('button');
+  charactersTabButton.type = 'button';
+  charactersTabButton.id = 'characters-tab';
+  charactersTabButton.textContent = 'Characters';
+  charactersTabButton.setAttribute('aria-controls', 'characters-pane');
+  charactersTabButton.setAttribute('aria-selected', 'false');
+  $('run-backend').before(charactersTabButton);
+
+  const charactersPane = document.createElement('section');
+  charactersPane.id = 'characters-pane';
+  charactersPane.className = 'pane characters-pane';
+  charactersPane.hidden = true;
+  charactersPane.style.position = 'fixed';
+  charactersPane.style.inset = '0';
+  charactersPane.style.zIndex = '60';
+  charactersPane.style.overflow = 'auto';
+  charactersPane.style.background = 'var(--bg, #0d0f14)';
+  charactersPane.style.padding = '16px';
+  document.body.append(charactersPane);
+
+  charactersTab = mountCharactersTab({
+    root: charactersPane,
+    tab: charactersTabButton,
+    castStripHost,
+    open: false,
+    api: createCharacterApi({ apiFetch }),
+    chatId: () => projectChat.conversationId,
+    ensureChatId: () => projectChat.ensureConversationId(),
+    apiFetch,
+    log: logActivity,
   });
 
   $<HTMLFormElement>('composer').addEventListener('submit', event => {

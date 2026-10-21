@@ -1,8 +1,7 @@
-import './project-chat.css';
 import type { PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import type { InlineAsset } from '../../renderer/src/components';
-import { sceneNumberOf, slotLabel, type ReferenceAssignment } from './references/panel';
+import { sceneNumberOf, slotLabel, type ReferenceAssignment } from './references/panel.ts';
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -16,10 +15,41 @@ export type ProjectPlan = {
   stylePreset: string; scenes: Scene[];
   assumptions?: string[];
 };
+export type CastProposalAction = 'cast' | 'uncast' | 'draft' | 'voice';
+
+export type CastProposal = {
+  id?: string;
+  status?: 'proposed' | 'confirmed' | string;
+  action?: CastProposalAction | string;
+  characterId?: string;
+  castId?: string;
+  scenes?: string[];
+  role?: string;
+  wardrobeId?: string;
+  reason?: string;
+  draft?: { name?: string; role?: string; summary?: string; identityPrompt?: string };
+  voice?: { engine?: string; voice?: string };
+  confirmedAt?: string;
+  lastError?: string;
+};
+
+export type ProjectCastEntry = {
+  castId: string;
+  characterId: string;
+  pinnedRevision?: number;
+  snapshot?: { name?: string; handle?: string; revision?: number };
+  overrides?: { role?: string; wardrobeId?: string; expressionId?: string };
+  detached?: boolean;
+  orphaned?: boolean;
+};
+
 type Conversation = {
   id: string; revision: number; messages: ChatMessage[]; plan: ProjectPlan | null;
   phase: 'chatting' | 'draft' | 'built'; projectId: string | null; projectRevision: number | null;
   referenceAssignments?: ReferenceAssignment[];
+  castProposals?: CastProposal[];
+  cast?: ProjectCastEntry[];
+  castPlacements?: unknown[];
 };
 export type ChatProject = {
   package: PackageV1; revision: number; timeline: Timeline;
@@ -28,10 +58,64 @@ export type ChatProject = {
 type ChatReply = {
   conversation: Conversation; reply: string; built: boolean; project?: ChatProject;
 };
-type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[] };
+type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[] };
 
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const STORAGE_KEY = 'comfyrizz.project-chat';
+
+export type CastProposalRenderOptions = {
+  characterLabel?: (characterId: string) => string | undefined;
+  castLabel?: (castId: string) => string | undefined;
+  sceneLabel?: (sceneId: string) => string | undefined;
+};
+
+export function castProposalLabel(proposal: CastProposal, options: CastProposalRenderOptions = {}): string {
+  if (proposal?.action === 'draft') return proposal.draft?.name?.trim() || 'New character draft';
+  if (proposal?.action === 'cast') {
+    const known = proposal.characterId ? options.characterLabel?.(proposal.characterId) : undefined;
+    return known?.trim() || proposal.characterId || 'Character';
+  }
+  const castId = proposal?.castId ?? '';
+  return (castId ? options.castLabel?.(castId) : undefined)?.trim() || castId || 'Cast member';
+}
+
+function castProposalDetail(proposal: CastProposal, options: CastProposalRenderOptions): string {
+  const scenes = (Array.isArray(proposal.scenes) ? proposal.scenes : [])
+    .map(sceneId => options.sceneLabel?.(sceneId) || sceneId)
+    .filter(Boolean);
+  const role = proposal.role ? ` as ${proposal.role}` : '';
+  if (proposal.action === 'cast') {
+    return `${scenes.length ? scenes.join(', ') : 'No scenes yet'}${role}`;
+  }
+  if (proposal.action === 'uncast') {
+    return `Remove from ${scenes.length ? scenes.join(', ') : 'every scene'}`;
+  }
+  if (proposal.action === 'draft') {
+    return proposal.draft?.summary?.trim() || proposal.draft?.role?.trim() || 'Review this character in the editor';
+  }
+  if (proposal.action === 'voice') {
+    const engine = proposal.voice?.engine ?? 'new';
+    const voice = proposal.voice?.voice ? ` · ${proposal.voice.voice}` : '';
+    return `Voice proposal: ${engine}${voice}`;
+  }
+  return scenes.join(', ');
+}
+
+/** Render only the pending character proposals, with Confirm / Change actions. */
+export function renderCastProposals(
+  proposals: readonly CastProposal[] | null | undefined,
+  options: CastProposalRenderOptions = {},
+): string {
+  const pending = (Array.isArray(proposals) ? proposals : [])
+    .filter((proposal): proposal is CastProposal & { id: string } =>
+      Boolean(proposal && proposal.status === 'proposed' && typeof proposal.id === 'string' && proposal.id));
+  if (pending.length === 0) return '';
+  const rows = pending.map(proposal => `<li data-cast-proposal="${esc(proposal.id)}">
+      <div><b>${esc(castProposalLabel(proposal, options))}</b><span>${esc(castProposalDetail(proposal, options))}${proposal.reason ? ` — ${esc(proposal.reason)}` : ''}</span>${proposal.lastError ? `<small role="alert">${esc(proposal.lastError)}</small>` : ''}</div>
+      <div class="reference-proposal-actions"><button type="button" data-confirm-cast="${esc(proposal.id)}" data-confirm-cast-proposal="${esc(proposal.id)}">Confirm</button><button type="button" data-change-cast="${esc(proposal.id)}" data-change-cast-proposal="${esc(proposal.id)}" class="quiet">Change</button></div>
+    </li>`).join('');
+  return `<div class="reference-proposals cast-proposals" data-cast-proposals><p><b>Proposed character placements</b></p><ul>${rows}</ul></div>`;
+}
 
 export function mountProjectChat(options: {
   apiFetch: ApiFetch;
@@ -46,6 +130,12 @@ export function mountProjectChat(options: {
   referenceLabel?: (refId: string) => string | undefined;
   onReferencesChanged?: () => void | Promise<void>;
   onChangeAssignment?: (assignmentId: string) => void;
+  characterLabel?: (characterId: string) => string | undefined;
+  castLabel?: (castId: string) => string | undefined;
+  sceneLabel?: (sceneId: string) => string | undefined;
+  onChangeCastProposal?: (proposal: CastProposal) => void;
+  onChangeCast?: (proposal: CastProposal) => void;
+  onCastChanged?: (cast: ProjectCastEntry[]) => void | Promise<void>;
   onReset?: () => void | Promise<void>;
 }) {
   const panel = options.root;
@@ -76,11 +166,26 @@ export function mountProjectChat(options: {
     return `<div class="reference-proposals"><p><b>Proposed reference placements</b></p><ul>${rows}</ul></div>`;
   }
 
+  function proposedCastProposals(): Array<CastProposal & { id: string }> {
+    return (conversation?.castProposals ?? []).filter(
+      (proposal): proposal is CastProposal & { id: string } =>
+        Boolean(proposal && proposal.status === 'proposed' && typeof proposal.id === 'string' && proposal.id),
+    );
+  }
+
+  function castProposalsHtml(): string {
+    return renderCastProposals(conversation?.castProposals, {
+      ...(options.characterLabel ? { characterLabel: options.characterLabel } : {}),
+      ...(options.castLabel ? { castLabel: options.castLabel } : {}),
+      ...(options.sceneLabel ? { sceneLabel: options.sceneLabel } : {}),
+    });
+  }
+
   function render(): void {
     const plan = conversation?.plan;
     if (!plan) {
       panel.hidden = !conversation && !errorText;
-      panel.innerHTML = `${errorText ? `<p role="alert">${esc(errorText)}</p>` : '<p class="hint">Chat with the agent to develop your video.</p>'}${proposalsHtml()}<button type="button" id="project-new">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload">Load latest conversation</button>' : ''}`;
+      panel.innerHTML = `${errorText ? `<p role="alert">${esc(errorText)}</p>` : '<p class="hint">Chat with the agent to develop your video.</p>'}${proposalsHtml()}${castProposalsHtml()}<button type="button" id="project-new">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload">Load latest conversation</button>' : ''}`;
       bindActions();
       return;
     }
@@ -107,7 +212,7 @@ export function mountProjectChat(options: {
         ${built ? '' : `<button type="button" id="project-plan-build">Build this project</button>`}
         <button type="button" id="project-new" class="quiet">Start a new video</button>
         <span class="hint">${built ? 'Edit scene copy directly in the storyboard.' : 'Ask for changes, or build to apply it.'}</span>
-      </div>${proposalsHtml()}${errorText ? `<p role="alert">${esc(errorText)}</p>${pending && !conflict ? '<button type="button" id="project-retry">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload">Load latest conversation</button>' : ''}` : ''}`;
+      </div>${proposalsHtml()}${castProposalsHtml()}${errorText ? `<p role="alert">${esc(errorText)}</p>${pending && !conflict ? '<button type="button" id="project-retry">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload">Load latest conversation</button>' : ''}` : ''}`;
     panel.querySelector('#project-plan-build')?.addEventListener('click', () => {
       void send('Build this plan exactly as it is now.', 'express', 'build');
     });
@@ -132,6 +237,22 @@ export function mountProjectChat(options: {
         else void send('Change the proposed reference placement.', 'plan');
       });
     });
+    panel.querySelectorAll<HTMLElement>('[data-confirm-cast]').forEach(button => {
+      button.addEventListener('click', () => {
+        const id = button.getAttribute('data-confirm-cast');
+        if (id) void confirmCastProposals([id]);
+      });
+    });
+    panel.querySelectorAll<HTMLElement>('[data-change-cast]').forEach(button => {
+      button.addEventListener('click', () => {
+        const id = button.getAttribute('data-change-cast');
+        if (!id || busy) return;
+        const proposal = proposedCastProposals().find(item => item.id === id);
+        if (options.onChangeCastProposal && proposal) options.onChangeCastProposal(proposal);
+        else if (options.onChangeCast && proposal) options.onChangeCast(proposal);
+        else void send('Change the proposed character placement.', 'plan');
+      });
+    });
     panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy; });
   }
 
@@ -140,6 +261,7 @@ export function mountProjectChat(options: {
     conversationId = reply.conversation.id;
     localStorage.setItem(STORAGE_KEY, conversationId);
     if (reply.project && built) options.applyProject(reply.project, built);
+    try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
     render();
   }
 
@@ -171,6 +293,7 @@ export function mountProjectChat(options: {
       pending = null; errorText = ''; conflict = false;
       options.replace(reply.conversation.messages);
       if (reply.project) options.applyProject(reply.project, reply.conversation.phase === 'built');
+      try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
       options.log(`Restored conversation: ${reply.conversation.messages.length} messages`);
     } catch (error) {
       options.log(`Could not restore the video conversation: ${(error as Error).message}`);
@@ -192,7 +315,13 @@ export function mountProjectChat(options: {
     return send(unique.length === 1 ? 'Confirm the proposed reference placement.' : 'Confirm the proposed reference placements.', 'plan', undefined, unique);
   }
 
-  async function send(text: string, mode: 'plan' | 'express', action?: 'build', confirm?: string[]): Promise<void> {
+  function confirmCastProposals(ids: string[]): Promise<void> {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (unique.length === 0) return Promise.resolve();
+    return send(unique.length === 1 ? 'Confirm the proposed character placement.' : 'Confirm the proposed character placements.', 'plan', undefined, undefined, unique);
+  }
+
+  async function send(text: string, mode: 'plan' | 'express', action?: 'build', confirm?: string[], confirmCast?: string[]): Promise<void> {
     if (busy || !text.trim()) return;
     busy = true;
     await loaded;
@@ -202,7 +331,8 @@ export function mountProjectChat(options: {
       pending = { conversationId: ensureConversationId(), turnId: crypto.randomUUID(), message: text, mode,
         provider: provider.provider, model: provider.model,
         ...(conversation ? { baseRevision: conversation.revision } : {}), ...(action ? { action } : {}),
-        ...(confirm?.length ? { confirmAssignments: confirm } : {}) };
+        ...(confirm?.length ? { confirmAssignments: confirm } : {}),
+        ...(confirmCast?.length ? { confirmCastProposals: confirmCast } : {}) };
       await perform(pending);
     } catch (error) {
       errorText = (error as Error).message;
@@ -246,7 +376,11 @@ export function mountProjectChat(options: {
     send,
     ensureConversationId,
     confirmAssignments,
+    confirmCastProposals,
+    confirmCastProposal: confirmCastProposals,
+    confirmCast: confirmCastProposals,
     get conversation() { return conversation; },
+    get castProposals() { return conversation?.castProposals ?? []; },
     get conversationId() { return conversationId; },
   };
 }

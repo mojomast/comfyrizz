@@ -14,7 +14,9 @@ import { spawnSync } from "node:child_process";
 import { DEFAULT_GATE_COMMAND, runPackage, runQualityGate } from "../src/run-package.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const PYTHON = process.env.COMFYRIZZ_PYTHON || join(REPO, ".venv", "bin", "python");
+// Q-H1: a bare `python3` is not the pipeline's interpreter - the gate needs Pillow and the runner needs
+// the relaxed deps - so this test skips rather than fails when neither the env var nor the venv exists.
+const PYTHON = process.env.COMFYRIZZ_PYTHON || (existsSync(join(REPO, ".venv", "bin", "python")) ? join(REPO, ".venv", "bin", "python") : null);
 const STILL_SIZE = { width: 96, height: 64 };
 
 /**
@@ -83,6 +85,7 @@ function packageWith(assets, format, palette = ["#0d0f14", "#6d8cff", "#f4f6fb"]
 }
 
 test("the gate judges a run's own produced file and passes it when it matches the plan (R1)", (t) => {
+  if (!PYTHON) return t.skip("no pipeline python (set COMFYRIZZ_PYTHON)");
   if (!existsSync(PYTHON)) return t.skip(`no project python at ${PYTHON}`);
   const work = mkdtempSync(join(tmpdir(), "comfyrizz-r1-gate-"));
   const outDir = join(work, "out");
@@ -137,7 +140,8 @@ test("the gate judges a run's own produced file and passes it when it matches th
   assert.deepEqual(missing.failures.map((failure) => failure.code), ["GATE_ASSET_MISSING"]);
 });
 
-test("a gate that cannot run is reported, not thrown (R1)", () => {
+test("a gate that cannot run is reported, not thrown (R1)", (t) => {
+  if (!PYTHON) return t.skip("no pipeline python (set COMFYRIZZ_PYTHON)");
   const work = mkdtempSync(join(tmpdir(), "comfyrizz-r1-gate-bad-"));
   const outDir = join(work, "out");
   mkdirSync(outDir, { recursive: true });
@@ -152,7 +156,8 @@ test("a gate that cannot run is reported, not thrown (R1)", () => {
   assert.match(missingPython.detail, /did not run/);
 });
 
-test("runPackage records the gate's verdict and never fails the run for it (R1)", async () => {
+test("runPackage records the gate's verdict and never fails the run for it (R1)", async (t) => {
+  if (!PYTHON) return t.skip("no pipeline python (set COMFYRIZZ_PYTHON)");
   const calls = [];
   const backend = {
     id: "colab",
@@ -219,7 +224,8 @@ test("runPackage records the gate's verdict and never fails the run for it (R1)"
   assert.equal(quiet.ok, true);
 });
 
-test("the gate's command is the pipeline's own module (R1)", () => {
+test("the gate's command is the pipeline's own module (R1)", (t) => {
+  if (!PYTHON) return t.skip("no pipeline python (set COMFYRIZZ_PYTHON)");
   assert.equal(DEFAULT_GATE_COMMAND[1], "-m");
   assert.equal(DEFAULT_GATE_COMMAND[2], "eval.gate");
   // and it exists where the gate is spawned from
