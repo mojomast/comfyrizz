@@ -38,7 +38,9 @@ export function mediaFor(job, cutout, output = null) {
       fps: measured.fps ?? job.fps,
       frames: measured.frames ?? job.frames,
       ...(measured.durationSeconds === undefined ? {} : { durationSeconds: measured.durationSeconds }),
-      audio: "muted",
+      // RL12: a FastH3 plate's MP4 carries the audio the model generated with the picture, so the
+      // asset's media says so; every other plate is muted (the renderer mixes its own audio bus).
+      audio: job.generator === "fasth3-omni" ? "present" : "muted",
     };
   }
   if (job.kind === "audio") return { audio: "present" };
@@ -104,8 +106,10 @@ export function applyManifestToPackage(pkg, { manifest, jobsDoc, outDir, backend
       file: relative,
       sha256: output.sha256,
       bytes: output.bytes ?? sizeOf(outDir, relative),
-      license: asset.license || { ...GENERATED_LICENSE },
-      redistributable: asset.redistributable ?? true,
+      // RL12: FastH3 output carries the MiniMax-H3 community licence (territorial and commercial
+      // conditions), not CC0, and it is not redistributable unless a reviewer says so on purpose.
+      license: asset.license || (generator === "fasth3-omni" ? { ...MODEL_LICENSES[generator] } : { ...GENERATED_LICENSE }),
+      redistributable: asset.redistributable ?? (generator !== "fasth3-omni"),
       ...(modelLicense ? { model_license: modelLicense } : {}),
       gen: provenance,
       ...(mediaFor(job, job?.cutout ?? asset.cutout, output) ? { media: mediaFor(job, job?.cutout ?? asset.cutout, output) } : {}),

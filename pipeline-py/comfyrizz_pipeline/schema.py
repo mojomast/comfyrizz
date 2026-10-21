@@ -113,7 +113,13 @@ LAYOUTS: dict[str, dict[str, Any]] = {
 }
 
 GENERATED_OUTPUT_LICENSE = {"id": "CC0-1.0", "redistributable": True}
-MODEL_GENERATORS = ("flux3-klein", "ltx25", "ltx25-a2v", "kokoro", "qwen3-tts")
+MODEL_GENERATORS = ("flux3-klein", "ltx25", "ltx25-a2v", "fasth3-omni", "kokoro", "qwen3-tts")
+#: FastH3 Omni is experimental: the MiniMax-H3 community licence carries territorial and
+#: commercial conditions, so its output is not CC0 by default (see ``apply_defaults``).
+FASTH3_MODEL_LICENSE = {
+    "id": "LicenseRef-MiniMax-H3-Community",
+    "url": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE",
+}
 FLEXIBLE_CEILING_FRAMES = 2700
 
 SCENE_ID_RE = re.compile(r"^s[A-Za-z0-9_-]{0,63}$")
@@ -634,7 +640,7 @@ def _check_assets(assets, errors) -> None:
         generator = gen.get("generator")
         if asset.get("origin") == "generated" and not _is_str(generator):
             errors.append(
-                _err("SEM_GEN_MISSING_GENERATOR", f"{at}/gen/generator", "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | kokoro | qwen3-tts)")
+                _err("SEM_GEN_MISSING_GENERATOR", f"{at}/gen/generator", "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | fasth3-omni | kokoro | qwen3-tts)")
             )
         if asset.get("origin") == "generated" and ready:
             license_obj = asset.get("license") if _is_obj(asset.get("license")) else {}
@@ -822,6 +828,11 @@ def _resolve_ref(schema: dict[str, Any], sub: Any) -> Any:
 def apply_defaults(doc: Any, schema: dict[str, Any] | None = None) -> Any:
     """Fill schema `default` keywords plus the generated-first output licence default.
 
+    FastH3 Omni is the exception: its output is not CC0, because the MiniMax-H3 community
+    licence carries territorial and commercial conditions that reach the produced file. Such an
+    asset defaults to that licence and to ``redistributable: False`` unless the document says
+    otherwise on purpose.
+
     Same algorithm as packages/schema/src/semantic.mjs ``applyDefaults``; the
     conformance test compares the two outputs on fixtures/valid/defaults-unfilled.json.
     """
@@ -830,14 +841,20 @@ def apply_defaults(doc: Any, schema: dict[str, Any] | None = None) -> Any:
     schema = schema or load_schema()
     out = json.loads(json.dumps(doc))
     _fill_defaults(out, schema, schema)
-    for asset in (out.get("assets") or {}).values():
+    source_assets = doc.get("assets") if _is_obj(doc.get("assets")) else {}
+    for asset_id, asset in (out.get("assets") or {}).items():
         if not _is_obj(asset):
             continue
         if asset.get("origin", "generated") == "generated":
+            gen = asset.get("gen") if _is_obj(asset.get("gen")) else {}
+            h3 = gen.get("generator") == "fasth3-omni"
+            said = _is_obj(source_assets.get(asset_id)) and "redistributable" in source_assets[asset_id]
+            if h3 and not said:
+                asset["redistributable"] = False
             if not _is_obj(asset.get("license")):
-                asset["license"] = {"id": GENERATED_OUTPUT_LICENSE["id"]}
+                asset["license"] = dict(FASTH3_MODEL_LICENSE) if h3 else {"id": GENERATED_OUTPUT_LICENSE["id"]}
             if "redistributable" not in asset:
-                asset["redistributable"] = GENERATED_OUTPUT_LICENSE["redistributable"]
+                asset["redistributable"] = False if h3 else GENERATED_OUTPUT_LICENSE["redistributable"]
     return out
 
 

@@ -33,6 +33,27 @@ export const BATCH_ORDER = ["stills", "plates", "upscales", "audio", "presenters
 export const DIM_MULTIPLE_BY_KIND = { still: 16, plate: 64, upscale: 64 };
 
 /**
+ * FastH3 Omni's own geometry (RL12, experimental).
+ *
+ * The reference-to-video+audio graph is not LTX: its spatial lattice is 32 pixels, its frame counts
+ * are 17n+5 (the model's temporal lattice) and it runs at 24 fps, because the generated audio is
+ * muxed with the frames into one MP4. A count that is not 17n+5 is rounded *up*, so the shot is
+ * never shorter than the line it has to speak.
+ */
+export const FASTH3_DIM_MULTIPLE = 32;
+export const FASTH3_FRAME_MODULUS = 17;
+export const FASTH3_FRAME_OFFSET = 5;
+export const FASTH3_FPS = 24;
+
+/** The next FastH3 frame count (17n+5) at or above the requested one. */
+export function resolveFastH3Frames(requested) {
+  const base = Math.max(FASTH3_FRAME_OFFSET, requested);
+  const remainder = base % FASTH3_FRAME_MODULUS;
+  const pad = (FASTH3_FRAME_OFFSET - remainder + FASTH3_FRAME_MODULUS) % FASTH3_FRAME_MODULUS;
+  return base + pad;
+}
+
+/**
  * Parameters whose value is a *file* the graph has to be given a server-side name for
  * (a `LoadImage`-style node). The runner uploads these to ComfyUI's input directory and injects
  * the name it gets back; without this the graph receives the asset id and the server answers
@@ -84,6 +105,9 @@ const GENERATOR_KIND = {
   // H17: the presenter is LTX-2.5 audio-to-video - the same weights, a different graph, and its own
   // batch because it can only run once the narration it is generated from exists
   "ltx25-a2v": "presenter",
+  // RL12: FastH3 Omni is experimental - reference-conditioned video *with* native audio. It plans
+  // like a plate (one MP4 per shot) but with its own geometry rules (see the plate branch below).
+  "fasth3-omni": "plate",
   kokoro: "audio",
   "llm-svg": null, // procedural vector: CPU work, no Comfy job (PLAN.md A5)
 };
@@ -460,6 +484,9 @@ export function planJobs(pkg, opts = {}) {
   const sourceLattice = new Map();
   for (const [assetId, kind] of kinds) {
     if (kind !== "plate" && kind !== "upscale") continue;
+    // RL12: a FastH3 plate's `image` is an identity reference, not the first frame of the shot, so
+    // it is not planned on the plate's lattice and never coerced to the plate's aspect.
+    if (assets[assetId]?.gen?.generator === "fasth3-omni") continue;
     const sourceId = assets[assetId]?.gen?.inputs?.image;
     if (typeof sourceId !== "string") continue;
     const lattice = DIM_MULTIPLE_BY_KIND[kind] ?? DIM_MULTIPLE_BY_KIND.still;
@@ -502,7 +529,7 @@ export function planJobs(pkg, opts = {}) {
     // Prompt defaults first, so the plate's upscale stage (which copies these params) inherits the
     // same guards, and so the guard is part of the cache key rather than a VM-side edit.
     let promptGuards = [];
-    if (kind === "still" || kind === "plate") {
+    if (kind === "still" || (kind === "plate" && gen.generator !== "fasth3-omni")) {
       const sourceInputs = (typeof inputs.image === "string" && assets[inputs.image]?.gen?.inputs) || {};
       const applied = applyPromptDefaults(params, {
         kind,
@@ -522,7 +549,7 @@ export function planJobs(pkg, opts = {}) {
     const roleInputs = (typeof inputs.image === "string" && assets[inputs.image]?.gen?.inputs) || {};
     const motionRole = typeof inputs.role === "string" ? inputs.role : typeof roleInputs.role === "string" ? roleInputs.role : null;
     delete params.role;
-    if (kind === "plate") {
+    if (kind === "plate" && gen.generator !== "fasth3-omni") {
       const motion = applyMotionRoleDefaults(params, {
         role: motionRole,
         kind,
@@ -624,6 +651,52 @@ export function planJobs(pkg, opts = {}) {
       if (params.height !== undefined) params.height = dims.height;
       if (params.cutout === true || asset.cutout === true) job.cutout = true;
       params.cutout = job.cutout === true;
+    } else if (kind === "plate" && gen.generator === "fasth3-omni") {
+      // RL12: FastH3 Omni is reference-conditioned video *with* native audio, and none of LTX's
+      // plate rules apply to it:
+      //   * its `image` and `reference` are identity/context pictures, not the first frame of the
+      //     shot, so there is no framing lock, no strength and no source-aspect coercion;
+      //   * there is no half-resolution stage, so there is no `stage1Dims`;
+      //   * the graph's lattice is 32 pixels and its frame counts are 17n+5 at 24 fps (the model's
+      //     temporal lattice), not LTX's 8n+1;
+      //   * the MP4 keeps the generated audio, so the asset's own file is the render (no upscale
+      //     stage is supported by this graph).
+      const width = Number(params.width ?? 832);
+      const height = Number(params.height ?? 480);
+      const requestedFrames = Number(params.frames ?? 124);
+      if (![width, height, requestedFrames].every(Number.isInteger) || width < 32 || height < 32 || requestedFrames < 5 || requestedFrames > 362) {
+        errors.push(`${assetId}: FastH3 requires positive integer dimensions and 5..362 requested frames`);
+      }
+      if (params.fps !== undefined && Number(params.fps) !== 24) errors.push(`${assetId}: FastH3 audio/video must use 24 fps`);
+      if (params.upscale) errors.push(`${assetId}: FastH3 does not support the LTX upscale stage`);
+      for (const name of ["image", "reference", "audio"]) {
+        if (typeof params[name] !== "string" || !params[name]) errors.push(`${assetId}: FastH3 template requires ${name}`);
+      }
+      const dims = resolveDimensions(width, height, FASTH3_DIM_MULTIPLE);
+      // 17n+5, rounded up: the model's own temporal lattice.
+      const frames = resolveFastH3Frames(requestedFrames);
+      job.dims = { width: dims.width, height: dims.height };
+      job.dimsAdjusted = dims.adjusted;
+      job.frames = frames;
+      job.framesAdjusted = frames !== requestedFrames;
+      job.fps = FASTH3_FPS;
+      job.output = `assets/${assetId}${OUTPUT_EXT.plate}`;
+      params.width = dims.width;
+      params.height = dims.height;
+      params.frames = frames;
+      params.fps = FASTH3_FPS;
+      // The three references decide the render, so their *content* is part of the cache key: a new
+      // portrait or a new voice take has to invalidate the take, even when the asset ids stay the
+      // same (the LTX rule only folds a cast reference's sha256 in).
+      castRefSha256 = sha256Hex(
+        canonical(
+          ["image", "reference", "audio"].map((name) => ({
+            name,
+            asset: params[name],
+            sha256: assets[params[name]]?.sha256 ?? null,
+          })),
+        ),
+      );
     } else if (kind === "plate") {
       // the default is a 64-multiple in 16:9 (N9); 960x544 used to be the default and came back
       // 960x512 from the graph, because half of 544 is 272 and LTX floors to 32
