@@ -1,6 +1,8 @@
 # Nous universe — miniseries production preparation
 
-Status: preproduction; no episode footage or voice auditions commissioned.
+Status: season preproduction; the 90-second FastH3 pilot cut has been generated.
+See [pilot production and delivery](NRCU_PILOT_PRODUCTION.md) for the actual
+voice references, user-directed Molty revision, review coverage and measured cost.
 Revised October 21, 2026. The [season bible](NOUS_OPENCLAW_SEASON_ONE.md) supplies
 the story and cast; its scene scripts will assign beat IDs.
 This document supplies the repeatable production method.

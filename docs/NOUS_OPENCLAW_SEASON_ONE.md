@@ -1,14 +1,15 @@
 # NRCU season one — HERMES: THE UNFINISHED DAWN
 
 **Rewritten preparation, October 21, 2026.** Supersedes *The Last Permission*.
-Status: story bible and production preparation; episodes and voice auditions
-have not been generated. Developed through parallel product/lore research,
+Status: season preparation plus a generated 90-second pilot cut, **The Lower Road**.
+The full episodes remain in preparation. Developed through parallel product/lore research,
 character research and story-architecture work, then consolidated into this plan.
 
 Companion documents:
 
 - [Research, sources and canon boundaries](research/NOUS_UNIVERSE_LORE_20261021.md)
 - [Production, voices, references, review and cost basis](NOUS_UNIVERSE_PRODUCTION.md)
+- [Pilot delivery, selected takes, review coverage and spending](NRCU_PILOT_PRODUCTION.md)
 
 ## 1. The film we are making
 
@@ -409,9 +410,9 @@ document. Casting accents are creative choices rather than biographical claims.
 | `nrcu.turbofit.v1` | Rough low-mid musician's voice, relaxed rhythmic phrasing; enthusiasm and fatigue can coexist |
 | `nrcu.artsbro.v1` | Light androgynous tenor, deliberate and intimate; intelligible mask coloration applied after the clean take |
 | `nrcu.nous-girl.v1` | Warm bright mezzo, curious and quick in conversation; calm authority in the failed-readiness moment |
-| `nrcu.don-piedro.v1` | Resonant bass-baritone in a small body, theatrical confidence; plain and unperformed during rescues |
+| `nrcu.don-piedro.v1` | Resonant bass-baritone in a small body; consistently broken English with short earnest clauses, omitted articles and simplified grammar, as requested. “I go lower. You take core.” / “We no get part. But everybody here.” Keep the pattern during both bravado and sincere rescues. |
 | `nrcu.hermes.v1` | Close, dry low-mid alto; candid uncertainty and attentive response, recognizably separate from Nous Girl |
-| `nrcu.molty.v1` | Androgynous mid register, brisk and charismatic, competitive warmth; never a corporate-villain sneer |
+| `nrcu.molty.v2` | User-directed evil-sounding rival: low resonant register, gravelly edge, cold contempt, controlled menace and mocking phrasing. No friendly or reassuring delivery. Supersedes the warm `v1` audition. |
 | `nrcu.regent.v1` | Low, patient, weathered resonance; genuine sorrow under reassurance; restraint makes the coercion disturbing |
 | `nrcu.doge-man.v1` | Buoyant chest voice, short direct phrases; exhausted breaths earn the rescue rather than endless shouting |
 | `nrcu.witcheer.v1` | Quick upper-mid merchant cadence; delighted precision, softens when opening the repair depot |
@@ -440,13 +441,21 @@ separate casting, references, silhouettes, motifs and dramatic treatment.
 Use the regulator choice from episode two. It tests action, rivalry, emotion and
 the new direction in one sequence, without requiring the whole season first.
 
+**Pilot direction update, 2026-10-21:** the user clarified that OpenClaw must
+read as the rival and that Molty needs to sound evil. The generated pilot uses
+the menacing `nrcu.molty.v2` voice, replacing the friendly audition. His opening
+line is “Keep up, little bear. That regulator belongs to me.” At the fork he
+says “Take the lower road. The regulator is mine.” The pilot presents this as
+an opportunistic win over Don, not a friendly division of rescue duties. The
+longer season's eventual cooperation remains a later story beat.
+
 | Time | Planned proof |
 |---|---|
 | 0:00–0:12 | Wide establishes upper winning rail, lower stranded-worker platform and the rival convoy. The regulator is visible on the convoy path. |
 | 0:12–0:25 | Don accelerates; Molty recognizes the challenge. Two distinct brief speaking performances, then clear reaction coverage. |
 | 0:25–0:40 | A support fails below. Show the workers, the choice of route and Don seeing both. No useful-secret-component reveal. |
-| 0:40–0:58 | Don brakes and turns away from victory. Molty checks that he has the lower platform; Don tells them to go. Break the rescue into approach, turn, contact and stable aftermath. |
-| 0:58–1:10 | Molty reaches the regulator and heads for their failing evacuation corridor. Crosscut with Don's occupied rescue platform so the strategic cost and both rescue objectives are unambiguous. |
+| 0:40–0:58 | Don brakes and turns away from victory. Molty coldly claims the regulator while Don chooses the workers. Break the rescue into approach, turn, contact and stable aftermath. |
+| 0:58–1:10 | Molty takes the regulator and departs. Crosscut with Don's occupied rescue platform so Don's lost opportunity is unambiguous. |
 | 1:10–1:23 | Turbo's disappointment changes when he sees the passengers. No immediate speech explaining the theme. |
 | 1:23–1:30 | Don looks at the empty winning rail, then checks that a passenger is secure. Let the sound and reaction finish the choice. |
 
