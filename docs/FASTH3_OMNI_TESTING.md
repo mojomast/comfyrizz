@@ -179,3 +179,21 @@ reported no sessions, zero active assignments and 0.00 credits/hour. The observe
 balance fell from 341.56 to 333.21: **8.35 credits** for this experiment and
 **13.33 / 25 credits** across the combined project, leaving 11.67. The balance
 remained 333.21 on the final check. Final assembly and compression ran locally.
+
+### Main integration — October 21, 2026
+
+Merged main through `06339ce`, including the reference-assets UI/server flow and
+quality-pipeline tooling. The merge required no conflict resolution. Full-suite
+checks identified two missing FastH3 registrations: the agent workflow hash
+manifest and the Python cross-workflow fixture. Both now include the native
+FastH3 graph, including injection of its audio reference into the plate workflow.
+
+The production frontend builds successfully, typechecks, and mounts the
+References panel in headless Chromium without page errors. The reference suites
+pass (126 server tests and 16 frontend tests), as do the quality-tool/release-scan
+tests (229 tests) and Python suite (370 passed, one skipped).
+
+Deployment uses the existing private app service and saved runtime. The previous
+runtime, frontend and untracked local files are backed up outside Git. The built
+frontend is overlaid onto the live dist directory to retain published media;
+deployment verification compares all 274 existing published files by SHA-256.
