@@ -1,0 +1,27 @@
+# Generated placeholder media (scripts/pip-night-shift/make-media.mjs) is produced at
+# seed/build time and never committed. Real Google Colab clips may be swapped in later
+# under the same names; they are local artefacts too.
+/assets/
+/takes/
+/media/
+/render/
+/references/*.png
+/references/*.jpg
+/references/*.jpeg
+/references/*.webp
+/references/*.gif
+/references/*.mp4
+/references/*.mov
+/references/*.webm
+/references/*.svg
+/references/files/
+/references/thumbs/
+/references/frames/
+/characters/*.png
+/characters/*.jpg
+/characters/*.jpeg
+/characters/*.webp
+/characters/*.gif
+/characters/*.mp4
+/characters/*.webm
+/characters/files/

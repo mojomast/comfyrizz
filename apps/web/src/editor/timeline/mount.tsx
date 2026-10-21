@@ -7,6 +7,7 @@ import type { PackageV1 } from '../../../../../packages/schema/types';
 import type { CompiledTimeline } from '../../../../../packages/planner/dist/src/browser.js';
 import type { EditorExtras, EditorStore } from '../store.ts';
 import { SceneTimeline } from './Timeline.tsx';
+import type { ClipSummary } from '../../takes/api.ts';
 
 export interface SceneTimelineHandle {
   followFrame(frame: number): void;
@@ -22,6 +23,8 @@ export function mountSceneTimeline(
     onDocument: (pkg: PackageV1, timeline: CompiledTimeline) => void;
     seek: (frame: number) => void;
     togglePlay: () => void;
+    /** Shared clips map (TR17); chips re-render when it changes. */
+    clips?: { all(): readonly ClipSummary[]; subscribe(listener: () => void): () => void };
   },
 ): SceneTimelineHandle {
   if (store.getState().session.zoom === 1) store.setSession({ zoom: 2 });
@@ -36,13 +39,18 @@ export function mountSceneTimeline(
     hooks.onDocument(doc.package as unknown as PackageV1, derived.timeline);
   });
   const root: Root = createRoot(container);
-  root.render(<SceneTimeline store={store} onSeek={hooks.seek} onTogglePlay={hooks.togglePlay} />);
+  const render = () => root.render(
+    <SceneTimeline store={store} onSeek={hooks.seek} onTogglePlay={hooks.togglePlay} clips={hooks.clips?.all()} />,
+  );
+  render();
+  const unsubscribeClips = hooks.clips?.subscribe(render);
   return {
     followFrame(frame) {
       store.setSession({ playheadFrame: Math.max(0, Math.floor(frame)) });
     },
     destroy() {
       unsubscribe();
+      unsubscribeClips?.();
       root.unmount();
     },
   };

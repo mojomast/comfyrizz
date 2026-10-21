@@ -1,0 +1,46 @@
+{
+  "schema": "comfyrizz.reference-manifest/v1",
+  "createdAt": "2026-10-21T07:28:00.000Z",
+  "synthetic": true,
+  "scenes": [
+    { "id": "s1_dawn" },
+    { "id": "s2_counter" },
+    { "id": "s3_juno" },
+    { "id": "s4_outro" }
+  ],
+  "references": [
+    {
+      "id": "ref_1f4a9c2d3e5b6a7c",
+      "label": "dawn-style.png",
+      "kind": "image",
+      "role": "style",
+      "note": "Use this warm 35mm dawn grade, soft halation and grain as the style reference for the opening scene; keep contrast soft and do not copy the buildings.",
+      "width": 1920,
+      "height": 1080,
+      "assignedTo": [
+        { "sceneId": "s1_dawn", "slot": "style_reference" }
+      ],
+      "needsAnswer": false
+    },
+    {
+      "id": "ref_2d6b8e0f1a3c5d7e",
+      "label": "counter-push.mp4",
+      "kind": "video",
+      "role": "motion",
+      "note": "Camera move only: a slow push-in toward the counter for the Pip scene. Do not copy the café interior, people or colours from the clip.",
+      "width": 1920,
+      "height": 1080,
+      "durationSec": 5,
+      "frames": [
+        { "index": 0, "atSec": 0.5 },
+        { "index": 1, "atSec": 1.6 },
+        { "index": 2, "atSec": 2.9 },
+        { "index": 3, "atSec": 4.2 }
+      ],
+      "assignedTo": [
+        { "sceneId": "s2_counter", "slot": "motion_reference" }
+      ],
+      "needsAnswer": false
+    }
+  ]
+}

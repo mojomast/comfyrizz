@@ -1,0 +1,269 @@
+{
+  "schema": "comfyrizz.colab-history/v1",
+  "synthetic": true,
+  "label": "Google Colab",
+  "projectId": "pkg_pipnightshift01",
+  "recordedWith": "scripts/colab/simulate-progress.mjs",
+  "recordedAt": "2026-10-21T07:31:00.000Z",
+  "runs": [
+    {
+      "runId": "simulated.regen.2026-10-20T21-21-40-000Z",
+      "updatedAt": "2026-10-20T21:26:05.000Z",
+      "active": false,
+      "updates": 72,
+      "gauges": [
+        {
+          "runId": "simulated.regen.2026-10-20T21-21-40-000Z",
+          "job": "s3_juno.take2",
+          "stage": "sampler",
+          "label": "node 3",
+          "n": 30,
+          "total": 30,
+          "rate": 1.4286,
+          "eta": null,
+          "ts": "2026-10-20T21:22:07.300Z",
+          "node": "3"
+        },
+        {
+          "runId": "simulated.regen.2026-10-20T21-21-40-000Z",
+          "job": "s3_juno.take2",
+          "stage": "sampler-log",
+          "label": "tqdm",
+          "n": 30,
+          "total": 30,
+          "rate": 3.1,
+          "eta": 0,
+          "ts": "2026-10-20T21:22:22.000Z"
+        },
+        {
+          "runId": "simulated.regen.2026-10-20T21-21-40-000Z",
+          "job": "s3_juno.take2",
+          "stage": "node",
+          "label": "nodes",
+          "n": 5,
+          "total": 5,
+          "rate": 0.1488,
+          "eta": null,
+          "ts": "2026-10-20T21:22:14.300Z",
+          "state": "done",
+          "current": "node 9"
+        },
+        {
+          "runId": "simulated.regen.2026-10-20T21-21-40-000Z",
+          "job": "s3_juno.take2",
+          "stage": "frames",
+          "label": "frames render",
+          "n": 150,
+          "total": 150,
+          "rate": 21.4286,
+          "eta": null,
+          "ts": "2026-10-20T21:22:29.700Z"
+        },
+        {
+          "runId": "simulated.regen.2026-10-20T21-21-40-000Z",
+          "job": "s3_juno.take2",
+          "stage": "frames",
+          "label": "frames encode",
+          "n": 150,
+          "total": 150,
+          "rate": null,
+          "eta": null,
+          "ts": "2026-10-20T21:22:30.400Z"
+        }
+      ]
+    },
+    {
+      "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+      "updatedAt": "2026-10-20T21:16:12.000Z",
+      "active": false,
+      "updates": 227,
+      "gauges": [
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s1_dawn",
+          "stage": "tqdm",
+          "label": "flux2-klein.safetensors",
+          "n": 8200000000,
+          "total": 8200000000,
+          "rate": 820000000,
+          "eta": 0,
+          "ts": "2026-10-20T21:05:07.700Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s1_dawn",
+          "stage": "sampler",
+          "label": "node 3",
+          "n": 30,
+          "total": 30,
+          "rate": 1.4286,
+          "eta": null,
+          "ts": "2026-10-20T21:05:35.000Z",
+          "node": "3"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s2_counter",
+          "stage": "sampler",
+          "label": "node 3",
+          "n": 30,
+          "total": 30,
+          "rate": 1.4286,
+          "eta": null,
+          "ts": "2026-10-20T21:06:25.400Z",
+          "node": "3"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s3_juno",
+          "stage": "sampler",
+          "label": "node 3",
+          "n": 30,
+          "total": 30,
+          "rate": 1.4286,
+          "eta": null,
+          "ts": "2026-10-20T21:07:15.800Z",
+          "node": "3"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s1_dawn",
+          "stage": "sampler-log",
+          "label": "tqdm",
+          "n": 30,
+          "total": 30,
+          "rate": 3.1,
+          "eta": 0,
+          "ts": "2026-10-20T21:05:49.700Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s2_counter",
+          "stage": "sampler-log",
+          "label": "tqdm",
+          "n": 30,
+          "total": 30,
+          "rate": 3.1,
+          "eta": 0,
+          "ts": "2026-10-20T21:06:40.100Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s3_juno",
+          "stage": "sampler-log",
+          "label": "tqdm",
+          "n": 30,
+          "total": 30,
+          "rate": 3.1,
+          "eta": 0,
+          "ts": "2026-10-20T21:07:30.500Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s1_dawn",
+          "stage": "node",
+          "label": "nodes",
+          "n": 5,
+          "total": 5,
+          "rate": 0.1488,
+          "eta": null,
+          "ts": "2026-10-20T21:05:42.000Z",
+          "state": "done",
+          "current": "node 9"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s2_counter",
+          "stage": "node",
+          "label": "nodes",
+          "n": 5,
+          "total": 5,
+          "rate": 0.1488,
+          "eta": null,
+          "ts": "2026-10-20T21:06:32.400Z",
+          "state": "done",
+          "current": "node 9"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s3_juno",
+          "stage": "node",
+          "label": "nodes",
+          "n": 5,
+          "total": 5,
+          "rate": 0.1488,
+          "eta": null,
+          "ts": "2026-10-20T21:07:22.800Z",
+          "state": "done",
+          "current": "node 9"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s1_dawn",
+          "stage": "frames",
+          "label": "frames render",
+          "n": 150,
+          "total": 150,
+          "rate": 21.4286,
+          "eta": null,
+          "ts": "2026-10-20T21:05:57.400Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s1_dawn",
+          "stage": "frames",
+          "label": "frames encode",
+          "n": 150,
+          "total": 150,
+          "rate": null,
+          "eta": null,
+          "ts": "2026-10-20T21:05:58.100Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s2_counter",
+          "stage": "frames",
+          "label": "frames render",
+          "n": 150,
+          "total": 150,
+          "rate": 21.4286,
+          "eta": null,
+          "ts": "2026-10-20T21:06:47.800Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s2_counter",
+          "stage": "frames",
+          "label": "frames encode",
+          "n": 150,
+          "total": 150,
+          "rate": null,
+          "eta": null,
+          "ts": "2026-10-20T21:06:48.500Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s3_juno",
+          "stage": "frames",
+          "label": "frames render",
+          "n": 150,
+          "total": 150,
+          "rate": 21.4286,
+          "eta": null,
+          "ts": "2026-10-20T21:07:38.200Z"
+        },
+        {
+          "runId": "simulated.run.2026-10-20T21-05-00-000Z",
+          "job": "s3_juno",
+          "stage": "frames",
+          "label": "frames encode",
+          "n": 150,
+          "total": 150,
+          "rate": null,
+          "eta": null,
+          "ts": "2026-10-20T21:07:38.900Z"
+        }
+      ]
+    }
+  ]
+}

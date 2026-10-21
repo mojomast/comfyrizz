@@ -18,14 +18,15 @@ import { mountVoiceSettings, readRenderLocation, writeRenderLocation } from './v
 import type { PlayerRef } from '@remotion/player';
 import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
-import pkgJson from '../../../examples/launch-demo/package.json';
-import timelineJson from '../../../examples/launch-demo/timeline.json';
+import pkgJson from '../../../examples/pip-night-shift/package.json';
+import timelineJson from '../../../examples/pip-night-shift/timeline.json';
 import { mountPreview, updatePreview as updatePreviewBase } from './preview';
 import { mountScriptAudioPanel, type ScriptAudioPanelHandle } from './editor/inspector/panel.ts';
 import { createTakesApi, type ClipSummary, type TakesResponse } from './takes/api.ts';
 import { createClipStore, mountRenderBar, withRenderOverride, type RenderBarHandle, type RenderGateSummary } from './takes/render-bar.ts';
 import { previewPackage, type PreviewClip } from './takes/preview-takes.ts';
 import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
+import { openInitialProject, type OpenedProject } from './default-project.ts';
 import type { InlineAsset } from '../../renderer/src/components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -99,32 +100,10 @@ function adoptEditorPackage(next: PackageV1): void {
   editorStore.replaceDocument({ package: next as never });
 }
 
-/**
- * `?package=<id>` plus the session token opens that stored project instead of
- * the bundled demo. Reload then shows the autosaved document. No query leaves
- * the demo in place.
- */
-async function openRequestedPackage(): Promise<void> {
-  const loc = globalThis.location;
-  if (!loc || !sessionToken()) return;
-  const requested = new URLSearchParams(loc.search).get('package');
-  if (!requested) return;
-  try {
-    const response = await apiFetch(`/api/package/${encodeURIComponent(requested)}`);
-    if (!response.ok) return;
-    const body = await response.json() as { package?: PackageV1; editor?: unknown };
-    if (!body.package || typeof body.package !== 'object') return;
-    editorStore.replaceDocument({
-      package: body.package as never,
-      ...(body.editor && typeof body.editor === 'object' ? { editor: body.editor as never } : {}),
-    });
-    pkg = body.package;
-    const compiled = editorStore.getState().derived.timeline;
-    if (compiled) timeline = compiled as unknown as Timeline;
-  } catch (error) {
-    console.error('package open failed', error);
-  }
-}
+// When the local server is open, the seeded demo's references and cast belong
+// to its conversation. The fallback keeps those panels populated until the
+// user starts their own conversation.
+let seededChatId: string | null = null;
 let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
@@ -305,7 +284,7 @@ const state = {
   streamLabel: '',
   messages: [
     { role: 'assistant', text: 'Tell me what video you want to make. I’ll ask only what matters, write the copy and storyboard with you, and build the project when it’s ready. You can keep chatting to revise the same project after it’s built.' },
-    { role: 'assistant', text: 'The bundled demo is open for now. Open **Agent settings** to connect OpenCode Go or another provider for an interactive conversation. The local scripted model remains available offline.' },
+    { role: 'assistant', text: 'Pip’s Night Shift is open for now. Open **Agent settings** to connect OpenCode Go or another provider for an interactive conversation. The local scripted model remains available offline.' },
   ] as Array<{ role: 'user' | 'assistant'; text: string; streaming?: boolean }>,
   activity: [] as Array<{ at: string; text: string }>,
 };
@@ -1727,7 +1706,7 @@ async function runBrief(brief: string): Promise<void> {
   }
 }
 
-function init(): void {
+function init(opened: OpenedProject): void {
   renderMessages();
   renderStoryboard();
   renderPalette();
@@ -1737,7 +1716,7 @@ function init(): void {
   renderSpendCard();
   renderBriefPanel();
   agentSettings = mountAgentSettings(apiFetch, logActivity);
-  state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: 'Loaded examples/launch-demo package + compiled timeline' }];
+  state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: opened.activity }];
   renderActivity();
 
   scrub = $<HTMLInputElement>('scrub');
@@ -1796,6 +1775,7 @@ function init(): void {
       togglePlay() {
         player?.toggle();
       },
+      clips: clipStore,
     });
   }
   let boundPlayer: PlayerRef | null = null;
@@ -2092,7 +2072,7 @@ function init(): void {
   referencePanel = mountReferencePanel(referenceHost, {
     api: createReferenceApi({
       apiFetch,
-      chatId: () => projectChat.conversationId,
+      chatId: () => projectChat.conversationId ?? seededChatId,
       ensureChatId: () => projectChat.ensureConversationId(),
     }),
   });
@@ -2128,7 +2108,7 @@ function init(): void {
     castStripHost,
     open: false,
     api: createCharacterApi({ apiFetch }),
-    chatId: () => projectChat.conversationId,
+    chatId: () => projectChat.conversationId ?? seededChatId,
     ensureChatId: () => projectChat.ensureConversationId(),
     apiFetch,
     log: logActivity,
@@ -2161,5 +2141,20 @@ function init(): void {
   if (token) void refreshClips();
 }
 
-await openRequestedPackage();
-init();
+const openedProject = await openInitialProject({
+  search: globalThis.location?.search ?? '',
+  hasToken: Boolean(sessionToken()),
+  request: input => apiFetch(input),
+  onPackage: (nextPackage, nextEditor) => {
+    editorStore.replaceDocument({
+      package: nextPackage as never,
+      ...(nextEditor ? { editor: nextEditor as never } : {}),
+    });
+    pkg = nextPackage;
+    const compiled = editorStore.getState().derived.timeline;
+    if (compiled) timeline = compiled as unknown as Timeline;
+  },
+  onError: error => console.error('package open failed', error),
+});
+seededChatId = openedProject.chatId ?? null;
+init(openedProject);

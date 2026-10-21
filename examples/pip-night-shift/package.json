@@ -1,0 +1,327 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_pipnightshift01",
+  "title": "Pip's Night Shift",
+  "createdAt": "2026-10-21T07:28:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#1a1410",
+      "#f6ead8",
+      "#ff8a3d",
+      "#6b4a33"
+    ],
+    "font": "Instrument Serif",
+    "text": "#f6ead8",
+    "text_muted": "#6b4a33",
+    "text_on_accent": "#f7f9fc"
+  },
+  "motion": {
+    "energy": "medium",
+    "direction": "left"
+  },
+  "captions": {
+    "style": "karaoke"
+  },
+  "voice": {
+    "enabled": false,
+    "engine": "none"
+  },
+  "datasets": {
+    "d_orders": {
+      "unit": "orders",
+      "label": "Orders before 7 am",
+      "values": [
+        {
+          "label": "Before 7 am",
+          "value": 347
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "Invented café data for the demo; labelled as an example."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s1_dawn",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "05:58, Rue Lumière",
+        "headline": "Pip's Night Shift",
+        "sub": "A small café wakes before the city."
+      },
+      "narration": "Dawn comes to a small café on Rue Lumière. Pip is already awake.",
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 1058
+        }
+      },
+      "motion": {
+        "recipe": "kinetic",
+        "seed": 1058,
+        "intensity": 0.7,
+        "entry": "maskRise",
+        "ease": "move",
+        "spring": "settle",
+        "stagger": "word",
+        "emphasis": "keyword",
+        "highlight": "Night Shift",
+        "energy": "high"
+      },
+      "transitionOut": {
+        "type": "iris",
+        "frames": 10
+      }
+    },
+    {
+      "id": "s2_counter",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Still warm. Still open.",
+        "sub": "Pip, barista bot",
+        "body": "Rain and roasted coffee."
+      },
+      "lower_third": {
+        "kicker": "Pip",
+        "text": "Pip, barista bot"
+      },
+      "narration": "Pip works the counter, still warm from the first pot of the night.",
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 2058
+        }
+      },
+      "motion": {
+        "recipe": "paper-cut",
+        "seed": 2058,
+        "intensity": 0.6,
+        "entry": "fadeUp",
+        "ease": "move",
+        "spring": "settle",
+        "stagger": "none",
+        "emphasis": "keyword",
+        "highlight": "warm",
+        "energy": "medium"
+      },
+      "transitionOut": {
+        "type": "paper-reveal",
+        "frames": 9
+      }
+    },
+    {
+      "id": "s3_juno",
+      "layout": "stat",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Orders before seven",
+        "sub": "Counted before sunrise.",
+        "body": "347 orders before 7 am"
+      },
+      "data": {
+        "dataset": "d_orders",
+        "display": "counter"
+      },
+      "lower_third": {
+        "kicker": "Juno",
+        "text": "Juno, courier"
+      },
+      "narration": "Three hundred and forty-seven orders before seven. Juno brings the last one in.",
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 3058
+        }
+      },
+      "motion": {
+        "recipe": "focus",
+        "seed": 3058,
+        "intensity": 0.7,
+        "focus": {
+          "x": 0.08,
+          "y": 0.18,
+          "width": 0.84,
+          "height": 0.56
+        },
+        "entry": "countUp",
+        "ease": "move",
+        "spring": "settle",
+        "stagger": "none",
+        "emphasis": "hero",
+        "energy": "high"
+      },
+      "transitionOut": {
+        "type": "push",
+        "frames": 9,
+        "direction": "left"
+      }
+    },
+    {
+      "id": "s4_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "Pip's Night Shift",
+        "headline": "Open all night",
+        "cta": "Come in",
+        "sub": "A fictional café, Rue Lumière."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 4058
+        }
+      },
+      "motion": {
+        "recipe": "sketch",
+        "seed": 4058,
+        "intensity": 0.5,
+        "entry": "waterfall",
+        "ease": "move",
+        "spring": "settle",
+        "stagger": "word",
+        "emphasis": "keyword",
+        "highlight": "Open",
+        "energy": "calm"
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 0
+      }
+    }
+  ],
+  "assets": {
+    "a_music_bed": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/music-bed.wav",
+      "sha256": "be8d3acf02c2eda452b7b3de14ed8861a308de3dac07e214fa1ace962a6ecac9",
+      "bytes": 3528044,
+      "media": {
+        "durationSeconds": 20,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "source": {
+        "provider": "repo",
+        "title": "Pip's Night Shift — music bed",
+        "creator": "Comfyrizz contributors"
+      },
+      "license": {
+        "id": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "Comfyrizz contributors"
+      },
+      "redistributable": true,
+      "notes": "Original 96 BPM, 8-bar instrumental bed (felt bass, warm pad, bell arpeggio, brushed pulse). Synthesized locally from scripts/pip-night-shift/make-music.mjs; no samples, no network, no models."
+    },
+    "a_sfx_whoosh": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/sfx-whoosh.wav",
+      "sha256": "892b79f10e134dd46f42192009c73a54c42265235124bbc8884a737c4558cce1",
+      "bytes": 123524,
+      "media": {
+        "durationSeconds": 0.7,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "source": {
+        "provider": "repo",
+        "title": "Pip's Night Shift — transition whoosh",
+        "creator": "Comfyrizz contributors"
+      },
+      "license": {
+        "id": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "Comfyrizz contributors"
+      },
+      "redistributable": true,
+      "notes": "Filtered-noise swell for the s1 to s2 iris transition, synthesized locally by scripts/pip-night-shift/make-music.mjs."
+    },
+    "a_sfx_ding": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/sfx-ding.wav",
+      "sha256": "4ee3605f785ddb5eee901db866f9aef4528cab2015795157a6fd89b4cd246f03",
+      "bytes": 211724,
+      "media": {
+        "durationSeconds": 1.2,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "source": {
+        "provider": "repo",
+        "title": "Pip's Night Shift — counter ding",
+        "creator": "Comfyrizz contributors"
+      },
+      "license": {
+        "id": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "Comfyrizz contributors"
+      },
+      "redistributable": true,
+      "notes": "Small bell chime for the s3 counter hit, synthesized locally by scripts/pip-night-shift/make-music.mjs."
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Every scene draws its background procedurally; generated stills and clips are optional.",
+      "Narration text is present but voice is off, so captions are estimated until audio is measured."
+    ]
+  },
+  "audio": {
+    "music": {
+      "asset": "a_music_bed",
+      "gain_db": -16,
+      "fade_in_seconds": 0.5,
+      "fade_out_seconds": 1.5,
+      "loop": false,
+      "duck": {
+        "enabled": true,
+        "reduction_db": -12,
+        "attack_ms": 20,
+        "release_ms": 300
+      }
+    },
+    "sfx": [
+      {
+        "asset": "a_sfx_whoosh",
+        "scene": "s1_dawn",
+        "at": "scene-end",
+        "offset_seconds": 0,
+        "gain_db": -6
+      },
+      {
+        "asset": "a_sfx_ding",
+        "scene": "s3_juno",
+        "at": "scene-start",
+        "offset_seconds": 0,
+        "gain_db": -6
+      }
+    ]
+  }
+}
