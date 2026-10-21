@@ -1810,9 +1810,10 @@ function init(opened: OpenedProject): void {
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   const renderButton = $('render');
+  const splitGroup = document.getElementById('render-split-button');
   const renderBarHost = document.createElement('div');
   renderBarHost.id = 'render-bar-host';
-  renderButton.before(renderBarHost);
+  (splitGroup ?? renderButton).before(renderBarHost);
   renderBar = mountRenderBar(renderBarHost, {
     gate: () => clipStore.gate(),
     onRender: reason => exportMp4(reason),
@@ -1824,6 +1825,111 @@ function init(opened: OpenedProject): void {
     renderLocation.value = readRenderLocation();
     renderLocation.addEventListener('change', () => writeRenderLocation(renderLocation.value));
   }
+
+  // UO06: Top bar header wiring (project name, Run settings popover, split-button menu)
+  const projectNameEl = document.getElementById('project-name');
+  if (projectNameEl && pkg.title) {
+    projectNameEl.textContent = pkg.title;
+  }
+
+  const runSettingsToggle = document.getElementById('run-settings-toggle');
+  const runSettingsPopover = document.getElementById('run-settings-popover');
+  const runSettingsClose = document.getElementById('run-settings-close');
+
+  function openRunSettings(): void {
+    if (!runSettingsPopover || !runSettingsToggle) return;
+    runSettingsPopover.hidden = false;
+    runSettingsToggle.setAttribute('aria-expanded', 'true');
+    const first = runSettingsPopover.querySelector<HTMLElement>('select, input, button');
+    first?.focus();
+  }
+
+  function closeRunSettings(returnFocus = true): void {
+    if (!runSettingsPopover || !runSettingsToggle || runSettingsPopover.hidden) return;
+    runSettingsPopover.hidden = true;
+    runSettingsToggle.setAttribute('aria-expanded', 'false');
+    if (returnFocus) runSettingsToggle.focus();
+  }
+
+  runSettingsToggle?.addEventListener('click', () => {
+    if (runSettingsPopover?.hidden) openRunSettings();
+    else closeRunSettings(true);
+  });
+
+  runSettingsClose?.addEventListener('click', () => closeRunSettings(true));
+
+  runSettingsPopover?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeRunSettings(true);
+    }
+  });
+
+  const exportMenuToggle = document.getElementById('export-menu-toggle');
+  const exportMenu = document.getElementById('export-menu');
+  const topbarExportMp4 = document.getElementById('topbar-export-mp4');
+  const topbarExportBundle = document.getElementById('topbar-export-bundle');
+
+  function openExportMenu(): void {
+    if (!exportMenu || !exportMenuToggle) return;
+    exportMenu.hidden = false;
+    exportMenuToggle.setAttribute('aria-expanded', 'true');
+    const first = exportMenu.querySelector<HTMLElement>('[role="menuitem"], button');
+    first?.focus();
+  }
+
+  function closeExportMenu(returnFocus = true): void {
+    if (!exportMenu || !exportMenuToggle || exportMenu.hidden) return;
+    exportMenu.hidden = true;
+    exportMenuToggle.setAttribute('aria-expanded', 'false');
+    if (returnFocus) exportMenuToggle.focus();
+  }
+
+  exportMenuToggle?.addEventListener('click', () => {
+    if (exportMenu?.hidden) openExportMenu();
+    else closeExportMenu(true);
+  });
+
+  exportMenu?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeExportMenu(true);
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const items = Array.from(exportMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"], button'));
+      const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+      if (currentIndex === -1) {
+        items[0]?.focus();
+      } else {
+        const nextIndex = event.key === 'ArrowDown'
+          ? (currentIndex + 1) % items.length
+          : (currentIndex - 1 + items.length) % items.length;
+        items[nextIndex]?.focus();
+      }
+    }
+  });
+
+  topbarExportMp4?.addEventListener('click', () => {
+    closeExportMenu(false);
+    void beginExport();
+  });
+
+  topbarExportBundle?.addEventListener('click', () => {
+    closeExportMenu(false);
+    void exportBundle();
+  });
+
+  document.addEventListener('click', event => {
+    const target = event.target as Node | null;
+    if (target && !runSettingsPopover?.contains(target) && !runSettingsToggle?.contains(target)) {
+      closeRunSettings(false);
+    }
+    if (target && !exportMenu?.contains(target) && !exportMenuToggle?.contains(target)) {
+      closeExportMenu(false);
+    }
+  });
   $('run-backend').addEventListener('click', () => void runOnBackend(false));
   $('render-changes').addEventListener('click', () => void renderChangedScenes());
   document.querySelectorAll<HTMLButtonElement>('.mode-toggle .mode').forEach(button => {

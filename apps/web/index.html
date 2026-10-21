@@ -7,41 +7,96 @@
     <link rel="stylesheet" href="/src/ui/tokens.css" />
     <link rel="stylesheet" href="/src/ui/components.css" />
     <link rel="stylesheet" href="/src/ui/shell.css" />
+    <link rel="stylesheet" href="/src/ui/topbar.css" />
     <title>Comfyrizz — CPU motion graphics</title>
   </head>
   <body>
     <div id="app" class="app-shell" data-shell="grid">
       <header id="topbar" class="toolbar shell-topbar" data-region="topbar">
-        <div class="brand"><span class="mark">◑</span><span>Comfyrizz</span><small>CPU slice</small></div>
-        <label class="picker">LLM
-          <select id="llm">
-            <option value="none">local · scripted model</option>
-            <option value="opencode-go">OpenCode Go</option>
-            <option value="custom">Custom · OpenAI-compatible</option>
-            <option value="openrouter">OpenRouter</option>
-          </select>
-        </label>
-        <label class="picker">Model <input id="agent-model" list="agent-model-options" placeholder="scripted" disabled maxlength="300" /><datalist id="agent-model-options"></datalist></label>
-        <button type="button" id="agent-settings-open" class="btn btn-secondary btn-sm">Agent settings</button>
-        <label class="picker">Backend
-          <select id="backend">
-            <option value="cpu">CPU · no network</option>
-            <option value="byo-comfyui">BYO ComfyUI</option>
-            <option value="colab">Google Colab G4</option>
-          </select>
-        </label>
-        <label class="picker">Budget
-          <input id="budget" type="number" min="0" step="1" value="15" title="project unit budget for Google Colab" />
-        </label>
-        <label class="picker">Render
-          <select id="render-location" title="Where the final MP4 is assembled">
-            <option value="local">This machine</option>
-            <option value="colab">Google Colab VM</option>
-          </select>
-        </label>
+        <div class="topbar-brand-group">
+          <div class="brand"><span class="mark">◑</span><span>Comfyrizz</span><small>CPU slice</small></div>
+          <span class="topbar-divider" aria-hidden="true">/</span>
+          <span class="topbar-project-name" id="project-name" title="Project name">Pip’s Night Shift</span>
+        </div>
+
+        <nav class="flow-stepper" aria-label="Project flow">
+          <ol class="stepper-list">
+            <li class="stepper-item is-complete"><span class="stepper-label">Brief</span></li>
+            <li class="stepper-sep" aria-hidden="true">·</li>
+            <li class="stepper-item is-active" aria-current="step"><span class="stepper-label">Storyboard</span></li>
+            <li class="stepper-sep" aria-hidden="true">·</li>
+            <li class="stepper-item"><span class="stepper-label">Takes</span></li>
+            <li class="stepper-sep" aria-hidden="true">·</li>
+            <li class="stepper-item"><span class="stepper-label">Render</span></li>
+          </ol>
+        </nav>
+
         <span class="spacer toolbar-spacer"></span>
+
+        <div class="run-settings-anchor">
+          <button type="button" id="run-settings-toggle" class="btn btn-secondary btn-sm" aria-haspopup="dialog" aria-expanded="false" aria-controls="run-settings-popover">Run settings</button>
+          <div id="run-settings-popover" class="popover run-settings-popover" role="dialog" aria-modal="false" aria-labelledby="run-settings-title" hidden>
+            <div class="run-settings-head">
+              <span id="run-settings-title" class="popover-title">Run settings</span>
+              <button type="button" id="run-settings-close" class="btn btn-ghost btn-icon btn-sm" aria-label="Close run settings">✕</button>
+            </div>
+            <div class="popover-body run-settings-grid">
+              <div class="field">
+                <label class="field-label" for="backend">Backend</label>
+                <select id="backend">
+                  <option value="cpu">CPU · no network</option>
+                  <option value="byo-comfyui">BYO ComfyUI</option>
+                  <option value="colab">Google Colab G4</option>
+                </select>
+                <span class="field-hint">Compute environment for generation</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="llm">LLM</label>
+                <select id="llm">
+                  <option value="none">local · scripted model</option>
+                  <option value="opencode-go">OpenCode Go</option>
+                  <option value="custom">Custom · OpenAI-compatible</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+                <span class="field-hint">Provider for video planning</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="agent-model">Model</label>
+                <div class="run-settings-model-row">
+                  <input id="agent-model" list="agent-model-options" placeholder="scripted" disabled maxlength="300" /><datalist id="agent-model-options"></datalist>
+                  <button type="button" id="agent-settings-open" class="btn btn-secondary btn-sm">Agent settings</button>
+                </div>
+                <span class="field-hint">Active model on the selected provider</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="budget">Budget</label>
+                <input id="budget" type="number" min="0" step="1" value="15" title="project unit budget for Google Colab" />
+                <span class="field-hint">Project unit budget for Google Colab</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="render-location">Render</label>
+                <select id="render-location" title="Where the final MP4 is assembled">
+                  <option value="local">This machine</option>
+                  <option value="colab">Google Colab VM</option>
+                </select>
+                <span class="field-hint">Where the final MP4 is assembled</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <button id="run-backend" class="btn btn-secondary btn-sm">Run on backend</button>
-        <button id="render" class="btn btn-primary btn-sm primary">Export MP4</button>
+
+        <div class="split-button" id="render-split-button">
+          <button id="render" class="btn btn-primary btn-sm primary" type="button" title="Render video">Render</button>
+          <button type="button" id="export-menu-toggle" class="btn btn-secondary btn-sm split-toggle" aria-haspopup="menu" aria-expanded="false" aria-label="Export menu" title="Export options">
+            Export <span class="split-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="export-menu" class="popover export-menu" role="menu" aria-label="Export options" hidden>
+            <button type="button" id="topbar-export-mp4" class="btn btn-ghost btn-sm menu-item" role="menuitem">Export MP4</button>
+            <button type="button" id="topbar-export-bundle" class="btn btn-ghost btn-sm menu-item" role="menuitem">Export bundle</button>
+          </div>
+        </div>
       </header>
 
       <main class="shell-main" data-region="workspace">

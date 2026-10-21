@@ -1,0 +1,234 @@
+/* UO06: Top bar layout, flow stepper, run settings popover and split render button.
+   Dark pro tool palette: borders over shadows, one indigo accent, no gradients. */
+
+/* Brand & Project name */
+.topbar-brand-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.topbar-divider {
+  color: var(--text-3);
+  font-size: var(--font-size-12);
+  user-select: none;
+}
+
+.topbar-project-name {
+  color: var(--text-1);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  white-space: nowrap;
+  max-width: calc(var(--space-6) * 6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Flow stepper (Brief · Storyboard · Takes · Render) */
+.flow-stepper {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-2);
+  flex-shrink: 0;
+}
+
+.stepper-list {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stepper-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.stepper-item.is-active,
+.stepper-item[aria-current="step"] {
+  color: var(--text-1);
+  font-weight: var(--font-weight-600);
+}
+
+.stepper-item.is-complete {
+  color: var(--text-2);
+}
+
+.stepper-sep {
+  color: var(--text-3);
+  font-size: var(--font-size-12);
+  user-select: none;
+}
+
+/* Run settings anchor and popover */
+.run-settings-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.run-settings-popover:not([hidden]) {
+  position: fixed;
+  top: calc(var(--space-5) * 2 + var(--space-1));
+  right: calc(var(--space-6) * 5);
+  z-index: 100;
+  width: calc(var(--space-6) * 10);
+  max-width: calc(100vw - var(--space-6));
+  background: var(--bg-2);
+  border: var(--elevation-border-2);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--elevation-2);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.run-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-bottom: var(--elevation-border-1);
+  padding-bottom: var(--space-2);
+}
+
+.run-settings-title {
+  margin: 0;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  color: var(--text-1);
+}
+
+.run-settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.run-settings-grid .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.run-settings-grid .field-label {
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+  color: var(--text-2);
+}
+
+.run-settings-grid select,
+.run-settings-grid input {
+  min-height: calc(var(--space-5) + var(--space-1));
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-0);
+  color: var(--text-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-12);
+  font-family: var(--font-sans);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.run-settings-grid select:focus-visible,
+.run-settings-grid input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-color: var(--accent);
+}
+
+.run-settings-model-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.run-settings-model-row input {
+  flex: 1;
+}
+
+.run-settings-grid .field-hint {
+  font-size: var(--font-size-12);
+  color: var(--text-3);
+  margin: 0;
+}
+
+/* Split button: Primary Render + Export menu toggle */
+.split-button {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+
+.split-button > button:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right-width: 0;
+}
+
+.split-button > .split-toggle {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: var(--space-1) var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.split-caret {
+  font-size: var(--font-size-12);
+  line-height: 1;
+}
+
+/* Export menu popover */
+.export-menu:not([hidden]) {
+  position: fixed;
+  top: calc(var(--space-5) * 2 + var(--space-1));
+  right: var(--space-3);
+  z-index: 100;
+  min-width: calc(var(--space-6) * 5);
+  background: var(--bg-2);
+  border: var(--elevation-border-2);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--elevation-2);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.export-menu .menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  min-height: calc(var(--space-5) + var(--space-1));
+  font-size: var(--font-size-12);
+  color: var(--text-1);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.export-menu .menu-item:hover,
+.export-menu .menu-item:focus-visible {
+  background: var(--bg-3);
+  color: var(--text-1);
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
