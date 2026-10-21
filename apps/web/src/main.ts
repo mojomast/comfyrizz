@@ -701,10 +701,11 @@ function renderAssets(): void {
     .map(([id, asset]) => {
       const origin = asset.origin === 'generated' ? asset.gen?.generator ?? 'generated' : asset.origin;
       const pending = asset.status === 'pending';
-      const chip = pending
-        ? '<span class="chip warn">pending gpu</span>'
-        : `<span class="chip">${esc(asset.license?.id ?? asset.status)}</span>`;
-      return `<div class="asset${pending ? ' pending' : ''}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy"><b>${esc(id)}</b><span>${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}${chip}</div>`;
+      const tone = pending ? 'warn' : 'ok';
+      const statusText = pending ? 'pending gpu' : (asset.license?.id ?? asset.status);
+      const chip = `<span class="badge badge-${tone} chip${pending ? ' warn' : ''}" data-tone="${tone}">${esc(statusText)}</span>`;
+      const timeInfo = asset.media?.frames ? `<time class="job-time hint tabular-nums mono">${asset.media.frames}f</time>` : '';
+      return `<div class="asset job-row${pending ? ' pending' : ''}" data-asset-id="${esc(id)}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(id)}</b>${chip}${timeInfo}</div><span class="job-progress hint">${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}</div>`;
     })
     .join('');
   renderGpuQueue();
@@ -721,15 +722,28 @@ function renderGpuQueue(): void {
   host.innerHTML = pendingGpu
     .map(
       item =>
-        `<div class="asset pending"><div class="thumb">◌</div><div><b>${esc(item.assetId)}</b><span>${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div><span class="chip warn">pending spend</span></div>`,
+        `<div class="asset job-row pending" data-asset-id="${esc(item.assetId)}"><div class="thumb">◌</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(item.assetId)}</b><span class="badge badge-warn chip warn" data-tone="warn">pending spend</span></div><span class="job-progress hint">${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div></div>`,
     )
     .join('');
+}
+
+function activityTone(text: string): { tone: 'ok' | 'warn' | 'danger' | 'info'; label: string } {
+  if (/fail|error|refus|reject|exploded/i.test(text)) return { tone: 'danger', label: 'failed' };
+  if (/warn|unconfirmed/i.test(text)) return { tone: 'warn', label: 'warn' };
+  if (/downloaded|saved|finished|ok|cleared|ready|passed|verified/i.test(text)) return { tone: 'ok', label: 'done' };
+  if (/started|rendering|re-rendering|exporting|checking|allocating/i.test(text)) return { tone: 'info', label: 'running' };
+  return { tone: 'info', label: 'log' };
 }
 
 function renderActivity(): void {
   const host = $('activity');
   host.innerHTML = state.activity.length
-    ? state.activity.map(event => `<div class="event"><time>${esc(event.at)}</time>${esc(event.text)}</div>`).join('')
+    ? state.activity
+        .map(event => {
+          const { tone, label } = activityTone(event.text);
+          return `<div class="event job-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><span class="job-text">${esc(event.text)}</span></div><time class="tabular-nums mono hint">${esc(event.at)}</time></div>`;
+        })
+        .join('')
     : '<div class="empty">No activity yet.<br /><span class="hint">Agent and render events will show up here.</span></div>';
 }
 
@@ -768,20 +782,53 @@ function teardownLabel(teardown: { state?: string; evidence?: string }): string 
   return teardown?.evidence ? `${label} · ${teardown.evidence}` : label;
 }
 
+function runEventTone(event: RunEvent): { tone: 'ok' | 'warn' | 'danger' | 'info'; label: string } {
+  if (event.event === 'run_phase') {
+    if (event.phase === 'failed') return { tone: 'danger', label: 'failed' };
+    if (event.phase === 'gated') return event.ok === false ? { tone: 'danger', label: 'gate' } : { tone: 'ok', label: 'gate' };
+    if (event.phase === 'planned') return { tone: 'info', label: 'plan' };
+    if (event.phase === 'up' || event.phase === 'bootstrapped' || event.phase === 'ran' || event.phase === 'applied') {
+      return { tone: 'ok', label: String(event.phase) };
+    }
+    return { tone: 'info', label: String(event.phase ?? 'phase') };
+  }
+  if (event.type === 'error' || event.type === 'job_failed') return { tone: 'danger', label: 'failed' };
+  if (event.type === 'health') return event.ok ? { tone: 'ok', label: 'health' } : { tone: 'danger', label: 'health' };
+  if (event.type === 'job_done' || event.type === 'job' || event.type === 'collected' || event.event === 'collect') {
+    return { tone: 'ok', label: 'done' };
+  }
+  return { tone: 'info', label: 'event' };
+}
+
+function runStatusTone(status: string): 'ok' | 'warn' | 'danger' | 'info' {
+  if (/fail|error/i.test(status)) return 'danger';
+  if (/starting|running|pending/i.test(status)) return 'info';
+  if (/ok|done|finished|succeeded/i.test(status)) return 'ok';
+  return 'info';
+}
+
 function renderRunPanel(): void {
   const host = $('run-panel');
   if (!runState.active) {
     host.innerHTML = '<div class="empty">No backend run yet.<br /><span class="hint">Pick a backend and press Run.</span></div>';
     return;
   }
+  const activeTone = runStatusTone(runState.active.status);
   const rows = runState.events
-    .map(event => `<div class="event"><b>${esc(String(event.event ?? event.type ?? 'event'))}</b> ${esc(summarizeRunEvent(event))}</div>`)
+    .map(event => {
+      const { tone, label } = runEventTone(event);
+      const at = event.at ?? event.time ?? event.timestamp;
+      const timeStr = at ? `<time class="tabular-nums mono hint">${esc(String(at))}</time>` : '';
+      return `<div class="event job-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><b class="job-name">${esc(String(event.event ?? event.type ?? 'event'))}</b><span class="job-progress hint">${esc(summarizeRunEvent(event))}</span></div>${timeStr}</div>`;
+    })
     .join('');
-  const teardown = runState.teardown ? `<div class="event"><b>teardown</b> ${esc(teardownLabel(runState.teardown))}</div>` : '';
-  const render = runState.render
-    ? `<div class="run-render"><button id="run-video">Download run MP4</button><span class="hint">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div>`
+  const teardown = runState.teardown
+    ? `<div class="event job-row" data-tone="${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}"><span class="badge badge-${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}">teardown</span><div class="job-content"><b class="job-name">teardown</b><span class="job-progress hint">${esc(teardownLabel(runState.teardown))}</span></div></div>`
     : '';
-  host.innerHTML = `<div class="run-head"><b>${esc(runState.active.runId)}</b><span class="chip">${esc(runState.active.status)}</span></div>${rows}${teardown}${render}`;
+  const render = runState.render
+    ? `<div class="run-render job-row"><span class="badge badge-ok" data-tone="ok">ready</span><div class="job-content"><b class="job-name">run MP4</b><span class="job-progress hint tabular-nums mono">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div><div class="job-actions"><button type="button" id="run-video" class="btn btn-secondary btn-sm">Download run MP4</button></div></div>`
+    : '';
+  host.innerHTML = `<div class="run-head job-row"><div class="job-content"><b class="job-name">${esc(runState.active.runId)}</b><span class="job-meta hint">${esc(runState.active.backendId)}</span></div><span class="badge badge-${activeTone} chip" data-tone="${activeTone}">${esc(runState.active.status)}</span></div>${rows}${teardown}${render}`;
   const video = $('run-video');
   if (video) video.addEventListener('click', () => void downloadRunVideo());
 }
