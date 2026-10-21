@@ -1,4 +1,4 @@
-"""Review and finish the 90-second native FastH3 NRCU pilot.
+"""Review and finish a frame-exact native FastH3 NRCU pilot edit.
 
 review ROOT [--shots s03 ...] uses CPU ASR and temporal samples.
 finish ROOT requires current source hashes and speech review reports. A review
@@ -25,6 +25,8 @@ def stamp(t):
 
 
 def finish(root,film):
+    duration=float(film['seconds']);target_frames=round(duration*24)
+    if abs(target_frames/24-duration)>1e-6:raise ValueError('Duration must land on a 24 fps frame')
     out=root/'final';parts=out/'parts';parts.mkdir(exist_ok=True,parents=True)
     overrides=json.loads((root/'review-overrides.json').read_text()) if (root/'review-overrides.json').exists() else {}
     edits=[]
@@ -60,12 +62,12 @@ def finish(root,film):
                       'sourceStart':source_start,
                       'crop':override.get('crop'),
                       'muteAudio':bool(override.get('muteAudio',False))})
-    excess=sum(s['editFrames'] for s in edits)-2160
+    excess=sum(s['editFrames'] for s in edits)-target_frames
     for shot in sorted(edits,key=lambda s:(bool(s['line']),-(s['editFrames']-s['minimumFrames']))):
         take=min(max(excess,0),shot['editFrames']-shot['minimumFrames']);shot['editFrames']-=take;excess-=take
     for shot in sorted(edits,key=lambda s:(bool(s['line']),-(s['maximumFrames']-s['editFrames']))):
         add=min(max(-excess,0),shot['maximumFrames']-shot['editFrames']);shot['editFrames']+=add;excess+=add
-    if excess:raise ValueError('Cannot fit protected performances into 90 seconds')
+    if excess:raise ValueError('Cannot fit protected performances into target duration')
     cursor=0;cues=[]
     for shot in edits:
         shot['start']=cursor/24;shot['seconds']=shot['editFrames']/24;cursor+=shot['editFrames']
@@ -98,17 +100,21 @@ def finish(root,film):
     listing=out/'parts.txt';listing.write_text(''.join(f"file 'parts/{s['id']}.mkv'\n" for s in edits))
     feature=out/'hermes-the-lower-road-1080p.mp4'
     run(['ffmpeg','-v','error','-y','-f','concat','-safe','1','-i',listing,'-i',root/'audio/music.wav','-i',root/'audio/ambience.wav','-i',srt,
-         '-filter_complex','[0:a][1:a][2:a]amix=inputs=3:normalize=0,loudnorm=I=-18:TP=-1.5:LRA=9,aresample=48000,atrim=duration=90[a]',
-         '-map','0:v:0','-map','[a]','-map','3:0','-c:v','copy','-c:a','aac','-b:a','192k','-c:s','mov_text',
-         '-metadata:s:s:0','language=eng','-metadata','title='+film['title'],'-movflags','+faststart',feature])
+         '-filter_complex',f'[0:v]setpts=N/(24*TB)[v];[0:a]asetpts=N/SR/TB[d];[d][1:a][2:a]amix=inputs=3:normalize=0,loudnorm=I=-18:TP=-1.5:LRA=9,aresample=48000,atrim=duration={duration}[a]',
+         '-map','[v]','-map','[a]','-map','3:0','-r','24','-fps_mode','cfr','-c:v','libx264','-preset','fast','-crf','18','-pix_fmt','yuv420p','-c:a','aac','-b:a','192k','-c:s','mov_text',
+         '-metadata:s:s:0','language=eng','-metadata','title='+film['title'],'-t',duration,'-movflags','+faststart',feature])
     metadata=probe(feature);video=next(s for s in metadata['streams'] if s['codec_type']=='video')
-    assert int(video['nb_frames'])==2160 and abs(float(video['duration'])-90)<.01
+    assert int(video['nb_frames'])==target_frames and abs(float(video['duration'])-duration)<.01
     compact=out/'hermes-the-lower-road-small.mp4'
     run(['ffmpeg','-v','error','-y','-i',feature,'-map','0:v:0','-map','0:a:0','-map','0:s?',
-         '-vf','scale=1280:720','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',
-         '-c:s','copy','-movflags','+faststart',compact])
+         '-vf','fps=24,scale=1280:720','-r','24','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',
+         '-c:s','copy','-t',duration,'-movflags','+faststart',compact])
     for export in [feature,compact]:
-        run(['ffmpeg','-v','error','-xerror','-i',export,'-map','0:v:0','-map','0:a:0','-f','null','-'])
+        checked=probe(export);stream=next(s for s in checked['streams'] if s['codec_type']=='video')
+        assert int(stream['nb_frames'])==target_frames and stream['avg_frame_rate']=='24/1'
+        assert abs(float(stream['duration'])-duration)<.01
+        decoded=subprocess.run(['ffmpeg','-v','error','-xerror','-i',str(export),'-map','0:v:0','-map','0:a:0','-f','null','-'],capture_output=True,text=True,check=True)
+        if decoded.stderr.strip():raise ValueError('Decode diagnostics: '+decoded.stderr)
     report={'title':film['title'],'videoModel':'fasth3-omni','bytes':feature.stat().st_size,'sha256':sha(feature),
             'probe':metadata,'captions':len(cues),'sourceShots':len(edits),'listeningReviewed':False,
             'fullDecodePassed':True,'compact':{'bytes':compact.stat().st_size,'sha256':sha(compact),'probe':probe(compact)},

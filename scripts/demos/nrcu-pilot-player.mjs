@@ -6,6 +6,7 @@ import { resolve, join } from 'node:path';
 
 const root = resolve(process.argv[2], 'final');
 const report = JSON.parse(readFileSync(join(root, 'verification.json')));
+const film = JSON.parse(readFileSync(join(root, '../film.json')));
 const files = new Map();
 for (const [name, expected] of [
   ['hermes-the-lower-road-1080p.mp4', report],
@@ -22,8 +23,9 @@ const mb = bytes => (bytes / 1e6).toFixed(1);
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hermes · The Lower Road</title><style>
 body{margin:0;background:#0b141b;color:#e8edf0;font:17px/1.55 system-ui,sans-serif}main{max-width:1100px;margin:40px auto;padding:0 24px}h1{font-size:clamp(32px,5vw,56px);line-height:1.1}.label{color:#8ccdd0;letter-spacing:2px;font-size:12px}video{width:100%;background:#000;border-radius:10px}p{color:#bbc6d1}a{color:#ffca79}.links{display:flex;gap:18px;flex-wrap:wrap}.note{font-size:14px}</style></head><body><main>
 <p class="label">HERMES: THE UNFINISHED DAWN / PILOT</p><h1>The Lower Road</h1><p>Winning the part. Or bringing everyone home.</p>
-<video controls playsinline preload="metadata" src="hermes-the-lower-road-small.mp4"><track kind="captions" src="captions.vtt" srclang="en" label="English"></video>
-<p>90 seconds · 20 shots · 24 fps · Native FastH3 Omni motion and dialogue</p>
+<video controls playsinline preload="metadata" src="hermes-the-lower-road-small.mp4?v=${report.compact.sha256.slice(0,8)}"><track kind="captions" src="captions.vtt?v=${report.compact.sha256.slice(0,8)}" srclang="en" label="English"></video>
+<p>${film.seconds} seconds · ${film.shots.length} shots · 24 fps · Native FastH3 Omni motion and dialogue</p>
+${film.edition === 'Rock recut v2' ? '<p>Rock recut · tighter action edit · original 144 BPM guitar, bass and drums</p>' : ''}
 <p class="links"><a href="hermes-the-lower-road-small.mp4" download>Download · ${mb(report.compact.bytes)} MB</a><a href="hermes-the-lower-road-1080p.mp4" download>1080p master · ${mb(report.bytes)} MB</a><a href="captions.srt" download>Captions</a></p>
 <p>Don Piedro chooses the lower road to rescue two stranded workers, while his rival Molty seizes the regulator.</p>
 <p class="note">An unofficial fictional adaptation. Original synthetic performances and score. Reviewed with speech transcription and temporal frame samples; normal-speed listening review is pending.</p>

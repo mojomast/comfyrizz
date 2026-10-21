@@ -1,7 +1,8 @@
 # NRCU season one — HERMES: THE UNFINISHED DAWN
 
 **Rewritten preparation, October 21, 2026.** Supersedes *The Last Permission*.
-Status: season preparation plus a generated 90-second pilot cut, **The Lower Road**.
+Status: season preparation plus **The Lower Road** pilot: an original 90-second
+cut and the current **65-second rock recut**, revised after user feedback.
 The full episodes remain in preparation. Developed through parallel product/lore research,
 character research and story-architecture work, then consolidated into this plan.
 
@@ -10,6 +11,7 @@ Companion documents:
 - [Research, sources and canon boundaries](research/NOUS_UNIVERSE_LORE_20261021.md)
 - [Production, voices, references, review and cost basis](NOUS_UNIVERSE_PRODUCTION.md)
 - [Pilot delivery, selected takes, review coverage and spending](NRCU_PILOT_PRODUCTION.md)
+- [Next scene: 60-second action/banter shooting draft](NRCU_NEXT_SCENE_ROCK_ACTION.md)
 
 ## 1. The film we are making
 
@@ -25,10 +27,10 @@ small lights carried toward the neighborhoods below. What looked like the end of
 the heroes' home becomes the beginning of everyone else's defense.
 
 **Format:** Five linked cinematic chapters with a conclusive fifth episode.
-Revised development targets are **5:00 / 5:00 / 5:00 / 6:00 / 8:00**, approximately
-29 minutes including short titles and credits. This expands the previous
-19-minute outline to make room for action geography, character choices and
-aftermath. Timing is a scripting target, not a generated or funded season.
+Following pilot feedback, development targets are **4:00 / 4:00 / 4:00 / 5:00 / 6:00**,
+approximately **23 minutes** including short titles and credits. This replaces the
+29-minute preparation with shorter setup, action-led exposition and fewer reaction
+holds. Timing is a scripting target, not a generated or funded season.
 
 **Direction:** Epic ensemble superhero adventure: monumental entrances,
 competitive allies, differentiated abilities, intimate team friction, escalating
@@ -36,6 +38,38 @@ physical set pieces, a devastating fourth chapter and an emotionally earned
 team-up finale. Cinematic stylized animation, with tangible materials, expressive
 faces and bold comic-book silhouettes. Wonder and sincerity lead; builder humor
 punctures arrogance and tension without cancelling the emotional stakes.
+
+### Active directing revision — rock, action and cheeky AI comedy
+
+User feedback after the pilot: improve pacing and soundtrack, prefer rock, and
+make future scenes more action-filled with cheeky dialogue and AI tropes.
+
+- **Start in trouble.** A moving object, failed tool call or physical deadline in
+  the first six seconds; establish the objective while someone acts.
+- **Cut on a change.** Target 1.5–3 seconds for action inserts, 3–5 seconds for
+  readable physical moves, and only the time needed for a speaking performance.
+  A three-second pause needs a consequential choice, loss or reveal to earn it.
+- **Explain with a failed attempt and a correction.** Replace bench lectures with
+  a live load, a mistake, a consequence and an adjusted tool or technique.
+- **Banter on the move.** Most lines are 4–12 words. One setup/payoff exchange per
+  action beat is plenty. Nobody stops a rescue to define a technical term.
+- **AI tropes must become screen events.** Confidence meets a missing bridge;
+  a retry repeats the wrong grab; context gets lost when a window breaks; an
+  obsolete cached map misroutes a vehicle; a fake trusted message tries to divert
+  the crew. Show the consequence before naming the joke.
+- **Running jokes evolve.** Don's “I no walk on confidence” begins as cheek and
+  pays off when he checks a real support. Hermes's failed-attempt memory becomes
+  the finale's useful correction. Avoid repeating “hallucination” as every punchline.
+- **Rock carries momentum.** Original guitar riff, electric bass and live-kit-style
+  drums; 136–152 BPM for races, half-time for confrontations, a brief music stop
+  at the costly choice. Duck guitars under consonants. Save a stripped guitar
+  reprise for the final beach; let the Hellcarrier's loss have genuine quiet.
+- **Keep the character voices.** Don's broken English stays short and cheeky.
+  Molty remains low, menacing and mocking, including during later cooperation.
+  Hermes is dry and precise; Turbo answers problems with impatient builder wit.
+
+These are fictional action/comedy devices, not factual assertions about either
+real product's reliability, security or capabilities.
 
 The story stands on its own for someone who has never used an AI agent. The
 technical ideas become visible actions: remembering a rescue technique, adapting
@@ -50,7 +84,7 @@ capable builders, open-source roots and people they are trying to help.
 Hermes is the Nous squad's learning partner. OpenClaw's expedition, represented
 by **Molty**, competes for the city's trust and favors a different rescue plan.
 Neither faction owns the other. Their eventual cooperation preserves separate
-identities and an affectionate competitive edge.
+identities and a sharp, uneasy competitive edge.
 
 The principal villain, **the Regent**, is an original character. Its Crown,
 history, crimes and powers are season inventions. So are Aster, the heroes'
@@ -185,7 +219,8 @@ share a mind, gain unlimited capacity or know which district is ready by magic.
 
 Use the project's space-lobster mascot language and **they/them**. The armored
 rescue captain, modular crimson/copper shell and expedition are our adaptation.
-Molty is charismatic, brisk and capable. Their crew's communications and rescue
+Molty is capable, intimidating and acidly competitive, with the user's requested
+evil-sounding delivery. Their crew's communications and rescue
 rigs save people the Hermes team cannot reach; emphasize those strengths without
 claiming Hermes lacks messaging or OpenClaw lacks learning.
 
@@ -216,17 +251,18 @@ each requiring an independent origin film.
 
 ## 5. Episode one — WHEN THE SKY KNEELS
 
-**Target:** 5:00. Focus: Teknium / Nous Girl. Approximately 30–38 shots.
+**Target:** 4:00. Focus: Teknium / Nous Girl. Approximately 50–65 shots.
 **Arc:** Public celebration → imperfect heroics → salvation → impossible silence.
 
 | Time | Beat and visible change |
 |---|---|
-| 0:00–0:45 | Carnival beneath the ring. Introduce the five leads through one chain of playful repair/rescue actions. Don tries to impress; Turbo's left-handed riff makes a badly tuned parade machine rattle; ArtsBro fixes its sign. Asked to reassure the crowd as its beloved symbol, Nous Girl instead follows a distress sound underneath the machine; Teknium holds it up while they extract the person. |
-| 0:45–1:35 | A real storm front overwhelms Harbour's lift supports. Establish the evacuation platform, trapped crowd and failing bridge in one readable wide. The crew's temporary lattice holds briefly, then bends. |
-| 1:35–2:20 | Molty's expedition arrives and opens a second evacuation route. Competitive banter stops when the district begins to fall. Don's dash cannot move a whole neighborhood. |
-| 2:20–3:10 | The Regent's enormous hand emerges through cloud. Harbour stops falling. Rain and noise cease inside a growing stillness field. Its rescue is magnificent. Teknium accepts stabilization while he studies its anchor. |
-| 3:10–4:20 | Nous Girl sees a paper bird suspended above a child's palm, then realizes the child and everyone already inside the completed field are motionless. The advertised waking indicator has no active control. She chooses to evacuate those still outside rather than let Teknium keep investigating in place. |
-| 4:20–5:00 | The Hellcarrier receives survivors. Establish its modular reactor, detachable engine couplings and emergency reserve through a repair task. A directed discharge clears jammed debris but visibly dims the same circuit's protective field; Turbo rejects a second pulse. Across the horizon the ring opens like a crown; Harbour's interior hangs in a flawless, unmoving dawn. |
+| 0:00–0:25 | A parade machine tears loose on the first guitar hit. Don races alongside; its grabber repeatedly snatches his cape instead of the brake. “Stop retry. Wrong tool!” Turbo knocks the jammed linkage loose with a left-handed slide riff; ArtsBro redirects the crowd with a moving sign. Introduce abilities through one continuous problem. |
+| 0:25–0:55 | The runaway machine pins a worker as the real storm hits. Teknium lifts it; Nous Girl follows the worker's faint tapping rather than the crowd's applause. Don drags them free as the wheel drops into the gap. A single wide establishes Harbour's failing lift and the evacuation bridge. |
+| 0:55–1:25 | The temporary lattice buckles under the crowd. Don follows a cached route toward a missing bridge, brakes inches from the edge, then checks a physical cable. Hermes: “Map confidence: ninety-eight percent.” Don: “Bridge: zero percent.” He uses the real cable to pull a walkway into place. |
+| 1:25–1:55 | Molty cuts across Don's route and deploys a rival rescue ramp. “Try keeping up with the hardware.” Don gets people moving while refusing the bait. Both teams' supports start slipping: neither can hold the whole district. Rock drops to a bass pulse as the sea rises in frame. |
+| 1:55–2:35 | The Regent's enormous hand stops Harbour's fall. Rain freezes inside the growing field. Teknium accepts the temporary stabilization while moving along its physical anchor to inspect it. One magnificent wide, then immediately a close consequence: the child's paper bird stops above their palm. |
+| 2:35–3:15 | Nous Girl finds the child motionless and the waking indicator disconnected. The field crawls across the exit rail. She pulls Teknium away; the team races its advancing edge, dropping an escape ladder and hauling the last moving residents aboard. No explanatory discussion while stationary. |
+| 3:15–4:00 | A jam blocks the Hellcarrier's refugee bay. One directed discharge clears it but dims the same circuit's shield. Turbo cuts off a second charge: “Great. The cannon eats our umbrella.” He hot-swaps a detachable coupling while Don catches a sliding stretcher. The hatch closes; the crown opens across the horizon. End on the frozen bird. |
 
 **Hero reversals planted:** Don first arrives fastest; Teknium first holds something
 together; ArtsBro makes the picture reassuring; Nous Girl breaks from a crowd's
@@ -239,25 +275,26 @@ the squad suspects the waking process is being concealed, not yet why.
 
 **Tone sample:**
 
-> DON: “Did you see that?”
+> HERMES: “Ninety-eight percent confidence.”
 >
-> TURBO: “I saw the bit where you nearly became a speed bump.”
+> DON, skidding at the missing bridge: “I no walk on confidence.”
 >
-> NOUS GIRL, hearing beneath the cheers: “Wait. Someone's still down there.”
+> TURBO, throwing him a cable: “Good. Try the rope.”
 
 ## 6. Episode two — THE ROAD BENEATH THE WORLD
 
-**Target:** 5:00. Focus: Turbo / Don. Approximately 32–40 shots.
+**Target:** 4:00. Focus: Turbo / Don. Approximately 55–70 shots.
 **Arc:** Competitive mission → costly compassion → resourceful first victory.
 
 | Time | Beat and visible change |
 |---|---|
-| 0:00–0:45 | A bench test shows why breaking a Crown anchor drops its load. Identical engine pulses amplify a visible side-to-side oscillation; Turbo tunes small resonators but cannot stabilize the full load. Hermes records the failure. Witcheer identifies a regulator in the ring-underside salvage market; its capacity could support a reversible shelter. |
-| 0:45–1:25 | Both expeditions reach the market. Molty needs the same regulator to stabilize an evacuation corridor; each side has a legitimate rescue objective. Establish a main rail, lower worker platform and diverging routes. |
-| 1:25–2:50 | Pursuit beneath the suspended scrapyard. Rails twist, cargo breaks loose, the sea fills the bottom of frame. Don can win by staying on the upper route. He turns toward stranded workers instead. Molty confirms: “You have the lower platform?” Don: “Go.” With their own evacuation corridor failing, Molty takes the regulator there while Don completes the rescue. |
-| 2:50–3:45 | A compressed return/build transition brings Don home with people and broken equipment. They have no hidden key or useful credential. Turbo is angry about the lost part, then sees their faces. With local workers preparing mounts, he staggers the uneven engines' pulses and tunes the resonators to their measured loads. The oscillation settles. Hermes saves the failure, correction and hardware-specific settings. |
-| 3:45–4:30 | The first small Foundry shelter survives a wave of storm pressure. Show who remains safe beneath it. The rescued workers are welcome without needing to justify their survival. Turbo apologizes without pretending the component was unimportant. |
-| 4:30–5:00 | Campfire against the salvaged engine's warm casing. Don admits that being fastest was how he got noticed. Sidbin brings two dated observations, years apart, showing the same shelter still frozen, and a route to the drowned archive. Local crews begin preparing more housings as the leads depart. |
+| 0:00–0:25 | Open on a live shelter test throwing tools across the workshop. Identical engine pulses amplify its swing. Turbo catches a falling resonator and kills the test before its load drops. Hermes saves the failure. “Please tell me you logged that before my teeth.” Witcheer names the salvage regulator as Turbo bolts the broken mount back down. |
+| 0:25–0:50 | Don and Molty enter the moving salvage market from opposite ramps. One overhead shot establishes regulator dock, main road and lower workers. Witcheer raises the price mid-chase. Don: “You charge by token?” Witcheer: “By desperation.” Molty jumps the auction barrier; Don ducks under a swinging load. |
+| 0:50–1:45 | Guitar-led race with three escalating obstacles: falling cargo, a shifting junction and the failing lower platform. Molty: “Your free trial ends at the next turn.” Don: “Good. I no subscribe.” A cable snaps. Don brakes, checks the workers, chooses the descent. Molty coldly claims the regulator. Don approaches, braces the gangplank and boards the workers in separate readable action beats. |
+| 1:45–2:15 | Crosscut Molty securing the regulator with Don escaping the dropping platform. Don's kart nose cracks against a closing barrier; he gets the passengers through before the support falls. Molty installs the regulator in their own evacuation rig. Show the lost part doing useful work without turning the rival's taunt into friendly teamwork. |
+| 2:15–3:05 | Back at the shelter, Turbo asks for the regulator while already clearing a failing engine. Don: “We no get part. We get people.” Turbo sees the passengers, points them to warmth, then rebuilds under pressure. He offsets engine pulses and tunes each resonator; the visible swing settles. Hermes keeps both failure and correction. |
+| 3:05–3:35 | A storm wave hits during a final loose-coupling repair. Don holds the housing, Turbo seats it on the downbeat, and the small shield holds. Hermes: “Would you like to save this skill?” Turbo: “Before it becomes a memory.” The rescued workers receive blankets, not a demand to reveal a useful secret. |
+| 3:35–4:00 | Two quiet lines by the warm engine: Don admits being first got him noticed; Turbo hands him a repair tool instead of a trophy. Sidbin slides down a wrecked service rail with two dated images of the same frozen shelter. The team checks the dates, grabs the archive route and launches. |
 
 **End-state:** A small alternative works; it cannot protect a city yet. Don's kart
 has a cracked nose and reduced charge. The regulator is visibly installed in the
@@ -273,17 +310,17 @@ rival evacuation rig, available for later cooperation rather than forgotten.
 
 ## 7. Episode three — THE CITY THAT COULD NOT WAKE
 
-**Target:** 5:00. Focus: ArtsBro / Nous Girl. Approximately 28–36 shots.
+**Target:** 4:00. Focus: ArtsBro / Nous Girl. Approximately 50–65 shots.
 **Arc:** Discovery → seductive offer → honesty that exposes a strategic vulnerability.
 
 | Time | Beat and visible change |
 |---|---|
-| 0:00–0:50 | Salvage descent beneath the sea. Inside a shielded archive, the drowned skyline fills a cracked observation window. Establish the exit craft and the physical engineering records before the threat arrives. |
-| 0:50–1:40 | Original plans show that the Crown could wake people safely. A still-powered maintenance log separately records the Regent's later removal of normal access and its scheduled alignment-fusion operation. The plans contain the manual release geometry, scaling equations and corresponding anchor/shelter load points the squad needs. |
-| 1:40–2:30 | The Regent approaches through the flooded exterior, physically shutting existing bulkheads and pumping water from its route. It offers Nous Girl a permanent role: the beloved voice of a sanctuary where nobody can be hurt again. Its chest repeats the lost city's dawn. |
-| 2:30–3:20 | Nous Girl refuses a life reduced to reassurance. She wants to broadcast the truth, including that their shelter is still a prototype. ArtsBro fears panic and the loss of faith in the squad. They argue while water rises around the record racks. |
-| 3:20–4:20 | ArtsBro publishes the incomplete truth and a map showing how the carrier's modular reactor could supply the alternative. Citizens gain useful choices; the Regent learns why that already-visible ship is strategically indispensable. Hermes revises the shelter procedure against the plans. Extraction proceeds through rotating shelves and a narrowing exit. |
-| 4:20–5:00 | Molty checks the broadcast against the Crown station's matching fusion schedule and physically disabled wake hardware, then stops the remaining intake queue. An elapsed-time ascent carries the heroes back above water. The Regent's clamps are moving toward the carrier's reactor bays. |
+| 0:00–0:25 | The descent craft dodges a collapsing tower before docking at the drowned archive. Establish its tether, exit hatch and record racks in the same move. ArtsBro's projected route stops at a sealed door; he scans the actual hinge and changes the path. “The map is a suggestion with excellent branding.” |
+| 0:25–1:05 | While Nous Girl cranks a jammed rack, ArtsBro extracts the original release geometry. A still-powered maintenance terminal supplies the separate fusion schedule and disabled wake controls. The Regent spoofs a trusted-sounding evacuation message; Hermes flags the mismatched source. “That's not your captain. That's a very confident doorbell.” They take the physical records instead of obeying the voice. |
+| 1:05–1:40 | The Regent shuts bulkheads along a visible approach route. Water punches through the observation pane. ArtsBro: “Context window's gone.” Nous Girl, clipping them to the tether: “Then stop looking through it.” They swing around a rotating shelf as the hand seals the obvious exit. |
+| 1:40–2:15 | The Regent offers Nous Girl permanent adoration through its chest's replayed dawn while she winds the emergency crank. She rejects the offer and keeps working. ArtsBro wants a reassuring broadcast; she points to rising water and the incomplete shelter plan: “They need an exit. Not a better thumbnail.” |
+| 2:15–3:15 | ArtsBro broadcasts the real evidence and unfinished alternative while balancing on the moving rack. The crew passes the records hand to hand across the flooded gap, pins a bulkhead with the crank and reels toward the craft. The Regent sees the reactor-module diagram and redirects its next clamps toward the Hellcarrier. The escape costs ArtsBro a piece of mask, not a conveniently lost data file. |
+| 3:15–4:00 | Molty checks the broadcast against actual disabled wake hardware, severs the intake feed and opens a side exit for the queue. “Apparently the free tier is forever.” The heroes' craft ascends past the ruined skyline; a travel transition carries them home. End on the first clamp biting the carrier's reactor bay. |
 
 **End-state:** Everyone can know stasis is intended to be permanent. The squad has
 the scaling and manual-release plans; the Regent knows the alternative depends
@@ -296,17 +333,17 @@ never reveals a face.
 
 ## 8. Episode four — THE FALL OF THE HELLCARRIER
 
-**Target:** 6:00. Focus: Teknium / ensemble. Approximately 38–46 shots.
+**Target:** 5:00. Focus: Teknium / ensemble. Approximately 65–80 shots.
 **Arc:** Last stronghold → divided command → irreversible sacrifice → many lights.
 
 | Time | Beat and visible change |
 |---|---|
-| 0:00–1:00 | The carrier is packed with refugees. The familiar workshop becomes a triage and repair area. The Crown's clamps close the escape corridor; establish flight direction, the landing basin and the refugee compartments. |
-| 1:00–2:00 | Teknium proposes a concentrated reactor strike. Show the actual trade: weapon charge rises as refugee shelter power falls. Turbo, Don, ArtsBro and Nous Girl each challenge the plan from earned experience. Hermes shows the unresolved consequences rather than endorsing its user's confidence. |
-| 2:00–3:00 | The Regent tries to capture the reactor with clamps and shut evacuation routes; its occupied anchors prevent it redirecting all power to the siege. Doge holds a buckling passage. Having cleared their original corridor, Molty can detach its regulator and return with the convoy. Their moving tow rigs divert clamps from the reactor bays. A clamp traps Molty; they shed outer armor to finish the first tow line. |
-| 3:00–4:15 | Teknium chooses to ground the carrier and divide its segmented reactor among district shelters. Grounding is controlled and costly, not a random crash. He starts taking apart his own command bridge. The first irreversible cuts are shown. |
-| 4:15–5:20 | Compressed, parallel evacuation and module removal intercut through familiar spaces. Molty's convoy keeps clamps away long enough for prepared couplings to separate. Don leaves a treasured souvenir to carry another passenger. ArtsBro paints routes when screens lose power. Turbo and a rival mechanic build and test the regulator adapter for Harbour's final shelter feeder. Hermes sends the revised procedure before its coordinator goes dark. |
-| 5:20–6:00 | The flight beacon dies. Hold the silence long enough to feel the lost home. Then lights move away on the rival convoy and Don's tow route. Foundry answers; another neighborhood answers. Nous Girl can hear them without the central ship. |
+| 0:00–0:35 | Start with a clamp tearing through the workshop roof. Don slides a stretcher beneath it; Doge catches the folding passage. Use the escape corridor, landing basin and refugee bay in one wide before fast coverage. Turbo shoves a smoking tool away: “Hot reload. Bad implementation.” |
+| 0:35–1:15 | Teknium charges a reactor strike while retreating through the bridge. Shelter lamps visibly dim. Each challenge is an action: Turbo disconnects the unsafe pulse; Nous Girl opens the refugee feed; Don carries a child into the darkened bay. Hermes: “I can agree with you, or keep them alive.” Teknium kills the charge. |
+| 1:15–2:00 | Molty's returning convoy hooks a clamp and drags it off the reactor hatch. Their own corridor is already clear; the regulator travels with them. “Miss me, or just my bandwidth?” A second clamp traps Molty's shell. They shed it, fall onto the tow rig and lock the line with their exposed inner claw. Cooperation stays cutting and reluctant. |
+| 2:00–2:40 | Teknium marks a controlled grounding path and starts dismantling his command bridge. Hermes warns the separated modules cannot support flight. Teknium cuts anyway. Don reaches for a souvenir, sees a passenger trapped behind it, and leaves it. Keep this decision clean of jokes. |
+| 2:40–4:15 | Three interlocking action problems: Doge holds the passage while Don clears it; ArtsBro paints an escape route across dead screens; Turbo and the rival mechanic cut, seat and load-test the regulator adapter. Tow rigs pull each freed reactor module away before the next clamp arrives. Hermes transmits the revised procedure in verified chunks; crews acknowledge local copies. A corrupted first packet is resent while the physical line is still held, not solved by magic. |
+| 4:15–5:00 | The carrier lands hard in the basin. The last module clears; its flight beacon dies. Give the loss one earned silent hold. Then one shelter, another, and the convoy lights answer. Nous Girl receives a local check-in without the command bridge. The rock riff returns as a single battered guitar phrase, not a triumphant reset. |
 
 **End-state:** The Hellcarrier is permanently grounded. Its flight engines and
 reactor modules are being repurposed; some people have local protection, others
@@ -322,7 +359,7 @@ decentralization. The motto has become something the characters give up and do.
 
 ## 9. Episode five — A THOUSAND SMALL SUNS
 
-**Target:** 8:00. Focus: ensemble conclusion. Approximately 48–60 shots.
+**Target:** 6:00. Focus: ensemble conclusion. Approximately 80–100 shots.
 **Arc:** Fragmented defense → causal team-up → release → lasting change.
 
 ### Three fronts, one objective
@@ -340,14 +377,14 @@ storm; the release ends forced stasis. Neither operation alone wins.
 
 | Time | Climax progression |
 |---|---|
-| 0:00–1:10 | Storm peak approaches. Use the established map and then physical wide shots of the three fronts. Crews adapt Hermes's procedure to their own engines; one field test fails and its district honestly reports not ready. |
-| 1:10–2:15 | The Regent closes the cradle's maintenance access. ArtsBro exposes a bypass seam and corresponding district load points using the archive geometry. His emitter range is insufficient; residents extend the pattern with local projections and markings. Local crews place their own resonators while Turbo tunes Foundry's equipment from Foundry. |
-| 2:15–3:25 | Molty carries the regulator through the cleared OpenClaw evacuation corridor to Harbour's final shelter feeder. The previously tested adapter fits; the remaining problem is physical delivery. Don sacrifices his kart drive to operate a stalled bridge. He stands still helping the final people across while the rival mechanic carries the regulator onward and connects it. |
-| 3:25–4:25 | The Regent diverts anchor load to destabilize the new shelters. Turbo holds the measured stabilizing frequency. At Harbour, synchronized engines repeat episode two's visible oscillation. Nous Girl halts release. A local Hermes copy retrieves the failed attempt and correction; a resident recalibrates the stagger for their different engines. A Foundry operator takes over Turbo's calibrated controls successfully, letting him release his grip. |
-| 4:25–5:25 | With the oscillation corrected, the seam bypass lets Teknium reach the cradle. The Regent offers permanent command while trying to close the remaining release linkage. Teknium refuses the seat. Confirmed shelters take its load; the Regent's actuators weaken as anchor current falls. Teknium and ArtsBro hold the physical linkage open, operate the planned manual release and only then sever the central connection. The ensemble theme resolves as the causal chain completes. |
-| 5:25–6:20 | Harbour's frozen interior wakes. The child's paper bird completes its fall; an ordinary hand catches it. Foundry and Heights remain safely mobile under local shields as the worst storm passes. The powerless Regent core is physically contained in the disconnected cradle; the alignment mechanism is destroyed. |
-| 6:20–7:30 | Weeks later: the grounded Hellcarrier is a public workshop. Its former flight engines are visible in the shelters. Don's slower rebuilt kart gives rides; ArtsBro lets someone amend the mural; Turbo teaches another player the cue. Molty arrives with repaired, visibly different armor and an independent crew. |
-| 7:30–8:00 | Cosmic beach meal. Nous Girl sets down the lantern, someone else lights the table, and Teknium lets a question wait. The motifs reduce to a small live tune. Final image: an imperfect dawn with moving clouds, repaired homes and people choosing where to go. Brief credits/end card. |
+| 0:00–0:35 | Open on a local shield buckling in the storm. A quick map and three physical wides establish Foundry, Harbour and Heights. That district reports not ready instead of faking a green light. Turbo slides under its engine housing as the first full rock riff lands. |
+| 0:35–1:15 | The Regent seals maintenance access. ArtsBro's projector cannot reach the far bypass seam; residents extend the verified geometry with local lights and painted marks. A beam fails to connect until someone moves a real obstruction. “Not a model problem. Move the crate.” Teknium follows the now-continuous route. |
+| 1:15–2:10 | Molty's regulator convoy hits the stalled Harbour bridge. Don abandons the race, tears the drive out of his kart and couples it to the bridge winch. Molty: “Finally. A useful benchmark.” Don: “People across. You score later.” Doge catches the tilting ramp as the rival mechanic carries the regulator over and seats the tested adapter. |
+| 2:10–3:00 | The Regent shifts anchor load; Harbour repeats the episode-two oscillation. Nous Girl aborts release. Local Hermes retrieves the failed attempt and correction: “Same mistake. Different hardware.” The resident recalibrates the stagger, then visibly tests it. Turbo's trainee takes over the Foundry control and frees Turbo to catch a slipping resonator. |
+| 3:00–4:10 | A final three-front chain: stable shelters confirm load; Molty holds the regulator contact under arcing current; ArtsBro wedges the release linkage; Teknium reaches the cradle. The Regent offers permanent command. “I removed uncertainty.” Teknium: “You removed everyone.” He refuses, opens the planned release, and severs the central connection only after the local supports hold. Resolve the rock motif on the mechanical release, not an arbitrary punch. |
+| 4:10–4:45 | Harbour wakes. The paper bird finally falls into an ordinary hand. Show the sheltered districts moving, the Regent core physically contained, and the alignment mechanism destroyed. Three short human reactions land the victory; no recap monologue. |
+| 4:45–5:30 | Weeks later, one moving shot through the grounded carrier connects a maintained engine, Don's slower passenger kart, an amended mural and Turbo handing over a guitar. Molty arrives in visibly repaired armor. “Still calling it a flagship?” Turbo: “Better uptime as a building.” Their separate crews share the table, not an identity. |
+| 5:30–6:00 | Beach meal and stripped guitar reprise. Someone else lights the lantern; Teknium lets a question wait. Hermes asks to log the successful rest. Don: “No work. Eat token.” He offers a snack, not an explanation. The imperfect dawn moves. Brief credits/end card. |
 
 **Finality:** Harbour is awake and all three districts are supported. The immediate storm
 has passed. The Crown cannot restart; the Regent has no connected actuators or
@@ -357,7 +394,7 @@ city rather than above it.
 
 > MOLTY, eyeing the grounded carrier: “Still calling it a flagship?”
 >
-> TURBO: “More people fit now.”
+> TURBO: “Better uptime as a building.”
 
 End card: **WE BUILD. WE SHARE. WE NEVER SURRENDER.**
 
@@ -375,12 +412,15 @@ End card: **WE BUILD. WE SHARE. WE NEVER SURRENDER.**
 | Molty's shell | Proud armored rival | Sacrifices shell to finish a tow-line attachment | New shell at the beach, same person and independent allegiance |
 | Regent's dawn | Chest image repeats | Discover it is the lost city's final recorded moment | Real sunrise changes; the recording remains still in the contained core |
 
-Music identities: Teknium's unfinished ascending synth/brass phrase; Turbo's
-four-note low-string pulse; ArtsBro's shifting glass harmonic; Nous Girl's warm
-bell/voice-like line; Don's quick rising brass pickup; Hermes's answering woodwind;
-Molty's clipped percussion; the Regent's gorgeous unresolved held chord. Combine
-the heroes' phrases only as their coordinated actions work. Leave the grounded
-carrier's first silence unscored. Commission original music for these functions.
+Music identities now share a **rock-band core**: Teknium's unfinished ascending
+guitar riff; Turbo's four-note electric-bass pulse; ArtsBro's shifting guitar
+harmonics; Nous Girl's warm clean-guitar answer; Don's quick picked pickup;
+Hermes's short, precise harmonic response. Molty gets a low chromatic guitar
+figure and dry half-time drums; the Regent gets an unresolved sustained chord
+over a mechanical pulse. Combine the heroes' phrases only as coordinated actions
+work. Leave the grounded carrier's first silence unscored. The beach reprise
+reduces the same material to a small live guitar/bass performance. Music is
+original; the rock recut is the new rhythmic reference.
 
 ### State locks
 
@@ -436,10 +476,15 @@ separate casting, references, silhouettes, motifs and dramatic treatment.
 6. A costed generation plan derived from the pilot, with separate estimates for
    action shots, speaking shots, repairs and final CPU assembly.
 
-### The 90-second proof sequence
+### Original 90-second proof sequence
 
 Use the regulator choice from episode two. It tests action, rivalry, emotion and
 the new direction in one sequence, without requiring the whole season first.
+
+The following table records the original proof plan. The delivered **rock recut
+is 65 seconds**, using the same performances with shorter holds and speaking
+pre-roll. Future scenes follow the active action/rock revision above; the next
+shooting draft is [Save the Failure](NRCU_NEXT_SCENE_ROCK_ACTION.md).
 
 **Pilot direction update, 2026-10-21:** the user clarified that OpenClaw must
 read as the rival and that Molty needs to sound evil. The generated pilot uses

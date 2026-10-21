@@ -1,12 +1,57 @@
 # The Lower Road — pilot production
 
-This is the 90-second pilot for **Hermes: The Unfinished Dawn**. The production
+This is the pilot for **Hermes: The Unfinished Dawn**. The production
 uses native FastH3 Omni for every motion and speaking shot, with FLUX 3 Klein
 used only to author still references and starting compositions.
 
 ## Live view
 
 **Pilot player and downloads:** <https://mail.tailec998.ts.net:8455/>
+
+### Current delivery — 65-second rock recut
+
+After the user requested better pacing, rock music and more action/AI banter in
+future scenes, the pilot was recut from **90 to 65 seconds**. All 20 shots remain,
+with **1,560 frames at 24 fps**. The opening geography/prop setup is 3.25 seconds
+instead of nine; the cable failure, fork turn, descent, boarding and regulator
+departure cut closer to their action. Long pauses before Turbo and Don's final
+lines are removed. The spoken performances retain their natural speed and words.
+
+The original score is replaced by an original **144 BPM instrumental rock cue**:
+synthesized double-tracked distorted power-chord guitars, electric bass, kick,
+snare, hats and cymbals. Speech-window ducking lowers the music by approximately
+15.4 dB through dialogue, with short attack/release ramps. Picture-timed accents
+and original nonvocal engine/cable Foley support the action. No third-party music
+samples or additional GPU allocation were used.
+
+| Rock recut export | Bytes | SHA-256 |
+| --- | ---: | --- |
+| 1080p master | 51,202,005 | `8d9bdeb4b4feb8f8cbae03df4c0ceaac11b7d9c666d137942c927275415b5fcf` |
+| 720p compact | 13,041,832 | `3986bc2c4c37904bf88ab337f4727b73e482b5e6e571e5840d6684d84eddbf6b` |
+
+Both exports are exactly 65.000 seconds, with 1,560 video frames and 11 caption
+cues. They passed clean full decode and exact frame-rate/frame-count checks.
+Final mixed-audio ASR recovered all scripted words in order. Master loudness is
+−18.3 LUFS, true peak −1.6 dBFS, range 4.1 LU. End-of-shot frames were inspected
+for all 20 editorial cuts. Normal-speed listening review remains pending.
+
+Production root: `/home/mojo/comfyrizz-gpu-tests/nrcu-pilot-rock-v2-20261021`.
+The original production/export directory remains intact. The recut reuses its
+verified source takes, reference images and source review reports. The shared
+player now serves the rock recut; the live dashboard also embeds this version.
+
+The finisher now supports the film's declared frame-exact duration. The shorter
+edit exposed concatenated timestamp irregularities, so final video timestamps
+are rebuilt at 24 fps and both master and compact files are checked independently.
+Decode diagnostics now fail verification even when FFmpeg exits zero.
+
+Future preparation is rewritten to **4 / 4 / 4 / 5 / 6 minutes**. The season bible
+contains revised action beats and cheeky AI-trope dialogue for all five chapters.
+[Save the Failure](NRCU_NEXT_SCENE_ROCK_ACTION.md) is a new 60-second, 20-shot
+shooting draft with a retry/memory payoff during a live shelter repair. These
+future scenes are written, not generated.
+
+### Original delivery — 90-second cut
 
 Delivered cut: 20 shots, 2,160 video frames, exactly 90.000 video seconds at
 24 fps. The 1080p master is 65,704,761 bytes; the 720p compact export is
@@ -39,7 +84,8 @@ outside Git at `/home/mojo/comfyrizz-gpu-tests/nrcu-pilot-20261021`.
 
 ## Creative and technical contract
 
-- Exactly 90 seconds / 2,160 frames at 24 fps in the final edit; 20 planned shots.
+- Original proof: 90 seconds / 2,160 frames. Current rock recut: 65 seconds /
+  1,560 frames. Both use 20 shots at 24 fps.
 - Native FastH3 reference-conditioned video at 1344×768, letterboxed into a
   1920×1080 delivery canvas without stretching.
 - Don's original synthetic voice speaks the user's requested broken English.
@@ -80,6 +126,7 @@ pilot spend: **6.87 credits**; combined spend: **20.20 / 25 credits**, leaving
 | `scripts/demos/nrcu-run.py` | Submit bounded batches, verify downloaded artifacts, publish live progress |
 | `scripts/demos/nrcu-live.mjs` | Publish the private live production dashboard |
 | `scripts/demos/nrcu-pilot-score.py` | Synthesize original 90-second score and ambience stems |
+| `scripts/demos/nrcu-rock-score.py` | Fit original rock arrangement and ducking to measured speech windows |
 | `scripts/demos/nrcu-pilot-finish.py` | CPU ASR, temporal contact sheets and speech-protected assembly |
 | `scripts/demos/nrcu-pilot-package.mjs` | Produce schema-validated package and planned jobs |
 | `scripts/demos/nrcu-pilot-player.mjs` | Hash-verified private player with captions and range downloads |

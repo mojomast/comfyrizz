@@ -1,6 +1,7 @@
 # Nous universe — miniseries production preparation
 
-Status: season preproduction; the 90-second FastH3 pilot cut has been generated.
+Status: season preproduction; the FastH3 pilot has a current 65-second rock recut
+and an archived original 90-second cut.
 See [pilot production and delivery](NRCU_PILOT_PRODUCTION.md) for the actual
 voice references, user-directed Molty revision, review coverage and measured cost.
 Revised October 21, 2026. The [season bible](NOUS_OPENCLAW_SEASON_ONE.md) supplies
@@ -27,6 +28,35 @@ showing that capability work, fail or cost something.
   location or confirm an outcome; it cannot be the only evidence of a rescue.
 - Let a failed rescue, a sincere admission or a sacrifice land before a joke.
   Humor comes from personalities colliding under pressure.
+
+### Pacing and sound revision after the pilot
+
+The active season target is **4 / 4 / 4 / 5 / 6 minutes**. Use the rewritten beat
+tables and dialogue in the season bible, not the superseded 29-minute timing.
+
+Every future shot card must identify its **action change**, **cut point** and
+**spoken-word allowance**. If it repeats information without changing position,
+ownership, danger or a decision, combine or remove it. Plan distinct approach,
+contact and payoff shots, then assemble them briskly rather than preserving a
+five-second generated clip merely because five seconds were generated.
+
+- Typical action insert: 1.5–3 seconds; physical contact/payoff: 3–5 seconds.
+- Typical quip: 4–12 words, performed while driving, climbing, catching or fixing.
+- One AI trope per action beat, with a visible setup and consequence. A failed
+  tool selection, retry loop, stale cache or spoofed message must change the scene.
+- Trim speaking pre-roll to the measured first word plus a small breath; preserve
+  the complete final word and natural speed. Do not insert long pauses between
+  setup and punchline unless the pause is itself a character beat.
+- Score from the **locked edit**, using its actual speech windows. Rock guitars,
+  bass and drums lead the action; short dropouts mark choices. Ramp music ducking
+  around dialogue and place accents on physical contact, not every cut.
+- Keep clean dialogue, music and Foley stems. Verify the joined export's frame
+  timestamps, rate, decode and transcript after trimming; valid source clips alone
+  do not establish a valid edited export.
+
+The pilot rock recut removes 25 seconds of holds/pre-roll and uses an original
+144 BPM instrumental arrangement. This edit is CPU-only and reuses the verified
+FastH3 performances. Normal-speed listening review remains separately recorded.
 
 ## Persistent cast and reference registry
 
@@ -119,14 +149,17 @@ compute seconds per source second. At the observed 8.90 credits/hour rate, that
 is about **0.0203 credits per generated source second** before startup, transfer,
 idle time, repairs and rejected takes. Rates and workloads must be rechecked.
 
-For illustration, the revised 29-minute season at that same rate would cost about
-**35.3 credits for one source pass**, or about **53.0 credits at 1.5× coverage**,
+For illustration, the revised 23-minute season at that same rate would cost about
+**28.0 credits for one source pass**, or about **42.0 credits at 1.5× coverage**,
 before those overheads. This is arithmetic from the trial, not a season quote:
 action complexity, shot duration, model choice and revision rate change the cost.
+Faster editorial cuts still need source handles, so shortening the final runtime
+does not reduce inference costs in direct proportion.
 
-The earlier 25-credit combined task had 13.33 observed credits spent and 11.67
-remaining after the mockumentaries. This preparation allocates no GPU and is
-not a claim that the remaining amount funds an epic five-episode production.
+The 25-credit combined task has **20.20 observed credits spent and 4.80 remaining**
+after the 6.87-credit pilot. The rock recut and current screenplay revision use
+CPU editing and writing, with no additional GPU allocation. This is not a claim
+that the remaining amount funds an epic five-episode production.
 Estimate a revised season budget from the selected pilot route and actual shot
 list before production.
 
