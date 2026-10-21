@@ -64,6 +64,9 @@ let renderLocation: RenderLocation = readRenderLocation();
 let deliverySceneId = '';
 let timer: ReturnType<typeof setTimeout> | undefined;
 let restored = false;
+/** Open state per collapsible group, so a repaint never reopens a collapsed section. */
+const groupState = new Map<string, boolean>();
+const groupOpen = (key: string, fallback: boolean): boolean => groupState.get(key) ?? fallback;
 const active = () => Boolean(run && ['running', 'cancelling', 'reconciling'].includes(run.status));
 
 async function request(path: string, body?: unknown) {
@@ -185,37 +188,58 @@ function render() {
       <p class="hint field-hint">Overrides the default CustomVoice delivery for this scene.${deliveryScene?.locked ? ' This scene is locked; its saved direction is read only.' : ''} Design-mode Base cloning does not use scene directions.</p>
     </fieldset>` : '';
 
+  const direction = `${mode === 'design' ? `<label class="field">Voice identity and reference performance<textarea data-persona class="field-control" maxlength="400" rows="3">${esc(voice.persona ?? 'A clear, warm, conversational narrator.')}</textarea></label><label class="field">Reference text<textarea data-reference class="field-control" maxlength="1000" rows="3" placeholder="Use the default reference transcript">${esc(voice.reference_text ?? '')}</textarea></label>` : ''}${mode !== 'kokoro' ? `<label class="field">${mode === 'custom' ? 'Default delivery direction' : 'Additional reference direction'}<textarea data-delivery class="field-control" maxlength="400" rows="2" placeholder="Warm and conversational; emphasize the contrast, then finish calmly.">${esc(voice.delivery ?? '')}</textarea></label>` : ''}${delivery}`;
+
   host.innerHTML = `<section class="voice-settings panel" aria-label="Voice and narration">
-    <h3>Voice &amp; narration</h3>
-    <label class="field"><input data-enabled type="checkbox"${voice.enabled ? ' checked' : ''}> Enable generated narration</label>
-    <div class="voice-grid">
-      <label class="field">Quick voice preset<select data-preset data-voice-preset class="field-control"><option value="">Choose a preset…</option>${VOICE_PRESETS.map(p => option(p.id, p.label)).join('')}</select></label>
-      <label class="field">Voice engine<select data-mode class="field-control">${option('kokoro', 'Kokoro · CPU', mode)}${option('design', 'Qwen · designed voice + clone', mode)}${option('custom', 'Qwen · directed preset voice', mode)}</select></label>
-      ${mode !== 'design' ? `<label class="field">Speaker<select data-speaker class="field-control">${voices.some(v => v.id.toLowerCase() === selected.toLowerCase()) ? '' : option(selected, `${selected} · current`, selected)}${voices.map(v => option(v.id, v.label, voices.find(x => x.id.toLowerCase() === selected.toLowerCase())?.id)).join('')}</select></label>` : ''}
-      ${mode === 'kokoro' ? `<label class="field">Speaking speed<input data-speed class="field-control" type="number" min="0.5" max="2" step="0.01" value="${voice.speed ?? 1}"></label>
-        <label class="field">Speech context<select data-chunking class="field-control">${option('sentence', 'Separate sentences', voice.chunking ?? 'sentence')}${option('paragraph', 'Connected scene paragraph', voice.chunking)}</select></label>
-        <label class="field"><input data-blend type="checkbox"${blend ? ' checked' : ''}${KOKORO_VOICES.filter(v => v.language === language).length < 2 ? ' disabled' : ''}> Blend a second voice</label>
-        ${blend ? `<label class="field">Second voice<select data-second class="field-control">${KOKORO_VOICES.filter(v => v.language === language).map(v => option(v.id, v.label, blend[1]?.voice)).join('')}</select></label><label class="field">Second voice share (%)<input data-weight class="field-control" type="number" min="5" max="95" step="5" value="${Math.round((blend[1]?.weight ?? 0.3) * 100)}"></label>` : ''}` : `<label class="field">Language<select data-language class="field-control">${[['en-us', 'English'], ['fr-fr', 'French'], ['zh-cn', 'Chinese'], ['ja-jp', 'Japanese'], ['ko-kr', 'Korean'], ['de-de', 'German'], ['it-it', 'Italian'], ['pt-br', 'Portuguese'], ['es-es', 'Spanish'], ['ru-ru', 'Russian']].map(([id, label]) => option(id, label, language)).join('')}</select></label><label class="field"><input data-fulltext type="checkbox"${(voice.non_streaming ?? mode === 'custom') ? ' checked' : ''}> Full-text conditioning</label>`}
-    </div>
-    ${mode === 'design' ? `<label class="field">Voice identity and reference performance<textarea data-persona class="field-control" maxlength="400" rows="3">${esc(voice.persona ?? 'A clear, warm, conversational narrator.')}</textarea></label><details class="voice-reference"><summary>Reference text</summary><div class="field"><textarea data-reference class="field-control" maxlength="1000" rows="3" placeholder="Use the default reference transcript">${esc(voice.reference_text ?? '')}</textarea></div></details>` : ''}
-    ${mode !== 'kokoro' ? `<label class="field">${mode === 'custom' ? 'Default delivery direction' : 'Additional reference direction'}<textarea data-delivery class="field-control" maxlength="400" rows="2" placeholder="Warm and conversational; emphasize the contrast, then finish calmly.">${esc(voice.delivery ?? '')}</textarea></label>` : ''}
-    ${delivery}
-    <p class="hint field-hint">${mode === 'kokoro' ? 'Voice, speed and context affect synthesis. Paragraph mode preserves measured take length; sentence/word timing uses the existing estimated alignment.' : mode === 'custom' ? 'CustomVoice supports delivery instructions. A scene’s delivery direction overrides the default. Qwen runs strictly: no silent voice fallback.' : 'VoiceDesign creates the reference once; Base reuses it across scenes. Delivery direction shapes the reference, not individual Base-clone scenes.'} <a href="/tts-expression/index.html" target="_blank" rel="noopener">Hear the comparisons</a></p>
-    <details class="voice-production"><summary>Generate narrated video</summary>
-      <div class="voice-grid">
+    <div class="voice-head panel-header"><h3>Voice &amp; narration</h3></div>
+    <details class="form-group voice-group" data-group="voice"${groupOpen('voice', true) ? ' open' : ''}>
+      <summary>Voice</summary>
+      <div class="form-group-body">
+        <label class="field"><input data-enabled type="checkbox"${voice.enabled ? ' checked' : ''}> Enable generated narration</label>
+        <div class="voice-grid field-grid">
+          <label class="field">Quick voice preset<select data-preset data-voice-preset class="field-control"><option value="">Choose a preset…</option>${VOICE_PRESETS.map(p => option(p.id, p.label)).join('')}</select></label>
+          <label class="field">Voice engine<select data-mode class="field-control">${option('kokoro', 'Kokoro · CPU', mode)}${option('design', 'Qwen · designed voice + clone', mode)}${option('custom', 'Qwen · directed preset voice', mode)}</select></label>
+          ${mode !== 'design' ? `<label class="field">Speaker<select data-speaker class="field-control">${voices.some(v => v.id.toLowerCase() === selected.toLowerCase()) ? '' : option(selected, `${selected} · current`, selected)}${voices.map(v => option(v.id, v.label, voices.find(x => x.id.toLowerCase() === selected.toLowerCase())?.id)).join('')}</select></label>` : ''}
+          ${mode === 'kokoro' ? `<label class="field">Speaking speed<input data-speed class="field-control" type="number" min="0.5" max="2" step="0.01" value="${voice.speed ?? 1}"></label>
+            <label class="field">Speech context<select data-chunking class="field-control">${option('sentence', 'Separate sentences', voice.chunking ?? 'sentence')}${option('paragraph', 'Connected scene paragraph', voice.chunking)}</select></label>
+            <label class="field"><input data-blend type="checkbox"${blend ? ' checked' : ''}${KOKORO_VOICES.filter(v => v.language === language).length < 2 ? ' disabled' : ''}> Blend a second voice</label>
+            ${blend ? `<label class="field">Second voice<select data-second class="field-control">${KOKORO_VOICES.filter(v => v.language === language).map(v => option(v.id, v.label, blend[1]?.voice)).join('')}</select></label><label class="field">Second voice share (%)<input data-weight class="field-control" type="number" min="5" max="95" step="5" value="${Math.round((blend[1]?.weight ?? 0.3) * 100)}"></label>` : ''}` : `<label class="field">Language<select data-language class="field-control">${[['en-us', 'English'], ['fr-fr', 'French'], ['zh-cn', 'Chinese'], ['ja-jp', 'Japanese'], ['ko-kr', 'Korean'], ['de-de', 'German'], ['it-it', 'Italian'], ['pt-br', 'Portuguese'], ['es-es', 'Spanish'], ['ru-ru', 'Russian']].map(([id, label]) => option(id, label, language)).join('')}</select></label><label class="field"><input data-fulltext type="checkbox"${(voice.non_streaming ?? mode === 'custom') ? ' checked' : ''}> Full-text conditioning</label>`}
+        </div>
+      </div>
+    </details>
+    ${direction ? `<details class="form-group voice-group" data-group="direction"${groupOpen('direction', true) ? ' open' : ''}>
+      <summary>Direction</summary>
+      <div class="form-group-body">${direction}</div>
+    </details>` : ''}
+    <details class="form-group voice-group voice-production" data-group="production"${groupOpen('production', false) ? ' open' : ''}>
+      <summary>Generate narrated video</summary>
+      <div class="form-group-body">
+        <div class="voice-grid field-grid">
+          <label class="field">Final render<select data-render-location class="field-control">${option('local', 'This machine', renderLocation)}${option('colab', 'Google Colab VM', renderLocation)}</select></label>
+        </div>
+        <div class="voice-actions toolbar"><button type="button" data-save class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>Save voice settings</button><button type="button" data-plan class="btn btn-secondary btn-sm" ${busy || active() ? 'disabled' : ''}>Check generation plan</button>${plan?.value.ready ? `<button type="button" data-start class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>${plan.value.requiresApproval ? 'Approve ceiling & generate' : 'Generate video'}</button>` : ''}${active() ? '<button type="button" data-cancel class="btn btn-danger btn-sm">Cancel generation</button>' : ''}</div>
+        <p class="hint field-hint">Uses the full voice → measured timing → media → render → verification → editable export pipeline. ${renderLocation === 'colab' ? 'Google Colab VM renders the MP4 and checks the mix after generation, then stops. If that fails, this machine renders instead.' : 'The final MP4 is rendered on this machine.'} Existing Render/Export actions reuse existing audio. Generate here to synthesize the selected voice.</p>
+        <div data-voice-status role="status" aria-live="polite">${esc(message)}</div>
+        <div data-run-progress>${runProgress()}</div>
+        <div class="voice-actions toolbar">${(run?.result?.files ?? []).map(f => `<button type="button" data-file="${esc(f.url)}" data-name="${esc(f.name)}" class="btn btn-secondary btn-sm">Download ${esc(f.name)}</button>`).join('')}</div>
+      </div>
+    </details>
+    <details class="form-group voice-group" data-group="advanced" data-adv${groupOpen('advanced', false) ? ' open' : ''}>
+      <summary>Advanced</summary>
+      <div class="form-group-body voice-grid field-grid">
         <label class="field">Visual generation<select data-backend class="field-control">${option('cpu', 'CPU · ready/local visuals', backend)}${option('colab', 'Google Colab GPU', backend)}${option('byo-comfyui', 'My ComfyUI', backend)}</select></label>
         ${mode !== 'kokoro' ? `<label class="field">Qwen runtime<select data-runtime class="field-control">${option('colab', 'Managed Google Colab GPU', runtime)}${option('local', 'Locally installed Qwen', runtime)}</select></label>` : ''}
-        <label class="field">Final render<select data-render-location class="field-control">${option('local', 'This machine', renderLocation)}${option('colab', 'Google Colab VM', renderLocation)}</select></label>
         ${backend === 'colab' || (mode !== 'kokoro' && runtime === 'colab') ? `<label class="field">Total compute-unit ceiling<input data-budget class="field-control" type="number" min="0.5" step="0.5" value="${budget}"></label>${mode !== 'kokoro' && runtime === 'colab' ? `<label class="field">Qwen allocation ceiling<input data-narration-units class="field-control" type="number" min="0.5" max="4" step="0.5" value="${narrationUnits}"></label>` : ''}` : ''}
         ${backend === 'byo-comfyui' ? `<label class="field">ComfyUI URL<input data-comfyui class="field-control" value="${esc(comfyuiUrl)}" placeholder="http://127.0.0.1:8188"></label>` : ''}
       </div>
-      <div class="voice-actions toolbar"><button type="button" data-save class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>Save voice settings</button><button type="button" data-plan class="btn btn-secondary btn-sm" ${busy || active() ? 'disabled' : ''}>Check generation plan</button>${plan?.value.ready ? `<button type="button" data-start class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>${plan.value.requiresApproval ? 'Approve ceiling & generate' : 'Generate video'}</button>` : ''}${active() ? '<button type="button" data-cancel class="btn btn-danger btn-sm">Cancel generation</button>' : ''}</div>
-      <p class="hint field-hint">Uses the full voice → measured timing → media → render → verification → editable export pipeline. ${renderLocation === 'colab' ? 'Google Colab VM renders the MP4 and checks the mix after generation, then stops. If that fails, this machine renders instead.' : 'The final MP4 is rendered on this machine.'} Existing Render/Export actions reuse existing audio. Generate here to synthesize the selected voice.</p>
-      <div data-voice-status role="status" aria-live="polite">${esc(message)}</div>
-      <div data-run-progress>${runProgress()}</div>
-      <div class="voice-actions toolbar">${(run?.result?.files ?? []).map(f => `<button type="button" data-file="${esc(f.url)}" data-name="${esc(f.name)}" class="btn btn-secondary btn-sm">Download ${esc(f.name)}</button>`).join('')}</div>
     </details>
+    <p class="hint field-hint voice-footnote">${mode === 'kokoro' ? 'Voice, speed and context affect synthesis. Paragraph mode preserves measured take length; sentence/word timing uses the existing estimated alignment.' : mode === 'custom' ? 'CustomVoice supports delivery instructions. A scene’s delivery direction overrides the default. Qwen runs strictly: no silent voice fallback.' : 'VoiceDesign creates the reference once; Base reuses it across scenes. Delivery direction shapes the reference, not individual Base-clone scenes.'} <a href="/tts-expression/index.html" target="_blank" rel="noopener">Hear the comparisons</a></p>
   </section>`;
+  host.querySelectorAll<HTMLDetailsElement>('details[data-group]').forEach(details => {
+    const key = details.dataset.group!;
+    details.open = groupOpen(key, details.open);
+    details.addEventListener('toggle', () => groupState.set(key, details.open));
+  });
   const bind = (selector: string, callback: (element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => void, event = 'change') => {
     host!.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(selector).forEach(element => element.addEventListener(event, () => callback(element)));
   };

@@ -7,6 +7,8 @@
   border-top: var(--elevation-border-1);
   background: var(--bg-1);
   color: var(--text-1);
+  /* Group headers stick below the pane header while the panel scrolls. */
+  --sticky-offset: calc(var(--space-6) + 1px);
 }
 
 .sa-panel h2 {
@@ -23,6 +25,28 @@
   gap: var(--space-2);
   align-items: center;
   justify-content: space-between;
+}
+
+/* The section header stays visible while the panel body scrolls. */
+.sa-head {
+  position: sticky;
+  top: var(--sticky-offset);
+  z-index: 2;
+  background: var(--bg-1);
+}
+
+/* Fields go two or three columns wide when the pane has room for it. */
+.sa-advanced > .sa-row:not(.toolbar) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
+  justify-content: stretch;
+}
+
+.sa-panel .hint,
+.sa-panel .field-hint,
+.sa-panel .sa-status {
+  max-width: 70ch;
 }
 
 .sa-panel label {
@@ -139,12 +163,26 @@
   padding-top: var(--space-2);
 }
 
-.sa-advanced summary {
+/* The group header stays visible while the group body scrolls. */
+.sa-advanced > summary {
+  position: sticky;
+  top: var(--sticky-offset);
+  z-index: 1;
+  display: list-item;
+  list-style-position: inside;
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-2);
   color: var(--text-2);
+  background: var(--bg-1);
+  border-bottom: var(--elevation-border-1);
   font-size: var(--font-size-12);
   font-weight: var(--font-weight-500);
   cursor: pointer;
-  margin-bottom: var(--space-2);
+}
+
+.sa-advanced > summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .sa-tabs {

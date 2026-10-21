@@ -33,46 +33,58 @@ export function mountAgentSettings(apiFetch: ApiFetch, log: (message: string) =>
         <button type="button" id="agent-add" class="btn btn-secondary btn-sm">+ Add provider</button>
       </nav>
       <form id="agent-settings-form" autocomplete="off">
-        <div class="agent-form-grid">
-          <div class="field">
-            <label class="field-label" for="agent-name">Connection name</label>
-            <input id="agent-name" class="field-control" required maxlength="100" placeholder="e.g. My OpenCode Go" />
-          </div>
-          <div class="field">
-            <label class="field-label" for="agent-preset">Provider type</label>
-            <select id="agent-preset" class="field-control">
-              <option value="opencode-go">OpenCode Go</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="custom">OpenAI-compatible</option>
-            </select>
-          </div>
-          <div class="field agent-full">
-            <label class="field-label" for="agent-base-url">API base URL</label>
-            <input id="agent-base-url" class="field-control" type="url" required placeholder="https://provider.example/v1" />
-            <span class="hint field-hint">OpenAI-compatible Chat Completions API. Include /v1 when required.</span>
-          </div>
-          <div class="field agent-full">
-            <label class="field-label" for="agent-api-key">API key</label>
-            <input id="agent-api-key" class="field-control" type="password" autocomplete="new-password" placeholder="Paste API key" />
-            <span id="agent-key-status" class="hint field-hint"></span>
-          </div>
-          <div class="field agent-full agent-inline">
-            <label class="field-label agent-inline">
-              <input id="agent-clear-key" type="checkbox" /> Remove saved key (use environment key if available)
-            </label>
-          </div>
-          <div class="field agent-full">
-            <label class="field-label" for="agent-settings-model">Model ID</label>
-            <input id="agent-settings-model" class="field-control" list="agent-settings-model-options" placeholder="Choose a discovered model or enter its exact ID" maxlength="300" />
-            <datalist id="agent-settings-model-options"></datalist>
-            <span class="hint field-hint">Model IDs are provider-specific. Use a Chat Completions model with tool calling.</span>
-          </div>
-          <details class="agent-full agent-advanced">
+        <div class="agent-form-groups">
+          <details class="form-group agent-group" data-group="connection" open>
+            <summary>Connection</summary>
+            <div class="form-group-body agent-form-grid">
+              <div class="field">
+                <label class="field-label" for="agent-name">Connection name</label>
+                <input id="agent-name" class="field-control" required maxlength="100" placeholder="e.g. My OpenCode Go" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="agent-preset">Provider type</label>
+                <select id="agent-preset" class="field-control">
+                  <option value="opencode-go">OpenCode Go</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="custom">OpenAI-compatible</option>
+                </select>
+              </div>
+              <div class="field agent-full">
+                <label class="field-label" for="agent-base-url">API base URL</label>
+                <input id="agent-base-url" class="field-control" type="url" required placeholder="https://provider.example/v1" />
+                <span class="hint field-hint">OpenAI-compatible Chat Completions API. Include /v1 when required.</span>
+              </div>
+              <div class="field agent-full">
+                <label class="field-label" for="agent-api-key">API key</label>
+                <input id="agent-api-key" class="field-control" type="password" autocomplete="new-password" placeholder="Paste API key" />
+                <span id="agent-key-status" class="hint field-hint"></span>
+              </div>
+              <div class="field agent-full agent-inline">
+                <label class="field-label agent-inline">
+                  <input id="agent-clear-key" type="checkbox" /> Remove saved key (use environment key if available)
+                </label>
+              </div>
+            </div>
+          </details>
+          <details class="form-group agent-group" data-group="model" open>
+            <summary>Model</summary>
+            <div class="form-group-body agent-form-grid">
+              <div class="field agent-full">
+                <label class="field-label" for="agent-settings-model">Model ID</label>
+                <input id="agent-settings-model" class="field-control" list="agent-settings-model-options" placeholder="Choose a discovered model or enter its exact ID" maxlength="300" />
+                <datalist id="agent-settings-model-options"></datalist>
+                <span class="hint field-hint">Model IDs are provider-specific. Use a Chat Completions model with tool calling.</span>
+              </div>
+            </div>
+          </details>
+          <details class="form-group agent-group agent-advanced" data-group="advanced" data-adv>
             <summary>Advanced</summary>
-            <div class="field">
-              <label class="field-label" for="agent-models-url">Models endpoint</label>
-              <input id="agent-models-url" class="field-control" type="url" placeholder="Defaults to the provider’s models endpoint" />
-              <p class="hint field-hint">Custom discovery URL. Leave blank to use the provider default.</p>
+            <div class="form-group-body agent-form-grid">
+              <div class="field agent-full">
+                <label class="field-label" for="agent-models-url">Models endpoint</label>
+                <input id="agent-models-url" class="field-control" type="url" placeholder="Defaults to the provider’s models endpoint" />
+                <p class="hint field-hint">Custom discovery URL. Leave blank to use the provider default.</p>
+              </div>
             </div>
           </details>
         </div>

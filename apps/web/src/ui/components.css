@@ -1560,3 +1560,103 @@ textarea.field-control {
   color: var(--text-2);
   font-size: var(--font-size-12);
 }
+
+/* ==========================================================================
+   12. Long-form utilities
+   Long forms collapse into <details> groups. The group header stays visible
+   while its body scrolls, fields go two or three columns wide when the pane
+   has room, and hint text keeps a readable measure.
+   Advanced-only groups carry data-adv: the Easy view hides them, the
+   Advanced view reveals them. Nothing is destroyed, so a mode switch never
+   loses an edit.
+   ========================================================================== */
+
+/* Sticky offset for headers inside a scrolling pane. A pane that owns a
+   header raises it so the two never overlap. */
+:root {
+  --sticky-offset: 0px;
+}
+
+.pane-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.pane-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-1);
+}
+
+/* A readable measure for hint and description text. */
+.hint,
+.field-hint,
+.field .hint,
+.description {
+  max-width: 70ch;
+}
+
+/* Fields go two or three columns wide when the pane has room for it. */
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--gap);
+  align-items: start;
+}
+
+/* Collapsible form group. Its header sticks while the body scrolls. */
+.form-group {
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+}
+
+.form-group > summary {
+  position: sticky;
+  top: var(--sticky-offset);
+  z-index: 1;
+  display: list-item;
+  list-style-position: inside;
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--panel-padding);
+  color: var(--text-1);
+  background: var(--bg-1);
+  border-bottom: var(--elevation-border-1);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  line-height: var(--line-height-tight);
+  cursor: pointer;
+}
+
+.form-group > summary::marker {
+  color: var(--text-2);
+}
+
+.form-group > summary:hover {
+  background: var(--bg-2);
+}
+
+.form-group > summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.form-group[open] > summary {
+  border-bottom-color: var(--border-strong);
+}
+
+.form-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--panel-padding);
+}
+
+/* Advanced-only nodes stay in the DOM: the Easy view hides them instead of
+   removing them, so an edit made in Advanced is still there on the way back. */
+html[data-mode="easy"] [data-adv] {
+  display: none !important;
+}
