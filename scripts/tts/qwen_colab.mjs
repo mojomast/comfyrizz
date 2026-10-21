@@ -55,7 +55,7 @@ if (!dryRun) {
     onEvent({ event: 'qwen_phase', phase: 'allocating' });
     before = await backend.usage();
     if (!Number.isFinite(before.balance) || before.balance < units) throw Error('Insufficient or unreadable balance');
-    const session = (await backend.ensureUp({ approved: true })).session;
+    const session = (await backend.ensureUp({ approved: true, signal })).session;
     onEvent({ event: 'qwen_phase', phase: 'uploading' });
     await step(argvUpload({ session, localPath: input, remotePath: '/content/comfyrizz-qwen-input.zip' }));
     onEvent({ event: 'qwen_phase', phase: 'bootstrapping' });

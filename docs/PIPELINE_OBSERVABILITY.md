@@ -221,12 +221,26 @@ retains its redacted step logs locally.
 
 - `POST /api/pipeline/:runId/cancel` with `{}`: requests cancellation; poll or
   subscribe through cleanup. Local subprocess groups receive termination;
-  active Google Colab exec is stopped and the owned VM is torn down. Allocation/control
-  requests already in flight may finish before cancellation reaches cleanup.
+  active Google Colab exec is stopped and the owned VM is torn down. Cancelling
+  during allocation interrupts the allocation itself; any session the allocation
+  created is found through `colab sessions` and stopped before the run reports
+  clean. Cancelling a reconcile stops the reconcile, not the run.
+  Allocation/control requests already in flight may finish before cancellation
+  reaches cleanup.
 - `POST /api/pipeline/:runId/reconcile` with `{}`: for a terminal/interrupted run,
   checks the persisted owned runtime identities and verifies/stops them. Does
   not regenerate assets or start a new allocation. Unconfirmed managed runtimes
-  block new pipeline starts until resolved.
+  block new pipeline starts until resolved. A reconcile has a deadline
+  (`COMFYRIZZ_RECONCILE_TIMEOUT_MS`, default 6 minutes, then a 10 s grace before
+  the worker is killed) and records its own outcome on the run
+  (`reconcile.confirmed`, `reconcile.timedOut`, `reconcile.cancelled`), so an
+  unanswered CLI cannot leave the pipeline busy forever.
+- One runtime directory serves one server process. `pipelines/owner.json` names
+  the owning pid; a second server on the same directory is refused with an
+  explanation instead of silently sharing runs and journals, and a lock left by
+  a process that no longer exists is taken over. Event replay reads only the
+  lines appended since the previous poll, and heartbeats update the run in
+  memory rather than growing the journal every ten seconds.
 - `GET /api/pipeline/:runId/assets/:assetId`: authenticated, byte-range-capable
   collected assets, when listed in the snapshot's `artifacts`.
 - Completed `result.files[]` supplies download URLs and sizes for the MP4,
