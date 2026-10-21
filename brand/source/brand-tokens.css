@@ -1,0 +1,16 @@
+:root {
+  --brand-violet: #6d28ff;
+  --brand-mint: #00d8ab;
+  --brand-ink: #14112b;
+  --brand-paper: #f7f5fc;
+  --brand-surface-dark: #211c38;
+  --brand-border-light: #ded9eb;
+  --brand-muted-on-dark: #beb7d0;
+  --brand-font-ui: Inter, ui-sans-serif, system-ui, sans-serif;
+  --brand-radius-control: 8px;
+  --brand-radius-panel: 12px;
+  --brand-motion-fast: 160ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --brand-motion-fast: 0ms; }
+}

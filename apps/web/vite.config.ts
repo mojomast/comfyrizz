@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { request as httpRequest } from 'node:http';
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -95,9 +95,38 @@ function apiProxy(): Plugin {
   };
 }
 
+/**
+ * Vite takes one publicDir, which is the renderer's (fonts, licences). The web
+ * app's own brand icons live in apps/web/public; serve them in dev and copy
+ * them into dist on build so /favicon.svg and friends resolve.
+ */
+function webPublic(): Plugin {
+  const dir = join(here, 'public');
+  const files = (base: string): string[] => readdirSync(base).flatMap(name => {
+    const full = join(base, name);
+    return statSync(full).isDirectory() ? files(full) : [full];
+  });
+  return {
+    name: 'comfyrizz-web-public',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const file = join(dir, decodeURIComponent((req.url ?? '').split('?')[0]));
+        if (!file.startsWith(dir + '/') || !existsSync(file) || statSync(file).isDirectory()) return next();
+        if (file.endsWith('.svg')) res.setHeader('content-type', 'image/svg+xml');
+        createReadStream(file).pipe(res);
+      });
+    },
+    generateBundle() {
+      for (const file of files(dir)) {
+        this.emitFile({ type: 'asset', fileName: file.slice(dir.length + 1), source: readFileSync(file) });
+      }
+    },
+  };
+}
+
 export default defineConfig({
   publicDir: join(repoRoot, 'apps', 'renderer', 'public'),
-  plugins: [apiProxy(), react(), renderApi()],
+  plugins: [apiProxy(), react(), renderApi(), webPublic()],
   resolve: {
     dedupe: ['remotion', 'react', 'react-dom'],
     alias: {

@@ -20,12 +20,12 @@
   --text-3: #8a93a6;
 
   /* Single indigo accent (6.34:1 on --bg-0; #071022 fg is 6.36:1 on #6d8cff) */
-  --color-accent: #6d8cff;
-  --accent: #6d8cff;
-  --accent-fg: #071022;
+  --color-accent: #6d28ff;
+  --accent: #6d28ff;
+  --accent-fg: #f7f5fc;
   --accent-hover: #9fb2ff;
-  --accent-bg: #121a2c;
-  --accent-border: #2b3d68;
+  --accent-bg: #211c38;
+  --accent-border: #ded9eb;
 
   /* Semantic statuses + -bg tints */
   --color-ok: #60d6a7;

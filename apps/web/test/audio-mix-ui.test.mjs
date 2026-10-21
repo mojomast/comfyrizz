@@ -6,7 +6,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const web = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
-const app = readFileSync(fileURLToPath(new URL('../../server/src/app.mjs', import.meta.url)), 'utf8');
+// RL11 moved the render/export routes out of app.mjs into routes/render.mjs; check both.
+const app = ['../../server/src/app.mjs', '../../server/src/routes/render.mjs']
+  .map(path => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')).join('\n');
 const exporter = readFileSync(fileURLToPath(new URL('../../server/src/export.mjs', import.meta.url)), 'utf8');
 
 test('M2: the storyboard exposes a sound-design toggle', () => {

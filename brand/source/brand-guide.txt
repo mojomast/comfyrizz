@@ -1,0 +1,74 @@
+COMFYRIZZ BRAND GUIDE / WORKING DIRECTION
+
+IDEA
+Creative momentum with exact control. The interlocking Z forms suggest edits,
+motion and connected frames. Keep the identity energetic, confident and useful.
+Avoid generic AI sparkles, robot mascots and filmstrip decoration.
+
+NAME AND WORDMARK
+Brand name in prose: Comfyrizz. Logo wordmark: comfyrizz, all lowercase.
+Preserve the double z. The forward-leaning heavy lettering is custom artwork;
+do not substitute a typed italic font for the official wordmark.
+
+COLOR
+Canonical proposed values, chosen to regularize the selected concept:
+Violet #6D28FF / Mint #00D8AB / Ink #14112B / Paper #F7F5FC.
+Supporting dark surface #211C38; light border #DED9EB; muted light text #BEB7D0.
+Raster outputs may vary slightly; use the token values for future vector masters.
+Use ink or paper as the dominant surface. Violet is the main brand action accent;
+mint is a supporting highlight. Do not make every interface element saturated.
+Mint is not suitable for small text on paper; use ink text on mint buttons.
+Use paper text on violet buttons. Do not use violet for small text on ink:
+that pair is only 2.97:1; use paper or muted-on-dark text instead. Focus rings
+need a high-contrast outline or backing against the specific surrounding surface.
+Color is never the only indicator of status, selection, failure or approval.
+Check final text/button contrast in the actual interface and interaction states.
+
+LOGO USE
+Light backgrounds: logo-light.png. Dark backgrounds: logo-dark.png.
+Single-ink reproduction: logo-mono.png. Small square placements: symbol-color.png.
+Minimum clear space: one half of the symbol height on every side.
+Working minimum widths: full lockup 180 CSS px, standalone mark 24 CSS px.
+At 16 px, develop a simplified hand-tuned favicon rather than shrinking blindly.
+Preserve aspect ratio. Never stretch, rotate, skew again, add shadows, recolor
+individual letters, or place the mark on noisy moving footage without a calm plate.
+
+TYPE
+Use the project's existing Inter family for UI and documentation if available.
+Fallback: ui-sans-serif, system-ui, sans-serif. UI/body regular 400; labels 500;
+headings 600-700. Keep interface text upright for readability.
+Use an existing monospace family only for timecode, frame counts and technical data.
+The italic logo is a brand accent, not a reason to italicize the interface.
+
+UI APPLICATION
+Use a restrained dark editing workspace with paper text and violet focus/action
+accents. Keep clip thumbnails and preview content visually dominant.
+Use the symbol for compact navigation and full logo for sign-in, empty states,
+README hero and about screens. One strong brand moment per screen is enough.
+Keep existing task flow, controls, ARIA labels, keyboard access and user data intact.
+Brand colors must not imply a real generation run or spending approval.
+
+MOTION
+Suggested micro-transition: 140-200 ms ease-out, short directional offset.
+Logo intro: two Z forms settle into alignment in 400-600 ms, then hold still.
+Avoid constant flicker, rotating logos or aggressive strobing.
+Respect prefers-reduced-motion and provide a static mark.
+
+VOICE
+Short, concrete and candid. Say what is ready and what remains planned.
+Prefer 'Generate this shot', 'Review takes', 'Export video' and 'Retry save'.
+Avoid promises about perfect results or instant completion of GPU work.
+Optional campaign line supplied on the cover: 'From brief to motion.'
+This line is a proposal, not a required permanent slogan.
+
+REFINEMENT PRIORITIES
+1. Rebuild a clean original SVG from the approved concept, with consistent curves,
+   diagonals, overlap gaps and letter spacing. Keep the concept recognizable.
+2. Derive every colorway from that one master so geometry is identical.
+3. Test at 16/24/32 px and lockup widths 180/240/360 px on light/dark surfaces.
+4. Export transparent PNGs, SVG masters and proper favicon/app-icon sizes.
+5. Apply to a small number of real product screens; check contrast and keyboard focus.
+
+STATUS
+Built-in image generation produced the raster derivatives. They are design assets
+for review and refinement, not a trademark clearance or a finished vector system.

@@ -1,0 +1,81 @@
+/* BR03: Comfyrizz brand tokens and UI role mapping for the dark editing workspace. */
+
+:root {
+  --brand-violet: #6d28ff;
+  --brand-mint: #00d8ab;
+  --brand-ink: #14112b;
+  --brand-paper: #f7f5fc;
+  --brand-surface-dark: #211c38;
+  --brand-border-light: #ded9eb;
+  --brand-muted-on-dark: #beb7d0;
+  --brand-font-ui: Inter, ui-sans-serif, system-ui, sans-serif;
+  --brand-radius-control: 8px;
+  --brand-radius-panel: 12px;
+  --brand-motion-fast: 160ms;
+
+  /* UI roles mapped onto brand tokens. */
+  --bg-0: var(--brand-ink);
+  --bg-1: var(--brand-surface-dark);
+  --bg-2: var(--brand-surface-dark);
+  --bg-3: var(--brand-surface-dark);
+  --border: var(--brand-border-light);
+  --border-subtle: var(--brand-muted-on-dark);
+  --border-strong: var(--brand-border-light);
+  --text-1: var(--brand-paper);
+  --text-2: var(--brand-muted-on-dark);
+  --text-3: var(--brand-muted-on-dark);
+  --color-accent: var(--brand-violet);
+  --accent: var(--brand-violet);
+  --accent-fg: var(--brand-paper);
+  --accent-hover: var(--brand-mint);
+  --accent-bg: var(--brand-surface-dark);
+  --accent-border: var(--brand-border-light);
+  --highlight: var(--brand-mint);
+  --highlight-fg: var(--brand-ink);
+  --focus-ring-color: var(--brand-paper);
+  --focus-ring: 2px solid var(--brand-paper);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --brand-motion-fast: 0ms;
+    --duration-120: 0ms;
+    --duration-200: 0ms;
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+    --motion-120: 0ms;
+    --motion-200: 0ms;
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --transition-fast: 0ms linear;
+    --transition-normal: 0ms linear;
+  }
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  flex-shrink: 0;
+}
+
+.brand img {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
