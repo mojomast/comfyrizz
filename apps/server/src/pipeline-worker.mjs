@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
-import { createColabBackend } from '../../../packages/backends/src/colab-backend.mjs';
+import { createColabBackend, sessionsCheck } from '../../../packages/backends/src/colab-backend.mjs';
 import { createByoBackend } from '../../../packages/backends/src/byo-backend.mjs';
 import { runQwenColab } from '../../../scripts/tts/qwen_colab.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -364,7 +364,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const backend = createColabBackend({ packageId: narration ? `${spec.plan.packageId}_qwen` : spec.runId, scratchDir: narration ? join(spec.runDir, 'qwen/scratch') : join(spec.runDir, 'media-runtime') });
       try {
         const sessions = await backend.sessions();
-        const teardown = sessions.empty || !sessions.sessions.some(s => s.name === backend.state.session) ? { state: 'stopped', evidence: 'Runtime no longer listed by Colab' } : await backend.teardown('pipeline reconciliation');
+        // PO-4 review: only a positively clean listing is "stopped"; an unnamed (orphan) row may be the VM an
+        // interrupted allocation created, so it is surfaced as unconfirmed rather than ignored.
+        const check = sessionsCheck(sessions, backend.state.session);
+        const teardown = check.clean ? { state: 'stopped', evidence: 'Runtime no longer listed by Google Colab' }
+          : check.ours ? await backend.teardown('pipeline reconciliation')
+          : { state: 'stop_unconfirmed', evidence: check.note, orphans: check.orphans, manual: 'colab sessions; colab stop -s <name> for any session this run created' };
         send({ kind: 'runtime', runtime, value: { ...value, state: teardown.state === 'stopped' ? 'stopped' : 'stop_unconfirmed', evidence: teardown.evidence } });
         if (teardown.state !== 'stopped') process.exitCode = 1;
       } catch (error) {

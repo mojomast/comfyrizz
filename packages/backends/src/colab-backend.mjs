@@ -129,6 +129,22 @@ export const BOOTSTRAP_SILENCE_MS = 180000;
 /** G6-6: wall (and silence) budget for `colab new`; the assign POST is silent and can exceed 60 s. */
 export const NEW_WALL_MS = 300000;
 /** G6-6: the CLI output of an assign the Google frontend gave up on (HTTP 503 after ~60 s). */
+/**
+ * PO-4 review: a `colab sessions` reading is only clean when it positively says there is nothing of ours:
+ * "No active sessions", or rows that all parsed with a name and none named ours. An unnamed ('?') row may
+ * be the VM an interrupted `colab new` created before it was named, and output with no rows and no
+ * "No active sessions" line proves nothing, so both count as *not* gone.
+ */
+export function sessionsCheck(found, session) {
+  const rows = Array.isArray(found?.sessions) ? found.sessions : [];
+  const ours = rows.some((entry) => entry.name === session);
+  const orphans = rows.filter((entry) => entry.orphan || !entry.name);
+  const parsed = Boolean(found?.empty) || rows.length > 0;
+  const clean = parsed && !ours && orphans.length === 0;
+  const note = clean ? `colab sessions does not list ${session}` : ours ? `colab sessions still lists ${session}` : orphans.length ? `colab sessions lists ${orphans.length} unnamed (orphan) session(s) [${orphans.map((o) => `${o.hardware || "?"}/${o.status || "?"}`).join(", ")}] that may be ours` : "colab sessions output could not be parsed";
+  return { clean, ours, orphans, parsed, note };
+}
+
 export const isAssignUnavailable = (output) => /Service Unavailable/.test(String(output || "")) && /assign/.test(String(output || ""));
 
 /**
@@ -491,6 +507,7 @@ export function createColabBackend({
   async function stopAfterFailedAllocation(onEvent) {
     let listedEver = false;
     let notListedChecks = 0;
+    let orphans = [];
     let lastNote = "";
     for (let attempt = 1; attempt <= allocationCleanupChecks; attempt += 1) {
       let found;
@@ -501,27 +518,32 @@ export function createColabBackend({
         await sleep(teardownRetryMs);
         continue;
       }
-      const listed = found.sessions.some((entry) => entry.name === session);
-      if (!listed) {
+      const check = sessionsCheck(found, session);
+      if (check.clean) {
         notListedChecks += 1;
         if (notListedChecks >= 2) {
           forgetSession();
           state.createdByUs = false;
-          const cleanup = { confirmedGone: true, listedEver, note: `colab sessions does not list ${session}` };
+          const cleanup = { confirmedGone: true, listedEver, note: check.note };
           emit(onEvent, { type: "allocation_cleanup", ...cleanup });
           return cleanup;
         }
       } else {
-        listedEver = true;
         notListedChecks = 0;
-        const stopped = await step(argvStop({ session }), { label: `alloc-stop-${attempt}`, wallMs: 90000 });
-        lastNote = `colab sessions still lists ${session}; last stop: ${redactTail(stopped).slice(-160)}`;
+        lastNote = check.note;
+        orphans = check.orphans;
+        if (check.ours) {
+          listedEver = true;
+          const stopped = await step(argvStop({ session }), { label: `alloc-stop-${attempt}`, wallMs: 90000 });
+          lastNote = `${check.note}; last stop: ${redactTail(stopped).slice(-160)}`;
+        }
       }
       await sleep(teardownRetryMs);
     }
     // keep the provisional entry and arm the watchdog: it may be the only thing that ends the spend
-    if (listedEver) armWatchdog();
-    const cleanup = { confirmedGone: false, listedEver, note: lastNote || `could not confirm ${session} is gone` };
+    // (armed whenever the session is not confirmed gone, including when every `colab sessions` call failed)
+    armWatchdog();
+    const cleanup = { confirmedGone: false, listedEver, orphans, note: lastNote || `could not confirm ${session} is gone` };
     emit(onEvent, { type: "allocation_cleanup", ...cleanup });
     return cleanup;
   }
@@ -883,12 +905,14 @@ export function createColabBackend({
       const droppedOutcome = execOutcome(dropped, "drop-token");
       emit(null, { type: "drop_token", ok: droppedOutcome.ok, note: droppedOutcome.ok ? null : droppedOutcome.note });
       let lastEvidence = "";
+      let lastCheck = null;
       for (let attempt = 1; attempt <= teardownRetries; attempt += 1) {
         const stopped = await step(argvStop({ session }), { label: `stop-${attempt}`, wallMs: 90000 });
         lastEvidence = redactTail(stopped);
         await sleep(teardownRetryMs);
         const after = await sessions();
-        if (after.empty || !after.sessions.some((entry) => entry.name === session)) {
+        lastCheck = sessionsCheck(after, session);
+        if (lastCheck.clean) {
           forgetSession();
           const watchdog = await disarmWatchdog();
           return {
@@ -902,8 +926,9 @@ export function createColabBackend({
       const after = await sessions();
       return {
         state: "stop_unconfirmed",
-        evidence: `the VM may still be running and units are draining: colab stop was accepted but colab sessions still lists ${session}. Last output: ${lastEvidence.slice(-160)}`,
-        listed: after.sessions.map((entry) => entry.name),
+        evidence: `the VM may still be running and units are draining: colab stop was accepted but ${sessionsCheck(after, session).note}. Last output: ${lastEvidence.slice(-160)}`,
+        listed: after.sessions.map((entry) => entry.name || "(orphan)"),
+        orphans: sessionsCheck(after, session).orphans,
         manual: `colab stop -s ${session}`,
         // deliberately not disarmed: an unconfirmed stop is exactly when the watchdog has to stay
         // armed, because it may be the only thing that ends the spend

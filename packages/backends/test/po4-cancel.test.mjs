@@ -93,3 +93,39 @@ test('the 503 retry wait is abort-aware', async t => {
   assert.ok(error);
   assert.ok(Date.now() - started < 20000, 'ensureUp must not sit out a 60 s backoff after cancel');
 });
+
+// PO-4 re-review (1): an interrupted `new` can leave an unnamed ('?') row. That is not "gone".
+test('an orphan row after a cancelled hanging allocation is surfaced, not counted as gone', async t => {
+  const { backend, fake } = backendFor(t, { stopped: true, newHangs: true, newListsOrphan: true, keepAfterStop: true });
+  const { readState } = await import('./helpers.mjs');
+  const controller = new AbortController();
+  const pending = backend.ensureUp({ approved: true, signal: controller.signal }).then(() => null, e => e);
+  for (let i = 0; i < 200 && !String(readState(fake.statePath).sessions || '').includes('[?]'); i += 1) await new Promise(r => setTimeout(r, 25));
+  controller.abort(new Error('owner cancelled'));
+  const error = await pending;
+  assert.match(error?.message ?? '', /not confirmed stopped/);
+  const cleanup = error.detail?.allocationCleanup;
+  assert.equal(cleanup?.confirmedGone, false);
+  assert.equal(cleanup.orphans.length, 1, 'the orphan must be surfaced');
+  assert.match(cleanup.note, /unnamed \(orphan\)/);
+  assert.ok(backend.state.watchdog?.pid, 'an unconfirmed cleanup arms the watchdog');
+  const teardown = await backend.teardown('after cancel');
+  assert.equal(teardown.state, 'stop_unconfirmed');
+  assert.equal(teardown.orphans?.length, 1);
+});
+
+// PO-4 re-review (2): when every `colab sessions` call fails, nothing is confirmed, so the watchdog is armed.
+test('a cleanup whose sessions calls all fail still arms the watchdog', async t => {
+  const { backend, fake } = backendFor(t, { stopped: true, newHangs: true });
+  const { readState, writeState } = await import('./helpers.mjs');
+  const controller = new AbortController();
+  const pending = backend.ensureUp({ approved: true, signal: controller.signal }).then(() => null, e => e);
+  for (let i = 0; i < 200 && !String(readState(fake.statePath).sessions || '').includes('['); i += 1) await new Promise(r => setTimeout(r, 25));
+  writeState(fake.statePath, { ...readState(fake.statePath), failSessions: true });
+  controller.abort(new Error('owner cancelled'));
+  const error = await pending;
+  assert.equal(error?.detail?.allocationCleanup?.confirmedGone, false);
+  assert.equal(error.detail.allocationCleanup.listedEver, false, 'no listing ever succeeded');
+  assert.match(error.detail.allocationCleanup.note, /colab sessions failed/);
+  assert.ok(backend.state.watchdog?.pid, 'watchdog armed although no listing succeeded');
+});
