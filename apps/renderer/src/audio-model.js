@@ -45,7 +45,8 @@ export function unreferencedNarrationAssets(pkg) {
   const audio = pkg?.audio ?? {};
   const buses = new Set();
   if (audio.music?.asset) buses.add(audio.music.asset);
-  for (const ambience of audio.ambience ?? []) if (ambience?.asset) buses.add(ambience.asset);
+  // Ambience configures the videos' embedded audio; it is an object, not
+  // a list of standalone audio assets (packageAudio in the schema).
   for (const sfx of audio.sfx ?? []) if (sfx?.asset) buses.add(sfx.asset);
   return Object.keys(assets).filter(assetId => {
     const asset = assets[assetId];
@@ -63,7 +64,7 @@ export function unreferencedNarrationAssets(pkg) {
  * @returns {string | null}
  */
 export function narrationWarning(pkg) {
-  if (narrationAudio(pkg) || !pkg?.audio) return null;
+  if (pkg?.voice?.enabled === false || narrationAudio(pkg) || !pkg?.audio) return null;
   const stray = unreferencedNarrationAssets(pkg);
   if (stray.length === 0) return null;
   return `no scene sets narration_asset, so the ready audio ${stray.join(', ')} is not mixed as voice; point a scene's narration_asset at it`;

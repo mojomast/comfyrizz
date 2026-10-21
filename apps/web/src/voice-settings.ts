@@ -14,6 +14,7 @@ export type VoiceSaveResult = {
   text?: string;
 };
 type Options = {
+  initialBudgetUnits?: number;
   /** Read-only: every edit goes through setVoice/setNarrationStyle. */
   getPackage: () => PackageV1;
   /** Existing EditorStore SetVoice command, so undo and autosave see the edit. */
@@ -23,6 +24,8 @@ type Options = {
   /** Flush shared autosave and return the revision /api/pipeline/plan expects. */
   save: () => Promise<VoiceSaveResult>;
   api: Client;
+  /** Reuse the editor's review gate; null means the user cancelled. */
+  renderOverride?: () => Promise<{ reason: string } | undefined | null>;
   /** Repaint after external edits (undo/redo) without stealing focus. */
   subscribe?: (listener: () => void) => () => void;
 };
@@ -93,6 +96,7 @@ export function mountVoiceSettings(element: HTMLElement, configuration: Options)
   unsubscribe?.();
   host = element;
   options = configuration;
+  if (typeof configuration.initialBudgetUnits === 'number' && Number.isFinite(configuration.initialBudgetUnits) && configuration.initialBudgetUnits >= 0) budget = configuration.initialBudgetUnits;
   if (!deliverySceneId) deliverySceneId = configuration.getPackage().scenes[0]?.id ?? '';
   let observedPackage = configuration.getPackage();
   unsubscribe = configuration.subscribe?.(() => {
@@ -280,7 +284,10 @@ function render() {
   }));
   host.querySelector('[data-start]')?.addEventListener('click', () => perform(async () => {
     if (!plan || plan.snapshot !== JSON.stringify(packageValue())) { plan = null; throw Error('Project changed. Check a fresh generation plan.'); }
-    run = (await request('/api/pipeline', { ...plan.body, approvedPlanHash: plan.value.planHash })).run;
+    const override = await options!.renderOverride?.();
+    if (override === null) return;
+    if (!plan || plan.snapshot !== JSON.stringify(packageValue())) { plan = null; throw Error('Project changed. Check a fresh generation plan.'); }
+    run = (await request('/api/pipeline', { ...plan.body, approvedPlanHash: plan.value.planHash, ...(override ? { override } : {}) })).run;
     if (run) sessionStorage.setItem('comfyrizz.voice-generation-run', run.runId);
     plan = null; message = 'Generation started.';
     if (timer) clearTimeout(timer); timer = setTimeout(refreshRun, 1000);

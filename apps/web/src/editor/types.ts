@@ -25,6 +25,7 @@ export interface VoiceSettings {
 export interface EditorScene {
   id: string;
   layout: string;
+  media_only?: boolean;
   preferredFrames?: number;
   copy?: Record<string, unknown>;
   transitionOut?: { type: string; frames?: number; direction?: string };

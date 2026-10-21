@@ -34,6 +34,7 @@ export interface OpenedProject {
   /** Present only for the seeded default, so sidecars resolve to its chat. */
   chatId?: string;
   editor?: unknown;
+  budgetUnits?: number;
 }
 
 export type PackageRequest = (input: string, init?: RequestInit) => Promise<Response>;
@@ -105,7 +106,7 @@ export async function openInitialProject(options: OpenInitialProjectOptions): Pr
       options.onError?.(new Error(`package ${target.packageId} returned HTTP ${response.status}`));
       return bundled;
     }
-    const body = await response.json() as { package?: unknown; editor?: unknown };
+    const body = await response.json() as { package?: unknown; editor?: unknown; runDefaults?: { budgetUnits?: unknown } };
     if (!isRecord(body.package)) {
       options.onError?.(new Error(`package ${target.packageId} response has no package`));
       return bundled;
@@ -117,7 +118,11 @@ export async function openInitialProject(options: OpenInitialProjectOptions): Pr
       packageId: target.packageId,
       activity: initialProjectActivity(target.source, target.packageId),
       ...(target.source === 'seeded' ? { chatId: SEEDED_CHAT_ID } : {}),
+      ...(target.source === 'requested' && /^chat_[A-Za-z0-9_-]{8,80}$/.test(new URLSearchParams(options.search).get('chat') ?? '')
+        ? { chatId: new URLSearchParams(options.search).get('chat')! } : {}),
       ...(editor ? { editor } : {}),
+      ...(typeof body.runDefaults?.budgetUnits === 'number' && Number.isFinite(body.runDefaults.budgetUnits) && body.runDefaults.budgetUnits >= 0
+        ? { budgetUnits: body.runDefaults.budgetUnits } : {}),
     };
   } catch (error) {
     options.onError?.(error);

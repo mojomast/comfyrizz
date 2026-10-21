@@ -102,6 +102,7 @@ const OUTPUT_KIND = { still: "image", plate: "video", upscale: "video", audio: "
 const GENERATOR_KIND = {
   "flux3-klein": "still",
   ltx25: "plate",
+  "fasth3-omni": "plate",
   // H17: the presenter is LTX-2.5 audio-to-video - the same weights, a different graph, and its own
   // batch because it can only run once the narration it is generated from exists
   "ltx25-a2v": "presenter",

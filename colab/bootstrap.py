@@ -25,10 +25,12 @@ same bytes the timings were measured on. The backend uploads the lock next to th
 from __future__ import annotations
 
 import argparse
+import hashlib
 import concurrent.futures
 import json
 import os
 import subprocess
+import shlex
 import threading
 import sys
 import time
@@ -260,7 +262,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"LOCK {args.lock}: {sum(len(files) for _, files in plan.values())} files from {len(plan)} repos", flush=True)
 
     OUT.mkdir(parents=True, exist_ok=True)
-    if run(f"cd {ROOT} && rm -rf ComfyUI && git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI.git && cd ComfyUI && git checkout -q {COMFYUI_REF} && git log -1 --format='%h %cd'", "clone") != 0:
+    ref = os.environ.get('COMFYRIZZ_COMFYUI_REF') or lock.get('comfyui', {}).get('revision') or COMFYUI_REF
+    quoted_ref = shlex.quote(ref)
+    if run(f"cd {ROOT} && rm -rf ComfyUI && git clone -q https://github.com/comfyanonymous/ComfyUI.git && cd ComfyUI && git checkout -q {quoted_ref} && git log -1 --format='%h %cd'", "clone") != 0:
         raise SystemExit("cloning ComfyUI failed")
 
     # The install step GPU test 2 spent 192 s on. With a wheelhouse, pip reads the wheels from that
@@ -288,6 +292,18 @@ def main(argv: list[str] | None = None) -> int:
     # the token is used and then removed; it is never exported to ComfyUI or to a node
     TOKEN.unlink(missing_ok=True)
     print("token file removed:", not TOKEN.exists(), flush=True)
+
+    for entry in lock['files']:
+        if not entry.get('sha256'):
+            continue
+        file = Path(lock['hosts'][entry['host']]['localDir']) / entry['path']
+        digest = hashlib.sha256()
+        with file.open('rb') as stream:
+            for chunk in iter(lambda: stream.read(16 * 1024 * 1024), b''):
+                digest.update(chunk)
+        if digest.hexdigest() != entry['sha256']:
+            raise SystemExit('Model hash mismatch: ' + entry['path'])
+        print('VERIFIED', entry['path'], flush=True)
 
     # merge the sharded text encoders the lock declares (GPU test 1: two shards -> one file)
     from safetensors.torch import load_file, save_file  # noqa: PLC0415 - only present on the VM
@@ -374,6 +390,12 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:  # noqa: BLE001
         ready["proxy_error"] = str(error)
     ready["ok"] = bool(ready["comfyui"]) and ready["proxy"] == 200
+    if ready['ok'] and lock.get('requiredNodes'):
+        with urllib.request.urlopen(f'http://127.0.0.1:{COMFY_PORT}/object_info', timeout=30) as response:
+            info = json.load(response)
+        ready['missingNodes'] = [name for name in lock['requiredNodes'] if name not in info]
+        ready['ok'] = not ready['missingNodes']
+    ready['comfyuiRevision'] = ref
     (OUT / "ready.json").write_text(json.dumps(ready, indent=2))
     print("READY", json.dumps(ready), flush=True)
     return 0 if ready["ok"] else 1

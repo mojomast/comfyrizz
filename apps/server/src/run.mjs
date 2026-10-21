@@ -8,7 +8,7 @@
 // `backend.runPackage`; this controller only owns the spend gate, the plan hash, the
 // one-run lock and the record. It never branches on the provider.
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PER_HOUR, DEFAULT_GPU } from '../../../packages/backends/src/budget.mjs';
 
@@ -91,18 +91,31 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     // and a measured rate can only raise it: max(table, measured). The approved plan uses the same number
     // the admission check will.
     const plannedRate = resolveRatePerHour({ gpu, explicit: ratePerHour });
+    // The real planner validates uploaded inputs even for a dry run. Stage the
+    // same snapshot before constructing the backend (which selects its model
+    // profile from package.json). Isolate estimates to avoid stale/concurrent files.
+    const workDir = mkdtempSync(join(runsDir, 'plan-'));
+    try {
+      if (prepareWorkDir) await prepareWorkDir(pkg, workDir, { backendId, dryRun: true });
+      return await estimateStaged({ backendId, pkg, budgetUnits, ratePerHour, plannedRate, includeReady, assets, comfyuiUrl, workDir });
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  }
+
+  async function estimateStaged({ backendId, pkg, budgetUnits, ratePerHour, plannedRate, includeReady, assets, comfyuiUrl, workDir }) {
     const instance = await backend(backendId, {
       budgetUnits,
       ratePerHour: plannedRate,
       packageId: pkg.id,
-      workDir: join(runsDir, 'plan', backendId),
-      outDir: join(runsDir, 'plan', backendId, 'out'),
-      scratchDir: join(runsDir, 'plan', backendId),
+      workDir,
+      outDir: join(workDir, 'out'),
+      scratchDir: workDir,
       comfyuiUrl,
     });
     const described = await instance.describe();
     // A dry run is the same plan the real run will use: nothing is started and nothing is billed.
-    const planned = await instance.runPackage(pkg, { workDir: join(runsDir, 'plan', backendId), dryRun: true, includeReady, assets });
+    const planned = await instance.runPackage(pkg, { workDir, dryRun: true, includeReady, assets });
     const jobList = planned.jobsDoc?.jobs ?? [];
     const est = planned.estimate ?? (typeof instance.estimate === 'function' ? await instance.estimate(jobList) : { gpuMinutes: 0, overheadMinutes: 0 });
     const rate = resolveRatePerHour({ gpu, explicit: ratePerHour, measured: est.ratePerHour });

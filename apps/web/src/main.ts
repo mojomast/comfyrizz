@@ -3,6 +3,7 @@ import './project-chat.css';
 import './characters/characters.css';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
+import { readRunSnapshot } from './run-progress.ts';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
 import { createReferenceApi } from './references/api.ts';
@@ -753,6 +754,9 @@ function summarizeRunEvent(event: RunEvent): string {
     return String(event.phase ?? 'phase');
   }
   if (event.type === 'ensure_up') return `state ${event.state ?? '?'}`;
+  if (event.type === 'bootstrap_log') return String(event.message ?? '').trim();
+  if (event.type === 'collection_progress') return `${event.completed ?? 0}/${event.total ?? '?'} files · ${event.file ?? ''}`;
+  if (event.type === 'batch_start') return `${event.batch ?? 'media'} · ${event.jobs ?? '?'} jobs`;
   if (event.type === 'health') return `${event.ok ? 'ok' : 'not ok'} · ${event.detail ?? ''}`;
   if (event.type === 'collected' || event.event === 'collect') return `${event.files ?? '?'} file(s) → ${event.destDir ?? ''}`;
   if (event.type === 'teardown') return teardownLabel({ state: String(event.state ?? ''), evidence: event.evidence as string | undefined });
@@ -979,6 +983,16 @@ async function refreshSpend(): Promise<void> {
     if (!response.ok) return;
     const body = (await response.json()) as { spentEstimate?: number };
     if (typeof body.spentEstimate === 'number') $('spend').textContent = `${body.spentEstimate.toFixed(2)} GPU units (est.)`;
+    if (!runState.active) {
+      const run = await readRunSnapshot(apiFetch);
+      if (run && !runState.active) {
+        runState.active = { runId: run.runId, backendId: run.backendId, status: run.status };
+        runState.events = run.events ?? [];
+        runState.render = run.render ?? null;
+        runState.teardown = run.teardown ?? null;
+        renderRunPanel();
+      }
+    }
   } catch {
     /* the meter is best-effort */
   }
@@ -1707,6 +1721,7 @@ async function runBrief(brief: string): Promise<void> {
 }
 
 function init(opened: OpenedProject): void {
+  if (opened.budgetUnits !== undefined) $<HTMLInputElement>('budget').value = String(opened.budgetUnits);
   renderMessages();
   renderStoryboard();
   renderPalette();
@@ -1744,6 +1759,7 @@ function init(opened: OpenedProject): void {
     voiceHost.id = 'voice-panel';
     scriptHost.append(voiceHost);
     mountVoiceSettings(voiceHost, {
+      initialBudgetUnits: opened.budgetUnits,
       getPackage: () => editorStore.getState().doc.package as unknown as PackageV1,
       setVoice: voice => {
         const result = editorStore.dispatch({ type: 'SetVoice', voice: voice as never });
@@ -1755,6 +1771,12 @@ function init(opened: OpenedProject): void {
       },
       save: saveEditorNow,
       api: apiFetch,
+      renderOverride: async () => {
+        const gate = clipStore.gate();
+        if (gate.ok || gate.total === 0) return undefined;
+        const reason = await renderBar?.requestOverride(gate);
+        return reason ? { reason } : null;
+      },
       subscribe: listener => editorStore.subscribe(listener),
     });
   }
@@ -2029,6 +2051,11 @@ function init(opened: OpenedProject): void {
 
   projectChat = mountProjectChat({
     apiFetch,
+    ...(opened.source === 'requested' ? {
+      initialConversationId: opened.chatId,
+      restoreSaved: false,
+      expectedPackageId: opened.packageId ?? undefined,
+    } : {}),
     root: $('project-plan-panel'),
     append: appendChatMessage,
     replace: replaceChatMessages,

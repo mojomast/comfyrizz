@@ -66,6 +66,22 @@ test('G6-15: a ready audio asset that no scene references is flagged as stray', 
   assert.deepEqual(unreferencedNarrationAssets(pkg), ['a_narr']);
 });
 
+test('native video ambience is an object and disabled narration leaves conditioning audio alone', () => {
+  const pkg = {
+    voice: { enabled: false },
+    audio: { ambience: { enabled: true, gain_db: 0 }, music: { asset: 'a_music' } },
+    assets: {
+      a_music: { kind: 'audio', status: 'ready', file: 'music.wav' },
+      a_voice_ref: { kind: 'audio', status: 'ready', file: 'reference.wav' },
+    },
+    scenes: [],
+  };
+  assert.deepEqual(unreferencedNarrationAssets(pkg), ['a_voice_ref']);
+  assert.equal(narrationWarning(pkg), null);
+  pkg.voice.enabled = true;
+  assert.match(narrationWarning(pkg), /a_voice_ref/);
+});
+
 test('G6-15: warns when a package has a voice asset but no scene points at it', () => {
   const pkg = {
     audio: { music: { asset: 'a_music' } },

@@ -126,6 +126,9 @@ export function mountProjectChat(options: {
   applyProject: (project: ChatProject, built: boolean) => void;
   provider: () => Promise<{ provider: string; model: string }>;
   log: (message: string) => void;
+  initialConversationId?: string;
+  restoreSaved?: boolean;
+  expectedPackageId?: string;
   brand?: () => unknown;
   referenceLabel?: (refId: string) => string | undefined;
   onReferencesChanged?: () => void | Promise<void>;
@@ -139,7 +142,7 @@ export function mountProjectChat(options: {
   onReset?: () => void | Promise<void>;
 }) {
   const panel = options.root;
-  const id = localStorage.getItem(STORAGE_KEY);
+  const id = options.initialConversationId ?? (options.restoreSaved === false ? null : localStorage.getItem(STORAGE_KEY));
   let conversationId: string | null = id && /^chat_[A-Za-z0-9_-]+$/.test(id) ? id : null;
   let conversation: Conversation | null = null;
   let busy = false;
@@ -289,6 +292,9 @@ export function mountProjectChat(options: {
       }
       if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
       const reply = body as ChatReply;
+      if (options.expectedPackageId && reply.project?.package?.id !== options.expectedPackageId) {
+        throw new Error('The linked conversation belongs to a different project.');
+      }
       conversation = reply.conversation;
       pending = null; errorText = ''; conflict = false;
       options.replace(reply.conversation.messages);

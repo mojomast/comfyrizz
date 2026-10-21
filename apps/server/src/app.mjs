@@ -210,8 +210,7 @@ export function createApp({
         cpSync(source, workflowsLink, { recursive: true });
       }
     }
-    const assets = join(dirname(store.path(pkg.id)), 'assets');
-    if (existsSync(assets)) cpSync(assets, join(workDir, 'assets'), { recursive: true });
+    copyNamedAssets({ pkg, outputDir: dirname(store.path(pkg.id)), packageDir: workDir });
   }
 
   // C9: after collect, write the applied package back next to its collected plates, then render
@@ -964,7 +963,9 @@ export function createApp({
         if (!pkg) return sendJson(response, 404, { error: 'package not found' });
         let editor = null;
         try { editor = readEditor(runtimeDir, id); } catch { editor = null; }
-        return sendJson(response, 200, editor ? { package: pkg, revision: pkg.revision, editor } : { package: pkg, revision: pkg.revision });
+        const runDefaults = store.runDefaults(id);
+        return sendJson(response, 200, { package: pkg, revision: pkg.revision,
+          ...(editor ? { editor } : {}), ...(runDefaults ? { runDefaults } : {}) });
       }
       if (request.method === 'PATCH') {
         const body = await readJson(request);

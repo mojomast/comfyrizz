@@ -72,6 +72,7 @@ def test_presenter_freezes_original_audio_in_both_sampling_stages():
 
 #: The GPU-test-1 set the fixture package plans jobs for.
 GPU1_WORKFLOWS = {
+    "fasth3_omni_ref2va.api.json",
     "flux3_klein_t2i.api.json",
     "flux3_klein_img2img.api.json",
     "flux3_klein_ref_edit.api.json",
