@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "name": "Comfyrizz",
+  "direction": "Kinetic ZZ",
+  "status": "working palette; vector refinement pending",
+  "colors": {
+    "violet": "#6D28FF",
+    "mint": "#00D8AB",
+    "ink": "#14112B",
+    "paper": "#F7F5FC",
+    "surfaceDark": "#211C38",
+    "borderLight": "#DED9EB",
+    "mutedOnDark": "#BEB7D0"
+  },
+  "typography": {
+    "ui": "Inter, ui-sans-serif, system-ui, sans-serif",
+    "wordmark": "custom artwork; rebuild as paths"
+  },
+  "usage": {
+    "clearSpaceSymbolHeight": 0.5,
+    "minLockupCssPx": 180,
+    "minSymbolCssPx": 24
+  },
+  "motion": {
+    "fastMs": 160,
+    "reducedMotionMs": 0
+  }
+}

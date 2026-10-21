@@ -1,0 +1,40 @@
+TASK: Refine and implement the Comfyrizz Kinetic ZZ identity
+
+The user selected the third logo concept. Use assets/approved-concept.png as the
+approved visual direction. Use the other assets and brand-guide.txt as supporting
+material. Preserve the violet/mint interlocking double-Z symbol and bold, slanted,
+lowercase comfyrizz wordmark. Do not invent a new concept or mascot.
+
+First inspect the current repository's instructions and existing brand/UI assets.
+Then deliver a concrete visual refinement for review:
+
+1. Create a true editable SVG master of the symbol and wordmark. Reconstruct clean
+   paths rather than embedding the PNG. Preserve the approved design's character;
+   fix edge artifacts, overlap spacing, stroke/shape weight and optical kerning.
+   Use one shared geometry for all variants. Do not trace rendering noise.
+2. Deliver horizontal light/dark/full-color and monochrome logos, a standalone
+   symbol, and a simplified favicon. Convert custom wordmark lettering to paths;
+   do not require a proprietary font to display it.
+3. Deliver transparent raster exports and common icon sizes: 16, 32, 48, 180,
+   192, 512 and 1024 px where applicable. Keep generous safe padding in square icons.
+4. Use brand-tokens.json as the proposed palette. Measure contrast and adjust UI
+   color roles as needed without arbitrarily changing the logo's identity.
+5. Integrate the identity into the app header, favicon, README and one social card.
+   Preserve product behavior, accessibility labels, keyboard navigation, project
+   data and compute/spend approval flows. Do not let branding crowd the editor.
+6. Show light/dark examples and a small-size proof sheet. Check spelling,
+   clipping, alpha edges, visual centering and reduced-motion behavior.
+7. Run checks appropriate to changed files and report what was actually verified.
+
+Acceptance criteria
+- All marks read 'comfyrizz' with exactly two final z letters.
+- The icon is recognizable without the wordmark and works at small sizes.
+- Every variant uses identical master geometry and documented clear space.
+- SVGs are self-contained with no embedded bitmaps or external font/network links.
+- No auto-traced noise, accidental new outlines, gradients, glow or drop shadows.
+- The current approved PNG remains preserved as a reference.
+- New assets and before/after previews are available before any public deployment.
+
+Use the image generation prompts only if more raster exploration is useful.
+Prefer native vector editing for the final logo system. The supplied raster
+variants may have minor differences; reconcile them against the approved concept.

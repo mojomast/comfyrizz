@@ -1,0 +1,50 @@
+[
+  {
+    "file": "assets/approved-concept.png",
+    "width": 2172,
+    "height": 724,
+    "cornerAlpha": 0,
+    "bytes": 437295,
+    "sha256": "708546a8e552b4bb2e7b3f1568ed7dfe0e6e59a7a8681e4e639557f6cdfdb699"
+  },
+  {
+    "file": "assets/logo-dark.png",
+    "width": 2172,
+    "height": 724,
+    "cornerAlpha": 0,
+    "bytes": 466735,
+    "sha256": "9b45936bd19aedd8ed687ac6eaeae7472cd697e91b17e74b13cb533fd542f73b"
+  },
+  {
+    "file": "assets/logo-light.png",
+    "width": 2172,
+    "height": 724,
+    "cornerAlpha": 0,
+    "bytes": 436647,
+    "sha256": "9644664f17d100166d7563ab41b9ef11e3e4e6620a92a39561421d6fc2209829"
+  },
+  {
+    "file": "assets/logo-mono.png",
+    "width": 2171,
+    "height": 724,
+    "cornerAlpha": 0,
+    "bytes": 410389,
+    "sha256": "bd36a431778ea48bb355490b4000132dc3b76c9812de65b95c7ae3c3eb292d36"
+  },
+  {
+    "file": "assets/social-cover.png",
+    "width": 1672,
+    "height": 941,
+    "cornerAlpha": 255,
+    "bytes": 1289777,
+    "sha256": "589137636541b3f265f0c00fef7d5bade3c75a276825bef5f11440e50b3fe8b7"
+  },
+  {
+    "file": "assets/symbol-color.png",
+    "width": 1254,
+    "height": 1254,
+    "cornerAlpha": 0,
+    "bytes": 595829,
+    "sha256": "f8500920a9bafdcc902838f4f648ab9ae6fb47e91e4451188528fdec037a0f14"
+  }
+]
