@@ -67,7 +67,7 @@ ticket while the run continued.
 Private production root:
 `/home/mojo/comfyrizz-gpu-tests/nrcu-episode2-20261021`.
 
-[Private live production page](https://mail.tailec998.ts.net:8451/nrcu-episode2/index.html)
+[Private live production page](https://your-host.example:8451/nrcu-episode2/index.html)
 
 ## Helpers and resumption
 

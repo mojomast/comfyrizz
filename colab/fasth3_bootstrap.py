@@ -1,4 +1,4 @@
-"""Isolated FastH3 experiment. Upload with fasth3-models.lock.json to /content/fasth3.
+"""Isolated FastH3 experiment on a Google Colab GPU. Upload with fasth3-models.lock.json to /content/fasth3.
 
 No credentials required: the pinned models are public. Keeps the production
 LTX/FLUX environment untouched. A host-side owner must stop the billed runtime.
@@ -19,6 +19,18 @@ def run(argv, **kwargs):
     subprocess.run(argv, check=True, **kwargs)
 
 
+def package_version(name):
+    """The installed version of a distribution, or None when it is not installed.
+
+    The receipt is written after the server is up and answering, so a missing
+    distribution must not throw away a session that already worked.
+    """
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def main():
     root = Path('/content/fasth3')
     root.mkdir(exist_ok=True)
@@ -32,7 +44,10 @@ def main():
     if not comfy.exists():
         run(['git', 'clone', '--filter=blob:none', 'https://github.com/Comfy-Org/ComfyUI.git', str(comfy)])
     run(['git', 'checkout', lock['comfyuiRevision']], cwd=comfy)
-    # Retain the Colab CUDA-enabled torch unless the pinned runtime proves incompatible.
+    # Retain the Google Colab CUDA-enabled torch unless the pinned runtime proves incompatible.
+    # Only the torch/torchvision/torchaudio distributions themselves are dropped: a filter that
+    # dropped everything starting with "torch" also dropped torchsde, and the server then failed
+    # to start with a missing dependency.
     req = root / 'requirements.txt'
     req.write_text('\n'.join(l for l in (comfy / 'requirements.txt').read_text().splitlines()
                              if not re.match(r'^(torch|torchvision|torchaudio)([<>=~\s]|$)', l)))
@@ -72,7 +87,7 @@ def main():
             (root / 'object-info.json').write_text(json.dumps(info))
             receipt = {'comfyuiRevision': lock['comfyuiRevision'], 'seconds': time.time()-started,
                        'pid': proc.pid, 'torch': torch.__version__, 'gpu': torch.cuda.get_device_name(), 'ready': True,
-                       'packages': {p: importlib.metadata.version(p) for p in ['torch','torchsde','comfy-kitchen','huggingface-hub']}}
+                       'packages': {p: package_version(p) for p in ['torch','torchsde','comfy-kitchen','huggingface-hub']}}
             (root / 'bootstrap-receipt.json').write_text(json.dumps(receipt, indent=2))
             print(json.dumps(receipt), flush=True)
             return

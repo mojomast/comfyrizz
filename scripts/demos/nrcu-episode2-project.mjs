@@ -13,6 +13,8 @@ import { addToProject } from '../../apps/server/src/characters/cast.mjs';
 import { planJobs, checkJobsDoc } from '../../packages/jobs/src/plan.mjs';
 import { compileTimeline } from '../../packages/planner/dist/src/index.js';
 import { validatePackage } from '../../packages/schema/src/index.mjs';
+// Public host of the private app (e.g. your-host.example); never commit a real hostname.
+const HOST = process.env.COMFYRIZZ_HOST || 'your-host.example';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const [production, recut, runtime] = process.argv.slice(2).map(p => resolve(p));
@@ -157,5 +159,5 @@ write(join(root,'run-defaults',id+'.json'),{budgetUnits:14.5});
 write(join(production,'ui-project.json'),pkg);write(join(production,'ui-jobs.json'),jobs);write(join(production,'ui-timeline.json'),timeline);
 const report={packageId:id,chatId,scenes:pkg.scenes.length,frames:timeline.durationInFrames,seconds:timeline.durationInFrames/24,cast:cast.length,jobs:jobs.jobs.length,
   stills:jobs.jobs.filter(j=>j.kind==='still').length,videos:jobs.jobs.filter(j=>j.generator==='fasth3-omni').length,
-  url:`https://mail.tailec998.ts.net:8451/?package=${id}&chat=${chatId}`};
+  url:`https://${HOST}:8451/?package=${id}&chat=${chatId}`};
 write(join(production,'ui-import.json'),report);console.log(JSON.stringify(report,null,2));

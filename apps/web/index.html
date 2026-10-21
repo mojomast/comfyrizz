@@ -4,100 +4,166 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d0f14'/%3E%3Ccircle cx='32' cy='32' r='18' fill='none' stroke='%236d8cff' stroke-width='7'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/src/ui/tokens.css" />
+    <link rel="stylesheet" href="/src/ui/components.css" />
+    <link rel="stylesheet" href="/src/ui/shell.css" />
+    <link rel="stylesheet" href="/src/ui/topbar.css" />
     <title>Comfyrizz — CPU motion graphics</title>
   </head>
   <body>
-    <div id="app">
-      <header id="topbar">
-        <div class="brand"><span class="mark">◑</span><span>Comfyrizz</span><small>CPU slice</small></div>
-        <label class="picker">LLM
-          <select id="llm">
-            <option value="none">local · scripted model</option>
-            <option value="opencode-go">OpenCode Go</option>
-            <option value="custom">Custom · OpenAI-compatible</option>
-            <option value="openrouter">OpenRouter</option>
-          </select>
-          <span id="llm-status" class="hint"></span>
-        </label>
-        <label class="picker">Model <input id="agent-model" list="agent-model-options" placeholder="scripted" disabled maxlength="300" /><datalist id="agent-model-options"></datalist></label>
-        <button type="button" id="agent-settings-open">Agent settings</button>
-        <label class="picker">Backend
-          <select id="backend">
-            <option value="cpu">CPU · no network</option>
-            <option value="byo-comfyui">BYO ComfyUI</option>
-            <option value="colab">Google Colab G4</option>
-          </select>
-        </label>
-        <label class="picker">Budget
-          <input id="budget" type="number" min="0" step="0.5" value="15" title="project unit budget for Google Colab" />
-        </label>
-        <label class="picker">Render
-          <select id="render-location" title="Where the final MP4 is assembled">
-            <option value="local">This machine</option>
-            <option value="colab">Google Colab VM</option>
-          </select>
-        </label>
-        <span class="badge" title="Every asset in this package is generated or CC0">open weights</span>
-        <span class="meter" id="ctx">ctx 0 / 200k</span>
-        <span class="meter" id="spend">0.0 GPU units</span>
-        <span class="spacer"></span>
-        <span id="save-status" data-testid="save-status" role="status" aria-live="polite" data-state="saved">Saved</span>
-        <button id="run-backend">Run on backend</button>
-        <div id="colab-card-host" class="colab-card-host"></div>
-        <div id="colab-progress-host" class="colab-progress-host"></div>
-        <button id="render" class="primary">Export MP4</button>
-        <span id="render-state" class="hint"></span>
+    <div id="app" class="app-shell" data-shell="grid">
+      <header id="topbar" class="toolbar shell-topbar" data-region="topbar">
+        <div class="topbar-brand-group">
+          <div class="brand"><span class="mark">◑</span><span>Comfyrizz</span><small>CPU slice</small></div>
+          <span class="topbar-divider" aria-hidden="true">/</span>
+          <span class="topbar-project-name" id="project-name" title="Project name">Pip’s Night Shift</span>
+        </div>
+
+        <nav class="flow-stepper" aria-label="Project flow">
+          <ol class="stepper-list">
+            <li class="stepper-item is-complete"><span class="stepper-label">Brief</span></li>
+            <li class="stepper-sep" aria-hidden="true">·</li>
+            <li class="stepper-item is-active" aria-current="step"><span class="stepper-label">Storyboard</span></li>
+            <li class="stepper-sep" aria-hidden="true">·</li>
+            <li class="stepper-item"><span class="stepper-label">Takes</span></li>
+            <li class="stepper-sep" aria-hidden="true">·</li>
+            <li class="stepper-item"><span class="stepper-label">Render</span></li>
+          </ol>
+        </nav>
+
+        <span class="spacer toolbar-spacer"></span>
+
+        <div class="run-settings-anchor">
+          <button type="button" id="run-settings-toggle" class="btn btn-secondary btn-sm" aria-haspopup="dialog" aria-expanded="false" aria-controls="run-settings-popover">Run settings</button>
+          <div id="run-settings-popover" class="popover run-settings-popover" role="dialog" aria-modal="false" aria-labelledby="run-settings-title" hidden>
+            <div class="run-settings-head">
+              <span id="run-settings-title" class="popover-title">Run settings</span>
+              <button type="button" id="run-settings-close" class="btn btn-ghost btn-icon btn-sm" aria-label="Close run settings">✕</button>
+            </div>
+            <div class="popover-body run-settings-grid">
+              <div class="field">
+                <label class="field-label" for="backend">Backend</label>
+                <select id="backend">
+                  <option value="cpu">CPU · no network</option>
+                  <option value="byo-comfyui">BYO ComfyUI</option>
+                  <option value="colab">Google Colab G4</option>
+                </select>
+                <span class="field-hint">Compute environment for generation</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="llm">LLM</label>
+                <select id="llm">
+                  <option value="none">local · scripted model</option>
+                  <option value="opencode-go">OpenCode Go</option>
+                  <option value="custom">Custom · OpenAI-compatible</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+                <span class="field-hint">Provider for video planning</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="agent-model">Model</label>
+                <div class="run-settings-model-row">
+                  <input id="agent-model" list="agent-model-options" placeholder="scripted" disabled maxlength="300" /><datalist id="agent-model-options"></datalist>
+                  <button type="button" id="agent-settings-open" class="btn btn-secondary btn-sm">Agent settings</button>
+                </div>
+                <span class="field-hint">Active model on the selected provider</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="budget">Budget</label>
+                <input id="budget" type="number" min="0" step="0.5" value="15" title="project unit budget for Google Colab" />
+                <span class="field-hint">Project unit budget for Google Colab</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="render-location">Render</label>
+                <select id="render-location" title="Where the final MP4 is assembled">
+                  <option value="local">This machine</option>
+                  <option value="colab">Google Colab VM</option>
+                </select>
+                <span class="field-hint">Where the final MP4 is assembled</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button id="run-backend" class="btn btn-secondary btn-sm">Run on backend</button>
+
+        <div class="split-button" id="render-split-button">
+          <button id="render" class="btn btn-primary btn-sm primary" type="button" title="Render video">Render</button>
+          <button type="button" id="export-menu-toggle" class="btn btn-secondary btn-sm split-toggle" aria-haspopup="menu" aria-expanded="false" aria-label="Export menu" title="Export options">
+            Export <span class="split-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="export-menu" class="popover export-menu" role="menu" aria-label="Export options" hidden>
+            <button type="button" id="topbar-export-mp4" class="btn btn-ghost btn-sm menu-item" role="menuitem">Export MP4</button>
+            <button type="button" id="topbar-export-bundle" class="btn btn-ghost btn-sm menu-item" role="menuitem">Export bundle</button>
+          </div>
+        </div>
       </header>
 
-      <main>
-        <section id="chat-pane" class="pane">
-          <div class="pane-head"><b>Chat</b><span class="hint">brief → local agent → package</span></div>
+      <main class="shell-main" data-region="workspace">
+        <section id="chat-pane" class="pane panel shell-left" data-region="left" aria-label="Chat and references">
+          <div class="pane-head panel-header"><b>Chat</b><span class="hint">brief → local agent → package</span></div>
           <div id="messages"></div>
           <div id="project-plan-panel" hidden></div>
           <form id="composer">
-            <div id="brief-panel" class="brief-panel" hidden></div>
+            <div id="brief-panel" class="brief-panel popover" hidden></div>
             <textarea id="prompt" rows="2" placeholder="Describe your video, or tell the agent what to change…"></textarea>
             <div class="composer-row">
               <span class="mode-toggle" role="group" aria-label="Planning mode">
-                <button type="button" id="mode-plan" class="mode active" data-mode="plan">Chat</button>
-                <button type="button" id="mode-express" class="mode" data-mode="express">Express</button>
+                <button type="button" id="mode-plan" class="btn btn-sm mode active" data-mode="plan">Chat</button>
+                <button type="button" id="mode-express" class="btn btn-sm mode" data-mode="express">Express</button>
               </span>
               <span class="hint" id="composer-hint">Enter to send · keys stay on the server</span>
-              <button type="submit" id="composer-send">Send</button>
+              <button type="submit" id="composer-send" class="btn btn-primary btn-sm">Send</button>
             </div>
           </form>
         </section>
 
-        <section id="work-pane" class="pane">
-          <div class="pane-head"><b>Preview</b><span id="draft" class="hint">compiled timeline</span></div>
+        <section id="work-pane" class="pane panel shell-center" data-region="center" aria-label="Preview">
+          <div class="pane-head panel-header"><b>Preview</b><span id="draft" class="hint">compiled timeline</span></div>
           <div id="player" aria-label="Remotion preview"></div>
-          <div id="transport">
-            <button id="play">Play</button>
+          <div id="transport" class="toolbar shell-transport">
+            <button id="play" class="btn btn-secondary btn-sm">Play</button>
             <input id="scrub" type="range" min="0" max="100" value="0" aria-label="Playhead" />
-            <span id="time" class="mono">00:00 / 00:36</span>
+            <span id="time" class="mono tabular-nums">00:00 / 00:36</span>
           </div>
-          <div id="scene-timeline"></div>
           <div id="script-audio-panel"></div>
           <div id="qa-panel" class="qa-panel" hidden></div>
-          <div class="pane-head"><b>Theme</b><span class="hint">palette changes the procedural backgrounds</span></div>
-          <div id="palette" class="palette" style="padding: 12px 16px;"></div>
+          <div class="pane-head panel-header"><b>Theme</b><span class="hint">palette changes the procedural backgrounds</span></div>
+          <div id="palette" class="palette"></div>
           <div id="spend-card"></div>
-          <div class="pane-head"><b>Storyboard</b><span class="hint">inline edits update the Player immediately</span><span class="pane-tools"><span id="render-changes-state" class="hint"></span><button type="button" id="render-changes" class="pane-action">Render changes</button></span></div>
+          <div class="pane-head panel-header"><b>Storyboard</b><span class="hint">inline edits update the Player immediately</span><span class="pane-tools"><span id="render-changes-state" class="hint"></span><button type="button" id="render-changes" class="btn btn-secondary btn-sm pane-action">Render changes</button></span></div>
           <div id="storyboard"></div>
         </section>
 
-        <aside id="activity-pane" class="pane">
-          <div class="pane-head"><b>Run</b><span class="hint">backend lifecycle</span></div>
+        <aside id="activity-pane" class="pane panel shell-right" data-region="right" aria-label="Inspector">
+          <div class="pane-head panel-header"><b>Run</b><span class="hint">backend lifecycle</span></div>
           <div id="run-panel"><div class="empty">No backend run yet.<br /><span class="hint">Pick a backend and press Run.</span></div></div>
+          <div id="colab-card-host" class="colab-card-host"></div>
+          <div id="colab-progress-host" class="colab-progress-host gauge"></div>
           <div id="export-panel"></div>
-          <div class="pane-head"><b>Activity</b><span class="hint">local + server</span></div>
+          <div class="pane-head panel-header"><b>Activity</b><span class="hint">local + server</span></div>
           <div id="activity"></div>
-          <div class="pane-head"><b>Assets</b><span class="hint">generated-first</span></div>
+          <div class="pane-head panel-header"><b>Assets</b><span class="hint">generated-first</span></div>
           <div id="assets"></div>
-          <div class="pane-head"><b>GPU queue</b><span class="hint">fallbacks active until approved</span></div>
+          <div class="pane-head panel-header"><b>GPU queue</b><span class="hint">fallbacks active until approved</span></div>
           <div id="gpu-queue"></div>
         </aside>
       </main>
+
+      <section id="timeline-dock" class="panel shell-timeline" data-region="timeline" aria-label="Timeline">
+        <div id="scene-timeline"></div>
+      </section>
+
+      <footer id="statusbar" class="toolbar shell-statusbar" data-region="statusbar" role="contentinfo" aria-label="Status bar">
+        <span class="badge badge-ok" title="Every asset in this package is generated or CC0">open weights</span>
+        <span id="llm-status" class="hint"></span>
+        <span class="meter" id="ctx">ctx 0 / 200k</span>
+        <span class="meter" id="spend">0.0 GPU units</span>
+        <span id="render-state" class="hint"></span>
+        <span class="spacer toolbar-spacer"></span>
+        <kbd class="kbd" title="Play or pause timeline">Space</kbd>
+        <span id="save-status" class="badge" data-testid="save-status" role="status" aria-live="polite" data-state="saved">Saved</span>
+      </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

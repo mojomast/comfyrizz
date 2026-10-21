@@ -1,6 +1,7 @@
 import './style.css';
 import './project-chat.css';
 import './characters/characters.css';
+import './ui/look-picker.css';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { readRunSnapshot } from './run-progress.ts';
@@ -706,12 +707,13 @@ function renderAssets(): void {
     .map(([id, asset]) => {
       const origin = asset.origin === 'generated' ? asset.gen?.generator ?? 'generated' : asset.origin;
       const pending = asset.status === 'pending';
-      const chip = pending
-        ? '<span class="chip warn">pending gpu</span>'
-        : pkg.assets?.[id]?.status === 'pending'
-          ? '<span class="chip">preview ready</span>'
-          : `<span class="chip">${esc(asset.license?.id ?? asset.status)}</span>`;
-      return `<div class="asset${pending ? ' pending' : ''}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy"><b>${esc(id)}</b><span>${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}${chip}</div>`;
+      // PR #19: a pending package asset whose local preview already streamed in reads "preview ready".
+      const previewReady = !pending && pkg.assets?.[id]?.status === 'pending';
+      const tone = pending ? 'warn' : previewReady ? 'info' : 'ok';
+      const statusText = pending ? 'pending gpu' : previewReady ? 'preview ready' : (asset.license?.id ?? asset.status);
+      const chip = `<span class="badge badge-${tone} chip${pending ? ' warn' : ''}" data-tone="${tone}">${esc(statusText)}</span>`;
+      const timeInfo = asset.media?.frames ? `<time class="job-time hint tabular-nums mono">${asset.media.frames}f</time>` : '';
+      return `<div class="asset job-row${pending ? ' pending' : ''}" data-asset-id="${esc(id)}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(id)}</b>${chip}${timeInfo}</div><span class="job-progress hint">${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}</div>`;
     })
     .join('');
   renderGpuQueue();
@@ -730,15 +732,28 @@ function renderGpuQueue(): void {
   host.innerHTML = remaining
     .map(
       item =>
-        `<div class="asset pending"><div class="thumb">◌</div><div><b>${esc(item.assetId)}</b><span>${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div><span class="chip warn">pending spend</span></div>`,
+        `<div class="asset job-row pending" data-asset-id="${esc(item.assetId)}"><div class="thumb">◌</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(item.assetId)}</b><span class="badge badge-warn chip warn" data-tone="warn">pending spend</span></div><span class="job-progress hint">${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div></div>`,
     )
     .join('');
+}
+
+function activityTone(text: string): { tone: 'ok' | 'warn' | 'danger' | 'info'; label: string } {
+  if (/fail|error|refus|reject|exploded/i.test(text)) return { tone: 'danger', label: 'failed' };
+  if (/warn|unconfirmed/i.test(text)) return { tone: 'warn', label: 'warn' };
+  if (/downloaded|saved|finished|ok|cleared|ready|passed|verified/i.test(text)) return { tone: 'ok', label: 'done' };
+  if (/started|rendering|re-rendering|exporting|checking|allocating/i.test(text)) return { tone: 'info', label: 'running' };
+  return { tone: 'info', label: 'log' };
 }
 
 function renderActivity(): void {
   const host = $('activity');
   host.innerHTML = state.activity.length
-    ? state.activity.map(event => `<div class="event"><time>${esc(event.at)}</time>${esc(event.text)}</div>`).join('')
+    ? state.activity
+        .map(event => {
+          const { tone, label } = activityTone(event.text);
+          return `<div class="event job-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><span class="job-text">${esc(event.text)}</span></div><time class="tabular-nums mono hint">${esc(event.at)}</time></div>`;
+        })
+        .join('')
     : '<div class="empty">No activity yet.<br /><span class="hint">Agent and render events will show up here.</span></div>';
 }
 
@@ -780,20 +795,53 @@ function teardownLabel(teardown: { state?: string; evidence?: string }): string 
   return teardown?.evidence ? `${label} · ${teardown.evidence}` : label;
 }
 
+function runEventTone(event: RunEvent): { tone: 'ok' | 'warn' | 'danger' | 'info'; label: string } {
+  if (event.event === 'run_phase') {
+    if (event.phase === 'failed') return { tone: 'danger', label: 'failed' };
+    if (event.phase === 'gated') return event.ok === false ? { tone: 'danger', label: 'gate' } : { tone: 'ok', label: 'gate' };
+    if (event.phase === 'planned') return { tone: 'info', label: 'plan' };
+    if (event.phase === 'up' || event.phase === 'bootstrapped' || event.phase === 'ran' || event.phase === 'applied') {
+      return { tone: 'ok', label: String(event.phase) };
+    }
+    return { tone: 'info', label: String(event.phase ?? 'phase') };
+  }
+  if (event.type === 'error' || event.type === 'job_failed') return { tone: 'danger', label: 'failed' };
+  if (event.type === 'health') return event.ok ? { tone: 'ok', label: 'health' } : { tone: 'danger', label: 'health' };
+  if (event.type === 'job_done' || event.type === 'job' || event.type === 'collected' || event.event === 'collect') {
+    return { tone: 'ok', label: 'done' };
+  }
+  return { tone: 'info', label: 'event' };
+}
+
+function runStatusTone(status: string): 'ok' | 'warn' | 'danger' | 'info' {
+  if (/fail|error/i.test(status)) return 'danger';
+  if (/starting|running|pending/i.test(status)) return 'info';
+  if (/ok|done|finished|succeeded/i.test(status)) return 'ok';
+  return 'info';
+}
+
 function renderRunPanel(): void {
   const host = $('run-panel');
   if (!runState.active) {
     host.innerHTML = '<div class="empty">No backend run yet.<br /><span class="hint">Pick a backend and press Run.</span></div>';
     return;
   }
+  const activeTone = runStatusTone(runState.active.status);
   const rows = runState.events
-    .map(event => `<div class="event"><b>${esc(String(event.event ?? event.type ?? 'event'))}</b> ${esc(summarizeRunEvent(event))}</div>`)
+    .map(event => {
+      const { tone, label } = runEventTone(event);
+      const at = event.at ?? event.time ?? event.timestamp;
+      const timeStr = at ? `<time class="tabular-nums mono hint">${esc(String(at))}</time>` : '';
+      return `<div class="event job-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><b class="job-name">${esc(String(event.event ?? event.type ?? 'event'))}</b><span class="job-progress hint">${esc(summarizeRunEvent(event))}</span></div>${timeStr}</div>`;
+    })
     .join('');
-  const teardown = runState.teardown ? `<div class="event"><b>teardown</b> ${esc(teardownLabel(runState.teardown))}</div>` : '';
-  const render = runState.render
-    ? `<div class="run-render"><button id="run-video">Download run MP4</button><span class="hint">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div>`
+  const teardown = runState.teardown
+    ? `<div class="event job-row" data-tone="${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}"><span class="badge badge-${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}">teardown</span><div class="job-content"><b class="job-name">teardown</b><span class="job-progress hint">${esc(teardownLabel(runState.teardown))}</span></div></div>`
     : '';
-  host.innerHTML = `<div class="run-head"><b>${esc(runState.active.runId)}</b><span class="chip">${esc(runState.active.status)}</span></div>${rows}${teardown}${render}`;
+  const render = runState.render
+    ? `<div class="run-render job-row"><span class="badge badge-ok" data-tone="ok">ready</span><div class="job-content"><b class="job-name">run MP4</b><span class="job-progress hint tabular-nums mono">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div><div class="job-actions"><button type="button" id="run-video" class="btn btn-secondary btn-sm">Download run MP4</button></div></div>`
+    : '';
+  host.innerHTML = `<div class="run-head job-row"><div class="job-content"><b class="job-name">${esc(runState.active.runId)}</b><span class="job-meta hint">${esc(runState.active.backendId)}</span></div><span class="badge badge-${activeTone} chip" data-tone="${activeTone}">${esc(runState.active.status)}</span></div>${rows}${teardown}${render}`;
   const video = $('run-video');
   if (video) video.addEventListener('click', () => void downloadRunVideo());
 }
@@ -1430,7 +1478,7 @@ function renderBriefCard(panel: HTMLElement): void {
   const presetCards: PresetCard[] = briefState.presets.length
     ? briefState.presets
     : presetIds.map(id => ({ id, label: id, palette: [], font: '', attributes: '', thumbnail: '' }));
-  const presetPicker = `<div class="brief-presets">${presetCards.map(card => `<button type="button" class="preset ${card.id === currentPreset ? 'selected' : ''}" data-brief-preset="${esc(card.id)}" title="${esc(card.attributes)}">${card.thumbnail}<span>${esc(card.label)}</span></button>`).join('')}<select data-brief-field="style.preset" hidden>${presetIds.map(id => `<option value="${esc(id)}" ${id === currentPreset ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></div>`;
+  const presetPicker = `<div class="look-picker">${presetCards.map(card => `<button type="button" class="look-option ${card.id === currentPreset ? 'selected' : ''}" data-brief-preset="${esc(card.id)}" title="${esc(card.attributes)}"><span class="look-thumb">${card.thumbnail || '<span class="look-thumb-empty" aria-hidden="true"></span>'}</span><span class="look-caption"><span class="look-label">${esc(card.label)}</span><span class="look-check" aria-hidden="true"></span></span></button>`).join('')}<select data-brief-field="style.preset" hidden>${presetIds.map(id => `<option value="${esc(id)}" ${id === currentPreset ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></div>`;
   // C-pres: the presenter chip (off by default). Writes brief.presenter; the build maps it to
   // package.presenter coverage. Per-scene overrides stay on the storyboard.
   const presenterOptions: [string, string][] = [['none', 'No presenter (default)'], ['bookends', 'Intro + outro'], ['all', 'All scenes']];
@@ -1448,12 +1496,17 @@ function renderBriefCard(panel: HTMLElement): void {
     <ol class="brief-outline">${beats}</ol>
     <div class="brief-actions"><span class="hint">${esc(summary)}</span><button type="button" id="brief-refresh" ${briefState.busy ? 'disabled' : ''}>Update outline</button><button type="button" id="brief-build" ${briefState.busy ? 'disabled' : ''}>Build video</button></div>
     ${notes ? `<ul class="brief-notes">${notes}</ul>` : ''}`;
+  const presetSelect = panel.querySelector<HTMLSelectElement>('select[data-brief-field="style.preset"]');
   panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
     button.addEventListener('click', () => {
       const id = button.getAttribute('data-brief-preset') as string;
-      const selectEl = panel.querySelector<HTMLSelectElement>('select[data-brief-field="style.preset"]');
-      if (selectEl) selectEl.value = id;
+      if (presetSelect) presetSelect.value = id;
       panel.querySelectorAll('[data-brief-preset]').forEach(other => other.classList.toggle('selected', other === button));
+    });
+  });
+  presetSelect?.addEventListener('change', () => {
+    panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
+      button.classList.toggle('selected', button.getAttribute('data-brief-preset') === presetSelect.value);
     });
   });
   panel.querySelectorAll<HTMLInputElement>('[data-brand-field]').forEach(input => {
@@ -1849,9 +1902,10 @@ function init(opened: OpenedProject): void {
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   const renderButton = $('render');
+  const splitGroup = document.getElementById('render-split-button');
   const renderBarHost = document.createElement('div');
   renderBarHost.id = 'render-bar-host';
-  renderButton.before(renderBarHost);
+  (splitGroup ?? renderButton).before(renderBarHost);
   renderBar = mountRenderBar(renderBarHost, {
     gate: () => clipStore.gate(),
     onRender: reason => exportMp4(reason),
@@ -1863,6 +1917,111 @@ function init(opened: OpenedProject): void {
     renderLocation.value = readRenderLocation();
     renderLocation.addEventListener('change', () => writeRenderLocation(renderLocation.value));
   }
+
+  // UO06: Top bar header wiring (project name, Run settings popover, split-button menu)
+  const projectNameEl = document.getElementById('project-name');
+  if (projectNameEl && pkg.title) {
+    projectNameEl.textContent = pkg.title;
+  }
+
+  const runSettingsToggle = document.getElementById('run-settings-toggle');
+  const runSettingsPopover = document.getElementById('run-settings-popover');
+  const runSettingsClose = document.getElementById('run-settings-close');
+
+  function openRunSettings(): void {
+    if (!runSettingsPopover || !runSettingsToggle) return;
+    runSettingsPopover.hidden = false;
+    runSettingsToggle.setAttribute('aria-expanded', 'true');
+    const first = runSettingsPopover.querySelector<HTMLElement>('select, input, button');
+    first?.focus();
+  }
+
+  function closeRunSettings(returnFocus = true): void {
+    if (!runSettingsPopover || !runSettingsToggle || runSettingsPopover.hidden) return;
+    runSettingsPopover.hidden = true;
+    runSettingsToggle.setAttribute('aria-expanded', 'false');
+    if (returnFocus) runSettingsToggle.focus();
+  }
+
+  runSettingsToggle?.addEventListener('click', () => {
+    if (runSettingsPopover?.hidden) openRunSettings();
+    else closeRunSettings(true);
+  });
+
+  runSettingsClose?.addEventListener('click', () => closeRunSettings(true));
+
+  runSettingsPopover?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeRunSettings(true);
+    }
+  });
+
+  const exportMenuToggle = document.getElementById('export-menu-toggle');
+  const exportMenu = document.getElementById('export-menu');
+  const topbarExportMp4 = document.getElementById('topbar-export-mp4');
+  const topbarExportBundle = document.getElementById('topbar-export-bundle');
+
+  function openExportMenu(): void {
+    if (!exportMenu || !exportMenuToggle) return;
+    exportMenu.hidden = false;
+    exportMenuToggle.setAttribute('aria-expanded', 'true');
+    const first = exportMenu.querySelector<HTMLElement>('[role="menuitem"], button');
+    first?.focus();
+  }
+
+  function closeExportMenu(returnFocus = true): void {
+    if (!exportMenu || !exportMenuToggle || exportMenu.hidden) return;
+    exportMenu.hidden = true;
+    exportMenuToggle.setAttribute('aria-expanded', 'false');
+    if (returnFocus) exportMenuToggle.focus();
+  }
+
+  exportMenuToggle?.addEventListener('click', () => {
+    if (exportMenu?.hidden) openExportMenu();
+    else closeExportMenu(true);
+  });
+
+  exportMenu?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeExportMenu(true);
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const items = Array.from(exportMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"], button'));
+      const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+      if (currentIndex === -1) {
+        items[0]?.focus();
+      } else {
+        const nextIndex = event.key === 'ArrowDown'
+          ? (currentIndex + 1) % items.length
+          : (currentIndex - 1 + items.length) % items.length;
+        items[nextIndex]?.focus();
+      }
+    }
+  });
+
+  topbarExportMp4?.addEventListener('click', () => {
+    closeExportMenu(false);
+    void beginExport();
+  });
+
+  topbarExportBundle?.addEventListener('click', () => {
+    closeExportMenu(false);
+    void exportBundle();
+  });
+
+  document.addEventListener('click', event => {
+    const target = event.target as Node | null;
+    if (target && !runSettingsPopover?.contains(target) && !runSettingsToggle?.contains(target)) {
+      closeRunSettings(false);
+    }
+    if (target && !exportMenu?.contains(target) && !exportMenuToggle?.contains(target)) {
+      closeExportMenu(false);
+    }
+  });
   $('run-backend').addEventListener('click', () => void runOnBackend(false));
   $('render-changes').addEventListener('click', () => void renderChangedScenes());
   document.querySelectorAll<HTMLButtonElement>('.mode-toggle .mode').forEach(button => {
@@ -2131,7 +2290,17 @@ function init(opened: OpenedProject): void {
   charactersTabButton.id = 'characters-tab';
   charactersTabButton.textContent = 'Characters';
   charactersTabButton.setAttribute('aria-controls', 'characters-pane');
-  charactersTabButton.setAttribute('aria-selected', 'false');
+  charactersTabButton.setAttribute('aria-pressed', 'false');
+  charactersTabButton.setAttribute('aria-expanded', 'false');
+  const setCharactersTabAttr = charactersTabButton.setAttribute.bind(charactersTabButton);
+  charactersTabButton.setAttribute = (name: string, value: string) => {
+    if (name.endsWith('-selected')) {
+      setCharactersTabAttr('aria-pressed', value);
+      setCharactersTabAttr('aria-expanded', value);
+      return;
+    }
+    setCharactersTabAttr(name, value);
+  };
   $('run-backend').before(charactersTabButton);
 
   const charactersPane = document.createElement('section');

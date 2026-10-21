@@ -1,0 +1,253 @@
+/* UO02: Comfyrizz design tokens (PLAN section 4).
+   Dark pro tool palette: borders over shadows, one indigo accent, no gradients or glow shadows. */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces & borders */
+  --bg-0: #0b0d12;
+  --bg-1: #0f131b;
+  --bg-2: #141924;
+  --bg-3: #1b2230;
+  --border: #232b3a;
+  --border-subtle: #1b2230;
+  --border-strong: #3b4a68;
+
+  /* Text hierarchy (WCAG 2.2 contrast on --bg-0 / --bg-1 / --bg-2:
+     --text-1 >= 12:1 [16.3:1], --text-2 >= 7:1 [8.5:1], --text-3 >= 4.5:1 [6.3:1]) */
+  --text-1: #e8ebf3;
+  --text-2: #a3acc0;
+  --text-3: #8a93a6;
+
+  /* Single indigo accent (6.34:1 on --bg-0; #071022 fg is 6.36:1 on #6d8cff) */
+  --color-accent: #6d8cff;
+  --accent: #6d8cff;
+  --accent-fg: #071022;
+  --accent-hover: #9fb2ff;
+  --accent-bg: #121a2c;
+  --accent-border: #2b3d68;
+
+  /* Semantic statuses + -bg tints */
+  --color-ok: #60d6a7;
+  --ok: #60d6a7;
+  --ok-bg: #0f231c;
+  --ok-border: #2d5a4a;
+  --ok-fg: #071a12;
+
+  --color-warn: #ffc46b;
+  --warn: #ffc46b;
+  --warn-bg: #1a1408;
+  --warn-border: #5a4a1a;
+  --warn-fg: #1d1500;
+
+  --color-danger: #e08a8a;
+  --danger: #e08a8a;
+  --danger-bg: #241215;
+  --danger-border: #5a2a2a;
+  --danger-fg: #1f0709;
+
+  --color-info: #7aa2ff;
+  --info: #7aa2ff;
+  --info-bg: #121a2c;
+  --info-border: #2b3d68;
+  --info-fg: #071022;
+
+  /* Licence chip token set (CC0, PDM, MIT, CC-BY, CC-BY-SA, CC-BY-NC, CC-BY-ND, upload, blocked) */
+  --licence-cc0: #60d6a7;
+  --licence-cc0-bg: #0f231c;
+  --licence-cc0-border: #2d5a4a;
+  --licence-pdm: #60d6a7;
+  --licence-pdm-bg: #0f231c;
+  --licence-pdm-border: #2d5a4a;
+  --licence-mit: #60d6a7;
+  --licence-mit-bg: #0f231c;
+  --licence-mit-border: #2d5a4a;
+  --licence-cc-by: #7aa2ff;
+  --licence-cc-by-bg: #121a2c;
+  --licence-cc-by-border: #2b3d68;
+  --licence-cc-by-sa: #ffc46b;
+  --licence-cc-by-sa-bg: #1a1408;
+  --licence-cc-by-sa-border: #5a4a1a;
+  --licence-cc-by-nc: #e08a8a;
+  --licence-cc-by-nc-bg: #241215;
+  --licence-cc-by-nc-border: #5a2a2a;
+  --licence-cc-by-nd: #e08a8a;
+  --licence-cc-by-nd-bg: #241215;
+  --licence-cc-by-nd-border: #5a2a2a;
+  --licence-upload: #a3acc0;
+  --licence-upload-bg: #141924;
+  --licence-upload-border: #232b3a;
+  --licence-ok: var(--ok);
+  --licence-ok-bg: var(--ok-bg);
+  --licence-ok-border: var(--ok-border);
+  --licence-warn: var(--warn);
+  --licence-warn-bg: var(--warn-bg);
+  --licence-warn-border: var(--warn-border);
+  --licence-blocked: var(--danger);
+  --licence-blocked-bg: var(--danger-bg);
+  --licence-blocked-border: var(--danger-border);
+  --licence-unknown: var(--danger);
+  --licence-unknown-bg: var(--danger-bg);
+  --licence-unknown-border: var(--danger-border);
+
+  /* US-spelling aliases for licence tokens */
+  --license-cc0: var(--licence-cc0);
+  --license-cc0-bg: var(--licence-cc0-bg);
+  --license-cc0-border: var(--licence-cc0-border);
+  --license-pdm: var(--licence-pdm);
+  --license-pdm-bg: var(--licence-pdm-bg);
+  --license-pdm-border: var(--licence-pdm-border);
+  --license-mit: var(--licence-mit);
+  --license-mit-bg: var(--licence-mit-bg);
+  --license-mit-border: var(--licence-mit-border);
+  --license-cc-by: var(--licence-cc-by);
+  --license-cc-by-bg: var(--licence-cc-by-bg);
+  --license-cc-by-border: var(--licence-cc-by-border);
+  --license-cc-by-sa: var(--licence-cc-by-sa);
+  --license-cc-by-sa-bg: var(--licence-cc-by-sa-bg);
+  --license-cc-by-sa-border: var(--licence-cc-by-sa-border);
+  --license-cc-by-nc: var(--licence-cc-by-nc);
+  --license-cc-by-nc-bg: var(--licence-cc-by-nc-bg);
+  --license-cc-by-nc-border: var(--licence-cc-by-nc-border);
+  --license-cc-by-nd: var(--licence-cc-by-nd);
+  --license-cc-by-nd-bg: var(--licence-cc-by-nd-bg);
+  --license-cc-by-nd-border: var(--licence-cc-by-nd-border);
+  --license-upload: var(--licence-upload);
+  --license-upload-bg: var(--licence-upload-bg);
+  --license-upload-border: var(--licence-upload-border);
+  --license-blocked: var(--licence-blocked);
+  --license-blocked-bg: var(--licence-blocked-bg);
+  --license-blocked-border: var(--licence-blocked-border);
+
+  /* Focus ring & WCAG 2.2 AA target size */
+  --focus-ring: 2px solid var(--accent);
+  --focus-ring-width: 2px;
+  --focus-ring-color: var(--accent);
+  --focus-ring-offset: 2px;
+  --focus-offset: 2px;
+  --target-min: 24px;
+
+  /* Typography: Inter/system at 12, 13 (base UI), 15, 18, 24, 32; weights 400/500/600 */
+  --font-sans: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-ui: var(--font-sans);
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --font-size-12: 12px;
+  --font-size-13: 13px;
+  --font-size-15: 15px;
+  --font-size-18: 18px;
+  --font-size-24: 24px;
+  --font-size-32: 32px;
+  --font-size-base: var(--font-size-13);
+
+  --text-xs: var(--font-size-12);
+  --text-sm: var(--font-size-13);
+  --text-base: var(--font-size-13);
+  --text-md: var(--font-size-15);
+  --text-lg: var(--font-size-18);
+  --text-xl: var(--font-size-24);
+  --text-2xl: var(--font-size-32);
+
+  --fs-12: var(--font-size-12);
+  --fs-13: var(--font-size-13);
+  --fs-15: var(--font-size-15);
+  --fs-18: var(--font-size-18);
+  --fs-24: var(--font-size-24);
+  --fs-32: var(--font-size-32);
+
+  --font-weight-400: 400;
+  --font-weight-500: 500;
+  --font-weight-600: 600;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --line-height-tight: 1.25;
+  --line-height-base: 1.45;
+  --line-height-relaxed: 1.6;
+
+  /* Tabular numerals for timecodes and money */
+  --font-numeric-tabular: tabular-nums;
+  --tabular-nums: tabular-nums;
+
+  /* Spacing: 4px base scale (4, 8, 12, 16, 24, 32) */
+  --space-base: 4px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --sp-4: 4px;
+  --sp-8: 8px;
+  --sp-12: 12px;
+  --sp-16: 16px;
+  --sp-24: 24px;
+  --sp-32: 32px;
+  --space-4px: 4px;
+  --space-8px: 8px;
+  --space-12: 12px;
+  --space-12px: 12px;
+  --space-16: 16px;
+  --space-16px: 16px;
+  --space-24: 24px;
+  --space-24px: 24px;
+  --space-32: 32px;
+  --space-32px: 32px;
+
+  /* Radius: 6px controls, 10px panels (plus pill and legacy 14px alias) */
+  --radius-control: 6px;
+  --radius-panel: 10px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-6: 6px;
+  --radius-10: 10px;
+  --radius-pill: 999px;
+  --radius-full: 999px;
+  --radius-legacy: 14px;
+
+  /* Elevation: 2 levels, borders preferred over shadows */
+  --elevation-0: none;
+  --elevation-1: 0 2px 6px rgba(0, 0, 0, 0.32);
+  --elevation-2: 0 8px 24px rgba(0, 0, 0, 0.48);
+  --shadow-1: var(--elevation-1);
+  --shadow-2: var(--elevation-2);
+  --elevation-border-1: 1px solid var(--border);
+  --elevation-border-2: 1px solid var(--border-strong);
+
+  /* Motion: 120ms and 200ms, honouring prefers-reduced-motion */
+  --duration-120: 120ms;
+  --duration-200: 200ms;
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --motion-120: 120ms;
+  --motion-200: 200ms;
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --transition-fast: var(--duration-fast) var(--ease-standard);
+  --transition-normal: var(--duration-normal) var(--ease-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-120: 0ms;
+    --duration-200: 0ms;
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+    --motion-120: 0ms;
+    --motion-200: 0ms;
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --transition-fast: 0ms linear;
+    --transition-normal: 0ms linear;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: var(--font-numeric-tabular);
+}

@@ -40,7 +40,7 @@ worked. No replacement reference is fully approved for the intended episode acti
   word-timed ASR, cut comparison and sampled reference/frame comparisons. These
   checks cannot approve acting, timbre, lip sync or natural motion.
 - External artifacts: `/home/mojo/comfyrizz-gpu-tests/nrcu-validation-20261021/`.
-- Private progress/results: `https://mail.tailec998.ts.net:8451/nrcu-episode2/validation/index.html`.
+- Private progress/results: `https://your-host.example:8451/nrcu-episode2/validation/index.html`.
 
 ## Collected performance results
 

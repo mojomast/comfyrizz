@@ -95,6 +95,17 @@ async function correctCaption(page: Page, text: string): Promise<void> {
 
 const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Timeline' });
 
+/**
+ * UO08: the scene panel keeps its less used controls in a collapsed "Advanced"
+ * section, so the split control is only in view once that section is open.
+ */
+async function openSceneAdvanced(page: Page): Promise<void> {
+  const details = page.getByTestId('script-audio').locator('details.sa-advanced');
+  if (await details.evaluate(node => (node as HTMLDetailsElement).open)) return;
+  await details.locator('summary').click();
+  await expect.poll(() => details.evaluate(node => (node as HTMLDetailsElement).open)).toBe(true);
+}
+
 /** Pointer events the timeline listens for. Playwright's mouse path does not reach that handler. */
 async function pointerDrag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }, options: { alt?: boolean; release?: boolean; selector?: string } = {}): Promise<void> {
   await page.evaluate(async ({ from, to, alt, release, selector }) => {
@@ -323,6 +334,7 @@ test('split divides the captions and undo joins them', async ({ page }) => {
   await openEditor(page, loadEnv());
   await page.getByTestId('sentences').locator('button').nth(1).click();
   await expect(page.getByTestId('split-frame')).not.toHaveValue('0');
+  await openSceneAdvanced(page);
   await page.getByTestId('split').click();
   await expect(page.locator('[data-action]')).toHaveText('Edit applied.');
   await expect(page.getByTestId('scene')).toHaveCount(4);

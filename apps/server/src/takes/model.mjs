@@ -28,6 +28,10 @@ export const TAKE_EXTENSIONS = Object.freeze(['png', 'jpg', 'webp', 'mp4', 'webm
 export const MAX_TAKES_PER_ASSET = 12;
 export const MAX_NOTE_CHARS = 1000;
 
+// RL10b: a clip retry is bounded. A failed clip is re-run at most this many times, so a
+// broken clip can never turn into an endless regeneration loop.
+export const MAX_RETRY_ATTEMPTS = 3;
+
 const TAKE_ID_RE = /^tk_[0-9a-f]{12}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/i;
 const PACKAGE_ID_RE = /^[A-Za-z0-9_.-]+$/;
@@ -36,7 +40,9 @@ const PLAN_HASH_RE = /^[0-9a-f]{64}$/i;
 const EXT_RE = /\.([A-Za-z0-9]+)$/;
 const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
-const ACTIVE_JOB_STATES = new Set(['active', 'generating', 'in_progress', 'rendering', 'running']);
+// RL10b: a clip whose retry is in flight is still work in progress, so it shows as
+// 'generating' rather than as a clip that failed.
+const ACTIVE_JOB_STATES = new Set(['active', 'generating', 'in_progress', 'rendering', 'running', 'retrying']);
 const WAITING_JOB_STATES = new Set(['pending', 'queued', 'starting']);
 const FAILED_JOB_STATES = new Set(['error', 'failed']);
 
@@ -174,6 +180,8 @@ function validateTake(errors, take, path, assetId) {
       && (typeof take.gen.workflow_sha256 !== 'string' || !SHA256_RE.test(take.gen.workflow_sha256))) {
       push(errors, `${path}/gen/workflow_sha256`, 'INVALID_SHA256', `${path}/gen/workflow_sha256 must be a 64-character hexadecimal digest`);
     }
+    // RL10b: a take that only landed after a clip retry says so in its provenance.
+    validateRetry(errors, take.gen.retry, `${path}/gen/retry`);
   }
 
   validateCorrection(errors, take.correction, `${path}/correction`);
@@ -191,6 +199,21 @@ function validateTake(errors, take, path, assetId) {
   }
 }
 
+function validateRetry(errors, retry, path) {
+  if (retry === undefined || retry === null) return;
+  if (!isPlainObject(retry)) {
+    push(errors, path, 'INVALID_RETRY', `${path} must be an object`);
+    return;
+  }
+  if (!Number.isSafeInteger(retry.attempts) || retry.attempts < 0) {
+    push(errors, `${path}/attempts`, 'INVALID_RETRY_ATTEMPTS', `${path}/attempts must be a non-negative integer`);
+  }
+  if (typeof retry.recovered !== 'boolean') {
+    push(errors, `${path}/recovered`, 'INVALID_RETRY_RECOVERED', `${path}/recovered must be a boolean`);
+  }
+  validateText(errors, retry.error, `${path}/error`, { max: 2000 });
+}
+
 function validateLastJob(errors, lastJob, path) {
   if (lastJob === undefined || lastJob === null) return;
   if (!isPlainObject(lastJob)) {
@@ -200,6 +223,7 @@ function validateLastJob(errors, lastJob, path) {
   validateText(errors, lastJob.runId, `${path}/runId`, { required: true });
   validateText(errors, lastJob.state, `${path}/state`, { required: true });
   validateText(errors, lastJob.error, `${path}/error`, { max: 2000 });
+  validateRetry(errors, lastJob.retry, `${path}/retry`);
 }
 
 function validateQueued(errors, queued, path) {
@@ -329,6 +353,25 @@ function canonical(value) {
     return out;
   }
   return null;
+}
+
+/**
+ * Build the retry record that a clip's `lastJob` and a recovered take's `gen` both carry.
+ *
+ * RL10b: the takes panel API shows `lastJob` as it is, so the record has to say how many
+ * times the clip was retried and whether the retry recovered it. `error` keeps the reason
+ * the first attempt failed, which is what the panel shows next to the badge.
+ *
+ * @param {{attempts?: number, recovered?: boolean, error?: string|null}} input
+ * @returns {{attempts: number, recovered: boolean, error?: string}}
+ */
+export function retryRecord({ attempts = 0, recovered = false, error = null } = {}) {
+  const record = {
+    attempts: Number.isSafeInteger(attempts) && attempts > 0 ? attempts : 0,
+    recovered: recovered === true,
+  };
+  if (typeof error === 'string' && error.trim() !== '') record.error = error.slice(0, 2000);
+  return record;
 }
 
 /**

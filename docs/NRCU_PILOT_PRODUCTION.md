@@ -6,7 +6,7 @@ used only to author still references and starting compositions.
 
 ## Live view
 
-**Pilot player and downloads:** <https://mail.tailec998.ts.net:8455/>
+**Pilot player and downloads:** <https://your-host.example:8455/>
 
 ### Current delivery — 65-second rock recut
 
@@ -74,7 +74,7 @@ downloads (206), and invalid-range handling (416). These checks are not a
 normal-speed listening review; that remains pending.
 
 Private production dashboard:
-<https://mail.tailec998.ts.net:8451/nrcu-pilot/index.html>
+<https://your-host.example:8451/nrcu-pilot/index.html>
 
 The explicit `index.html` is required by the deployed app's static routing.
 The dashboard refreshes status every five seconds. Images and raw takes are

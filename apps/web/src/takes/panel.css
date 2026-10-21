@@ -1,36 +1,44 @@
+@import '../ui/tokens.css';
+@import '../ui/components.css';
+
+/* UO14: Takes review panel (PLAN section 5).
+   Calm, dense ComfyUI-like dark pro tool: borders over shadows, single indigo accent, no gradients/glows. */
+
 .take-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   min-width: 0;
-  padding: 14px;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  padding: var(--space-4);
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
 }
 
 .take-panel h2,
 .take-panel h3 {
   margin: 0;
+  color: var(--text-1);
 }
 
 .take-panel h2 {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: var(--space-2);
+  font-size: var(--font-size-15);
+  font-weight: var(--font-weight-600);
 }
 
 .take-panel h3 {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
 }
 
 .take-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-start;
   justify-content: space-between;
 }
@@ -39,28 +47,28 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  color: var(--text);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  background: #ffffff14;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  min-width: var(--space-5);
+  height: var(--space-5);
+  padding: 0 var(--space-2);
+  color: var(--text-1);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--tabular-nums);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-pill);
 }
 
 .take-clip {
-  margin: 2px 0 0;
-  color: var(--muted);
-  font-size: 11px;
+  margin: var(--space-1) 0 0;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
   overflow-wrap: anywhere;
 }
 
 .take-head-state {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 }
 
@@ -68,245 +76,340 @@
 .take-new {
   display: inline-flex;
   align-items: center;
-  min-height: 20px;
-  padding: 0 8px;
-  font-size: 11px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  min-height: var(--space-5);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-pill);
 }
 
-.take-state-review {
-  color: #ffd479;
-  background: #3a2c10;
-  border-color: #6b5320;
+.take-state-review,
+.take-state[data-status="pending"] {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
 }
 
-.take-state-approved {
-  color: #9ee6b0;
-  background: #12301d;
-  border-color: #245c36;
+.take-state-approved,
+.take-state[data-status="approved"] {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
 }
 
 .take-state-rejected,
-.take-state-failed {
-  color: #ffb3b3;
-  background: #351519;
-  border-color: #6b2a30;
+.take-state-failed,
+.take-state[data-status="redo"],
+.take-state[data-status="failed"] {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
 }
 
 .take-state-generating,
 .take-state-queued {
-  color: var(--accent-2);
-  background: #16213a;
-  border-color: #2b3f68;
+  color: var(--info);
+  background: var(--info-bg);
+  border-color: var(--info-border);
 }
 
 .take-new {
-  color: var(--accent-2);
-  background: #16213a;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
 }
 
 .take-status {
   margin: 0;
-  min-height: 16px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
+  min-height: var(--space-4);
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
 }
 
 .take-status.is-error {
-  color: #ffb3b3;
+  color: var(--danger);
 }
 
 .take-hint,
 .take-keys,
 .take-plan-hint {
   margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
 }
 
-.take-keys kbd {
-  padding: 0 4px;
-  font-family: inherit;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+.take-keys kbd,
+kbd {
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
 }
 
 .take-strip-wrap {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .take-strip-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .take-strip-nav {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .take-step {
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 6px;
-  font-size: 16px;
+  min-width: calc(var(--space-5) + var(--space-1));
+  min-height: calc(var(--space-5) + var(--space-1));
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-15);
   line-height: 1;
 }
 
 .take-position {
-  min-width: 44px;
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  min-width: calc(var(--space-6) + var(--space-3));
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--tabular-nums);
   text-align: center;
 }
 
+/* Card grid: one .panel per take */
 .take-strip {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-6) * 6), 1fr));
+  gap: var(--space-3);
   margin: 0;
-  padding: 2px 2px 6px;
-  overflow-x: auto;
+  padding: 0;
   list-style: none;
-  scrollbar-width: thin;
 }
 
 .take-item {
-  flex: 0 0 auto;
-  min-width: 132px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+  transition: border-color var(--transition-fast);
+}
+
+.take-item:hover {
+  border-color: var(--border-strong);
+}
+
+.take-item.is-selected {
+  border-color: var(--ok-border);
+}
+
+.take-item.is-previewed {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.take-item.is-purged {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .take-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 6px;
-  color: var(--text);
+  padding: var(--space-2);
+  color: var(--text-1);
   text-align: left;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  background: transparent;
+  border: none;
   cursor: pointer;
-}
-
-.take-card:hover {
-  border-color: var(--accent);
-}
-
-.take-card.is-selected {
-  border-color: #3c7a50;
-}
-
-.take-card.is-previewed {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
-}
-
-.take-card.is-purged {
-  opacity: 0.5;
-  cursor: not-allowed;
+  outline: none;
 }
 
 .take-card:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
-.take-thumb {
+.take-card.is-purged {
+  cursor: not-allowed;
+}
+
+/* Filmstrip of frames */
+.take-thumb,
+.take-filmstrip {
   display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1);
+  background: var(--bg-0);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  box-sizing: border-box;
+}
+
+.take-filmstrip-sprockets {
+  display: block;
+  height: var(--space-1);
+  width: 100%;
+  background: var(--border-subtle);
+  border-radius: var(--radius-control);
+  opacity: 0.7;
+}
+
+.take-filmstrip-frames {
+  display: flex;
+  gap: var(--space-1);
+  align-items: stretch;
+  min-height: calc(var(--space-6) + var(--space-4));
+}
+
+.take-frame {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: calc(var(--space-6) + var(--space-4));
+  padding: var(--space-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  min-height: 52px;
-  padding: 0 8px;
-  background:
-    linear-gradient(135deg, #1b2434 0%, #0d121b 100%);
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+.take-frame-marker {
+  color: var(--text-3);
+  font-size: var(--font-size-12);
+}
+
+.take-frame-label {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
+  color: var(--text-3);
+  font-variant-numeric: var(--tabular-nums);
+  line-height: 1;
 }
 
 .take-thumb-n {
-  color: var(--accent-2);
-  font-size: 18px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-size: var(--font-size-15);
+  font-weight: var(--font-weight-600);
+  font-variant-numeric: var(--tabular-nums);
+  line-height: 1;
 }
 
 .take-thumb-duration {
-  color: var(--muted);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--tabular-nums);
+  line-height: 1;
 }
 
 .take-card-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
 .take-card-title {
   overflow: hidden;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-1);
 }
 
 .take-card-note {
   display: -webkit-box;
   overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.4;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
+/* Card action footer (Approve primary / Redo secondary) */
+.take-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  border-top: var(--elevation-border-1);
+  background: var(--bg-1);
+}
+
+.take-card-actions .btn {
+  flex: 1 1 0;
+  min-height: calc(var(--space-5) + var(--space-1));
+  font-size: var(--font-size-12);
+}
+
+/* Consistent status .badge set (pending, approved, redo, failed) */
 .take-verdict {
   display: inline-flex;
   align-items: center;
   align-self: flex-start;
-  min-height: 18px;
-  padding: 0 7px;
-  font-size: 10px;
-  font-weight: 600;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  min-height: calc(var(--space-5) - var(--space-1));
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+  line-height: var(--line-height-tight);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-pill);
 }
 
-.take-verdict-unreviewed {
-  color: #ffd479;
-  background: #3a2c10;
-  border-color: #6b5320;
+.take-verdict-unreviewed,
+.take-verdict[data-status="pending"] {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
 }
 
-.take-verdict-approved {
-  color: #9ee6b0;
-  background: #12301d;
-  border-color: #245c36;
+.take-verdict-approved,
+.take-verdict[data-status="approved"] {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
 }
 
-.take-verdict-rejected {
-  color: #ffb3b3;
-  background: #351519;
-  border-color: #6b2a30;
+.take-verdict-rejected,
+.take-verdict[data-status="redo"] {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.take-verdict[data-status="failed"] {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
 }
 
 .take-verdict-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -318,33 +421,42 @@
 .take-approval {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
 }
 
 .take-action-row,
 .take-form-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 }
 
 .take-panel button {
-  min-height: 30px;
-  padding: 0 10px;
-  color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  min-height: var(--space-6);
+  min-width: var(--target-min);
+  padding: var(--space-1) var(--space-3);
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-500);
   cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .take-panel button:hover:not(:disabled) {
-  border-color: var(--accent);
+  background: var(--bg-3);
+  border-color: var(--border-strong);
 }
 
 .take-panel button:focus-visible,
@@ -352,8 +464,8 @@
 .take-panel select:focus-visible,
 .take-panel textarea:focus-visible,
 .take-panel summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .take-panel button:disabled {
@@ -361,27 +473,49 @@
   cursor: not-allowed;
 }
 
-.take-panel .take-approve {
-  color: #9ee6b0;
-  border-color: #245c36;
+.take-panel .take-approve,
+.take-panel .take-card-approve {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: var(--font-weight-600);
 }
 
-.take-panel .take-reject {
-  color: #ffb3b3;
-  border-color: #6b2a30;
+.take-panel .take-approve:hover:not(:disabled),
+.take-panel .take-card-approve:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.take-panel .take-reject,
+.take-panel .take-card-redo {
+  color: var(--text-1);
+  background: var(--bg-2);
+  border-color: var(--border);
+}
+
+.take-panel .take-reject:hover:not(:disabled),
+.take-panel .take-card-redo:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
 }
 
 .take-panel .take-regenerate {
-  color: #071022;
-  font-weight: 700;
+  color: var(--accent-fg);
+  font-weight: var(--font-weight-600);
   background: var(--accent);
   border-color: var(--accent);
+}
+
+.take-panel .take-regenerate:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .take-diff-rows {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -390,58 +524,58 @@
 .take-diff-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
-  padding: 5px 7px;
-  font-size: 11px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-12);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
 }
 
 .take-diff-path {
-  color: var(--accent-2);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
   overflow-wrap: anywhere;
 }
 
 .take-diff-values {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: baseline;
   overflow-wrap: anywhere;
 }
 
 .take-diff-before {
-  color: var(--muted);
+  color: var(--text-3);
   text-decoration: line-through;
 }
 
 .take-diff-arrow {
-  color: var(--muted);
+  color: var(--text-3);
 }
 
 .take-diff-after {
-  color: var(--text);
+  color: var(--text-1);
 }
 
 .take-diff-note,
 .take-diff-empty {
   margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
   overflow-wrap: anywhere;
 }
 
 .take-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   min-width: 0;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
 }
 
 .take-field-wide {
@@ -450,91 +584,94 @@
 
 .take-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-6) * 5), 1fr));
+  gap: var(--space-2);
 }
 
 .take-panel input,
 .take-panel select,
 .take-panel textarea {
   width: 100%;
-  min-height: 30px;
-  padding: 6px 8px;
-  color: var(--text);
+  min-height: var(--space-6);
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-1);
   font: inherit;
-  font-size: 12px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  font-size: var(--font-size-13);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  box-sizing: border-box;
 }
 
 .take-panel textarea {
-  min-height: 68px;
+  min-height: calc(var(--space-6) * 2);
   resize: vertical;
 }
 
 .take-note-meta {
   display: flex;
   justify-content: flex-end;
-  margin-top: -4px;
+  margin-top: 0;
 }
 
 .take-count-hint {
-  color: var(--muted);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--tabular-nums);
 }
 
 .take-inputs {
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  padding: var(--space-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  background: var(--bg-2);
 }
 
 .take-inputs summary {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
   cursor: pointer;
 }
 
 .take-inputs[open] summary {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .take-approval {
-  border-color: #6b5320;
-  background: #241c0c;
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
 }
 
 .take-estimate {
   margin: 0;
-  color: #ffd479;
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--warn);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
 }
 
 .take-plan-hint code {
-  color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
   overflow-wrap: anywhere;
 }
 
 .take-approve-spend {
-  color: #071022;
-  font-weight: 700;
-  background: #ffd479;
-  border-color: #ffd479;
+  color: var(--warn-fg);
+  font-weight: var(--font-weight-600);
+  background: var(--warn);
+  border-color: var(--warn);
 }
 
 .take-empty {
   margin: 0;
-  padding: 12px;
-  color: var(--muted);
-  font-size: 11px;
+  padding: var(--space-4);
+  color: var(--text-2);
+  font-size: var(--font-size-13);
   text-align: center;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
+  background: var(--bg-1);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -743,20 +743,20 @@ function renderCastChip(
         <span class="cast-version" data-cast-version aria-label="Project revision ${escapeHtml(version)}">v${escapeHtml(version)}</span>
       </span>
       <span class="cast-badges">
-        ${canUpdate && latestRevision !== null ? `<span class="cast-update-badge" data-cast-update-available>v${escapeHtml(latestRevision)} available</span>` : ''}
-        ${entry.detached ? '<span class="cast-detached-badge" data-cast-detached>Detached</span>' : ''}
-        ${entry.orphaned ? '<span class="cast-orphaned-badge" data-cast-orphaned>Library copy deleted</span>' : ''}
+        ${canUpdate && latestRevision !== null ? `<span class="cast-update-badge badge badge-warn" data-cast-update-available>v${escapeHtml(latestRevision)} available</span>` : ''}
+        ${entry.detached ? '<span class="cast-detached-badge badge" data-cast-detached>Detached</span>' : ''}
+        ${entry.orphaned ? '<span class="cast-orphaned-badge badge badge-danger" data-cast-orphaned>Library copy deleted</span>' : ''}
       </span>
     </span>
     <span class="cast-chip-actions">
-      ${canUpdate && latestRevision !== null ? `<button type="button" class="cast-diff-button" data-cast-diff="${escapeHtml(entry.castId)}"${disabled}>View v${escapeHtml(latestRevision)} changes</button>
-      <button type="button" class="cast-update-button" data-cast-update="${escapeHtml(entry.castId)}"${disabled}>Update to v${escapeHtml(latestRevision)}</button>` : ''}
-      <button type="button" data-cast-presenter="${escapeHtml(entry.castId)}" aria-pressed="${presenter ? 'true' : 'false'}"${disabled}>Presenter</button>
-      <button type="button" data-cast-narrator="${escapeHtml(entry.castId)}" aria-pressed="${narrator ? 'true' : 'false'}"${disabled}>Narrator</button>
+      ${canUpdate && latestRevision !== null ? `<button type="button" class="cast-diff-button btn btn-secondary btn-sm" data-cast-diff="${escapeHtml(entry.castId)}"${disabled}>View v${escapeHtml(latestRevision)} changes</button>
+      <button type="button" class="cast-update-button btn btn-primary btn-sm" data-cast-update="${escapeHtml(entry.castId)}"${disabled}>Update to v${escapeHtml(latestRevision)}</button>` : ''}
+      <button type="button" class="btn btn-secondary btn-sm" data-cast-presenter="${escapeHtml(entry.castId)}" aria-pressed="${presenter ? 'true' : 'false'}"${disabled}>Presenter</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-cast-narrator="${escapeHtml(entry.castId)}" aria-pressed="${narrator ? 'true' : 'false'}"${disabled}>Narrator</button>
       ${entry.detached
-        ? `<button type="button" data-cast-attach="${escapeHtml(entry.castId)}"${disabled}>Reattach</button>`
-        : `<button type="button" data-cast-detach="${escapeHtml(entry.castId)}"${disabled}>Detach</button>`}
-      <button type="button" class="cast-remove-button" data-cast-remove="${escapeHtml(entry.castId)}"${disabled}>Remove</button>
+        ? `<button type="button" class="btn btn-secondary btn-sm" data-cast-attach="${escapeHtml(entry.castId)}"${disabled}>Reattach</button>`
+        : `<button type="button" class="btn btn-secondary btn-sm" data-cast-detach="${escapeHtml(entry.castId)}"${disabled}>Detach</button>`}
+      <button type="button" class="cast-remove-button btn btn-ghost btn-sm" data-cast-remove="${escapeHtml(entry.castId)}"${disabled}>Remove</button>
     </span>
   </li>`;
 }
@@ -782,17 +782,17 @@ export function renderCastDiff(state: CastStripState, options: RenderCastStripOp
       </li>`).join('')}</ul>`
     : '<p class="cast-diff-empty" data-cast-diff-empty>No visible fields changed in this revision.</p>';
   return `<div class="cast-diff-backdrop" data-cast-diff-backdrop>
-    <section class="cast-diff-modal" role="dialog" aria-modal="true" aria-labelledby="${escapeHtml(titleId)}" data-cast-diff-modal>
-      <header class="cast-diff-head">
+    <section class="cast-diff-modal panel" role="dialog" aria-modal="true" aria-labelledby="${escapeHtml(titleId)}" data-cast-diff-modal>
+      <header class="cast-diff-head panel-header">
         <h3 id="${escapeHtml(titleId)}">${escapeHtml(diff.name)}: v${escapeHtml(diff.fromRevision)} → v${escapeHtml(diff.toRevision)}</h3>
         <p>Updating replaces this project's pinned copy. The library character is not changed.</p>
       </header>
       ${rows}
       <p class="cast-diff-hint">Clips that use this character become stale after the update so nothing re-renders silently.</p>
       <div class="cast-diff-actions">
-        <button type="button" class="cast-diff-update" data-cast-diff-update="${escapeHtml(diff.castId)}"${disabled}>Update to v${escapeHtml(diff.toRevision)}</button>
-        <button type="button" data-cast-diff-cancel${disabled}>Keep v${escapeHtml(diff.fromRevision)}</button>
-        <button type="button" class="cast-diff-close" data-cast-diff-close aria-label="Close the revision diff"${disabled}>×</button>
+        <button type="button" class="cast-diff-update btn btn-primary btn-sm" data-cast-diff-update="${escapeHtml(diff.castId)}"${disabled}>Update to v${escapeHtml(diff.toRevision)}</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-cast-diff-cancel${disabled}>Keep v${escapeHtml(diff.fromRevision)}</button>
+        <button type="button" class="cast-diff-close btn btn-ghost btn-sm" data-cast-diff-close aria-label="Close the revision diff"${disabled}>×</button>
       </div>
     </section>
   </div>`;
@@ -813,12 +813,19 @@ export function renderCastStrip(state: CastStripState, options: RenderCastStripO
   const body = state.loading && count === 0
     ? '<p class="cast-empty" data-cast-loading>Loading cast…</p>'
     : count === 0
-      ? '<p class="cast-empty" data-cast-empty>No characters in this project yet. Add one from the Characters tab, then use @handle in chat.</p>'
+      ? `<div class="empty-state cast-empty" data-cast-empty>
+          <span class="empty-state-icon" aria-hidden="true">👤</span>
+          <h3 class="empty-state-title">No characters in this project yet</h3>
+          <p class="empty-state-line">Add one from the Characters tab, then use @handle in chat.</p>
+          <div class="empty-state-cta">
+            <button type="button" class="btn btn-primary btn-sm" data-cast-open-characters>Create character</button>
+          </div>
+        </div>`
       : `<ol class="cast-chips" data-cast-chips aria-label="Project cast">${chips}</ol>`;
   const statusClass = state.messageError ? 'cast-status is-error' : 'cast-status';
-  return `<section class="cast-strip" data-cast-strip aria-labelledby="${escapeHtml(titleId)}"${busy ? ' aria-busy="true"' : ''}>
-    <header class="cast-strip-head">
-      <h2 id="${escapeHtml(titleId)}">Cast <span class="cast-count" data-cast-count aria-label="${escapeHtml(countLabel)}">${count}</span></h2>
+  return `<section class="cast-strip panel" data-cast-strip aria-labelledby="${escapeHtml(titleId)}"${busy ? ' aria-busy="true"' : ''}>
+    <header class="cast-strip-head panel-header">
+      <h2 id="${escapeHtml(titleId)}">Cast <span class="cast-count badge" data-cast-count aria-label="${escapeHtml(countLabel)}">${count}</span></h2>
       <p class="cast-hint">Type @handle in chat. The agent only proposes placements; you confirm them.</p>
     </header>
     <p class="${statusClass}" data-cast-status role="status" aria-live="polite">${escapeHtml(state.message)}</p>
@@ -850,10 +857,14 @@ export function mountCastStrip(el: HTMLElement, options: MountCastStripOptions):
     const target = event.target as HTMLElement | null;
     if (!target || typeof target.closest !== 'function') return;
     const action = target.closest<HTMLElement>(
-      '[data-cast-diff],[data-cast-update],[data-cast-detach],[data-cast-attach],[data-cast-remove],[data-cast-presenter],[data-cast-narrator],[data-cast-diff-update],[data-cast-diff-cancel],[data-cast-diff-close]',
+      '[data-cast-diff],[data-cast-update],[data-cast-detach],[data-cast-attach],[data-cast-remove],[data-cast-presenter],[data-cast-narrator],[data-cast-diff-update],[data-cast-diff-cancel],[data-cast-diff-close],[data-cast-open-characters]',
     );
     if (!action || !el.contains(action)) return;
 
+    if (action.hasAttribute('data-cast-open-characters')) {
+      el.dispatchEvent(new CustomEvent('cast:open-characters', { bubbles: true }));
+      return;
+    }
     const diffId = action.getAttribute('data-cast-diff');
     if (diffId) { controller.openDiff(diffId); return; }
     const updateId = action.getAttribute('data-cast-update');

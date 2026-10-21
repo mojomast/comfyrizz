@@ -1,4 +1,4 @@
-"""Run prepared film shots through native ComfyUI, retaining synchronized audio.
+"""Run prepared film shots through native ComfyUI on a Google Colab GPU, retaining synchronized audio.
 
 python fasth3_run.py /content/fasth3/film --shots s04 [s01 ...]
 Records submission before polling; interrupted/uncertain attempts are never

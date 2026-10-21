@@ -3,6 +3,8 @@ import { createServer } from 'node:http';
 import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
+// Public host of the private app (e.g. your-host.example); never commit a real hostname.
+const HOST = process.env.COMFYRIZZ_HOST || 'your-host.example';
 
 const root = resolve(process.argv[2], 'final');
 const report = JSON.parse(readFileSync(join(root, 'verification.json')));
@@ -29,7 +31,7 @@ ${film.edition === 'Rock recut v2' ? '<p>Rock recut · tighter action edit · or
 <p class="links"><a href="hermes-the-lower-road-small.mp4" download>Download · ${mb(report.compact.bytes)} MB</a><a href="hermes-the-lower-road-1080p.mp4" download>1080p master · ${mb(report.bytes)} MB</a><a href="captions.srt" download>Captions</a></p>
 <p>Don Piedro chooses the lower road to rescue two stranded workers, while his rival Molty seizes the regulator.</p>
 <p class="note">An unofficial fictional adaptation. Original synthetic performances and score. Reviewed with speech transcription and temporal frame samples; normal-speed listening review is pending.</p>
-<p><a href="https://mail.tailec998.ts.net:8451/nrcu-pilot/index.html">Production references and raw takes</a> · <a href="https://mail.tailec998.ts.net:8451/">ComfyRizz</a></p>
+<p><a href="https://${HOST}:8451/nrcu-pilot/index.html">Production references and raw takes</a> · <a href="https://${HOST}:8451/">ComfyRizz</a></p>
 </main></body></html>`;
 
 createServer((req, res) => {

@@ -2,6 +2,8 @@
 // Usage: node nrcu-live.mjs <web-dist/nrcu-pilot> (status.json is owner-updated).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+// Public host of the private app (e.g. your-host.example); never commit a real hostname.
+const HOST = process.env.COMFYRIZZ_HOST || 'your-host.example';
 
 const out = resolve(process.argv[2]);
 mkdirSync(join(out, 'clips'), { recursive: true });
@@ -39,7 +41,7 @@ async function update(){try{
     const v=document.createElement('video');v.className='feature';v.controls=true;v.playsInline=true;v.preload='metadata';v.src=s.final.url;
     const track=document.createElement('track');track.kind='captions';track.src=s.final.captions||'captions.vtt';track.srclang='en';track.label='English';v.append(track);
     const a=document.createElement('a');a.href=s.final.url;a.textContent='Download the pilot';a.download='';
-    const p=document.createElement('p');const player=document.createElement('a');player.href=s.final.player||'https://mail.tailec998.ts.net:8455/';player.textContent='Open the pilot player and 1080p download';p.append(player);
+    const p=document.createElement('p');const player=document.createElement('a');player.href=s.final.player||'https://${HOST}:8455/';player.textContent='Open the pilot player and 1080p download';p.append(player);
     el('final').replaceChildren(h,v,a,p);
   }
 }catch(e){el('connection').textContent='Status connection interrupted; retrying automatically.'}}

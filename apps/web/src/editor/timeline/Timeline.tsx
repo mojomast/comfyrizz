@@ -289,7 +289,7 @@ export function SceneTimeline({
       const frame = Math.max(0, session.playheadFrame + action.delta);
       writeSession({ playheadFrame: frame });
       onSeek(frame);
-    }     else if (action.type === 'undo') { store.undo(); setMessage(''); }
+    } else if (action.type === 'undo') { store.undo(); setMessage(''); }
     else if (action.type === 'redo') { store.redo(); setMessage(''); }
     else if (action.type === 'toggle-snap') setSnap(value => !value);
     else if (action.type === 'zoom') writeSession({ zoom: zoomClamped(zoom, action.factor) });
@@ -351,7 +351,11 @@ export function SceneTimeline({
 
   if (!compiled) {
     const diagnostic = state.derived.diagnostics[0] ?? 'Nothing to compile.';
-    return <div className="tl" data-testid="timeline" data-timeline-root role="region" aria-label="Scene timeline"><p className="tl-message" role="status">{diagnostic}</p></div>;
+    return (
+      <div className="tl" data-testid="timeline" data-timeline-root role="region" aria-label="Scene timeline">
+        <p className="tl-message" role="status">{diagnostic}</p>
+      </div>
+    );
   }
 
   const duration = compiled.durationInFrames;
@@ -401,23 +405,282 @@ export function SceneTimeline({
 
   return (
     <div className="tl" data-testid="timeline" data-timeline-root data-duration={duration} data-fps={fps} role="region" aria-label="Scene timeline" tabIndex={0} onKeyDown={onKeyDown}>
-      <div className="tl-toolbar" role="toolbar" aria-label="Timeline">
-        <button type="button" onClick={onTogglePlay} aria-keyshortcuts="Space">Play / pause</button>
-        <button type="button" onClick={() => { const frame = Math.max(0, session.playheadFrame - 1); writeSession({ playheadFrame: frame }); onSeek(frame); }}>Step back</button>
-        <button type="button" onClick={() => { const frame = session.playheadFrame + 1; writeSession({ playheadFrame: frame }); onSeek(frame); }}>Step forward</button>
-        <span className="tl-time" ref={timeRef}>{`${formatTimecode(session.playheadFrame, fps)} / ${formatTimecode(duration, fps)}`}</span>
-        <button type="button" onClick={() => writeSession({ zoom: zoomClamped(zoom, 0.8) })} aria-keyshortcuts="-">Zoom out</button>
-        <input data-testid="zoom" aria-label="Zoom" type="range" min={0.2} max={14} step={0.1} value={zoom} onChange={event => writeSession({ zoom: Number(event.target.value) })} />
-        <button type="button" onClick={() => writeSession({ zoom: zoomClamped(zoom, 1.25) })} aria-keyshortcuts="+">Zoom in</button>
-        <button type="button" onClick={fit} aria-keyshortcuts="F">Fit</button>
-        <button type="button" aria-pressed={snap} onClick={() => setSnap(value => !value)} aria-keyshortcuts="S">Snap</button>
-        <button type="button" onClick={() => { store.undo(); setMessage(''); }} disabled={!store.canUndo()} aria-keyshortcuts="Control+Z">Undo</button>
-        <button type="button" onClick={() => { store.redo(); setMessage(''); }} disabled={!store.canRedo()} aria-keyshortcuts="Control+Shift+Z">Redo</button>
-        <button type="button" onClick={() => primary && run({ type: 'MoveScene', sceneId: primary, toIndex: Math.max(0, orderedIds.indexOf(primary) - 1) })} disabled={!primary}>Move earlier</button>
-        <button type="button" onClick={() => primary && run({ type: 'MoveScene', sceneId: primary, toIndex: Math.min(orderedIds.length - 1, orderedIds.indexOf(primary) + 1) })} disabled={!primary}>Move later</button>
-        <button type="button" onClick={() => primary && duplicate(primary)} disabled={!primary} aria-keyshortcuts="Control+D">Duplicate</button>
-        <button type="button" onClick={removeSelected} disabled={session.selectedSceneIds.length === 0} aria-keyshortcuts="Delete">Delete</button>
-        <span className="tl-status" role="status" data-save-status={store.saveStatus()}>{store.statusText()}</span>
+      <div className="tl-toolbar toolbar" role="toolbar" aria-label="Timeline">
+        <div className="tl-group" role="group" aria-label="Playback transport">
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={onTogglePlay}
+              aria-label="Play / pause"
+              aria-keyshortcuts="Space"
+              title="Play / pause (Space)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M4 3.5v9l8-4.5-8-4.5z" />
+              </svg>
+              <span className="tl-sr">Play / pause</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Play / pause <kbd className="kbd">Space</kbd>
+            </span>
+          </div>
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => { const frame = Math.max(0, session.playheadFrame - 1); writeSession({ playheadFrame: frame }); onSeek(frame); }}
+              aria-label="Step back"
+              aria-keyshortcuts="ArrowLeft"
+              title="Step back (Left Arrow)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M12 3.5v9l-6-4.5 6-4.5zM4 3.5h2v9H4v-9z" />
+              </svg>
+              <span className="tl-sr">Step back</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Step back <kbd className="kbd">←</kbd>
+            </span>
+          </div>
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => { const frame = session.playheadFrame + 1; writeSession({ playheadFrame: frame }); onSeek(frame); }}
+              aria-label="Step forward"
+              aria-keyshortcuts="ArrowRight"
+              title="Step forward (Right Arrow)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M4 3.5v9l6-4.5-6-4.5zM10 3.5h2v9h-2v-9z" />
+              </svg>
+              <span className="tl-sr">Step forward</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Step forward <kbd className="kbd">→</kbd>
+            </span>
+          </div>
+
+          <span className="tl-time tabular-nums" ref={timeRef}>{`${formatTimecode(session.playheadFrame, fps)} / ${formatTimecode(duration, fps)}`}</span>
+        </div>
+
+        <div className="tl-group" role="group" aria-label="Zoom controls">
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => writeSession({ zoom: zoomClamped(zoom, 0.8) })}
+              aria-label="Zoom out"
+              aria-keyshortcuts="-"
+              title="Zoom out (-)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M3.5 7.25h9v1.5h-9v-1.5z" />
+              </svg>
+              <span className="tl-sr">Zoom out</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Zoom out <kbd className="kbd">−</kbd>
+            </span>
+          </div>
+
+          <input
+            data-testid="zoom"
+            aria-label="Zoom"
+            type="range"
+            min={0.2}
+            max={14}
+            step={0.1}
+            value={zoom}
+            onChange={event => writeSession({ zoom: Number(event.target.value) })}
+          />
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => writeSession({ zoom: zoomClamped(zoom, 1.25) })}
+              aria-label="Zoom in"
+              aria-keyshortcuts="+"
+              title="Zoom in (+)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M7.25 3.5h1.5v3.75H12.5v1.5H8.75V12.5h-1.5V8.75H3.5v-1.5h3.75V3.5z" />
+              </svg>
+              <span className="tl-sr">Zoom in</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Zoom in <kbd className="kbd">+</kbd>
+            </span>
+          </div>
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={fit}
+              aria-label="Fit"
+              aria-keyshortcuts="F"
+              title="Fit (F)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M1.5 3h13v1.5h-13V3zm0 8.5h13V13h-13v-1.5zM6 8l-3.5-2v4L6 8zm4 0l3.5-2v4L10 8z" />
+              </svg>
+              <span className="tl-sr">Fit</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Fit to window <kbd className="kbd">F</kbd>
+            </span>
+          </div>
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              aria-pressed={snap}
+              onClick={() => setSnap(value => !value)}
+              aria-label="Snap"
+              aria-keyshortcuts="S"
+              title="Snap (S)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M3 2v6a5 5 0 0010 0V2h-3v6a2 2 0 01-4 0V2H3zm1 1h1v2H4V3zm7 0h1v2h-1V3z" />
+              </svg>
+              <span className="tl-sr">Snap</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Toggle snap <kbd className="kbd">S</kbd>
+            </span>
+          </div>
+        </div>
+
+        <div className="tl-group" role="group" aria-label="History actions">
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => { store.undo(); setMessage(''); }}
+              disabled={!store.canUndo()}
+              aria-label="Undo"
+              aria-keyshortcuts="Control+Z"
+              title="Undo (Ctrl+Z)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M6.5 3L2 7.5 6.5 12V9c3.5 0 6 1.5 7.5 5-.5-5-3.5-8-7.5-8V3z" />
+              </svg>
+              <span className="tl-sr">Undo</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Undo <kbd className="kbd">Ctrl+Z</kbd>
+            </span>
+          </div>
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => { store.redo(); setMessage(''); }}
+              disabled={!store.canRedo()}
+              aria-label="Redo"
+              aria-keyshortcuts="Control+Shift+Z"
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M9.5 3L14 7.5 9.5 12V9c-3.5 0-6 1.5-7.5 5 .5-5 3.5-8 7.5-8V3z" />
+              </svg>
+              <span className="tl-sr">Redo</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Redo <kbd className="kbd">Ctrl+Shift+Z</kbd>
+            </span>
+          </div>
+        </div>
+
+        <div className="tl-group" role="group" aria-label="Scene actions">
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => primary && run({ type: 'MoveScene', sceneId: primary, toIndex: Math.max(0, orderedIds.indexOf(primary) - 1) })}
+              disabled={!primary}
+              aria-label="Move earlier"
+              title="Move earlier (Alt+Up)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M8 3L3.5 7.5H7v5.5h2V7.5h3.5L8 3z" />
+              </svg>
+              <span className="tl-sr">Move earlier</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Move earlier <kbd className="kbd">Alt+↑</kbd>
+            </span>
+          </div>
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => primary && run({ type: 'MoveScene', sceneId: primary, toIndex: Math.min(orderedIds.length - 1, orderedIds.indexOf(primary) + 1) })}
+              disabled={!primary}
+              aria-label="Move later"
+              title="Move later (Alt+Down)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M8 13l4.5-4.5H9V3H7v5.5H3.5L8 13z" />
+              </svg>
+              <span className="tl-sr">Move later</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Move later <kbd className="kbd">Alt+↓</kbd>
+            </span>
+          </div>
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-secondary btn-icon btn-sm"
+              onClick={() => primary && duplicate(primary)}
+              disabled={!primary}
+              aria-label="Duplicate"
+              aria-keyshortcuts="Control+D"
+              title="Duplicate (Ctrl+D)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M4 2h7v2H4v7H2V4a2 2 0 012-2zm2 4h7a1 1 0 011 1v7a1 1 0 01-1 1H6a1 1 0 01-1-1V7a1 1 0 011-1z" />
+              </svg>
+              <span className="tl-sr">Duplicate</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Duplicate scene <kbd className="kbd">Ctrl+D</kbd>
+            </span>
+          </div>
+
+          <div className="tl-tooltip-wrap">
+            <button
+              type="button"
+              className="btn btn-danger btn-icon btn-sm"
+              onClick={removeSelected}
+              disabled={session.selectedSceneIds.length === 0}
+              aria-label="Delete"
+              aria-keyshortcuts="Delete"
+              title="Delete (Delete)"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M6 2.5V3H3v1.5h1v9a1 1 0 001 1h6a1 1 0 001-1v-9h1V3h-3v-.5h-4zM5.5 13V4.5h5V13h-5z" />
+              </svg>
+              <span className="tl-sr">Delete</span>
+            </button>
+            <span className="tl-tooltip" role="tooltip">
+              Delete scene <kbd className="kbd">Del</kbd>
+            </span>
+          </div>
+        </div>
+
+        <span className="toolbar-spacer" />
+        <span className="tl-status badge" role="status" data-save-status={store.saveStatus()}>{store.statusText()}</span>
       </div>
       <div className="tl-body">
         <div className="tl-labels">

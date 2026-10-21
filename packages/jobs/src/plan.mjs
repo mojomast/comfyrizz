@@ -34,6 +34,27 @@ export const BATCH_ORDER = ["stills", "plates", "upscales", "audio", "presenters
 export const DIM_MULTIPLE_BY_KIND = { still: 16, plate: 64, upscale: 64 };
 
 /**
+ * FastH3 Omni's own geometry (RL12, experimental).
+ *
+ * The reference-to-video+audio graph is not LTX: its spatial lattice is 32 pixels, its frame counts
+ * are 17n+5 (the model's temporal lattice) and it runs at 24 fps, because the generated audio is
+ * muxed with the frames into one MP4. A count that is not 17n+5 is rounded *up*, so the shot is
+ * never shorter than the line it has to speak.
+ */
+export const FASTH3_DIM_MULTIPLE = 32;
+export const FASTH3_FRAME_MODULUS = 17;
+export const FASTH3_FRAME_OFFSET = 5;
+export const FASTH3_FPS = 24;
+
+/** The next FastH3 frame count (17n+5) at or above the requested one. */
+export function resolveFastH3Frames(requested) {
+  const base = Math.max(FASTH3_FRAME_OFFSET, requested);
+  const remainder = base % FASTH3_FRAME_MODULUS;
+  const pad = (FASTH3_FRAME_OFFSET - remainder + FASTH3_FRAME_MODULUS) % FASTH3_FRAME_MODULUS;
+  return base + pad;
+}
+
+/**
  * Parameters whose value is a *file* the graph has to be given a server-side name for
  * (a `LoadImage`-style node). The runner uploads these to ComfyUI's input directory and injects
  * the name it gets back; without this the graph receives the asset id and the server answers
@@ -86,6 +107,9 @@ const GENERATOR_KIND = {
   // H17: the presenter is LTX-2.5 audio-to-video - the same weights, a different graph, and its own
   // batch because it can only run once the narration it is generated from exists
   "ltx25-a2v": "presenter",
+  // RL12: FastH3 Omni is experimental - reference-conditioned video *with* native audio. It plans
+  // like a plate (one MP4 per shot) but with its own geometry rules (see the plate branch below).
+  "fasth3-omni": "plate",
   kokoro: "audio",
   "llm-svg": null, // procedural vector: CPU work, no Comfy job (PLAN.md A5)
 };
@@ -462,6 +486,8 @@ export function planJobs(pkg, opts = {}) {
   const sourceLattice = new Map();
   for (const [assetId, kind] of kinds) {
     if (kind !== "plate" && kind !== "upscale") continue;
+    // RL12: a FastH3 plate's `image` is an identity reference, not the first frame of the shot, so
+    // it is not planned on the plate's lattice and never coerced to the plate's aspect.
     if (assets[assetId]?.gen?.generator === "fasth3-omni") continue;
     const sourceId = assets[assetId]?.gen?.inputs?.image;
     if (typeof sourceId !== "string") continue;
@@ -631,8 +657,15 @@ export function planJobs(pkg, opts = {}) {
       if (params.cutout === true || asset.cutout === true) job.cutout = true;
       params.cutout = job.cutout === true;
     } else if (kind === "plate" && gen.generator === "fasth3-omni") {
-      // Identity/context references are not first frames. H3 uses 17n+5 at 24 fps,
-      // without LTX's half-resolution stage or source-aspect coercion.
+      // RL12: FastH3 Omni is reference-conditioned video *with* native audio, and none of LTX's
+      // plate rules apply to it:
+      //   * its `image` and `reference` are identity/context pictures, not the first frame of the
+      //     shot, so there is no framing lock, no strength and no source-aspect coercion;
+      //   * there is no half-resolution stage, so there is no `stage1Dims`;
+      //   * the graph's lattice is 32 pixels and its frame counts are 17n+5 at 24 fps (the model's
+      //     temporal lattice), not LTX's 8n+1;
+      //   * the MP4 keeps the generated audio, so the asset's own file is the render (no upscale
+      //     stage is supported by this graph).
       const width = Number(params.width ?? 832);
       const height = Number(params.height ?? 480);
       const requestedFrames = Number(params.frames ?? 124);
@@ -644,15 +677,19 @@ export function planJobs(pkg, opts = {}) {
       for (const name of ["image", "reference", "audio"]) {
         if (typeof params[name] !== "string" || !params[name]) errors.push(`${assetId}: FastH3 template requires ${name}`);
       }
-      const dims = resolveDimensions(width, height, 32);
-      const frames = Math.max(5, requestedFrames) + ((5 - Math.max(5, requestedFrames) % 17 + 17) % 17);
+      const dims = resolveDimensions(width, height, FASTH3_DIM_MULTIPLE);
+      // 17n+5, rounded up: the model's own temporal lattice.
+      const frames = resolveFastH3Frames(requestedFrames);
       job.dims = { width: dims.width, height: dims.height };
       job.dimsAdjusted = dims.adjusted;
       job.frames = frames;
       job.framesAdjusted = frames !== requestedFrames;
-      job.fps = 24;
-      job.output = `assets/${assetId}.mp4`;
-      Object.assign(params, { width: dims.width, height: dims.height, frames, fps: 24 });
+      job.fps = FASTH3_FPS;
+      job.output = `assets/${assetId}${OUTPUT_EXT.plate}`;
+      params.width = dims.width;
+      params.height = dims.height;
+      params.frames = frames;
+      params.fps = FASTH3_FPS;
       if (gen.direction !== undefined) {
         try {
           params.prompt = buildFastH3Prompt(gen.direction, {

@@ -90,7 +90,7 @@ not relicense the archive artwork.
 
 ## Private installation
 
-- App: <https://mail.tailec998.ts.net:8451/> → **Characters**.
+- App: <https://your-host.example:8451/> → **Characters**.
 - Authentication is tab-scoped: a plain homepage link in a fresh tab does not
   carry the session token. The private origin adapter now supports a one-use
   `/connect/<nonce>` launch page. Generate a fresh link with

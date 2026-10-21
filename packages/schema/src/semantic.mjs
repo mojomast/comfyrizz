@@ -83,6 +83,8 @@ export const MODEL_GENERATORS = Object.freeze(["flux3-klein", "ltx25", "ltx25-a2
  * it carries (GPU test 3, N6: apply left it empty). One map, so the examples and the run agree.
  */
 export const MODEL_LICENSES = Object.freeze({
+  // FastH3 Omni is experimental: the MiniMax-H3 community licence carries territorial and
+  // commercial conditions, so its output is not CC0 by default (see applyDefaults below).
   "fasth3-omni": Object.freeze({
     id: "LicenseRef-MiniMax-H3-Community",
     url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE",
@@ -641,7 +643,7 @@ function checkAssets(assets, errors) {
     const ready = asset.status === "ready";
     if (asset.origin === "generated") {
       if (!isObj(asset.gen) || !isStr(asset.gen.generator)) {
-        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | kokoro | qwen3-tts)"));
+        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | fasth3-omni | kokoro | qwen3-tts)"));
       }
       if (ready && !isStr(asset.license?.id)) {
         errors.push(error("SEM_LICENSE_MISSING", `${at}/license/id`, "a ready generated asset needs an output licence; generated output defaults to CC0-1.0"));
@@ -793,6 +795,11 @@ function resolveRef(schema, sub) {
  * Apply declared defaults: schema `default` keywords plus the generated-first
  * output licence default (CC0-1.0 + redistributable true). Pure: returns a copy.
  *
+ * FastH3 Omni is the exception: its output is not CC0, because the MiniMax-H3 community
+ * licence carries territorial and commercial conditions that reach the produced file. Such an
+ * asset defaults to that licence and to `redistributable: false` unless the document says
+ * otherwise on purpose.
+ *
  * Deliberately a small, explicit walk rather than a library defaults pass, because
  * pipeline-py/comfyrizz_pipeline/schema.py implements the identical algorithm and
  * the conformance test compares the two outputs.
@@ -805,7 +812,8 @@ export function applyDefaults(doc, schema) {
     if (!isObj(asset)) continue;
     if (asset.origin === "generated" || asset.origin === undefined) {
       const h3 = asset.gen?.generator === "fasth3-omni";
-      if (h3 && doc.assets?.[id]?.redistributable === undefined) asset.redistributable = false;
+      const said = isObj(doc.assets) && isObj(doc.assets[id]) && doc.assets[id].redistributable !== undefined;
+      if (h3 && !said) asset.redistributable = false;
       if (!isObj(asset.license)) asset.license = h3 ? { ...MODEL_LICENSES["fasth3-omni"] } : { id: GENERATED_OUTPUT_LICENSE.id };
       if (asset.redistributable === undefined) asset.redistributable = h3 ? false : GENERATED_OUTPUT_LICENSE.redistributable;
     }
