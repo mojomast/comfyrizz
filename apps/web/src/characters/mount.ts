@@ -143,16 +143,16 @@ export function renderCharactersTab(
   const cast = options.includeCast !== false && value.cast
     ? renderCastStrip(value.cast, { idPrefix: `${prefix}-cast`, busy: value.cast.busy })
     : '';
-  return `<section class="chr-tab" data-characters-tab aria-label="Characters">
-    <header class="chr-tab-header">
+  return `<section class="chr-tab drawer" data-characters-tab aria-label="Characters">
+    <header class="chr-tab-header drawer-header">
       <div>
         <h1>Characters</h1>
         <p class="chr-hint">Define a character once, then cast it in every video. The chat agent proposes placements; you confirm them.</p>
       </div>
-      <button type="button" class="chr-btn chr-btn-quiet" data-characters-close aria-label="Close characters">Close</button>
+      <button type="button" class="chr-btn chr-btn-quiet btn btn-ghost btn-sm" data-characters-close aria-label="Close characters">Close</button>
     </header>
     ${status}
-    <div class="chr-tab-body">
+    <div class="chr-tab-body drawer-body">
       <div class="chr-tab-library" data-characters-library>${library}</div>
       ${editor ? `<div class="chr-tab-editor" data-characters-editor>${editor}</div>` : ''}
     </div>
@@ -364,15 +364,15 @@ function messageOf(error: unknown): string {
   return text ? text.slice(0, 400) : 'Unexpected error';
 }
 
-const TAB_SKELETON = `<section class="chr-tab-shell" data-characters-tab>
-  <header class="chr-tab-head">
+const TAB_SKELETON = `<section class="chr-tab-shell drawer" data-characters-tab>
+  <header class="chr-tab-head drawer-header">
     <div>
       <h1>Characters</h1>
       <p class="chr-hint">Define a character once, then reuse it in every video. The chat agent proposes placements; you confirm them.</p>
     </div>
-    <button type="button" class="chr-btn chr-btn-quiet" data-characters-close aria-label="Close characters">Close</button>
+    <button type="button" class="chr-btn chr-btn-quiet btn btn-ghost btn-sm" data-characters-close aria-label="Close characters">Close</button>
   </header>
-  <div class="chr-tab-body">
+  <div class="chr-tab-body drawer-body">
     <div class="chr-tab-library" data-characters-library-host></div>
     <div class="chr-tab-editor" data-character-editor-host hidden></div>
   </div>
@@ -449,6 +449,21 @@ export function mountCharactersTab(
   const controller = new CharactersTabController(options);
   const idPrefix = options.idPrefix ?? 'characters';
 
+  root.classList.add('characters-pane', 'drawer');
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-label', 'Characters');
+
+  // Reset full-screen takeover inline styles so right-side drawer rules take effect
+  root.style.inset = '';
+  root.style.top = '0';
+  root.style.right = '0';
+  root.style.bottom = '0';
+  root.style.left = 'auto';
+  root.style.padding = '0';
+  root.style.background = '';
+  root.style.overflow = '';
+
   root.innerHTML = TAB_SKELETON;
   const libraryHost = query<HTMLElement>(root, '[data-characters-library-host]') ?? root;
   const editorHost = query<HTMLElement>(root, '[data-character-editor-host]');
@@ -458,15 +473,55 @@ export function mountCharactersTab(
   let open = options.open !== false;
 
   const tab = options.tab ?? null;
+  let opener: HTMLElement | null = tab;
+
+  function enhanceLibraryEmpty(): void {
+    const emptyEl = libraryHost.querySelector<HTMLElement>('[data-empty]');
+    if (!emptyEl || emptyEl.classList.contains('empty-state')) return;
+    emptyEl.className = 'empty-state chr-empty';
+    emptyEl.innerHTML = `
+      <span class="empty-state-icon" aria-hidden="true">👤</span>
+      <h3 class="empty-state-title">No characters yet</h3>
+      <p class="empty-state-line">Create one to reuse it across videos.</p>
+      <div class="empty-state-cta">
+        <button type="button" class="btn btn-primary btn-sm chr-btn chr-btn-primary" data-new-character>Create character</button>
+      </div>
+    `;
+  }
 
   function setOpen(value: boolean): void {
+    if (open === value) return;
     open = value;
     root.hidden = !open;
     if (tab) {
       tab.setAttribute('aria-selected', open ? 'true' : 'false');
+      tab.setAttribute('aria-expanded', open ? 'true' : 'false');
       tab.classList?.toggle?.('active', open);
     }
-    if (open) void refreshCast();
+    if (open) {
+      if (typeof document !== 'undefined' && document.activeElement && document.activeElement !== document.body && document.activeElement !== root) {
+        opener = document.activeElement as HTMLElement;
+      } else if (tab) {
+        opener = tab;
+      }
+      void refreshCast();
+      enhanceLibraryEmpty();
+      try {
+        const closeBtn = query<HTMLElement>(root, '[data-characters-close]');
+        const focusable = closeBtn ?? root.querySelector<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+        focusable?.focus();
+      } catch {
+        /* ignore in non-browser env */
+      }
+    } else {
+      if (opener && typeof opener.focus === 'function') {
+        try {
+          opener.focus();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }
 
   function setLibraryMessage(message: string, error = false): void {
@@ -549,7 +604,13 @@ export function mountCharactersTab(
       }
       controller.cast = null;
       controller.state.chatId = null;
-      host.innerHTML = '<section class="cast-strip" data-cast-strip><p class="cast-empty">Start a chat to add characters to the project.</p></section>';
+      host.innerHTML = `<section class="cast-strip panel" data-cast-strip>
+        <div class="empty-state cast-empty" data-cast-empty>
+          <span class="empty-state-icon" aria-hidden="true">💬</span>
+          <h3 class="empty-state-title">No characters in this project yet</h3>
+          <p class="empty-state-line">Start a chat to add characters to the project.</p>
+        </div>
+      </section>`;
       return;
     }
     if (!castHandle || castChatId !== chatId) {
@@ -606,6 +667,7 @@ export function mountCharactersTab(
     const state = libraryHandle.controller.getState();
     controller.library.setCharacters(state.characters);
     controller.library.setProject(state.project);
+    enhanceLibraryEmpty();
   });
 
   const onRootClick = (event: Event) => {
@@ -616,19 +678,70 @@ export function mountCharactersTab(
       return;
     }
   };
-  const onRootKeyDown = (event: Event) => {
+
+  const onKeyDown = (event: Event) => {
     const key = (event as KeyboardEvent).key;
     if (key !== 'Escape') return;
-    if (editor) closeEditor();
-    else if (open) setOpen(false);
+    if (editor) {
+      (event as KeyboardEvent).preventDefault?.();
+      (event as KeyboardEvent).stopPropagation?.();
+      closeEditor();
+      try {
+        const newBtn = libraryHost.querySelector<HTMLElement>('[data-new-character]');
+        newBtn?.focus();
+      } catch {
+        /* ignore */
+      }
+    } else if (open) {
+      (event as KeyboardEvent).preventDefault?.();
+      (event as KeyboardEvent).stopPropagation?.();
+      setOpen(false);
+    }
   };
-  const onTabClick = () => setOpen(!open);
+
+  const onDocClick = (event: Event) => {
+    if (!open) return;
+    const target = (event as MouseEvent).target as Node | null;
+    if (!target) return;
+    if (root.contains(target)) return;
+    if (tab && (tab === target || tab.contains(target))) return;
+    const castHost = options.castStripHost;
+    if (castHost && castHost.contains(target)) return;
+    setOpen(false);
+  };
+
+  const onTabClick = () => {
+    opener = tab;
+    setOpen(!open);
+  };
+
+  const onCastClick = (event: Event) => {
+    const target = (event as MouseEvent).target as HTMLElement | null;
+    if (target?.closest?.('[data-cast-open-characters]')) {
+      opener = target.closest<HTMLElement>('[data-cast-open-characters]') ?? tab ?? null;
+      setOpen(true);
+    }
+  };
+
+  const onCastCustom = () => {
+    opener = tab ?? null;
+    setOpen(true);
+  };
 
   root.addEventListener('click', onRootClick);
-  root.addEventListener('keydown', onRootKeyDown);
+  root.addEventListener('keydown', onKeyDown);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('click', onDocClick);
+  }
   tab?.addEventListener('click', onTabClick);
+  if (options.castStripHost) {
+    options.castStripHost.addEventListener('click', onCastClick);
+    options.castStripHost.addEventListener('cast:open-characters', onCastCustom);
+  }
 
   setOpen(open);
+  enhanceLibraryEmpty();
   void refreshCast();
 
   return {
@@ -650,8 +763,16 @@ export function mountCharactersTab(
     },
     destroy: () => {
       root.removeEventListener('click', onRootClick);
-      root.removeEventListener('keydown', onRootKeyDown);
+      root.removeEventListener('keydown', onKeyDown);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('click', onDocClick);
+      }
       tab?.removeEventListener('click', onTabClick);
+      if (options.castStripHost) {
+        options.castStripHost.removeEventListener('click', onCastClick);
+        options.castStripHost.removeEventListener('cast:open-characters', onCastCustom);
+      }
       editor?.destroy();
       castHandle?.destroy();
       unsubscribeLibrarySync();
