@@ -132,7 +132,8 @@ async function defaultBackendFactory(backendId, opts = {}) {
       packageDir: opts.workDir ?? undefined,
       scratchDir: opts.scratchDir ?? undefined,
       budgetUnits: opts.budgetUnits ?? 0,
-      ratePerHour: opts.ratePerHour ?? 8.9,
+      // PO-3: the rate lives in the backend budget module, not in a literal here.
+      ratePerHour: mod.resolveRatePerHour({ gpu: opts.gpu, explicit: opts.ratePerHour }),
     });
   }
   if (backendId === 'byo-comfyui') {
@@ -294,7 +295,7 @@ export function createApp({
     };
   }
 
-  const runs = createRunController({ backendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun });
+  const runs = createRunController({ backendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun, isBusy: () => Boolean(pipelines?.active()) });
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
   // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
   // package's working resolution.

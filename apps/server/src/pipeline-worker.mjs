@@ -13,7 +13,7 @@ import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { json, writeJson, preparePresenterInputs, correctPresenters, presenterScenes } from './pipeline-media.mjs';
 import { summarizeJobs } from './pipeline-contract.mjs';
-import { assessBudget, nextJobUpperEstimate } from '../../../packages/backends/src/budget.mjs';
+import { assessBudget, nextJobUpperEstimate, rateForGpu, reserveUnitsFor, spendingMinutes, COLLECT_AND_STOP_RESERVE_MINUTES } from '../../../packages/backends/src/budget.mjs';
 import { decideRenderFallback } from '../../../packages/backends/src/colab-render-plan.mjs';
 import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
 import { runColabRender } from './pipeline-colab-render.mjs';
@@ -59,6 +59,8 @@ async function stage(id, fn, skip = false) {
 }
 
 let heldBackend = null;
+/** Upper bound on a Google Colab render of one package (measured renders take a few minutes). */
+const RENDER_ALLOWANCE_MINUTES = 15;
 async function releaseHeld(reason) {
   if (!heldBackend) return { state: 'stopped' };
   const backend = heldBackend;
@@ -146,28 +148,79 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     const outDir = join(runDir, 'media-out'), scratch = join(runDir, 'media-runtime');
     const colab = plan.options.backendId === 'colab';
     const ceiling = plan.budget.mediaCeilingUnits;
-    const backend = colab ? colabFactory({ packageId: runId, packageDir: workDir, scratchDir: scratch, budgetUnits: ceiling, watchdogMinutes: Math.max(1, Math.floor(ceiling / 8.9 * 60)), wallClockCapMinutes: Math.max(1, Math.floor(ceiling / 8.9 * 60)) }) : byoFactory({ comfyuiUrl: plan.options.comfyuiUrl || 'http://127.0.0.1:8188', outDir });
+    // PO-3 review: the rate is the requested accelerator's, from the per-gpu table (or its
+    // COMFYRIZZ_COLAB_RATE_PER_HOUR_<GPU> override). `colab usage` is read *before* anything is allocated,
+    // so its rate is the account's existing burn (0.00/h idle, ~0.08/h with a CPU session): it can raise
+    // the price (another session is already spending) but never lower it. spend rate =
+    // max(table rate for the gpu, measured). The teardown reserve is one number derived from that rate.
+    const gpu = colab ? String(plan.options.gpu || 'G4').toUpperCase() : null;
+    const planned = colab ? rateForGpu(gpu) : null;
+    let measured = null, before = null;
+    const limitsFor = rate => {
+      const reserveUnits = reserveUnitsFor(rate);
+      return { ratePerHour: rate, reserveUnits, deadlineMinutes: spendingMinutes(ceiling, rate, { reserveUnits }) };
+    };
+    let limits = colab ? limitsFor(planned.ratePerHour) : null;
+    const makeBackend = () => colab ? colabFactory({ packageId: runId, packageDir: workDir, scratchDir: scratch, budgetUnits: ceiling, gpu, ratePerHour: limits.ratePerHour, watchdogMinutes: limits.deadlineMinutes, wallClockCapMinutes: limits.deadlineMinutes }) : byoFactory({ comfyuiUrl: plan.options.comfyuiUrl || 'http://127.0.0.1:8188', outDir });
+    let backend = makeBackend();
+    if (colab) {
+      before = await backend.usage();
+      measured = Number.isFinite(before?.ratePerHour) && before.ratePerHour > 0 ? before.ratePerHour : null;
+      if (measured !== null && measured > limits.ratePerHour) {
+        // Price, watchdog and wall-clock cap all follow the higher rate; nothing is allocated yet, so the
+        // backend is simply rebuilt with the corrected limits.
+        limits = limitsFor(measured);
+        backend = makeBackend();
+      }
+    }
+    const ratePerHour = limits?.ratePerHour ?? null;
+    const rateSource = !colab ? null : limits.ratePerHour > planned.ratePerHour ? 'measured' : planned.origin;
     if (typeof backend.preflight === 'function') {
       const check = await backend.preflight();
       if (check.ok === false || check.ready === false) throw new Error(check.problems?.join('; ') || check.message || check.detail || 'Media backend preflight failed');
     }
     const estimate = await backend.estimate(jobs);
+    const upperFor = rate => nextJobUpperEstimate({ gpuMinutes: estimate.gpuMinutes ?? 0, overheadMinutes: estimate.overheadMinutes ?? 0, ratePerHour: rate });
     let admission = null;
     if (colab) {
-      admission = assessBudget({ budgetUnits: ceiling, ratePerHour: 8.9, nextJobUpperEstimate: nextJobUpperEstimate({ gpuMinutes: estimate.gpuMinutes ?? 0, overheadMinutes: estimate.overheadMinutes ?? 0, ratePerHour: 8.9 }) });
+      admission = assessBudget({ budgetUnits: ceiling, ratePerHour, nextJobUpperEstimate: upperFor(ratePerHour) });
       if (!admission.allowed) throw new Error(`${admission.message} Re-plan with a larger media allocation.`);
     }
-    send({ kind: 'task', stageId, detail: { event: 'media_plan', jobs: summarizeJobs(pkg, jobs), estimate, admission } });
-    let before, result, teardown;
+    send({ kind: 'task', stageId, detail: { event: 'media_plan', jobs: summarizeJobs(pkg, jobs), estimate, admission, spend: colab ? { gpu, ratePerHour, rateSource, tableRatePerHour: planned.tableRate, measuredRatePerHour: measured, deadlineMinutes: limits.deadlineMinutes, reserveUnits: limits.reserveUnits, reserveMinutes: COLLECT_AND_STOP_RESERVE_MINUTES } : null } });
+    let result, teardown;
     const holdForRender = remoteRender && colab;
     if (holdForRender && typeof backend.setCollectPolicy === 'function') backend.setCollectPolicy('manifest');
     send({ kind: 'runtime', runtime: 'media', value: { state: 'allocating', ownership: colab ? 'managed' : 'external', spentUnits: null } });
     try {
-      if (colab) before = await backend.usage();
+      if (colab) {
+        // PO-3: the ceiling is checked before anything is allocated. `required` is the upper estimate plus
+        // the collect-and-stop reserve (assessBudget's reserve, the same reserveUnitsFor(rate) the deadline
+        // subtracts). An unreadable balance is a refusal, not a pass: we cannot prove the run is covered.
+        // Balance check: the account's existing burn keeps draining while we run, so the balance must cover
+        // our run priced at (planned + measured), not max(). The per-run rate for watchdog/caps stays max().
+        const balanceRate = Number((planned.ratePerHour + (measured ?? 0)).toFixed(3));
+        const required = balanceRate === ratePerHour ? admission?.required ?? null : assessBudget({ budgetUnits: Number.MAX_SAFE_INTEGER, ratePerHour: balanceRate, nextJobUpperEstimate: upperFor(balanceRate) }).required;
+        const balance = typeof before?.balance === 'number' ? before.balance : Number.NaN;
+        send({ kind: 'task', stageId, detail: { event: 'media_spend_ceiling', gpu, ratePerHour, rateSource, balanceRatePerHour: balanceRate, required, reserveUnits: limits.reserveUnits, balance: Number.isFinite(balance) ? balance : null } });
+        if (!Number.isFinite(balance)) throw new Error('The Google Colab account balance could not be read, so this run cannot be shown to fit it. Nothing was allocated; check `colab usage` and try again.');
+        if (!Number.isFinite(required) || balance < required) {
+          throw new Error(`The account balance (${balance} units) does not cover the estimated ${required} units for this run at ${balanceRate} units/h on ${gpu} (planned ${planned.ratePerHour} + the account's current ${measured ?? 0}), which includes the ${reserveUnitsFor(balanceRate)}-unit collect-and-stop reserve (${COLLECT_AND_STOP_RESERVE_MINUTES} min at ${balanceRate} units/h). Nothing was allocated; reduce the media allocation or top the account up.`);
+        }
+      }
       result = await backend.runPackage(pkg, { workDir, outDir, budget: admission, approved: true, teardownMode: holdForRender ? 'never' : 'done', gateCommand: null, signal, onEvent: sourceEvent });
       teardown = result.teardown;
       if (!result.ok) throw new Error('Media generation did not complete; collected assets are retained for diagnosis');
-      if (holdForRender) heldBackend = backend;
+      if (holdForRender) {
+        heldBackend = backend;
+        // PO-3 review (8): the media watchdog was sized for media; the held VM now has to survive the
+        // render. Re-arm it with a bounded render allowance plus the collect-and-stop reserve.
+        if (typeof backend.rearmWatchdog === 'function') {
+          const allowance = Number(process.env.COMFYRIZZ_COLAB_RENDER_ALLOWANCE_MINUTES) || RENDER_ALLOWANCE_MINUTES;
+          const minutes = allowance + COLLECT_AND_STOP_RESERVE_MINUTES;
+          const watchdog = await backend.rearmWatchdog({ minutes });
+          send({ kind: 'task', stageId, detail: { event: 'render_watchdog', minutes, allowanceMinutes: allowance, estimatedUnits: Number(((minutes / 60) * ratePerHour).toFixed(3)), armed: Boolean(watchdog) } });
+        }
+      }
     } catch (error) {
       heldBackend = null;
       teardown = error.runPackage?.teardown ?? teardown;
