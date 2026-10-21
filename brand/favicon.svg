@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="comfyrizz-favicon-title">
   <title id="comfyrizz-favicon-title">Comfyrizz favicon</title>
   <g id="comfyrizz-favicon">
-    <path id="favicon-z-violet" fill="#6D28FF" d="M 5 3 H 20 L 19 8 L 10 17 H 18 L 13 22 H 3 L 4 17 L 13 8 H 4 Z"/>
-    <path id="favicon-z-mint" fill="#00D8AB" d="M 19 10 H 29 L 28 15 L 19 24 H 28 L 27 29 H 12 L 13 24 L 22 15 H 14 Z"/>
+    <path id="favicon-z-violet" fill="#6D28FF" d="M 3 11 L 18 4 L 11 18 L 17 17 L 2 24 L 9 10 Z"/>
+    <path id="favicon-z-mint" fill="#00D8AB" d="M 14 15 L 29 8 L 22 22 L 28 21 L 13 28 L 20 14 Z"/>
   </g>
 </svg>

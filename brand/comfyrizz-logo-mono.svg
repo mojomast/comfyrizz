@@ -1,18 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 628 160" color="#14112B" fill="currentColor" role="img" aria-labelledby="comfyrizz-logo-mono-title">
   <title id="comfyrizz-logo-mono-title">Comfyrizz logo (monochrome)</title>
   <g id="comfyrizz-symbol" fill="currentColor">
-    <path id="symbol-z-violet" fill="currentColor" d="M 28 24 H 98 L 92 42 L 52 82 H 98 L 80 100 H 24 L 30 82 L 70 42 H 22 Z"/>
-    <path id="symbol-z-mint" fill="currentColor" d="M 80 60 H 136 L 130 78 L 90 118 H 138 L 132 136 H 62 L 68 118 L 108 78 H 62 Z"/>
+    <path id="symbol-z-violet" fill="currentColor" d="M 20 57 L 95 24 L 59 84 L 92 81 L 17 114 L 53 54 Z"/>
+    <path id="symbol-z-mint" fill="currentColor" d="M 68 78 L 143 45 L 107 105 L 140 102 L 65 135 L 101 75 Z"/>
   </g>
-  <g id="comfyrizz-wordmark" transform="translate(136, 0)" fill="currentColor">
-    <path id="letter-c" fill="currentColor" d="M 62 56 L 59 68 H 42 C 34 68 29 73 27 84 C 25 95 28 100 36 100 H 53 L 50 112 H 31 C 16 112 9 102 12 84 C 15 66 26 56 41 56 Z"/>
-    <path id="letter-o" fill="currentColor" d="M 96 56 C 112 56 120 66 117 84 C 114 102 102 112 86 112 C 70 112 62 102 65 84 C 68 66 80 56 96 56 Z M 93 68 C 85 68 80 73 78 84 C 76 95 79 100 87 100 C 95 100 100 95 102 84 C 104 73 101 68 93 68 Z"/>
-    <path id="letter-m" fill="currentColor" d="M 134 56 H 149 L 147 62 L 155 56 H 168 C 175 56 178 60 176 66 L 184 56 H 197 C 204 56 207 61 205 70 L 194 112 H 179 L 189 72 C 190 69 188 68 184 68 H 176 L 165 112 H 150 L 160 72 C 161 69 159 68 155 68 H 146 L 135 112 H 120 Z"/>
-    <path id="letter-f" fill="currentColor" d="M 234 32 H 250 L 247 44 H 236 C 232 44 230 46 229 50 L 227 56 H 242 L 239 68 H 224 L 213 112 H 198 L 209 68 H 200 L 203 56 H 212 L 214 48 C 217 37 224 32 234 32 Z"/>
-    <path id="letter-y" fill="currentColor" d="M 248 56 H 263 L 267 94 L 285 56 H 300 L 266 122 C 260 133 253 136 242 136 H 230 L 233 124 H 242 C 247 124 250 122 253 116 L 255 112 L 248 56 Z"/>
-    <path id="letter-r" fill="currentColor" d="M 314 56 H 329 L 327 64 L 335 56 H 348 L 345 68 H 333 C 328 68 325 71 324 76 L 315 112 H 300 L 314 56 Z"/>
-    <path id="letter-i" fill="currentColor" d="M 362 32 H 377 L 373 46 H 358 Z M 356 56 H 371 L 357 112 H 342 Z"/>
-    <path id="letter-z-1" fill="currentColor" d="M 382 56 H 424 L 421 68 L 391 100 H 416 L 413 112 H 370 L 373 100 L 403 68 H 379 Z"/>
-    <path id="letter-z-2" fill="currentColor" d="M 428 56 H 470 L 467 68 L 437 100 H 462 L 459 112 H 416 L 419 100 L 449 68 H 425 Z"/>
+  <g id="comfyrizz-wordmark" transform="translate(142, 0)" fill="currentColor">
+    <path id="letter-c" fill="currentColor" d="M 42 52 H 58 Q 62 52 61 56 L 59 64 Q 58 68 54 68 H 41 C 34 68 30 73 28 82 C 26 91 29 96 36 96 H 47 Q 51 96 50 100 L 48 108 Q 47 112 43 112 H 27 C 11 112 6 100 10 82 C 14 64 26 52 42 52 Z"/>
+    <path id="letter-o" fill="currentColor" d="M 100 52 C 117 52 122 64 118 82 C 114 100 102 112 85 112 C 68 112 63 100 67 82 C 71 64 83 52 100 52 Z M 96 68 C 90 68 87 73 85 82 C 83 91 83 96 89 96 C 95 96 98 91 100 82 C 102 73 102 68 96 68 Z"/>
+    <path id="letter-m" fill="currentColor" d="M 138 52 H 150 Q 153 52 152 56 L 151 59 C 156 54 162 52 169 52 C 176 52 180 55 181 60 C 186 54 192 52 199 52 C 207 52 211 58 209 67 L 199 108 Q 198 112 194 112 H 182 Q 178 112 179 108 L 188 72 C 189 69 187 68 184 68 C 181 68 179 69 178 72 L 169 108 Q 168 112 164 112 H 152 Q 148 112 149 108 L 158 72 C 159 69 157 68 154 68 C 151 68 149 69 148 72 L 139 108 Q 138 112 134 112 H 122 Q 118 112 119 108 L 132 56 Q 133 52 138 52 Z"/>
+    <path id="letter-f" fill="currentColor" d="M 244 28 H 253 Q 257 28 256 32 L 254 40 Q 253 44 249 44 H 245 C 242 44 240 46 239 49 L 238 52 H 245 Q 249 52 248 56 L 246 64 Q 245 68 241 68 H 234 L 224 108 Q 223 112 219 112 H 207 Q 203 112 204 108 L 214 68 H 212 Q 208 68 209 64 L 211 56 Q 212 52 216 52 H 218 L 220 45 C 223 34 231 28 244 28 Z"/>
+    <path id="letter-y" fill="currentColor" d="M 259 52 H 271 Q 275 52 275 56 L 276 88 L 288 56 Q 290 52 294 52 H 305 Q 309 52 307 56 L 268 132 Q 266 136 262 136 H 250 Q 246 136 248 132 L 259 108 L 255 56 Q 255 52 259 52 Z"/>
+    <path id="letter-r" fill="currentColor" d="M 319 52 H 330 Q 333 52 332 56 L 331 60 C 336 54 341 52 347 52 H 349 Q 353 52 352 56 L 350 64 Q 349 68 345 68 H 338 C 333 68 330 71 329 76 L 321 108 Q 320 112 316 112 H 304 Q 300 112 301 108 L 314 56 Q 315 52 319 52 Z"/>
+    <path id="letter-i" fill="currentColor" d="M 369 28 H 375 Q 382 28 381 35 L 380 38 Q 378 45 371 45 H 365 Q 358 45 360 38 L 361 35 Q 362 28 369 28 Z M 363 52 H 375 Q 379 52 378 56 L 365 108 Q 364 112 360 112 H 348 Q 344 112 345 108 L 358 56 Q 359 52 363 52 Z"/>
+    <path id="letter-z-1" fill="currentColor" d="M 378 74 L 428 52 L 404 92 L 426 90 L 376 112 L 400 72 Z"/>
+    <path id="letter-z-2" fill="currentColor" d="M 420 74 L 470 52 L 446 92 L 468 90 L 418 112 L 442 72 Z"/>
   </g>
 </svg>
