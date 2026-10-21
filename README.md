@@ -2,6 +2,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="brand/comfyrizz-logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="brand/comfyrizz-logo-light.svg">
   <img src="brand/comfyrizz-logo-light.svg" alt="Comfyrizz" width="420">
 </picture>
 
