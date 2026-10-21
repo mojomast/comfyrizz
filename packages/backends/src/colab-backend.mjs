@@ -156,7 +156,7 @@ export function createColabBackend({
   scratchDir = null,
   logDir = null,
   budgetUnits = 0,
-  ratePerHour = resolveRatePerHour(),
+  ratePerHour = null,
   wallClockCapMinutes = 180,
   gpu = "G4",
   reserveMinutes = COLLECT_AND_STOP_RESERVE_MINUTES,
@@ -181,6 +181,8 @@ export function createColabBackend({
   newAttempts = 3,
   newRetryMs = 20000,
 } = {}) {
+  // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
+  ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
   if (!packageId) throw new Error("createColabBackend needs a packageId (it names the session)");
   const session = sessionNameFor(packageId);
   const scratch = scratchDir || join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${packageId}`);
@@ -931,6 +933,16 @@ export function createColabBackend({
     },
     admit,
     armWatchdog,
+    /**
+     * PO-3 review: a VM held past media for the Google Colab render keeps the media deadline's watchdog,
+     * which can fire mid-render. Replace it (disarm first, so two watchdogs never race) with a fresh one
+     * sized for the render. Only for a session we own.
+     */
+    async rearmWatchdog({ minutes } = {}) {
+      if (!owns()) return null;
+      await disarmWatchdog();
+      return armWatchdog({ minutes });
+    },
     collectOut,
     state,
   };

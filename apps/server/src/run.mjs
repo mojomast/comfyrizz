@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PER_HOUR } from '../../../packages/backends/src/budget.mjs';
+import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PER_HOUR, DEFAULT_GPU } from '../../../packages/backends/src/budget.mjs';
 
 /** Kept as the exported name earlier code and tests reference; the value is the shared default (PO-3). */
 export const G4_RATE_PER_HOUR = DEFAULT_RATE_PER_HOUR;
@@ -66,7 +66,7 @@ function clipJobFor(record, event) {
  * @param {(context: {pkg: object, result: object, record: object}) => Promise<{revision?: number, render?: object}>} [options.onComplete]
  *   persist the applied package and render it; the return value lands on the run record
  */
-export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, defaultRatePerHour = G4_RATE_PER_HOUR } = {}) {
+export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false } = {}) {
   if (typeof backendFactory !== 'function') throw new Error('createRunController needs a backendFactory');
   const runsDir = join(runtimeDir, 'runs');
   mkdirSync(runsDir, { recursive: true });
@@ -87,9 +87,10 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
 
   async function estimate({ backendId, pkg, budgetUnits, ratePerHour = null, includeReady = false, assets = null, comfyuiUrl = null }) {
     if (!pkg || typeof pkg !== 'object') throw new Error('a package is required to plan a run');
-    // PO-3: the rate is configurable (COMFYRIZZ_COLAB_RATE_PER_HOUR) and the CLI's measured rate wins over
-    // the default, so an approved plan is priced with the same number the admission check will use.
-    const plannedRate = resolveRatePerHour({ explicit: ratePerHour, fallback: defaultRatePerHour });
+    // PO-3 review: priced from the per-accelerator table for this controller's gpu (overridable per gpu),
+    // and a measured rate can only raise it: max(table, measured). The approved plan uses the same number
+    // the admission check will.
+    const plannedRate = resolveRatePerHour({ gpu, explicit: ratePerHour });
     const instance = await backend(backendId, {
       budgetUnits,
       ratePerHour: plannedRate,
@@ -104,7 +105,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     const planned = await instance.runPackage(pkg, { workDir: join(runsDir, 'plan', backendId), dryRun: true, includeReady, assets });
     const jobList = planned.jobsDoc?.jobs ?? [];
     const est = planned.estimate ?? (typeof instance.estimate === 'function' ? await instance.estimate(jobList) : { gpuMinutes: 0, overheadMinutes: 0 });
-    const rate = resolveRatePerHour({ explicit: ratePerHour, measured: est.ratePerHour, fallback: defaultRatePerHour });
+    const rate = resolveRatePerHour({ gpu, explicit: ratePerHour, measured: est.ratePerHour });
     const upper = nextJobUpperEstimate({
       gpuMinutes: est.gpuMinutes ?? 0,
       overheadMinutes: est.overheadMinutes ?? 0,
@@ -242,6 +243,9 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null }) {
     if (mode !== 'final' && mode !== 'take') throw new Error("mode must be 'final' or 'take'");
     if (activeRunId) return { error: 'run busy', runId: activeRunId, status: 409 };
+    // PO-3 review: a pipeline spending on the same account must block every run start, including the
+    // queued-regenerate drain, not only the HTTP route that remembered to check.
+    if (isBusy()) return { error: 'pipeline busy', status: 409 };
     const preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
     if (preview.requiresApproval && !(approved || approvals.has(preview.planHash))) {
       publish({ type: 'run.approval_required', ...preview });

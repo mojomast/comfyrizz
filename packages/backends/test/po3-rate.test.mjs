@@ -1,49 +1,65 @@
-// PO-3: one rate and one deadline formula. The 8.9 units/hour figure was copied into worker admission,
-// the media watchdog, the wall-clock cap, the Qwen watchdog and two defaults, so changing it for a
-// different account rate meant finding six literals. These tests pin the precedence and the arithmetic
-// (including what the old formulas produced) rather than the literal.
+// PO-3 (review): the Google Colab rate is per accelerator, the planning rate is a floor that a measured
+// account rate can only raise, and there is one teardown reserve derived from the rate.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_RATE_PER_HOUR, TEARDOWN_RESERVE_UNITS, resolveRatePerHour, spendingMinutes } from '../src/budget.mjs';
+import { COLAB_RATE_TABLE, COLLECT_AND_STOP_RESERVE_MINUTES, DEFAULT_RATE_PER_HOUR, assessBudget, rateForGpu, reserveUnitsFor, resolveRatePerHour, spendingMinutes } from '../src/budget.mjs';
 
-test('the rate is configurable and the default stays the pessimistic measured one', () => {
+test('the rate table is keyed by accelerator and sourced from repo measurements', () => {
+  assert.equal(COLAB_RATE_TABLE.G4.ratePerHour, 8.9);
+  assert.equal(COLAB_RATE_TABLE.CPU.ratePerHour, 0.08);
+  assert.equal(COLAB_RATE_TABLE.L4.ratePerHour, 1.54);
+  for (const entry of Object.values(COLAB_RATE_TABLE)) assert.match(entry.source, /docs\//);
   assert.equal(DEFAULT_RATE_PER_HOUR, 8.9);
-  assert.equal(resolveRatePerHour({ env: {} }), 8.9);
-  assert.equal(resolveRatePerHour({ env: { COMFYRIZZ_COLAB_RATE_PER_HOUR: '12.5' } }), 12.5);
-  // An explicit option beats the environment, which beats a measured rate, which beats the default.
-  assert.equal(resolveRatePerHour({ explicit: 4, env: { COMFYRIZZ_COLAB_RATE_PER_HOUR: '12.5' } }), 4);
-  assert.equal(resolveRatePerHour({ measured: 6, env: { COMFYRIZZ_COLAB_RATE_PER_HOUR: '12.5' } }), 12.5);
-  assert.equal(resolveRatePerHour({ measured: 6, env: {} }), 6);
-  assert.equal(resolveRatePerHour({ explicit: null, measured: null, env: {} }), 8.9);
+  assert.equal(rateForGpu('G4', { env: {} }).ratePerHour, 8.9);
+  assert.equal(rateForGpu('cpu', { env: {} }).ratePerHour, 0.08);
+  assert.equal(rateForGpu('G4', { env: {} }).origin, 'table');
 });
 
-test('an unusable rate is refused instead of becoming NaN in a spend calculation', () => {
-  for (const value of ['abc', '0', '-2']) {
-    assert.throws(() => resolveRatePerHour({ env: { COMFYRIZZ_COLAB_RATE_PER_HOUR: value } }), /positive number/, value);
-  }
-  assert.throws(() => resolveRatePerHour({ explicit: Number.NaN, env: {} }), /positive number/);
-  // An empty variable means "not set", which is a fallback, not an error.
-  assert.equal(resolveRatePerHour({ env: { COMFYRIZZ_COLAB_RATE_PER_HOUR: '' } }), DEFAULT_RATE_PER_HOUR);
+test('overrides are per accelerator, and the legacy global variable only prices G4', () => {
+  assert.equal(rateForGpu('G4', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: '12.5' } }).ratePerHour, 12.5);
+  assert.equal(rateForGpu('G4', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR: '12.5' } }).ratePerHour, 12.5);
+  assert.equal(rateForGpu('CPU', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR: '12.5' } }).ratePerHour, 0.08, 'a G4 override must not reprice CPU');
+  assert.equal(rateForGpu('CPU', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_CPU: '0.1' } }).ratePerHour, 0.1);
+  assert.equal(rateForGpu('G4', { explicit: 10, env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: '12.5' } }).ratePerHour, 10);
+  assert.equal(rateForGpu('H100', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_H100: '15' } }).ratePerHour, 15);
 });
 
-test('a deadline buys the units minus teardown headroom, and keeps the old Qwen formula', () => {
-  // The reserve Qwen has always used: (units - 0.3) / rate * 60, floored, never below a minute.
-  for (const units of [0.5, 1, 2, 4]) {
-    assert.equal(spendingMinutes(units, 8.9), Math.max(1, Math.floor(((units - TEARDOWN_RESERVE_UNITS) / 8.9) * 60)), `units ${units}`);
+test('an unpriced accelerator and a below-table override are refused unless deliberate', () => {
+  assert.throws(() => rateForGpu('H100', { env: {} }), /COMFYRIZZ_COLAB_RATE_PER_HOUR_H100/);
+  assert.throws(() => rateForGpu('G4', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: '4' } }), /below its measured 8.9.*COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1/);
+  assert.throws(() => rateForGpu('G4', { explicit: 0.08, env: {} }), /below its measured/);
+  assert.equal(rateForGpu('G4', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: '4', COMFYRIZZ_COLAB_ALLOW_LOW_RATE: '1' } }).ratePerHour, 4);
+  for (const value of ['abc', '0', '-1', 'NaN']) {
+    assert.throws(() => rateForGpu('G4', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: value } }), /positive number/, value);
   }
-  assert.equal(spendingMinutes(4, 8.9), 24);
-  // The media path used to divide the whole ceiling by the rate, which left nothing for collect-and-stop.
+  assert.equal(rateForGpu('G4', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: '' } }).ratePerHour, 8.9);
+});
+
+test('a measured pre-allocation rate can raise the price but never lower it', () => {
+  assert.equal(resolveRatePerHour({ gpu: 'G4', measured: 0, env: {} }), 8.9, 'an idle account (0.00/h) must not price G4 at zero');
+  assert.equal(resolveRatePerHour({ gpu: 'G4', measured: 0.08, env: {} }), 8.9, 'a CPU session must not price G4 at 0.08');
+  assert.equal(resolveRatePerHour({ gpu: 'G4', measured: 17.8, env: {} }), 17.8, 'another live session raises the price');
+  assert.equal(resolveRatePerHour({ gpu: 'G4', measured: null, env: {} }), 8.9);
+  assert.equal(resolveRatePerHour({ gpu: 'CPU', measured: 0.05, env: {} }), 0.08);
+});
+
+test('one reserve: COLLECT_AND_STOP_RESERVE_MINUTES of the rate, in assessBudget and the deadline alike', () => {
+  assert.equal(COLLECT_AND_STOP_RESERVE_MINUTES, 6);
+  assert.equal(reserveUnitsFor(8.9), 0.89);
+  assert.equal(reserveUnitsFor(0.08), 0.008);
+  const admission = assessBudget({ budgetUnits: 5, nextJobUpperEstimate: 1, ratePerHour: 8.9 });
+  assert.equal(admission.reserve, reserveUnitsFor(8.9));
+  assert.equal(spendingMinutes(5, 8.9), Math.floor(((5 - 0.89) / 8.9) * 60));
+  assert.equal(spendingMinutes(4, 8.9), 20);
   assert.ok(spendingMinutes(5, 8.9) < Math.floor((5 / 8.9) * 60));
-  assert.equal(spendingMinutes(5, 8.9), 31);
+  // a CPU ceiling is not eaten by a GPU-sized reserve
+  assert.equal(spendingMinutes(1, 0.08), Math.floor(((1 - 0.008) / 0.08) * 60));
 });
 
-test('a budget smaller than the reserve is still bounded by the one-minute floor', () => {
-  assert.equal(spendingMinutes(0.3, 8.9), 1);
-  assert.equal(spendingMinutes(0.1, 8.9), 1);
+test('a too-small or invalid allocation still gets the 1-minute floor', () => {
+  assert.equal(spendingMinutes(0.89, 8.9), 1);
   assert.equal(spendingMinutes(0, 8.9), 1);
   assert.equal(spendingMinutes(-4, 8.9), 1);
   assert.equal(spendingMinutes(5, 0), 1);
   assert.equal(spendingMinutes(5, Number.NaN), 1);
-  // A different rate moves the deadline with it; nothing is divided by the old literal.
-  assert.equal(spendingMinutes(5, 12.5), Math.floor(((5 - 0.3) / 12.5) * 60));
 });

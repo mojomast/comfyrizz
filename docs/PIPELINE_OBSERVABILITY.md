@@ -152,16 +152,31 @@ the local render; the warning says the shutdown is unconfirmed. Cancellation
 does not fall back. A failure after the MP4 is already local does not fall back
 either. Tokens are not passed with `--env`.
 
-The rate an allocation is priced with is not a constant. `COMFYRIZZ_COLAB_RATE_PER_HOUR`
-pins it (units per hour) for an account whose rate differs from G4's observed 8.90;
-when it is unset, the pre-allocation ceiling check uses the rate the account itself
-reports (`colab usage`) and only falls back to 8.9. Deadlines derived from a ceiling —
-the media watchdog, the wall-clock cap and the Qwen watchdog — subtract a 0.3-unit
-collect-and-stop reserve before converting the remainder to minutes, so a run cannot
-spend its whole allocation and then have nothing left with which to collect assets and
-stop the session. The decision is recorded in the run's events (`media_plan`,
-`media_spend_ceiling`: rate, its source, the required units and the balance), so an
-audited run states which rate it used rather than leaving it to be inferred.
+The rate an allocation is priced with is per accelerator. `packages/backends/src/budget.mjs`
+keeps a table of measured Google Colab rates (`COLAB_RATE_TABLE`): G4 8.90 units/h
+(docs/COLAB_EFFICIENCY_RESULTS.md), L4 1.54 units/h (same document) and CPU 0.08 units/h
+(docs/DIPSY_SWARM.md). H100 and A100 have no measured rate in the repo, so a run on one is
+refused until `COMFYRIZZ_COLAB_RATE_PER_HOUR_<GPU>` (for example `..._H100`) prices it.
+`COMFYRIZZ_COLAB_RATE_PER_HOUR_<GPU>` overrides one accelerator; the older
+`COMFYRIZZ_COLAB_RATE_PER_HOUR` still works but only prices G4. An override below the table
+rate is refused unless `COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1`, because pricing low lets a run
+outspend its ceiling.
+
+`colab usage` is read before anything is allocated, so its rate is the account's existing
+burn (0.00/h when idle, about 0.08/h with a CPU session running). It can raise the price,
+never lower it: the run is priced at max(table rate for the requested accelerator, measured).
+A balance that cannot be read refuses the run; it is not skipped.
+
+There is one teardown reserve: `COLLECT_AND_STOP_RESERVE_MINUTES` (6) at the run's rate,
+about 0.89 units on G4. Admission (`assessBudget`), the pre-allocation balance check and
+every deadline derived from a ceiling (the media watchdog, the wall-clock cap and the Qwen
+watchdog) use that same figure, so a run cannot spend its whole allocation and then have
+nothing left with which to collect assets and stop the session. When the VM is held for a
+Google Colab render, its watchdog is re-armed for a bounded render allowance
+(`COMFYRIZZ_COLAB_RENDER_ALLOWANCE_MINUTES`, default 15) plus that reserve. The decision is
+recorded in the run's events (`media_plan`, `media_spend_ceiling`, `render_watchdog`: gpu,
+rate, its source, the reserve, the required units and the balance), so an audited run states
+which rate it used rather than leaving it to be inferred.
 
 `POST /api/pipeline` uses the same body, adding `approvedPlanHash` when metered
 compute is required. Approval binds the entire input package and options, including

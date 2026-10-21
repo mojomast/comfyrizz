@@ -17,42 +17,88 @@ export const COLLECT_AND_STOP_RESERVE_MINUTES = 6;
 export const NEXT_JOB_MARGIN = 1.35;
 
 /**
- * PO-3: the G4 rate is the one number every spend computation divides by, and it was written out as
- * 8.9 in six places (server admission, the server's media watchdog and wall-clock cap, the Qwen
- * watchdog, the backend default and the run controller's default). Colab's rate is account state
- * that can change, so it is configured once here and read from `colab usage` when the CLI reports it.
+ * PO-3 review: the rate is per accelerator, not one global number. A CPU runtime burns ~0.08 units/h and a
+ * G4 ~8.9, so one shared figure either over-reserves CPU work 100x or under-prices a GPU. Every rate here
+ * comes from a measurement already in this repo:
  *
- * Measured Oct 16: 1.90 units over a 14-minute window = 8.14/h, so 8.9 is the pessimistic assumption
- * and stays the default.
+ *   G4  8.90 units/h  docs/COLAB_EFFICIENCY_RESULTS.md, docs/SPEC.md 5.2 (observed Oct 16; GPU test 3
+ *                     measured 8.14/h, so 8.9 is the pessimistic figure)
+ *   L4  1.54 units/h  docs/COLAB_EFFICIENCY_RESULTS.md (observed marginal rate)
+ *   CPU 0.08 units/h  docs/DIPSY_SWARM.md (`colab usage` reported 0.08 credits/hour)
+ *
+ * H100 and A100 are listed fallbacks (colab-plan.mjs) with no measured rate in the repo, so they have no
+ * entry: pricing one requires COMFYRIZZ_COLAB_RATE_PER_HOUR_<GPU> (e.g. ..._H100), and an unpriced
+ * accelerator is refused rather than guessed.
  */
-export const DEFAULT_RATE_PER_HOUR = 8.9;
-/**
- * Headroom kept out of every deadline so teardown can still happen inside the ceiling. Qwen has always
- * reserved 0.3 units (~2 minutes at the default rate); the media path reserved nothing, so its cap
- * allowed a run to spend the whole allocation and leave nothing for collect-and-stop.
- */
-export const TEARDOWN_RESERVE_UNITS = 0.3;
+export const COLAB_RATE_TABLE = Object.freeze({
+  G4: Object.freeze({ ratePerHour: 8.9, source: "docs/COLAB_EFFICIENCY_RESULTS.md (observed 8.90 units/h)" }),
+  L4: Object.freeze({ ratePerHour: 1.54, source: "docs/COLAB_EFFICIENCY_RESULTS.md (observed marginal 1.54 units/h)" }),
+  CPU: Object.freeze({ ratePerHour: 0.08, source: "docs/DIPSY_SWARM.md (colab usage reported 0.08/h)" }),
+});
+/** The accelerator Comfyrizz allocates by default (colab-plan.mjs COMFYRIZZ_RUNTIME). */
+export const DEFAULT_GPU = "G4";
+/** Kept for callers that only ever priced G4; prefer `rateForGpu`. */
+export const DEFAULT_RATE_PER_HOUR = COLAB_RATE_TABLE.G4.ratePerHour;
+
+const gpuKey = gpu => String(gpu || DEFAULT_GPU).trim().toUpperCase();
+const rateEnvName = gpu => `COMFYRIZZ_COLAB_RATE_PER_HOUR_${gpuKey(gpu).replace(/[^A-Z0-9]/g, "_")}`;
+const isSet = value => value !== null && value !== undefined && value !== "";
 
 /**
- * One rate for every caller. Precedence: an explicit option, then COMFYRIZZ_COLAB_RATE_PER_HOUR, then a
- * measured `colab usage` rate, then the default. Unparseable values are refused instead of silently
- * becoming NaN in a spend calculation.
- * @returns {number}
+ * The planning rate for one accelerator. Precedence: an explicit option, then
+ * COMFYRIZZ_COLAB_RATE_PER_HOUR_<GPU>, then (G4 only, for compatibility) COMFYRIZZ_COLAB_RATE_PER_HOUR,
+ * then the table. An override *below* the table rate would let a run outspend its ceiling, so it is
+ * refused unless COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1 (or `allowBelowTable`) says it is deliberate.
+ * @returns {{gpu: string, ratePerHour: number, source: string, origin: 'table'|'configured', tableRate: number|null}}
  */
-export function resolveRatePerHour({ explicit = null, measured = null, env = process.env, fallback = DEFAULT_RATE_PER_HOUR } = {}) {
-  const candidates = [explicit, env?.COMFYRIZZ_COLAB_RATE_PER_HOUR, measured, fallback];
-  const chosen = candidates.find(value => value !== null && value !== undefined && value !== '');
-  const rate = Number(chosen);
-  if (!Number.isFinite(rate) || rate <= 0) throw new Error(`Colab rate per hour must be a positive number (got ${JSON.stringify(chosen)})`);
-  return rate;
+export function rateForGpu(gpu = DEFAULT_GPU, { explicit = null, env = process.env, allowBelowTable = env?.COMFYRIZZ_COLAB_ALLOW_LOW_RATE === "1" } = {}) {
+  const key = gpuKey(gpu);
+  const entry = COLAB_RATE_TABLE[key] ?? null;
+  const overrides = [
+    [explicit, "explicit option"],
+    [env?.[rateEnvName(key)], rateEnvName(key)],
+    [key === "G4" ? env?.COMFYRIZZ_COLAB_RATE_PER_HOUR : null, "COMFYRIZZ_COLAB_RATE_PER_HOUR"],
+  ];
+  const override = overrides.find(([value]) => isSet(value));
+  if (!override) {
+    if (!entry) throw new Error(`No Google Colab rate is known for accelerator ${key}; set ${rateEnvName(key)} to its units/hour.`);
+    return { gpu: key, ratePerHour: entry.ratePerHour, source: entry.source, origin: "table", tableRate: entry.ratePerHour };
+  }
+  const rate = Number(override[0]);
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error(`Google Colab rate per hour must be a positive number (got ${JSON.stringify(override[0])} from ${override[1]})`);
+  if (entry && rate < entry.ratePerHour && !allowBelowTable) {
+    throw new Error(`${override[1]} sets ${key} to ${rate} units/h, below its measured ${entry.ratePerHour} units/h (${entry.source}). Pricing below the table lets a run outspend its ceiling; set COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1 if this is deliberate.`);
+  }
+  return { gpu: key, ratePerHour: rate, source: override[1], origin: "configured", tableRate: entry?.ratePerHour ?? null };
 }
 
 /**
- * Minutes a budget of `units` buys once teardown headroom is taken out. Returns the 1-minute floor rather
- * than 0 or a negative cap, so a too-small allocation is still bounded instead of unbounded.
+ * The rate to price spend with: never below the accelerator's planning rate. A measured `colab usage`
+ * rate is account-wide burn *before* our allocation (0.00/h on an idle account, 0.08/h with a CPU
+ * session), so it can only raise the figure, never lower it: max(table or override, measured).
  * @returns {number}
  */
-export function spendingMinutes(units, ratePerHour, { reserveUnits = TEARDOWN_RESERVE_UNITS, minimum = 1 } = {}) {
+export function resolveRatePerHour({ gpu = DEFAULT_GPU, explicit = null, measured = null, env = process.env, allowBelowTable } = {}) {
+  const planned = rateForGpu(gpu, { explicit, env, ...(allowBelowTable === undefined ? {} : { allowBelowTable }) }).ratePerHour;
+  const observed = Number(measured);
+  return isSet(measured) && Number.isFinite(observed) && observed > planned ? observed : planned;
+}
+
+/**
+ * The one teardown reserve: COLLECT_AND_STOP_RESERVE_MINUTES of the accelerator's rate. assessBudget, the
+ * deadlines and the balance check all use this, so the reserve a message quotes is the one subtracted.
+ * @returns {number}
+ */
+export function reserveUnitsFor(ratePerHour, { reserveMinutes = COLLECT_AND_STOP_RESERVE_MINUTES } = {}) {
+  return round(unitsForMinutes(reserveMinutes, ratePerHour) ?? 0);
+}
+
+/**
+ * Minutes a budget of `units` buys once the collect-and-stop reserve is taken out. Returns the 1-minute
+ * floor rather than 0 or a negative cap, so a too-small allocation is still bounded instead of unbounded.
+ * @returns {number}
+ */
+export function spendingMinutes(units, ratePerHour, { reserveUnits = reserveUnitsFor(ratePerHour), minimum = 1 } = {}) {
   const usable = Number(units) - Number(reserveUnits);
   const rate = Number(ratePerHour);
   if (!Number.isFinite(usable) || usable <= 0 || !Number.isFinite(rate) || rate <= 0) return minimum;
@@ -109,7 +155,7 @@ export function assessBudget({
       formula: [],
     };
   }
-  const reserve = round(unitsForMinutes(reserveMinutes, ratePerHour) ?? 0);
+  const reserve = reserveUnitsFor(ratePerHour, { reserveMinutes });
   const spent = round(Number(spentEstimate) || 0);
   const committed = round(Number(committedEstimate) || 0);
   const nextUpper = round(Number(next ?? 0));

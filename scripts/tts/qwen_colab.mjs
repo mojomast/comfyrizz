@@ -9,7 +9,7 @@ import { ColabCli } from '../../packages/backends/src/cli.mjs';
 import { createColabBackend } from '../../packages/backends/src/colab-backend.mjs';
 import { argvExec, argvUpload, argvDownload } from '../../packages/backends/src/colab-plan.mjs';
 import { progressLines } from '../../packages/backends/src/progress-lines.mjs';
-import { resolveRatePerHour, spendingMinutes, TEARDOWN_RESERVE_UNITS } from '../../packages/backends/src/budget.mjs';
+import { resolveRatePerHour, reserveUnitsFor, spendingMinutes } from '../../packages/backends/src/budget.mjs';
 
 const flag = (name, fallback) => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : fallback;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -42,7 +42,7 @@ writeFileSync(input, createZip(entries));
 // together instead of only one of them.
 const ratePerHour = resolveRatePerHour();
 const watchdogMinutes = spendingMinutes(units, ratePerHour);
-onEvent({ event: 'qwen_plan', dryRun, scenes: pkg.scenes.length, unitsCeiling: units, watchdogMinutes, ratePerHour, reserveUnits: TEARDOWN_RESERVE_UNITS });
+onEvent({ event: 'qwen_plan', dryRun, scenes: pkg.scenes.length, unitsCeiling: units, watchdogMinutes, ratePerHour, reserveUnits: reserveUnitsFor(ratePerHour) });
 if (!dryRun) {
   const lines = progressLines(onEvent, message => onEvent({ event: 'diagnostic', message }));
   const cli = new ColabCli({ bin: process.env.COMFYRIZZ_COLAB_BIN || join(process.env.HOME, '.local/bin/colab'), logDir: join(out, 'logs'), onLog: text => lines.write(text) });
