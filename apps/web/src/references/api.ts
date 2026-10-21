@@ -176,6 +176,27 @@ export function createReferenceApi(options: CreateReferenceApiOptions): Referenc
       return chatId && ref?.id ? urlFor(chatId, ref.id, 'thumb') : undefined;
     },
 
+    async loadThumb(ref: Reference) {
+      const chatId = current();
+      if (!chatId || !ref?.id) return undefined;
+      const source = typeof ref.thumbUrl === 'string' && ref.thumbUrl
+        ? ref.thumbUrl
+        : urlFor(chatId, ref.id, 'thumb');
+      // Only /api media needs the session token; data:/blob: URLs are already
+      // directly usable by the browser.
+      if (!source.startsWith('/api/')) return source;
+      try {
+        const response = await options.apiFetch(source);
+        if (!response.ok) return undefined;
+        const blob = await response.blob();
+        const objectUrls = globalThis.URL;
+        if (!blob || typeof objectUrls?.createObjectURL !== 'function') return undefined;
+        return objectUrls.createObjectURL(blob);
+      } catch {
+        return undefined;
+      }
+    },
+
     fileUrl(ref: Reference) {
       const chatId = current();
       return chatId && ref?.id ? urlFor(chatId, ref.id, 'file') : undefined;

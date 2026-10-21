@@ -1,0 +1,161 @@
+# TIMELINE-REVIEW: review generated clips on the timeline, fix them one clip at a time, then render
+
+Status: **approved by Kyle with the plan defaults** (2026-10-20). Branch `feat/timeline-review` (rebased on main 06339ce: quality-fixes and reference-assets merged), orchestration feature `TIMELINE-REVIEW`, tasks TR00-TR19.
+
+## Resolved decisions (Kyle, 2026-10-20)
+
+- **Final render gate:** every clip must be approved before the final render. An override is allowed only with a written reason (logged in `takes.overrides`, `render.gate.blocked` event when blocked).
+- **Google Colab spend:** approved per regeneration (each regenerate gets its own `planHash` approval; no blanket approval).
+- **Narration / TTS:** out of scope for this feature.
+- **Take cap:** 12 takes per asset (oldest unselected rejected take purged over the cap).
+- **Agent role:** the agent only proposes (corrections, selections, verdicts, spend), even in Express mode; the user confirms.
+- **TR07:** approved to touch the run-completion step (`completeRun`) in `apps/server/src/app.mjs`.
+- **TR00 added:** References panel thumbnails are broken because a plain `<img src>` cannot send the server auth token; fixed before the rest of the feature.
+
+## 1. Goal
+
+When a Google Colab (or BYO ComfyUI) media job comes back, its outputs land on the editor timeline as **takes** on the clip that asked for them, and the user watches them in the in-browser preview before anything is rendered. The user or the chat agent can then mark each clip approved, or write a correction ("slower push-in, keep the logo readable, no people"). The correction regenerates **only that clip** as a new take. The old take is kept, so the user can compare, switch back or approve. The final end-to-end render (local or Google Colab remote render) runs only when every generated clip has an approved take, or when the user overrides that with a written reason.
+
+Non-goals for the hackathon: partial-segment retakes inside a clip (LTX "Retake" style, no such graph in `workflows/`), generative extend, multi-user review and comments, take branching beyond one linear list per clip, storing takes in package-v1.
+
+## 2. What exists today (investigated on origin/main 4773334, plus feat/reference-assets and feat/quality-fixes)
+
+- **Media jobs.** `packages/jobs/src/plan.mjs` `planJobs(pkg, {assets, includeReady})` already narrows a plan to a set of asset ids. `apps/server/src/run.mjs` `runs.start({backendId, pkg, assets, includeReady, approved})` runs it. A Google Colab run is refused until its `planHash` is approved (`POST /api/run/approve`, `run.approval_required` event). This is an approval gate we reuse for spend.
+- **Applying results.** `packages/jobs/src/apply.mjs` `applyManifestToPackage` writes succeeded outputs into the package (`status: ready`, `file`, `sha256`, `media`, `gen` provenance with `job_id`/`attempt_id`/`workflow_sha256`). Rule SPEC 6.4: an asset that is already `ready` with a different sha is **not replaced**. The new output is returned in `candidates[]`, and today nothing keeps it. That is the natural seed for takes.
+- **After a run.** `completeRun` in `apps/server/src/app.mjs` copies `outputDir/assets` over the package's `assets/` (same file name `assets/<assetId>.<ext>`, so a second output **overwrites the first file on disk**), saves the package, publishes `package.updated`, and then **immediately renders a full MP4**. The pipeline worker (`pipeline-worker.mjs`, stage `media` -> `copyNamedAssets`) has the same shape and also emits `artifacts` events per asset after `media`.
+- **Per-scene actions.** `apps/server/src/scene.mjs` `sceneAssetIds` / `sceneJobsPlan` (C11) and `POST /api/scene/plan` and `/api/scene/render` (incremental A6 render, which reuses cached segments). The demo page's `scene-rerun.mjs` notes that the server has no field for a free-text instruction yet.
+- **Editor.** `apps/web/src/editor/*` holds the project doc + command union (`commands.ts`), the store with undo, autosave and compile (`store.ts`), and the timeline (`timeline/model.ts` pure math, `Timeline.tsx` view). There is a **sidecar** `runtime/editor/<pkgId>.json` (`editor-sidecar.mjs`, `version: 1`) that already holds non-package state (`takes` for narration, `alignment`, `presenterClips`) with `fresh|stale|missing` freshness. The preview is the Remotion `Player` with the same `PackageComposition` as the MP4 renderer (`apps/web/src/preview.tsx`). Media reaches the browser through short-lived tickets (`POST /api/media-ticket`, `GET /api/media/<ticket>`).
+- **Agent.** `packages/agent/src/conversation.ts` exposes the tools `project_update_plan`, `project_patch_plan`, `project_build` (+ `conversation_read_history`). feat/reference-assets adds the pattern we copy: `reference-tools.ts` with injected ctx, tools that **propose** and never apply, the user confirms in the UI or by replying "yes", and `runConversationTurn(options.references)` appends a manifest block to `<project_context>`.
+- **Quality-fixes** (scripts only): `scripts/quality/temporal-review.mjs` `reviewTake`, `beat-verdicts.mjs` (`passed|failed|substituted|not_reviewed`, where absent counts as `not_reviewed`, not passed), and `receipt.mjs` `selectedTakes[]`. We adopt the same vocabulary. A clip with no verdict is never treated as approved.
+- **Google Colab rendering (read-only for us).** `pipeline-colab-render.mjs` ships the package with every named asset file and refuses a result that changes timing. Because the selected take is written into the asset's normal `file`, **no Colab or HyperFrames change is needed**: Colab simply renders whatever the package names.
+
+## 3. Best practice we follow (research, Oct 2026)
+
+| Source | Practice | What we take |
+|---|---|---|
+| DaVinci Resolve Take Selector ([manual ch. 50](https://docs.imaster.org/davinci-resolve-21-manual/part-6-edit/ch.-50-take-selectors,-compound-clips,-and-nested-timelines)) | Several takes stacked in one timeline clip, one is current (star), badge on the clip, "Finalize take"; "ripple take" when lengths differ | Takes live on the clip and the timeline shows one current take with a badge. A take of a different length never ripples: we trim or hold to the clip's frames (Section 6) |
+| Premiere Generative Extend ([Adobe FAQ](https://helpx.adobe.com/premiere/desktop/edit-projects/edit-with-generative-ai/generative-extend-faq.html)) | Generated media is labelled, the original stays untouched, "Revert to Original", regenerate variations | A non-destructive take list, an AI label on the clip, one-click revert to the previous selected take |
+| LTX Studio storyboard / Retake ([LTX tutorial](https://ltx.io/blog/ltx-studio-tutorial)) | Every generation is a version, the storyboard arranges references not files, regenerate one shot without touching the rest | The package points at the selected take. Regeneration is scoped to one asset (`planJobs({assets:[id]})`) |
+| Descript Underlord ([revert](https://help.descript.com/ai-assistant/revert)) | The agent works on @-attached scenes, a checkpoint before each AI edit, revert per response | Agent tools take an explicit `clip_id`. Every agent change is a proposal whose diff is shown and confirmed |
+| Runway long-form guide ([help](https://help.runwayml.com/hc/en-us/articles/26871350018835-How-to-create-longer-videos-and-films)) | Rough-cut first, review in 2-3 min segments, then polish | Preview the assembled cut with candidate takes, final render last |
+| NLE proxy workflows (Resolve proxy media) | Edit on a cheap proxy that matches the source's timecode and fps, conform to the full-res source at the end | Preview plays the 1x take files in the Player (and the A6 incremental scene MP4 on request). The final render uses x2 `variants.upscaled` only when present. The preview never alters what is rendered |
+| ComfyUI practice | Seed, prompt and workflow sha make a generation reproducible | Each take records `seed`, `prompt`, `inputs`, `workflow_sha256` and the correction that led to it, so a diff between takes is exact |
+| Approval gates (our own `planHash` approval, quality receipt) | Spend needs explicit approval, and unreviewed is not passed | Two gates: spend approval per regeneration (Colab), and final render blocked until all clips are approved |
+
+## 4. Concepts and states
+
+- **Clip** = one generated asset as used on the timeline: `{clipId, sceneId, assetId, slot: 'background'|'foreground:<n>'|'presenter', kind: 'still'|'plate'|'presenter'}`. `clipId = <sceneId>:<assetId>`. Clips are derived from the compiled timeline (the same source as `sceneAssetIds`), so they are never stored as their own truth. Narration audio is out of scope (it already has takes in the editor sidecar). Assets without `gen` (uploads, references, SVGs) are not reviewable clips.
+- **Take** = one output file for a clip: `{takeId, assetId, n, file, sha256, bytes, media, gen{prompt, negative?, seed?, inputs, workflow_sha256?, job_id?, attempt_id?, backend}, correction?{note, diff[], by:'user'|'agent'}, runId, createdAt, verdict: 'unreviewed'|'approved'|'rejected', verdictNote?}`. `takeId = 'tk_' + sha256[0:12]`, so identical bytes never become two takes.
+- **Clip state** (derived, never hand-set):
+
+| State | Meaning | Timeline badge |
+|---|---|---|
+| `planned` | no take yet, no job | grey dashed |
+| `queued` | a regenerate request awaits spend approval or a free runner | grey + clock |
+| `generating` | a run containing this asset is active (progress from run events) | blue + progress |
+| `review` | the selected take is `unreviewed` (new output landed) | amber "review" |
+| `approved` | the selected take is `approved` | green check |
+| `rejected` | the selected take is `rejected` and no newer take exists | red |
+| `failed` | the last job for this asset failed (the previous take, if any, stays selected) | red "!" with error |
+| `stale` | the selected take's `gen` (prompt/inputs/seed/workflow) differs from the asset's current `gen` (someone edited the prompt) | amber stripe |
+
+Transitions: `planned -> queued -> generating -> review`; `review -> approved|rejected`; any state -> `queued` on a regenerate; `generating -> failed`. A new take never auto-selects over an `approved` take (SPEC 6.4). It lands as `unreviewed` beside it, and the clip shows "1 new take". Otherwise the newest take becomes selected so the preview shows it at once.
+
+## 5. Regenerate-with-correction flow
+
+1. The user selects a clip on the timeline (or the agent calls `clip_propose_correction`) and writes a correction note plus an optional structured change: `promptAppend`, `promptReplace`, `negativeAppend`, `seed: 'new'|'keep'|<int>`, `inputs` (allow-list: `reference*`, `image`, `strength`, `motion` fields already in the workflow params; nothing else).
+2. `buildCorrection(pkg, assetId, change)` returns `{package', diff[{path, before, after}]}`. Only that asset's `gen` changes, and the seed bumps by default so the result differs. The UI shows the diff.
+3. `POST /api/package/:id/clips/:clipId/regenerate` plans `planJobs(package', {assets:[assetId], includeReady:true})`. For Google Colab it returns `approval_required` with `planHash`, estimate and GPU minutes first. The user approves (existing `/api/run/approve`) and the request is re-sent. Several clips can be batched in one run (`/clips/regenerate-batch`) to pay the Colab boot once.
+4. The run executes in **take mode** (`runs.start({..., mode:'take'})`). On completion the server **ingests** each output as a new take: it copies the file to `takes/<assetId>/<takeId>.<ext>` before anything can overwrite `assets/<assetId>.<ext>`, records the gen and correction, and (unless the clip is approved) selects it. It **skips the automatic full render** that `completeRun` does today and publishes `clip.take.landed`.
+5. The editor refreshes the clip and the Player previews the new take in context. The take panel offers A/B (current vs. previous), and "approve", "reject + correct again", "revert to take n".
+6. Failure keeps the previous take selected and marks the clip `failed` with the runner's message.
+
+## 6. Preview vs. final render
+
+- **Preview** (cheap, instant, never billed): the browser Player with the package where each clip's asset `file` points at the selected (or the hovered/A-B candidate) take, served by media tickets. A take whose duration differs from the clip is fitted the way the renderer already does for plates (trim to the scene's frames, or hold the last frame). Timing never changes, so a take swap never re-flows the timeline. Optional "Render this scene" uses the existing `/api/scene/render` (A6 incremental) for a true pixel check of one scene.
+- **Final render**: the existing paths only (`/api/render`, `/api/pipeline` render stage, local or Google Colab remote render). Selecting a take writes `file/sha256/bytes/media/gen` of that take into the package asset (`selectTake`), so the final render consumes exactly what was previewed. **Gate:** `finalGate(pkg, takes)` must return ok (every reviewable clip `approved`), or the request carries `override: {reason}` which is logged in `takes.json` and the event stream. The 1920x1080 export still prefers `variants.upscaled` when an upscale job ran for the approved take (unchanged H12 logic).
+
+## 7. Data model
+
+- **Package-v1: unchanged.** The selected take is the asset's ordinary `file`. No schema change.
+- **Takes sidecar** `runtime/takes/<pkgId>.json` (atomic temp+rename, mode 0600, same as the editor sidecar):
+  `{schema:'comfyrizz.takes/v1', packageId, clips: {<assetId>: {selected: takeId|null, takes: [Take], lastJob?: {runId, state, error?, progress?}, queued?: {planHash, correction}}}, overrides: [{at, reason, revision}]}`.
+  Keyed by assetId (an asset reused in two scenes shares its takes; clipIds of both scenes resolve to it).
+- **Files** `runtime/packages/<pkgId>/takes/<assetId>/<takeId>.<ext>` (realpath containment, ext from an allow-list `png|jpg|webp|mp4|webm`). Pre-existing ready assets are adopted as take 1 (`by: 'initial'`) the first time a clip is read.
+- **Events** (SSE, existing bus): `clip.queued`, `clip.job` {assetId, runId, state, progress}, `clip.take.landed`, `clip.take.selected`, `clip.verdict`, `render.gate.blocked`.
+
+## 8. Agent tools (packages/agent/src/clip-tools.ts)
+
+Same pattern as `reference-tools.ts`: OpenAI-style schemas, `runClipTool(call, ctx)` with an injected ctx, and **proposals only**. Spend, selection and verdicts are confirmed by the user in the UI or by replying "yes".
+
+- `clip_list {}` -> compact rows `{clip_id, scene, slot, kind, state, takes, selected_n, last_correction}`.
+- `clip_get {clip_id}` -> prompt, seed, inputs, takes with their corrections and verdicts, and a diff between the selected take and the previous one.
+- `clip_propose_correction {clip_id, note, prompt_append?, prompt_replace?, negative_append?, seed?, inputs?}` -> records a pending regenerate with its diff and estimate. Never starts a run.
+- `clip_propose_select {clip_id, take_n, reason}` and `clip_propose_verdict {clip_id, verdict:'approved'|'rejected', reason}`.
+- `clip_render_readiness {}` -> `finalGate` result, so the agent can say "3 clips still need review".
+- Rules text (CLIP_RULES): name the clip and the exact change, prefer the smallest correction (append before replace, keep seed only when asked), never approve on the user's behalf, batch when the user corrects several clips, and never propose a final render while the gate is blocked unless the user gives an override reason.
+- The `<project_context>` block gains a `clips` manifest (max ~40 rows, truncated with a count).
+
+## 9. UI
+
+- **Timeline:** each scene block shows a clip chip per generated asset with the state badge (Section 4), a take counter ("take 3/3", "+1 new") and a progress bar while generating. Click selects the clip, keyboard `[`/`]` cycles takes in the preview, and `A` approves the focused clip.
+- **Take panel** (inspector tab "Takes"): a thumbnail strip of takes (video: poster + duration), verdict chips, A/B toggle (swaps the preview), a diff of prompt/seed/inputs between takes, a correction textarea with structured fields, a "Regenerate" button that shows the estimate and the Colab approval inline, plus "Approve", "Reject" and "Revert to this take".
+- **Render bar:** "Final render" shows `n/m clips approved`. When blocked it lists the clips (click jumps to them) and offers "Render anyway" with a required reason.
+- **Chat:** agent proposals render as Confirm/Change buttons (same component as reference proposals).
+
+## 10. Boundaries and risks
+
+- **No HyperFrames / Google Colab rendering change.** Colab media runs and remote renders are consumed as they are (manifest + collected files). One **server** change touches the run completion path: `completeRun` in `apps/server/src/app.mjs` gains a take-mode branch (ingest takes, skip auto render). That is app orchestration, not Colab internals, but it sits beside the render call, and Kyle approved it (TR07). The pipeline worker's `media` stage is **not** changed. A full pipeline run ingests its outputs afterwards from the run dir (TR09) rather than editing the worker.
+- `agent-chat.mjs`, `conversation.ts`, `project-chat.ts` and `main.ts` are also edited by REFERENCE-ASSETS R10/R12. feat/reference-assets is now merged to main and this branch is rebased on it, so TR11/TR17 build on it directly.
+- Disk: takes accumulate. Cap 12 takes per asset. When over the cap, the oldest unselected rejected take's file is deleted (metadata kept, marked `purged`).
+- One active run at a time (existing `activeRunId`). A regenerate while busy is `queued`, not refused.
+
+## Tasks
+
+Tiers: simple = free pool (prompt budget ~100k tokens); standard = deepseek-v4.1-flash. Tests are node:test (`node --test`, web TS via `node --experimental-strip-types --test`).
+
+| Task | Title | Tier | Files | Depends on | Acceptance |
+|---|---|---|---|---|---|
+| TR00 ref-thumbs | Authed References panel thumbnails | simple | `apps/web/src/references/api.ts`, `apps/web/src/references/panel.ts`, `apps/web/src/references/panel.test.ts`, `apps/web/src/references/thumbs.test.ts` | - | thumbnails load through the authed apiFetch as a blob and render from an object URL (no bare `<img src>` to an /api path); object URLs revoked on re-render/remove/unmount; failed fetch shows the placeholder; tests with a fake apiFetch and fake URL.createObjectURL |
+| TR01 take-model | Takes schema and clip state machine | simple | `apps/server/src/takes/model.mjs`, `apps/server/test/takes/model.test.mjs` | - | valid sidecar passes, bad takeId/ext/verdict rejected with path; deriveClipState covers all 8 states incl. stale and failed-keeps-previous; new take never auto-selects over approved |
+| TR02 take-store | Takes sidecar store and take files | standard | `apps/server/src/takes/store.mjs`, `apps/server/test/takes/store.test.mjs` | TR01 | atomic write (temp+rename, 0600); addTake dedupes by sha; files copied to takes/<assetId>/<takeId>.<ext> with realpath containment; cap 12 purges oldest rejected unselected; adopts existing ready asset as take 1 |
+| TR03 clip-index | Clips from package + compiled timeline | simple | `apps/server/src/takes/clips.mjs`, `apps/server/test/takes/clips.test.mjs` | TR01 | background/foreground/presenter slots found for a fixture package; assets without gen excluded; shared asset yields two clipIds with one assetId; unknown scene -> [] |
+| TR04 ingest | Ingest run outputs as takes | standard | `apps/server/src/takes/ingest.mjs`, `apps/server/test/takes/ingest.test.mjs` | TR02 | from a fake manifest+jobsDoc+outputDir: succeeded outputs become takes with gen/seed/workflow_sha256/job ids and the correction; candidates[] from applyManifestToPackage are kept (not lost); failed job sets lastJob failed and keeps selection; file snapshot happens before assets/ copy |
+| TR05 correction | Correction -> scoped package change + diff | simple | `apps/server/src/takes/correction.mjs`, `apps/server/test/takes/correction.test.mjs` | TR01 | only the target asset's gen changes; promptAppend/Replace/negativeAppend/seed new|keep|int; inputs outside the allow-list rejected; diff lists exact paths; result passes packages/schema validatePackage |
+| TR06 select | Select / revert take into the package | simple | `apps/server/src/takes/select.mjs`, `apps/server/test/takes/select.test.mjs` | TR01 | selectTake writes file/sha256/bytes/media/gen of the take, keeps variants.upscaled only if its base sha matches; revert restores the previous selection; package still validates; pure (no fs) |
+| TR07 take-mode-run | Take mode in run completion (Kyle OK'd) | standard | `apps/server/src/run.mjs`, `apps/server/src/app.mjs`, `apps/server/test/takes/run-mode.test.mjs` | TR04, TR06 | runs.start({mode:'take'}) passes mode to completeRun; take mode calls ingest before the assets copy, saves the package with the selected takes, does NOT call render, and publishes clip.take.landed; default mode byte-identical (existing run/server tests green); run events republished as clip.job per asset |
+| TR08 routes | Clip/take HTTP routes | standard | `apps/server/src/takes/routes.mjs`, `apps/server/test/takes/routes.test.mjs` | TR02, TR03, TR05, TR06 | handle(req,res,url) for GET clips, GET takes, POST regenerate (approval_required with planHash for colab, start otherwise, queued when busy), POST regenerate-batch, POST select, POST verdict, POST media ticket for a take; injected runs/store; returns false on non-matching paths |
+| TR09 mount | Mount routes, gate final render, pipeline ingest | standard | `apps/server/src/app.mjs`, `apps/server/src/takes/gate.mjs`, `apps/server/test/takes/gate.test.mjs` | TR07, TR08 | createTakeRoutes mounted before the 404; finalGate blocks /api/render and /api/pipeline render when any clip is not approved unless override {reason} (logged, render.gate.blocked event); after a pipeline media stage the run dir outputs are ingested; no change to pipeline-worker.mjs |
+| TR10 agent-tools | Clip tools for the chat agent | standard | `packages/agent/src/clip-tools.ts`, `packages/agent/test/clip-tools.test.ts` | - | schemas for clip_list/get/propose_correction/propose_select/propose_verdict/render_readiness; runClipTool with injected ctx only records proposals; CLIP_RULES text; manifestBlock truncates at 40 rows with a count |
+| TR11 agent-wire | Wire clip tools into conversation and chat | standard | `packages/agent/src/conversation.ts`, `packages/agent/src/index.ts`, `apps/server/src/agent-chat.mjs` | TR10, TR08 | options.clips adds manifest, rules and tools; confirmClipProposals in input applies through the TR08 handlers; without clips behaviour byte-identical (existing tests green) |
+| TR12 cassette | Clip review cassette fixture | simple | `apps/server/test/fixtures/takes/clip-review.cassette.json`, `apps/server/test/takes/cassette.test.mjs` | TR10 | comfyrizz.cassette/v1 conversation: clip_list, clip_get, a correction proposal with diff, a verdict proposal; validated structurally; no binaries |
+| TR13 web-api | Web client for clip routes | simple | `apps/web/src/takes/api.ts`, `apps/web/test/takes-api.test.ts` | TR08 | typed fetch wrappers via apiFetch; approval_required surfaced as a value not an error; take URLs from media tickets |
+| TR14 clip-badges | Timeline clip chips and badges | standard | `apps/web/src/editor/timeline/clip-state.ts`, `apps/web/src/editor/timeline/Timeline.tsx`, `apps/web/src/editor/timeline/timeline.css`, `apps/web/test/editor/clip-state.test.ts` | TR13 | pure clipChips(timeline, clips) -> positioned chips with badge/label/progress per state; take counter and "+1 new"; [ ] and A keys mapped in the key model; Timeline renders chips without changing existing drag behaviour |
+| TR15 take-panel | Takes inspector panel | standard | `apps/web/src/takes/panel.ts`, `apps/web/src/takes/panel.css`, `apps/web/test/takes-panel.test.ts` | TR13 | render with a fake api: take strip, verdict chips, diff view, correction form with allow-listed fields, regenerate shows estimate + approve step, approve/reject/revert call the api; escapes text; keyboard operable |
+| TR16 preview-takes | Preview with candidate takes | simple | `apps/web/src/takes/preview-takes.ts`, `apps/web/test/takes-preview.test.ts` | TR13 | previewPackage(pkg, clips, {abTake?}) swaps asset file/media to the chosen take URL without mutating the doc; timing unchanged (compileTimeline durations equal); clearing A/B restores selected |
+| TR17 editor-wire | Mount panel, SSE refresh, render gate UI | standard | `apps/web/src/main.ts`, `apps/web/src/editor/inspector/panel.ts`, `apps/web/src/takes/render-bar.ts` | TR14, TR15, TR16, TR09 | clip.* events refresh clips; Takes tab in inspector; preview remounts with previewPackage; render bar shows n/m approved, lists blockers, override needs a reason; smallest change to main.ts |
+| TR18 e2e | End-to-end take loop with a fake backend | standard | `apps/server/test/takes/e2e.test.mjs` | TR09, TR11 | createApp on a temp runtime with a fake backend (no network/GPU): initial run -> takes adopted -> correction regenerate (approval for colab) -> second take lands without full render -> select/approve all -> gate ok -> render called exactly once with the approved files |
+| TR19 docs | Timeline review guide | simple | `docs/TIMELINE_REVIEW.md` | TR17, TR18 | states and badges, correction examples, spend approval, preview vs final, override, limits (no partial retake, cap 12), 60-second judge demo script; every route/command exists |
+
+Details:
+
+- **TR00** The References panel renders `<img src="/api/chat/.../thumb">`, which the browser requests without the server auth header, so it 401s. Fix it the way the app handles other authed media (main.ts fetches with apiFetch and uses `URL.createObjectURL(blob)`): api.ts gains `loadThumb(ref) -> Promise<string|undefined>` (apiFetch the thumb URL, blob, object URL); panel.ts renders the placeholder with `data-ref-thumb` and hydrates it after render via the api, caching per ref id+updatedAt and revoking object URLs when a card is replaced, deleted, or the panel unmounts. Keep `thumbUrl` for non-/api URLs (data:, blob:). Update panel.test.ts assertions that expected a bare `<img src>`. No main.ts or server change.
+- **TR01** validateTakes(doc)->{ok, errors[] with JSON paths} for comfyrizz.takes/v1 (Section 7). deriveClipState({clip, takes, lastJob, queued, assetGen})->one of planned|queued|generating|review|approved|rejected|failed|stale. shouldAutoSelect(entry, newTake) false when the selected take is approved. genFingerprint(gen) = stable sha256 over {prompt, negative, seed, inputs, workflow_sha256} used for stale. Pure.
+- **TR02** createTakeStore({runtimeDir, packageDir}): read(pkgId), write(pkgId, doc), addTake(pkgId, assetId, {srcPath, sha256, ...}) copies the file (allow-listed ext), adoptInitial(pkg) creates take 1 for ready generated assets with by:'initial', setSelected, setVerdict, setLastJob, purge over cap 12. Package id validated like editorPath. Pattern: editor-sidecar.mjs and feat/reference-assets references/store.mjs.
+- **TR03** listClips(pkg, measured) using compileTimeline like scene.mjs sceneAssetIds, tagging slot and kind (still/plate/presenter from asset.kind and media.fps), from/duration frames from the timeline scene; only assets with gen.generator.
+- **TR04** ingestRun({pkg, manifest, jobsDoc, outputDir, store, corrections:{assetId:correction}, runId})->{takes:[...], selected:{assetId:takeId}, failed:[...]}: uses applyManifestToPackage's applied + candidates (both become takes); the seed is read from the job inputs when present; it does not touch packageDir/assets.
+- **TR05** buildCorrection(pkg, assetId, change)->{package, diff, correction}: allow-list `reference`, `reference_2..10`, `image`, `strength`, `denoise`, `motion.*` that exist in the asset's workflow params (read workflows/*.api.params.json, read only). seed 'new' = deterministic hash(prev seed, takes count). Note capped at 1000 chars.
+- **TR06** selectTake(pkg, takeDoc, assetId, takeId)->package; revertTake(pkg, takeDoc, assetId)->package with the previously selected take (history stack in the entry). Validates with packages/schema validatePackage.
+- **TR07** run.mjs: start() accepts mode ('final' default | 'take') and corrections, stored on the record and passed to onComplete. app.mjs completeRun: `if (record.mode === 'take')` -> ingestRun before the cpSync of collected assets, apply the selection with selectTake, store.save, publish clip.take.landed per asset, return {revision, render:null}. A run.* progress event with a job id maps to clip.job {assetId: job.split('.')[0]}. Kyle approved touching completeRun beside the render call (2026-10-20).
+- **TR08** createTakeRoutes({store, takeStore, runs, events, mediaTickets, measuredFor}) under /api/package/:id/clips[...]: GET list (clips + derived state), GET /:clipId/takes, POST /:clipId/regenerate {change, backendId, approved?, budgetUnits?}, POST /regenerate-batch {items[]}, POST /:clipId/select {takeId}, POST /:clipId/revert, POST /:clipId/verdict {verdict, note?}, POST /:clipId/takes/:takeId/ticket. Regenerate: buildCorrection -> runs.start({pkg: corrected, assets:[assetId], includeReady:true, mode:'take', corrections}); when busy, record queued in the sidecar and return 202. Fake request streams in tests.
+- **TR09** gate.mjs finalGate(pkg, takeDoc, clips)->{ok, approved, total, blocking:[{clipId, state}]}. app.mjs: mount routes; in /api/render and the /api/pipeline render path check the gate (body.override.reason string 4..500 chars bypasses, appended to takes.overrides); after a pipeline run completes, ingest from its run dir's media-out (read the files only; no worker edit); drain one queued regenerate when a run ends.
+- **TR10** CLIP_TOOLS and runClipTool(call, ctx{clips, getClip, proposeCorrection, proposeSelect, proposeVerdict, readiness}). clip_propose_* return {proposalId, diff, estimate?}. No export from index.ts (TR11).
+- **TR11** conversation.ts: runConversationTurn options.clips {block, ctx} like options.references. agent-chat.mjs builds the clips manifest from the takes store for the chat's project and handles input.confirmClipProposals:[ids] by calling the same functions the routes use. Rebase on feat/reference-assets first.
+- **TR12** 4-6 entries in AGENT_CASSETTE.md shape: user says "scene 2 background is too busy and the logo is hidden"; agent clip_list -> clip_get -> clip_propose_correction (negative_append 'busy background', prompt_append 'clean negative space top-right for the logo', seed new) -> then after a landed take clip_propose_verdict approved.
+- **TR13** listClips, getTakes, regenerate (returns {kind:'approval', planHash, estimate} | {kind:'started', runId} | {kind:'queued'}), approve via existing /api/run/approve, select, revert, verdict, takeUrl.
+- **TR14** clip-state.ts: STATE_STYLE table, clipChips(), formatTakeCounter(); extend timeline/model.ts key mapping only if needed through a new exported helper (keep existing tests green). Timeline.tsx: render chips inside scene blocks, aria-labels "Scene 2 background, take 3 of 3, needs review".
+- **TR15** mountTakePanel(el, {api, clipId, onPreview(takeId|null)}) vanilla TS, mirroring feat/reference-assets panel.ts structure. Diff view from take.correction.diff or computed field diff of gen.
+- **TR16** pure; uses media ticket URLs passed in; compares compileTimeline(pkg) vs compileTimeline(preview) scene from/duration in the test.
+- **TR17** In main.ts subscribe to clip.* SSE (existing EventSource), keep a clips map in a small store, mount the panel in the inspector, remount preview on take change, render bar in the existing render controls, override dialog sends override.reason.
+- **TR18** Same harness as apps/server/test/server.test.mjs and run.test.mjs (fake backendFactory whose runPackage writes a PNG/MP4 stub and a manifest). Asserts the takes.json content, two take files on disk, package asset file = approved take, render spy called once only after the gate passes, gate 409 before.
+- **TR19** User guide plus a demo: generate, review the takes on the timeline, correct one clip by chat, A/B, approve, final render.

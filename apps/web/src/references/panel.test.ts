@@ -258,8 +258,9 @@ test('a video card shows its duration badge and uses the label as alt text', () 
 
   assert.match(html, /class="ref-duration"[^>]*>0:08</);
   assert.match(html, /data-duration="0:08"/);
-  assert.match(html, /<img src="\/api\/chat\/chat_abc\/references\/ref_video\/thumb" alt="Push-in\.mp4"/);
-  assert.match(html, /<img src="[^"]*" alt="Brand texture"/);
+  assert.ok(!/<img[^>]+src="\/api\//.test(html), 'authed thumbs never render as a bare img src');
+  assert.match(html, /data-ref-thumb="\/api\/chat\/chat_abc\/references\/ref_video\/thumb"[^>]*data-ref-id="ref_video"/);
+  assert.match(html, /data-ref-thumb="\/api\/chat\/chat_abc\/references\/ref_image\/thumb"[^>]*aria-label="Brand texture"/);
   assert.match(html, /Scene 2 \/ style reference/);
   assert.match(html, /Warm grain/);
   assert.match(html, /data-note-ref="ref_image"[^>]*maxlength="1000"/);

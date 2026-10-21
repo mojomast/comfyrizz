@@ -15,8 +15,11 @@ import type { Asset, PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/launch-demo/package.json';
 import timelineJson from '../../../examples/launch-demo/timeline.json';
-import { mountPreview, updatePreview } from './preview';
-import { mountScriptAudioPanel } from './editor/inspector/panel.ts';
+import { mountPreview, updatePreview as updatePreviewBase } from './preview';
+import { mountScriptAudioPanel, type ScriptAudioPanelHandle } from './editor/inspector/panel.ts';
+import { createTakesApi, type ClipSummary, type TakesResponse } from './takes/api.ts';
+import { createClipStore, mountRenderBar, withRenderOverride, type RenderBarHandle, type RenderGateSummary } from './takes/render-bar.ts';
+import { previewPackage, type PreviewClip } from './takes/preview-takes.ts';
 import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
 import type { InlineAsset } from '../../renderer/src/components';
 
@@ -119,6 +122,174 @@ let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; s
 let agentSettings: ReturnType<typeof mountAgentSettings>;
 let projectChat: ReturnType<typeof mountProjectChat>;
 let referencePanel: ReturnType<typeof mountReferencePanel> | null = null;
+
+// TIMELINE-REVIEW TR17: one clips map shared by the render bar and the Takes tab.
+const takesApi = createTakesApi({ apiFetch });
+const clipStore = createClipStore();
+const takeInfoCache = new Map<string, TakesResponse>();
+const takeUrlCache = new Map<string, string>();
+let previewClipMap: Record<string, PreviewClip> = {};
+let previewAb: { takeId: string; clipId: string; assetId: string } | null = null;
+let scriptPanel: ScriptAudioPanelHandle | null = null;
+let renderBar: RenderBarHandle | null = null;
+let clipsRequest = 0;
+
+/** The package with the selected (or A/B) take files swapped for media-ticket URLs. */
+function withTakePreview(nextPkg: PackageV1): PackageV1 {
+  if (Object.keys(previewClipMap).length === 0) return nextPkg;
+  try {
+    return previewPackage(nextPkg, previewClipMap, previewAb ? { abTake: previewAb } : {}) as PackageV1;
+  } catch {
+    return nextPkg;
+  }
+}
+
+/** Every existing preview call goes through here so a take swap is never lost. */
+function updatePreview(nextPkg: PackageV1, nextTimeline: Timeline, nextAssets?: Record<string, InlineAsset>): void {
+  updatePreviewBase(withTakePreview(nextPkg), nextTimeline, nextAssets);
+}
+
+function previewClipFrom(clip: ClipSummary, data: TakesResponse): PreviewClip {
+  return {
+    clipId: clip.clipId,
+    assetId: clip.assetId,
+    selected: data.selected,
+    takes: data.takes
+      .filter(take => !take.purged)
+      .map(take => ({ takeId: take.takeId, url: takeUrlCache.get(take.takeId) ?? null, media: take.media })),
+  };
+}
+
+async function ensureTakeInfo(clipId: string, force = false): Promise<TakesResponse | null> {
+  const cached = takeInfoCache.get(clipId);
+  if (cached && !force) return cached;
+  try {
+    const data = await takesApi.getTakes(String(pkg.id ?? ''), clipId);
+    takeInfoCache.set(clipId, data);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureTakeUrl(clipId: string, takeId: string): Promise<string | null> {
+  const cached = takeUrlCache.get(takeId);
+  if (cached) return cached;
+  const data = await ensureTakeInfo(clipId);
+  const take = data?.takes.find(candidate => candidate.takeId === takeId);
+  if (!take) return null;
+  try {
+    const url = await takesApi.takeUrl(String(pkg.id ?? ''), clipId, takeId);
+    takeUrlCache.set(takeId, url);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch selected-take media tickets and rebuild the preview package. */
+async function hydrateTakePreview(clips: readonly ClipSummary[], request: number): Promise<void> {
+  const next: Record<string, PreviewClip> = {};
+  for (const clip of clips) {
+    if (!clip.selected) continue;
+    const data = await ensureTakeInfo(clip.clipId);
+    if (request !== clipsRequest) return;
+    if (!data) continue;
+    const selected = data.takes.find(take => take.takeId === clip.selected);
+    if (!selected) continue;
+    if (!takeUrlCache.has(selected.takeId)) {
+      const url = await ensureTakeUrl(clip.clipId, selected.takeId);
+      if (request !== clipsRequest) return;
+      if (url) takeUrlCache.set(selected.takeId, url);
+    }
+    next[clip.assetId] = previewClipFrom(clip, data);
+  }
+  if (request !== clipsRequest) return;
+  previewClipMap = next;
+  if (previewAb && !clipStore.get(previewAb.clipId)) previewAb = null;
+  updatePreview(pkg, timeline, generatedAssets);
+}
+
+/** Refresh the shared clips map from the take routes (called on load and clip.* SSE). */
+async function refreshClips(): Promise<void> {
+  if (!token) return;
+  const packageId = String(pkg.id ?? '');
+  if (!packageId) return;
+  const request = ++clipsRequest;
+  try {
+    const result = await takesApi.listClips(packageId);
+    if (request !== clipsRequest) return;
+    clipStore.replace(result.clips, { packageId, revision: result.revision });
+    scriptPanel?.setClips(result.clips);
+    renderBar?.update();
+    await hydrateTakePreview(result.clips, request);
+  } catch (error) {
+    if (request === clipsRequest) logActivity(`Clips refresh failed: ${(error as Error).message}`);
+  }
+}
+
+/** One clip.* SSE event: invalidate the affected take cache and refresh the map. */
+function handleClipEvent(type: string, event: Event): void {
+  let data: { packageId?: string; clipId?: string; assetId?: string; takeId?: string; verdict?: string } = {};
+  try {
+    data = JSON.parse((event as MessageEvent).data) as typeof data;
+  } catch {
+    return;
+  }
+  if (data.packageId && data.packageId !== pkg.id) return;
+  if (data.clipId) takeInfoCache.delete(data.clipId);
+  if (data.assetId) {
+    for (const clip of clipStore.all()) {
+      if (clip.assetId === data.assetId) takeInfoCache.delete(clip.clipId);
+    }
+  }
+  if (type === 'clip.take.landed') logActivity(`New take landed${data.assetId ? ` for ${data.assetId}` : ''}`);
+  else if (type === 'clip.verdict') logActivity(`Clip verdict: ${data.verdict ?? 'updated'}`);
+  else if (type === 'clip.queued') logActivity('Clip regeneration queued');
+  void refreshClips();
+}
+
+/** The Takes tab's A/B preview: swap only that clip to the chosen take. */
+async function previewTake(clipId: string, takeId: string | null): Promise<void> {
+  if (!takeId) {
+    previewAb = null;
+    updatePreview(pkg, timeline, generatedAssets);
+    return;
+  }
+  const clip = clipStore.get(clipId);
+  if (!clip) return;
+  const data = await ensureTakeInfo(clipId, true);
+  if (!data) return;
+  const url = await ensureTakeUrl(clipId, takeId);
+  if (!url) return;
+  previewClipMap[clip.assetId] = previewClipFrom(clip, data);
+  previewAb = { takeId, clipId, assetId: clip.assetId };
+  updatePreview(pkg, timeline, generatedAssets);
+}
+
+/** Timeline/render-bar blockers jump to the clip in the Takes tab and the preview. */
+function selectClipForReview(clipId: string): void {
+  const clip = clipStore.get(clipId);
+  if (!clip) return;
+  scriptPanel?.selectClip(clipId);
+  const scene = timeline.scenes.find(item => item.id === clip.sceneId);
+  if (scene) {
+    editorApi?.followFrame(scene.from);
+    player?.seekTo(scene.from);
+  }
+}
+
+/** Ask for an override reason only when the local gate is blocked. */
+async function beginExport(): Promise<void> {
+  const gate = clipStore.gate();
+  if (gate.total > 0 && !gate.ok) {
+    const reason = await renderBar?.requestOverride(gate);
+    if (!reason) return;
+    await exportMp4(reason);
+    return;
+  }
+  await exportMp4();
+}
 const state = {
   dirty: false,
   streaming: false,
@@ -1071,12 +1242,12 @@ function applySceneRenderStatus(rendered: string[], reused: string[], full: bool
   renderStoryboard();
 }
 
-async function exportMp4(): Promise<void> {
+async function exportMp4(overrideReason?: string): Promise<void> {
   const button = $<HTMLButtonElement>('render');
   const label = $('render-state');
   button.disabled = true;
   label.textContent = 'recompiling + rendering on CPU (~90 s)…';
-  logActivity('Export started: recompile with A2, render with Remotion on CPU');
+  logActivity(overrideReason ? 'Export started with a written render-gate override' : 'Export started: recompile with A2, render with Remotion on CPU');
   try {
     let body: Record<string, unknown> = { package: pkg };
     if (token) {
@@ -1092,12 +1263,26 @@ async function exportMp4(): Promise<void> {
       body = { packageId: pkg.id, baseRevision: savedBody.revision };
       logActivity(`Saved revision ${savedBody.revision} before render`);
     }
+    const requestBody = audioMixEnabled ? body : { ...body, mixAudio: false };
+    // The override dialog sends override.reason; a blocked render never gets one by default.
     const response = await apiFetch('/api/render', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(audioMixEnabled ? body : { ...body, mixAudio: false }),
+      body: JSON.stringify(withRenderOverride(requestBody, overrideReason)),
     });
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? `HTTP ${response.status}`);
+    if (!response.ok) {
+      const errorBody = (await response.json().catch(() => ({}))) as { error?: string; code?: string; gate?: RenderGateSummary };
+      if (overrideReason === undefined && errorBody.code === 'RENDER_GATE_BLOCKED') {
+        void refreshClips();
+        const reason = await renderBar?.requestOverride(errorBody.gate ?? clipStore.gate());
+        if (reason) {
+          button.disabled = false;
+          await exportMp4(reason);
+          return;
+        }
+      }
+      throw new Error(errorBody.error ?? `HTTP ${response.status}`);
+    }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1469,9 +1654,14 @@ function adoptChatProject(project: ChatProject, built: boolean): void {
   renderStoryboard();
   renderPalette();
   renderAssets();
+  takeInfoCache.clear();
+  takeUrlCache.clear();
+  previewClipMap = {};
+  previewAb = null;
   updatePreview(pkg, timeline, generatedAssets);
   state.dirty = false;
   $('draft').textContent = `chat project · ${pkg.scenes.length} scenes · rev ${project.revision}${built ? ' · built' : ''}`;
+  void refreshClips();
   if (built) {
     briefState.brief = null;
     briefState.pending = [];
@@ -1505,7 +1695,12 @@ async function runBrief(brief: string): Promise<void> {
     renderStoryboard();
     renderPalette();
     renderAssets();
+    takeInfoCache.clear();
+    takeUrlCache.clear();
+    previewClipMap = {};
+    previewAb = null;
     updatePreview(pkg, timeline, generatedAssets);
+    void refreshClips();
     state.dirty = false;
     const agentLabel = body.fallback ? 'scripted fallback' : body.live ? `${body.provider} / ${body.model}` : 'scripted model';
     $('draft').textContent = `agent package · ${body.svgAssets.length} SVG assets · ${agentLabel}`;
@@ -1541,7 +1736,18 @@ function init(): void {
   const timelineHost = document.getElementById('scene-timeline');
   const scriptHost = document.getElementById('script-audio-panel');
   if (scriptHost) {
-    mountScriptAudioPanel(scriptHost, editorStore);
+    scriptPanel = mountScriptAudioPanel(scriptHost, editorStore);
+    scriptPanel.mountTakes({
+      api: takesApi,
+      packageId: () => String(pkg.id ?? ''),
+      clips: clipStore.all(),
+      onPreview: (clipId, takeId) => { void previewTake(clipId, takeId); },
+      onChanged: clipId => {
+        takeInfoCache.delete(clipId);
+        void refreshClips();
+      },
+      log: logActivity,
+    });
     const animationHost = document.createElement('div');
     animationHost.id = 'animation-panel';
     scriptHost.append(animationHost);
@@ -1584,7 +1790,7 @@ function init(): void {
     });
   }
   let boundPlayer: PlayerRef | null = null;
-  mountPreview($('player'), pkg, timeline, ref => {
+  mountPreview($('player'), withTakePreview(pkg), timeline, ref => {
     player = ref;
     if (boundPlayer === ref) return;
     boundPlayer = ref;
@@ -1614,7 +1820,16 @@ function init(): void {
   });
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
-  $('render').addEventListener('click', () => void exportMp4());
+  const renderButton = $('render');
+  const renderBarHost = document.createElement('div');
+  renderBarHost.id = 'render-bar-host';
+  renderButton.before(renderBarHost);
+  renderBar = mountRenderBar(renderBarHost, {
+    gate: () => clipStore.gate(),
+    onRender: reason => exportMp4(reason),
+    onSelectBlocker: selectClipForReview,
+  });
+  renderButton.addEventListener('click', () => void beginExport());
   const renderLocation = $<HTMLSelectElement>('render-location');
   if (renderLocation) {
     renderLocation.value = readRenderLocation();
@@ -1635,6 +1850,20 @@ function init(): void {
     stream.addEventListener('package.updated', event => {
       const data = JSON.parse((event as MessageEvent).data) as { revision: number };
       logActivity(`Server accepted package revision ${data.revision}`);
+      void refreshClips();
+    });
+    // TR17: every clip.* event refreshes the shared clips map, so the Takes tab
+    // and the render gate follow landed takes, selections and verdicts.
+    stream.addEventListener('clip.queued', event => handleClipEvent('clip.queued', event));
+    stream.addEventListener('clip.job', event => handleClipEvent('clip.job', event));
+    stream.addEventListener('clip.take.landed', event => handleClipEvent('clip.take.landed', event));
+    stream.addEventListener('clip.take.selected', event => handleClipEvent('clip.take.selected', event));
+    stream.addEventListener('clip.verdict', event => handleClipEvent('clip.verdict', event));
+    stream.addEventListener('render.gate.blocked', event => {
+      const data = JSON.parse((event as MessageEvent).data) as { approved?: number; total?: number; blocking?: unknown[] };
+      logActivity(`Final render blocked: ${data.approved ?? 0}/${data.total ?? 0} clips approved`);
+      void refreshClips();
+      renderBar?.update();
     });
     stream.addEventListener('render.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { renderId: string };
@@ -1864,6 +2093,8 @@ function init(): void {
     if (briefMode === 'plan' && token) void planBriefFlow(text);
     else void runBrief(text);
   });
+
+  if (token) void refreshClips();
 }
 
 await openRequestedPackage();

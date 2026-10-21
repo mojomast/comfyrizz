@@ -11,8 +11,29 @@ import { exportAudition, scriptView } from '../derive.ts';
 import { DEMO_SOURCE, demoSamples } from './demo.ts';
 import type { EditorStore, EditorExtras } from '../store.ts';
 import type { SceneFreshness } from '../types.ts';
+import type { ClipSummary, TakesApi } from '../../takes/api.ts';
+import { mountTakePanel, type TakePanelHandle } from '../../takes/panel.ts';
 
 type PanelStore = EditorStore & EditorExtras;
+
+export type TakesTabOptions = {
+  api: TakesApi;
+  packageId: string | (() => string);
+  clips?: readonly ClipSummary[];
+  onPreview?: (clipId: string, takeId: string | null) => void;
+  onChanged?: (clipId: string) => void;
+  log?: (message: string) => void;
+};
+
+export type ScriptAudioPanelHandle = {
+  /** Refresh the Takes tab's clip list from the shell's clip store. */
+  setClips(clips: readonly ClipSummary[]): void;
+  /** Focus one clip in the Takes tab (timeline chip, render-bar blocker). */
+  selectClip(clipId: string): void;
+  /** Mount the Takes tab with the takes API; the Script tab still works alone. */
+  mountTakes(options: TakesTabOptions): void;
+  destroy(): void;
+};
 
 function freshnessText(status: SceneFreshness | undefined): string {
   if (!status) return 'No scene selected.';
@@ -24,67 +45,92 @@ function tone(status: SceneFreshness | undefined): string {
   return status.take === 'stale' || status.alignment === 'stale' || status.presenter === 'stale' ? 'stale' : 'fresh';
 }
 
-export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samples = demoSamples()): void {
+export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samples = demoSamples()): ScriptAudioPanelHandle {
   host.innerHTML = '';
   const panel = document.createElement('section');
   panel.className = 'sa-panel';
   panel.setAttribute('aria-label', 'Script, audio and media');
   panel.setAttribute('data-testid', 'script-audio');
   panel.innerHTML = `
-    <div class="sa-head">
-      <h2>Script and audio</h2>
-      <p class="sa-status" data-testid="script-save-status" data-save-status role="status"></p>
+    <div class="sa-tabs" role="tablist" aria-label="Inspector sections" data-testid="inspector-tabs">
+      <button type="button" role="tab" id="sa-tab-script" aria-controls="sa-section-script" aria-selected="true" data-inspector-tab="script">Script</button>
+      <button type="button" role="tab" id="sa-tab-takes" aria-controls="sa-section-takes" aria-selected="false" data-inspector-tab="takes">Takes</button>
     </div>
-    <div class="sa-row">
-      <label>Scene <select data-testid="scene-select" data-scene></select></label>
-      <span class="sa-row">
-        <button type="button" data-undo>Undo</button>
-        <button type="button" data-redo>Redo</button>
-      </span>
-    </div>
-    <p class="sa-status" data-testid="freshness" data-freshness role="status"></p>
-    <label>Narration<textarea data-testid="narration" data-narration maxlength="600"></textarea></label>
-    <div class="sa-row">
-      <button type="button" data-testid="apply-narration" data-apply-narration>Apply narration</button>
-      <span class="hint">Applying narration marks this take, its alignment and the presenter stale.</span>
-    </div>
-    <ol class="sa-sentences" data-testid="sentences" data-sentences></ol>
-    <label>Caption correction<input data-testid="caption-text" data-caption maxlength="600" /></label>
-    <button type="button" data-testid="apply-caption" data-apply-caption>Correct caption</button>
-    <div class="sa-row">
-      <label>Voice engine
-        <select data-engine>
-          <option value="kokoro">Kokoro (CPU)</option>
-          <option value="qwen3-tts">Qwen3-TTS</option>
-          <option value="none">None</option>
-        </select>
-      </label>
-      <label>Voice id <input data-voice-id maxlength="64" /></label>
-      <label>Speed <input data-speed type="number" min="0.5" max="2" step="0.05" /></label>
-    </div>
-    <div class="sa-row">
-      <button type="button" data-set-voice>Set voice</button>
-      <button type="button" data-preview-voice>Preview voice</button>
-    </div>
-    <p class="hint" data-preview role="status"></p>
-    <canvas class="sa-wave" data-wave width="640" height="72" aria-label="Narration waveform"></canvas>
-    <div class="sa-row">
-      <label>Split at frame <input data-testid="split-frame" data-frame type="number" min="0" step="1" value="15" /></label>
-      <button type="button" data-testid="split" data-split>Split scene</button>
-    </div>
-    <fieldset class="sa-fieldset">
-      <legend>Mix audition</legend>
-      <div class="sa-row">
-        <label><input type="checkbox" data-mute="narration" checked /> Narration</label>
-        <label><input type="checkbox" data-mute="music" checked /> Music</label>
-        <label><input type="checkbox" data-mute="ambience" checked /> Ambience</label>
-        <label><input type="checkbox" data-mute="sfx" checked /> SFX</label>
+    <div role="tabpanel" id="sa-section-script" aria-labelledby="sa-tab-script" data-inspector-panel="script">
+      <div class="sa-head">
+        <h2>Script and audio</h2>
+        <p class="sa-status" data-testid="script-save-status" data-save-status role="status"></p>
       </div>
-      <p class="hint" data-mix>Export uses the renderer mix. These switches are audition only.</p>
-    </fieldset>
-    <p class="hint" data-action role="status"></p>
+      <div class="sa-row">
+        <label>Scene <select data-testid="scene-select" data-scene></select></label>
+        <span class="sa-row">
+          <button type="button" data-undo>Undo</button>
+          <button type="button" data-redo>Redo</button>
+        </span>
+      </div>
+      <p class="sa-status" data-testid="freshness" data-freshness role="status"></p>
+      <label>Narration<textarea data-testid="narration" data-narration maxlength="600"></textarea></label>
+      <div class="sa-row">
+        <button type="button" data-testid="apply-narration" data-apply-narration>Apply narration</button>
+        <span class="hint">Applying narration marks this take, its alignment and the presenter stale.</span>
+      </div>
+      <ol class="sa-sentences" data-testid="sentences" data-sentences></ol>
+      <label>Caption correction<input data-testid="caption-text" data-caption maxlength="600" /></label>
+      <button type="button" data-testid="apply-caption" data-apply-caption>Correct caption</button>
+      <div class="sa-row">
+        <label>Voice engine
+          <select data-engine>
+            <option value="kokoro">Kokoro (CPU)</option>
+            <option value="qwen3-tts">Qwen3-TTS</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label>Voice id <input data-voice-id maxlength="64" /></label>
+        <label>Speed <input data-speed type="number" min="0.5" max="2" step="0.05" /></label>
+      </div>
+      <div class="sa-row">
+        <button type="button" data-set-voice>Set voice</button>
+        <button type="button" data-preview-voice>Preview voice</button>
+      </div>
+      <p class="hint" data-preview role="status"></p>
+      <canvas class="sa-wave" data-wave width="640" height="72" aria-label="Narration waveform"></canvas>
+      <div class="sa-row">
+        <label>Split at frame <input data-testid="split-frame" data-frame type="number" min="0" step="1" value="15" /></label>
+        <button type="button" data-testid="split" data-split>Split scene</button>
+      </div>
+      <fieldset class="sa-fieldset">
+        <legend>Mix audition</legend>
+        <div class="sa-row">
+          <label><input type="checkbox" data-mute="narration" checked /> Narration</label>
+          <label><input type="checkbox" data-mute="music" checked /> Music</label>
+          <label><input type="checkbox" data-mute="ambience" checked /> Ambience</label>
+          <label><input type="checkbox" data-mute="sfx" checked /> SFX</label>
+        </div>
+        <p class="hint" data-mix>Export uses the renderer mix. These switches are audition only.</p>
+      </fieldset>
+      <p class="hint" data-action role="status"></p>
+    </div>
+    <div role="tabpanel" id="sa-section-takes" aria-labelledby="sa-tab-takes" data-inspector-panel="takes" hidden>
+      <div class="sa-head">
+        <h2>Takes</h2>
+        <p class="sa-status" data-takes-status role="status" aria-live="polite"></p>
+      </div>
+      <label>Clip <select data-takes-clip data-testid="takes-clip"></select></label>
+      <div data-takes-host></div>
+    </div>
   `;
   host.append(panel);
+  const style = document.createElement('style');
+  style.dataset.comfyrizz = 'inspector-tabs';
+  style.textContent = `
+.sa-tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); }
+.sa-tabs [role="tab"] { border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:var(--muted); padding:6px 10px; }
+.sa-tabs [role="tab"][aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); }
+[data-inspector-panel] { display:flex; flex-direction:column; gap:10px; }
+[data-inspector-panel][hidden] { display:none; }
+[data-takes-host] .take-panel { padding:0; }
+`;
+  panel.prepend(style);
 
   const q = <T extends HTMLElement>(name: string) => panel.querySelector<T>(`[data-${name}]`)!;
   const saveEl = q<HTMLParagraphElement>('save-status');
@@ -101,6 +147,128 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
   let captionIndex = 0;
   let waveMin: Float32Array | null = null;
   let waveMax: Float32Array | null = null;
+
+  const takesHost = q<HTMLDivElement>('takes-host');
+  const takesSelect = q<HTMLSelectElement>('takes-clip');
+  const takesStatus = q<HTMLParagraphElement>('takes-status');
+  let takesOptions: TakesTabOptions | null = null;
+  let takesHandle: TakePanelHandle | null = null;
+  let takesClips: ClipSummary[] = [];
+  let takesClipId = '';
+  let takesSignature = '';
+
+  const showTab = (tab: 'script' | 'takes'): void => {
+    panel.querySelectorAll<HTMLElement>('[data-inspector-tab]').forEach(button => {
+      button.setAttribute('aria-selected', button.getAttribute('data-inspector-tab') === tab ? 'true' : 'false');
+    });
+    panel.querySelectorAll<HTMLElement>('[data-inspector-panel]').forEach(section => {
+      section.hidden = section.getAttribute('data-inspector-panel') !== tab;
+    });
+    // Animation and voice are separate hosts appended beside this panel; they
+    // belong to the Script tab, not the Takes tab.
+    for (const sibling of Array.from(host.children)) {
+      if (sibling !== panel && sibling instanceof HTMLElement) sibling.hidden = tab === 'takes';
+    }
+  };
+  panel.querySelectorAll<HTMLButtonElement>('[data-inspector-tab]').forEach(button => {
+    button.addEventListener('click', () => showTab(button.getAttribute('data-inspector-tab') === 'takes' ? 'takes' : 'script'));
+  });
+
+  const clipSignature = (clip: ClipSummary): string => `${clip.clipId}:${clip.state}:${clip.takeCount}:${clip.selected}:${clip.newTakes}`;
+
+  const decorateTakesApi = (api: TakesApi, clipId: string): TakesApi => {
+    const changed = (): void => takesOptions?.onChanged?.(clipId);
+    return {
+      ...api,
+      async regenerate(packageId, id, input) {
+        const result = await api.regenerate(packageId, id, input);
+        changed();
+        return result;
+      },
+      async select(packageId, id, takeId) {
+        const result = await api.select(packageId, id, takeId);
+        changed();
+        return result;
+      },
+      async revert(packageId, id) {
+        const result = await api.revert(packageId, id);
+        changed();
+        return result;
+      },
+      async verdict(packageId, id, verdict, options) {
+        const result = await api.verdict(packageId, id, verdict, options);
+        changed();
+        return result;
+      },
+    };
+  };
+
+  const mountTakesForClip = (): void => {
+    takesHandle?.destroy();
+    takesHandle = null;
+    takesHost.innerHTML = '';
+    const options = takesOptions;
+    if (!options) {
+      takesHost.innerHTML = '<p class="sa-status">Takes are not available in this shell.</p>';
+      return;
+    }
+    const clip = takesClips.find(item => item.clipId === takesClipId);
+    if (!clip) {
+      takesHost.innerHTML = '<p class="sa-status">No reviewable clips in this package yet.</p>';
+      return;
+    }
+    const packageId = typeof options.packageId === 'function' ? options.packageId() : options.packageId;
+    if (!packageId) {
+      takesHost.innerHTML = '<p class="sa-status">Open a saved project to review its clips.</p>';
+      return;
+    }
+    takesSignature = clipSignature(clip);
+    const clipId = takesClipId;
+    takesHandle = mountTakePanel(takesHost, {
+      api: decorateTakesApi(options.api, clipId),
+      packageId,
+      clipId,
+      onPreview: takeId => options.onPreview?.(clipId, takeId),
+    });
+  };
+
+  const fillTakesClips = (clips: readonly ClipSummary[]): void => {
+    takesClips = Array.isArray(clips) ? [...clips] : [];
+    const previous = takesClipId;
+    if (!takesClips.some(clip => clip.clipId === previous)) takesClipId = takesClips[0]?.clipId ?? '';
+    const options = takesClips.map(clip => {
+      const option = document.createElement('option');
+      option.value = clip.clipId;
+      option.textContent = `${clip.clipId} · ${clip.state}`;
+      return option;
+    });
+    takesSelect.replaceChildren(...options);
+    takesSelect.disabled = takesClips.length === 0;
+    takesSelect.value = takesClipId;
+    const approved = takesClips.filter(clip => clip.state === 'approved').length;
+    takesStatus.textContent = takesClips.length === 0
+      ? (takesOptions ? 'No reviewable clips in this package yet.' : 'Takes are not available in this shell.')
+      : `${approved}/${takesClips.length} clips approved`;
+    const current = takesClips.find(clip => clip.clipId === takesClipId);
+    if (!takesOptions || !current) {
+      if (takesOptions) mountTakesForClip();
+      return;
+    }
+    if (!takesHandle || previous !== takesClipId) {
+      mountTakesForClip();
+      return;
+    }
+    const signature = clipSignature(current);
+    if (signature !== takesSignature) {
+      takesSignature = signature;
+      void takesHandle.refresh();
+    }
+  };
+
+  takesSelect.addEventListener('change', () => {
+    takesClipId = takesSelect.value;
+    mountTakesForClip();
+  });
 
   const selectedId = () => sceneSelect.value || store.getState().session.selectedSceneIds[0] || '';
   const run = (cmd: Command) => {
@@ -261,6 +429,31 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
     action.textContent = message;
     console.error('waveform', message);
   });
+
+  return {
+    setClips(clips) {
+      fillTakesClips(clips);
+    },
+    selectClip(clipId) {
+      if (clipId === takesClipId) {
+        showTab('takes');
+        return;
+      }
+      takesClipId = clipId;
+      takesSelect.value = clipId;
+      showTab('takes');
+      mountTakesForClip();
+    },
+    mountTakes(options) {
+      takesOptions = options;
+      fillTakesClips(options.clips ?? takesClips);
+    },
+    destroy() {
+      takesHandle?.destroy();
+      takesHandle = null;
+      panel.remove();
+    },
+  };
 }
 
 function play(samples: Float32Array, sampleRate: number): void {
