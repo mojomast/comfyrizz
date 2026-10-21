@@ -34,6 +34,9 @@ test('private launch requires an unexpired one-use grant and same-origin POST; p
     assert.equal(accepted.status, 303);
     assert.equal(accepted.headers.Location, '/#token=test-only-secret');
     assert.equal(call('POST').status, 404);
+    url = new URL(issuePrivateLaunch({ ...args, now: time, target: '/?package=pkg_nrcu_episode2&chat=chat_nrcu_episode2' }));
+    assert.equal(call('POST').headers.Location, '/?package=pkg_nrcu_episode2&chat=chat_nrcu_episode2#token=test-only-secret');
+    assert.throws(() => issuePrivateLaunch({ ...args, target: '//attacker.example/' }), /launch target/);
     url = new URL(issuePrivateLaunch({ ...args, now: time }));
     time += 3600001;
     assert.equal(call('POST').status, 404);

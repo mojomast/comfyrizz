@@ -117,6 +117,8 @@ export async function openInitialProject(options: OpenInitialProjectOptions): Pr
       packageId: target.packageId,
       activity: initialProjectActivity(target.source, target.packageId),
       ...(target.source === 'seeded' ? { chatId: SEEDED_CHAT_ID } : {}),
+      ...(target.source === 'requested' && /^chat_[A-Za-z0-9_-]{8,80}$/.test(new URLSearchParams(options.search).get('chat') ?? '')
+        ? { chatId: new URLSearchParams(options.search).get('chat')! } : {}),
       ...(editor ? { editor } : {}),
     };
   } catch (error) {

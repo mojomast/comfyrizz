@@ -122,6 +122,12 @@ test('PN07: a failed or malformed API response leaves the bundled package open',
   assert.equal(malformed.errors.length, 1);
 });
 
+test('a requested project can restore its explicitly linked conversation', async () => {
+  const requested = opener(() => json({ package: { id: 'pkg_nrcu_episode2' }, revision: 1 }));
+  assert.equal((await requested.open('?package=pkg_nrcu_episode2&chat=chat_nrcu_episode2', true)).chatId, 'chat_nrcu_episode2');
+  assert.equal((await requested.open('?package=pkg_nrcu_episode2&chat=../invalid', true)).chatId, undefined);
+});
+
 test('PN07: the shell boots Pip\'s Night Shift and keeps the seeded-chat fallback', () => {
   assert.match(mainSource, /examples\/pip-night-shift\/package\.json/);
   assert.match(mainSource, /examples\/pip-night-shift\/timeline\.json/);

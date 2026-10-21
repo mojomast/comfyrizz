@@ -13,6 +13,7 @@
 //   * unknown comfyrizz-* sessions are offered, never auto-stopped       -> orphans()
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { withRunPackage } from "./run-package.mjs";
+import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -209,6 +210,9 @@ export function createColabBackend({
   const scratch = scratchDir || join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${packageId}`);
   const logs = logDir || join(scratch, "logs");
   mkdirSync(scratch, { recursive: true });
+  if (modelsLock === join(REPO, 'colab', 'models.lock.json')) {
+    modelsLock = packageModelLock({ packageDir, scratchDir: scratch, repo: REPO, defaultLock: modelsLock });
+  }
   const registryFile = join(scratch, "sessions.json");
   // G4-2: a `pip install --user` CLI lives at ~/.local/bin/colab, which is not on the PATH the child
   // gets, so "not found" on a machine where it is installed and signed in. Resolve it once here.
@@ -398,6 +402,7 @@ export function createColabBackend({
   function estimateJobs(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
     const minutesFor = (job) => {
+      if (job.generator === 'fasth3-omni') return fasth3JobMinutes(job);
       // H17: a presenter clip is priced per video-second (research 2.2 measured about 3.3 GPU-seconds
       // per second of video at 0.59 MP), not per job, because its cost scales with the narration it
       // covers. The number to replace is PRESENTER_GPU_SECONDS_PER_VIDEO_SECOND, from the bake-off.
@@ -415,7 +420,7 @@ export function createColabBackend({
       units: unitsForMinutes(gpuMinutes + BOOTSTRAP_OVERHEAD_MINUTES, ratePerHour),
       basis:
         "measured wall minutes per job kind (Google Colab GPU test 3, docs/GPU_TEST_3.md; GPU test 2 " +
-        "for the upscale and audio shapes), overhead measured at 218.5 s of setup",
+        "for the upscale and audio shapes); FastH3 pilot: 13 wall seconds/source second; overhead measured at 218.5 s of setup",
       perKind: { ...MEASURED_JOB_MINUTES },
       slowestJobMinutes: slowest,
     };

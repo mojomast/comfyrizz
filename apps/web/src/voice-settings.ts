@@ -23,6 +23,8 @@ type Options = {
   /** Flush shared autosave and return the revision /api/pipeline/plan expects. */
   save: () => Promise<VoiceSaveResult>;
   api: Client;
+  /** Reuse the editor's review gate; null means the user cancelled. */
+  renderOverride?: () => Promise<{ reason: string } | undefined | null>;
   /** Repaint after external edits (undo/redo) without stealing focus. */
   subscribe?: (listener: () => void) => () => void;
 };
@@ -280,7 +282,10 @@ function render() {
   }));
   host.querySelector('[data-start]')?.addEventListener('click', () => perform(async () => {
     if (!plan || plan.snapshot !== JSON.stringify(packageValue())) { plan = null; throw Error('Project changed. Check a fresh generation plan.'); }
-    run = (await request('/api/pipeline', { ...plan.body, approvedPlanHash: plan.value.planHash })).run;
+    const override = await options!.renderOverride?.();
+    if (override === null) return;
+    if (!plan || plan.snapshot !== JSON.stringify(packageValue())) { plan = null; throw Error('Project changed. Check a fresh generation plan.'); }
+    run = (await request('/api/pipeline', { ...plan.body, approvedPlanHash: plan.value.planHash, ...(override ? { override } : {}) })).run;
     if (run) sessionStorage.setItem('comfyrizz.voice-generation-run', run.runId);
     plan = null; message = 'Generation started.';
     if (timer) clearTimeout(timer); timer = setTimeout(refreshRun, 1000);

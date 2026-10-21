@@ -1755,6 +1755,12 @@ function init(opened: OpenedProject): void {
       },
       save: saveEditorNow,
       api: apiFetch,
+      renderOverride: async () => {
+        const gate = clipStore.gate();
+        if (gate.ok || gate.total === 0) return undefined;
+        const reason = await renderBar?.requestOverride(gate);
+        return reason ? { reason } : null;
+      },
       subscribe: listener => editorStore.subscribe(listener),
     });
   }
@@ -2029,6 +2035,11 @@ function init(opened: OpenedProject): void {
 
   projectChat = mountProjectChat({
     apiFetch,
+    ...(opened.source === 'requested' ? {
+      initialConversationId: opened.chatId,
+      restoreSaved: false,
+      expectedPackageId: opened.packageId ?? undefined,
+    } : {}),
     root: $('project-plan-panel'),
     append: appendChatMessage,
     replace: replaceChatMessages,

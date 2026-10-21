@@ -280,11 +280,11 @@ export function projectFps(format?: { fps?: number } | null): number {
  * Unmeasured scenes use the layout minimum. Speech is never the thing being trimmed.
  */
 export function speechFloorFrames(
-  scene: { id: string; layout: LayoutId },
+  scene: { id: string; layout: LayoutId; media_only?: boolean },
   options: CompileOptions,
   fps: number,
 ): { frames: number; measured: boolean } {
-  const limit = sceneLimit(scene.layout);
+  const limit = sceneLimit(scene.layout, undefined, scene.media_only);
   const spoken = narrationFrames(options.narration?.[scene.id], options, fps);
   if (spoken === null) return { frames: limit.min, measured: false };
   return { frames: spoken, measured: true };
@@ -303,8 +303,10 @@ function narrationFrames(chunks: NarrationChunk[] | undefined, options: CompileO
   return frameSecondsToFrames(spoken + gaps + padding, fps);
 }
 
-function sceneLimit(layout: LayoutId, variant?: string): LayoutLimit {
+function sceneLimit(layout: LayoutId, variant?: string, mediaOnly = false): LayoutLimit {
   void variant;
+  // Cinematic inserts have no layout copy to read; allow frame-exact short cuts.
+  if (mediaOnly) return { min: 1, max: (LAYOUT_LIMITS[layout] ?? LAYOUT_LIMITS.hero).max };
   return LAYOUT_LIMITS[layout] ?? LAYOUT_LIMITS.hero;
 }
 
@@ -324,7 +326,7 @@ interface ScenePlan {
 
 function planScenes(pkg: ComfyrizzPackage, options: CompileOptions, fps: number): ScenePlan[] {
   return pkg.scenes.map(scene => {
-    const limit = sceneLimit(scene.layout, scene.variant);
+    const limit = sceneLimit(scene.layout, scene.variant, scene.media_only);
     const preferred = isFiniteNumber(scene.preferredFrames) ? Math.floor(scene.preferredFrames) : limit.min;
     const chunks = options.narration?.[scene.id];
     const spoken = narrationFrames(chunks, options, fps);

@@ -51,3 +51,37 @@ already-authored production, copy those fields from the current helper into its
 `film.json` before scoring/exporting; do not rerun authoring over existing work.
 Review full decoding, captions, dialogue, shot endings and normal-speed
 audiovisual playback before publishing a finished episode.
+# Editable ComfyRizz project
+
+The prepared episode is installed in the private native project store as
+`pkg_nrcu_episode2`, with conversation `chat_nrcu_episode2`.
+
+Open `/?package=pkg_nrcu_episode2&chat=chat_nrcu_episode2` on the private app origin.
+The project contains 68 shots / 5,760 frames at 24 fps (four minutes), six cast
+members, 20 reused frame-exact pilot edits, 48 pending native FastH3 videos and
+53 pending Klein environment/keyframe stills. Voice conditioning WAVs and a
+draft rock bed are staged as normal package assets. Generated narration is off.
+The music bed and new dialogue timing still require editorial review.
+
+In **Script → Voice & narration → Generate narrated video**, select
+**Google Colab GPU**, set **Total compute-unit ceiling** to **12**, keep final
+render on **This machine**, and click **Check generation plan**. The live plan
+has passed preflight with 101 jobs and no issues. **Approve ceiling & generate**
+uses the existing review-gate override for a working preview; generated takes
+must subsequently be reviewed. G4 capacity is checked when allocation starts.
+
+The import command is:
+
+```sh
+COMFYRIZZ_PYTHON=/path/to/pillow-python node scripts/demos/nrcu-episode2-project.mjs \
+  PRODUCTION_DIRECTORY PILOT_ROCK_RECUT_DIRECTORY SERVER_RUNTIME_DIRECTORY
+```
+
+It refuses to overwrite an installed project or conversation. Original production
+files remain separate. Package-generated FastH3 jobs select the pinned H3 + Klein
+model profile automatically, including hash verification and native-node checks.
+The UI import, staging checks, timeline, job plan and headless-browser screenshots
+are recorded under the episode production directory as `ui-*` files.
+
+Verification did not allocate a GPU: the browser's start request was intercepted
+after confirming the 12-unit ceiling, project ID, plan hash and written override.

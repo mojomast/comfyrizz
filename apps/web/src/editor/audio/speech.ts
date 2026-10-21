@@ -97,7 +97,8 @@ interface Plan {
 
 function planScenes(pkg: EditorPackage, chunksByScene: Record<string, AlignmentChunk[] | undefined>, fps: number): Plan[] {
   return pkg.scenes.map(scene => {
-    const limit = LAYOUT_LIMITS[scene.layout] ?? LAYOUT_LIMITS.hero;
+    const layoutLimit = LAYOUT_LIMITS[scene.layout] ?? LAYOUT_LIMITS.hero;
+    const limit = scene.media_only ? { ...layoutLimit, min: 1 } : layoutLimit;
     const preferred = typeof scene.preferredFrames === 'number' && Number.isFinite(scene.preferredFrames)
       ? Math.floor(scene.preferredFrames)
       : limit.min;

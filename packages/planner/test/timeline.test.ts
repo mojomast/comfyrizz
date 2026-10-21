@@ -44,6 +44,15 @@ test('a cut is a hard cut even if it carries frames', () => {
   assert.equal(timeline.durationInFrames, timeline.scenes.reduce((acc, s) => acc + s.durationInFrames, 0));
 });
 
+test('media-only cinematic inserts retain short frame-exact timing and measured speech', () => {
+  const p = pkg([scene('insert', { layout: 'hero', media_only: true, preferredFrames: 24, transitionOut: { type: 'cut', frames: 0 } })]);
+  assert.equal(compileTimeline(p).durationInFrames, 24);
+  const measured = compileTimeline(p, { narration: { insert: [{ text: 'Keep the whole line.', seconds: 2 }] }, narrationPaddingSeconds: 0 });
+  assert.equal(measured.durationInFrames, 60);
+  p.scenes[0].media_only = false;
+  assert.equal(compileTimeline(p).durationInFrames, LAYOUT_LIMITS.hero.min);
+});
+
 test('a transition longer than either neighbour fails with a usable error', () => {
   const broken = pkg([
     scene('s1', { transitionOut: { type: 'fade', frames: 40 } }),

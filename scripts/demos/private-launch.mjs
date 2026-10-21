@@ -12,13 +12,20 @@ const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && a.leng
   && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const readToken = file => readFileSync(file, 'utf8').trim();
 
-export function issuePrivateLaunch({ tokenFile, grantFile, origin, now = Date.now() }) {
+function launchTarget(value, origin) {
+  const url = new URL(value, origin);
+  if (url.origin !== origin || url.pathname !== '/' || url.hash || url.username || url.password) throw Error('Expected a workspace-root launch target');
+  return url.pathname + url.search;
+}
+
+export function issuePrivateLaunch({ tokenFile, grantFile, origin, target = '/', now = Date.now() }) {
   const base = new URL(origin);
   if (base.protocol !== 'https:' || base.username || base.password || base.pathname !== '/' || base.search || base.hash) throw Error('Expected a private HTTPS origin');
   const token = readToken(tokenFile);
   if (!token) throw Error('Missing server token');
   const nonce = randomBytes(32).toString('hex');
-  writeFileSync(grantFile, JSON.stringify({ nonceHash: hash(nonce), tokenHash: hash(token), expiresAt: now + 60 * 60 * 1000 }), { mode: 0o600 });
+  const destination = launchTarget(target, base.origin);
+  writeFileSync(grantFile, JSON.stringify({ nonceHash: hash(nonce), tokenHash: hash(token), expiresAt: now + 60 * 60 * 1000, target: destination }), { mode: 0o600 });
   return base.origin + '/connect/' + nonce;
 }
 
@@ -47,14 +54,16 @@ export function createPrivateLaunchHandler({ tokenFile, grantFile, origin, now =
       return respond(404, 'This sign-in link has expired or was already used.');
     }
     // Preview fetches and HEAD requests never consume a grant or reveal the token.
-    if (req.method !== 'POST') return respond(200, '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open ComfyRizz</title><h1>Open ComfyRizz</h1><p>Sign in to your private workspace, then select Characters to see the Nous universe cast.</p><form method="post"><button type="submit">Open my workspace</button></form></html>');
+    if (req.method !== 'POST') return respond(200, '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open ComfyRizz</title><h1>Open ComfyRizz</h1><p>Sign in to open your private workspace and project.</p><form method="post"><button type="submit">Open my workspace</button></form></html>');
     if (req.headers.origin !== base.origin) return respond(403);
+    let target;
+    try { target = launchTarget(grant.target ?? '/', base.origin); } catch { return respond(403); }
     unlinkSync(grantFile);
-    return respond(303, '', { Location: '/#token=' + encodeURIComponent(token) });
+    return respond(303, '', { Location: target + '#token=' + encodeURIComponent(token) });
   };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  if (process.argv.length !== 5) throw Error('Usage: private-launch.mjs TOKEN_FILE GRANT_FILE PRIVATE_ORIGIN');
-  console.log(issuePrivateLaunch({ tokenFile: process.argv[2], grantFile: process.argv[3], origin: process.argv[4] }));
+  if (![5, 6].includes(process.argv.length)) throw Error('Usage: private-launch.mjs TOKEN_FILE GRANT_FILE PRIVATE_ORIGIN [WORKSPACE_TARGET]');
+  console.log(issuePrivateLaunch({ tokenFile: process.argv[2], grantFile: process.argv[3], origin: process.argv[4], target: process.argv[5] }));
 }

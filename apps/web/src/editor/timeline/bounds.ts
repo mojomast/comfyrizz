@@ -60,12 +60,12 @@ export function trimBounds(doc: ProjectDoc, measured: MeasuredInput, sceneId: st
   const fps = projectFps(doc.package.format);
   const limit = LAYOUT_LIMITS[scene.layout] ?? LAYOUT_LIMITS.hero!;
   const floor = speechFloorFrames(
-    { id: scene.id, layout: scene.layout as 'title' },
+    { id: scene.id, layout: scene.layout as 'title', media_only: scene.media_only === true },
     { narration: measured.narration },
     fps,
   );
   const speech = floor.measured ? floor.frames : null;
-  const min = Math.max(limit.min, speech ?? 0);
+  const min = Math.max(scene.media_only ? 1 : limit.min, speech ?? 0);
   const source = sourceCeilingFrames(doc, sceneId);
   const max = Math.min(MAX_PREFERRED, source ?? MAX_PREFERRED, limit.max);
   return { min, max: Math.max(min, max), speech, source };
