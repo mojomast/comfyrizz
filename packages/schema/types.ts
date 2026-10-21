@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 81b3a7c74cb05f5930b4b7014f512aa65cee0c1ed1d5af75ea04178c695ad8f1
+// Schema sha256: 835298e56f1b609c37a10c9f64b6b21ef774be0e2cedbcb5918a9e053eba8d1b
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -483,6 +483,77 @@ export interface CastMember {
    */
   ref_asset: AssetId;
   description?: string;
+  /**
+   * CCL4a: this cast member's own voice. Optional. When present it is used for scenes this member
+   * speaks (scene.speaker) and is shaped like the package voice without the package-level enabled
+   * switch.
+   */
+  voice?: CastVoice;
+  }
+
+export interface CastVoice {
+  enabled?: boolean;
+  /**
+   * kokoro is the CPU narrator. qwen3-tts is the Qwen3-TTS 1.7B backend. none means this character
+   * does not speak.
+   */
+  engine?: "kokoro" | "qwen3-tts" | "none";
+  voice?: string;
+  speed?: number;
+  language?: string;
+  /**
+   * Optional short language tag for Qwen3-TTS (en or fr). When it is omitted, voice.language is
+   * used. Kokoro keeps using voice.language.
+   * [minLength 2, maxLength 16]
+   */
+  lang?: string;
+  /**
+   * Natural-language description used by Qwen3-TTS VoiceDesign to build this character's voice.
+   * [minLength 1, maxLength 400]
+   */
+  persona?: string;
+  /**
+   * Designed reference clip for this character's voice.
+   */
+  ref_asset?: AssetId;
+  /**
+   * When true, a selected qwen3-tts runtime that is unavailable fails the run. When false or
+   * omitted, the run falls back to Kokoro.
+   */
+  strict?: boolean;
+  /**
+   * Kokoro synthesis context: separate sentences (default) or a coherent scene paragraph with
+   * estimated sentence/word alignment.
+   */
+  chunking?: "sentence" | "paragraph";
+  /**
+   * Kokoro weighted voice styles. Positive weights are normalized before synthesis.
+   * [minItems 2, maxItems 4]
+   */
+  blend?: Array<{
+    voice: string;
+    weight: number;
+    }>;
+  /**
+   * design (default) uses VoiceDesign then Base cloning; custom uses the CustomVoice preset named in
+   * voice.voice.
+   */
+  qwen_mode?: "design" | "custom";
+  /**
+   * CustomVoice default delivery instruction, overridden by scene.narration_style. For design mode,
+   * appended to the reference persona.
+   * [maxLength 400]
+   */
+  delivery?: string;
+  /**
+   * Qwen full-text conditioning. Defaults to false for Base cloning and true for CustomVoice.
+   */
+  non_streaming?: boolean;
+  /**
+   * Transcript synthesized by VoiceDesign to create the reusable synthetic reference.
+   * [minLength 1, maxLength 1000]
+   */
+  reference_text?: string;
   }
 
 /**
@@ -707,6 +778,12 @@ export interface Scene {
    * [maxItems 8]
    */
   cast?: Array<CastId>;
+  /**
+   * CCL4a: the cast member who speaks this scene's narration. Optional. When omitted, the package
+   * voice narrates. The speaker's cast[].voice, when present, overrides the package voice for this
+   * scene; otherwise the package voice is used.
+   */
+  speaker?: CastId;
   }
 
 export interface AssetVariants {

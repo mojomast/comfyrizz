@@ -959,6 +959,122 @@
         "description": {
           "type": "string",
           "maxLength": 400
+        },
+        "voice": {
+          "$ref": "#/$defs/castVoice",
+          "description": "CCL4a: this cast member's own voice. Optional. When present it is used for scenes this member speaks (scene.speaker) and is shaped like the package voice without the package-level enabled switch."
+        }
+      }
+    },
+    "castVoice": {
+      "type": "object",
+      "description": "CCL4a: a per-character voice in package-v1. Same fields and bounds as the package voice, minus the package switch: `enabled` is accepted for round-tripping a package voice but is not required. A missing voice means the package voice narrates.",
+      "unevaluatedProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "engine": {
+          "type": "string",
+          "enum": [
+            "kokoro",
+            "qwen3-tts",
+            "none"
+          ],
+          "description": "kokoro is the CPU narrator. qwen3-tts is the Qwen3-TTS 1.7B backend. none means this character does not speak."
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0,
+          "default": 1.0
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16
+        },
+        "lang": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16,
+          "description": "Optional short language tag for Qwen3-TTS (en or fr). When it is omitted, voice.language is used. Kokoro keeps using voice.language."
+        },
+        "persona": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400,
+          "description": "Natural-language description used by Qwen3-TTS VoiceDesign to build this character's voice."
+        },
+        "ref_asset": {
+          "$ref": "#/$defs/assetId",
+          "description": "Designed reference clip for this character's voice."
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "When true, a selected qwen3-tts runtime that is unavailable fails the run. When false or omitted, the run falls back to Kokoro."
+        },
+        "chunking": {
+          "type": "string",
+          "enum": [
+            "sentence",
+            "paragraph"
+          ],
+          "description": "Kokoro synthesis context: separate sentences (default) or a coherent scene paragraph with estimated sentence/word alignment."
+        },
+        "blend": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "description": "Kokoro weighted voice styles. Positive weights are normalized before synthesis.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "voice",
+              "weight"
+            ],
+            "properties": {
+              "voice": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "weight": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        },
+        "qwen_mode": {
+          "type": "string",
+          "enum": [
+            "design",
+            "custom"
+          ],
+          "description": "design (default) uses VoiceDesign then Base cloning; custom uses the CustomVoice preset named in voice.voice."
+        },
+        "delivery": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "CustomVoice default delivery instruction, overridden by scene.narration_style. For design mode, appended to the reference persona."
+        },
+        "non_streaming": {
+          "type": "boolean",
+          "description": "Qwen full-text conditioning. Defaults to false for Base cloning and true for CustomVoice."
+        },
+        "reference_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Transcript synthesized by VoiceDesign to create the reusable synthetic reference."
         }
       }
     },
@@ -1575,6 +1691,10 @@
           "items": {
             "$ref": "#/$defs/castId"
           }
+        },
+        "speaker": {
+          "$ref": "#/$defs/castId",
+          "description": "CCL4a: the cast member who speaks this scene's narration. Optional. When omitted, the package voice narrates. The speaker's cast[].voice, when present, overrides the package voice for this scene; otherwise the package voice is used."
         }
       }
     },
