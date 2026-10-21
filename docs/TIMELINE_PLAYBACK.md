@@ -76,6 +76,29 @@ These are Chromium regression results with synthetic media and controlled latenc
 not a measured guarantee for the private episode over every Tailscale connection.
 The changes require deploying the new web bundle to affect the live editor.
 
+### Private deployment verification
+
+Deployed the tested web bundle from **410c955** on 2026-10-21 at the user's request.
+Content-hashed assets were installed before the entry HTML, retaining old assets
+for open tabs and all 20 delivery-directory links. A rollback snapshot is stored
+under `.runtime/deployments/playback-410c955` in the original installation.
+
+The live episode exposed a pre-existing 404 at
+`/assets/nrcu-episode2/rock-draft.mp3`, which blocked synchronized buffering.
+Restored that static preview URL from the existing runtime score, verified
+byte-for-byte, without editing the authored package.
+
+Authenticated Chromium verification over the private HTTPS origin confirmed:
+- Served entry HTML and playback bundle match the tested build hashes.
+- All 68 scenes load; upcoming video is decoded while hidden (two media elements).
+- Playback passes cuts at frames 96 and 220 and reaches frame 272 / 11 seconds,
+  with no observed video `waiting` events, failed HTTP responses or page errors.
+- Owner package and token bytes are unchanged; project stays revision 10,
+  5,788 frames. Both existing services remain active; no restart was required.
+
+This verifies the opening consecutive clips on the deployed episode, not every
+cut or device. Refresh an existing editor tab to load the new bundle.
+
 ## Primary sources
 
 - [Remotion: Premounting](https://www.remotion.dev/docs/player/premounting)
