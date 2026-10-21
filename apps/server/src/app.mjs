@@ -19,6 +19,7 @@ import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
+import { createCharacterRoutes } from './characters/routes.mjs';
 import { ingestRun } from './takes/ingest.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
@@ -1637,6 +1638,7 @@ export function createApp({
     }
 
     if (await takeRoutes.handle(request, response, url)) return;
+    if (await createCharacterRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     if (await createReferenceRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     return sendJson(response, 404, { error: 'not found' });
   }
