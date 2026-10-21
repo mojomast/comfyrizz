@@ -122,14 +122,14 @@ for (const shot of film.shots) {
     if (shot.line) {
       const file = `${prefix}/dialogue-${shot.id}.wav`;
       copyFileSync(join(production, shot.audio), join(root, file));
-      audio = ready(`a_ep2_dialogue_${shot.id}`, file, 'audio', { audio: 'present' }, true);
+      audio = ready(`a_ep2_dialogue_${shot.id}`, file, 'audio', { audio: 'present', durationSeconds: shot.conditioningSeconds }, true);
     }
-    const deadline = Math.max(1, shot.seconds - .2).toFixed(2);
-    const prompt = shot.prompt.replace(/finish before [\d.]+ seconds/, `finish before ${deadline} seconds`);
+    if (!shot.direction) throw Error(`Shot ${shot.id} needs structured FastH3 direction; prepare the revised authoring plan first.`);
     generated(assetId, 'fasth3-omni', 'workflows/fasth3_omni_ref2va.api.json', {
-      image:'a_ep2_key_'+shot.id, reference:'a_ep2_key_'+shot.id, audio,
-      prompt, width:shot.width,height:shot.height,frames:shot.frames,fps:24,seed:shot.seed,
+      image:sourceAssets[shot.image] ?? 'a_ep2_key_'+shot.id, reference:'a_ep2_key_'+shot.id, audio,
+      prompt:shot.prompt, width:shot.width,height:shot.height,frames:shot.frames,fps:24,seed:shot.seed,
     }, 'video');
+    pkg.assets[assetId].gen.direction = shot.direction;
   }
   const ids = new Set();
   const key = keys.find(s => s.id === shot.id);

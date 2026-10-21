@@ -30,6 +30,14 @@ test('resolved job filenames do not make a newly landed take stale, but owner pr
   assert.equal(deriveClipState({ takes, assetGen: { inputs: { ...authored.inputs, prompt: 'Say goodbye.' } } }), 'stale');
 });
 
+test('changing structured direction invalidates a take without changing legacy fingerprints', () => {
+  const authored = { inputs: { prompt: 'legacy' } };
+  assert.equal(genFingerprint(authored), genFingerprint({ ...authored, direction: undefined }));
+  assert.notEqual(genFingerprint(authored), genFingerprint({ ...authored, direction: { action: 'new action' } }));
+  assert.notEqual(genFingerprint({ ...authored, direction: { reactionSeconds: .2 } }),
+    genFingerprint({ ...authored, direction: { reactionSeconds: .7 } }));
+});
+
 function makeTake(overrides = {}) {
   return {
     takeId: TAKE_ID,

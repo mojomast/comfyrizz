@@ -9,8 +9,16 @@ import json
 from pathlib import Path
 import sys
 import wave
+import subprocess
 
 import numpy as np
+
+
+def compile_prompts(requests):
+    """Use the shared jobs planner's full-reference formatter for external plans too."""
+    helper = Path(__file__).resolve().parents[2] / 'packages/jobs/src/fasth3-direction.mjs'
+    code = f"import{{buildFastH3Prompt}}from {json.dumps(helper.as_uri())};import{{readFileSync}}from'node:fs';console.log(JSON.stringify(JSON.parse(readFileSync(0,'utf8')).map(r=>buildFastH3Prompt(r.direction,r))));"
+    return json.loads(subprocess.check_output(['node', '--input-type=module', '-e', code], input=json.dumps(requests).encode()))
 
 
 def speech_prompt(shot):

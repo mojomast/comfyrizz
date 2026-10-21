@@ -16,6 +16,80 @@ const fixture = () => ({ id: 'pkg_h3test', revision: 1, format: { width: 1920, h
   } },
 } });
 
+function directed() {
+  const pkg = fixture();
+  pkg.format.fps = 24;
+  pkg.scenes = [{ id: 's_one', preferredFrames: 96, background: { asset: 'a_shot', speed: 1 } }];
+  pkg.assets.a_voice.media = { durationSeconds: 2.8 };
+  pkg.assets.a_shot.gen.direction = {
+    subject: 'one armored bear', composition: 'The bear braces a beam with their shoulder.',
+    action: 'The beam settles as the bear speaks.', camera: 'Hold a medium close-up.',
+    characterCount: 1, soundscape: 'A low engine hum and one metal creak.', reactionSeconds: .5,
+    dialogue: { text: 'Roof heavy. Bear expensive.', conditioningText: 'Roof heavy. Bear expensive.',
+      language: 'English', voice: 'bear', delivery: 'strained, broken English as written' },
+  };
+  return pkg;
+}
+
+test('structured direction reaches the sampler prompt and cache, not unmapped node params', () => {
+  const pkg = directed();
+  const doc = planJobs(pkg);
+  assert.deepEqual(checkJobsDoc(doc), []);
+  const job = doc.jobs[0];
+  assert.equal(job.params.direction, undefined);
+  assert.match(job.params.prompt, /subject_definitions:[\s\S]*summary:[\s\S]*retention_analysis:[\s\S]*detailed_description:[\s\S]*overall_soundscape:[\s\S]*non_diegetic_music:/);
+  assert.match(job.params.prompt, /<Subject 1> \(S1\).*<d>\[English\] Roof heavy\. Bear expensive\.<\/d>/);
+  assert.match(job.params.prompt, /within 3\.50 seconds/);
+  assert.match(job.params.prompt, /<Audio 1>: reference -/);
+  assert.doesNotMatch(job.params.prompt, /fully_copy/);
+  pkg.assets.a_shot.gen.direction.dialogue.delivery = 'quietly threatening';
+  assert.notEqual(planJobs(pkg).jobs[0].cacheKey, job.cacheKey);
+});
+
+test('preflight catches contaminated conditioning and overfull speech including reactions', () => {
+  const pkg = directed();
+  pkg.assets.a_shot.gen.direction.dialogue.conditioningText += ' An unrelated line.';
+  assert.throws(() => planJobs(pkg), /exact dialogue/);
+  pkg.assets.a_shot.gen.direction.dialogue.conditioningText = 'Roof heavy. Bear expensive.';
+  pkg.assets.a_voice.media.durationSeconds = 3.8;
+  assert.throws(() => planJobs(pkg), /plus reaction time/);
+  delete pkg.assets.a_voice.media.durationSeconds;
+  assert.throws(() => planJobs(pkg), /measured conditioning/);
+});
+
+test('every editorial use limits speech fit, even if source clip is longer', () => {
+  const pkg = directed();
+  pkg.scenes.push({ id: 's_short', preferredFrames: 48, background: { asset: 'a_shot' } });
+  assert.throws(() => planJobs(pkg), /editorial slot/);
+  pkg.scenes.pop();
+  pkg.scenes[0].background.speed = .5;
+  assert.throws(() => planJobs(pkg), /natural-speed/);
+  pkg.scenes[0].background.speed = 1;
+  pkg.scenes[0].background.trim = { startSeconds: .5 };
+  assert.throws(() => planJobs(pkg), /trims after reviewing/);
+});
+
+test('offscreen speech does not introduce a visible character in an unoccupied insert', () => {
+  const pkg = directed();
+  const d = pkg.assets.a_shot.gen.direction;
+  Object.assign(d, { subject: 'the cyan console', composition: 'A close insert of three pulse diagrams.', characterCount: 0 });
+  assert.throws(() => planJobs(pkg), /offscreen speaker/);
+  Object.assign(d.dialogue, { offscreen: true, voice: 'a disembodied computer voice' });
+  const prompt = planJobs(pkg).jobs[0].params.prompt;
+  assert.match(prompt, /unoccupied throughout/);
+  assert.match(prompt, /a disembodied computer voice \(S1\), off-screen says/);
+  assert.doesNotMatch(prompt, /<Subject 1> \(S1\) says/);
+});
+
+test('legacy prompts remain unchanged and are explicitly unreviewed', () => {
+  const pkg = fixture();
+  pkg.assets.a_shot.gen.inputs.reference = pkg.assets.a_shot.gen.inputs.image;
+  const doc = planJobs(pkg);
+  assert.equal(doc.jobs[0].params.prompt, pkg.assets.a_shot.gen.inputs.prompt);
+  assert.ok(doc.warnings.some(w => w.code === 'PLAN_H3_DIRECTION_UNREVIEWED'));
+  assert.ok(doc.warnings.some(w => w.code === 'PLAN_H3_DUPLICATE_REFERENCE'));
+});
+
 test('H3 uses the AV grid, retains prompt, and treats portrait refs as identity not first frame', () => {
   const doc = planJobs(fixture());
   assert.deepEqual(checkJobsDoc(doc), []);
@@ -59,7 +133,7 @@ test('applied H3 output preserves audio and does not silently assign unrestricte
 
 test('H3 generator and model-specific defaults validate in the package schema', () => {
   const pkg = JSON.parse(readFileSync(new URL('../../schema/fixtures/valid/minimal.json', import.meta.url)));
-  Object.assign(pkg.assets, fixture().assets);
+  Object.assign(pkg.assets, directed().assets);
   for (const asset of Object.values(pkg.assets)) {
     if (asset.origin !== 'uploaded') continue;
     asset.origin = 'upload';

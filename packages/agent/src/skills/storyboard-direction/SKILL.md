@@ -1,7 +1,7 @@
 ---
 name: storyboard-direction
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
 description: Make each scene communicate through a concrete, consistent visual mechanism.
 ---
 # Storyboard direction
@@ -101,6 +101,31 @@ one focused pass. With rendered evidence, review opening, action, ending and cut
 a midpoint contact sheet cannot establish motion quality. Name unreviewed evidence
 rather than claiming visual, audio or timing checks passed.
 
+### Native reference-conditioned video
+
+For FastH3 Omni, distinguish reference conditioning from fixed-frame anchoring.
+Assign each image a role (identity, composition, environment); duplicate images
+do not lock the opening frame. Inspect references before motion generation:
+character count, costume, anatomy, required prop, hand/shoulder contact, framing
+and visible cause/result must match the shot. A portrait cannot stand in for an
+evidence insert. Describe an unoccupied console positively as an unoccupied set;
+an offscreen voice does not need a visible person. Prefer one readable action and
+one speaker per short shot.
+
+Use the model's full-reference structure: subject_definitions, summary,
+retention_analysis, detailed_description, overall_soundscape, non_diegetic_music.
+Keep reference labels stable; bind a voice reference to its speaker (S1), and put
+exact spoken words only inside <d>[English] words.</d> in [Shot 1]. For generated
+speech, mark audio as reference, not fully_copy. State delivery outside dialogue.
+Specify physical sound and N/A for absent score. BasicGuider has no negative
+branch: prefer explicit desired composition over lists of forbidden objects.
+These are authoring directions; use only fields exposed by the current tool.
+
+Keep Omni's release-specific 8-step recipe; older FastH3/base-H3 settings describe
+different checkpoints. Validate a small representative set before a full batch.
+Review natural-speed motion, speech, lip sync and cut boundaries; successful
+decoding or ASR alone cannot approve acting, identity or story accuracy.
+
 ## Sources
 
 Original guidance informed by multimedia learning, consistent visual meaning and animated data graphics:
@@ -108,3 +133,5 @@ Original guidance informed by multimedia learning, consistent visual meaning and
 - [Heer & Robertson: animated transitions in statistical graphics](https://idl.cs.washington.edu/files/2007-AnimatedTransitions-InfoVis.pdf)
 - [Nielsen Norman Group: usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/)
 - [LTX prompting guide, accessed 2026-10-20](https://docs.ltx.io/open-source-model/usage-guides/prompting-guide)
+- [MiniMax full-reference prompt guide, accessed 2026-10-21](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md)
+- [FastH3 Omni release recipe, accessed 2026-10-21](https://huggingface.co/FastVideo/FastH3-Omni-Comfy)

@@ -1,7 +1,7 @@
 ---
 name: explainer-script
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 description: Write concise, factual on-screen copy and speakable narration.
 ---
 # Explainer script
@@ -53,6 +53,31 @@ project_patch_plan for focused changes to an existing draft. Narration remains
 script text until audio is actually synthesized. Describe draft and build results
 accurately, without claiming a finished soundtrack or export.
 
+For native generated dialogue, use a shot-specific conditioning sample containing
+only the intended line. Preserve character voice, language, accent, intentional
+grammar and delivery; measure the sample with padding at natural speed against
+the editorial slot, not the longer generated source. Revise an overfull line or
+explicitly rebalance timing. Voice references can leak their words even when the
+prompt asks for timbre only. Exact-line conditioning is a mitigation to test, not
+a guarantee. Keep finished native audio, and disable duplicate narrator tracks.
+
+For fictional shorts/miniseries, write the complete dramatic scene before splitting
+it into generation jobs. Give each character a want, an opposing tactic and an
+unspoken concern; make the exchange change a decision, relationship or available
+option. Replies should respond to the previous thought: challenge, evade, bargain,
+concede or reveal. More complex dialogue means connected subtext and consequences,
+not longer exposition or a punchline after every sentence. Preserve distinct
+vocabulary, intentional grammar and recurring emotional concerns. Pay off earlier
+choices and end with a changed situation that motivates the next episode.
+
+One model shot is coverage, not an entire dramatic scene. Vary turn length and
+leave measured time for listening, hesitation and reaction. Preserve geography and
+eyelines across coverage. Let important lines land on a listener or a meaningful
+insert where editing supports it. J/L cuts require independently placed native
+audio and picture; they are editorial instructions, not a fade transition or
+invented chat field. Table-read the whole exchange at natural speed before
+generating a representative sample; then review it as a scene, not isolated clips.
+
 ## Sources
 
 Original wording informed by clear writing and multimedia explanation principles:
@@ -60,3 +85,6 @@ Original wording informed by clear writing and multimedia explanation principles
 - [Richard Mayer: multimedia learning research](https://psych.ucsb.edu/people/faculty/richard-mayer)
 - [BBC Subtitle Guidelines, March 2026](https://www.bbc.co.uk/accessibility/forproducts/guides/subtitles/)
 - [W3C captions guidance](https://www.w3.org/WAI/media/av/captions/)
+- [BBC Writers: scenes and subtext](https://www.bbc.co.uk/writers/resources/scriptwriting-essentials/6-scenes)
+- [Scriptnotes: conflict and stakes](https://johnaugust.com/2024/scriptnotes-episode-655-conflict-and-stakes-compendium-transcript)
+- [Editing dialogue scenes and reactions](https://www.studiobinder.com/blog/how-to-edit-a-dialogue-scene/)

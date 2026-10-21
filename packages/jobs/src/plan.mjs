@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { pathProblem } from "../../schema/src/semantic.mjs";
 import { applyMotionRoleDefaults, applyPresenterDefaults, applyPromptDefaults } from "./defaults.mjs";
 import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
+import { buildFastH3Prompt, fastH3SlotSeconds } from "./fasth3-direction.mjs";
 
 export const JOBS_VERSION = 1;
 export const BATCH_ORDER = ["stills", "plates", "upscales", "audio", "presenters"];
@@ -484,6 +485,9 @@ export function planJobs(pkg, opts = {}) {
     const asset = assets[assetId];
     const kind = kinds.get(assetId);
     const gen = asset.gen || {};
+    if (gen.direction !== undefined && gen.generator !== 'fasth3-omni') {
+      errors.push(`${assetId}: structured direction is supported only by FastH3 Omni`);
+    }
     const inputs = gen.inputs && typeof gen.inputs === "object" ? gen.inputs : {};
     const sceneIndex = sceneIndexOf(pkg, assetId);
     const scene = sceneIndex >= 0 ? pkg.scenes[sceneIndex].id : null;
@@ -649,6 +653,20 @@ export function planJobs(pkg, opts = {}) {
       job.fps = 24;
       job.output = `assets/${assetId}.mp4`;
       Object.assign(params, { width: dims.width, height: dims.height, frames, fps: 24 });
+      if (gen.direction !== undefined) {
+        try {
+          params.prompt = buildFastH3Prompt(gen.direction, {
+            slotSeconds: fastH3SlotSeconds(pkg, assetId, gen.direction?.slotSeconds),
+            sourceSeconds: frames / 24,
+            conditioningSeconds: assets[inputs.audio]?.media?.durationSeconds,
+          });
+        } catch (error) { errors.push(`${assetId}: ${error.message}`); }
+      } else {
+        warnings.push({ asset: assetId, code: 'PLAN_H3_DIRECTION_UNREVIEWED',
+          message: 'Legacy FastH3 prompt: reference roles, exact-line conditioning and editorial speech fit have not been checked. Use gen.direction for structured direction.' });
+      }
+      if (inputs.image === inputs.reference) warnings.push({ asset: assetId, code: 'PLAN_H3_DUPLICATE_REFERENCE',
+        message: 'The same image occupies both reference slots; this does not anchor a first frame. Prefer distinct identity and composition references when available.' });
       castRefSha256 = sha256Hex(canonical(["image", "reference", "audio"].map(name => ({
         name, asset: params[name], sha256: assets[params[name]]?.sha256 ?? null,
       }))));

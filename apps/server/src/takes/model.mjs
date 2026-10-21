@@ -345,6 +345,7 @@ export function genFingerprint(gen) {
     negative: source.negative ?? null,
     seed: source.seed ?? null,
     inputs: source.inputs ?? null,
+    ...(source.direction !== undefined ? { direction: source.direction } : {}),
     workflow_sha256: source.workflow_sha256 ?? null,
   };
   return createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex');

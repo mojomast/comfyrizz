@@ -1908,6 +1908,35 @@
         }
       }
     },
+    "fastH3Direction": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "description": "Planner-only single-shot direction for the two-image/one-voice FastH3 Omni graph. Not a Comfy node input or a creative approval.",
+      "required": ["subject", "composition", "action", "camera", "soundscape", "characterCount"],
+      "properties": {
+        "subject": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "composition": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "action": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "camera": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "soundscape": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "characterCount": {"type": "integer", "minimum": 0, "maximum": 100},
+        "slotSeconds": {"type": "number", "exclusiveMinimum": 0.2, "maximum": 16},
+        "reactionSeconds": {"type": "number", "minimum": 0, "maximum": 15},
+        "dialogue": {
+          "type": "object",
+          "unevaluatedProperties": false,
+          "required": ["text", "conditioningText", "language", "voice", "delivery"],
+          "properties": {
+            "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "conditioningText": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "language": {"type": "string", "minLength": 1, "maxLength": 64},
+            "voice": {"type": "string", "minLength": 1, "maxLength": 512},
+            "delivery": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "offscreen": {"type": "boolean"}
+          }
+        }
+      }
+    },
     "gen": {
       "type": "object",
       "unevaluatedProperties": false,
@@ -1946,6 +1975,9 @@
         "quantization": {
           "type": "string",
           "maxLength": 32
+        },
+        "direction": {
+          "$ref": "#/$defs/fastH3Direction"
         },
         "inputs": {
           "type": "object",

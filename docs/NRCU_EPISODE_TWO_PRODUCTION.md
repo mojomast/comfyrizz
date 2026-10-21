@@ -8,6 +8,14 @@ video takes are preserved locally. The review found dialogue contamination,
 timing problems and visual mismatches: **do not resume the old plan unchanged**.
 See [the stopped-run review](NRCU_EPISODE_TWO_REVIEW.md).
 
+The follow-up research is now implemented in the shared jobs planner and agent
+skills/prompts: [FastH3 direction](FASTH3_OMNI_DIRECTION.md) and
+[miniseries dialogue workflow](MINISERIES_DIALOGUE_WORKFLOW.md). Fresh authoring
+uses 33 revised speaking turns, structured reference prompts and measured
+reaction time. A separate 240-second script revision is prepared; the live
+owner-edited project and existing takes have not been replaced. Generation stays
+paused pending corrected visual references and native-performance validation.
+
 The user selected the full four-minute episode and authorized up to **14.5 credits**
 for this render, increasing the combined ceiling to **34.70 credits**. Previous
 combined spending before this run was **20.20 credits**. The observed balance

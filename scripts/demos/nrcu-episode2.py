@@ -12,7 +12,8 @@ import wave
 
 import numpy as np
 from PIL import Image
-from nrcu_shot_conditioning import speech_prompt, write_conditioning
+from nrcu_shot_conditioning import write_conditioning, compile_prompts
+from nrcu_miniseries_dialogue import revise_rows, direction_for, SCENES
 
 STYLE='Cinematic painterly 2.5D animated film, teal shadows and amber practical lights, coherent bodies and objects. Single landscape film frame. No lettering, captions, logos, collage or extra characters. '
 DESIGN={
@@ -83,6 +84,9 @@ ENDING=[
 ]
 
 
+OPENING, REPAIR, ENDING = map(revise_rows, (OPENING, REPAIR, ENDING))
+
+
 def write(path,data):path.write_text(json.dumps(data,indent=2)+'\n')
 
 
@@ -123,16 +127,19 @@ def main():
         if sid=='d06':background='A small salvage launch at the shelter dock over dark turquoise water. '
         prompt=still+' '+''.join(DESIGN.get(x,'') for x in names)+background+STYLE
         keys.append({'id':sid,'title':title,'refs':[] if sid in ['a14','a16'] else [f'refs/assets/{x}.png' for x in names],'prompt':prompt})
-        source=max(5,seconds,6 if len(line.split())>7 else 5);frames=source*24;frames+=(5-frames%17)%17
-        voice={'don':'Preserve the written broken English exactly; earnest, cheeky bass-baritone. ', 'molty':'Deep gravelly bass, cold contempt, mocking and menacing, never friendly. ', 'hermes':'Dry precise disembodied male computer voice; no face or mouth in this shot. ', 'witcheer':'Sly, brisk, amused merchant voice. ', 'sidbin':'Quiet low voice with urgent measured delivery. '}.get(speaker,'')
-        speech=voice+speech_prompt({'line':line,'speaker':speaker,'seconds':seconds})
+        frames=max(124,round(seconds*24)+12);frames+=(5-frames%17)%17;source=frames/24
+        direction=direction_for(row,DESIGN)
         conditioning=f'refs/dialogue/{sid}.wav' if line else 'refs/silence.wav'
         conditioning_seconds=None
         if line:
             _,conditioning_seconds=write_conditioning(k,registry[speaker],line,root/conditioning)
-        vp='Single continuous animated film shot. Both pictures show the SAME scene and same characters, never additional figures. '+action+' '+speech+'Preserve exact character count, costumes, anatomy, objects and solid contact. Quiet relevant location sound. No music, titles, captions, written text, cuts or extra people.'
+        vp=compile_prompts([{'direction':direction,'slotSeconds':seconds,'sourceSeconds':source,'conditioningSeconds':conditioning_seconds}])[0]
         shots.append({'id':sid,'title':title,'start':cursor,'seconds':seconds,'sourceSeconds':source,'frames':frames,'fps':24,'width':1344,'height':768,'seed':2026102200+len(shots),'speaker':speaker,'line':line,'action':action,'prompt':vp,'image':f'refs/keyframes/{sid}.png','reference':f'refs/keyframes/{sid}.png','audio':conditioning,'conditioningSeconds':conditioning_seconds,'conditioningFitsSlot':conditioning_seconds is None or conditioning_seconds<=seconds,'section':'opening' if sid.startswith('a') else 'repair' if sid.startswith('b') else 'aftermath' if sid.startswith('c') else 'archive'})
-        cursor+=seconds
+        shots[-1]['direction']=direction
+        visible=[name for name in names if name in DESIGN and name!='workers']
+        if direction['characterCount']==1 and len(visible)==1:
+            shots[-1]['image']=f'refs/assets/{visible[0]}.png'
+        cursor=round((cursor+seconds)*24)/24
     for row in OPENING:new(row)
     previous=json.loads((recut/'film.json').read_text());prior_overrides=json.loads((recut/'review-overrides.json').read_text())
     for old in previous['shots']:
@@ -149,7 +156,7 @@ def main():
     music_cues={'choiceStart':'p08','choiceEnd':'p12','quietStart':'c01','quietEnd':'d06',
                 'accents':[['a13',0],['p06',.6],['p12',0],['p14',2.8],['b16',0],['d06',.15]],
                 'engineShots':['a07','a13','a15','p05','p09','p12','p16'],'cableShot':'p06'}
-    write(root/'film.json',{'title':'Hermes: The Unfinished Dawn — The Road Beneath the World','episodeTitle':'The Road Beneath the World','episode':2,'seconds':240,'fps':24,'edition':'Full episode 2','model':'fasth3-omni','music':'Original guitar-led rock','musicCues':music_cues,'exportStem':'hermes-the-road-beneath-the-world','shots':shots})
+    write(root/'film.json',{'title':'Hermes: The Unfinished Dawn — The Road Beneath the World','episodeTitle':'The Road Beneath the World','episode':2,'seconds':240,'fps':24,'edition':'Miniseries dialogue revision','model':'fasth3-omni','music':'Original guitar-led rock','musicCues':music_cues,'exportStem':'hermes-the-road-beneath-the-world','dramaticScenes':SCENES,'shots':shots})
     write(root/'keyframes-plan.json',{'images':keys});write(root/'review-overrides.json',overrides)
     shutil.copy2(repo/'workflows/fasth3_omni_ref2va.api.json',root/'workflow.json')
     for name in ['flux3_klein_t2i.api.json','flux3_klein_ref_edit.api.json']:shutil.copy2(repo/'workflows'/name,root/name)

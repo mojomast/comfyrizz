@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from nrcu_shot_conditioning import speech_prompt, write_conditioning
+from nrcu_miniseries_dialogue import DIALOGUE, TIMING_FRAMES, SCENES
 
 
 class ConditioningTest(unittest.TestCase):
@@ -30,6 +31,14 @@ class ConditioningTest(unittest.TestCase):
         self.assertIn('before 2.75 seconds', prompt)
         self.assertIn('Preserve the written broken English exactly', prompt)
         self.assertIn('Say exactly once: "Good. I no subscribe."', prompt)
+
+    def test_miniseries_revision_retains_episode_target_and_covers_every_new_shot(self):
+        self.assertEqual(sum(TIMING_FRAMES.values()) + 65 * 24, 240 * 24)
+        coverage = [shot for scene in SCENES for shot in scene['shots']]
+        self.assertEqual(len(set(coverage)), 48)
+        self.assertEqual(set(coverage), set(TIMING_FRAMES))
+        self.assertTrue(set(DIALOGUE) <= set(coverage))
+        self.assertTrue(all(frame > 0 for frame in TIMING_FRAMES.values()))
 
 
 if __name__ == '__main__':
