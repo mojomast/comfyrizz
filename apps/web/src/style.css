@@ -1,18 +1,20 @@
+@import './ui/tokens.css';
+
 /* UO01: the hidden attribute always wins over component display rules (e.g. .pane{display:flex}). */
 [hidden] { display: none !important; }
 
 :root {
-  --bg: #080a0f;
-  --panel: #0f131b;
-  --panel-2: #141924;
-  --line: #232b3a;
-  --text: #e8ebf3;
-  --muted: #8a93a6;
-  --accent: #6d8cff;
-  --accent-2: #9fb2ff;
-  --ok: #60d6a7;
-  --warn: #ffc46b;
-  --radius: 14px;
+  --bg: var(--bg-0);
+  --panel: var(--bg-1);
+  --panel-2: var(--bg-2);
+  --line: var(--border);
+  --text: var(--text-1);
+  --muted: var(--text-3);
+  --accent: var(--color-accent);
+  --accent-2: var(--accent-hover);
+  --ok: var(--color-ok);
+  --warn: var(--color-warn);
+  --radius: var(--radius-legacy);
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
