@@ -753,6 +753,7 @@ function summarizeRunEvent(event: RunEvent): string {
     return String(event.phase ?? 'phase');
   }
   if (event.type === 'ensure_up') return `state ${event.state ?? '?'}`;
+  if (event.type === 'bootstrap_log') return String(event.message ?? '').trim();
   if (event.type === 'health') return `${event.ok ? 'ok' : 'not ok'} · ${event.detail ?? ''}`;
   if (event.type === 'collected' || event.event === 'collect') return `${event.files ?? '?'} file(s) → ${event.destDir ?? ''}`;
   if (event.type === 'teardown') return teardownLabel({ state: String(event.state ?? ''), evidence: event.evidence as string | undefined });
