@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { conversationPlanSchema, patchConversationPlan } from '../../../packages/agent/dist/src/index.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -72,7 +73,7 @@ function richPlan() {
 }
 
 async function setupRich(t) {
-  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-rich-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'chat-project-rich-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const previousPlan = richPlan();
   const previous = await buildChatProject({ plan: previousPlan, runtimeDir });
@@ -81,8 +82,8 @@ async function setupRich(t) {
 }
 
 async function setup(t) {
-  mkdirSync('/tmp/opencode', { recursive: true });
-  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-');
+  // Q-H1: os.tmpdir() rather than a path that only exists on the machine this was written on
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'chat-project-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const previousPlan = makePlan();
   const previous = await buildChatProject({ plan: previousPlan, runtimeDir });
@@ -298,7 +299,7 @@ test('new projects do not assert unverified compliance and aborted builds genera
 });
 
 test('expanded layouts build a valid package with datasets, code, plates, recipe motion and transitions', async t => {
-  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-expanded-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'chat-project-expanded-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const plan = richPlan();
   const pkg = await buildChatProject({ plan, runtimeDir });
@@ -494,7 +495,7 @@ test('a divergent manual transition on the final scene is refused rather than le
 });
 
 test('layout switches add newly visible copy fields even when the plan value was hidden before', async t => {
-  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-copy-switch-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'chat-project-copy-switch-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const make = (layout, extra = {}) => conversationPlanSchema.parse({
     title: 'Copy switch', brief: 'Copy switch.', audience: 'Test', aspect: '16:9', stylePreset: 'cinematic-dark',
@@ -523,7 +524,7 @@ test('layout switches add newly visible copy fields even when the plan value was
 });
 
 test('a formerly-middle plan transition that becomes final is recognised as plan-owned', async t => {
-  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-transition-reorder-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'chat-project-transition-reorder-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const basePlan = () => conversationPlanSchema.parse({
     title: 'Order', brief: 'Transition reorder.', audience: 'Test', aspect: '16:9', stylePreset: 'cinematic-dark',
@@ -573,7 +574,7 @@ test('deep motion patches reach the built project without erasing manual recipe 
 });
 
 test('split/compare plate media types drive style and palette invalidation', async t => {
-  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-plate-style-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'chat-project-plate-style-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const imagePlan = stylePreset => conversationPlanSchema.parse({
     title: 'Plate restyle', brief: 'Plate restyle.', audience: 'Test', aspect: '16:9', stylePreset,
@@ -615,7 +616,7 @@ test('split/compare plate media types drive style and palette invalidation', asy
 });
 
 test('removing a scene and dataset preserves manually edited unreferenced provenance', async t => {
-  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-dataset-remove-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'chat-project-dataset-remove-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const plan = () => conversationPlanSchema.parse({
     title: 'Data', brief: 'Dataset removal.', audience: 'Test', aspect: '16:9', stylePreset: 'cinematic-dark',
