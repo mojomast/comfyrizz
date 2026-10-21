@@ -366,7 +366,7 @@
     "cast": {
       "type": "array",
       "maxItems": 8,
-      "description": "CAST1: recurring fictional characters (a mascot). Optional. A package without this array validates, plans and renders exactly as before. v1 is fictional only: no real people and no user photos.",
+      "description": "CAST1: recurring characters. Optional. A package without this array validates, plans and renders exactly as before. A member is fictional by default; a real_authorized member is allowed only with a consentRef (CCL5b).",
       "items": {
         "$ref": "#/$defs/castMember"
       }
@@ -517,7 +517,7 @@
           "default": false
         },
         "portrait": {
-          "description": "The portrait still: an asset id, or a CAST1 cast id whose ready ref_asset is that still. A cast id is the optional hook that lets the portrait be a fictional cast member without requiring any other presenter field.",
+          "description": "The portrait still: an asset id, or a CAST1 cast id whose ready ref_asset is that still. A cast id is the optional hook that lets the portrait be a cast member without requiring any other presenter field.",
           "oneOf": [
             {
               "$ref": "#/$defs/assetId"
@@ -529,7 +529,7 @@
         },
         "cast": {
           "$ref": "#/$defs/castId",
-          "description": "CAST1: this presenter is the fictional cast member. Optional. When portrait is an asset id, jobs for that still append the member's ref_asset. When portrait is a cast id, the portrait is that member's ref_asset."
+          "description": "CAST1: this presenter is the cast member. Optional. When portrait is an asset id, jobs for that still append the member's ref_asset. When portrait is a cast id, the portrait is that member's ref_asset."
         },
         "placement": {
           "enum": [
@@ -932,11 +932,11 @@
     "castId": {
       "type": "string",
       "pattern": "^c[A-Za-z0-9_-]{0,63}$",
-      "description": "CAST1 id of a fictional cast member. v1 is a mascot: never a real person."
+      "description": "CAST1 id of a cast member. See castMember.kind: fictional by default, real_authorized only with a consentRef (CCL5b)."
     },
     "castMember": {
       "type": "object",
-      "description": "CAST1: one recurring fictional character. ref_asset is a ready still (image or svg) the FLUX 3 Klein reference edit conditions on.",
+      "description": "CAST1: one recurring character. ref_asset is a ready still (image or svg) the FLUX 3 Klein reference edit conditions on. `kind` defaults to fictional; real_authorized requires consentRef (CCL5b).",
       "required": [
         "id",
         "name",
@@ -954,11 +954,167 @@
         },
         "ref_asset": {
           "$ref": "#/$defs/assetId",
-          "description": "Ready still of the fictional character. A missing or unready asset is a semantic error."
+          "description": "Ready still of the character. A missing or unready asset is a semantic error."
         },
         "description": {
           "type": "string",
           "maxLength": 400
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "fictional",
+            "real_authorized"
+          ],
+          "default": "fictional",
+          "description": "CCL5b: fictional means an invented character and is the default when the field is absent, so old packages stay valid. real_authorized means a real person whose consent record is named by consentRef."
+        },
+        "consentRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S",
+          "description": "CCL5b: reference to the consent record for this member (for example an id in the characters.json sidecar). Required when kind is real_authorized; ignored for fictional members."
+        },
+        "voice": {
+          "$ref": "#/$defs/castVoice",
+          "description": "CCL4a: this cast member's own voice. Optional. When present it is used for scenes this member speaks (scene.speaker) and is shaped like the package voice without the package-level enabled switch."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "real_authorized"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "consentRef": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "consentRef"
+            ]
+          }
+        }
+      ]
+    },
+    "castVoice": {
+      "type": "object",
+      "description": "CCL4a: a per-character voice in package-v1. Same fields and bounds as the package voice, minus the package switch: `enabled` is accepted for round-tripping a package voice but is not required. A missing voice means the package voice narrates.",
+      "unevaluatedProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "engine": {
+          "type": "string",
+          "enum": [
+            "kokoro",
+            "qwen3-tts",
+            "none"
+          ],
+          "description": "kokoro is the CPU narrator. qwen3-tts is the Qwen3-TTS 1.7B backend. none means this character does not speak."
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0,
+          "default": 1.0
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16
+        },
+        "lang": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16,
+          "description": "Optional short language tag for Qwen3-TTS (en or fr). When it is omitted, voice.language is used. Kokoro keeps using voice.language."
+        },
+        "persona": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400,
+          "description": "Natural-language description used by Qwen3-TTS VoiceDesign to build this character's voice."
+        },
+        "ref_asset": {
+          "$ref": "#/$defs/assetId",
+          "description": "Designed reference clip for this character's voice."
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "When true, a selected qwen3-tts runtime that is unavailable fails the run. When false or omitted, the run falls back to Kokoro."
+        },
+        "chunking": {
+          "type": "string",
+          "enum": [
+            "sentence",
+            "paragraph"
+          ],
+          "description": "Kokoro synthesis context: separate sentences (default) or a coherent scene paragraph with estimated sentence/word alignment."
+        },
+        "blend": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "description": "Kokoro weighted voice styles. Positive weights are normalized before synthesis.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "voice",
+              "weight"
+            ],
+            "properties": {
+              "voice": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "weight": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        },
+        "qwen_mode": {
+          "type": "string",
+          "enum": [
+            "design",
+            "custom"
+          ],
+          "description": "design (default) uses VoiceDesign then Base cloning; custom uses the CustomVoice preset named in voice.voice."
+        },
+        "delivery": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "CustomVoice default delivery instruction, overridden by scene.narration_style. For design mode, appended to the reference persona."
+        },
+        "non_streaming": {
+          "type": "boolean",
+          "description": "Qwen full-text conditioning. Defaults to false for Base cloning and true for CustomVoice."
+        },
+        "reference_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Transcript synthesized by VoiceDesign to create the reusable synthetic reference."
         }
       }
     },
@@ -1571,10 +1727,14 @@
           "type": "array",
           "maxItems": 8,
           "uniqueItems": true,
-          "description": "CAST1: fictional cast members that appear in this scene. Every Klein still the scene names (background or foreground) is planned as a reference edit that includes each member's ref_asset.",
+          "description": "CAST1: cast members that appear in this scene. Every Klein still the scene names (background or foreground) is planned as a reference edit that includes each member's ref_asset.",
           "items": {
             "$ref": "#/$defs/castId"
           }
+        },
+        "speaker": {
+          "$ref": "#/$defs/castId",
+          "description": "CCL4a: the cast member who speaks this scene's narration. Optional. When omitted, the package voice narrates. The speaker's cast[].voice, when present, overrides the package voice for this scene; otherwise the package voice is used."
         }
       }
     },
@@ -2016,7 +2176,7 @@
         },
         "cast": {
           "$ref": "#/$defs/castId",
-          "description": "CAST1: this still depicts the fictional cast member. The planner appends that member's ref_asset to the Klein reference-edit inputs."
+          "description": "CAST1: this still depicts the cast member. The planner appends that member's ref_asset to the Klein reference-edit inputs."
         }
       }
     }

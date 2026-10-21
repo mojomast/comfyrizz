@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 81b3a7c74cb05f5930b4b7014f512aa65cee0c1ed1d5af75ea04178c695ad8f1
+// Schema sha256: 44a51e11e70e60b80c855238c6800a8202931a1b510664dfaff2c11decd09fd7
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -162,9 +162,9 @@ export interface PackageV1 {
   captions?: PackageCaptions;
   audio?: PackageAudio;
   /**
-   * CAST1: recurring fictional characters (a mascot). Optional. A package without this array
-   * validates, plans and renders exactly as before. v1 is fictional only: no real people and no user
-   * photos.
+   * CAST1: recurring characters. Optional. A package without this array validates, plans and renders
+   * exactly as before. A member is fictional by default; a real_authorized member is allowed only
+   * with a consentRef (CCL5b).
    * [maxItems 8]
    */
   cast?: Array<CastMember>;
@@ -223,14 +223,14 @@ export interface Presenter {
   enabled?: boolean;
   /**
    * The portrait still: an asset id, or a CAST1 cast id whose ready ref_asset is that still. A cast
-   * id is the optional hook that lets the portrait be a fictional cast member without requiring any
-   * other presenter field.
+   * id is the optional hook that lets the portrait be a cast member without requiring any other
+   * presenter field.
    */
   portrait?: AssetId | CastId;
   /**
-   * CAST1: this presenter is the fictional cast member. Optional. When portrait is an asset id, jobs
-   * for that still append the member's ref_asset. When portrait is a cast id, the portrait is that
-   * member's ref_asset.
+   * CAST1: this presenter is the cast member. Optional. When portrait is an asset id, jobs for that
+   * still append the member's ref_asset. When portrait is a cast id, the portrait is that member's
+   * ref_asset.
    */
   cast?: CastId;
   placement?: "pip-br" | "pip-bl" | "pip-bc" | "split-left";
@@ -470,7 +470,8 @@ export type SceneId = string;
 export type DatasetId = string;
 
 /**
- * CAST1 id of a fictional cast member. v1 is a mascot: never a real person.
+ * CAST1 id of a cast member. See castMember.kind: fictional by default, real_authorized only with
+ * a consentRef (CCL5b).
  * [pattern ^c[A-Za-z0-9_-]{0,63}$]
  */
 export type CastId = string;
@@ -479,10 +480,94 @@ export interface CastMember {
   id: CastId;
   name: string;
   /**
-   * Ready still of the fictional character. A missing or unready asset is a semantic error.
+   * Ready still of the character. A missing or unready asset is a semantic error.
    */
   ref_asset: AssetId;
   description?: string;
+  /**
+   * CCL5b: fictional means an invented character and is the default when the field is absent, so old
+   * packages stay valid. real_authorized means a real person whose consent record is named by
+   * consentRef.
+   * [default "fictional"]
+   */
+  kind?: "fictional" | "real_authorized";
+  /**
+   * CCL5b: reference to the consent record for this member (for example an id in the characters.json
+   * sidecar). Required when kind is real_authorized; ignored for fictional members.
+   * [minLength 1, maxLength 256, pattern \S]
+   */
+  consentRef?: string;
+  /**
+   * CCL4a: this cast member's own voice. Optional. When present it is used for scenes this member
+   * speaks (scene.speaker) and is shaped like the package voice without the package-level enabled
+   * switch.
+   */
+  voice?: CastVoice;
+  }
+
+export interface CastVoice {
+  enabled?: boolean;
+  /**
+   * kokoro is the CPU narrator. qwen3-tts is the Qwen3-TTS 1.7B backend. none means this character
+   * does not speak.
+   */
+  engine?: "kokoro" | "qwen3-tts" | "none";
+  voice?: string;
+  speed?: number;
+  language?: string;
+  /**
+   * Optional short language tag for Qwen3-TTS (en or fr). When it is omitted, voice.language is
+   * used. Kokoro keeps using voice.language.
+   * [minLength 2, maxLength 16]
+   */
+  lang?: string;
+  /**
+   * Natural-language description used by Qwen3-TTS VoiceDesign to build this character's voice.
+   * [minLength 1, maxLength 400]
+   */
+  persona?: string;
+  /**
+   * Designed reference clip for this character's voice.
+   */
+  ref_asset?: AssetId;
+  /**
+   * When true, a selected qwen3-tts runtime that is unavailable fails the run. When false or
+   * omitted, the run falls back to Kokoro.
+   */
+  strict?: boolean;
+  /**
+   * Kokoro synthesis context: separate sentences (default) or a coherent scene paragraph with
+   * estimated sentence/word alignment.
+   */
+  chunking?: "sentence" | "paragraph";
+  /**
+   * Kokoro weighted voice styles. Positive weights are normalized before synthesis.
+   * [minItems 2, maxItems 4]
+   */
+  blend?: Array<{
+    voice: string;
+    weight: number;
+    }>;
+  /**
+   * design (default) uses VoiceDesign then Base cloning; custom uses the CustomVoice preset named in
+   * voice.voice.
+   */
+  qwen_mode?: "design" | "custom";
+  /**
+   * CustomVoice default delivery instruction, overridden by scene.narration_style. For design mode,
+   * appended to the reference persona.
+   * [maxLength 400]
+   */
+  delivery?: string;
+  /**
+   * Qwen full-text conditioning. Defaults to false for Base cloning and true for CustomVoice.
+   */
+  non_streaming?: boolean;
+  /**
+   * Transcript synthesized by VoiceDesign to create the reusable synthetic reference.
+   * [minLength 1, maxLength 1000]
+   */
+  reference_text?: string;
   }
 
 /**
@@ -702,11 +787,17 @@ export interface Scene {
   locked?: boolean;
   notes?: string;
   /**
-   * CAST1: fictional cast members that appear in this scene. Every Klein still the scene names
-   * (background or foreground) is planned as a reference edit that includes each member's ref_asset.
+   * CAST1: cast members that appear in this scene. Every Klein still the scene names (background or
+   * foreground) is planned as a reference edit that includes each member's ref_asset.
    * [maxItems 8]
    */
   cast?: Array<CastId>;
+  /**
+   * CCL4a: the cast member who speaks this scene's narration. Optional. When omitted, the package
+   * voice narrates. The speaker's cast[].voice, when present, overrides the package voice for this
+   * scene; otherwise the package voice is used.
+   */
+  speaker?: CastId;
   }
 
 export interface AssetVariants {
@@ -838,8 +929,8 @@ export interface Asset {
   gen?: Gen;
   notes?: string;
   /**
-   * CAST1: this still depicts the fictional cast member. The planner appends that member's ref_asset
-   * to the Klein reference-edit inputs.
+   * CAST1: this still depicts the cast member. The planner appends that member's ref_asset to the
+   * Klein reference-edit inputs.
    */
   cast?: CastId;
   }
