@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { makeResult, runChecks, summarize } from './checks.mjs';
 import { redact } from './redact.mjs';
+import { resolvePython } from '../py.mjs';
 import { renderJson, renderText } from './report.mjs';
 import { createToolChecks, parseMinVersion, parseVersion } from './check-tools.mjs';
 import { createChecks as createRepoChecks } from './check-repo.mjs';
@@ -222,6 +223,73 @@ function offlineSkip(id, title) {
   });
 }
 
+/**
+ * Python interpreter check: reports the resolved interpreter (RL08).
+ */
+export function createPythonCheck({ exec, env = {}, rootDir = REPO_ROOT } = {}) {
+  if (typeof exec !== 'function') {
+    throw new TypeError('createPythonCheck requires an exec(cmd, args) function');
+  }
+  const resolved = resolvePython({ env, rootDir });
+  const id = 'python';
+  const title = 'Python 3.12';
+  const fix = 'install Python 3.12 (uv python install 3.12) or set COMFYRIZZ_PYTHON';
+  const minimum = { major: 3, minor: 12, patch: 0 };
+
+  return {
+    id,
+    title,
+    run: async () => {
+      let result;
+      try {
+        result = await exec(resolved, ['--version']);
+      } catch {
+        return makeResult({ id, title, status: 'fail', detail: `${resolved} not found`, fix });
+      }
+      if (Number(result?.code ?? 0) !== 0) {
+        return makeResult({ id, title, status: 'fail', detail: `${resolved} --version failed`, fix });
+      }
+      const output = String(result?.stdout ?? '') || String(result?.stderr ?? '');
+      const version = parseVersionOutput(output);
+      if (!version) {
+        return makeResult({ id, title, status: 'fail', detail: `could not parse ${resolved} version`, fix });
+      }
+      const actual = `${version.major}.${version.minor}.${version.patch}`;
+      if (compareVersionsLocal(version, minimum) < 0) {
+        return makeResult({
+          id,
+          title,
+          status: 'fail',
+          detail: `${resolved} ${actual} is older than required 3.12`,
+          fix,
+        });
+      }
+      return makeResult({
+        id,
+        title,
+        status: 'ok',
+        detail: `${resolved} ${actual}`,
+      });
+    },
+  };
+}
+
+function parseVersionOutput(text) {
+  const match = String(text ?? '').match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2] ?? 0),
+    patch: Number(match[3] ?? 0),
+  };
+}
+
+function compareVersionsLocal(left, right) {
+  return (left.major - right.major)
+    || (left.minor - right.minor)
+    || (left.patch - right.patch);
+}
+
 /** Build the ordered check list with its dependencies bound. */
 export function buildChecks({
   rootDir = REPO_ROOT,
@@ -232,9 +300,10 @@ export function buildChecks({
   minNode = DEFAULT_MIN_NODE,
 } = {}) {
   const toolChecks = createToolChecks({ exec, minNode })
-    .filter((check) => check.id !== 'node');
+    .filter((check) => check.id !== 'node' && check.id !== 'python');
   const checks = [
     createNodeCheck({ exec, minNode }),
+    createPythonCheck({ exec, env, rootDir }),
     ...toolChecks,
     ...createRepoChecks(rootDir),
   ];
