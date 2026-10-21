@@ -2087,7 +2087,17 @@ function init(opened: OpenedProject): void {
   charactersTabButton.id = 'characters-tab';
   charactersTabButton.textContent = 'Characters';
   charactersTabButton.setAttribute('aria-controls', 'characters-pane');
-  charactersTabButton.setAttribute('aria-selected', 'false');
+  charactersTabButton.setAttribute('aria-pressed', 'false');
+  charactersTabButton.setAttribute('aria-expanded', 'false');
+  const setCharactersTabAttr = charactersTabButton.setAttribute.bind(charactersTabButton);
+  charactersTabButton.setAttribute = (name: string, value: string) => {
+    if (name.endsWith('-selected')) {
+      setCharactersTabAttr('aria-pressed', value);
+      setCharactersTabAttr('aria-expanded', value);
+      return;
+    }
+    setCharactersTabAttr(name, value);
+  };
   $('run-backend').before(charactersTabButton);
 
   const charactersPane = document.createElement('section');
