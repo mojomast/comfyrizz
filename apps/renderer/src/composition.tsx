@@ -22,7 +22,7 @@ export function SafeAudio({ file, volume, gains, loop, src }: { file: string; vo
   // `?? 1` default, so the second pass of the bed played at full level. Index the
   // composition (or enclosing <Sequence>) frame instead, rounded, and default to 0.
   const level = gains ? gains[Math.min(Math.max(0, Math.round(frame)), gains.length - 1)] ?? 0 : volume;
-  return <Audio src={src ?? staticFile(file)} {...(level !== undefined ? { volume: level } : {})} {...(loop ? { loop } : {})} onError={() => setFailed(true)} />;
+  return <Audio src={src ?? staticFile(file)} pauseWhenBuffering {...(level !== undefined ? { volume: level } : {})} {...(loop ? { loop } : {})} onError={() => setFailed(true)} />;
 }
 
 /**
@@ -61,7 +61,7 @@ export function PackageComposition({
   const missing = new Set(missingMedia ?? []);
   return (
     <>
-      {resolved.narration && !resolved.narration.missing ? <Audio src={src(resolved.narration.file)} /> : null}
+      {resolved.narration && !resolved.narration.missing ? <Audio src={src(resolved.narration.file)} pauseWhenBuffering /> : null}
       {resolved.mixAudio ? (
         <>
           {mix.music && !missing.has(mix.music.file) ? (

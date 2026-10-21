@@ -42,4 +42,43 @@ worked. No replacement reference is fully approved for the intended episode acti
 - External artifacts: `/home/mojo/comfyrizz-gpu-tests/nrcu-validation-20261021/`.
 - Private progress/results: `https://your-host.example:8451/nrcu-episode2/validation/index.html`.
 
-Performance results are pending collection and review. Keep the full episode held.
+## Collected performance results
+
+All three videos match their recorded SHA-256 hashes, fully decode, and contain
+audio at **1344×768 / 24 fps**. Local Whisper ASR returned the exact normalized
+intended text in all three, with no recognized extra dialogue. This is promising
+evidence for exact-line conditioning, not a controlled A/B proof or listening approval.
+
+| Shot | ASR speech end | Editorial cut | Reaction left / planned | Visual evidence |
+| --- | ---: | ---: | ---: | --- |
+| a11 / Molty | 4.94s | 5.292s | 0.352s / 0.35s | Buggy and wheel appear, but claws become fingered hands. Reject identity/anatomy. |
+| b07 / Hermes | 2.20s | 3.500s | 1.300s / 0.35s | Half-second samples remain unoccupied; three offset lower pulses emerge. Reference's initial lower row is not blank. |
+| c06 / Turbo | 4.34s | 4.625s | 0.285s / 0.70s | One character remains beside engine; intended hand-rest action is not established in samples. Reaction target fails. |
+
+Turbo's native performance differs from conditioning timing: a provisional
+**121-frame** slot would cover the estimated 4.34s speech plus 0.70s hold, within
+the 124-frame source. This is an editorial proposal, not a saved timeline edit;
+confirm the real boundary by listening before retiming the connected scene.
+
+Decoded mono audio peaks exceed full scale for b07 (1.294) and c06 (1.013).
+Inspect native audio before final mixing; this alone does not establish audible
+clipping. Natural-speed listening, Molty's threatening voice, lip sync and full-motion
+approval remain outstanding. Don's broken English/contact and the connected emotional
+exchange were not tested because their references failed.
+
+**Decision: keep full generation held.** Fix rejected reference geometry and Molty's
+claw/wheel composition, review native performances, and reconcile reaction timing
+before admitting further work. No validation take was selected into the live project.
+
+Private playable evidence and sampled sequences:
+`https://your-host.example:8451/nrcu-episode2/validation/review/index.html`.
+
+### Stopped-run accounting
+
+Colab verified **zero sessions, zero assignments, 0.00/hr** after collection.
+Balance **320.73 → 319.06** gives an account-level validation estimate of
+**1.67 credits**, below the 3.5 ceiling. Estimated episode spend is now **7.28**,
+combined spend **27.48**, remaining episode allowance **7.22**. Later settlement
+may adjust account-level estimates. The prior-stage watchdog was explicitly
+terminated after verified stop; the validation driver now carries its PID/deadline
+into continuation teardown. Owner project remains revision 10 / 5,788 frames.

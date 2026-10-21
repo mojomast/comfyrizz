@@ -131,6 +131,9 @@ if(mode==='prepare'){
       // Separate continuation process: account for the first stage in its remaining ceiling.
       const next=createColabBackend({packageId:pkg.id,packageDir:input,scratchDir:scratch,modelsLock:lock,budgetUnits:config.budgetUnits-spent,
         hfTokenPath:'/home/mojo/.config/comfyrizz-hf-token',wallClockCapMinutes:config.wallMinutes,watchdogMinutes:config.wallMinutes});
+      // Carry the original deadline/PID across processes so teardown can disarm it.
+      const allocation=read(join(root,'allocated-at.json'));
+      if(allocation.watchdog)next.state.watchdog=allocation.watchdog;
       await next.ensureUp({approved:false,onEvent:publish});
       const jobs=valid(pkg);write(join(input,'package.json'),pkg);write(join(input,'jobs.json'),jobs);
       const health=await next.health({onEvent:publish});if(!health.ok)throw Error(health.detail);

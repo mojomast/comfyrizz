@@ -23,6 +23,13 @@ Drag reorder, trim that floors below measured speech, zoom, Escape cancelling a 
 
 `animation.spec.ts` covers the inspector's animation edits: autosave then reload, keyboard undo/redo, a saved recipe the layout no longer offers, an invalid focus rectangle, locked-scene controls, an explicit animation save rejected by the server, a failed scene re-render releasing its card, and a QA contact sheet served to the page as a token-free `blob:` URL. It also covers voice presets and blends through undo/save/reload, per-scene delivery with its locked-scene guard, a rejected voice save, and a generation-plan check that sends the saved revision but never starts a run.
 
+`playback.spec.ts` exercises the production timeline preview with three generated
+MP4 scenes, native audio, source trims and controlled HTTP-range latency. It checks
+that the next clip decodes before the cut without a buffering gap, and that a cold
+seek holds the timeline clock until media arrives. Requires local `ffmpeg` with
+libx264/AAC. Run just this coverage with `pnpm --filter @comfyrizz/web test:e2e playback.spec.ts`.
+See [timeline playback research](../../../docs/TIMELINE_PLAYBACK.md).
+
 ## Licences
 
 New test code is MIT, like the rest of this repo.

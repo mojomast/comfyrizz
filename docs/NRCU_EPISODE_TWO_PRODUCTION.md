@@ -19,8 +19,12 @@ paused pending corrected visual references and native-performance validation.
 The user selected the full four-minute episode and authorized up to **14.5 credits**
 for this render, increasing the combined ceiling to **34.70 credits**. Previous
 combined spending before this run was **20.20 credits**. The observed balance
-delta is **4.88**, leaving **9.62 credits** of episode authorization; the live
-budget-default sidecar reflects that remaining ceiling.
+delta after settlement and bounded validation is **7.28**, leaving **7.22 credits**
+of episode authorization; the live budget-default sidecar reflects that remaining
+ceiling. The validation consumed an estimated **1.67 credits**, collected three
+performance diagnostics, and stopped Colab. Exact-line ASR passed, but reference,
+anatomy and reaction-time failures keep full generation held. See
+[validation evidence and limitations](NRCU_DIRECTION_VALIDATION.md).
 
 ### Incremental timeline previews
 

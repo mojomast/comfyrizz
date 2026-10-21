@@ -21,6 +21,9 @@ const Preview = ({ pkg, timeline, generatedAssets }: { pkg: PackageV1; timeline:
     compositionWidth={timeline.width}
     compositionHeight={timeline.height}
     fps={timeline.fps}
+    // Warm the upcoming scene's real media elements before the cut. Remotion's
+    // Player defaults to zero (unlike Studio); keep this preview-only.
+    defaultPremountInSeconds={2}
     controls={false}
     loop
     acknowledgeRemotionLicense
