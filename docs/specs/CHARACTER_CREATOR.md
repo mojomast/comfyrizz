@@ -14,7 +14,8 @@ Kyle approved the plan with every recommended default from section 14:
 - **Library scope:** per runtime directory (single local user), with a reserved `userId` segment for later.
 - **Identity:** Klein multi-reference only; no PuLID/LoRA now (CCL2/CCL3 later).
 - **References overlap:** a `character` reference card gets a one-way "Promote to character" button.
-- **Board:** CC01-CC18 only; CCL* tasks stay off the board. CC14-CC18 are gated on feat/timeline-review merging to main (rebase this branch first).
+- **Later tasks (scope change, Kyle 2026-10-20):** CCL1-CCL6 go on the board too, gated after CC18 (none dispatched yet). Kyle approved CCL2 (PuLID/InfiniteYou face lock: new Google Colab workflow nodes and models), CCL3 (character LoRA training on Google Colab), CCL4 (multi-speaker voices: schema change plus Colab Qwen) and CCL5 (real-person characters: schema and cast-policy change; keeps a consent checkbox plus a likeness warning). Colab notebook/workflow edits are new files or clearly scoped, coordinated with the HyperFrames/Google Colab owner.
+- **Board:** CC01-CC18 plus the CCL subtasks in section 13. CC14-CC18 are gated on feat/timeline-review merging to main (rebase this branch first).
 
 ## 1. Goal
 
@@ -217,18 +218,28 @@ Tiers: all `standard` = OpenCode worker on deepseek-v4.1-flash, 2-4 files each, 
 | CC17 e2e | Server end-to-end character flow | `apps/server/test/characters/e2e.test.mjs` | CC13, CC14, CC15 | after-TR | temp runtime, cassette/scripted model, no network: create character + image, add to chat, propose/confirm, build; assert cast[], scene.cast, presenter, pkg.voice, a_chr in jobs plan, characters.json; library update -> TR clip state 'stale' for the cast scene |
 | CC18 docs | User guide | `docs/CHARACTER_CREATOR.md` | CC16, CC17 | - | every route/command exists in code; limits match constants; states fictional-only and MVP identity = Klein reference (no face-ID training); 60 s demo script |
 
-Later (not for the hackathon board; listed so they are not forgotten):
+Later tasks (approved 2026-10-20, on the board but gated: none may start before CC18 is merged). Too-big items are split into 2-4-file subtasks. Flag `colab` = new Google Colab file only (no edits to existing colab/** or workflows/** files); flagged in demo-webapp NOTES.md for the HyperFrames/Google Colab owner.
 
-| Task | Title | Flags |
-|---|---|---|
-| CCL1 sheet-workflow | Turnaround-sheet prompt preset on existing Klein ref_edit (no new nodes) | - |
-| CCL2 pulid | PuLID/InfiniteYou identity workflow + Colab models | needs-kyle-ok (new Colab workflow nodes, models.lock) |
-| CCL3 lora | Character LoRA training + loader node | needs-kyle-ok (Colab) |
-| CCL4 multi-speaker | `scene.speaker` + per-scene voice in TTS and Colab Qwen | needs-kyle-ok (schema + Colab) |
-| CCL5 real-person | `kind:'real_authorized'` with consent record | needs-kyle-ok (schema/CAST1 policy) |
-| CCL6 identity-qa | Embedding similarity of takes vs primary, suggests TR verdicts | - |
+| Task | Title | Files | Deps | Flags | Acceptance |
+|---|---|---|---|---|---|
+| CCL1a sheet-preset | Turnaround-sheet prompt preset on existing Klein ref_edit | `apps/server/src/characters/sheet.mjs`, `apps/server/test/characters/sheet.test.mjs` | CC18 | after-CC | pure buildSheetJob(character) -> ref_edit job params using the existing flux3_klein_ref_edit workflow (no new nodes); front/side/back prompt; needs a planHash approval; no network |
+| CCL1b sheet-ui | "Generate sheet" button in the editor | `apps/web/src/characters/sheet-button.ts`, `apps/web/test/characters-sheet.test.ts` | CCL1a | after-CC | button disabled until a primary image exists; shows spend approval before calling the api; result becomes a non-primary image |
+| CCL2a pulid-workflow | PuLID/InfiniteYou identity workflow (new file) | `workflows/character_identity_pulid.api.json`, `workflows/character_identity_pulid.api.params.json`, `apps/server/test/characters/pulid-workflow.test.mjs` | CC18 | after-CC; colab | valid ComfyUI API JSON; params file names every input; test checks node ids/params match; no edits to existing workflows |
+| CCL2b pulid-models | Identity model lock (new file) | `colab/character-identity-models.lock.json`, `apps/server/test/characters/identity-models.test.mjs` | CCL2a | after-CC; colab | every model has url, sha256, licence, size; licences allow the use; models.lock.json untouched |
+| CCL2c identity-tier | Choose Klein vs PuLID per character | `apps/server/src/characters/identity.mjs`, `apps/server/test/characters/identity.test.mjs` | CCL2a | after-CC | pure pickIdentityJob(character, opts) -> Klein ref by default, PuLID when enabled and models present; plan shows the workflow; no network |
+| CCL3a lora-dataset | LoRA training set builder | `apps/server/src/characters/lora-dataset.mjs`, `apps/server/test/characters/lora-dataset.test.mjs` | CC18 | after-CC | builds captions + image list from a character (min 8 images, else LORA_TOO_FEW_IMAGES); fictional/consented only; deterministic manifest hash |
+| CCL3b lora-train | Colab LoRA training script (new file) | `colab/character_lora_train.py`, `pipeline-py/tests/test_character_lora_train.py` | CCL3a | after-CC; colab | dry-run mode validates manifest without GPU; writes a .safetensors path + sha; spend approved per run; no tokens logged |
+| CCL3c lora-loader | LoRA loader workflow + server mapping | `workflows/character_lora_klein.api.json`, `workflows/character_lora_klein.api.params.json`, `apps/server/src/characters/lora.mjs`, `apps/server/test/characters/lora.test.mjs` | CCL3b, CCL2c | after-CC; colab | new workflow only; lora.mjs maps a trained LoRA asset into the job; falls back to Klein ref when absent |
+| CCL4a speaker-schema | `scene.speaker` + per-character voices in package-v1 | `packages/schema/package-v1.schema.json`, `packages/schema/types.ts`, `pipeline-py/comfyrizz_pipeline/schema.py`, `packages/schema/test/speaker.test.mjs` | CC18 | after-CC; schema | optional scene.speaker = cast id; cast[].voice optional; old packages still valid; JS and Python validators agree |
+| CCL4b speaker-tts | Per-scene voice in TTS planning | `apps/server/src/characters/speakers.mjs`, `apps/server/test/characters/speakers.test.mjs` | CCL4a | after-CC | resolves each scene's voice (speaker cast voice, else package voice); one TTS job per voice segment; voiceHash stable |
+| CCL4c speaker-qwen | Colab Qwen multi-speaker narration (new file) | `colab/qwen_multi_speaker.py`, `pipeline-py/tests/test_qwen_multi_speaker.py` | CCL4b | after-CC; colab | new script calling existing Qwen speakers per segment; dry-run test without GPU; qwen_narrate.py untouched |
+| CCL4d speaker-ui | Speaker picker per scene + agent hint | `apps/web/src/characters/speaker-picker.ts`, `apps/web/test/characters-speaker.test.ts` | CCL4b | after-CC | picker lists cast with voices; default = narrator; change emits patch |
+| CCL5a real-model | `kind:'real_authorized'` + consent record | `apps/server/src/characters/consent.mjs`, `apps/server/test/characters/consent.test.mjs` | CC18 | after-CC; schema | real_authorized requires consent {assertedBy, assertedAt, scope, likenessWarningShown:true}; missing -> CHAR_CONSENT_REQUIRED; revocation removes from new builds |
+| CCL5b real-schema | CAST1 policy for authorized real people | `packages/schema/package-v1.schema.json`, `packages/schema/types.ts`, `pipeline-py/comfyrizz_pipeline/schema.py`, `packages/schema/test/cast-real.test.mjs` | CCL5a, CCL4a | after-CC; schema | cast[].kind fictional default; real_authorized needs consentRef; old packages valid; JS and Python agree |
+| CCL5c real-ui | Consent checkbox + likeness warning in the editor | `apps/web/src/characters/consent.ts`, `apps/web/test/characters-consent.test.ts` | CCL5a | after-CC | choosing "real person" shows a likeness warning and an unchecked consent checkbox; save blocked until checked; fictional path unchanged |
+| CCL6 identity-qa | Embedding similarity of takes vs primary, suggests TR verdicts | `apps/server/src/characters/identity-qa.mjs`, `apps/server/test/characters/identity-qa.test.mjs` | CC18 | after-CC | injected embed(fn); cosine score per take; below threshold -> proposed 'reject' verdict (proposal only); no network |
 
-Dependency waves: (1) CC01, CC02, CC09 ; (2) CC03, CC04 ; (3) CC05, CC06, CC07, CC08 ; (4) CC10, CC13 ; (5) CC11, CC12 ; **gate: TIMELINE-REVIEW merged, rebase** ; (6) CC14, CC15 ; (7) CC16, CC17 ; (8) CC18. Waves 1-5 (13 tasks) touch only new files and can run now.
+Dependency waves: (1) CC01, CC02, CC09 ; (2) CC03, CC04 ; (3) CC05, CC06, CC07, CC08 ; (4) CC10, CC13 ; (5) CC11, CC12 ; **gate: TIMELINE-REVIEW merged, rebase** ; (6) CC14, CC15 ; (7) CC16, CC17 ; (8) CC18. Waves 1-5 (13 tasks) touch only new files and can run now. (9) CCL* after CC18.
 
 ## 14. Open questions for Kyle (resolved 2026-10-20: all recommended defaults in bold accepted, see "Resolved decisions")
 
