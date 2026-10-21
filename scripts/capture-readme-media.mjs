@@ -353,7 +353,26 @@ async function attachPipTakes(env) {
   if (!response.ok) throw new Error(`attach takes: GET package HTTP ${response.status}`);
   const project = await response.json();
   const takes = JSON.parse(readFileSync(join(exampleDir, 'takes.json'), 'utf8'));
+  // The takes point at MP4 placeholder clips that are generated, not committed
+  // (PN02, gitignored). Without them the player draws "media not in this clone".
+  const needsMedia = Object.values(takes.clips ?? {}).some(entry => entry.takes.some(take => !existsSync(join(exampleDir, take.file))));
+  if (needsMedia) {
+    const made = spawnSync(process.execPath, [join(repoRoot, 'scripts', 'pip-night-shift', 'make-media.mjs')], { cwd: repoRoot, stdio: 'ignore', timeout: 300_000 });
+    if (made.status !== 0) console.warn('warning: make-media.mjs failed; previews may show the missing-media placeholder');
+  }
   const packageRoot = join(env.runtimeDir, 'packages', pipPackageId);
+  // Copy every take's file into the runtime package so the takes routes can
+  // mint media tickets for them (the server seeded before make-media ran).
+  for (const entry of Object.values(takes.clips ?? {})) {
+    for (const take of entry.takes) {
+      const from = join(exampleDir, take.file);
+      const to = join(packageRoot, take.file);
+      if (existsSync(from) && !existsSync(to)) {
+        mkdirSync(dirname(to), { recursive: true });
+        copyFileSync(from, to);
+      }
+    }
+  }
   const next = structuredClone(project.package);
   let changed = false;
   for (const [assetId, entry] of Object.entries(takes.clips ?? {})) {
@@ -363,7 +382,7 @@ async function attachPipTakes(env) {
     const scene = typeof sceneId === 'string' ? next.scenes.find(candidate => candidate.id === sceneId) : null;
     if (!take || !scene) continue;
     const sourceFile = [take.file, take.file.replace(/\.(?:mp4|mov|webm)$/i, '.svg')]
-      .map(file => join(packageRoot, file)).find(file => existsSync(file));
+      .flatMap(file => [join(packageRoot, file), join(exampleDir, file)]).find(file => existsSync(file));
     const extension = sourceFile ? extname(sourceFile).slice(1).toLowerCase() : (take.file.split('.').pop() ?? 'mp4');
     if (sourceFile) {
       mkdirSync(join(packageRoot, 'assets'), { recursive: true });
@@ -512,6 +531,13 @@ async function maskSensitive(page, context) {
       // Live Google Colab account balance from the capturing machine is not README content.
       return text.replace(pathPattern, '[path]').replace(/\s*·\s*[\d.,]+ compute units left/g, '');
     };
+    // Capture-only: hide the Hugging Face token-file setup warning (machine setup, not README content).
+    for (const element of document.querySelectorAll('body *')) {
+      const text = element.textContent ?? '';
+      if (!/^\s*No Hugging Face read token file/.test(text)) continue;
+      if ([...element.children].some(child => /^\s*No Hugging Face read token file/.test(child.textContent ?? ''))) continue;
+      element.style.display = 'none';
+    }
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
@@ -632,6 +658,15 @@ async function mountHistory(page, history) {
   await waitForSelector(page, '#readme-colab-history .colab-gauge', { timeout: 20_000 });
 }
 
+/** Seek the editor Player to a frame (via the playhead range) so the shot shows animated type. */
+async function seekPreview(page, frame) {
+  await page.locator('#scrub').evaluate((input, value) => {
+    input.value = String(value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, frame).catch(() => {});
+  await page.waitForTimeout(1200);
+}
+
 async function prepareShot(name, page, context) {
   if (name === 'character-library') {
     await ensureEditor(page);
@@ -697,6 +732,7 @@ async function prepareShot(name, page, context) {
   }
   if (name === 'ui-pip-default') {
     await ensureEditor(page);
+    await seekPreview(page, 90);
     await page.locator('#chat-pane').evaluate(element => { element.scrollTop = 0; }).catch(() => {});
     await page.locator('#work-pane').evaluate(element => { element.scrollTop = 0; }).catch(() => {});
     return;
@@ -727,6 +763,7 @@ async function prepareShot(name, page, context) {
   }
   if (name === 'colab-gauges-preview') {
     await ensureEditor(page);
+    await seekPreview(page, 330);
     await mountHistory(page, context.history);
     return;
   }
@@ -814,8 +851,12 @@ async function runCapture(selection, outDir) {
       await seedDemoExtras(env);
       await attachPipTakes(env);
     }
+    // Playwright's bundled Chromium has no H.264 decoder, so the take MP4s would
+    // fall back to the missing-media card; prefer installed Google Chrome.
+    const chromeChannel = process.env.CAPTURE_BROWSER_CHANNEL ?? (existsSync('/usr/bin/google-chrome') ? 'chrome' : undefined);
     browser = await chromium.launch({
       headless: true,
+      ...(chromeChannel ? { channel: chromeChannel } : {}),
       args: ['--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=1', ...(typeof process.getuid === 'function' && process.getuid() === 0 ? ['--no-sandbox'] : [])],
     });
     const context = await browser.newContext({
