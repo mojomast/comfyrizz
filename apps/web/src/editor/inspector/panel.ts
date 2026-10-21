@@ -73,8 +73,8 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
       </div>
       <p class="sa-status" data-testid="freshness" data-freshness role="status"></p>
       <div class="field">
-        <label class="field-label">Narration</label>
-        <textarea data-testid="narration" data-narration maxlength="600" class="field-control"></textarea>
+        <label class="field-label" for="sa-narration">Narration</label>
+        <textarea id="sa-narration" data-testid="narration" data-narration maxlength="600" class="field-control"></textarea>
       </div>
       <div class="sa-row toolbar">
         <button type="button" data-testid="apply-narration" data-apply-narration class="btn btn-primary btn-sm">Apply narration</button>
@@ -82,8 +82,8 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
       </div>
       <ol class="sa-sentences" data-testid="sentences" data-sentences></ol>
       <div class="field">
-        <label class="field-label">Caption correction</label>
-        <input data-testid="caption-text" data-caption maxlength="600" class="field-control" />
+        <label class="field-label" for="sa-caption-text">Caption correction</label>
+        <input id="sa-caption-text" data-testid="caption-text" data-caption maxlength="600" class="field-control" />
       </div>
       <button type="button" data-testid="apply-caption" data-apply-caption class="btn btn-secondary btn-sm">Correct caption</button>
       <canvas class="sa-wave" data-wave width="640" height="72" aria-label="Narration waveform"></canvas>
