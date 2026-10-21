@@ -118,7 +118,7 @@ export function MediaFill({
   const src = resolveMediaSrc(file, { [file]: file }, staticFile);
   // Cover/contain is centred so a wrong declared size can crop, never stretch.
   const style: React.CSSProperties = { width: '100%', height: '100%', objectFit: fit, objectPosition: 'center' };
-  if (asset.kind === 'image') return <AbsoluteFill><Img src={src} style={style} onError={() => setFailed(true)} /></AbsoluteFill>;
+  if (asset.kind === 'image') return <AbsoluteFill><Img src={src} pauseWhenLoading style={style} onError={() => setFailed(true)} /></AbsoluteFill>;
   const sourceFrames = asset.media?.frames ?? 97;
   const sourceFps = asset.media?.fps ?? 24;
   const clipFrames = Math.max(1, Math.round((sourceFrames / sourceFps) * fps));
@@ -128,6 +128,7 @@ export function MediaFill({
   const video = (
     <OffthreadVideo
       src={src}
+      pauseWhenBuffering
       muted={muted}
       playbackRate={rate}
       onError={() => setFailed(true)}
