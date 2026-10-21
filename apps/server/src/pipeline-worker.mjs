@@ -196,12 +196,15 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         // PO-3: the ceiling is checked before anything is allocated. `required` is the upper estimate plus
         // the collect-and-stop reserve (assessBudget's reserve, the same reserveUnitsFor(rate) the deadline
         // subtracts). An unreadable balance is a refusal, not a pass: we cannot prove the run is covered.
-        const required = admission?.required ?? null;
+        // Balance check: the account's existing burn keeps draining while we run, so the balance must cover
+        // our run priced at (planned + measured), not max(). The per-run rate for watchdog/caps stays max().
+        const balanceRate = Number((planned.ratePerHour + (measured ?? 0)).toFixed(3));
+        const required = balanceRate === ratePerHour ? admission?.required ?? null : assessBudget({ budgetUnits: Number.MAX_SAFE_INTEGER, ratePerHour: balanceRate, nextJobUpperEstimate: upperFor(balanceRate) }).required;
         const balance = typeof before?.balance === 'number' ? before.balance : Number.NaN;
-        send({ kind: 'task', stageId, detail: { event: 'media_spend_ceiling', gpu, ratePerHour, rateSource, required, reserveUnits: limits.reserveUnits, balance: Number.isFinite(balance) ? balance : null } });
+        send({ kind: 'task', stageId, detail: { event: 'media_spend_ceiling', gpu, ratePerHour, rateSource, balanceRatePerHour: balanceRate, required, reserveUnits: limits.reserveUnits, balance: Number.isFinite(balance) ? balance : null } });
         if (!Number.isFinite(balance)) throw new Error('The Google Colab account balance could not be read, so this run cannot be shown to fit it. Nothing was allocated; check `colab usage` and try again.');
         if (!Number.isFinite(required) || balance < required) {
-          throw new Error(`The account balance (${balance} units) does not cover the estimated ${required} units for this run at ${ratePerHour} units/h on ${gpu}, which includes the ${limits.reserveUnits}-unit collect-and-stop reserve (${COLLECT_AND_STOP_RESERVE_MINUTES} min at ${ratePerHour} units/h). Nothing was allocated; reduce the media allocation or top the account up.`);
+          throw new Error(`The account balance (${balance} units) does not cover the estimated ${required} units for this run at ${balanceRate} units/h on ${gpu} (planned ${planned.ratePerHour} + the account's current ${measured ?? 0}), which includes the ${reserveUnitsFor(balanceRate)}-unit collect-and-stop reserve (${COLLECT_AND_STOP_RESERVE_MINUTES} min at ${balanceRate} units/h). Nothing was allocated; reduce the media allocation or top the account up.`);
         }
       }
       result = await backend.runPackage(pkg, { workDir, outDir, budget: admission, approved: true, teardownMode: holdForRender ? 'never' : 'done', gateCommand: null, signal, onEvent: sourceEvent });

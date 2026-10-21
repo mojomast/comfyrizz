@@ -70,6 +70,22 @@ test('a measured rate above the table raises the price, the deadlines and the re
   assert.equal(used.watchdogMinutes, spendingMinutes(5, 17.8));
 });
 
+// Balance check (re-review): the account's existing burn keeps draining, so the balance must cover
+// planned + measured, while the run's own watchdog/caps use max(planned, measured).
+test('the balance must cover the run at planned + measured, not just max()', async t => {
+  cleanRateEnv(t);
+  const f = fixture(t);
+  withUsage(f, { balance: 3, ratePerHour: 17.8 });
+  const base = f.adapters.colabFactory;
+  f.adapters.colabFactory = opts => ({ ...base(opts), runPackage: async () => { f.calls.push('media'); throw new Error('must not be reached'); } });
+  assert.equal(await executePipeline(f.spec, f.adapters), 1);
+  assert.ok(!f.calls.includes('media'));
+  const ceilingEvent = f.events.find(event => event.detail?.event === 'media_spend_ceiling');
+  assert.equal(ceilingEvent.detail.ratePerHour, 17.8, 'per-run rate stays max(planned, measured)');
+  assert.equal(ceilingEvent.detail.balanceRatePerHour, 26.7, 'balance priced at planned + measured');
+  assert.match(f.events.filter(event => event.kind === 'failed').at(-1)?.message ?? '', /26\.7 units\/h on G4 \(planned 8\.9 \+ the account's current 17\.8\)/);
+});
+
 test('a G4 override below the table rate is refused unless explicitly allowed', async t => {
   cleanRateEnv(t, { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: '0.08' });
   const f = fixture(t);

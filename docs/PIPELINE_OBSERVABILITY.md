@@ -154,9 +154,11 @@ either. Tokens are not passed with `--env`.
 
 The rate an allocation is priced with is per accelerator. `packages/backends/src/budget.mjs`
 keeps a table of measured Google Colab rates (`COLAB_RATE_TABLE`): G4 8.90 units/h
-(docs/COLAB_EFFICIENCY_RESULTS.md), L4 1.54 units/h (same document) and CPU 0.08 units/h
-(docs/DIPSY_SWARM.md). H100 and A100 have no measured rate in the repo, so a run on one is
-refused until `COMFYRIZZ_COLAB_RATE_PER_HOUR_<GPU>` (for example `..._H100`) prices it.
+(docs/COLAB_EFFICIENCY_RESULTS.md), L4 4.8 units/h (a conservative, unmeasured figure; the
+1.54/h in that document is a marginal rate, so check it with `colab usage` while only an L4
+runs) and CPU 0.08 units/h (docs/DIPSY_SWARM.md). H100 and A100 have no measured rate in the repo, so a run on one is
+refused until `COMFYRIZZ_COLAB_RATE_PER_HOUR_<GPU>` (for example `..._H100`) prices it, at no
+less than the highest table rate (8.9) unless `COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1`.
 `COMFYRIZZ_COLAB_RATE_PER_HOUR_<GPU>` overrides one accelerator; the older
 `COMFYRIZZ_COLAB_RATE_PER_HOUR` still works but only prices G4. An override below the table
 rate is refused unless `COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1`, because pricing low lets a run
@@ -164,7 +166,9 @@ outspend its ceiling.
 
 `colab usage` is read before anything is allocated, so its rate is the account's existing
 burn (0.00/h when idle, about 0.08/h with a CPU session running). It can raise the price,
-never lower it: the run is priced at max(table rate for the requested accelerator, measured).
+never lower it: the run's watchdog and caps use max(table rate for the requested
+accelerator, measured). The balance check is stricter: the account's existing burn keeps
+draining, so the balance must cover the run at table rate + measured.
 A balance that cannot be read refuses the run; it is not skipped.
 
 There is one teardown reserve: `COLLECT_AND_STOP_RESERVE_MINUTES` (6) at the run's rate,

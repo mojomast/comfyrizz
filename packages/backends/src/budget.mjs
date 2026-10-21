@@ -23,7 +23,9 @@ export const NEXT_JOB_MARGIN = 1.35;
  *
  *   G4  8.90 units/h  docs/COLAB_EFFICIENCY_RESULTS.md, docs/SPEC.md 5.2 (observed Oct 16; GPU test 3
  *                     measured 8.14/h, so 8.9 is the pessimistic figure)
- *   L4  1.54 units/h  docs/COLAB_EFFICIENCY_RESULTS.md (observed marginal rate)
+ *   L4  4.80 units/h  UNMEASURED conservative figure. COLAB_EFFICIENCY_RESULTS.md reports a 1.54/h
+ *                     *marginal* rate, which is likely too low; check against `colab usage` with only an
+ *                     L4 session running before lowering this.
  *   CPU 0.08 units/h  docs/DIPSY_SWARM.md (`colab usage` reported 0.08 credits/hour)
  *
  * H100 and A100 are listed fallbacks (colab-plan.mjs) with no measured rate in the repo, so they have no
@@ -32,13 +34,16 @@ export const NEXT_JOB_MARGIN = 1.35;
  */
 export const COLAB_RATE_TABLE = Object.freeze({
   G4: Object.freeze({ ratePerHour: 8.9, source: "docs/COLAB_EFFICIENCY_RESULTS.md (observed 8.90 units/h)" }),
-  L4: Object.freeze({ ratePerHour: 1.54, source: "docs/COLAB_EFFICIENCY_RESULTS.md (observed marginal 1.54 units/h)" }),
+  // Unmeasured: conservative until checked with `colab usage` while only an L4 runs (see above).
+  L4: Object.freeze({ ratePerHour: 4.8, source: "conservative unmeasured estimate (verify with colab usage, L4 only)" }),
   CPU: Object.freeze({ ratePerHour: 0.08, source: "docs/DIPSY_SWARM.md (colab usage reported 0.08/h)" }),
 });
 /** The accelerator Comfyrizz allocates by default (colab-plan.mjs COMFYRIZZ_RUNTIME). */
 export const DEFAULT_GPU = "G4";
 /** Kept for callers that only ever priced G4; prefer `rateForGpu`. */
 export const DEFAULT_RATE_PER_HOUR = COLAB_RATE_TABLE.G4.ratePerHour;
+/** The floor for an accelerator with no table entry: nothing unpriced may be assumed cheaper than this. */
+export const HIGHEST_TABLE_RATE = Math.max(...Object.values(COLAB_RATE_TABLE).map(entry => entry.ratePerHour));
 
 const gpuKey = gpu => String(gpu || DEFAULT_GPU).trim().toUpperCase();
 const rateEnvName = gpu => `COMFYRIZZ_COLAB_RATE_PER_HOUR_${gpuKey(gpu).replace(/[^A-Z0-9]/g, "_")}`;
@@ -66,6 +71,9 @@ export function rateForGpu(gpu = DEFAULT_GPU, { explicit = null, env = process.e
   }
   const rate = Number(override[0]);
   if (!Number.isFinite(rate) || rate <= 0) throw new Error(`Google Colab rate per hour must be a positive number (got ${JSON.stringify(override[0])} from ${override[1]})`);
+  if (!entry && rate < HIGHEST_TABLE_RATE && !allowBelowTable) {
+    throw new Error(`${override[1]} prices ${key}, which has no measured rate, at ${rate} units/h, below the highest table rate (${HIGHEST_TABLE_RATE} units/h). An unmeasured accelerator is not assumed cheaper than G4; set COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1 if this is deliberate.`);
+  }
   if (entry && rate < entry.ratePerHour && !allowBelowTable) {
     throw new Error(`${override[1]} sets ${key} to ${rate} units/h, below its measured ${entry.ratePerHour} units/h (${entry.source}). Pricing below the table lets a run outspend its ceiling; set COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1 if this is deliberate.`);
   }

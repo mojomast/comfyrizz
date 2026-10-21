@@ -7,8 +7,9 @@ import { COLAB_RATE_TABLE, COLLECT_AND_STOP_RESERVE_MINUTES, DEFAULT_RATE_PER_HO
 test('the rate table is keyed by accelerator and sourced from repo measurements', () => {
   assert.equal(COLAB_RATE_TABLE.G4.ratePerHour, 8.9);
   assert.equal(COLAB_RATE_TABLE.CPU.ratePerHour, 0.08);
-  assert.equal(COLAB_RATE_TABLE.L4.ratePerHour, 1.54);
-  for (const entry of Object.values(COLAB_RATE_TABLE)) assert.match(entry.source, /docs\//);
+  assert.equal(COLAB_RATE_TABLE.L4.ratePerHour, 4.8, 'L4 is a conservative unmeasured figure');
+  assert.match(COLAB_RATE_TABLE.L4.source, /unmeasured/);
+  for (const gpu of ['G4', 'CPU']) assert.match(COLAB_RATE_TABLE[gpu].source, /docs\//);
   assert.equal(DEFAULT_RATE_PER_HOUR, 8.9);
   assert.equal(rateForGpu('G4', { env: {} }).ratePerHour, 8.9);
   assert.equal(rateForGpu('cpu', { env: {} }).ratePerHour, 0.08);
@@ -26,6 +27,10 @@ test('overrides are per accelerator, and the legacy global variable only prices 
 
 test('an unpriced accelerator and a below-table override are refused unless deliberate', () => {
   assert.throws(() => rateForGpu('H100', { env: {} }), /COMFYRIZZ_COLAB_RATE_PER_HOUR_H100/);
+  // an accelerator with no table entry may not be priced below the highest table rate (G4 8.9)
+  assert.throws(() => rateForGpu('H100', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_H100: '5' } }), /no measured rate.*below the highest table rate \(8\.9/);
+  assert.equal(rateForGpu('H100', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_H100: '5', COMFYRIZZ_COLAB_ALLOW_LOW_RATE: '1' } }).ratePerHour, 5);
+  assert.equal(rateForGpu('H100', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_H100: '8.9' } }).ratePerHour, 8.9);
   assert.throws(() => rateForGpu('G4', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: '4' } }), /below its measured 8.9.*COMFYRIZZ_COLAB_ALLOW_LOW_RATE=1/);
   assert.throws(() => rateForGpu('G4', { explicit: 0.08, env: {} }), /below its measured/);
   assert.equal(rateForGpu('G4', { env: { COMFYRIZZ_COLAB_RATE_PER_HOUR_G4: '4', COMFYRIZZ_COLAB_ALLOW_LOW_RATE: '1' } }).ratePerHour, 4);
