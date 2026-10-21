@@ -207,7 +207,83 @@
       }
     }
   ],
-  "assets": {},
+  "assets": {
+    "a_music_bed": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/music-bed.wav",
+      "sha256": "be8d3acf02c2eda452b7b3de14ed8861a308de3dac07e214fa1ace962a6ecac9",
+      "bytes": 3528044,
+      "media": {
+        "durationSeconds": 20,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "source": {
+        "provider": "repo",
+        "title": "Pip's Night Shift — music bed",
+        "creator": "Comfyrizz contributors"
+      },
+      "license": {
+        "id": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "Comfyrizz contributors"
+      },
+      "redistributable": true,
+      "notes": "Original 96 BPM, 8-bar instrumental bed (felt bass, warm pad, bell arpeggio, brushed pulse). Synthesized locally from scripts/pip-night-shift/make-music.mjs; no samples, no network, no models."
+    },
+    "a_sfx_whoosh": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/sfx-whoosh.wav",
+      "sha256": "892b79f10e134dd46f42192009c73a54c42265235124bbc8884a737c4558cce1",
+      "bytes": 123524,
+      "media": {
+        "durationSeconds": 0.7,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "source": {
+        "provider": "repo",
+        "title": "Pip's Night Shift — transition whoosh",
+        "creator": "Comfyrizz contributors"
+      },
+      "license": {
+        "id": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "Comfyrizz contributors"
+      },
+      "redistributable": true,
+      "notes": "Filtered-noise swell for the s1 to s2 iris transition, synthesized locally by scripts/pip-night-shift/make-music.mjs."
+    },
+    "a_sfx_ding": {
+      "kind": "audio",
+      "origin": "upload",
+      "status": "ready",
+      "file": "assets/sfx-ding.wav",
+      "sha256": "4ee3605f785ddb5eee901db866f9aef4528cab2015795157a6fd89b4cd246f03",
+      "bytes": 211724,
+      "media": {
+        "durationSeconds": 1.2,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "source": {
+        "provider": "repo",
+        "title": "Pip's Night Shift — counter ding",
+        "creator": "Comfyrizz contributors"
+      },
+      "license": {
+        "id": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "Comfyrizz contributors"
+      },
+      "redistributable": true,
+      "notes": "Small bell chime for the s3 counter hit, synthesized locally by scripts/pip-night-shift/make-music.mjs."
+    }
+  },
   "compliance": {
     "open_weights_only": true,
     "backends_used": [],
@@ -215,6 +291,37 @@
     "warnings": [
       "Every scene draws its background procedurally; generated stills and clips are optional.",
       "Narration text is present but voice is off, so captions are estimated until audio is measured."
+    ]
+  },
+  "audio": {
+    "music": {
+      "asset": "a_music_bed",
+      "gain_db": -16,
+      "fade_in_seconds": 0.5,
+      "fade_out_seconds": 1.5,
+      "loop": false,
+      "duck": {
+        "enabled": true,
+        "reduction_db": -12,
+        "attack_ms": 20,
+        "release_ms": 300
+      }
+    },
+    "sfx": [
+      {
+        "asset": "a_sfx_whoosh",
+        "scene": "s1_dawn",
+        "at": "scene-end",
+        "offset_seconds": 0,
+        "gain_db": -6
+      },
+      {
+        "asset": "a_sfx_ding",
+        "scene": "s3_juno",
+        "at": "scene-start",
+        "offset_seconds": 0,
+        "gain_db": -6
+      }
     ]
   }
 }
