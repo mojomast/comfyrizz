@@ -328,7 +328,15 @@ export function createApp({
     return { busy: false, holder: null, release };
   }
 
-  const pipelines = createPipelineController({ runtimeDir, events, stageInputs: stagePipelineInputs, ...(pipelineLaunch ? { launch: pipelineLaunch } : {}), isBusy: () => Boolean(runs.status().activeRunId || operations.status().busy) });
+  // RL10c: the pipeline controller takes the same shared slot for the whole life of a Google
+  // Colab generation run, so an export or a render during the run is refused with the holder
+  // instead of starting a second job on the same budget.
+  const pipelines = createPipelineController({
+    runtimeDir, events, stageInputs: stagePipelineInputs,
+    ...(pipelineLaunch ? { launch: pipelineLaunch } : {}),
+    operations,
+    isBusy: () => Boolean(runs.status().activeRunId),
+  });
 
   function takeDocFor(pkgId) {
     try {
@@ -1164,7 +1172,8 @@ export function createApp({
     }
 
     if (url.pathname === '/api/export' && request.method === 'POST') {
-      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
+      // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
+      // this export with the holder instead of a second job on the same budget.
       // RL06: take the shared slot before the body is read, so a slow request cannot let a
       // second export through the same door.
       const exportId = `x_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -1245,7 +1254,8 @@ export function createApp({
     }
 
     if (url.pathname === '/api/render' && request.method === 'POST') {
-      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
+      // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
+      // this render with the holder instead of a second job on the same budget.
       // RL06: the shared slot is taken before the body is read, so two parallel renders
       // cannot both start; the loser is told who holds the slot.
       const renderId = `r_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -1505,7 +1515,8 @@ export function createApp({
     // segment whose key did not change (A6), then re-stitches and muxes; the response is the
     // full-length MP4.
     if (url.pathname === '/api/scene/render' && request.method === 'POST') {
-      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
+      // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
+      // this scene render with the holder instead of a second job on the same budget.
       // RL06: the shared slot is taken before the body is read, so a scene render cannot
       // start while an export or a full render holds the machine.
       const renderId = `sr_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -1578,7 +1589,8 @@ export function createApp({
     // package is diffed against the last rendered timeline; a scene-local change goes through
     // the A6 incremental cache, a timing change falls back to a full render with a reason.
     if (url.pathname === '/api/render/edited' && request.method === 'POST') {
-      if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
+      // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
+      // this edited render with the holder instead of a second job on the same budget.
       // RL06: an edited render shares the scene render slot, taken before the body is read.
       const renderId = `er_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
       const hold = holdOperation('scene-render', renderId, response);
