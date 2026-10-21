@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runConversationTurn, brandTheme, CONVERSATION_PROMPT_VERSION, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
@@ -13,6 +13,9 @@ import { buildCorrection } from './takes/correction.mjs';
 import { deriveClipState, TAKES_SCHEMA } from './takes/model.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
+import { createCharacterStore } from './characters/store.mjs';
+import { addToProject, setCastOverrides } from './characters/cast.mjs';
+import { buildCastManifest, manifestBlock as castManifestBlock } from './characters/manifest.mjs';
 
 function fail(status, message) { throw Object.assign(new Error(message), { status }); }
 const clone = value => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
@@ -163,11 +166,26 @@ export function createProjectChat({
   runs = null,
   events = null,
   measuredFor = null,
+  characterStore = null,
 }) {
   const dir = join(runtimeDir, 'conversations');
   mkdirSync(dir, { recursive: true });
   const takes = takeStore ?? createTakeStore({ runtimeDir, packageDir: store.dir });
   const active = new Set();
+  let characterStoreCache = null;
+  let characterStoreProbed = false;
+  const charactersFor = () => {
+    if (characterStore) return characterStore;
+    if (!characterStoreProbed) {
+      characterStoreProbed = true;
+      // The library is optional: without library.json the chat keeps the exact
+      // pre-character prompt and tool surface.
+      if (existsSync(join(runtimeDir, 'characters', 'library.json'))) {
+        try { characterStoreCache = createCharacterStore({ rootDir: runtimeDir }); } catch { characterStoreCache = null; }
+      }
+    }
+    return characterStoreCache;
+  };
   const measured = async pkg => {
     if (typeof measuredFor !== 'function') return {};
     const value = await measuredFor(pkg);
@@ -311,6 +329,90 @@ export function createProjectChat({
       readiness: gate,
     };
   }
+  function characterFilesForBuild(libraryStore, cast) {
+    const files = {};
+    if (!libraryStore || typeof libraryStore.imagesDir !== 'function') return files;
+    for (const entry of Array.isArray(cast) ? cast : []) {
+      const images = Array.isArray(entry?.snapshot?.visual?.images) ? entry.snapshot.visual.images : [];
+      const image = images.find(item => item && item.primary === true) ?? images.find(item => item && item.imgId);
+      if (!image?.imgId || typeof entry.characterId !== 'string') continue;
+      try {
+        const names = readdirSync(libraryStore.imagesDir(entry.characterId));
+        const name = names.find(item => item.startsWith(`${image.imgId}.`));
+        if (name) files[image.imgId] = { path: join(libraryStore.imagesDir(entry.characterId), name) };
+      } catch {
+        // A missing library image is reported in characters.json by applyCast.
+      }
+    }
+    return files;
+  }
+
+  const samePlacement = (placement, castId, sceneId) => Boolean(placement
+    && placement.castId === castId && placement.sceneId === sceneId);
+
+  function confirmCastProposal(proposal, { cast, placements, libraryStore, now }) {
+    const state = { cast, placements };
+    if (!proposal || proposal.status !== 'proposed') return state;
+    if (proposal.action === 'cast') {
+      const character = libraryStore?.get(proposal.characterId)
+        ?? state.cast.find(entry => entry.characterId === proposal.characterId)?.snapshot
+        ?? null;
+      if (!character) throw new Error(`character ${proposal.characterId} is not in the library`);
+      const overrides = {};
+      if (proposal.role) overrides.role = proposal.role;
+      if (proposal.wardrobeId) overrides.wardrobeId = proposal.wardrobeId;
+      const added = addToProject(state.cast, character, Object.keys(overrides).length ? { overrides } : {});
+      state.cast = clone(added);
+      if (!added.added && Object.keys(overrides).length) {
+        state.cast = clone(setCastOverrides(state.cast, added.castId, overrides));
+      }
+      for (const sceneId of proposal.scenes ?? []) {
+        const existing = state.placements.find(item => samePlacement(item, added.castId, sceneId));
+        if (existing) {
+          existing.status = 'confirmed';
+          existing.confirmedAt = now;
+          if (proposal.wardrobeId) existing.wardrobeId = proposal.wardrobeId;
+          else delete existing.wardrobeId;
+          if (proposal.role) existing.role = proposal.role;
+          else delete existing.role;
+          continue;
+        }
+        state.placements.push({
+          castId: added.castId,
+          sceneId,
+          status: 'confirmed',
+          confirmedAt: now,
+          ...(proposal.wardrobeId ? { wardrobeId: proposal.wardrobeId } : {}),
+          ...(proposal.role ? { role: proposal.role } : {}),
+        });
+      }
+      proposal.status = 'confirmed';
+      proposal.confirmedAt = now;
+      proposal.castId = added.castId;
+      proposal.pinnedRevision = added.entry?.pinnedRevision ?? null;
+      state.changed = true;
+      return state;
+    }
+    if (proposal.action === 'uncast') {
+      const scenes = new Set(Array.isArray(proposal.scenes) ? proposal.scenes : []);
+      const before = state.placements.length;
+      state.placements = state.placements.filter(item => !(item.castId === proposal.castId && (scenes.size === 0 || scenes.has(item.sceneId))));
+      proposal.removed = before - state.placements.length;
+    } else if (proposal.action === 'voice') {
+      const index = state.cast.findIndex(entry => entry.castId === proposal.castId);
+      if (index < 0) throw new Error(`cast member ${proposal.castId} is not in this project`);
+      const entry = state.cast[index];
+      state.cast[index] = {
+        ...entry,
+        snapshot: { ...entry.snapshot, voice: clone(proposal.voice) },
+      };
+      state.changed = true;
+    }
+    proposal.status = 'confirmed';
+    proposal.confirmedAt = now;
+    return state;
+  }
+
   async function send(input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'A chat message is required');
     const id = input.conversationId ?? `chat_${randomUUID()}`;
@@ -326,6 +428,10 @@ export function createProjectChat({
       || input.confirmClipProposals.some(proposalId => typeof proposalId !== 'string' || !proposalId || proposalId.length > 80))) {
       fail(400, 'confirmClipProposals must be a list of proposal IDs');
     }
+    if (input.confirmCastProposals !== undefined && (!Array.isArray(input.confirmCastProposals)
+      || input.confirmCastProposals.some(proposalId => typeof proposalId !== 'string' || !proposalId || proposalId.length > 80))) {
+      fail(400, 'confirmCastProposals must be a list of proposal IDs');
+    }
     if (!input.provider || input.provider === 'none' || !providerSettings) fail(400, 'Choose a live provider and model in Agent settings to chat');
     if (active.has(id)) fail(409, 'This conversation already has a turn in progress');
     let session = read(id) ?? { id, revision: 0, messages: [], plan: null, phase: 'chatting', projectId: null, projectRevision: null };
@@ -337,6 +443,9 @@ export function createProjectChat({
     let current = session.projectId ? store.read(session.projectId) : null;
     let rebased = rebaseChatPlans(session.plan, session.previousPlan, current);
     let clipProposals = Array.isArray(session.clipProposals) ? clone(session.clipProposals) : [];
+    let cast = Array.isArray(session.cast) ? clone(session.cast) : [];
+    let castPlacements = Array.isArray(session.castPlacements) ? clone(session.castPlacements) : [];
+    let castProposals = Array.isArray(session.castProposals) ? clone(session.castProposals) : [];
     let packageChanged = false;
 
     // Clip proposals are proposals until the user confirms them by ID (a text "yes"
@@ -431,6 +540,25 @@ export function createProjectChat({
       if (packageChanged && current) {
         current = store.read(current.id);
         rebased = rebaseChatPlans(session.plan, session.previousPlan, current);
+      }
+    }
+
+    // Cast proposals are proposals until the user confirms them by ID. Confirmed
+    // membership and placements are persisted in the chat session; the library
+    // stays untouched (project cast entries are pinned snapshots).
+    if (input.confirmCastProposals?.length) {
+      const confirmedIds = new Set(input.confirmCastProposals);
+      const libraryStore = charactersFor();
+      for (const proposal of castProposals) {
+        if (!confirmedIds.has(proposal?.id) || proposal.status !== 'proposed') continue;
+        const now = new Date().toISOString();
+        try {
+          const state = confirmCastProposal(proposal, { cast, placements: castPlacements, libraryStore, now });
+          cast = state.cast;
+          castPlacements = state.placements;
+        } catch (error) {
+          proposal.lastError = String(error?.message ?? 'the proposal could not be applied').slice(0, 300);
+        }
       }
     }
 
@@ -547,6 +675,36 @@ export function createProjectChat({
     // Clips are opt-in too: no reviewable generated clips keeps the previous prompt/tools.
     const clips = await buildClipContext(current, clipProposals);
 
+    // Characters are opt-in: an empty library and cast keep the exact prompt/tools.
+    const libraryStore = charactersFor();
+    const library = libraryStore ? libraryStore.list() : [];
+    const sceneIds = current?.scenes?.map(scene => scene.id)
+      ?? (Array.isArray(rebased.plan?.scenes) ? rebased.plan.scenes.map(scene => scene.id) : []);
+    const recordCastProposal = proposal => {
+      const record = {
+        id: `cc_${randomUUID().replaceAll('-', '').slice(0, 16)}`,
+        status: 'proposed',
+        createdAt: new Date().toISOString(),
+        ...clone(proposal),
+      };
+      castProposals.push(record);
+      return { ok: true, proposalId: record.id, status: 'proposed' };
+    };
+    let characters;
+    if (library.length || cast.length) {
+      const manifest = buildCastManifest(cast, { placements: castPlacements, latestRevisions: library });
+      characters = {
+        block: castManifestBlock(manifest),
+        manifest,
+        cast,
+        library,
+        sceneIds,
+        getCharacter: id => (libraryStore ? libraryStore.get(id) : null),
+        propose: recordCastProposal,
+        ask: () => ({ ok: true }),
+      };
+    }
+
     const config = providerSettings.resolve(input.provider, input.model);
     const model = createOpenAICompatibleModel(config);
     const brand = input.brand ? prepareBrand(input.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : session.brand ?? null;
@@ -557,7 +715,12 @@ export function createProjectChat({
       const user = { role: 'user', content: input.message.trim() };
       const signal = AbortSignal.timeout(120000);
       const build = async plan => {
-        const candidate = await buildChatProject({ plan, previous: current, previousPlan: rebased.previousPlan ?? session.plan, brand, runtimeDir, signal, ...(referenceStore ? { references: referenceStore } : {}) });
+        const castBuild = cast.length ? {
+          cast,
+          placements: castPlacements,
+          files: characterFilesForBuild(libraryStore, cast),
+        } : null;
+        const candidate = await buildChatProject({ plan, previous: current, previousPlan: rebased.previousPlan ?? session.plan, brand, runtimeDir, signal, ...(referenceStore ? { references: referenceStore } : {}), ...(castBuild ? { characters: castBuild } : {}) });
         signal.throwIfAborted();
         // Save with the revision captured before the model ran; intervening edits conflict.
         try {
@@ -584,6 +747,7 @@ export function createProjectChat({
         projectPalette: current?.theme?.palette,
         references,
         clips,
+        characters,
         projectContext: current ? {
           id: current.id, revision: current.revision, title: current.title, format: current.format,
           theme: current.theme, manuallyEditedSinceLastBuild: current.revision !== session.projectRevision,
@@ -602,6 +766,9 @@ export function createProjectChat({
         lastTurnId: input.turnId ?? null, lastTurnBuilt: result.built,
         ...(referenceStore || Array.isArray(session.referenceAssignments) ? { referenceAssignments } : {}),
         ...(clipProposals.length || Array.isArray(session.clipProposals) ? { clipProposals } : {}),
+        ...(cast.length || Array.isArray(session.cast) ? { cast } : {}),
+        ...(castPlacements.length || Array.isArray(session.castPlacements) ? { castPlacements } : {}),
+        ...(castProposals.length || Array.isArray(session.castProposals) ? { castProposals } : {}),
         ...(builtPackage ? { projectId: builtPackage.id, projectRevision: builtPackage.revision, previousPlan: result.plan } : {}),
       };
       write(session);
