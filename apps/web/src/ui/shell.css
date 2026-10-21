@@ -1,0 +1,494 @@
+@import './tokens.css';
+@import './components.css';
+
+/* UO05: Phase 1 app shell grid (PLAN section 5).
+   Top bar (24 * 2), 3-column workspace (left chat + references, centre preview,
+   right inspector for run/activity/assets), docked timeline at bottom, status bar strip.
+   Built exclusively from tokens.css and components.css contracts. */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
+}
+
+/* Lock page-level scroll on desktop viewports (>= 80rem x 45rem); inner panels scroll. */
+@media (min-width: 80rem) and (min-height: 45rem) {
+  html,
+  body {
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+  }
+}
+
+html body #app {
+  display: grid;
+  grid-template-columns:
+    calc(var(--space-6) * 9 + var(--space-3))
+    minmax(0, 1fr)
+    calc(var(--space-6) * 10);
+  grid-template-rows:
+    calc(var(--space-5) * 2)
+    minmax(0, 1fr)
+    auto
+    calc(var(--space-5) + var(--space-2));
+  grid-template-areas:
+    'topbar topbar topbar'
+    'left center right'
+    'timeline timeline timeline'
+    'statusbar statusbar statusbar';
+  width: 100%;
+  max-width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+/* ==========================================================================
+   1. Top bar (24 * 2)
+   ========================================================================== */
+
+html body #app #topbar {
+  grid-area: topbar;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  height: calc(var(--space-5) * 2);
+  min-height: calc(var(--space-5) * 2);
+  max-height: calc(var(--space-5) * 2);
+  padding: 0 var(--space-3);
+  background: var(--bg-1);
+  border: 0;
+  border-bottom: var(--elevation-border-1);
+  border-radius: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  position: relative;
+  z-index: 20;
+}
+
+html body #app #topbar::-webkit-scrollbar {
+  display: none;
+}
+
+html body #app #topbar .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  color: var(--text-1);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+html body #app #topbar .brand small {
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+  color: var(--text-3);
+}
+
+html body #app #topbar .picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-12);
+  color: var(--text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+html body #app #topbar select,
+html body #app #topbar input {
+  min-height: calc(var(--space-5) + var(--space-1));
+  max-height: var(--space-6);
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-0);
+  color: var(--text-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-12);
+}
+
+html body #app #topbar #llm,
+html body #app #topbar #backend {
+  max-width: calc(var(--space-6) * 4);
+}
+
+html body #app #topbar #render-location {
+  max-width: calc(var(--space-6) * 3 + var(--space-4));
+}
+
+html body #app #topbar #agent-model {
+  width: calc(var(--space-6) * 3);
+}
+
+html body #app #topbar #budget {
+  width: calc(var(--space-5) * 2 + var(--space-2));
+  font-variant-numeric: var(--font-numeric-tabular);
+}
+
+html body #app #topbar button {
+  min-height: calc(var(--space-5) + var(--space-1));
+  max-height: var(--space-6);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-12);
+  flex-shrink: 0;
+}
+
+html body #app #topbar #render-bar-host,
+html body #app #topbar .render-bar,
+html body #app #topbar .render-bar-blockers,
+html body #app #topbar .render-bar-list {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  min-height: calc(var(--space-5) + var(--space-1));
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+html body #app #topbar .render-bar-blocker {
+  max-width: calc(var(--space-6) * 5);
+  min-height: calc(var(--space-5) + var(--space-1));
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-12);
+}
+
+html body #app #topbar .render-bar-override:not([hidden]) {
+  position: fixed;
+  top: calc(var(--space-5) * 2 + var(--space-1));
+  right: var(--space-4);
+  z-index: 50;
+  min-width: calc(var(--space-6) * 8);
+  max-width: calc(var(--space-6) * 11);
+  padding: var(--space-3);
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: var(--elevation-border-2);
+  border-radius: var(--radius-control);
+  box-shadow: var(--elevation-2);
+}
+
+/* ==========================================================================
+   2. Workspace columns: Left (chat + references), Centre (preview), Right (inspector)
+   ========================================================================== */
+
+html body #app main.shell-main {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns:
+    calc(var(--space-6) * 9 + var(--space-3))
+    minmax(0, 1fr)
+    calc(var(--space-6) * 10);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: 'left center right';
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+html body #app .pane.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-0);
+  border: 0;
+  border-right: var(--elevation-border-1);
+  border-radius: 0;
+}
+
+html body #app #chat-pane {
+  grid-area: left;
+  align-self: stretch;
+}
+
+html body #app #work-pane {
+  grid-area: center;
+  align-self: stretch;
+}
+
+html body #app #activity-pane {
+  grid-area: right;
+  align-self: stretch;
+  border-right: 0;
+}
+
+html body #app .pane-head.panel-header {
+  min-height: var(--space-6);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-1);
+  border-bottom: var(--elevation-border-1);
+  border-radius: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Left column: chat + references + cast + composer */
+html body #app #messages {
+  flex: 1 0 auto;
+  min-height: calc(var(--space-6) * 3);
+  max-height: none;
+  padding: var(--space-2) var(--space-3);
+  gap: var(--space-2);
+}
+
+html body #app #reference-panel-host,
+html body #app #cast-strip-host {
+  padding: var(--space-2) var(--space-3) 0;
+  flex-shrink: 0;
+}
+
+html body #app #composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin-top: auto;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-1);
+  border-top: var(--elevation-border-1);
+}
+
+html body #app #brief-panel.popover {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+}
+
+/* Centre column: preview + transport + script/storyboard panels */
+html body #app #player {
+  width: 100%;
+  max-width: min(100%, 48vh);
+  margin: 0 auto;
+  background: var(--bg-0);
+  border-bottom: 0;
+  flex-shrink: 0;
+}
+
+html body #app #transport {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-1);
+  border: 0;
+  border-top: var(--elevation-border-1);
+  border-bottom: var(--elevation-border-1);
+  border-radius: 0;
+  flex-shrink: 0;
+}
+
+html body #app #palette {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Right column: run, Google Colab card & gauges, activity, assets, GPU queue */
+html body #app #colab-card-host {
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+html body #app #colab-card-host:empty {
+  display: none;
+}
+
+html body #app #colab-progress-host.gauge {
+  width: auto;
+  margin: 0 var(--space-3) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+}
+
+html body #app #colab-progress-host .colab-progress {
+  margin-top: 0;
+}
+
+/* ==========================================================================
+   3. Docked timeline at the bottom
+   ========================================================================== */
+
+html body #app #timeline-dock {
+  grid-area: timeline;
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  max-height: calc(var(--space-6) * 8 + var(--space-5));
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-1);
+  border: 0;
+  border-top: var(--elevation-border-1);
+  border-bottom: var(--elevation-border-1);
+  border-radius: 0;
+}
+
+html body #app #scene-timeline {
+  width: 100%;
+  min-width: 0;
+}
+
+html body #app #scene-timeline .tl {
+  border-bottom: 0;
+  background: var(--bg-0);
+}
+
+html body #app #scene-timeline .tl-toolbar,
+html body #app #scene-timeline .tl-inspector {
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-1);
+}
+
+html body #app #scene-timeline .tl-toolbar button,
+html body #app #scene-timeline .tl-inspector button,
+html body #app #scene-timeline .tl-toolbar input,
+html body #app #scene-timeline .tl-inspector input,
+html body #app #scene-timeline .tl-inspector select {
+  min-height: calc(var(--space-5) + var(--space-1));
+}
+
+html body #app #scene-timeline .tl-body {
+  min-height: 0;
+}
+
+html body #app #scene-timeline .tl-labels span:nth-child(2),
+html body #app #scene-timeline .tl-lane-scenes {
+  height: calc(var(--space-6) + var(--space-5)) !important;
+}
+
+html body #app #scene-timeline .tl-labels span:not(:first-child):not(:nth-child(2)),
+html body #app #scene-timeline .tl-lane:not(.tl-lane-scenes) {
+  height: var(--space-5);
+}
+
+html body #app #scene-timeline .tl-message {
+  margin: 0;
+  padding: 0 var(--space-3);
+}
+
+html body #app #scene-timeline .tl-message:empty {
+  display: none;
+}
+
+html body #app #scene-timeline .tl-help {
+  padding: 0 var(--space-3) var(--space-1);
+}
+
+/* ==========================================================================
+   4. Status bar strip at the very bottom
+   ========================================================================== */
+
+html body #app #statusbar {
+  grid-area: statusbar;
+  grid-column: 1 / -1;
+  grid-row: 4;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  height: calc(var(--space-5) + var(--space-2));
+  min-height: calc(var(--space-5) + var(--space-2));
+  max-height: calc(var(--space-5) + var(--space-2));
+  padding: 0 var(--space-3);
+  background: var(--bg-1);
+  color: var(--text-2);
+  border: 0;
+  border-radius: 0;
+  font-size: var(--font-size-12);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+html body #app #statusbar .badge,
+html body #app #statusbar .meter,
+html body #app #statusbar .kbd {
+  min-height: var(--target-min);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--font-numeric-tabular);
+}
+
+html body #app #statusbar #save-status[data-state='saved'] {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+html body #app #statusbar #save-status[data-state='offline'],
+html body #app #statusbar #save-status[data-state='conflict'],
+html body #app #statusbar #save-status[data-state='rejected'] {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+/* ==========================================================================
+   5. Narrow viewport fallback (< 80rem)
+   ========================================================================== */
+
+@media (max-width: 68.75rem) {
+  html body #app,
+  html body #app main.shell-main {
+    grid-template-columns: calc(var(--space-6) * 9 + var(--space-3)) minmax(0, 1fr);
+    grid-template-areas: 'left center';
+  }
+
+  html body #app #activity-pane {
+    display: none;
+  }
+}
+
+@media (max-width: 47.5rem) {
+  html body #app {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas:
+      'topbar'
+      'center'
+      'timeline'
+      'statusbar';
+  }
+
+  html body #app main.shell-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    grid-template-areas:
+      'left'
+      'center';
+    height: auto;
+    overflow: visible;
+  }
+
+  html body #app .pane.panel {
+    height: auto;
+    overflow: visible;
+  }
+}

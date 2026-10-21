@@ -48,74 +48,95 @@ function tone(status: SceneFreshness | undefined): string {
 export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samples = demoSamples()): ScriptAudioPanelHandle {
   host.innerHTML = '';
   const panel = document.createElement('section');
-  panel.className = 'sa-panel';
+  panel.className = 'panel sa-panel';
   panel.setAttribute('aria-label', 'Script, audio and media');
   panel.setAttribute('data-testid', 'script-audio');
   panel.innerHTML = `
-    <div class="sa-tabs" role="tablist" aria-label="Inspector sections" data-testid="inspector-tabs">
-      <button type="button" role="tab" id="sa-tab-script" aria-controls="sa-section-script" aria-selected="true" data-inspector-tab="script">Script</button>
-      <button type="button" role="tab" id="sa-tab-takes" aria-controls="sa-section-takes" aria-selected="false" data-inspector-tab="takes">Takes</button>
+    <div class="tabs sa-tabs" role="tablist" aria-label="Inspector sections" data-testid="inspector-tabs">
+      <button type="button" role="tab" class="tab" id="sa-tab-script" aria-controls="sa-section-script" aria-selected="true" tabindex="0" data-inspector-tab="scene">Scene</button>
+      <button type="button" role="tab" class="tab" id="sa-tab-voice" aria-controls="sa-section-voice" aria-selected="false" tabindex="-1" data-inspector-tab="voice">Voice</button>
+      <button type="button" role="tab" class="tab" id="sa-tab-animation" aria-controls="sa-section-animation" aria-selected="false" tabindex="-1" data-inspector-tab="animation">Animation</button>
+      <button type="button" role="tab" class="tab" id="sa-tab-agent" aria-controls="sa-section-agent" aria-selected="false" tabindex="-1" data-inspector-tab="agent">Agent</button>
+      <button type="button" role="tab" class="tab" id="sa-tab-takes" aria-controls="sa-section-takes" aria-selected="false" tabindex="-1" data-inspector-tab="takes">Takes</button>
     </div>
-    <div role="tabpanel" id="sa-section-script" aria-labelledby="sa-tab-script" data-inspector-panel="script">
-      <div class="sa-head">
+    <div role="tabpanel" id="sa-section-script" aria-labelledby="sa-tab-script" data-inspector-panel="scene" class="tab-panel">
+      <div class="sa-head panel-header">
         <h2>Script and audio</h2>
         <p class="sa-status" data-testid="script-save-status" data-save-status role="status"></p>
       </div>
-      <div class="sa-row">
-        <label>Scene <select data-testid="scene-select" data-scene></select></label>
-        <span class="sa-row">
-          <button type="button" data-undo>Undo</button>
-          <button type="button" data-redo>Redo</button>
+      <div class="sa-row toolbar">
+        <label class="field">Scene <select data-testid="scene-select" data-scene class="field-control"></select></label>
+        <span class="sa-row toolbar">
+          <button type="button" data-undo class="btn btn-secondary btn-sm">Undo</button>
+          <button type="button" data-redo class="btn btn-secondary btn-sm">Redo</button>
         </span>
       </div>
       <p class="sa-status" data-testid="freshness" data-freshness role="status"></p>
-      <label>Narration<textarea data-testid="narration" data-narration maxlength="600"></textarea></label>
-      <div class="sa-row">
-        <button type="button" data-testid="apply-narration" data-apply-narration>Apply narration</button>
-        <span class="hint">Applying narration marks this take, its alignment and the presenter stale.</span>
+      <div class="field">
+        <label class="field-label" for="sa-narration">Narration</label>
+        <textarea id="sa-narration" data-testid="narration" data-narration maxlength="600" class="field-control"></textarea>
+      </div>
+      <div class="sa-row toolbar">
+        <button type="button" data-testid="apply-narration" data-apply-narration class="btn btn-primary btn-sm">Apply narration</button>
+        <span class="hint field-hint">Applying narration marks this take, its alignment and the presenter stale.</span>
       </div>
       <ol class="sa-sentences" data-testid="sentences" data-sentences></ol>
-      <label>Caption correction<input data-testid="caption-text" data-caption maxlength="600" /></label>
-      <button type="button" data-testid="apply-caption" data-apply-caption>Correct caption</button>
-      <div class="sa-row">
-        <label>Voice engine
-          <select data-engine>
-            <option value="kokoro">Kokoro (CPU)</option>
-            <option value="qwen3-tts">Qwen3-TTS</option>
-            <option value="none">None</option>
-          </select>
-        </label>
-        <label>Voice id <input data-voice-id maxlength="64" /></label>
-        <label>Speed <input data-speed type="number" min="0.5" max="2" step="0.05" /></label>
+      <div class="field">
+        <label class="field-label" for="sa-caption-text">Caption correction</label>
+        <input id="sa-caption-text" data-testid="caption-text" data-caption maxlength="600" class="field-control" />
       </div>
-      <div class="sa-row">
-        <button type="button" data-set-voice>Set voice</button>
-        <button type="button" data-preview-voice>Preview voice</button>
-      </div>
-      <p class="hint" data-preview role="status"></p>
+      <button type="button" data-testid="apply-caption" data-apply-caption class="btn btn-secondary btn-sm">Correct caption</button>
       <canvas class="sa-wave" data-wave width="640" height="72" aria-label="Narration waveform"></canvas>
-      <div class="sa-row">
-        <label>Split at frame <input data-testid="split-frame" data-frame type="number" min="0" step="1" value="15" /></label>
-        <button type="button" data-testid="split" data-split>Split scene</button>
-      </div>
-      <fieldset class="sa-fieldset">
-        <legend>Mix audition</legend>
+      <details class="sa-advanced field" aria-expanded="false">
+        <summary>Advanced</summary>
         <div class="sa-row">
-          <label><input type="checkbox" data-mute="narration" checked /> Narration</label>
-          <label><input type="checkbox" data-mute="music" checked /> Music</label>
-          <label><input type="checkbox" data-mute="ambience" checked /> Ambience</label>
-          <label><input type="checkbox" data-mute="sfx" checked /> SFX</label>
+          <label class="field">Voice engine
+            <select data-engine class="field-control">
+              <option value="kokoro">Kokoro (CPU)</option>
+              <option value="qwen3-tts">Qwen3-TTS</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <label class="field">Voice id <input data-voice-id maxlength="64" class="field-control" /></label>
+          <label class="field">Speed <input data-speed type="number" min="0.5" max="2" step="0.05" class="field-control" /></label>
         </div>
-        <p class="hint" data-mix>Export uses the renderer mix. These switches are audition only.</p>
-      </fieldset>
-      <p class="hint" data-action role="status"></p>
+        <div class="sa-row toolbar">
+          <button type="button" data-set-voice class="btn btn-secondary btn-sm">Set voice</button>
+          <button type="button" data-preview-voice class="btn btn-secondary btn-sm">Preview voice</button>
+        </div>
+        <p class="hint field-hint" data-preview role="status"></p>
+        <div class="sa-row toolbar">
+          <label class="field">Split at frame <input data-testid="split-frame" data-frame type="number" min="0" step="1" value="15" class="field-control" /></label>
+          <button type="button" data-testid="split" data-split class="btn btn-secondary btn-sm">Split scene</button>
+        </div>
+        <fieldset class="sa-fieldset">
+          <legend>Mix audition</legend>
+          <div class="sa-row">
+            <label><input type="checkbox" data-mute="narration" checked /> Narration</label>
+            <label><input type="checkbox" data-mute="music" checked /> Music</label>
+            <label><input type="checkbox" data-mute="ambience" checked /> Ambience</label>
+            <label><input type="checkbox" data-mute="sfx" checked /> SFX</label>
+          </div>
+          <p class="hint field-hint" data-mix>Export uses the renderer mix. These switches are audition only.</p>
+        </fieldset>
+      </details>
+      <p class="hint field-hint" data-action role="status"></p>
     </div>
-    <div role="tabpanel" id="sa-section-takes" aria-labelledby="sa-tab-takes" data-inspector-panel="takes" hidden>
-      <div class="sa-head">
+    <div role="tabpanel" id="sa-section-voice" aria-labelledby="sa-tab-voice" data-inspector-panel="voice" class="tab-panel" hidden>
+      <div id="sa-voice-host"></div>
+    </div>
+    <div role="tabpanel" id="sa-section-animation" aria-labelledby="sa-tab-animation" data-inspector-panel="animation" class="tab-panel" hidden>
+      <div id="sa-animation-host"></div>
+    </div>
+    <div role="tabpanel" id="sa-section-agent" aria-labelledby="sa-tab-agent" data-inspector-panel="agent" class="tab-panel" hidden>
+      <div id="sa-agent-host"></div>
+    </div>
+    <div role="tabpanel" id="sa-section-takes" aria-labelledby="sa-tab-takes" data-inspector-panel="takes" class="tab-panel" hidden>
+      <div class="sa-head panel-header">
         <h2>Takes</h2>
         <p class="sa-status" data-takes-status role="status" aria-live="polite"></p>
       </div>
-      <label>Clip <select data-takes-clip data-testid="takes-clip"></select></label>
+      <label class="field">Clip <select data-takes-clip data-testid="takes-clip" class="field-control"></select></label>
       <div data-takes-host></div>
     </div>
   `;
@@ -123,14 +144,18 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
   const style = document.createElement('style');
   style.dataset.comfyrizz = 'inspector-tabs';
   style.textContent = `
-.sa-tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); }
-.sa-tabs [role="tab"] { border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:var(--muted); padding:6px 10px; }
-.sa-tabs [role="tab"][aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); }
-[data-inspector-panel] { display:flex; flex-direction:column; gap:10px; }
-[data-inspector-panel][hidden] { display:none; }
-[data-takes-host] .take-panel { padding:0; }
+.sa-tabs { display: flex; gap: var(--space-1); border-bottom: var(--elevation-border-1); padding: var(--space-1); }
+[data-inspector-panel] { display: flex; flex-direction: column; gap: var(--space-3); }
+[data-inspector-panel][hidden] { display: none !important; }
+[data-takes-host] .take-panel { padding: 0; }
 `;
   panel.prepend(style);
+
+  panel.querySelectorAll('details').forEach(details => {
+    details.addEventListener('toggle', () => {
+      details.setAttribute('aria-expanded', details.open ? 'true' : 'false');
+    });
+  });
 
   const q = <T extends HTMLElement>(name: string) => panel.querySelector<T>(`[data-${name}]`)!;
   const saveEl = q<HTMLParagraphElement>('save-status');
@@ -157,22 +182,86 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
   let takesClipId = '';
   let takesSignature = '';
 
-  const showTab = (tab: 'script' | 'takes'): void => {
-    panel.querySelectorAll<HTMLElement>('[data-inspector-tab]').forEach(button => {
-      button.setAttribute('aria-selected', button.getAttribute('data-inspector-tab') === tab ? 'true' : 'false');
-    });
-    panel.querySelectorAll<HTMLElement>('[data-inspector-panel]').forEach(section => {
-      section.hidden = section.getAttribute('data-inspector-panel') !== tab;
-    });
-    // Animation and voice are separate hosts appended beside this panel; they
-    // belong to the Script tab, not the Takes tab.
-    for (const sibling of Array.from(host.children)) {
-      if (sibling !== panel && sibling instanceof HTMLElement) sibling.hidden = tab === 'takes';
+  const syncHosts = (): void => {
+    const animPanel = host.querySelector('#animation-panel') ?? document.getElementById('animation-panel');
+    const animHost = panel.querySelector('#sa-animation-host');
+    if (animPanel instanceof HTMLElement && animHost && animPanel.parentElement !== animHost) {
+      animHost.append(animPanel);
+    }
+    const voicePanel = host.querySelector('#voice-panel') ?? document.getElementById('voice-panel');
+    const voiceHost = panel.querySelector('#sa-voice-host');
+    if (voicePanel instanceof HTMLElement && voiceHost && voicePanel.parentElement !== voiceHost) {
+      voiceHost.append(voicePanel);
+    }
+    const agentLayout = document.querySelector('.agent-settings-layout');
+    const agentHost = panel.querySelector('#sa-agent-host');
+    if (agentLayout instanceof HTMLElement && agentHost && agentLayout.parentElement !== agentHost) {
+      agentHost.append(agentLayout);
     }
   };
-  panel.querySelectorAll<HTMLButtonElement>('[data-inspector-tab]').forEach(button => {
-    button.addEventListener('click', () => showTab(button.getAttribute('data-inspector-tab') === 'takes' ? 'takes' : 'script'));
+
+  const showTab = (tab: string): void => {
+    const target = tab === 'script' ? 'scene' : tab;
+    panel.querySelectorAll<HTMLButtonElement>('[role="tab"]').forEach(button => {
+      const btnTab = button.getAttribute('data-inspector-tab');
+      const isSelected = btnTab === target || (target === 'scene' && btnTab === 'script');
+      button.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      button.setAttribute('tabindex', isSelected ? '0' : '-1');
+      button.classList.toggle('active', isSelected);
+      button.classList.toggle('is-active', isSelected);
+    });
+    panel.querySelectorAll<HTMLElement>('[role="tabpanel"]').forEach(section => {
+      const secTab = section.getAttribute('data-inspector-panel');
+      const isSelected = secTab === target || (target === 'scene' && (secTab === 'scene' || secTab === 'script'));
+      section.hidden = !isSelected;
+    });
+
+    syncHosts();
+    window.dispatchEvent(new CustomEvent('comfyrizz-inspector-tab', { detail: target }));
+  };
+
+  panel.querySelectorAll<HTMLButtonElement>('[role="tab"]').forEach(button => {
+    button.addEventListener('click', () => {
+      const tabName = button.getAttribute('data-inspector-tab') || 'scene';
+      showTab(tabName);
+    });
   });
+
+  const tablist = panel.querySelector<HTMLElement>('[role="tablist"]');
+  tablist?.addEventListener('keydown', (event: KeyboardEvent) => {
+    const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    const currentIndex = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
+    let nextIndex = -1;
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      nextIndex = (currentIndex + 1) % tabs.length;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      nextIndex = tabs.length - 1;
+    }
+
+    if (nextIndex >= 0) {
+      const nextTab = tabs[nextIndex];
+      nextTab.focus();
+      const tabName = nextTab.getAttribute('data-inspector-tab');
+      if (tabName) showTab(tabName);
+    }
+  });
+
+  const hostObserver = new MutationObserver(() => syncHosts());
+  hostObserver.observe(host, { childList: true });
+
+  const bodyObserver = new MutationObserver(() => syncHosts());
+  bodyObserver.observe(document.body, { childList: true, subtree: true });
+
+  queueMicrotask(() => syncHosts());
 
   const clipSignature = (clip: ClipSummary): string => `${clip.clipId}:${clip.state}:${clip.takeCount}:${clip.selected}:${clip.newTakes}`;
 
@@ -354,7 +443,8 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
     const width = canvas.width;
     const height = canvas.height;
     ctx.clearRect(0, 0, width, height);
-    ctx.strokeStyle = '#6d8cff';
+    const accent = getComputedStyle(panel).getPropertyValue('--accent').trim() || 'currentColor';
+    ctx.strokeStyle = accent;
     ctx.beginPath();
     for (let index = 0; index < min.length; index += 1) {
       const x = (index / Math.max(1, min.length - 1)) * (width - 1);
@@ -449,6 +539,8 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
       fillTakesClips(options.clips ?? takesClips);
     },
     destroy() {
+      hostObserver.disconnect();
+      bodyObserver.disconnect();
       takesHandle?.destroy();
       takesHandle = null;
       panel.remove();

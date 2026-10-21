@@ -17,30 +17,91 @@ export function mountAgentSettings(apiFetch: ApiFetch, log: (message: string) =>
   const status = document.getElementById('llm-status')!;
   const toolbarModels = document.getElementById('agent-model-options')!;
   const dialog = document.createElement('dialog');
-  dialog.className = 'agent-settings';
+  dialog.className = 'agent-settings panel';
   dialog.setAttribute('aria-labelledby', 'agent-settings-title');
   dialog.innerHTML = `
-    <div class="agent-settings-head"><div><h2 id="agent-settings-title">Agent settings</h2><p>Connect a provider and choose the model that plans your videos.</p></div><button type="button" id="agent-settings-close" aria-label="Close agent settings">✕</button></div>
+    <div class="agent-settings-head panel-header">
+      <div>
+        <h2 id="agent-settings-title">Agent settings</h2>
+        <p class="hint field-hint">Connect a provider and choose the model that plans your videos.</p>
+      </div>
+      <button type="button" id="agent-settings-close" class="btn btn-secondary btn-sm" aria-label="Close agent settings">✕</button>
+    </div>
     <div class="agent-settings-layout">
-      <nav class="agent-connections" aria-label="Provider connections"><div id="agent-connection-list"></div><button type="button" id="agent-add">+ Add provider</button></nav>
+      <nav class="agent-connections" aria-label="Provider connections">
+        <div id="agent-connection-list"></div>
+        <button type="button" id="agent-add" class="btn btn-secondary btn-sm">+ Add provider</button>
+      </nav>
       <form id="agent-settings-form" autocomplete="off">
         <div class="agent-form-grid">
-          <label>Connection name<input id="agent-name" required maxlength="100" placeholder="e.g. My OpenCode Go" /></label>
-          <label>Provider type<select id="agent-preset"><option value="opencode-go">OpenCode Go</option><option value="openrouter">OpenRouter</option><option value="custom">OpenAI-compatible</option></select></label>
-          <label class="agent-full">API base URL<input id="agent-base-url" type="url" required placeholder="https://provider.example/v1" /><span class="hint">OpenAI-compatible Chat Completions API. Include /v1 when required.</span></label>
-          <label class="agent-full">API key<input id="agent-api-key" type="password" autocomplete="new-password" placeholder="Paste API key" /><span id="agent-key-status" class="hint"></span></label>
-          <label class="agent-full agent-inline"><input id="agent-clear-key" type="checkbox" /> Remove saved key (use environment key if available)</label>
-          <label class="agent-full">Model ID<input id="agent-settings-model" list="agent-settings-model-options" placeholder="Choose a discovered model or enter its exact ID" maxlength="300" /><datalist id="agent-settings-model-options"></datalist><span class="hint">Model IDs are provider-specific. Use a Chat Completions model with tool calling.</span></label>
-          <details class="agent-full"><summary>Advanced</summary><label>Models endpoint<input id="agent-models-url" type="url" placeholder="Defaults to the provider’s models endpoint" /></label><p class="hint">Custom discovery URL. Leave blank to use the provider default.</p></details>
+          <div class="field">
+            <label class="field-label" for="agent-name">Connection name</label>
+            <input id="agent-name" class="field-control" required maxlength="100" placeholder="e.g. My OpenCode Go" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="agent-preset">Provider type</label>
+            <select id="agent-preset" class="field-control">
+              <option value="opencode-go">OpenCode Go</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="custom">OpenAI-compatible</option>
+            </select>
+          </div>
+          <div class="field agent-full">
+            <label class="field-label" for="agent-base-url">API base URL</label>
+            <input id="agent-base-url" class="field-control" type="url" required placeholder="https://provider.example/v1" />
+            <span class="hint field-hint">OpenAI-compatible Chat Completions API. Include /v1 when required.</span>
+          </div>
+          <div class="field agent-full">
+            <label class="field-label" for="agent-api-key">API key</label>
+            <input id="agent-api-key" class="field-control" type="password" autocomplete="new-password" placeholder="Paste API key" />
+            <span id="agent-key-status" class="hint field-hint"></span>
+          </div>
+          <div class="field agent-full agent-inline">
+            <label class="field-label agent-inline">
+              <input id="agent-clear-key" type="checkbox" /> Remove saved key (use environment key if available)
+            </label>
+          </div>
+          <div class="field agent-full">
+            <label class="field-label" for="agent-settings-model">Model ID</label>
+            <input id="agent-settings-model" class="field-control" list="agent-settings-model-options" placeholder="Choose a discovered model or enter its exact ID" maxlength="300" />
+            <datalist id="agent-settings-model-options"></datalist>
+            <span class="hint field-hint">Model IDs are provider-specific. Use a Chat Completions model with tool calling.</span>
+          </div>
+          <details class="agent-full agent-advanced">
+            <summary>Advanced</summary>
+            <div class="field">
+              <label class="field-label" for="agent-models-url">Models endpoint</label>
+              <input id="agent-models-url" class="field-control" type="url" placeholder="Defaults to the provider’s models endpoint" />
+              <p class="hint field-hint">Custom discovery URL. Leave blank to use the provider default.</p>
+            </div>
+          </details>
         </div>
-        <div class="agent-settings-tools"><button type="button" id="agent-fetch-models">Fetch models</button><button type="button" id="agent-test">Test connection & tools</button></div>
-        <p class="hint">Fetch and Test save your connection first. The test sends a small tool-calling request to the selected model.</p>
+        <div class="agent-settings-tools toolbar">
+          <button type="button" id="agent-fetch-models" class="btn btn-secondary btn-sm">Fetch models</button>
+          <button type="button" id="agent-test" class="btn btn-secondary btn-sm">Test connection &amp; tools</button>
+        </div>
+        <p class="hint field-hint">Fetch and Test save your connection first. The test sends a small tool-calling request to the selected model.</p>
         <p id="agent-settings-feedback" role="status" aria-live="polite"></p>
-        <div class="agent-settings-footer"><span class="hint">Keys are saved on this server and never returned to the browser.</span><button type="button" id="agent-delete">Delete connection</button><button type="submit" class="primary">Save & use</button></div>
+        <div class="agent-settings-footer toolbar">
+          <span class="hint field-hint">Keys are saved on this server and never returned to the browser.</span>
+          <button type="button" id="agent-delete" class="btn btn-danger btn-sm">Delete connection</button>
+          <button type="submit" class="btn btn-primary btn-sm primary">Save &amp; use</button>
+        </div>
       </form>
     </div>`;
   document.body.append(dialog);
-  const field = <T extends HTMLElement>(id: string) => dialog.querySelector<T>(`#${id}`)!;
+
+  const attachToInspector = () => {
+    const hostEl = document.getElementById('sa-agent-host');
+    const layout = dialog.querySelector<HTMLElement>('.agent-settings-layout');
+    if (hostEl && layout && hostEl.children.length === 0) {
+      hostEl.append(layout);
+    }
+  };
+  queueMicrotask(attachToInspector);
+  window.addEventListener('comfyrizz-inspector-tab', attachToInspector);
+
+  const field = <T extends HTMLElement>(id: string): T => (document.getElementById(id) as T | null ?? dialog.querySelector<T>(`#${id}`))!;
   const name = field<HTMLInputElement>('agent-name');
   const preset = field<HTMLSelectElement>('agent-preset');
   const baseUrl = field<HTMLInputElement>('agent-base-url');
@@ -117,11 +178,20 @@ export function mountAgentSettings(apiFetch: ApiFetch, log: (message: string) =>
     try {
       if (!loaded) await load();
       fill(settings.profiles.find(item => item.id === provider.value) ?? settings.profiles[0]);
-      dialog.showModal();
+      const agentTab = document.getElementById('sa-tab-agent');
+      if (agentTab) {
+        agentTab.click();
+      } else {
+        dialog.showModal();
+      }
     } catch (error) { log(`Cannot open Agent settings: ${(error as Error).message}`); }
   }
   document.getElementById('agent-settings-open')!.addEventListener('click', () => void open());
-  field('agent-settings-close').addEventListener('click', () => dialog.close());
+  field('agent-settings-close').addEventListener('click', () => {
+    if (dialog.open) dialog.close();
+    const sceneTab = document.getElementById('sa-tab-script');
+    sceneTab?.click();
+  });
   dialog.addEventListener('close', () => { apiKey.value = ''; });
   field('agent-add').addEventListener('click', () => { fill(); name.focus(); });
   field('agent-connection-list').addEventListener('click', event => {
@@ -154,7 +224,8 @@ export function mountAgentSettings(apiFetch: ApiFetch, log: (message: string) =>
   async function task(work: () => Promise<void>) {
     if (busy) return;
     busy = true;
-    const controls = Array.from(dialog.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, button, select'));
+    const container = form.closest('.agent-settings-layout') ?? dialog;
+    const controls = Array.from(container.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, button, select'));
     const previouslyDisabled = new Set(controls.filter(control => control.disabled));
     // Save reads form fields; disable action buttons while keeping values editable until it runs.
     const actions = controls.filter(control => control instanceof HTMLButtonElement);

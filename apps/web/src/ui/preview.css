@@ -1,0 +1,121 @@
+@import './tokens.css';
+@import './components.css';
+
+/* UO11: Preview panel restyle (PLAN section 5).
+   Calm, dense ComfyUI-like dark pro tool: borders over shadows, one indigo accent.
+   The shell owns the single transport (#play, #scrub, #time); the Player renders
+   without its own controls bar. Timecode uses tabular numerals. */
+
+/* Preview canvas: inset frame, border over shadow */
+html body #app #work-pane #player {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: min(100%, 48vh);
+  margin: 0 auto;
+  padding: var(--space-3);
+  background: var(--bg-0);
+  border-bottom: 0;
+  flex-shrink: 0;
+}
+
+.preview-player {
+  width: 100%;
+  max-width: 100%;
+  background: var(--bg-0);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.preview-player > div {
+  width: 100% !important;
+}
+
+.preview-player:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-color: var(--accent);
+}
+
+/* Player error fallback, styled from tokens instead of inline colour and padding */
+.preview-error {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--danger);
+  background: var(--danger-bg);
+  border: var(--elevation-border-1);
+  border-color: var(--danger-border);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+/* Single transport row under the preview */
+html body #app #transport {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--space-6) + var(--space-2));
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-1);
+  border: 0;
+  border-bottom: var(--elevation-border-1);
+  border-radius: 0;
+  flex-shrink: 0;
+}
+
+html body #app #transport #play {
+  flex: 0 0 auto;
+  min-width: calc(var(--space-6) * 2);
+  font-variant-numeric: var(--font-numeric-tabular);
+}
+
+html body #app #transport #play:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Scrubber: minimum 24 target, accent fill, visible focus */
+html body #app #transport #scrub {
+  flex: 1 1 auto;
+  min-width: var(--space-6);
+  min-height: var(--target-min);
+  height: var(--target-min);
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+}
+
+html body #app #transport #scrub:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--radius-pill);
+}
+
+/* Timecode: mono, tabular numerals so the playhead never shifts the layout */
+html body #app #transport #time {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: calc(var(--space-6) * 3);
+  min-height: var(--target-min);
+  padding: 0 var(--space-2);
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--font-numeric-tabular);
+  font-feature-settings: 'tnum' 1;
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+}

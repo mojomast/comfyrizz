@@ -4,7 +4,7 @@
  */
 import { copyFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 interface Env {
   web: string;
@@ -75,15 +75,73 @@ async function patchPackage(env: Env, change: (stored: StoredProject) => void): 
 async function openEditor(page: Page, env: Env): Promise<void> {
   await page.goto(`/?package=${encodeURIComponent(env.packageId)}#token=${encodeURIComponent(env.token)}`);
   await expect(page.getByTestId('scene')).toHaveCount(3);
-  await expect(page.getByTestId('animation-panel')).toBeVisible();
-  await expect(page.locator('#voice-panel')).toBeVisible();
   await expect(page.locator('#save-status')).toHaveText('Saved');
   await expect(page).not.toHaveURL(/token=/);
+  // The inspector is a tab set: the animation and the voice panel are mounted
+  // but only in view while their own tab is selected, so open both.
+  await openAnimationPanel(page);
+  await openVoicePanel(page);
+  await selectInspectorTab(page, 'Scene');
 }
 
 const animation = (page: Page) => page.locator('[data-animation-section]');
 const animationStatus = (page: Page) => page.locator('[data-anim-status]');
 const voice = (page: Page) => page.locator('#voice-panel').locator('[aria-label="Voice and narration"]');
+
+/**
+ * UO08: the inspector tabs (Scene, Voice, Animation, Agent, Takes) each own one
+ * panel. A panel is only in view while its tab is selected.
+ */
+async function selectInspectorTab(page: Page, name: 'Scene' | 'Voice' | 'Animation'): Promise<void> {
+  await page.getByTestId('inspector-tabs').getByRole('tab', { name, exact: true }).click();
+  await expect(page.getByTestId('inspector-tabs').getByRole('tab', { name, exact: true })).toHaveAttribute('aria-selected', 'true');
+}
+
+async function openAnimationPanel(page: Page): Promise<void> {
+  await selectInspectorTab(page, 'Animation');
+  await expect(page.getByTestId('animation-panel')).toBeVisible();
+}
+
+async function openVoicePanel(page: Page): Promise<void> {
+  await selectInspectorTab(page, 'Voice');
+  await expect(page.locator('#voice-panel')).toBeVisible();
+}
+
+/** Expand a collapsed <details> section (Advanced, Generate narrated video). */
+async function expandDetails(details: Locator): Promise<void> {
+  if (await details.evaluate(node => (node as HTMLDetailsElement).open)) return;
+  await details.locator('summary').click();
+  await expect.poll(() => details.evaluate(node => (node as HTMLDetailsElement).open)).toBe(true);
+}
+
+/** The voice panel's generation actions live in the collapsed "Generate narrated video" section. */
+async function openVoiceProduction(page: Page): Promise<void> {
+  await expandDetails(voice(page).locator('details.voice-production'));
+}
+
+/** The scene panel's split and voice controls live in the collapsed "Advanced" section. */
+async function openSceneAdvanced(page: Page): Promise<void> {
+  await expandDetails(page.getByTestId('script-audio').locator('details.sa-advanced'));
+}
+
+/**
+ * UO05/UO06: the top bar's run controls (backend, llm, model, budget, render
+ * location) live in the "Run settings" popover. Open it, act, then close it so
+ * the popover cannot overlay the panel the next assertion looks at.
+ */
+async function openRunSettings(page: Page): Promise<void> {
+  const popover = page.locator('#run-settings-popover');
+  if (await popover.isVisible()) return;
+  await page.locator('#run-settings-toggle').click();
+  await expect(popover).toBeVisible();
+}
+
+async function closeRunSettings(page: Page): Promise<void> {
+  const popover = page.locator('#run-settings-popover');
+  if (!await popover.isVisible()) return;
+  await page.locator('#run-settings-close').click();
+  await expect(popover).toBeHidden();
+}
 
 test.beforeEach(() => {
   resetProject(loadEnv());
@@ -92,6 +150,7 @@ test.beforeEach(() => {
 test('animation edits use autosave and survive reload', async ({ page }) => {
   const env = loadEnv();
   await openEditor(page, env);
+  await openAnimationPanel(page);
 
   const first = animation(page);
   await first.getByLabel('Recipe').selectOption('kinetic');
@@ -116,6 +175,7 @@ test('animation edits use autosave and survive reload', async ({ page }) => {
   await page.reload();
   await expect(page.getByTestId('scene')).toHaveCount(3);
   await expect(page.locator('#save-status')).toHaveText('Saved');
+  await openAnimationPanel(page);
 
   const reloaded = animation(page);
   await expect(reloaded.getByLabel('Recipe')).toHaveValue('kinetic');
@@ -129,6 +189,7 @@ test('animation edits use autosave and survive reload', async ({ page }) => {
 
 test('animation edits undo and redo from the timeline keyboard', async ({ page }) => {
   await openEditor(page, loadEnv());
+  await openAnimationPanel(page);
   const section = animation(page);
   await section.getByLabel('Recipe').selectOption('sketch');
   await expect(section.getByLabel('Recipe')).toHaveValue('sketch');
@@ -144,6 +205,7 @@ test('animation edits undo and redo from the timeline keyboard', async ({ page }
 test('voice presets undo, save and reload with their blend', async ({ page }) => {
   const env = loadEnv();
   await openEditor(page, env);
+  await openVoicePanel(page);
 
   await voice(page).getByLabel('Quick voice preset').selectOption('michael-fenrir');
   await expect(voice(page).getByLabel('Voice engine')).toHaveValue('kokoro');
@@ -158,9 +220,13 @@ test('voice presets undo, save and reload with their blend', async ({ page }) =>
   await toolbar.getByRole('button', { name: 'Redo' }).click();
   await expect(voice(page).getByLabel('Voice engine')).toHaveValue('kokoro');
   // The compact editor must not erase the blend/chunking chosen in production controls.
+  await selectInspectorTab(page, 'Scene');
+  await openSceneAdvanced(page);
   await page.getByTestId('script-audio').getByLabel('Speed', { exact: true }).fill('1.1');
   await page.getByTestId('script-audio').getByRole('button', { name: 'Set voice', exact: true }).click();
 
+  await openVoicePanel(page);
+  await openVoiceProduction(page);
   await voice(page).getByRole('button', { name: 'Save voice settings' }).click();
   await expect(page.locator('#save-status')).toHaveText('Saved');
   const stored = await storedProject(env);
@@ -175,6 +241,7 @@ test('voice presets undo, save and reload with their blend', async ({ page }) =>
 
   await page.reload();
   await expect(page.getByTestId('scene')).toHaveCount(3);
+  await openVoicePanel(page);
   await expect(voice(page).getByLabel('Voice engine')).toHaveValue('kokoro');
   await expect(voice(page).getByLabel('Speaker')).toHaveValue('am_michael');
   await expect(voice(page).getByLabel('Blend a second voice')).toBeChecked();
@@ -185,6 +252,7 @@ test('voice presets undo, save and reload with their blend', async ({ page }) =>
 test('per-scene delivery is undoable and locked scenes stay read only', async ({ page }) => {
   const env = loadEnv();
   await openEditor(page, env);
+  await openVoicePanel(page);
   await voice(page).getByLabel('Voice engine').selectOption('custom');
   const delivery = voice(page).getByLabel('Scene delivery direction');
   await delivery.fill('Warm and curious, with a pause before the result.');
@@ -216,6 +284,7 @@ test('per-scene delivery is read only on a locked scene', async ({ page }) => {
     }
   });
   await openEditor(page, env);
+  await openVoicePanel(page);
   await expect(voice(page).getByLabel('Scene delivery direction')).toBeDisabled();
   await expect(voice(page).getByLabel('Scene delivery direction')).toHaveValue('Keep this saved direction.');
   await expect(voice(page).locator('.voice-delivery')).toContainText('locked');
@@ -237,7 +306,9 @@ test('the generation plan uses the saved revision without starting a run', async
     });
   });
   await openEditor(page, env);
+  await openVoicePanel(page);
   await voice(page).getByLabel('Voice engine').selectOption('custom');
+  await openVoiceProduction(page);
   await voice(page).getByRole('button', { name: 'Check generation plan' }).click();
 
   await expect(voice(page).locator('[data-voice-status]')).toContainText('Ready to generate');
@@ -248,8 +319,12 @@ test('the generation plan uses the saved revision without starting a run', async
   expect(planBody!.renderLocation).toBe('local');
   expect(planBody).not.toHaveProperty('status');
   expect(startCalls).toBe(0);
+  await openVoiceProduction(page);
   await expect(voice(page).getByRole('button', { name: 'Generate video' })).toBeVisible();
+  await selectInspectorTab(page, 'Scene');
   await page.getByTestId('scene-select').selectOption('s_body');
+  await openVoicePanel(page);
+  await openVoiceProduction(page);
   await expect(voice(page).getByRole('button', { name: 'Generate video' })).toBeVisible();
 });
 
@@ -265,10 +340,15 @@ test('the generation plan can render on the Google Colab VM', async ({ page }) =
     });
   });
   await openEditor(page, env);
+  await openRunSettings(page);
   await page.locator('#render-location').selectOption('colab');
+  await closeRunSettings(page);
+  await openVoicePanel(page);
   await expect(voice(page).getByLabel('Final render')).toHaveValue('colab');
+  await openVoiceProduction(page);
   await voice(page).getByRole('button', { name: 'Check generation plan' }).click();
   expect(planBody!.renderLocation).toBe('colab');
+  await openVoiceProduction(page);
   await expect(voice(page).locator('.hint', { hasText: 'Google Colab VM' })).toBeVisible();
 });
 
@@ -282,8 +362,10 @@ test('a rejected voice save names the failure and keeps the edit', async ({ page
     });
   });
   await openEditor(page, loadEnv());
+  await openVoicePanel(page);
   await voice(page).getByLabel('Quick voice preset').selectOption('heart');
   await voice(page).getByLabel('Speaking speed').fill('1.1');
+  await openVoiceProduction(page);
   await voice(page).getByRole('button', { name: 'Save voice settings' }).click();
   await expect(voice(page).locator('[data-voice-status]')).toContainText('Save rejected: invalid package: /voice/speed speed is out of range');
   await expect(page.locator('#save-status')).toHaveAttribute('data-state', 'rejected');
@@ -298,6 +380,7 @@ test('a saved recipe the layout does not offer is shown but not selectable', asy
   });
   await openEditor(page, env);
   await page.getByTestId('scene-select').selectOption('s_close');
+  await openAnimationPanel(page);
 
   const section = animation(page);
   await expect(section.getByLabel('Recipe')).toHaveValue('technical-flow');
@@ -310,6 +393,7 @@ test('an invalid focus rectangle is reported and never saved', async ({ page }) 
   const env = loadEnv();
   await openEditor(page, env);
   await page.getByTestId('scene-select').selectOption('s_body');
+  await openAnimationPanel(page);
   const section = animation(page);
   await section.getByLabel('Recipe').selectOption('focus');
   await expect(page.locator('#save-status')).toHaveText('Saved');
@@ -341,6 +425,7 @@ test('a locked scene disables animation editing and saving', async ({ page }) =>
     }
   });
   await openEditor(page, env);
+  await openAnimationPanel(page);
 
   const section = animation(page);
   await expect(section.locator('.animation-lock')).toHaveText('locked');
@@ -364,6 +449,7 @@ test('a rejected animation save keeps the edit and shows the reason', async ({ p
     });
   });
   await openEditor(page, loadEnv());
+  await openAnimationPanel(page);
   const section = animation(page);
   await section.getByLabel('Recipe').selectOption('kinetic');
   await section.getByRole('button', { name: 'Save animation' }).click();

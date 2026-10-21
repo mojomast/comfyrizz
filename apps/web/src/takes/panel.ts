@@ -874,7 +874,36 @@ export type RenderOptions = {
 
 function renderVerdictChip(verdict: unknown): string {
   const label = verdictLabel(verdict);
-  return `<span class="take-verdict take-verdict-${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+  const status = label === 'rejected' ? 'redo' : label === 'unreviewed' ? 'pending' : label;
+  const tone = label === 'approved' ? 'ok' : label === 'rejected' ? 'danger' : 'warn';
+  return `<span class="take-verdict take-verdict-${escapeHtml(label)}" data-status="${escapeHtml(status)}" data-tone="${tone}">${escapeHtml(label)}</span>`;
+}
+
+function renderFilmstrip(take: ClipTake): string {
+  const n = Number.isFinite(take.n) ? take.n : 0;
+  const duration = takeDuration(take);
+  const framesCount = finiteNumber(take.media?.frames) ?? 48;
+  const f1 = 1;
+  const f2 = Math.max(2, Math.round(framesCount / 2));
+  const f3 = Math.max(3, framesCount);
+  return `<span class="take-thumb take-filmstrip" aria-hidden="true">
+    <span class="take-filmstrip-sprockets take-filmstrip-sprockets-top"></span>
+    <span class="take-filmstrip-frames">
+      <span class="take-frame" data-frame="${f1}">
+        <span class="take-thumb-n">${escapeHtml(n)}</span>
+        <span class="take-frame-label">f.${f1}</span>
+      </span>
+      <span class="take-frame" data-frame="${f2}">
+        <span class="take-frame-marker">▶</span>
+        <span class="take-frame-label">f.${f2}</span>
+      </span>
+      <span class="take-frame" data-frame="${f3}">
+        <span class="take-thumb-duration">${escapeHtml(duration)}</span>
+        <span class="take-frame-label">f.${f3}</span>
+      </span>
+    </span>
+    <span class="take-filmstrip-sprockets take-filmstrip-sprockets-bottom"></span>
+  </span>`;
 }
 
 function renderTakeCard(
@@ -893,21 +922,30 @@ function renderTakeCard(
     previewed ? 'is-previewed' : '',
     take.purged ? 'is-purged' : '',
   ].filter(Boolean).join(' ');
+  const itemClasses = [
+    'take-item',
+    'panel',
+    selected ? 'is-selected' : '',
+    previewed ? 'is-previewed' : '',
+    take.purged ? 'is-purged' : '',
+  ].filter(Boolean).join(' ');
   const action = take.purged
     ? 'purged, cannot be previewed'
     : `preview take ${n}, ${verdict}, ${duration}`;
-  return `<li class="take-item">
+  const disabled = take.purged ? ' disabled' : '';
+  return `<li class="${itemClasses}" data-take-item="${id}">
     <button type="button" class="${classes}" data-take-preview="${id}" aria-pressed="${previewed ? 'true' : 'false'}"${selected ? ' aria-current="true"' : ''}${take.purged ? ' disabled' : ''} aria-label="${escapeHtml(`Take ${n}, ${action}`)}">
-      <span class="take-thumb" aria-hidden="true">
-        <span class="take-thumb-n">${escapeHtml(n)}</span>
-        <span class="take-thumb-duration">${escapeHtml(duration)}</span>
-      </span>
+      ${renderFilmstrip(take)}
       <span class="take-card-body">
         <span class="take-card-title">Take ${escapeHtml(n)}${selected ? ' · selected' : ''}${take.purged ? ' · purged' : ''}</span>
         ${renderVerdictChip(take.verdict)}
         ${note ? `<span class="take-card-note">${escapeHtml(note)}</span>` : ''}
       </span>
     </button>
+    <div class="take-card-actions toolbar">
+      <button type="button" class="btn btn-sm btn-primary take-card-approve" data-take-card-approve="${id}" aria-label="Approve take ${n}"${disabled}>Approve</button>
+      <button type="button" class="btn btn-sm btn-secondary take-card-redo" data-take-card-redo="${id}" aria-label="Redo take ${n}"${disabled}>Redo</button>
+    </div>
   </li>`;
 }
 
@@ -926,12 +964,12 @@ export function renderTakeStrip(state: TakePanelState): string {
     take.takeId === activeId,
   )).join('');
   return `<div class="take-strip-wrap" data-take-strip>
-    <div class="take-strip-head">
-      <h3 id="take-strip-title">Take strip</h3>
-      <div class="take-strip-nav">
-        <button type="button" class="take-step" data-take-step="-1" aria-label="Previous take" aria-keyshortcuts="["${takes.length < 2 ? ' disabled' : ''}>‹</button>
-        <span class="take-position" data-take-position>${activeIndex + 1} / ${takes.length}</span>
-        <button type="button" class="take-step" data-take-step="1" aria-label="Next take" aria-keyshortcuts="]"${takes.length < 2 ? ' disabled' : ''}>›</button>
+    <div class="take-strip-head panel-header">
+      <h3 id="take-strip-title" class="panel-header-title">Take strip</h3>
+      <div class="take-strip-nav toolbar">
+        <button type="button" class="btn btn-secondary btn-sm take-step" data-take-step="-1" aria-label="Previous take" aria-keyshortcuts="["${takes.length < 2 ? ' disabled' : ''}>‹</button>
+        <span class="take-position badge" data-take-position>${activeIndex + 1} / ${takes.length}</span>
+        <button type="button" class="btn btn-secondary btn-sm take-step" data-take-step="1" aria-label="Next take" aria-keyshortcuts="]"${takes.length < 2 ? ' disabled' : ''}>›</button>
       </div>
     </div>
     <ol class="take-strip" aria-labelledby="take-strip-title">${cards}</ol>
@@ -941,9 +979,12 @@ export function renderTakeStrip(state: TakePanelState): string {
 function renderVerdictChips(state: TakePanelState): string {
   const takes = visibleTakes(state.data);
   if (takes.length === 0) return '';
-  const chips = takes.map(take =>
-    `<li><span class="take-verdict take-verdict-${escapeHtml(verdictLabel(take.verdict))}">Take ${escapeHtml(take.n)}: ${escapeHtml(verdictLabel(take.verdict))}</span></li>`,
-  ).join('');
+  const chips = takes.map(take => {
+    const label = verdictLabel(take.verdict);
+    const status = label === 'rejected' ? 'redo' : label === 'unreviewed' ? 'pending' : label;
+    const tone = label === 'approved' ? 'ok' : label === 'rejected' ? 'danger' : 'warn';
+    return `<li><span class="take-verdict take-verdict-${escapeHtml(label)}" data-status="${escapeHtml(status)}" data-tone="${tone}">Take ${escapeHtml(take.n)}: ${escapeHtml(label)}</span></li>`;
+  }).join('');
   return `<ul class="take-verdict-chips" data-take-verdicts aria-label="Take verdicts">${chips}</ul>`;
 }
 
@@ -965,10 +1006,14 @@ export function renderDiff(state: TakePanelState): string {
         <span class="take-diff-values"><span class="take-diff-before">${escapeHtml(formatDiffValue(row.before))}</span><span class="take-diff-arrow" aria-hidden="true">→</span><span class="take-diff-after">${escapeHtml(formatDiffValue(row.after))}</span></span>
       </li>`).join('')}</ul>`
     : `<p class="take-diff-empty" data-take-diff-empty>${previous ? 'No recorded differences from the previous take.' : 'Take 1 has no earlier take to compare with.'}</p>`;
-  return `<section class="take-diff" data-take-diff aria-label="${escapeHtml(heading)}">
-    <h3>${escapeHtml(heading)}</h3>
-    ${note ? `<p class="take-diff-note" data-take-diff-note>Correction: ${escapeHtml(note)}</p>` : ''}
-    ${body}
+  return `<section class="take-diff panel" data-take-diff aria-label="${escapeHtml(heading)}">
+    <div class="panel-header">
+      <h3 class="panel-header-title">${escapeHtml(heading)}</h3>
+    </div>
+    <div class="panel-body">
+      ${note ? `<p class="take-diff-note" data-take-diff-note>Correction: ${escapeHtml(note)}</p>` : ''}
+      ${body}
+    </div>
   </section>`;
 }
 
@@ -980,56 +1025,60 @@ function renderCorrectionForm(state: TakePanelState): string {
   const fields = INPUT_FIELDS.map(field => {
     const value = inputs[field.key] ?? '';
     const inputMode = field.numeric ? 'decimal' : 'text';
-    return `<label class="take-field">
-      <span>${escapeHtml(field.label)}</span>
-      <input type="${field.numeric ? 'number' : 'text'}" data-input-field="${escapeHtml(field.key)}" value="${escapeHtml(value)}" inputmode="${inputMode}"${field.numeric ? ' step="any"' : ''} maxlength="${MAX_INPUT_CHARS}" autocomplete="off"${field.hint ? ` aria-description="${escapeHtml(field.hint)}"` : ''}${disabled} />
+    return `<label class="take-field field">
+      <span class="field-label">${escapeHtml(field.label)}</span>
+      <input class="field-control" type="${field.numeric ? 'number' : 'text'}" data-input-field="${escapeHtml(field.key)}" value="${escapeHtml(value)}" inputmode="${inputMode}"${field.numeric ? ' step="any"' : ''} maxlength="${MAX_INPUT_CHARS}" autocomplete="off"${field.hint ? ` aria-description="${escapeHtml(field.hint)}"` : ''}${disabled} />
     </label>`;
   }).join('');
   const hasInputs = Object.values(inputs).some(value => String(value ?? '').trim() !== '');
-  return `<form class="take-correction" data-take-form aria-label="Correction">
-    <h3>Correct this clip</h3>
-    <p class="take-hint">Only this clip is regenerated and the current take is kept. The seed changes unless you choose to keep it.</p>
-    <label class="take-field take-field-wide">
-      <span>Correction note</span>
-      <textarea data-field="note" rows="3" maxlength="${MAX_NOTE_CHARS}" placeholder="Slower push-in, keep the logo readable, no people"${disabled}>${escapeHtml(note)}</textarea>
-    </label>
-    <div class="take-note-meta">
-      <span class="take-count-hint" data-note-count aria-live="polite">${note.length} / ${MAX_NOTE_CHARS}</span>
+  return `<form class="take-correction panel" data-take-form aria-label="Correction">
+    <div class="panel-header">
+      <h3 class="panel-header-title">Correct this clip</h3>
     </div>
-    <div class="take-grid">
-      <label class="take-field">
-        <span>Prompt append</span>
-        <input type="text" data-field="promptAppend" value="${escapeHtml(form.promptAppend)}" maxlength="2000" autocomplete="off"${disabled} />
+    <div class="panel-body">
+      <p class="take-hint">Only this clip is regenerated and the current take is kept. The seed changes unless you choose to keep it.</p>
+      <label class="take-field take-field-wide field">
+        <span class="field-label">Correction note</span>
+        <textarea class="field-control" data-field="note" rows="3" maxlength="${MAX_NOTE_CHARS}" placeholder="Slower push-in, keep the logo readable, no people"${disabled}>${escapeHtml(note)}</textarea>
       </label>
-      <label class="take-field">
-        <span>Prompt replace</span>
-        <input type="text" data-field="promptReplace" value="${escapeHtml(form.promptReplace)}" maxlength="2000" autocomplete="off"${disabled} />
-      </label>
-      <label class="take-field">
-        <span>Negative append</span>
-        <input type="text" data-field="negativeAppend" value="${escapeHtml(form.negativeAppend)}" maxlength="2000" autocomplete="off"${disabled} />
-      </label>
-      <label class="take-field">
-        <span>Seed</span>
-        <select data-field="seedMode"${disabled}>
-          <option value="new"${form.seedMode === 'new' ? ' selected' : ''}>New seed</option>
-          <option value="keep"${form.seedMode === 'keep' ? ' selected' : ''}>Keep seed</option>
-          <option value="custom"${form.seedMode === 'custom' ? ' selected' : ''}>Fixed seed</option>
-        </select>
-      </label>
-      <label class="take-field">
-        <span>Seed value</span>
-        <input type="text" inputmode="numeric" data-field="seedValue" value="${escapeHtml(form.seedValue)}" maxlength="32" autocomplete="off"${disabled} />
-      </label>
-    </div>
-    <details class="take-inputs"${hasInputs ? ' open' : ''}>
-      <summary>Workflow inputs (allow-listed)</summary>
-      <div class="take-grid">${fields}</div>
-    </details>
-    <p class="take-hint">Allowed inputs: reference, reference_2 to reference_10, image, strength, denoise and motion.*. Other fields are ignored.</p>
-    <div class="take-form-actions">
-      <button type="button" class="take-regenerate" data-take-regenerate${disabled}>Regenerate this clip</button>
-      <span class="take-hint">Google Colab spend is shown before it is charged.</span>
+      <div class="take-note-meta">
+        <span class="take-count-hint" data-note-count aria-live="polite">${note.length} / ${MAX_NOTE_CHARS}</span>
+      </div>
+      <div class="take-grid">
+        <label class="take-field field">
+          <span class="field-label">Prompt append</span>
+          <input class="field-control" type="text" data-field="promptAppend" value="${escapeHtml(form.promptAppend)}" maxlength="2000" autocomplete="off"${disabled} />
+        </label>
+        <label class="take-field field">
+          <span class="field-label">Prompt replace</span>
+          <input class="field-control" type="text" data-field="promptReplace" value="${escapeHtml(form.promptReplace)}" maxlength="2000" autocomplete="off"${disabled} />
+        </label>
+        <label class="take-field field">
+          <span class="field-label">Negative append</span>
+          <input class="field-control" type="text" data-field="negativeAppend" value="${escapeHtml(form.negativeAppend)}" maxlength="2000" autocomplete="off"${disabled} />
+        </label>
+        <label class="take-field field">
+          <span class="field-label">Seed</span>
+          <select class="field-control" data-field="seedMode"${disabled}>
+            <option value="new"${form.seedMode === 'new' ? ' selected' : ''}>New seed</option>
+            <option value="keep"${form.seedMode === 'keep' ? ' selected' : ''}>Keep seed</option>
+            <option value="custom"${form.seedMode === 'custom' ? ' selected' : ''}>Fixed seed</option>
+          </select>
+        </label>
+        ${form.seedMode === 'custom' ? `<label class="take-field field">
+          <span class="field-label">Seed number</span>
+          <input class="field-control" type="number" data-field="seedValue" value="${escapeHtml(form.seedValue)}" step="1" min="0"${disabled} />
+        </label>` : ''}
+      </div>
+      <details class="take-inputs"${hasInputs ? ' open' : ''}>
+        <summary>Workflow inputs (allow-listed)</summary>
+        <div class="take-grid">${fields}</div>
+      </details>
+      <p class="take-hint">Allowed inputs: reference, reference_2 to reference_10, image, strength, denoise and motion.*. Other fields are ignored.</p>
+      <div class="take-form-actions toolbar">
+        <button type="button" class="btn btn-primary take-regenerate" data-take-regenerate${disabled}>Regenerate this clip</button>
+        <span class="take-hint">Google Colab spend is shown before it is charged.</span>
+      </div>
     </div>
   </form>`;
 }
@@ -1038,14 +1087,18 @@ function renderApproval(state: TakePanelState): string {
   const approval = state.approval;
   if (!approval) return '';
   const disabled = state.busy ? ' disabled' : '';
-  return `<section class="take-approval" data-take-approval role="group" aria-label="Spend approval">
-    <h3>Approve the regeneration</h3>
-    <p class="take-estimate" data-take-estimate>${escapeHtml(formatEstimate(approval.estimate, approval.budget))}</p>
-    <p class="take-hint">This approval covers this regeneration only. Nothing has been charged yet.</p>
-    <p class="take-plan-hint">Plan <code data-take-plan>${escapeHtml(approval.planHash)}</code></p>
-    <div class="take-action-row">
-      <button type="button" class="take-approve-spend" data-take-approve-spend${disabled}>Approve and regenerate</button>
-      <button type="button" data-take-cancel-approval${disabled}>Cancel</button>
+  return `<section class="take-approval panel" data-take-approval role="group" aria-label="Spend approval">
+    <div class="panel-header">
+      <h3 class="panel-header-title">Approve the regeneration</h3>
+    </div>
+    <div class="panel-body">
+      <p class="take-estimate" data-take-estimate>${escapeHtml(formatEstimate(approval.estimate, approval.budget))}</p>
+      <p class="take-hint">This approval covers this regeneration only. Nothing has been charged yet.</p>
+      <p class="take-plan-hint">Plan <code data-take-plan>${escapeHtml(approval.planHash)}</code></p>
+      <div class="take-action-row toolbar">
+        <button type="button" class="btn btn-primary take-approve-spend" data-take-approve-spend${disabled}>Approve and regenerate</button>
+        <button type="button" class="btn btn-secondary" data-take-cancel-approval${disabled}>Cancel</button>
+      </div>
     </div>
   </section>`;
 }
@@ -1060,16 +1113,21 @@ function renderActions(state: TakePanelState): string {
   const selected = active.takeId === state.data?.selected;
   const n = escapeHtml(active.n);
   const previewActive = state.previewTakeId != null;
-  return `<section class="take-actions" aria-label="Take actions">
-    <h3>Take actions</h3>
-    <div class="take-action-row">
-      <button type="button" data-take-select${selected ? ' disabled' : attrs}>Use take ${n}</button>
-      <button type="button" class="take-approve" data-take-approve aria-keyshortcuts="A"${attrs}>Approve</button>
-      <button type="button" class="take-reject" data-take-reject${attrs}>Reject</button>
-      <button type="button" data-take-revert${attrs}>Revert</button>
-      ${previewActive ? `<button type="button" data-take-clear-preview${attrs}>Preview selected take</button>` : ''}
+  return `<section class="take-actions panel" aria-label="Take actions">
+    <div class="panel-header">
+      <h3 class="panel-header-title">Take actions</h3>
+      <span class="panel-header-meta">Take ${n}</span>
     </div>
-    <p class="take-hint">Approve or reject the take shown in the preview. Revert restores the previous selection.</p>
+    <div class="panel-body">
+      <div class="take-action-row toolbar">
+        <button type="button" class="btn btn-secondary" data-take-select${selected ? ' disabled' : attrs}>Use take ${n}</button>
+        <button type="button" class="take-approve btn btn-primary" data-take-approve aria-keyshortcuts="A"${attrs}>Approve</button>
+        <button type="button" class="take-reject btn btn-secondary" data-take-reject${attrs}>Redo</button>
+        <button type="button" class="btn btn-secondary" data-take-revert${attrs}>Revert</button>
+        ${previewActive ? `<button type="button" class="btn btn-secondary" data-take-clear-preview${attrs}>Preview selected take</button>` : ''}
+      </div>
+      <p class="take-hint">Approve or redo the take shown in the preview. Revert restores the previous selection.</p>
+    </div>
   </section>`;
 }
 
@@ -1082,14 +1140,17 @@ export function renderTakePanel(state: TakePanelState, options: RenderOptions = 
   const newTakes = finiteNumber(data?.clip?.newTakes) ?? 0;
   const countLabel = `${takes.length} take${takes.length === 1 ? '' : 's'}`;
   const statusClass = state.messageError ? 'take-status is-error' : 'take-status';
-  const header = `<header class="take-head">
+  const clipStateRaw = textOf(data?.clip?.state) || 'unknown';
+  const clipStatus = clipStateRaw === 'rejected' ? 'redo' : clipStateRaw === 'review' || clipStateRaw === 'planned' || clipStateRaw === 'unknown' ? 'pending' : clipStateRaw;
+  const clipTone = clipStateRaw === 'approved' ? 'ok' : clipStateRaw === 'rejected' || clipStateRaw === 'failed' ? 'danger' : clipStateRaw === 'generating' || clipStateRaw === 'queued' ? 'info' : 'warn';
+  const header = `<header class="take-head panel-header">
     <div>
-      <h2 id="${escapeHtml(prefix)}-title">Takes <span class="take-count" data-take-count aria-label="${countLabel}">${takes.length}</span></h2>
-      <p class="take-clip">${escapeHtml(state.clipId)}${slot ? ` · ${escapeHtml(slot)}` : ''}</p>
+      <h2 id="${escapeHtml(prefix)}-title" class="panel-header-title">Takes <span class="take-count badge" data-take-count aria-label="${countLabel}">${takes.length}</span></h2>
+      <p class="take-clip panel-header-meta">${escapeHtml(state.clipId)}${slot ? ` · ${escapeHtml(slot)}` : ''}</p>
     </div>
     <div class="take-head-state">
-      <span class="take-state take-state-${escapeHtml(textOf(data?.clip?.state) || 'unknown')}" data-take-state>${escapeHtml(clipState)}</span>
-      ${newTakes > 0 ? `<span class="take-new" data-take-new>+${escapeHtml(newTakes)} new</span>` : ''}
+      <span class="take-state take-state-${escapeHtml(clipStateRaw)}" data-status="${escapeHtml(clipStatus)}" data-tone="${clipTone}" data-take-state>${escapeHtml(clipState)}</span>
+      ${newTakes > 0 ? `<span class="take-new badge badge-info" data-take-new data-status="pending">+${escapeHtml(newTakes)} new</span>` : ''}
     </div>
   </header>`;
   const body = !data && state.loading
@@ -1184,10 +1245,20 @@ export function mountTakePanel(el: HTMLElement, options: TakePanelMountOptions):
     const target = event.target as HTMLElement | null;
     if (!target || typeof target.closest !== 'function') return;
     const action = target.closest<HTMLElement>(
-      '[data-take-preview],[data-take-step],[data-take-select],[data-take-approve],[data-take-reject],[data-take-revert],[data-take-clear-preview],[data-take-regenerate],[data-take-approve-spend],[data-take-cancel-approval]',
+      '[data-take-preview],[data-take-step],[data-take-select],[data-take-approve],[data-take-reject],[data-take-revert],[data-take-clear-preview],[data-take-regenerate],[data-take-approve-spend],[data-take-cancel-approval],[data-take-card-approve],[data-take-card-redo]',
     );
     if (!action || !el.contains(action)) return;
 
+    const cardApprove = action.getAttribute('data-take-card-approve');
+    if (cardApprove) {
+      void controller.approve(cardApprove);
+      return;
+    }
+    const cardRedo = action.getAttribute('data-take-card-redo');
+    if (cardRedo) {
+      void controller.reject(cardRedo);
+      return;
+    }
     const previewId = action.getAttribute('data-take-preview');
     if (previewId) {
       controller.preview(previewId);

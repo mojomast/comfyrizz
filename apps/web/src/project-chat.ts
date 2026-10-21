@@ -63,6 +63,13 @@ type TurnRequest = { conversationId: string; turnId: string; message: string; mo
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const STORAGE_KEY = 'comfyrizz.project-chat';
 
+export const SUGGESTED_PROMPTS = [
+  '30-second product launch',
+  'Explainer with charts',
+  'Fast-paced brand teaser',
+  'Educational summary video',
+] as const;
+
 export type CastProposalRenderOptions = {
   characterLabel?: (characterId: string) => string | undefined;
   castLabel?: (castId: string) => string | undefined;
@@ -101,7 +108,7 @@ function castProposalDetail(proposal: CastProposal, options: CastProposalRenderO
   return scenes.join(', ');
 }
 
-/** Render only the pending character proposals, with Confirm / Change actions. */
+/** Render only the pending character proposals, with Accept / Reject actions. */
 export function renderCastProposals(
   proposals: readonly CastProposal[] | null | undefined,
   options: CastProposalRenderOptions = {},
@@ -110,11 +117,18 @@ export function renderCastProposals(
     .filter((proposal): proposal is CastProposal & { id: string } =>
       Boolean(proposal && proposal.status === 'proposed' && typeof proposal.id === 'string' && proposal.id));
   if (pending.length === 0) return '';
-  const rows = pending.map(proposal => `<li data-cast-proposal="${esc(proposal.id)}">
-      <div><b>${esc(castProposalLabel(proposal, options))}</b><span>${esc(castProposalDetail(proposal, options))}${proposal.reason ? ` — ${esc(proposal.reason)}` : ''}</span>${proposal.lastError ? `<small role="alert">${esc(proposal.lastError)}</small>` : ''}</div>
-      <div class="reference-proposal-actions"><button type="button" data-confirm-cast="${esc(proposal.id)}" data-confirm-cast-proposal="${esc(proposal.id)}">Confirm</button><button type="button" data-change-cast="${esc(proposal.id)}" data-change-cast-proposal="${esc(proposal.id)}" class="quiet">Change</button></div>
+  const rows = pending.map(proposal => `<li class="panel proposal-card" data-cast-proposal="${esc(proposal.id)}">
+      <div class="proposal-body"><b>${esc(castProposalLabel(proposal, options))}</b><span>${esc(castProposalDetail(proposal, options))}${proposal.reason ? ` — ${esc(proposal.reason)}` : ''}</span>${proposal.lastError ? `<small role="alert">${esc(proposal.lastError)}</small>` : ''}</div>
+      <div class="reference-proposal-actions"><button type="button" class="btn btn-sm btn-primary" data-confirm-cast="${esc(proposal.id)}" data-confirm-cast-proposal="${esc(proposal.id)}">Accept</button><button type="button" class="btn btn-sm btn-ghost quiet" data-change-cast="${esc(proposal.id)}" data-change-cast-proposal="${esc(proposal.id)}">Reject</button></div>
     </li>`).join('');
   return `<div class="reference-proposals cast-proposals" data-cast-proposals><p><b>Proposed character placements</b></p><ul>${rows}</ul></div>`;
+}
+
+function renderSuggestedPrompts(): string {
+  const chips = SUGGESTED_PROMPTS.map(
+    text => `<button type="button" class="chip prompt-chip" data-prompt="${esc(text)}">${esc(text)}</button>`,
+  ).join('');
+  return `<div class="suggested-prompts" role="group" aria-label="Suggested prompts"><span class="suggested-prompts-label">Suggested prompts</span><div class="suggested-prompts-chips">${chips}</div></div>`;
 }
 
 export function mountProjectChat(options: {
@@ -163,10 +177,10 @@ export function mountProjectChat(options: {
     const rows = proposals.map(assignment => {
       const label = options.referenceLabel?.(assignment.refId) || assignment.refId;
       const scene = assignment.sceneLabel || `Scene ${sceneNumberOf(assignment) ?? assignment.sceneId ?? '—'}`;
-      return `<li><div><b>${esc(label)}</b><span>${esc(scene)} / ${esc(slotLabel(assignment.slot))}${assignment.reason ? ` — ${esc(assignment.reason)}` : ''}</span></div>
-        <div class="reference-proposal-actions"><button type="button" data-confirm-assignment="${esc(assignment.id)}">Confirm</button><button type="button" data-change-assignment="${esc(assignment.id)}" class="quiet">Change</button></div></li>`;
+      return `<li class="panel proposal-card" data-reference-proposal="${esc(assignment.id)}"><div class="proposal-body"><b>${esc(label)}</b><span>${esc(scene)} / ${esc(slotLabel(assignment.slot))}${assignment.reason ? ` — ${esc(assignment.reason)}` : ''}</span></div>
+        <div class="reference-proposal-actions"><button type="button" class="btn btn-sm btn-primary" data-confirm-assignment="${esc(assignment.id)}">Accept</button><button type="button" class="btn btn-sm btn-ghost quiet" data-change-assignment="${esc(assignment.id)}">Reject</button></div></li>`;
     }).join('');
-    return `<div class="reference-proposals"><p><b>Proposed reference placements</b></p><ul>${rows}</ul></div>`;
+    return `<div class="reference-proposals" data-reference-proposals><p><b>Proposed reference placements</b></p><ul>${rows}</ul></div>`;
   }
 
   function proposedCastProposals(): Array<CastProposal & { id: string }> {
@@ -187,8 +201,8 @@ export function mountProjectChat(options: {
   function render(): void {
     const plan = conversation?.plan;
     if (!plan) {
-      panel.hidden = !conversation && !errorText;
-      panel.innerHTML = `${errorText ? `<p role="alert">${esc(errorText)}</p>` : '<p class="hint">Chat with the agent to develop your video.</p>'}${proposalsHtml()}${castProposalsHtml()}<button type="button" id="project-new">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload">Load latest conversation</button>' : ''}`;
+      panel.hidden = false;
+      panel.innerHTML = `${errorText ? `<p role="alert">${esc(errorText)}</p>` : '<p class="hint chat-welcome">Chat with the agent to develop your video.</p>'}${renderSuggestedPrompts()}${proposalsHtml()}${castProposalsHtml()}<div class="project-plan-actions"><button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}</div>`;
       bindActions();
       return;
     }
@@ -198,7 +212,7 @@ export function mountProjectChat(options: {
     panel.innerHTML = `
       <div class="project-plan-head">
         <div><b>${esc(plan.title)}</b><span class="hint">${plan.scenes.length} scenes · ${seconds.toFixed(0)}s · ${esc(plan.aspect)} · ${esc(plan.stylePreset)}</span></div>
-        <span class="plan-state">${built ? '✓ in project' : 'draft'}</span>
+        <span class="plan-state badge ${built ? 'badge-ok' : ''}">${built ? '✓ in project' : 'draft'}</span>
       </div>
       <div class="project-plan-audience">${esc(plan.audience)}</div>
       ${plan.assumptions?.length ? `<details><summary class="hint">Creative assumptions</summary><ul>${plan.assumptions.map(value => `<li>${esc(value)}</li>`).join('')}</ul></details>` : ''}
@@ -212,10 +226,10 @@ export function mountProjectChat(options: {
           <small>${esc(scene.visual)}</small></div><time>${scene.seconds}s</time></li>`).join('')}
       </ol></details>
       <div class="project-plan-actions">
-        ${built ? '' : `<button type="button" id="project-plan-build">Build this project</button>`}
-        <button type="button" id="project-new" class="quiet">Start a new video</button>
+        ${built ? '' : `<button type="button" id="project-plan-build" class="btn btn-sm btn-primary">Build this project</button>`}
+        <button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>
         <span class="hint">${built ? 'Edit scene copy directly in the storyboard.' : 'Ask for changes, or build to apply it.'}</span>
-      </div>${proposalsHtml()}${castProposalsHtml()}${errorText ? `<p role="alert">${esc(errorText)}</p>${pending && !conflict ? '<button type="button" id="project-retry">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload">Load latest conversation</button>' : ''}` : ''}`;
+      </div>${proposalsHtml()}${castProposalsHtml()}${errorText ? `<p role="alert">${esc(errorText)}</p>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}` : ''}`;
     panel.querySelector('#project-plan-build')?.addEventListener('click', () => {
       void send('Build this plan exactly as it is now.', 'express', 'build');
     });
@@ -226,6 +240,20 @@ export function mountProjectChat(options: {
     panel.querySelector('#project-new')?.addEventListener('click', reset);
     panel.querySelector('#project-retry')?.addEventListener('click', () => { if (pending && !busy) void perform(pending); });
     panel.querySelector('#project-reload')?.addEventListener('click', () => { if (!busy) void load(); });
+    panel.querySelectorAll<HTMLButtonElement>('[data-prompt]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const text = chip.getAttribute('data-prompt') || chip.textContent?.trim() || '';
+        if (!text) return;
+        const promptInput = (panel.querySelector('#prompt') ??
+          panel.ownerDocument?.getElementById('prompt') ??
+          (typeof document !== 'undefined' ? document.getElementById('prompt') : null)) as HTMLTextAreaElement | HTMLInputElement | null;
+        if (promptInput) {
+          promptInput.value = text;
+          promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+          promptInput.focus();
+        }
+      });
+    });
     panel.querySelectorAll<HTMLElement>('[data-confirm-assignment]').forEach(button => {
       button.addEventListener('click', () => {
         const id = button.getAttribute('data-confirm-assignment');
