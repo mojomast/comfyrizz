@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "generator": "pulid-flux",
+  "kind": "still",
+  "note": "PuLID-Flux identity still: LoadImage(10) is the character's primary portrait and feeds ApplyPulidFlux(23), which patches the Flux model before KSampler(7). 'image' and 'reference' are two names for the same single-portrait input and both land on node 10, so a job must set only one of them. The identity strength (0.9), start/end window, Flux guidance and sampler settings are fixed graph literals rather than job parameters; CCL2c selects this workflow for a character whose visual.identity.method is 'pulid'. No URLs, credentials or local paths: the identity model files are installed by the separate model lock (CCL2b).",
+  "files": ["image", "reference"],
+  "inputs": [
+    "prompt",
+    "image",
+    "reference",
+    "width",
+    "height",
+    "seed",
+    "steps",
+    "denoise"
+  ],
+  "map": {
+    "prompt": ["4", "text"],
+    "image": ["10", "image"],
+    "reference": ["10", "image"],
+    "width": ["6", "width"],
+    "height": ["6", "height"],
+    "seed": ["7", "seed"],
+    "steps": ["7", "steps"],
+    "denoise": ["7", "denoise"]
+  }
+}
