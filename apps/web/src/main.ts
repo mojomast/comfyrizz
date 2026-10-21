@@ -3,6 +3,7 @@ import './project-chat.css';
 import './characters/characters.css';
 import './ui/look-picker.css';
 import { initShellLayout } from './ui/splitter';
+import { mountModeToggle, type ModeController } from './ui/mode';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { readRunSnapshot } from './run-progress.ts';
@@ -480,6 +481,68 @@ function markDirty(reason: string): void {
   $('draft').textContent = `draft · ${reason} · recompiled on export`;
   syncTimeline();
   updatePreview(pkg, timeline, generatedAssets);
+  renderModeSummary();
+}
+
+function modeSummaryLabels(): string[] {
+  const source = (editorStore.getState().doc.package ?? pkg) as unknown as PackageV1;
+  const scenes = source.scenes ?? [];
+  const labels: string[] = [];
+  const customTransition = scenes.some(scene => {
+    const transition = scene.transitionOut;
+    if (!transition) return false;
+    return transition.type !== 'cut' || Number(transition.frames ?? 0) > 0;
+  });
+  if (customTransition) labels.push('Custom transition');
+  if (scenes.some(scene => typeof scene.preferredFrames === 'number')) labels.push('Custom timing');
+  if (scenes.some(scene => Boolean(scene.motion?.recipe || scene.motion?.seed !== undefined || scene.motion?.cue_phrases?.length))) {
+    labels.push('Custom motion');
+  }
+  if (source.voice?.enabled) labels.push('Custom voice');
+  if (source.presenter?.enabled === true) labels.push('AI presenter');
+  return labels;
+}
+
+function renderModeSummary(): void {
+  const host = document.getElementById('mode-summary');
+  if (!host) return;
+  host.innerHTML = modeSummaryLabels()
+    .map(label => `<span class="mode-chip" role="listitem">${esc(label)}</span>`)
+    .join('');
+}
+
+function mountEasyActions(mode: ModeController | null): void {
+  const transport = document.getElementById('transport');
+  if (!transport || document.getElementById('easy-actions')) return;
+  const host = document.createElement('div');
+  host.id = 'easy-actions';
+  host.className = 'easy-actions';
+  host.dataset.easySurface = 'true';
+  host.innerHTML = `
+    <span class="easy-actions-label">Easy view</span>
+    <button type="button" id="easy-generate" class="btn btn-primary btn-sm primary">Generate</button>
+    <button type="button" id="easy-preview" class="btn btn-secondary btn-sm">Preview</button>
+    <span id="mode-summary" class="mode-summary" role="list" aria-label="Custom settings hidden in Easy view"></span>
+    <span class="easy-actions-spacer"></span>
+    <button type="button" id="easy-advanced" class="btn btn-ghost btn-sm">Advanced settings</button>`;
+  transport.after(host);
+
+  host.querySelector<HTMLButtonElement>('#easy-generate')?.addEventListener('click', () => {
+    const prompt = document.getElementById('prompt') as HTMLTextAreaElement | null;
+    const composer = document.getElementById('composer') as HTMLFormElement | null;
+    if (!prompt) return;
+    if (prompt.value.trim() && composer) composer.requestSubmit();
+    else prompt.focus();
+  });
+  host.querySelector<HTMLButtonElement>('#easy-preview')?.addEventListener('click', () => {
+    player?.seekTo(0);
+    const play = document.getElementById('play');
+    if (play?.textContent?.trim() === 'Play') play.click();
+  });
+  host.querySelector<HTMLButtonElement>('#easy-advanced')?.addEventListener('click', () => {
+    mode?.setMode('advanced');
+  });
+  renderModeSummary();
 }
 
 /** C-pres: the storyboard's presenter toolbar (coverage + quick presets + placement + label). */
@@ -616,6 +679,7 @@ function renderStoryboard(): void {
     audioMixEnabled = mixToggle.checked;
     logActivity(`Sound design ${audioMixEnabled ? 'on' : 'off'} for the next render/export`);
   });
+  renderModeSummary();
 }
 
 function renderPalette(): void {
@@ -1039,7 +1103,7 @@ function renderRunPanel(): void {
       const timeStr = at ? `<time class="tabular-nums mono hint">${esc(String(at))}</time>` : '';
       const name = String(event.event ?? event.type ?? 'event');
       const countLabel = count > 1 ? `<span class="event-count rail-event-count" title="${count} identical events" aria-label="${count} identical events">×${count}</span>` : '';
-      return `<div class="event job-row rail-row" data-tone="${tone}" data-event="${esc(name)}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><b class="job-name">${esc(name)}</b>${countLabel}<span class="job-progress hint">${esc(summarizeRunEvent(event))}</span></div>${timeStr}</div>`;
+      return `<div class="event job-row rail-row" data-adv data-tone="${tone}" data-event="${esc(name)}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><b class="job-name">${esc(name)}</b>${countLabel}<span class="job-progress hint">${esc(summarizeRunEvent(event))}</span></div>${timeStr}</div>`;
     })
     .join('');
   const noMatches = runState.events.length === 0 || !rows
@@ -1048,12 +1112,12 @@ function renderRunPanel(): void {
   // The filters apply to the event list; the run summary stays, while the
   // teardown/render details belong to the unfiltered view.
   const teardown = railState.runFilter === 'all' && runState.teardown
-    ? `<div class="event job-row rail-row" data-tone="${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}"><span class="badge badge-${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}">teardown</span><div class="job-content"><b class="job-name">teardown</b><span class="job-progress hint">${esc(teardownLabel(runState.teardown))}</span></div></div>`
+    ? `<div class="event job-row rail-row" data-adv data-tone="${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}"><span class="badge badge-${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}">teardown</span><div class="job-content"><b class="job-name">teardown</b><span class="job-progress hint">${esc(teardownLabel(runState.teardown))}</span></div></div>`
     : '';
   const render = railState.runFilter === 'all' && runState.render
-    ? `<div class="run-render job-row rail-row"><span class="badge badge-ok" data-tone="ok">ready</span><div class="job-content"><b class="job-name">run MP4</b><span class="job-progress hint tabular-nums mono">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div><div class="job-actions"><button type="button" id="run-video" class="btn btn-secondary btn-sm">Download run MP4</button></div></div>`
+    ? `<div class="run-render job-row rail-row" data-adv><span class="badge badge-ok" data-tone="ok">ready</span><div class="job-content"><b class="job-name">run MP4</b><span class="job-progress hint tabular-nums mono">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div><div class="job-actions"><button type="button" id="run-video" class="btn btn-secondary btn-sm">Download run MP4</button></div></div>`
     : '';
-  host.innerHTML = `<div class="run-head job-row"><div class="job-content"><b class="job-name">${esc(runState.active.runId)}</b><span class="job-meta hint">${esc(runState.active.backendId)}</span></div><span class="badge badge-${activeTone} chip" data-tone="${activeTone}">${esc(runState.active.status)}</span></div>${rows || noMatches}${teardown}${render}`;
+  host.innerHTML = `<div class="run-head job-row" data-adv><div class="job-content"><b class="job-name">${esc(runState.active.runId)}</b><span class="job-meta hint">${esc(runState.active.backendId)}</span></div><span class="badge badge-${activeTone} chip" data-tone="${activeTone}">${esc(runState.active.status)}</span></div>${rows || noMatches}${teardown}${render}`;
   const video = $('run-video');
   if (video) video.addEventListener('click', () => void downloadRunVideo());
 }
@@ -2012,6 +2076,16 @@ function init(opened: OpenedProject): void {
   renderExportPanel();
   renderSpendCard();
   renderBriefPanel();
+
+  const modeControl = mountModeToggle();
+  if (modeControl) {
+    const renderSplit = document.getElementById('render-split-button');
+    if (renderSplit?.parentElement) renderSplit.after(modeControl.element);
+    else document.getElementById('topbar')?.append(modeControl.element);
+  }
+  mountEasyActions(modeControl);
+  editorStore.subscribe(() => renderModeSummary());
+
   agentSettings = mountAgentSettings(apiFetch, logActivity);
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: opened.activity }];
   renderActivity();

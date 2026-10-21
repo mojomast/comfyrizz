@@ -80,7 +80,7 @@ export function mountAgentSettings(apiFetch: ApiFetch, log: (message: string) =>
           <details class="form-group agent-group agent-advanced" data-group="advanced" data-adv>
             <summary>Advanced</summary>
             <div class="form-group-body agent-form-grid">
-              <div class="field agent-full">
+              <div class="field agent-full" data-adv>
                 <label class="field-label" for="agent-models-url">Models endpoint</label>
                 <input id="agent-models-url" class="field-control" type="url" placeholder="Defaults to the provider’s models endpoint" />
                 <p class="hint field-hint">Custom discovery URL. Leave blank to use the provider default.</p>

@@ -184,6 +184,7 @@ function groupAnimationSection(section: HTMLElement): void {
     const details = document.createElement('details');
     details.className = 'form-group animation-group';
     details.dataset.group = key;
+    if (summary === 'Transition') details.dataset.adv = '';
     details.open = groupState.get(key) ?? true;
     const head = document.createElement('summary');
     head.textContent = summary;
