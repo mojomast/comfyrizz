@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "generator": "flux3-klein",
+  "kind": "still",
+  "note": "Character LoRA still: UNETLoader(1) feeds LoraLoaderModelOnly(13), and KSampler(7) samples the patched model. 'lora' is the trained .safetensors name already installed in the server's loras directory (CCL3b writes character_lora.safetensors) and 'lora_strength' is its model weight. LoadImage(10) is the character's Klein reference and ReferenceMultiLatent(12) holds the reference budget, so a trained LoRA still keeps the same reference anchor as flux3_klein_ref_edit. 'image' and 'reference' are two names for that one portrait and both land on node 10; a job sets one of them. The graph wires image0 only. No URLs, credentials or local paths: model installation is a separate bootstrap/model-lock concern.",
+  "files": ["image", "reference"],
+  "inputs": [
+    "prompt",
+    "image",
+    "reference",
+    "seed",
+    "steps",
+    "denoise",
+    "megapixels",
+    "lora",
+    "lora_strength"
+  ],
+  "map": {
+    "prompt": ["4", "text"],
+    "image": ["10", "image"],
+    "reference": ["10", "image"],
+    "seed": ["7", "seed"],
+    "steps": ["7", "steps"],
+    "denoise": ["7", "denoise"],
+    "megapixels": ["12", "resolution.megapixels"],
+    "lora": ["13", "lora_name"],
+    "lora_strength": ["13", "strength_model"]
+  }
+}
