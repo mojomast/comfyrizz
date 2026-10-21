@@ -53,6 +53,27 @@ Review full decoding, captions, dialogue, shot endings and normal-speed
 audiovisual playback before publishing a finished episode.
 # Editable ComfyRizz project
 
+## UI run/export fixes after revision 4
+
+The header **Run on backend** path now stages the current saved package and its
+named files before dry planning and model-profile selection. Each estimate has
+an isolated temporary directory, removed afterward, so old uploads cannot mask
+missing inputs. Export's narration diagnostic now handles the schema's ambience
+object and stays quiet for explicitly disabled narration/voice-conditioning files.
+
+Verified against saved episode revision 4: the live `/api/run` request returns
+101 jobs and an approval request, with no missing-file error. A separate three-second
+snapshot passed real Remotion rendering, audio normalization, full MP4 decode,
+caption export and editable ZIP export. The original 68-shot revision was preserved.
+Regression checks cover staged uploaded inputs outside `assets/`, cleanup, missing
+inputs on subsequent estimates, and the native-ambience audio configuration.
+
+**Budget finding:** the backend point estimate is 9.880 credits; its conservative
+admission calculation (margin plus collection/shutdown reserve) requires **14.227**.
+Consequently, the full run is refused at the authorized 12-credit ceiling. No ceiling
+was raised and no GPU was allocated during these fixes. The static pipeline preflight's
+`ready` flag does not include this later measured-backend admission check.
+
 The prepared episode is installed in the private native project store as
 `pkg_nrcu_episode2`, with conversation `chat_nrcu_episode2`.
 

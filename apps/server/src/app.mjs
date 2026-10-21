@@ -209,8 +209,7 @@ export function createApp({
         cpSync(source, workflowsLink, { recursive: true });
       }
     }
-    const assets = join(dirname(store.path(pkg.id)), 'assets');
-    if (existsSync(assets)) cpSync(assets, join(workDir, 'assets'), { recursive: true });
+    copyNamedAssets({ pkg, outputDir: dirname(store.path(pkg.id)), packageDir: workDir });
   }
 
   // C9: after collect, write the applied package back next to its collected plates, then render
