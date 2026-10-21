@@ -1,0 +1,434 @@
+@import './tokens.css';
+@import './components.css';
+
+/* UO07: Status bar extensions & Google Colab spend card popover (PLAN section 5).
+   Calm, dense pro tool styling; borders over shadows; single indigo accent; tokens only. */
+
+/* ==========================================================================
+   1. Status bar shell layout & status badges
+   ========================================================================== */
+
+html body #app #statusbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  height: calc(var(--space-5) + var(--space-2));
+  min-height: calc(var(--space-5) + var(--space-2));
+  max-height: calc(var(--space-5) + var(--space-2));
+  padding: 0 var(--space-3);
+  background: var(--bg-1);
+  color: var(--text-2);
+  border-top: var(--elevation-border-1);
+  font-size: var(--font-size-12);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+html body #app #statusbar .badge,
+html body #app #statusbar .meter,
+html body #app #statusbar .kbd,
+html body #app #statusbar .btn {
+  min-height: var(--target-min);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--font-numeric-tabular);
+}
+
+/* Events connection state badge */
+#events-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target-min);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--font-numeric-tabular);
+  border-radius: var(--radius-control);
+  border: var(--elevation-border-1);
+  background: var(--bg-2);
+  color: var(--text-2);
+}
+
+#events-status[data-state='connected'] {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+#events-status[data-state='offline'] {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+#events-status[data-state='disconnected'] {
+  color: var(--text-3);
+  background: var(--bg-1);
+  border-color: var(--border);
+}
+
+/* Queue count badge */
+#queue-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target-min);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--font-numeric-tabular);
+  border-radius: var(--radius-control);
+  border: var(--elevation-border-1);
+  background: var(--bg-2);
+  color: var(--text-2);
+}
+
+#queue-status[data-count='0'] {
+  color: var(--text-3);
+  background: var(--bg-1);
+  border-color: var(--border);
+}
+
+#queue-status:not([data-count='0']) {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+/* ==========================================================================
+   2. Status bar Google Colab slot & trigger
+   ========================================================================== */
+
+.statusbar-colab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+}
+
+.colab-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--target-min);
+  height: var(--target-min);
+  padding: 0 var(--space-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+  line-height: var(--line-height-tight);
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.colab-trigger:hover {
+  background: var(--bg-3);
+  border-color: var(--accent-border);
+  color: var(--text-1);
+}
+
+.colab-trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.colab-trigger-label {
+  font-weight: var(--font-weight-600);
+  color: var(--text-1);
+}
+
+.colab-spend-summary {
+  color: var(--text-2);
+  font-variant-numeric: var(--font-numeric-tabular);
+}
+
+/* Mini gauge inside trigger */
+.colab-mini-gauge.gauge {
+  display: inline-flex;
+  align-items: center;
+  width: calc(var(--space-6) + var(--space-4));
+  min-width: calc(var(--space-6) + var(--space-4));
+  height: var(--space-2);
+  min-height: var(--space-2);
+  padding: 0;
+  margin: 0;
+  background: var(--bg-3);
+  border: none;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.colab-mini-gauge .gauge-bar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-3);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.colab-mini-gauge .gauge-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width var(--transition-normal);
+}
+
+/* ==========================================================================
+   3. Google Colab spend card popover (.colab-popover)
+   ========================================================================== */
+
+.colab-popover {
+  position: fixed;
+  bottom: calc(var(--space-5) + var(--space-2) + var(--space-2));
+  left: var(--space-3);
+  z-index: 50;
+  width: calc(var(--space-6) * 12);
+  max-width: calc(100vw - var(--space-5));
+  max-height: calc(100vh - var(--space-6) * 3);
+  overflow-y: auto;
+  background: var(--bg-1);
+  color: var(--text-1);
+  border: var(--elevation-border-2);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--elevation-2);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-sizing: border-box;
+}
+
+.colab-popover[hidden] {
+  display: none !important;
+}
+
+.colab-popover:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.colab-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--elevation-border-1);
+}
+
+.colab-popover-title {
+  margin: 0;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  color: var(--text-1);
+}
+
+.colab-popover-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target-min);
+  min-width: var(--target-min);
+  height: var(--target-min);
+  width: var(--target-min);
+  padding: 0;
+  font-size: var(--font-size-13);
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.colab-popover-close:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.colab-popover-close:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.colab-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+}
+
+/* ==========================================================================
+   4. Google Colab card & gauges inside popover
+   ========================================================================== */
+
+.colab-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  border: none;
+  font-size: var(--font-size-12);
+  color: var(--text-1);
+}
+
+.colab-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.colab-head b {
+  color: var(--text-1);
+  font-size: var(--font-size-13);
+}
+
+#colab-status {
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--font-numeric-tabular);
+}
+
+.colab-install,
+.colab-signin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+}
+
+.colab-install p,
+.colab-signin p {
+  margin: 0;
+  font-size: var(--font-size-12);
+  color: var(--text-2);
+  line-height: var(--line-height-base);
+}
+
+.colab-install code {
+  display: block;
+  padding: var(--space-2);
+  background: var(--bg-0);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
+  overflow-x: auto;
+}
+
+.colab-warn {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-control);
+  color: var(--warn);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
+}
+
+#colab-log {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-0);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
+  max-height: calc(var(--space-6) * 4);
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.colab-progress {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: var(--elevation-border-1);
+}
+
+.colab-run {
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  padding: var(--space-2);
+  margin: var(--space-2) 0;
+  background: var(--bg-2);
+}
+
+.colab-run h4 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-13);
+  color: var(--text-1);
+}
+
+.colab-run small {
+  color: var(--text-3);
+  font-weight: var(--font-weight-regular);
+}
+
+.colab-gauge {
+  margin: var(--space-1) 0;
+  font-size: var(--font-size-12);
+}
+
+.colab-gauge-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--text-1);
+}
+
+.colab-gauge-bar {
+  height: var(--space-2);
+  background: var(--bg-3);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  margin: var(--space-1) 0;
+}
+
+.colab-gauge-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width var(--transition-normal);
+}
+
+.colab-gauge-bar i.indeterminate {
+  opacity: 0.35;
+}
+
+.colab-gauge[data-state='failed'] .colab-gauge-bar i {
+  background: var(--danger);
+}
+
+.colab-gauge[data-state='done'] .colab-gauge-bar i {
+  background: var(--ok);
+}
+
+.colab-gauge-meta {
+  color: var(--text-3);
+  font-size: var(--font-size-12);
+  font-variant-numeric: var(--font-numeric-tabular);
+}

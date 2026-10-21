@@ -1,4 +1,4 @@
-// Live gauges for Google Colab runs: the bars a notebook would draw (tqdm, ComfyUI sampler steps,
+// Live gauges for Google Colab runs: the notebook's bars, polled from /api/colab/progress.
 // per-node progress, render frames), from /api/colab/progress. Rendering is a pure function of the
 // snapshot so it can be tested as a string; the mount just polls.
 
@@ -78,26 +78,57 @@ export function colabProgressHtml(runs: ColabRun[] | null, error: string | null 
   return `<div class="colab-progress"><div class="colab-head"><b>Google Colab runs</b></div>${body}</div>`;
 }
 
-const STYLE = `.colab-progress{margin-top:12px}.colab-run{border:1px solid #2a3140;border-radius:8px;padding:8px;margin:8px 0}
-.colab-run h4{margin:0 0 6px;font-size:13px}.colab-run small{opacity:.7;font-weight:400}.colab-gauge{margin:6px 0;font-size:12px}
-.colab-gauge-head{display:flex;justify-content:space-between}.colab-gauge-bar{height:8px;background:#1d2330;border-radius:4px;overflow:hidden}
-.colab-gauge-bar i{display:block;height:100%;background:#6d8cff;transition:width .4s}.colab-gauge-bar i.indeterminate{opacity:.35}
-.colab-gauge[data-state="failed"] .colab-gauge-bar i{background:#e5484d}.colab-gauge[data-state="done"] .colab-gauge-bar i{background:#30a46c}
-.colab-gauge-meta{opacity:.7}`;
+const STYLE = `.colab-progress{margin-top:var(--space-2);padding-top:var(--space-2);border-top:var(--elevation-border-1)}.colab-run{border:var(--elevation-border-1);border-radius:var(--radius-control);padding:var(--space-2);margin:var(--space-2) 0;background:var(--bg-2)}
+.colab-run h4{margin:0 0 var(--space-1);font-size:var(--font-size-13);color:var(--text-1)}.colab-run small{color:var(--text-3);font-weight:var(--font-weight-regular)}.colab-gauge{margin:var(--space-1) 0;font-size:var(--font-size-12)}
+.colab-gauge-head{display:flex;justify-content:space-between;color:var(--text-1)}.colab-gauge-bar{height:var(--space-2);background:var(--bg-3);border-radius:var(--radius-pill);overflow:hidden;margin:var(--space-1) 0}
+.colab-gauge-bar i{display:block;height:100%;background:var(--accent);border-radius:var(--radius-pill);transition:width var(--transition-normal)}.colab-gauge-bar i.indeterminate{opacity:.35}
+.colab-gauge[data-state="failed"] .colab-gauge-bar i{background:var(--danger)}.colab-gauge[data-state="done"] .colab-gauge-bar i{background:var(--ok)}
+.colab-gauge-meta{color:var(--text-3);font-size:var(--font-size-12);font-variant-numeric:var(--font-numeric-tabular)}`;
 
 export function mountColabProgress(host: HTMLElement, request: (input: string, init?: RequestInit) => Promise<Response>, intervalMs = 1000): () => void {
-  if (!document.getElementById('colab-progress-style')) {
-    const style = document.createElement('style');
-    style.id = 'colab-progress-style';
-    style.textContent = STYLE;
-    document.head.appendChild(style);
+  if (typeof document !== 'undefined') {
+    if (!document.getElementById('colab-progress-style')) {
+      const style = document.createElement('style');
+      style.id = 'colab-progress-style';
+      style.textContent = STYLE;
+      document.head.appendChild(style);
+    }
+    const popoverBody = document.getElementById('colab-popover-body');
+    if (popoverBody && !popoverBody.contains(host)) {
+      popoverBody.appendChild(host);
+    }
   }
   let stopped = false;
   const tick = async (): Promise<void> => {
     try {
       const response = await request('/api/colab/progress');
       const data = (await response.json()) as { runs: ColabRun[] };
-      host.innerHTML = colabProgressHtml(data.runs ?? []);
+      const runs = data.runs ?? [];
+      host.innerHTML = colabProgressHtml(runs);
+
+      // Update the status bar mini gauge if present
+      if (typeof document !== 'undefined') {
+        const miniGaugeFill = document.getElementById('colab-mini-gauge-fill');
+        const summary = document.getElementById('colab-spend-summary');
+        const activeRun = runs.find((r) => r.active);
+        if (activeRun && activeRun.gauges && activeRun.gauges.length > 0) {
+          const lastGauge = activeRun.gauges[activeRun.gauges.length - 1];
+          const pct = gaugePercent(lastGauge);
+          if (miniGaugeFill && pct !== null) {
+            miniGaugeFill.style.width = `${pct.toFixed(1)}%`;
+            if (lastGauge.state === 'failed') {
+              miniGaugeFill.style.background = 'var(--danger)';
+            } else if (lastGauge.state === 'done') {
+              miniGaugeFill.style.background = 'var(--ok)';
+            } else {
+              miniGaugeFill.style.background = 'var(--accent)';
+            }
+          }
+          if (summary && pct !== null) {
+            summary.textContent = `${pct.toFixed(0)}% · ${lastGauge.label || 'running'}`;
+          }
+        }
+      }
     } catch (failure) {
       host.innerHTML = colabProgressHtml(null, failure instanceof Error ? failure.message : String(failure));
     }
