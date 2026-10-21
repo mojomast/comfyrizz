@@ -12,6 +12,8 @@
     "test": "pnpm run build:libs && pnpm -r --if-present test",
     "test:py": "cd pipeline-py && ../.venv/bin/python -m pytest -q",
     "test:scan": "node --test scripts/release-scan.test.mjs && node scripts/release-scan.mjs",
+    "test:browser": "pnpm -C apps/web test:e2e",
+    "check": "pnpm test && pnpm -C apps/web typecheck && pnpm test:scan",
     "test:all": "pnpm test && pnpm run test:py && pnpm run test:scan",
     "build:libs": "pnpm -r --filter './packages/**' --if-present run build"
   }
