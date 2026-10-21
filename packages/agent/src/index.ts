@@ -39,7 +39,7 @@ export {
   CONVERSATION_STAGGERS, CONVERSATION_EMPHASIS, CONVERSATION_ENERGIES, CONVERSATION_PATTERNS,
   runConversationTurn, patchConversationPlan, conversationPlanWarnings, budgetConversationMessages,
 } from './conversation.js';
-export type { ConversationPlan, ConversationReferences } from './conversation.js';
+export type { ConversationClips, ConversationPlan, ConversationReferences } from './conversation.js';
 export {
   REFERENCE_NOTE_MAX_CHARS,
   REFERENCE_QUESTION_MAX_CHARS,
@@ -60,6 +60,38 @@ export type {
   ReferenceToolContext,
   ReferenceToolResult,
 } from './reference-tools.js';
+export {
+  CLIP_ID_MAX_CHARS,
+  CLIP_MANIFEST_MAX_ROWS,
+  CLIP_NOTE_MAX_CHARS,
+  CLIP_REASON_MAX_CHARS,
+  CLIP_RULES,
+  CLIP_STATES,
+  CLIP_TOOLS,
+  CLIP_TOOL_NAMES,
+  CLIP_VERDICTS,
+  MAX_CLIP_MANIFEST_ROWS,
+  MAX_MANIFEST_ROWS,
+  clipManifestBlock,
+  isClipToolName,
+  manifestBlock,
+  runClipTool,
+} from './clip-tools.js';
+export type {
+  ClipCorrectionInput,
+  ClipEntry,
+  ClipGateResult,
+  ClipProposalResult,
+  ClipSelectionInput,
+  ClipState,
+  ClipTake,
+  ClipTakeCorrection,
+  ClipToolCall,
+  ClipToolContext,
+  ClipToolResult,
+  ClipVerdict,
+  ClipVerdictInput,
+} from './clip-tools.js';
 export { composeConversationSkills, SKILL_CATALOG_VERSION, BUNDLED_SKILL_IDS } from './skills/index.js';
 export type { ScriptedCall } from './scripted-model.js';
 export { DEFAULT_PALETTE, defaultCpuDatasets, defaultCpuScenes, foregroundFor, titleFor } from './package.js';
