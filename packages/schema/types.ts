@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 44a51e11e70e60b80c855238c6800a8202931a1b510664dfaff2c11decd09fd7
+// Schema sha256: 7fd801b5b61e0b2ee0d86bd03603dc0063cf250c30fc3ebfddf56233a42f1d00
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -845,10 +845,11 @@ export interface Gen {
   /**
    * llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein
    * stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by
-   * a scene's narration WAV); kokoro = Kokoro narration audio; qwen3-tts = optional Qwen3-TTS 1.7B
-   * narration audio (Apache-2.0).
+   * a scene's narration WAV); fasth3-omni = experimental FastH3 Omni reference-conditioned video
+   * with native audio (MiniMax-H3 community licence); kokoro = Kokoro narration audio; qwen3-tts =
+   * optional Qwen3-TTS 1.7B narration audio (Apache-2.0).
    */
-  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "kokoro" | "qwen3-tts";
+  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "fasth3-omni" | "kokoro" | "qwen3-tts";
   workflow?: RelativePath;
   workflow_sha256?: Sha256Hex;
   model?: string;

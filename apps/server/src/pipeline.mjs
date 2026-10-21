@@ -59,11 +59,39 @@ export function launchPipeline(spec, onMessage, onExit) {
   return { cancel: () => child.connected && child.send({ kind: 'cancel' }), kill: signal => { try { child.kill(signal); } catch { /* already gone */ } } };
 }
 
-export function createPipelineController({ runtimeDir, events, stageInputs, launch = launchPipeline, env = process.env, isBusy = () => false, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = Math.max(90000, Number(env.COMFYRIZZ_RECONCILE_STOP_GRACE_MS) || RECONCILE_STOP_GRACE_MS), takeOver = env.COMFYRIZZ_TAKE_OVER === '1' || process.argv.includes('--take-over'), ownerStaleMs = (Number(env.COMFYRIZZ_OWNER_STALE_MINUTES) || OWNER_STALE_MINUTES) * 60000, ownerHeartbeatMs = OWNER_HEARTBEAT_MS }) {
+export function createPipelineController({ runtimeDir, events, stageInputs, launch = launchPipeline, env = process.env, operations = null, isBusy = () => false, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = Math.max(90000, Number(env.COMFYRIZZ_RECONCILE_STOP_GRACE_MS) || RECONCILE_STOP_GRACE_MS), takeOver = env.COMFYRIZZ_TAKE_OVER === '1' || process.argv.includes('--take-over'), ownerStaleMs = (Number(env.COMFYRIZZ_OWNER_STALE_MINUTES) || OWNER_STALE_MINUTES) * 60000, ownerHeartbeatMs = OWNER_HEARTBEAT_MS }) {
   const dir = join(runtimeDir, 'pipelines');
   mkdirSync(dir, { recursive: true });
   const records = new Map(), workers = new Map(), journals = new Map();
   let starting = false, lastPersist = 0, ownsLock = false;
+  /**
+   * RL10c: a Google Colab generation run owns the shared operation slot (RL05's coordinator) for its
+   * whole life. The lease is taken before the run is admitted, so an export or a render cannot
+   * start a second job on the same CPU/GPU budget while the run works, and it is released when the
+   * run ends: finished, failed, cancelled or interrupted. `operations` is optional, so the
+   * controller still works on its own (no slot, no admission).
+   */
+  const leases = new Map();
+  /** Take the shared slot for a run. Returns { ok: false, holder } when another operation owns it. */
+  function takeSlot(runId) {
+    if (!operations) return { ok: true };
+    const lease = operations.tryAcquire('pipeline', runId);
+    if (lease.busy) return { ok: false, holder: lease.holder };
+    leases.set(runId, lease);
+    return { ok: true };
+  }
+  /** Give the shared slot back. Releasing twice is harmless. */
+  function releaseSlot(runId) {
+    const lease = leases.get(runId);
+    if (!lease) return;
+    leases.delete(runId);
+    lease.release();
+  }
+  /** The current holder of the shared slot, when one exists. */
+  function slotHolder() {
+    const status = operations?.status?.();
+    return status?.busy ? status.holder : null;
+  }
   /**
    * PO-4: the busy flag was in-memory only, so two servers pointed at one runtime directory both accepted
    * runs and both replayed the same journals. One process owns the directory. A lock is stale, and taken
@@ -223,17 +251,28 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     }
     // Completion is set only by a clean worker exit after a result, not by the GPU phase.
     emit(record, data.kind, data);
+    // RL10c: a finished, failed or cancelled run gives the shared slot back.
+    if (TERMINAL.has(record.status)) releaseSlot(record.runId);
   }
   async function start(pkg, input, sourceDir) {
-    if (starting || active() || isBusy()) return { status: 409, error: 'pipeline busy', runId: active()?.runId ?? null };
+    if (starting || active() || isBusy()) {
+      // RL10c: the run that already owns the machine is named, so the caller knows who holds it.
+      const holder = slotHolder();
+      return { status: 409, error: 'pipeline busy', runId: active()?.runId ?? null, ...(holder ? { busy: true, holder } : {}) };
+    }
     const unresolved = [...records.values()].find(unsettled);
     if (unresolved) return { status: 409, error: 'runtime shutdown needs reconciliation', runId: unresolved.runId, action: `/api/pipeline/${unresolved.runId}/reconcile` };
     starting = true;
+    const runId = `pipe_${randomUUID().replaceAll('-', '')}`;
+    let live = false;
     try {
+      // RL10c: the shared slot decides admission before the plan is even looked at, so a machine
+      // that is already busy answers "busy" (with the holder) instead of a plan problem.
+      const slot = takeSlot(runId);
+      if (!slot.ok) return { status: 409, error: 'pipeline busy', busy: true, holder: slot.holder };
       const plan = planPipeline(pkg, input, { env });
-      if (!plan.ready) return { status: 422, ...plan };
-      if (plan.requiresApproval && input.approvedPlanHash !== plan.planHash) return { status: 409, approvalRequired: true, ...plan };
-      const runId = `pipe_${randomUUID().replaceAll('-', '')}`;
+      if (!plan.ready) { releaseSlot(runId); return { status: 422, ...plan }; }
+      if (plan.requiresApproval && input.approvedPlanHash !== plan.planHash) { releaseSlot(runId); return { status: 409, approvalRequired: true, ...plan }; }
       const runDir = join(dir, runId), workDir = join(runDir, 'work');
       mkdirSync(workDir, { recursive: true });
       await stageInputs(pkg, sourceDir, workDir);
@@ -250,11 +289,17 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
           record.finishedAt = new Date().toISOString();
           if (code === 0 && record.result && record.status !== 'cancelling' && !unsettled(record) && record.stages.every(s => ['completed', 'skipped'].includes(s.status))) {
             record.status = 'completed'; emit(record, 'completed', { result: record.result });
+            releaseSlot(runId);
           } else receive(record, { kind: 'failed', code: 'WORKER_EXIT', message: `Pipeline worker exited before completion (${code ?? signal}). Check runtime shutdown status.` });
         });
         workers.set(runId, worker);
+        live = true;
       } catch (error) { receive(record, { kind: 'failed', message: error.message }); }
       return { status: 202, run: publicRecord(record) };
+    } catch (error) {
+      // The run never went live: the slot goes back to whoever wants it.
+      if (!live) releaseSlot(runId);
+      throw error;
     } finally { starting = false; }
   }
   function cancel(runId) {
@@ -277,6 +322,10 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     const record = records.get(runId);
     if (!record) return null;
     if (starting || active() || isBusy()) return { status: 409, error: 'pipeline busy' };
+    // RL10c: a reconcile stops a Google Colab runtime, so it takes the shared slot for its own life
+    // and gives it back when it settles. It does not start while another operation owns the slot.
+    const slot = takeSlot(runId);
+    if (!slot.ok) return { status: 409, error: 'pipeline busy', busy: true, holder: slot.holder };
     const previousStatus = record.status;
     record.status = 'reconciling';
     record.reconcile = { startedAt: new Date().toISOString(), finishedAt: null, confirmed: null, timedOut: false, cancelled: false, message: null };
@@ -289,6 +338,7 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     const settle = (confirmed, message) => {
       clearTimers();
       workers.delete(runId);
+      releaseSlot(runId);
       // PO-4: the outcome is part of the run's durable record, not only a journal event. A reconcile that
       // did not confirm shutdown leaves the run unsettled (which is what actually blocks a new run), and the
       // record says why instead of silently restoring the previous status.
@@ -317,6 +367,7 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
       timer.unref?.();
     } catch (error) {
       clearTimers();
+      releaseSlot(runId);
       record.reconcile = { ...record.reconcile, finishedAt: new Date().toISOString(), confirmed: false, message: error.message };
       record.status = previousStatus;
       emit(record, 'reconciled', { confirmed: false, message: error.message });
@@ -335,6 +386,8 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     },
     close: () => {
       for (const record of records.values()) if (!TERMINAL.has(record.status)) cancel(record.runId);
+      // RL10c: a closing controller hands the shared slot back.
+      for (const runId of [...leases.keys()]) releaseSlot(runId);
       if (ownerHeartbeat) { clearInterval(ownerHeartbeat); ownerHeartbeat = null; }
       if (ownsLock) { try { unlinkSync(join(dir, 'owner.json')); } catch { /* already released */ } ownsLock = false; }
     },

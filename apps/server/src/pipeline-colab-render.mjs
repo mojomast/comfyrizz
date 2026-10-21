@@ -2,6 +2,13 @@
 // render plus mix verification there, and bring back the MP4 and reports.
 // Generated plates stay on the VM through rendering; editable media and newly
 // compiled composition resources return together after the movie is verified.
+//
+// RL10a: a render that stops reporting is stalled, not slow. The render cell on the VM
+// heartbeats every 20 s (colab/render_remote.py), so a step that says nothing for minutes is
+// gone, not busy. The render is therefore watched here instead of being awaited forever: no
+// progress for the stall window ends the step with the state `stalled` and a retry hint, and
+// every backend call has a deadline, so progress and status never wait on a promise that never
+// settles.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +28,106 @@ import {
 const renderDirsScript = join(repoRoot, 'colab', 'render_dirs.py');
 const renderScript = join(repoRoot, 'colab', 'render_remote.py');
 const python = () => process.env.COMFYRIZZ_PYTHON || 'python3';
+
+/** The state a render that stopped reporting progress ends in. */
+export const RENDER_STALL_STATE = 'stalled';
+/** How long a render may stay silent before it counts as stalled. */
+export const DEFAULT_RENDER_STALL_MINUTES = 5;
+/** The knob for the stall window, so a very long render can be given more room. */
+export const RENDER_STALL_MINUTES_ENV = 'COMFYRIZZ_COLAB_RENDER_STALL_MINUTES';
+/** Upper bounds for the backend calls of one render. No step waits forever. */
+export const RENDER_STEP_DEADLINES = Object.freeze({
+  dirs: 5 * 60_000,
+  upload: 11 * 60_000,
+  render: 65 * 60_000,
+  download: 16 * 60_000,
+});
+
+/** The clock the render watches itself with. A test injects its own. */
+export const realClock = Object.freeze({
+  now: () => Date.now(),
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: handle => clearTimeout(handle),
+});
+
+/**
+ * The stall window in milliseconds: an explicit number of minutes, the environment, or the
+ * default. A window that is not a positive number would stall every render, so it falls back
+ * to the default rather than to "stall immediately".
+ */
+export function renderStallMs({ minutes = null, env = process.env } = {}) {
+  const raw = minutes ?? env?.[RENDER_STALL_MINUTES_ENV] ?? DEFAULT_RENDER_STALL_MINUTES;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_RENDER_STALL_MINUTES * 60_000;
+  return Math.round(value * 60_000);
+}
+
+/**
+ * A silence timer for one long step. `progress()` says the step is alive; when nothing has said
+ * so for `stallMs` of the injected clock, `onStall` fires once and the guard stops.
+ */
+export function createStallGuard({ stallMs, clock = realClock, onStall = () => {} } = {}) {
+  let handle = null;
+  let lastProgressAt = clock.now();
+  let stalled = false;
+  const arm = () => {
+    if (handle != null) { clock.clearTimeout(handle); handle = null; }
+    if (stalled) return;
+    const remaining = stallMs - (clock.now() - lastProgressAt);
+    if (remaining <= 0) { stalled = true; onStall(); return; }
+    handle = clock.setTimeout(() => { handle = null; arm(); }, remaining);
+  };
+  arm();
+  return {
+    get stalled() { return stalled; },
+    get silentSince() { return lastProgressAt; },
+    progress() { if (stalled) return; lastProgressAt = clock.now(); arm(); },
+    stop() { if (handle != null) { clock.clearTimeout(handle); handle = null; } },
+  };
+}
+
+/** The error a stalled render ends with: the state it reached, and what to do about it. */
+export function stalledRenderError({ stallMs, detail = null }) {
+  const minutes = Math.max(1, Math.round(stallMs / 60_000));
+  const error = new Error(detail ?? `The Google Colab render stopped reporting progress for ${minutes} minutes and was stopped.`);
+  error.name = 'ColabRenderStalled';
+  error.code = 'RENDER_STALLED';
+  error.state = RENDER_STALL_STATE;
+  error.retry = {
+    retryable: true,
+    resume: 'render',
+    hint: 'Retry the render: the generated media is still on the Google Colab VM, so the retry resumes at the render step instead of generating the plates again.',
+  };
+  return error;
+}
+
+/** The error a render that outlived its deadline ends with. */
+export function renderTimeoutError({ label = 'render', deadlineMs }) {
+  const minutes = Math.max(1, Math.round(deadlineMs / 60_000));
+  const error = new Error(`The Google Colab ${label} step did not finish within ${minutes} minutes and was stopped.`);
+  error.name = 'ColabRenderTimeout';
+  error.code = 'RENDER_TIMEOUT';
+  error.state = 'timeout';
+  error.retry = {
+    retryable: true,
+    resume: 'render',
+    hint: 'Retry the render: the generated media is still on the Google Colab VM, so the retry resumes at the render step instead of generating the plates again.',
+  };
+  return error;
+}
+
+/** Where the last render attempt stopped, so a retry can pick it up. */
+export function readRenderStatus(runDir) {
+  const path = join(runDir, 'colab-render', 'status.json');
+  if (!existsSync(path)) return null;
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
+}
+
+function writeRenderStatus(scratch, clock, status) {
+  try {
+    writeFileSync(join(scratch, 'status.json'), JSON.stringify({ ...status, at: new Date(clock.now()).toISOString() }, null, 2));
+  } catch { /* a status file never fails a render */ }
+}
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
@@ -112,13 +219,72 @@ with zipfile.ZipFile(archive) as bundle:
 
 /**
  * @param {object} backend a Google Colab backend that is already up (uploadFile, execStep, downloadFile)
+ * @param {number} [stallMinutes] how long the render may stay silent before it counts as stalled
+ * @param {object} [clock] {now, setTimeout, clearTimeout}: the clock the render watches itself with
  */
-export async function runColabRender({ backend, workDir, runDir, voiced = false, presenters = false, signal, onEvent = () => {} } = {}) {
+export async function runColabRender({ backend, workDir, runDir, voiced = false, presenters = false, signal, onEvent = () => {}, stallMinutes = null, clock = realClock, deadlines = {} } = {}) {
   if (!backend || typeof backend.uploadFile !== 'function' || typeof backend.execStep !== 'function' || typeof backend.downloadFile !== 'function') {
     throw new Error('This Google Colab backend cannot run a remote render');
   }
+  const limits = { ...RENDER_STEP_DEADLINES, ...deadlines };
+  const stallMs = renderStallMs({ minutes: stallMinutes });
   const scratch = join(runDir, 'colab-render');
   mkdirSync(scratch, { recursive: true });
+
+  /**
+   * One backend call, watched. The call is raced against its deadline and, for the render, against
+   * its own silence: whichever comes first settles the step, so no caller waits on a promise that
+   * never settles. The step gets an abort of its own, linked to the caller's cancellation, so a
+   * deadline or a stall stops the work instead of leaving it running.
+   */
+  async function callStep(label, call, { stallMs: stallWindow = 0 } = {}) {
+    const deadlineMs = limits[label] ?? 0;
+    const controller = new AbortController();
+    let settleCancel;
+    const cancelled = new Promise((resolve) => { settleCancel = resolve; });
+    const cancel = () => {
+      const reason = signal?.reason ?? new Error('The pipeline was cancelled');
+      controller.abort(reason);
+      settleCancel({ state: 'cancelled', reason });
+    };
+    if (signal) { if (signal.aborted) cancel(); else signal.addEventListener('abort', cancel, { once: true }); }
+    let stallError = null;
+    let settleStall;
+    const stalled = new Promise((resolve) => { settleStall = resolve; });
+    const guard = stallWindow > 0 ? createStallGuard({
+      stallMs: stallWindow,
+      clock,
+      onStall: () => {
+        stallError = stalledRenderError({ stallMs: stallWindow });
+        onEvent({ phase: RENDER_STALL_STATE, state: RENDER_STALL_STATE, progress: null, message: stallError.message, retry: stallError.retry });
+        settleStall({ state: 'stalled' });
+        controller.abort(stallError);
+      },
+    }) : null;
+    let deadlineHandle = null;
+    const deadline = new Promise((resolve) => {
+      if (Number.isFinite(deadlineMs) && deadlineMs > 0) deadlineHandle = clock.setTimeout(() => resolve({ state: 'deadline' }), deadlineMs);
+    });
+    try {
+      const settled = Promise.resolve()
+        .then(() => call(controller.signal, guard))
+        .then(value => ({ state: 'done', value }), error => ({ state: 'failed', error }));
+      const outcome = await Promise.race([settled, deadline, stalled, cancelled]);
+      if (outcome.state === 'stalled') throw stallError;
+      if (outcome.state === 'cancelled') throw outcome.reason;
+      if (outcome.state === 'deadline') {
+        controller.abort(new Error(`The Google Colab ${label} step did not finish in time`));
+        throw renderTimeoutError({ label, deadlineMs });
+      }
+      if (outcome.state === 'failed') throw outcome.error;
+      return outcome.value;
+    } finally {
+      guard?.stop();
+      if (deadlineHandle != null) clock.clearTimeout(deadlineHandle);
+      if (signal) signal.removeEventListener('abort', cancel);
+    }
+  }
+
   const { pkg, timeline, bundleFiles, job } = await prepareRenderJob(workDir, { voiced, presenters });
   writeFileSync(join(scratch, 'job.json'), JSON.stringify(job));
   onEvent({ phase: 'bundling', progress: null });
@@ -131,23 +297,46 @@ export async function runColabRender({ backend, workDir, runDir, voiced = false,
   };
   signal?.throwIfAborted();
   onEvent({ phase: 'preparing', progress: null });
-  const dirs = await backend.execStep(renderDirsScript, 'render-dirs', { timeout: 180, signal, onEvent: forward });
+  const dirs = await callStep('dirs', (stepSignal) => backend.execStep(renderDirsScript, 'render-dirs', { timeout: 180, signal: stepSignal, onEvent: forward }));
   if (!dirs?.ok) throw new Error(dirs?.note || 'Google Colab render directories were not created');
   signal?.throwIfAborted();
   onEvent({ phase: 'uploading', progress: null });
-  await backend.uploadFile(join(scratch, 'bundle.zip'), job.bundleZip);
-  await backend.uploadFile(join(scratch, 'project.zip'), job.projectZip);
-  await backend.uploadFile(join(scratch, 'job.json'), job.jobFile);
+  await callStep('upload', (stepSignal) => backend.uploadFile(join(scratch, 'bundle.zip'), job.bundleZip, { signal: stepSignal }));
+  await callStep('upload', (stepSignal) => backend.uploadFile(join(scratch, 'project.zip'), job.projectZip, { signal: stepSignal }));
+  await callStep('upload', (stepSignal) => backend.uploadFile(join(scratch, 'job.json'), job.jobFile, { signal: stepSignal }));
   signal?.throwIfAborted();
   onEvent({ phase: 'bootstrapping', progress: null });
-  const rendered = await backend.execStep(renderScript, 'render', { timeout: 3600, silenceMs: 180000, signal, onEvent: forward });
-  if (!rendered?.ok) throw new Error(rendered?.note || 'Google Colab render did not finish');
+  let rendered;
+  try {
+    rendered = await callStep('render', (stepSignal, guard) => backend.execStep(renderScript, 'render', {
+      timeout: 3600,
+      silenceMs: 180000,
+      signal: stepSignal,
+      onEvent: (event) => { guard?.progress(); forward(event); },
+    }), { stallMs });
+    if (!rendered?.ok) {
+      // The cell that stopped reporting is the same stall the guard watches for: the backend gave
+      // up on it and never saw it finish. Say so, with the retry that works.
+      if (rendered?.lost) {
+        const error = stalledRenderError({ stallMs, detail: 'The Google Colab render stopped reporting and the cell on the VM was lost before it finished.' });
+        onEvent({ phase: RENDER_STALL_STATE, state: RENDER_STALL_STATE, progress: null, message: error.message, retry: error.retry });
+        throw error;
+      }
+      const failure = new Error(rendered?.note || 'Google Colab render did not finish');
+      failure.code = 'RENDER_FAILED';
+      throw failure;
+    }
+  } catch (error) {
+    writeRenderStatus(scratch, clock, { state: error.state ?? (signal?.aborted ? 'cancelled' : 'failed'), phase: 'render', code: error.code ?? null, retry: error.retry ?? null });
+    throw error;
+  }
+  writeRenderStatus(scratch, clock, { state: 'completed', phase: 'render' });
   signal?.throwIfAborted();
   onEvent({ phase: 'collecting', progress: { mode: 'measured', completed: 0, total: 2, unit: 'files' } });
   const resultsZip = join(scratch, 'results.zip');
   const mediaZip = join(scratch, 'media.zip');
-  await backend.downloadFile(job.resultsZip, resultsZip);
-  await backend.downloadFile(job.mediaZip, mediaZip);
+  await callStep('download', (stepSignal) => backend.downloadFile(job.resultsZip, resultsZip, { signal: stepSignal }));
+  await callStep('download', (stepSignal) => backend.downloadFile(job.mediaZip, mediaZip, { signal: stepSignal }));
   onEvent({ phase: 'collecting', progress: { mode: 'measured', completed: 2, total: 2, unit: 'files' } });
   unzipSafe(resultsZip, runDir);
   unzipSafe(mediaZip, workDir);

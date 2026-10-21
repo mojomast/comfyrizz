@@ -12,8 +12,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { makeResult, runChecks, summarize } from './checks.mjs';
 import { redact } from './redact.mjs';
+import { resolvePython } from '../py.mjs';
 import { renderJson, renderText } from './report.mjs';
-import { createToolChecks } from './check-tools.mjs';
+import { createToolChecks, parseMinVersion, parseVersion } from './check-tools.mjs';
 import { createChecks as createRepoChecks } from './check-repo.mjs';
 import {
   SERVER_CHECK_ID,
@@ -37,7 +38,7 @@ export const CHECK_TIMEOUT_MS = 5000;
 
 export const EXEC_TIMEOUT_MS = 4000;
 
-export const DEFAULT_MIN_NODE = '20';
+export const DEFAULT_MIN_NODE = '22.6';
 
 export const USAGE = `Usage: node scripts/doctor/doctor.mjs [options]
 
@@ -131,15 +132,86 @@ export function parseArgs(argv = []) {
   return options;
 }
 
-/** Minimum Node version from the root package.json engines field. */
+function compareVersions(left, right) {
+  return (left.major - right.major)
+    || (left.minor - right.minor)
+    || (left.patch - right.patch);
+}
+
+/**
+ * Minimum Node version from the root package.json engines field, never below
+ * the version Comfyrizz requires. The whole major.minor.patch is preserved so
+ * the node check can reject 22.5 while accepting 22.6.
+ */
 export function minNodeFromRoot(rootDir = REPO_ROOT) {
+  const floor = parseMinVersion(DEFAULT_MIN_NODE);
+  let required = floor;
   try {
     const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8'));
-    const match = String(pkg?.engines?.node ?? '').match(/(\d+)/);
-    return match ? match[1] : DEFAULT_MIN_NODE;
+    required = parseMinVersion(pkg?.engines?.node) ?? floor;
   } catch {
-    return DEFAULT_MIN_NODE;
+    required = floor;
   }
+  const minimum = compareVersions(required, floor) > 0 ? required : floor;
+  return `${minimum.major}.${minimum.minor}.${minimum.patch}`;
+}
+
+/**
+ * The Node.js check lives here (not in the generic tool checks) so the minimum
+ * supported version and its fix hint stay in one place.
+ */
+export function createNodeCheck({ exec, minNode = DEFAULT_MIN_NODE } = {}) {
+  if (typeof exec !== 'function') {
+    throw new TypeError('createNodeCheck requires an exec(cmd, args) function');
+  }
+  const minimum = parseMinVersion(minNode) ?? parseMinVersion(DEFAULT_MIN_NODE);
+  const required = `${minimum.major}.${minimum.minor}.${minimum.patch}`;
+  const id = 'node';
+  const title = 'Node.js';
+  const fix = `install Node.js >= ${required} (https://nodejs.org)`;
+
+  return {
+    id,
+    title,
+    run: async () => {
+      let result;
+      try {
+        result = await exec('node', ['--version']);
+      } catch {
+        return makeResult({ id, title, status: 'fail', detail: 'node not found', fix });
+      }
+      if (Number(result?.code ?? 0) !== 0) {
+        return makeResult({ id, title, status: 'fail', detail: 'node --version failed', fix });
+      }
+      const output = String(result?.stdout ?? '') || String(result?.stderr ?? '');
+      const version = parseVersion(output);
+      if (!version) {
+        return makeResult({
+          id,
+          title,
+          status: 'fail',
+          detail: 'could not parse node version',
+          fix,
+        });
+      }
+      const actual = `${version.major}.${version.minor}.${version.patch}`;
+      if (compareVersions(version, minimum) < 0) {
+        return makeResult({
+          id,
+          title,
+          status: 'fail',
+          detail: `node ${actual} is older than required ${required}`,
+          fix,
+        });
+      }
+      return makeResult({
+        id,
+        title,
+        status: 'ok',
+        detail: `node ${actual} (requires >= ${required})`,
+      });
+    },
+  };
 }
 
 function offlineSkip(id, title) {
@@ -151,6 +223,73 @@ function offlineSkip(id, title) {
   });
 }
 
+/**
+ * Python interpreter check: reports the resolved interpreter (RL08).
+ */
+export function createPythonCheck({ exec, env = {}, rootDir = REPO_ROOT } = {}) {
+  if (typeof exec !== 'function') {
+    throw new TypeError('createPythonCheck requires an exec(cmd, args) function');
+  }
+  const resolved = resolvePython({ env, rootDir });
+  const id = 'python';
+  const title = 'Python 3.12';
+  const fix = 'install Python 3.12 (uv python install 3.12) or set COMFYRIZZ_PYTHON';
+  const minimum = { major: 3, minor: 12, patch: 0 };
+
+  return {
+    id,
+    title,
+    run: async () => {
+      let result;
+      try {
+        result = await exec(resolved, ['--version']);
+      } catch {
+        return makeResult({ id, title, status: 'fail', detail: `${resolved} not found`, fix });
+      }
+      if (Number(result?.code ?? 0) !== 0) {
+        return makeResult({ id, title, status: 'fail', detail: `${resolved} --version failed`, fix });
+      }
+      const output = String(result?.stdout ?? '') || String(result?.stderr ?? '');
+      const version = parseVersionOutput(output);
+      if (!version) {
+        return makeResult({ id, title, status: 'fail', detail: `could not parse ${resolved} version`, fix });
+      }
+      const actual = `${version.major}.${version.minor}.${version.patch}`;
+      if (compareVersionsLocal(version, minimum) < 0) {
+        return makeResult({
+          id,
+          title,
+          status: 'fail',
+          detail: `${resolved} ${actual} is older than required 3.12`,
+          fix,
+        });
+      }
+      return makeResult({
+        id,
+        title,
+        status: 'ok',
+        detail: `${resolved} ${actual}`,
+      });
+    },
+  };
+}
+
+function parseVersionOutput(text) {
+  const match = String(text ?? '').match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2] ?? 0),
+    patch: Number(match[3] ?? 0),
+  };
+}
+
+function compareVersionsLocal(left, right) {
+  return (left.major - right.major)
+    || (left.minor - right.minor)
+    || (left.patch - right.patch);
+}
+
 /** Build the ordered check list with its dependencies bound. */
 export function buildChecks({
   rootDir = REPO_ROOT,
@@ -160,8 +299,12 @@ export function buildChecks({
   offline = false,
   minNode = DEFAULT_MIN_NODE,
 } = {}) {
+  const toolChecks = createToolChecks({ exec, minNode })
+    .filter((check) => check.id !== 'node' && check.id !== 'python');
   const checks = [
-    ...createToolChecks({ exec, minNode }),
+    createNodeCheck({ exec, minNode }),
+    createPythonCheck({ exec, env, rootDir }),
+    ...toolChecks,
     ...createRepoChecks(rootDir),
   ];
 
