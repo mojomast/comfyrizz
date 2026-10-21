@@ -2,6 +2,20 @@
 
 Status: **plan, awaiting Kyle's approval** (2026-10-20). Branch `feat/character-creator` (from main 06339ce), orchestration feature `CHARACTER-CREATOR`, tasks CC01-CC18 (all `planned`, none dispatched, nothing on the board). Hackathon due 2026-10-30 12:00 PM Toronto.
 
+## Resolved decisions (Kyle, 2026-10-20)
+
+Kyle approved the plan with every recommended default from section 14:
+
+- **Real people:** fictional characters only, with a required "this character is fictional" checkbox (CAST1 unchanged; CCL5 stays later).
+- **Schema:** `characters.json` sidecar plus the existing `cast[]`; no package-v1 schema change.
+- **Library vs project:** pinned project snapshots (revision pin) with an explicit Update action (section 6).
+- **Voices:** one voice per video (narrator/presenter character); per-character voices deferred (CCL4).
+- **Images:** upload-only for the MVP/demo; turnaround-sheet generation is a stretch goal (CCL1).
+- **Library scope:** per runtime directory (single local user), with a reserved `userId` segment for later.
+- **Identity:** Klein multi-reference only; no PuLID/LoRA now (CCL2/CCL3 later).
+- **References overlap:** a `character` reference card gets a one-way "Promote to character" button.
+- **Board:** CC01-CC18 only; CCL* tasks stay off the board. CC14-CC18 are gated on feat/timeline-review merging to main (rebase this branch first).
+
 ## 1. Goal
 
 Before any scene is generated, the user opens **Characters** and defines who is in the video: a name and a role, how they look (reference images, a generated turnaround sheet, wardrobe, expressions, a locked seed), how they sound (TTS engine, voice, speed, delivery or a designed persona, sample lines they can audition), and how they behave (personality, mannerisms, catchphrases, do/don't rules). Characters live in a **user-level library** and are reused across projects. When a character is added to a project, the project gets a **pinned snapshot** of it. The chat agent sees the project's cast in a compact manifest, places characters in scenes by **proposal only**, and confirmed placements become the package's existing `cast[]` + `scene.cast` + Klein reference inputs (CAST1), the presenter portrait (H17) and the package voice. No change to Google Colab or HyperFrames rendering is needed for the MVP.
@@ -216,7 +230,7 @@ Later (not for the hackathon board; listed so they are not forgotten):
 
 Dependency waves: (1) CC01, CC02, CC09 ; (2) CC03, CC04 ; (3) CC05, CC06, CC07, CC08 ; (4) CC10, CC13 ; (5) CC11, CC12 ; **gate: TIMELINE-REVIEW merged, rebase** ; (6) CC14, CC15 ; (7) CC16, CC17 ; (8) CC18. Waves 1-5 (13 tasks) touch only new files and can run now.
 
-## 14. Open questions for Kyle (recommended default in bold)
+## 14. Open questions for Kyle (resolved 2026-10-20: all recommended defaults in bold accepted, see "Resolved decisions")
 
 1. **Real people / user photos.** CAST1 says fictional only. Keep that for the hackathon (**yes, fictional only, with a checkbox**), or allow authorized real-person characters (schema + policy change)?
 2. **Schema.** **`characters.json` sidecar + existing `cast[]`** (no schema change), or a richer `castMember` (voice, wardrobe) in package-v1?
