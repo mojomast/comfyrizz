@@ -317,11 +317,33 @@ def ensure_composition_fonts(node: Path, cache: Path, font_root: Path = Path("/u
     subprocess.run(["apt-get", "install", "-y", "fontconfig", "fonts-liberation"], env=env, check=True)
 
 
-def _stream(command: list[str], cwd: Path, env: dict[str, str]) -> int:
+def _frames_tap(project: Path):
+    """Render frame gauges (colab_progress lines); None when the helper was not uploaded."""
+    try:
+        sys.path.insert(0, "/content/comfyrizz")
+        import progress_tap
+
+        total = None
+        timeline = project / "timeline.json"
+        if timeline.is_file():
+            total = json.loads(timeline.read_text(encoding="utf-8")).get("durationInFrames")
+        return progress_tap.LineTap(progress_tap.Emitter("render", sink=None), stage="render", frames_label="frames", frames_total=total)
+    except Exception:  # noqa: BLE001 - gauges are optional
+        return None
+
+
+#: The render's frame-gauge tap, set by main() just before the renderer starts.
+_FRAMES: dict[str, object] = {}
+
+
+def _stream(command: list[str], cwd: Path, env: dict[str, str], tap=None) -> int:
+    tap = tap or _FRAMES.get("tap")
     process = subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     assert process.stdout is not None
     for line in process.stdout:
         print(line.rstrip(), flush=True)
+        if tap:
+            tap.feed(line)
     return process.wait()
 
 
@@ -428,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
     command = node_command(node, repo, project / "package.json", output)
     if "--env" in command:
         raise RuntimeError("refusing a render command that uses --env")
+    _FRAMES["tap"] = _frames_tap(project)
     code = _stream(command, repo, _tool_env(node, cache, render_env))
     if code != 0:
         raise RuntimeError(f"renderer exited {code}")

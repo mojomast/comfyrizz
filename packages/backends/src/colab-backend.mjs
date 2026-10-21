@@ -158,6 +158,7 @@ export const isAssignUnavailable = (output) => /Service Unavailable/.test(String
 export const READY_WAIT_SECONDS = 600;
 
 import { progressLines } from './progress-lines.mjs';
+import { colabProgressDir, createColabProgressSink, tapColabProgress } from './colab-progress.mjs';
 import { entriesForCollect } from './colab-render-plan.mjs';
 
 export function createColabBackend({
@@ -187,6 +188,9 @@ export function createColabBackend({
   healthScript = join(REPO, "colab", "health.py"),
   runJobsScript = join(REPO, "colab", "run_jobs.py"),
   reconcileScript = join(REPO, "colab", "reconcile.py"),
+  // live gauges: the VM-side helper the run/render cells import, and where the box keeps their lines
+  progressTapScript = join(REPO, "colab", "progress_tap.py"),
+  progressDir = process.env.COMFYRIZZ_COLAB_PROGRESS_DIR || (process.env.NODE_TEST_CONTEXT ? null : colabProgressDir()),
   hfTokenPath = process.env.COMFYRIZZ_HF_TOKEN_FILE || null,
   pythonBin = process.env.COMFYRIZZ_PYTHON || "python3",
   teardownRetries = 3,
@@ -270,6 +274,26 @@ export function createColabBackend({
       );
     }
     return result;
+  }
+
+  /** One gauge file per exec step; null when gauges are switched off (no progressDir). */
+  function progressSink(stepName) {
+    if (!progressDir) return null;
+    const stamp = new Date(now()).toISOString().replace(/[:.]/g, "-");
+    return createColabProgressSink({ runId: `${session}.${stepName}.${stamp}`, dir: progressDir, now });
+  }
+
+  /** Put colab/progress_tap.py next to the cells once per backend. Optional: a cell without it still runs. */
+  let progressTapUploaded = false;
+  async function uploadProgressTap() {
+    if (progressTapUploaded || !progressDir || !progressTapScript || !existsSync(progressTapScript)) return;
+    try {
+      const sent = await step(argvUpload({ session, localPath: progressTapScript, remotePath: `${REMOTE_ROOT}/progress_tap.py` }), {
+        label: "upload-progress-tap",
+        wallMs: 120000,
+      });
+      progressTapUploaded = sent.code === 0;
+    } catch { /* gauges are optional */ }
   }
 
   /**
@@ -817,7 +841,8 @@ export function createColabBackend({
           emit(onEvent, { type: "batch_start", batch: name, jobs: subset.length });
         }
 
-        const progress = progressLines(onEvent);
+        await uploadProgressTap();
+        const progress = progressLines(tapColabProgress(onEvent, progressSink(name ? `run-${name}` : "run")));
         const exec = await execScript(runJobsScript, {
           step: "run",
           timeout: 3600,
@@ -1007,9 +1032,10 @@ export function createColabBackend({
      * never `--env`. `onEvent` receives JSON progress lines the script prints.
      */
     async execStep(script, stepName, { timeout = 900, silenceMs = null, signal = null, onEvent = null } = {}) {
-      const progress = progressLines((event) => {
+      await uploadProgressTap();
+      const progress = progressLines(tapColabProgress((event) => {
         if (typeof onEvent === "function") onEvent(event);
-      });
+      }, progressSink(stepName)));
       const exec = await execScript(script, {
         step: stepName,
         timeout,
