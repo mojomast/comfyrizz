@@ -35,6 +35,18 @@ export {
   redactSecrets,
   sessionNameFor,
 } from "./colab-plan.mjs";
+export {
+  DEFAULT_RENDER_LOCATION,
+  RENDER_LOCATIONS,
+  assertRenderJobSafe,
+  classifyProjectFiles,
+  decideRenderFallback,
+  entriesForCollect,
+  normalizeRenderLocation,
+  planColabRenderJob,
+  remoteRenderDecision,
+  renderCommandArgv,
+} from "./colab-render-plan.mjs";
 
 /**
  * @typedef {object} Backend

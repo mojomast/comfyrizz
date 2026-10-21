@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Comfyrizz example gallery: title, description, duration and rendered video for every example in the repository.">
+<title>Comfyrizz example gallery</title>
+<link rel="stylesheet" href="gallery.css">
+</head>
+<body>
+<header class="site-header">
+  <h1>Comfyrizz example gallery</h1>
+  <p>
+    Every example in the repository. Renders live under <code>out/</code> and are
+    git-ignored, so most cards show a render command until you produce the video
+    locally. See the <a href="../../README.md">repository README</a> for setup
+    instructions.
+  </p>
+</header>
+
+<main id="gallery" aria-live="polite" aria-busy="true">
+  <noscript>
+    <p class="status status-error">This gallery needs JavaScript: it fetches
+    <code>gallery.json</code> and renders the example cards. Enable JavaScript
+    and reload.</p>
+  </noscript>
+</main>
+
+<footer class="site-footer">
+  <p>Static, dependency-free page served from <code>docs/gallery/</code>; it works
+  on GitHub Pages.</p>
+</footer>
+
+<script src="gallery.js"></script>
+</body>
+</html>

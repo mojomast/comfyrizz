@@ -1,4 +1,4 @@
-import { attributionFor, DEFAULT_LICENSE_POLICY, isAssetRedistributable, licenseFamily, licenseUrl } from './licenses.js';
+import { attributionFor, canonicalLicenseId, DEFAULT_LICENSE_POLICY, isAssetRedistributable, licenseFamily, licenseUrl } from './licenses.js';
 import type { CreditEntry, Credits, ExcludedAsset, LicensePolicy, PackageLike } from './types.js';
 
 export interface BuildCreditsOptions {
@@ -16,7 +16,7 @@ export function buildCredits(pkg: PackageLike, options: BuildCreditsOptions = {}
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const entries: CreditEntry[] = [];
   for (const [assetId, asset] of Object.entries(pkg.assets ?? {})) {
-    const licenseId = asset.license?.id ?? (asset.origin === 'generated' ? 'CC0-1.0' : 'UNKNOWN');
+    const licenseId = canonicalLicenseId(asset.license?.id ?? (asset.origin === 'generated' ? 'CC0-1.0' : 'UNKNOWN'));
     const link = asset.license?.url ?? licenseUrl(licenseId);
     const attribution = asset.license?.attribution ?? attributionFor({ title: asset.source?.title, creator: asset.source?.creator, licenseId, licenseUrl: link });
     entries.push({
@@ -25,6 +25,7 @@ export function buildCredits(pkg: PackageLike, options: BuildCreditsOptions = {}
       creator: asset.source?.creator?.trim() || (asset.origin === 'generated' ? 'Comfyrizz (generated)' : 'Unknown creator'),
       licenseId,
       ...(link ? { licenseUrl: link } : {}),
+      ...(licenseId === 'MIT' && isAssetRedistributable(asset, policy) && !options.excluded?.some(item => item.assetId === assetId && (!item.file || item.file === asset.file)) ? { licenseNotice: 'licenses/MIT.txt' } : {}),
       ...(asset.source?.landing_url ? { sourceUrl: asset.source.landing_url } : {}),
       attribution,
       ...(asset.file ? { file: asset.file } : {}),
@@ -47,7 +48,7 @@ export function buildCredits(pkg: PackageLike, options: BuildCreditsOptions = {}
   ];
   for (const entry of entries) {
     const source = entry.sourceUrl ? `[source](${entry.sourceUrl})` : entry.file ? `\`${entry.file}\`` : '—';
-    const licence = entry.licenseUrl ? `[${entry.licenseId}](${entry.licenseUrl})` : entry.licenseId;
+    const licence = (entry.licenseUrl ? `[${entry.licenseId}](${entry.licenseUrl})` : entry.licenseId) + (entry.licenseNotice ? ` ([notice](${entry.licenseNotice}))` : '');
     lines.push(`| ${escapeCell(entry.assetId)} | ${escapeCell(entry.title)} | ${escapeCell(entry.creator)} | ${licence} | ${source} | ${entry.redistributable ? 'yes' : 'no'} |`);
   }
   if (entries.length === 0) lines.push('| — | No assets | — | — | — | — |');

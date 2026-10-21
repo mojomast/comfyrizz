@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from 'node:string_decoder';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { colabEnvironment, stripAnsi } from "./orbit-colab-plan.mjs";
@@ -35,7 +36,7 @@ export class ColabCli {
    * @param {boolean} [opts.detached] run steps through job-worker.mjs (survives a restart)
    * @param {Function} [opts.onLog]  (text, meta) => void for live progress
    */
-  constructor({ bin = "colab", home = process.env.HOME || "/home/box", logDir = null, detached = false, onLog = null, extraEnv = {} } = {}) {
+  constructor({ bin = "colab", home = process.env.HOME || os.homedir(), logDir = null, detached = false, onLog = null, extraEnv = {} } = {}) {
     this.bin = bin;
     this.home = home;
     this.logDir = logDir || join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${process.pid}`);

@@ -1,0 +1,172 @@
+{
+  "schema": "comfyrizz.voice-manifest/v1",
+  "note": "Synthetic fixture built from the measured examples in docs/research/MOCKUMENTARY_QUALITY_REVIEW_20261020.md (section 3 and section 7). Not production audio.",
+  "sampleRate": 24000,
+  "filmS": 600,
+  "segments": [
+    {
+      "id": "ch01",
+      "chapter": 1,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 74400,
+      "speed": 1.0
+    },
+    {
+      "id": "ch02",
+      "chapter": 2,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 82800,
+      "speed": 1.0
+    },
+    {
+      "id": "ch03",
+      "chapter": 3,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 50400,
+      "speed": 1.0
+    },
+    {
+      "id": "ch04",
+      "chapter": 4,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 52800,
+      "speed": 1.0,
+      "editorialReason": "deliberate_pause",
+      "editorialNote": "Reporter waits for Ada to answer before the cutaway."
+    },
+    {
+      "id": "ch05",
+      "chapter": 5,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 202800,
+      "speed": 1.0
+    },
+    {
+      "id": "ch06",
+      "chapter": 6,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 90000,
+      "speed": 1.0
+    },
+    {
+      "id": "ch07",
+      "chapter": 7,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 103200,
+      "speed": 1.0
+    },
+    {
+      "id": "ch08",
+      "chapter": 8,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 58800,
+      "speed": 1.0
+    },
+    {
+      "id": "ch09",
+      "chapter": 9,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 73200,
+      "speed": 1.0,
+      "editorialReason": "silent_gag",
+      "editorialNote": "Silent gag: nobody answers the question on purpose."
+    },
+    {
+      "id": "ch10",
+      "chapter": 10,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 151200,
+      "speed": 1.0
+    },
+    {
+      "id": "ch11",
+      "chapter": 11,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 156000,
+      "speed": 1.0
+    },
+    {
+      "id": "ch12",
+      "chapter": 12,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 158400,
+      "speed": 1.0
+    },
+    {
+      "id": "ch13",
+      "chapter": 13,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 46800,
+      "speed": 1.0
+    },
+    {
+      "id": "ch14",
+      "chapter": 14,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 69600,
+      "speed": 1.0
+    },
+    {
+      "id": "ch15",
+      "chapter": 15,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 189600,
+      "speed": 1.0
+    },
+    {
+      "id": "ch16",
+      "chapter": 16,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 93600,
+      "speed": 1.0
+    },
+    {
+      "id": "ch17",
+      "chapter": 17,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 7440,
+      "speed": 1.15
+    },
+    {
+      "id": "ch18",
+      "chapter": 18,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 138000,
+      "speed": 1.0
+    },
+    {
+      "id": "ch19",
+      "chapter": 19,
+      "speaker": "Reporter",
+      "slotS": 30,
+      "trailingPaddingSamples": 190800,
+      "speed": 1.0
+    },
+    {
+      "id": "ch20",
+      "chapter": 20,
+      "speaker": "Ada",
+      "slotS": 30,
+      "trailingPaddingSamples": 97200,
+      "speed": 1.0
+    }
+  ]
+}

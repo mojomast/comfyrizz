@@ -1,0 +1,100 @@
+{
+  "date": "2026-10-20",
+  "comfyrizzCommit": "ff5f013",
+  "upstream": {
+    "repository": "https://github.com/heygen-com/hyperframes",
+    "commit": "6d357ff0d8dbb88b8d19fe689c15f0808724e52a",
+    "testedPackage": "hyperframes@0.8.181",
+    "animationPackage": "gsap@3.13.0"
+  },
+  "environment": {
+    "node": "22.19.0",
+    "chromium": "157.0.8080.0",
+    "ffmpeg": "7.1.5",
+    "platform": "linux",
+    "workers": 1,
+    "browserGpu": false,
+    "captureMode": "screenshot"
+  },
+  "check": {
+    "exitCode": 0,
+    "ok": true,
+    "lintFindings": 0,
+    "runtimeFindings": 0,
+    "layoutFindings": 0,
+    "motionFindings": 0,
+    "contrastFindings": 0,
+    "layoutSampleSeconds": [0.5, 1.5, 2.5, 3.5],
+    "motionSamples": 81,
+    "contrastChecksPassed": 21,
+    "assertionKinds": ["appearsBy", "before", "staysInFrame"]
+  },
+  "hyperframesRender": {
+    "codec": "h264",
+    "width": 1280,
+    "height": 720,
+    "fps": "30/1",
+    "decodedFrames": 120,
+    "seconds": 4,
+    "audio": false,
+    "bytes": 101609,
+    "sha256": "284246e95ea5cab898f8536dc84ed6e353e1213ad27c3df7e7235f3093b878b9",
+    "reportedRenderSeconds": 6.4,
+    "timingIsComparativeBenchmark": false
+  },
+  "comfyrizzBridge": {
+    "packageValid": true,
+    "mediaOnly": true,
+    "speed": 1,
+    "loop": false,
+    "codec": "h264",
+    "width": 1280,
+    "height": 720,
+    "fps": "30/1",
+    "decodedFrames": 120,
+    "seconds": 4,
+    "bytes": 62176,
+    "sha256": "430f4b697d2cde171a3f2faeedf377bd2c992869605d95d11f88e6701a03a948",
+    "ssimAgainstHyperframesExport": 0.998191,
+    "ssimIsCreativeQualityScore": false
+  },
+  "negativeControl": {
+    "exitCode": 1,
+    "ok": false,
+    "changes": ["Title moved beyond canvas edge", "Result deadline changed from 3.1s to 1s"],
+    "findingCodes": ["text_box_overflow", "canvas_overflow", "motion_appears_late"]
+  },
+  "frameSourceFollowup": {
+    "animation": "Independently written DOM transforms and fades driven by registerFrameSource",
+    "gsapScriptIncluded": false,
+    "runtimeGuard": "Throw if window.gsap != null during render",
+    "checkPassed": ["lint", "runtime", "layout", "motion", "contrast"],
+    "motionSamples": 81,
+    "renderExitCode": 0,
+    "decodedFrames": 120,
+    "fps": "30/1",
+    "width": 1280,
+    "height": 720,
+    "seconds": 4,
+    "bytes": 102095,
+    "sha256": "07017fd50cf4defc3020a998a9798a6cf663a5140d4a0d0c3b4db99292a05a29",
+    "sourceHtmlSha256": "9218461db755decd82c2a58264e3f5f54aad262eb013cf8ebe1891ca32a835ad",
+    "fullDistributionLicenseAudit": false,
+    "initialGuardFailure": "typeof window.gsap was object because HyperFrames own stub initializes it to null; corrected to a non-null check"
+  },
+  "sourceHtmlSha256": "4bf9000b09d72a0fcbcc115b372e9d3e6fce4ceeda398a85bdc3fc50a3e53184",
+  "contactSheetSeconds": [0.5, 1.8, 2.7, 3.5],
+  "colabCreditsSpent": 0,
+  "unverified": [
+    "narrated cue synchronization",
+    "alpha compositing",
+    "portrait and square reflow",
+    "arbitrary-seek determinism",
+    "cancellation and cleanup",
+    "source archive round-trip",
+    "cache invalidation",
+    "long-form resource use",
+    "OS-level network isolation",
+    "comparative creative quality"
+  ]
+}

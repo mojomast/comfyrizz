@@ -42,10 +42,10 @@ export function fixture(t) {
     },
     runCommand: async (bin, args) => {
       if (args[0]?.endsWith('narrate.mjs')) calls.push('timing');
-      if (bin === 'ffprobe' && args.includes('-count_frames')) return { stdout: JSON.stringify({ streams: [{ codec_type: 'video', nb_read_frames: '30', width: 640, height: 360 }, { codec_type: 'audio' }], format: { duration: '1' } }) };
+      if (bin === 'ffprobe' && args.includes('-count_frames')) return { code: 0, stdout: JSON.stringify({ streams: [{ codec_type: 'video', nb_read_frames: '30', width: 640, height: 360 }, { codec_type: 'audio' }], format: { duration: '1' } }) };
       if (args[0]?.endsWith('verify_mix.py')) write(join(runDir, 'audio-verification.json'), { passed: true });
       if (args[1] === 'export') { calls.push('export'); write(join(runDir, 'export.json'), { files: [] }); }
-      return { stdout: '', stderr: 'mean_volume: -16 dB' };
+      return { code: 0, stdout: '', stderr: 'mean_volume: -16 dB' };
     },
   };
   return { spec: { runDir, workDir, plan, runId: 'pipe_test' }, adapters, calls, events };

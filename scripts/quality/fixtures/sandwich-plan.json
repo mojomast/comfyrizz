@@ -1,0 +1,118 @@
+{
+  "schema": "comfyrizz.beat-lint-fixture/v1",
+  "note": "Synthetic shot plans built from the measured examples in docs/research/MOCKUMENTARY_QUALITY_REVIEW_20261020.md section 3 (the 03:46.5 sandwich and 02:10 chair beats). Not production prompts or dialogue.",
+  "cases": {
+    "sandwichContradiction": {
+      "beats": [
+        {
+          "beat": "s08_unreachable_sandwich",
+          "speaker": "painter",
+          "participants": ["painter", "reporter"],
+          "dialogueAnchor": "Today I can't reach my sandwich",
+          "requiredProps": ["sandwich_01"],
+          "before": { "painterHands": "empty", "sandwich": "outside reach" },
+          "duringLine": { "sandwich": "outside reach" },
+          "rejectIf": ["sandwich handed to painter", "painter holds sandwich"],
+          "reviewEvidence": ["approved first frame", "action midpoint", "end frame"]
+        }
+      ],
+      "shots": [
+        {
+          "id": "shot-sandwich",
+          "beat": "s08_unreachable_sandwich",
+          "participants": ["painter", "reporter"],
+          "imagePrompt": "A painter and a reporter beside a sandwich on a high shelf, outside reach.",
+          "actionPrompt": "The reporter hands the sandwich to the painter while the line is spoken."
+        }
+      ],
+      "script": [
+        {
+          "speaker": "painter",
+          "text": "Today I can't reach my sandwich."
+        }
+      ]
+    },
+    "chairSpeakerUnassigned": {
+      "beats": [
+        {
+          "beat": "s02_chair_gag",
+          "speaker": "ada",
+          "participants": ["ada", "reporter"],
+          "dialogueAnchor": "I haven't sat down since Tuesday",
+          "requiredProps": ["chair_01"],
+          "before": { "chair": "empty", "adaStanding": true },
+          "duringLine": { "chair": "empty", "adaStanding": true },
+          "rejectIf": ["reporter seated in Ada's chair"],
+          "reviewEvidence": ["approved first frame", "end frame"]
+        }
+      ],
+      "shots": [
+        {
+          "id": "shot-chair",
+          "beat": "s02_chair_gag",
+          "participants": ["reporter"],
+          "imagePrompt": "A yellow-coated reporter beside an empty chair.",
+          "actionPrompt": "The reporter is seated in the yellow chair, listening."
+        }
+      ],
+      "script": [
+        {
+          "speaker": "ada",
+          "text": "Someone put bad anatomy on my chair. I haven't sat down since Tuesday."
+        }
+      ]
+    },
+    "clean": {
+      "beats": [
+        {
+          "beat": "s08_unreachable_sandwich",
+          "speaker": "painter",
+          "participants": ["painter"],
+          "dialogueAnchor": "Today I can't reach my sandwich",
+          "requiredProps": ["sandwich_01"],
+          "before": { "painterHands": "empty", "sandwich": "outside reach" },
+          "duringLine": { "sandwich": "outside reach" },
+          "rejectIf": ["sandwich handed to painter", "painter holds sandwich"],
+          "reviewEvidence": ["approved first frame", "action midpoint", "end frame"]
+        },
+        {
+          "beat": "s02_chair_gag",
+          "speaker": "ada",
+          "participants": ["ada", "reporter"],
+          "dialogueAnchor": "I haven't sat down since Tuesday",
+          "requiredProps": ["chair_01"],
+          "before": { "chair": "empty", "adaStanding": true },
+          "duringLine": { "chair": "empty", "adaStanding": true },
+          "rejectIf": ["reporter seated in Ada's chair"],
+          "reviewEvidence": ["approved first frame", "end frame"]
+        }
+      ],
+      "shots": [
+        {
+          "id": "shot-sandwich",
+          "beat": "s08_unreachable_sandwich",
+          "participants": ["painter"],
+          "imagePrompt": "A painter beside a sandwich on a high shelf, outside reach.",
+          "actionPrompt": "The painter gestures toward the sandwich but stays back; the sandwich remains outside reach."
+        },
+        {
+          "id": "shot-chair",
+          "beat": "s02_chair_gag",
+          "participants": ["ada", "reporter"],
+          "imagePrompt": "Ada stands beside her empty chair while the reporter stands nearby.",
+          "actionPrompt": "Ada points at the empty chair while the reporter stays standing."
+        }
+      ],
+      "script": [
+        {
+          "speaker": "painter",
+          "text": "Today I can't reach my sandwich."
+        },
+        {
+          "speaker": "ada",
+          "text": "Someone put bad anatomy on my chair. I haven't sat down since Tuesday."
+        }
+      ]
+    }
+  }
+}

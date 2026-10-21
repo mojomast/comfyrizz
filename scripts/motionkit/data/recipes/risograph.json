@@ -1,0 +1,29 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "risograph",
+  "label": "Risograph",
+  "taxonomy": { "era": "retro", "finish": "print", "energy": "medium", "geometry": "flat", "type": "display" },
+  "palette": [
+    { "role": "background", "hex": "#f6f1e7" },
+    { "role": "text", "hex": "#1f2a5c" },
+    { "role": "accent", "hex": "#ff4f7b" },
+    { "role": "secondary", "hex": "#ffd23f" }
+  ],
+  "fonts": { "display": "syne", "text": "ibm-plex-mono" },
+  "easing": { "personality": "snappy", "entry": "enter", "exit": "exit", "spring": "snap" },
+  "entries": ["fadeUp", "waterfall", "pop"],
+  "emphasis": ["hero", "keyword"],
+  "transitions": { "primary": "wipe", "accent": ["slide", "cut"] },
+  "storyRecipe": "kinetic",
+  "background": { "pattern": "dots" },
+  "finish": [
+    { "id": "riso-misregister", "params": { "offset": 3, "angle": 8 } },
+    { "id": "halftone", "params": { "dotSize": 2, "angle": 15 } },
+    { "id": "paper-grain", "params": { "amount": 0.05 } }
+  ],
+  "rules": {
+    "do": ["two-ink misregistered layers with halftone dots", "flat spot colours"],
+    "dont": ["smooth gradients", "photographic textures"]
+  },
+  "prompt": "Two-ink risograph print, warm off-white stock, blue and pink inks misregistered, yellow hit"
+}

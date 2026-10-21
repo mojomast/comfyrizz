@@ -15,21 +15,26 @@
     "render:example": "node scripts/render-example.mjs",
     "render:package": "node scripts/render-package-example.mjs",
     "render:showcase": "node scripts/render-showcase.mjs",
+    "render:recipes": "node scripts/render-recipes.mjs",
     "pretest": "pnpm --filter @comfyrizz/planner build && pnpm --filter @comfyrizz/vector build",
     "test": "node --test test/*.test.mjs",
     "render:narrated": "node scripts/render-narrated.mjs",
     "layout:check": "node --test test/layout.test.mjs"
   },
   "dependencies": {
+    "@dagrejs/dagre": "3.1.1",
     "@remotion/cli": "4.0.536",
     "@remotion/fonts": "4.0.536",
     "@remotion/transitions": "4.0.536",
     "@shikijs/langs": "1.29.2",
     "@shikijs/themes": "1.29.2",
     "d3-scale": "4.0.2",
+    "flubber": "0.4.2",
+    "perfect-freehand": "1.2.3",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "remotion": "4.0.536",
+    "roughjs": "4.6.6",
     "shiki": "1.29.2"
   },
   "devDependencies": {

@@ -21,7 +21,7 @@ import { ease } from '../src/motion/index.js';
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
 
 test('the transition vocabulary matches the MS2 schema types', () => {
-  assert.deepEqual(TRANSITION_TYPES, ['none', 'cut', 'fade', 'blur', 'slide', 'push', 'wipe', 'zoom', 'iris']);
+  assert.deepEqual(TRANSITION_TYPES, ['none', 'cut', 'fade', 'blur', 'slide', 'push', 'wipe', 'zoom', 'iris', 'paper-reveal', 'draw-reveal', 'shape-reveal']);
 });
 
 test('energy picks a duration inside the research range', () => {

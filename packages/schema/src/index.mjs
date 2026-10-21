@@ -25,6 +25,12 @@ import {
   ENERGY_TRANSITIONS,
   MOTION_DEFAULTS,
 } from "./motion.mjs";
+import {
+  ANIMATION_RECIPES,
+  ANIMATION_RECIPE_IDS,
+  ANIMATION_TRANSITIONS,
+  ANIMATION_REVEAL_TRANSITIONS,
+} from "./animation.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const SCHEMA_PATH = join(here, "..", "package-v1.schema.json");
@@ -137,4 +143,8 @@ export {
   TRANSITIONS,
   ENERGY_TRANSITIONS,
   MOTION_DEFAULTS,
+  ANIMATION_RECIPES,
+  ANIMATION_RECIPE_IDS,
+  ANIMATION_TRANSITIONS,
+  ANIMATION_REVEAL_TRANSITIONS,
 };

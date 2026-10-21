@@ -53,6 +53,7 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_AUDIO_UNKNOWN_SCENE",
   "SEM_LAYOUT_REQUIRES_MEDIA",
   "SEM_CODE_REQUIRED",
+  "SEM_MOTION_FOCUS_RECT",
 ]);
 
 // Published layout contract (PLAN.md A5 / SPEC.md 6.3). The schema holds the loose
@@ -336,6 +337,12 @@ function checkVoice(doc, errors) {
   if (!voiced || !isStr(v.voice) || v.voice.length === 0) {
     errors.push(error("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro or qwen3-tts and a non-empty voice"));
   }
+  if (v.engine === 'qwen3-tts') {
+    if ((v.speed ?? 1) !== 1) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/speed', 'Qwen requires speed=1; use delivery direction for pacing'));
+    if (v.blend) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/blend', 'Voice blending is only supported by Kokoro'));
+    if (v.qwen_mode === 'custom' && !['ryan', 'aiden', 'vivian', 'serena', 'uncle_fu', 'dylan', 'eric', 'ono_anna', 'sohee'].includes(String(v.voice).toLowerCase())) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/voice', 'Unknown Qwen CustomVoice speaker'));
+  }
+  if (Array.isArray(v.blend) && new Set(v.blend.map(part => isObj(part) ? String(part.voice ?? '')[0] : undefined)).size > 1) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/blend', 'Kokoro blend voices must use the same language/accent'));
   const assets = isObj(doc.assets) ? doc.assets : {};
   if (isStr(v.ref_asset) && !isObj(assets[v.ref_asset])) {
     errors.push(error("SEM_REF_UNRESOLVED", "/voice/ref_asset", `unknown asset ${JSON.stringify(v.ref_asset)}`));
@@ -431,6 +438,21 @@ function checkScenes(scenes, assets, datasets, errors) {
             "SEM_MEDIA_ONLY_NO_MEDIA",
             `${at}/media_only`,
             "media_only skips the layout, so it needs a media background (background.asset) or at least one foreground item; this scene would render an empty frame",
+          ),
+        );
+      }
+    }
+    // Storytelling recipe focus window (ANIMATION_STORYTELLING_2026): a normalised rect must
+    // stay inside the frame. JSON Schema can bound each number but cannot sum x + width, so
+    // this cross-field rule is semantic.
+    if (isObj(scene.motion) && isObj(scene.motion.focus)) {
+      const { x, y, width, height } = scene.motion.focus;
+      if ([x, y, width, height].every(isFiniteNumber) && (x + width > 1 + 1e-9 || y + height > 1 + 1e-9)) {
+        errors.push(
+          error(
+            "SEM_MOTION_FOCUS_RECT",
+            `${at}/motion/focus`,
+            "focus rectangle must stay inside the frame (x + width <= 1 and y + height <= 1)",
           ),
         );
       }
@@ -825,4 +847,3 @@ function fillDefaults(value, sub, schema) {
     if (isObj(sub.items)) value.forEach((item) => fillDefaults(item, sub.items, schema));
   }
 }
-

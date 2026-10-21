@@ -128,7 +128,9 @@ export function MediaFill({
       {...(trim?.endSeconds !== undefined ? { endAt: Math.round(trim.endSeconds * fps) } : {})}
     />
   );
-  return loop ? <Loop durationInFrames={loopFrames}>{video}</Loop> : video;
+  // A background must stay out of its parent's flex flow even without Loop's
+  // sequence wrapper. Otherwise a one-shot plate pushes title copy off-frame.
+  return <AbsoluteFill>{loop ? <Loop durationInFrames={loopFrames}>{video}</Loop> : video}</AbsoluteFill>;
 }
 
 function panelAnimation(frame: number, anim: ForegroundItem['anim']): { opacity: number; transform: string } {

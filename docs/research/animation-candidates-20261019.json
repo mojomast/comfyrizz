@@ -1,0 +1,362 @@
+{
+  "checkedOn": "2026-10-19",
+  "scope": "Research only: root project license files and observed npm latest metadata, not a full dependency/assets audit or compatibility benchmark.",
+  "archive": "~/comfyrizz-gpu-tests/animation-research-20261019",
+  "projects": [
+    {
+      "repository": "rough-stuff/rough",
+      "url": "https://github.com/rough-stuff/rough",
+      "sourceRef": "56a2762171b1294d643501e8d14f120db6b27bd7",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/rough-stuff/rough/56a2762171b1294d643501e8d14f120db6b27bd7/LICENSE",
+      "licenseSha256": "dca9a392272606ac748ac0976a2a1133f14eef841c27beaa51a844d53c56a09d",
+      "package": {
+        "name": "roughjs",
+        "observedLatest": "4.6.6",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/roughjs/latest"
+      },
+      "priority": "P1",
+      "note": "Seeded hand-drawn SVG; slow-moving mature repository."
+    },
+    {
+      "repository": "steveruizok/perfect-freehand",
+      "url": "https://github.com/steveruizok/perfect-freehand",
+      "sourceRef": "176e00f2399f4969e1b0965c5921d96a3e50ce9f",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/steveruizok/perfect-freehand/176e00f2399f4969e1b0965c5921d96a3e50ce9f/LICENSE",
+      "licenseSha256": "6a5ac82b42ce0af6a1e5fe39b46f0b52f1368e81e437175e8d9ae21569c8688e",
+      "package": {
+        "name": "perfect-freehand",
+        "observedLatest": "1.2.3",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/perfect-freehand/latest"
+      },
+      "priority": "P1",
+      "note": "Pressure-shaped annotations; not a handwriting recognition or font engine."
+    },
+    {
+      "repository": "veltman/flubber",
+      "url": "https://github.com/veltman/flubber",
+      "sourceRef": "0cadadf3eb15cd5b2ec7c45c70601ff88b76a6c3",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/veltman/flubber/0cadadf3eb15cd5b2ec7c45c70601ff88b76a6c3/LICENSE",
+      "licenseSha256": "3eb888ef31044c40757fe52030e381d2b7ec6ef5e90379920ea18b98ac32d187",
+      "package": {
+        "name": "flubber",
+        "observedLatest": "0.4.2",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/flubber/latest"
+      },
+      "priority": "P1",
+      "note": "Precompute SVG interpolators; old release and non-MIT permissive dependencies require package-level review."
+    },
+    {
+      "repository": "dagrejs/dagre",
+      "url": "https://github.com/dagrejs/dagre",
+      "sourceRef": "32e7f30f97f029fbfc89ce50e072d4fc16145838",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/dagrejs/dagre/32e7f30f97f029fbfc89ce50e072d4fc16145838/LICENSE",
+      "licenseSha256": "6a349742a6cb219d5a2fc8d0844f6d89a6efc62e20c664450d884fc7ff2d6015",
+      "package": {
+        "name": "@dagrejs/dagre",
+        "observedLatest": "3.1.1",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/%40dagrejs%2Fdagre/latest"
+      },
+      "priority": "P1",
+      "note": "Directed graph layout at planning time; do not recompute layout every frame."
+    },
+    {
+      "repository": "airbnb/lottie-web",
+      "url": "https://github.com/airbnb/lottie-web",
+      "sourceRef": "bede03d25d232826e0c9dca1733d542d8a7754fb",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/airbnb/lottie-web/bede03d25d232826e0c9dca1733d542d8a7754fb/LICENSE.md",
+      "licenseSha256": "9d8d4d8b4bb99572ee8b51025a30b8493d949798cac465c6c15b1b29420bcb06",
+      "package": {
+        "name": "lottie-web",
+        "observedLatest": "5.13.0",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/lottie-web/latest"
+      },
+      "priority": "P2",
+      "note": "Frame-seekable vector playback; player license does not cover downloaded animations."
+    },
+    {
+      "repository": "LottieFiles/dotlottie-web",
+      "url": "https://github.com/LottieFiles/dotlottie-web",
+      "sourceRef": "d8a4e9e2cf76740b7b3848257f962b38d71aa71a",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/LottieFiles/dotlottie-web/d8a4e9e2cf76740b7b3848257f962b38d71aa71a/LICENSE",
+      "licenseSha256": "779cec663b3c6590082566f2a000170d7a4d1a4bfc6f954e61efa4adddc652a8",
+      "package": {
+        "name": "@lottiefiles/dotlottie-web",
+        "observedLatest": "0.81.0",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/%40lottiefiles%2Fdotlottie-web/latest"
+      },
+      "priority": "P2",
+      "note": "Alternative WASM runtime; loading, frame seeking and packaged WASM need an adapter."
+    },
+    {
+      "repository": "juliangarnier/anime",
+      "url": "https://github.com/juliangarnier/anime",
+      "sourceRef": "01b81be1df6843ccfe0a71c0699a746bf740dd77",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/juliangarnier/anime/01b81be1df6843ccfe0a71c0699a746bf740dd77/LICENSE.md",
+      "licenseSha256": "3f3e835a9952cfc2a6ca836fb95b3257c981f24fa3ef51249055acb09931897b",
+      "package": {
+        "name": "animejs",
+        "observedLatest": "4.5.0",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/animejs/latest"
+      },
+      "priority": "P2",
+      "note": "Optional choreography authoring; autoplay off and explicit seek required for frame rendering."
+    },
+    {
+      "repository": "motiondivision/motion",
+      "url": "https://github.com/motiondivision/motion",
+      "sourceRef": "main",
+      "immutableRef": false,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/motiondivision/motion/main/LICENSE.md",
+      "licenseSha256": "1bf0dc3f7727723e5a032ed12164a47cf92c05204cb1a3485f123c24e2833ed1",
+      "package": {
+        "name": "motion",
+        "observedLatest": "14.4.0",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/motion/latest"
+      },
+      "priority": "editor-only",
+      "note": "Core MIT; Motion+ and commercial offerings are separate. Not a drop-in deterministic video clock."
+    },
+    {
+      "repository": "mrdoob/three.js",
+      "url": "https://github.com/mrdoob/three.js",
+      "sourceRef": "9b840199c684ddf47df52c210c43e6d91a3c6a18",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/mrdoob/three.js/9b840199c684ddf47df52c210c43e6d91a3c6a18/LICENSE",
+      "licenseSha256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc",
+      "package": {
+        "name": "three",
+        "observedLatest": "0.186.1",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/three/latest"
+      },
+      "priority": "P3",
+      "note": "3D scenes and cameras; benchmark headless GL and actual render hardware."
+    },
+    {
+      "repository": "pmndrs/react-three-fiber",
+      "url": "https://github.com/pmndrs/react-three-fiber",
+      "sourceRef": "master",
+      "immutableRef": false,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/master/LICENSE",
+      "licenseSha256": "9c35b5de7b7493a707fffe4eb23bd2f7f449153c1911f7c6eefb4e591fd5349a",
+      "package": {
+        "name": "@react-three/fiber",
+        "observedLatest": "9.8.2",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/%40react-three%2Ffiber/latest"
+      },
+      "priority": "P3",
+      "note": "React/Three integration; drive transforms from composition frame, not accumulated useFrame deltas."
+    },
+    {
+      "repository": "pmndrs/drei",
+      "url": "https://github.com/pmndrs/drei",
+      "sourceRef": "master",
+      "immutableRef": false,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/pmndrs/drei/master/LICENSE",
+      "licenseSha256": "2e36b208b403882158daf95cae207087bbb830db4d434a79ebafffca177244c8",
+      "package": {
+        "name": "@react-three/drei",
+        "observedLatest": "10.7.9",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/%40react-three%2Fdrei/latest"
+      },
+      "priority": "P3",
+      "note": "Selective 3D helpers; external environment/model assets have their own licenses."
+    },
+    {
+      "repository": "pixijs/pixijs",
+      "url": "https://github.com/pixijs/pixijs",
+      "sourceRef": "dev",
+      "immutableRef": false,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/pixijs/pixijs/dev/LICENSE",
+      "licenseSha256": "5ce7447bc57f7349ffc48338782fbcabe613696e00712b20d66bc58e780f9473",
+      "package": {
+        "name": "pixi.js",
+        "observedLatest": "8.22.0",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/pixi.js/latest"
+      },
+      "priority": "P3",
+      "note": "2D GPU scene rendering; disable ticker and explicitly render selected frames."
+    },
+    {
+      "repository": "pixijs/filters",
+      "url": "https://github.com/pixijs/filters",
+      "sourceRef": "e9d1ca987864f121680bb0d7e9612c05b37748de",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/pixijs/filters/e9d1ca987864f121680bb0d7e9612c05b37748de/LICENSE",
+      "licenseSha256": "d554721b2cd409d9bc075d743bb34f960e05ba55de1818a62fa60caf21ca6188",
+      "package": {
+        "name": "pixi-filters",
+        "observedLatest": "6.1.5",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/pixi-filters/latest"
+      },
+      "priority": "P3",
+      "note": "Displacement, glow and material effects; benchmark filters and offscreen textures."
+    },
+    {
+      "repository": "motion-canvas/motion-canvas",
+      "url": "https://github.com/motion-canvas/motion-canvas",
+      "sourceRef": "7b91435c301d530351dcf5ebb91dd139c002e405",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/motion-canvas/motion-canvas/7b91435c301d530351dcf5ebb91dd139c002e405/LICENSE",
+      "licenseSha256": "b3f12201916c5d478263cd210cf17f3d0c007d03bd574e0b77cac6307953068e",
+      "package": {
+        "name": "@motion-canvas/core",
+        "observedLatest": "3.17.2",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/%40motion-canvas%2Fcore/latest"
+      },
+      "priority": "specialist",
+      "note": "Voiceover-oriented scene authoring; evaluate a separate scene materializer rather than replacing the pipeline."
+    },
+    {
+      "repository": "ManimCommunity/manim",
+      "url": "https://github.com/ManimCommunity/manim",
+      "sourceRef": "b31c77e181d57d66ba30baa617328afaf52eb061",
+      "immutableRef": true,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/ManimCommunity/manim/b31c77e181d57d66ba30baa617328afaf52eb061/LICENSE",
+      "licenseSha256": "c6a922fc1cfaed7ac0f87aa1dc77ebf5a3c8d1ccc5ab01da33153f0d013bf019",
+      "package": null,
+      "priority": "specialist",
+      "note": "Mathematics/technical scenes; Python render stack and fonts/TeX dependencies are separate."
+    },
+    {
+      "repository": "KaTeX/KaTeX",
+      "url": "https://github.com/KaTeX/KaTeX",
+      "sourceRef": "main",
+      "immutableRef": false,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/KaTeX/KaTeX/main/LICENSE",
+      "licenseSha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3",
+      "package": {
+        "name": "katex",
+        "observedLatest": "0.19.0",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/katex/latest"
+      },
+      "priority": "specialist",
+      "note": "Typesetting building block; does not itself animate mathematical transformations."
+    },
+    {
+      "repository": "rive-app/rive-wasm",
+      "url": "https://github.com/rive-app/rive-wasm",
+      "sourceRef": "master",
+      "immutableRef": false,
+      "license": "MIT",
+      "licenseSource": "https://raw.githubusercontent.com/rive-app/rive-wasm/master/LICENSE",
+      "licenseSha256": "8a1efa755d19446b51a18e1c15f6308728da0b36283c4d38050698ad6954b69a",
+      "package": {
+        "name": "@rive-app/canvas",
+        "observedLatest": "2.45.0",
+        "declaredLicense": "MIT",
+        "registryUrl": "https://registry.npmjs.org/%40rive-app%2Fcanvas/latest"
+      },
+      "priority": "specialist",
+      "note": "Rigged mascot runtime; editor, authored .riv assets and state-machine replay are separate concerns."
+    },
+    {
+      "repository": "gl-transitions/gl-transitions",
+      "url": "https://github.com/gl-transitions/gl-transitions",
+      "sourceRef": "e1e4bde9b4dad3cb7bdd7ed28e4b97f469d90448",
+      "immutableRef": true,
+      "license": "MIT-with-file-specific-overrides",
+      "licenseSource": "https://raw.githubusercontent.com/gl-transitions/gl-transitions/e1e4bde9b4dad3cb7bdd7ed28e4b97f469d90448/LICENSE",
+      "licenseSha256": "0db684e0150546743ae96d8ecf083be716786d834af7dbf8170ee8b6c247978d",
+      "package": null,
+      "priority": "P3",
+      "note": "Root license explicitly permits per-transition overrides. Only reviewed shader files are candidates."
+    },
+    {
+      "repository": "greensock/GSAP",
+      "url": "https://github.com/greensock/GSAP",
+      "sourceRef": "master",
+      "immutableRef": false,
+      "license": "GSAP-standard-license-not-MIT",
+      "licenseSource": "https://raw.githubusercontent.com/greensock/GSAP/master/package.json",
+      "licenseSha256": "4ca16b896affd09e270d4dcf5149a02f57def55e4747ce11f68c7723fd3dedaa",
+      "package": {
+        "name": "gsap",
+        "observedLatest": "3.15.0",
+        "declaredLicense": "Standard 'no charge' license: https://gsap.com/standard-license.",
+        "registryUrl": "https://registry.npmjs.org/gsap/latest"
+      },
+      "priority": "exclude-MIT-shortlist",
+      "note": "Free of charge does not mean MIT. Package manifest points to https://gsap.com/standard-license."
+    },
+    {
+      "repository": "theatre-js/theatre",
+      "url": "https://github.com/theatre-js/theatre",
+      "sourceRef": "main",
+      "immutableRef": false,
+      "license": "Apache-2.0-not-MIT",
+      "licenseSource": "https://raw.githubusercontent.com/theatre-js/theatre/main/LICENSE",
+      "licenseSha256": "32a36fa187169c24228aaf6889371e7ffb4273d327ef37e340994e7ca157879b",
+      "package": null,
+      "priority": "exclude-MIT-shortlist",
+      "note": "Potentially useful, but outside an MIT-specific shortlist."
+    }
+  ],
+  "shaders": [
+    {
+      "name": "CrossZoom.glsl",
+      "url": "https://raw.githubusercontent.com/gl-transitions/gl-transitions/e1e4bde9b4dad3cb7bdd7ed28e4b97f469d90448/transitions/CrossZoom.glsl",
+      "licenseHeader": "MIT",
+      "sha256": "a30adba2a78deac0ac114a30ea285e972fdd7d488ed0cde90e15bc0eef333e84",
+      "evidence": "File header checked; attribution/provenance retained in archived source."
+    },
+    {
+      "name": "directionalwarp.glsl",
+      "url": "https://raw.githubusercontent.com/gl-transitions/gl-transitions/e1e4bde9b4dad3cb7bdd7ed28e4b97f469d90448/transitions/directionalwarp.glsl",
+      "licenseHeader": "MIT",
+      "sha256": "9b4988a12affa2fc89a7a1d87ad2df8c8bfaf185fc83e958188e5c674dbf03ce",
+      "evidence": "File header checked; attribution/provenance retained in archived source."
+    },
+    {
+      "name": "displacement.glsl",
+      "url": "https://raw.githubusercontent.com/gl-transitions/gl-transitions/e1e4bde9b4dad3cb7bdd7ed28e4b97f469d90448/transitions/displacement.glsl",
+      "licenseHeader": "MIT",
+      "sha256": "ef090908787642ad5c43104d84562b57ee3ac80b51c787bd67b88016e2674290",
+      "evidence": "File header checked; attribution/provenance retained in archived source."
+    },
+    {
+      "name": "GridFlip.glsl",
+      "url": "https://raw.githubusercontent.com/gl-transitions/gl-transitions/e1e4bde9b4dad3cb7bdd7ed28e4b97f469d90448/transitions/GridFlip.glsl",
+      "licenseHeader": "MIT",
+      "sha256": "f84096ffe6fc44808189a381a4e48dfde949beabed8df110fb45e68f6557810c",
+      "evidence": "File header checked; attribution/provenance retained in archived source."
+    }
+  ]
+}

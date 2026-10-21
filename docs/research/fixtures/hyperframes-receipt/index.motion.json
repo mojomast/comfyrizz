@@ -1,0 +1,1 @@
+{"version":1,"duration":4,"assertions":[{"kind":"appearsBy","selector":"#result","bySec":3.1},{"kind":"before","a":"#receipt","b":"#result"},{"kind":"staysInFrame","selector":"#receipt"}]}

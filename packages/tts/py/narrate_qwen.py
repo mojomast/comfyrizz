@@ -23,6 +23,7 @@ from qa import MAX_ATTEMPTS, missing_pronunciations, should_regenerate, wer
 from qwen import (
     ALIGNER_MODEL,
     BASE_MODEL,
+    CUSTOM_MODEL,
     DEFAULT_REFERENCE,
     DESIGN_MODEL,
     ENGINE_QWEN,
@@ -330,13 +331,16 @@ def narrate_qwen(
     if resolve_engine(voice_cfg) != ENGINE_QWEN:
         return _unavailable(voice_cfg, "engine is not qwen3-tts", kokoro_runner)
 
-    adapter = tts if tts is not None else Qwen3Tts()
+    custom = voice_cfg.get("qwen_mode", "design") == "custom"
+    adapter = tts if tts is not None else Qwen3Tts(voice_cfg)
     available = adapter.available() if hasattr(adapter, "available") else True
     if not available:
         return _unavailable(voice_cfg, "qwen3-tts runtime is unavailable", kokoro_runner)
 
     lang = qwen_language_name(voice_cfg)
     persona = voice_cfg.get("persona") if isinstance(voice_cfg.get("persona"), str) and voice_cfg.get("persona").strip() else "a clear neutral narrator"
+    if not custom and voice_cfg.get("delivery"):
+        persona += ". " + voice_cfg["delivery"]
     voice_id = voice_cfg.get("voice") if isinstance(voice_cfg.get("voice"), str) and voice_cfg.get("voice").strip() else "af_heart"
     try:
         speed = float(voice_cfg.get("speed", 1.0))
@@ -344,12 +348,14 @@ def narrate_qwen(
         speed = 1.0
     if not 0.5 <= speed <= 2.0:
         raise SystemExit(f"speed {speed} outside 0.5-2.0")
+    if speed != 1.0:
+        raise SystemExit("Qwen does not support the Kokoro speed control; use delivery direction and speed=1.")
 
-    print(json.dumps({"event": "qwen_phase", "phase": "designing_voice"}), flush=True)
+    print(json.dumps({"event": "qwen_phase", "phase": "loading_custom_voice" if custom else "designing_voice"}), flush=True)
     try:
         prompt = _adapter_call(
             "voice design",
-            lambda: adapter.design(persona=persona, lang=lang, reference_line=DEFAULT_REFERENCE),
+            lambda: adapter.design(persona=persona, lang=lang, reference_line=voice_cfg.get("reference_text", DEFAULT_REFERENCE)),
         )
     except QwenRuntimeUnavailable as exc:
         return _unavailable(voice_cfg, str(exc), kokoro_runner)
@@ -364,9 +370,10 @@ def narrate_qwen(
         "version": 1,
         "engine": ENGINE_QWEN,
         "engineVersion": "1.7B",
-        "model": BASE_MODEL,
-        "designModel": DESIGN_MODEL,
-        "voices": "voice-design+base-clone",
+        "model": CUSTOM_MODEL if custom else BASE_MODEL,
+        "designModel": None if custom else DESIGN_MODEL,
+        "voices": "custom-voice" if custom else "voice-design+base-clone",
+        "voiceSettings": dict(voice_cfg),
         "voice": voice_id,
         "language": resolve_language(voice_cfg),
         "lang": lang,
@@ -389,7 +396,7 @@ def narrate_qwen(
             continue
         sentences = split_sentences(display)
         spoken, spoken_sentences = spoken_for_scene(scene, sentences)
-        instruct = scene.get("narration_style") if isinstance(scene.get("narration_style"), str) and scene.get("narration_style").strip() else None
+        instruct = scene.get("narration_style") if isinstance(scene.get("narration_style"), str) and scene.get("narration_style").strip() else voice_cfg.get("delivery") or None
         seed = scene_seed(str(scene.get("id", "")), spoken)
         try:
             audio, qa = _synthesize_checked(

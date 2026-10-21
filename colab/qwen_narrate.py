@@ -50,6 +50,9 @@ root=Path('/content/comfyrizz-qwen')
 models=json.loads((root/'models.lock.json').read_text())['models']
 if json.loads((root/'task.json').read_text()).get('qaOnly'):
     models={repo:rev for repo,rev in models.items() if 'TTS' not in repo}
+else:
+    custom=json.loads((root/'package.json').read_text()).get('voice',{}).get('qwen_mode')=='custom'
+    models={repo:rev for repo,rev in models.items() if 'TTS' not in repo or (('CustomVoice' in repo) if custom else ('CustomVoice' not in repo))}
 def download(item):
     repo,revision=item
     snapshot_download(repo, revision=revision, local_dir=root/'models'/repo.split('/')[-1], max_workers=4)

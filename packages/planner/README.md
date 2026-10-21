@@ -40,6 +40,24 @@ npm test         # tsc + node:test
   `TimelineScene.mediaOnly` / `.lowerThird`, so the renderer can draw a full-frame
   media plate with a lower third and skip the layout without a sidecar (P-fix3 N8).
   Non-media scenes carry `mediaOnly: false` and `lowerThird: null`.
+- ANIM: when a scene uses `motion.cue_phrases`, the compiler resolves each phrase against
+  that scene's captions and, when present, per-word cues. The result is
+  `TimelineScene.motionCues: [{ phrase, frame, seconds, source, estimated, timing?, occurrence? }]`.
+  `source` is `explicit-seconds`, `word-cues`, `measured-caption`, `estimated-caption` or
+  `unresolved`; it never claims forced alignment. `motion.cue_seconds` wins per index.
+  Missing/repeated/estimated cues add `motionCueDiagnostics` plus a human-readable warning.
+  Cue resolution changes no scene length, narration or total duration. Scenes without
+  `cue_phrases` keep their exact previous timeline shape and hash.
+- `NarrationChunk.timing` (`aligner | syllable-fallback | other string`) is copied to the
+  compiled caption's optional `timing` only when the chunk declares it, so legacy options keep
+  their exact caption shape and hash. `aligner` word cues are accurate provenance;
+  `syllable-fallback` marks measured sentence audio whose word boundaries are estimated:
+  the resolved cue keeps `source: "word-cues"` but sets `estimated: true` and reports
+  `MOTION_CUE_ESTIMATED` for the estimated boundary, not for unmeasured audio. Unknown timing
+  strings are carried without being treated as either accurate or estimated.
+  The renderer's `mergeScenes()` currently spreads the package scene over the timeline
+  scene, so a consumer must read `motionCues` from the **committed timeline** (the package
+  has no such key) rather than dropping it during the merge.
 - `hash` is a SHA-256 over the canonical JSON of everything except the hash itself.
   Identical input → identical hash; any package edit changes it.
 

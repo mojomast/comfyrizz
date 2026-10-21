@@ -1,0 +1,203 @@
+{
+  "schema": "comfyrizz.state-ledger/v1",
+  "production": "mockumentary-quality-review-20261020",
+  "fps": 30,
+  "notes": "Synthetic ledger built from the measured examples in docs/research/MOCKUMENTARY_QUALITY_REVIEW_20261020.md: the closing scene keeps Ada in her apron instead of paying off the paid-leave cardigan, and the 09:00-09:20 payoff uses raccoon_portrait@2 after the opening/reveal used raccoon_portrait@1. The sandwich handoff at the end of the unreachable-sandwich line is unlicensed and reproduces PROP_OWNER_JUMP.",
+  "shots": [
+    {
+      "id": "s00_opening_portrait",
+      "role": "opening",
+      "scene": "opening",
+      "time": "00:00-00:10",
+      "characters": {
+        "ada": {
+          "costume": "apron_teal"
+        }
+      },
+      "props": {
+        "raccoon_portrait": {
+          "location": "courtroom_wall"
+        }
+      },
+      "artwork": [
+        "raccoon_portrait@1"
+      ],
+      "artworkBeat": "courtroom_portrait"
+    },
+    {
+      "id": "s04_bench_setup",
+      "scene": "work_stoppage",
+      "time": "02:35-02:40",
+      "characters": {
+        "ada": {
+          "costume": "apron_teal"
+        },
+        "painter": {
+          "costume": "work_overalls"
+        }
+      },
+      "props": {
+        "sandwich_01": {
+          "holder": "painter"
+        },
+        "raccoon_portrait": {
+          "location": "courtroom_wall"
+        }
+      },
+      "artwork": [
+        "raccoon_portrait@1"
+      ],
+      "artworkBeat": "courtroom_portrait"
+    },
+    {
+      "id": "s05_bench_pickup",
+      "scene": "work_stoppage",
+      "time": "02:40-02:45",
+      "characters": {
+        "ada": {
+          "costume": "apron_teal"
+        },
+        "painter": {
+          "costume": "work_overalls"
+        }
+      },
+      "props": {
+        "sandwich_01": {
+          "holder": "ada"
+        }
+      },
+      "artwork": [
+        "raccoon_portrait@1"
+      ],
+      "licenses": [
+        {
+          "prop": "sandwich_01",
+          "from": "painter",
+          "to": "ada",
+          "reason": "s05_bench_pickup"
+        }
+      ],
+      "artworkBeat": "courtroom_portrait"
+    },
+    {
+      "id": "s08_unreachable_line",
+      "scene": "unreachable_sandwich",
+      "time": "03:41-03:44",
+      "characters": {
+        "ada": {
+          "costume": "apron_teal"
+        }
+      },
+      "props": {
+        "sandwich_01": {
+          "holder": "ada"
+        }
+      },
+      "artwork": [
+        "raccoon_portrait@1"
+      ],
+      "artworkBeat": "courtroom_portrait"
+    },
+    {
+      "id": "s08_unreachable_line_end",
+      "scene": "unreachable_sandwich",
+      "time": "03:44-03:47",
+      "characters": {
+        "ada": {
+          "costume": "apron_teal"
+        },
+        "painter": {
+          "costume": "work_overalls"
+        }
+      },
+      "props": {
+        "sandwich_01": {
+          "holder": "painter"
+        }
+      },
+      "artwork": [
+        "raccoon_portrait@1"
+      ],
+      "artworkBeat": "courtroom_portrait"
+    },
+    {
+      "id": "s11_raccoon_reveal",
+      "scene": "raccoon_reveal",
+      "time": "06:11-06:17",
+      "characters": {
+        "ada": {
+          "costume": "apron_teal"
+        }
+      },
+      "props": {
+        "raccoon_portrait": {
+          "location": "courtroom_wall"
+        }
+      },
+      "artwork": [
+        "raccoon_portrait@1"
+      ],
+      "artworkBeat": "courtroom_portrait"
+    },
+    {
+      "id": "s18_payoff_a",
+      "role": "payoff",
+      "scene": "closing",
+      "time": "09:00-09:10",
+      "characters": {
+        "ada": {
+          "costume": "apron_teal"
+        }
+      },
+      "props": {
+        "raccoon_portrait": {
+          "location": "courtroom_wall"
+        }
+      },
+      "artwork": [
+        "raccoon_portrait@1"
+      ],
+      "requires": {
+        "characters": {
+          "ada": {
+            "costume": "paid_leave_cardigan@1"
+          }
+        },
+        "artwork": [
+          "raccoon_portrait@1"
+        ]
+      },
+      "artworkBeat": "courtroom_portrait"
+    },
+    {
+      "id": "s18_payoff_b",
+      "role": "payoff",
+      "scene": "closing",
+      "time": "09:10-09:20",
+      "characters": {
+        "ada": {
+          "costume": "apron_teal"
+        }
+      },
+      "props": {
+        "raccoon_portrait": {
+          "location": "courtroom_wall"
+        }
+      },
+      "artwork": [
+        "raccoon_portrait@2"
+      ],
+      "requires": {
+        "characters": {
+          "ada": {
+            "costume": "paid_leave_cardigan@1"
+          }
+        },
+        "artwork": [
+          "raccoon_portrait@1"
+        ]
+      },
+      "artworkBeat": "courtroom_portrait"
+    }
+  ]
+}

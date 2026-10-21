@@ -1,0 +1,238 @@
+/* Comfyrizz example gallery (docs/gallery/index.html).
+   Static, dependency-free, no external assets. */
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --ink: #1c2430;
+  --muted: #5b6674;
+  --accent: #1f5eff;
+  --accent-ink: #ffffff;
+  --card-bg: #f7f9fc;
+  --card-border: #d8dfe9;
+  --focus: #1f5eff;
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 1rem 3rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+.site-header,
+.site-footer {
+  max-width: 70rem;
+  margin: 0 auto;
+}
+
+.site-header {
+  padding: 2rem 0 1rem;
+}
+
+.site-header h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.6rem;
+}
+
+.site-header p,
+.site-footer p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 60rem;
+}
+
+.site-footer {
+  padding-top: 2rem;
+  font-size: 0.9rem;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:focus-visible,
+button:focus-visible,
+video:focus-visible,
+img:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Gallery list */
+
+.gallery-list {
+  list-style: none;
+  margin: 1rem auto 0;
+  padding: 0;
+  max-width: 70rem;
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem 1.1rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.3;
+}
+
+.card-id {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.card-id code {
+  background: transparent;
+  color: inherit;
+}
+
+/* Media block: video, poster image or placeholder */
+
+.card-media-wrap {
+  margin: 0;
+}
+
+.card-media {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  background: var(--bg);
+}
+
+video.card-media {
+  background: #0b1020;
+}
+
+.card-media-empty {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 1rem;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--card-bg),
+    var(--card-bg) 12px,
+    var(--bg) 12px,
+    var(--bg) 24px
+  );
+}
+
+.card-media-text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.card-media-text code {
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+/* Metadata */
+
+.card-duration {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.card-description {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.card-tags {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.card-tag {
+  font-size: 0.75rem;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  padding: 0.05rem 0.55rem;
+  color: var(--muted);
+}
+
+.card-readme {
+  margin-top: auto;
+  align-self: flex-start;
+  font-weight: 600;
+}
+
+.card-readme-plain {
+  margin-top: auto;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Status / error messages */
+
+.status {
+  max-width: 70rem;
+  margin: 1.5rem auto;
+  padding: 0.9rem 1.1rem;
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+}
+
+.status-info {
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--muted);
+}
+
+.status-error {
+  border: 1px solid #b3411f;
+  border-left: 6px solid #b3411f;
+  background: #fdf1ec;
+  color: #5a1e0a;
+}
+
+.status code {
+  overflow-wrap: anywhere;
+}
+
+noscript {
+  max-width: 70rem;
+  margin: 1.5rem auto;
+}
+
+noscript .status {
+  margin: 0;
+}

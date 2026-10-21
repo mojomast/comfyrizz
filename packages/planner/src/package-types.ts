@@ -57,6 +57,52 @@ export interface SceneTransition {
   frames: number;
 }
 
+/** Storytelling recipe id: the shared catalogue is packages/schema/src/animation.mjs. */
+export type AnimationRecipeId = 'sketch' | 'paper-cut' | 'morph' | 'technical-flow' | 'focus' | 'kinetic';
+
+/** Bounded shape ids accepted by `scene.motion.morph`. */
+export type MorphShape = 'circle' | 'square' | 'triangle' | 'blob';
+
+/** Normalised focus window (all values 0..1; x + width and y + height stay within 1). */
+export interface SceneMotionFocus {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SceneMotionMorph {
+  from: MorphShape;
+  to: MorphShape;
+}
+
+/**
+ * The optional storytelling motion contract. Every field is additive: an absent block keeps the
+ * renderer's current layout defaults. `cue_seconds` remains the explicit timing source; when it
+ * is absent the planner resolves `cue_phrases` against measured captions/word cues.
+ */
+export interface SceneMotion {
+  diagram?: 'flow' | 'hub';
+  recipe?: AnimationRecipeId;
+  /** Stable seed for recipe texture/geometry, 1..2147483647. */
+  seed?: number;
+  /** Recipe strength, 0..1. */
+  intensity?: number;
+  focus?: SceneMotionFocus;
+  morph?: SceneMotionMorph;
+  /** Narration phrases that anchor scene beats, in order (max 6). */
+  cue_phrases?: string[];
+  /** Explicit scene-local cue seconds; takes priority over cue_phrases. */
+  cue_seconds?: number[];
+  entry?: string;
+  ease?: string;
+  spring?: string;
+  stagger?: string;
+  emphasis?: string;
+  highlight?: string;
+  energy?: string;
+}
+
 export interface SceneLowerThird {
   kicker?: string;
   text: string;
@@ -72,6 +118,7 @@ export interface Scene {
   background?: SceneBackground | null;
   foreground?: SceneForeground[];
   transitionOut?: SceneTransition;
+  motion?: SceneMotion;
   narration?: string;
   /** Draw only the media layer (background + scrim + foreground + lower third), skipping the layout. */
   media_only?: boolean;
@@ -155,11 +202,29 @@ export interface NarrationWord {
   end: number;
 }
 
+/**
+ * How a chunk's `words[]` were produced. The two known values are interpreted by the planner:
+ * `aligner` is accurate word timing; `syllable-fallback` is an estimated word boundary inside
+ * measured audio. Any other string is carried through for compatibility but is not treated as
+ * either accurate or estimated.
+ */
+export type NarrationTiming = 'aligner' | 'syllable-fallback' | (string & {});
+
 export interface NarrationChunk {
   text: string;
   seconds: number;
   /** K1: optional per-word timings inside this sentence (seconds, sentence-relative). */
   words?: NarrationWord[];
+  /** Provenance of `words[]`; absent keeps the legacy unknown-provenance behaviour. */
+  timing?: NarrationTiming;
+}
+
+/** Caption wording correction. Timing stays on the compiled cue; speech text is untouched. */
+export interface CaptionOverride {
+  sceneId: string;
+  /** Index among that scene's caption cues, in compile order. */
+  index: number;
+  text: string;
 }
 
 export interface CompileOptions {
@@ -171,4 +236,6 @@ export interface CompileOptions {
   narrationPaddingSeconds?: number;
   /** Emit estimated caption cues when narration audio is not ready yet. Default true. */
   estimateCaptions?: boolean;
+  /** Replace caption cue text after timing is projected. Does not change scene.narration. */
+  captionOverrides?: CaptionOverride[];
 }

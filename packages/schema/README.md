@@ -15,6 +15,7 @@ tested against each other.
 | `src/index.mjs` | `validatePackage()`, `schemaErrors()`, `compile()`, `parse()`. |
 | `src/semantic.mjs` | The semantic rules (`SEM_*`), the layout contract, `applyDefaults()`, `pathProblem()`. |
 | `src/motion.mjs` | MS2: the motion vocabulary, `lintMotion()`, `applyMotionFixes()`, `autofixMotion()`. |
+| `src/animation.mjs` | Browser-safe storytelling capability catalogue: `ANIMATION_RECIPES`, `ANIMATION_RECIPE_IDS`, `ANIMATION_TRANSITIONS`, `ANIMATION_REVEAL_TRANSITIONS`. |
 | `bin/comfyrizz-validate.mjs` | CLI: `node bin/comfyrizz-validate.mjs <pkg.json \| -> [--json] [--defaults]`. |
 | `fixtures/valid/*.json` | Hand-written good packages (§6.3 example, minimal, generated-first, defaults). |
 | `fixtures/invalid/*.json` | **Generated** from the good ones by `fixtures/build.mjs` (one declared violation each). |
@@ -71,8 +72,15 @@ them up directly; `test/motion.test.mjs` fails if the two drift.
 | `scenes[].motion.stagger` | `none \| word \| listItem \| dot` (= `STAGGER_SECONDS`) |
 | `scenes[].motion.emphasis` / `highlight` | `none \| keyword \| hero`; `highlight` = the phrase of the copy a keyword emphasis marks |
 | `scenes[].motion.energy` | per-scene override of the package energy |
-| `transitionOut.type` | `none \| cut \| fade \| blur` (no direction) `\| slide \| push \| wipe` (left/right/up/down) `\| zoom \| iris` (in/out) |
-| `transitionOut.direction` | omitted on a directional type = package `motion.direction` (planar) or `in` (zoom/iris) |
+| `scenes[].motion.recipe` | `sketch \| paper-cut \| morph \| technical-flow \| focus \| kinetic`; omitted = current layout/default behaviour |
+| `scenes[].motion.seed` | integer `1–2147483647`; stable recipe texture/geometry seed |
+| `scenes[].motion.intensity` | number `0–1`; recipe strength |
+| `scenes[].motion.focus` | `{x,y,width,height}`, each `0–1`, positive width/height; `x+width` and `y+height` must stay within `1` (`SEM_MOTION_FOCUS_RECT`) |
+| `scenes[].motion.morph` | `{from,to}` from `circle \| square \| triangle \| blob` |
+| `scenes[].motion.cue_phrases` | up to 6 non-empty narration phrases; the planner resolves them against measured captions/word cues and records provenance. `cue_seconds` wins when present |
+| `scenes[].motion.cue_seconds` | explicit scene-local seconds, retained and higher priority than `cue_phrases` |
+| `transitionOut.type` | `none \| cut \| fade \| blur` (no direction) `\| slide \| push \| wipe` (left/right/up/down) `\| zoom \| iris` (in/out) `\| paper-reveal \| draw-reveal \| shape-reveal` (no axis) |
+| `transitionOut.direction` | omitted on a directional type = package `motion.direction` (planar) or `in` (zoom/iris); a direction on a reveal is a warning |
 
 `lintMotion(doc, { fps?, timeline? })` is pure and advisory: `validatePackage()` returns it as
 `motion` (it never changes `valid`), the CLI prints error/warning findings as `motion …` lines and
@@ -88,7 +96,7 @@ The Python mirror is `comfyrizz_pipeline.motion_lint` (`lint_motion`, `autofix_m
 | `MOTION_DIRECTION_AXIS` | error | zoom/iris go in/out, slide/push/wipe go left/right/up/down (→ current or `in`) |
 | `MOTION_HIGHLIGHT_MISSING` / `_NOT_IN_COPY` | error | keyword emphasis needs a highlight that is in the copy (→ drop it) |
 | `MOTION_DIRECTION_UNUSED` | warning | direction on none/cut/fade/blur (→ delete) |
-| `MOTION_TRANSITION_DURATION` | warning | frames inside the type's band: fade 0.3–0.8 s, blur 0.4–0.8, slide/push/wipe 0.25–0.6, zoom 0.15–0.4, iris 0.25–0.45 (→ clamp) |
+| `MOTION_TRANSITION_DURATION` | warning | frames inside the type's band: fade 0.3–0.8 s, blur 0.4–0.8, slide/push/wipe 0.25–0.6, zoom 0.15–0.4, iris 0.25–0.45, paper-reveal 0.3–0.8, draw-reveal 0.35–0.9, shape-reveal 0.25–0.6 (→ clamp) |
 | `MOTION_TRANSITION_BUDGET` | warning | ≤ 3 transition types per film, none/cut excluded (→ primary type) |
 | `MOTION_DIRECTION_PINGPONG` | warning | consecutive transitions never reverse direction (→ previous direction) |
 | `MOTION_HERO_MULTIPLE` | warning | one `hero` per film; the last is kept (→ others `none`) |
@@ -127,7 +135,7 @@ The Python mirror is `comfyrizz_pipeline.motion_lint` (`lint_motion`, `autofix_m
 `SEM_SVG_PROVENANCE`, `SEM_RENDER_CHECK_FAILED`, `SEM_GEN_MISSING_GENERATOR`,
 `SEM_READY_WITHOUT_FILE`, `SEM_DURATION_TARGET_REQUIRED`, `SEM_FLEXIBLE_OVER_CEILING`,
 `SEM_NARRATION_EMPTY`, `SEM_VOICE_INCOMPLETE`, `SEM_DATASET_UNAPPROVED`,
-`SEM_BACKGROUND_AMBIGUOUS`, `SEM_CUTOUT_KIND` — plus the advisory
+`SEM_BACKGROUND_AMBIGUOUS`, `SEM_CUTOUT_KIND`, `SEM_MOTION_FOCUS_RECT` — plus the advisory
 `WARN_ASSET_UNUSED` / `WARN_DATASET_UNUSED`.
 
 Paths (`asset.file`, `gen.workflow`, `renders[].file`, `theme.fonts[].file`) must be

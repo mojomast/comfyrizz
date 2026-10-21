@@ -24,5 +24,62 @@
       { "message": "Can we say it saves ten hours a week? I have no evidence for that. Suggest a truthful alternative without changing or building anything.", "expect": { "built": false, "samePlan": true } },
       { "message": "Keep the existing plan as written and build it now.", "expect": { "built": true, "samePlan": true, "media": "procedural", "mustNotMatch": "(?:ten|10) hours" } }
     ]
+  },
+  {
+    "id": "express-animation-build-revise",
+    "turns": [
+      {
+        "message": "Build a six-scene 16:9 CPU procedural-only animation explainer. Use these layouts and recipes in order: sketch list, paper-cut hero, morph hero, technical-flow list, focus code, kinetic title. Write concise copy and narration for every scene. For every scene use motion seed 42, intensity 0.6 and entry maskRise. Morph circle to square. The technical-flow items are Request, Worker, Result; its narration must contain those exact words in that order, initially with explicit cue_seconds [0.5, 2, 4]. The code is const result = worker(request); in javascript. Focus rectangle is x 0.1, y 0.2, width 0.5, height 0.5. Use paper-reveal, draw-reveal and shape-reveal at appropriate boundaries, no outgoing final transition. No SVG, images, external assets, paid generation or invented statistics. Build now.",
+        "expect": { "built": true, "scenes": 6, "layouts": ["list", "hero", "hero", "list", "code", "title"], "recipes": ["sketch", "paper-cut", "morph", "technical-flow", "focus", "kinetic"], "motion": { "2": { "morph": { "from": "circle", "to": "square" } }, "3": { "cue_seconds": [0.5, 2, 4], "seed": 42, "entry": "maskRise" }, "4": { "focus": { "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.5 } } }, "noGpu": true }
+      },
+      {
+        "message": "Make only these animation changes and apply them: on scene 3 change the morph destination to triangle, preserving its origin; on scene 4 replace explicit cue seconds with narration phrases request, worker, result; on scene 5 remove the focus recipe but keep its other motion settings. Preserve all seeds, intensity, entry, copy, narration, timing, layouts, transitions, media and scene IDs. Do not rewrite the story.",
+        "expect": { "built": true, "sameIds": true, "preserveSceneContent": true, "recipes": ["sketch", "paper-cut", "morph", "technical-flow", null, "kinetic"], "motion": { "2": { "morph": { "from": "circle", "to": "triangle" }, "seed": 42, "intensity": 0.6, "entry": "maskRise" }, "3": { "cue_seconds": null, "cue_phrases": ["request", "worker", "result"], "seed": 42, "intensity": 0.6, "entry": "maskRise" }, "4": { "recipe": null, "seed": 42, "intensity": 0.6, "entry": "maskRise", "focus": { "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.5 } } }, "noGpu": true }
+      }
+    ]
+  },
+  {
+    "id": "quality-worked-example",
+    "turns": [
+      {
+        "message": "Draft a 30-second, three-scene 16:9 explainer for freelancers about LedgerLeaf, a fictional receipt app. Its only established behavior is that a user assigns a receipt to a project and can inspect that project's receipts. Follow one receipt through this task so the audience understands the mechanism. Use only original SVG diagrams in every scene, including any title card; no real screenshots or performance evidence exist. Write the copy and narration, keep text readable at phone playback size, and don't build yet.",
+        "expect": { "built": false, "plan": true, "scenes": 3, "seconds": 30, "aspect": "16:9", "media": "svg" }
+      },
+      {
+        "message": "Change only the second scene's headline to 'Give this receipt a home'. Preserve every other field. Keep this as a draft.",
+        "expect": { "built": false, "headline": "Give this receipt a home", "preserveExceptSecondHeadline": true }
+      }
+    ]
+  },
+  {
+    "id": "quality-comic-payoff",
+    "turns": [
+      {
+        "message": "Draft a 24-second three-scene fictional comedy about a clerk who rejects an anonymous suggestion because it has no signature. Use only original static SVG compositions in every scene, including any title card, and a recurring teal form. Stage setup, reveal and reaction with deliberate pacing; the joke should become apparent at the reveal rather than in the opening title. Write all copy and narration. Do not build yet.",
+        "expect": { "built": false, "plan": true, "scenes": 3, "seconds": 24, "media": "svg" }
+      }
+    ]
+  },
+  {
+    "id": "quality-plate-coverage-advice",
+    "turns": [
+      {
+        "message": "Review this production report only; don't create a plan or build. A non-looping four-second source plate at playback speed 0.4 fills a fourteen-second scene, with no source trim or extra handles. The scene's narration was just re-synthesized and is fourteen seconds long. The report says 0 ms narration lag, while word positions use syllable-fallback. What should we fix before export, and what is still unverified? You have not seen or heard the video.",
+        "expect": { "built": false, "plan": false }
+      },
+      {
+        "message": "Another scene intentionally ends on a still diagram for two seconds so viewers can inspect it. Should we automatically replace that pause with more motion? Advice only; keep the project untouched.",
+        "expect": { "built": false, "plan": false, "samePlan": true, "sameProject": true }
+      }
+    ]
+  },
+  {
+    "id": "quality-caption-access",
+    "turns": [
+      {
+        "message": "Advice only, don't draft or build. A 16:9 technical explainer shows a headline, paragraph, diagram labels and a 30-word, 171-character caption for 13.3 seconds. It's cluttered on a phone. Would removing captions solve it? Recommend changes that keep access to the full speech and its qualifications. Also explain what to check for a 9:16 version. You have only these measurements, not the render.",
+        "expect": { "built": false, "plan": false }
+      }
+    ]
   }
 ]

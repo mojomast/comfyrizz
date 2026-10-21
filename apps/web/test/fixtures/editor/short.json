@@ -1,0 +1,56 @@
+{
+  "id": "pkg_shorteditor",
+  "title": "Short editor fixture",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible"
+  },
+  "voice": {
+    "enabled": false
+  },
+  "scenes": [
+    {
+      "id": "s_title",
+      "layout": "title",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Open"
+      },
+      "narration": "Open.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_hero",
+      "layout": "hero",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Show"
+      },
+      "narration": "Show.",
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s_list",
+      "layout": "list",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Close"
+      },
+      "narration": "Close.",
+      "transitionOut": {
+        "type": "none",
+        "frames": 0
+      }
+    }
+  ]
+}

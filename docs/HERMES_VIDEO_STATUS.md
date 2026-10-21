@@ -22,15 +22,15 @@ editorial distinctions and implementation choices are in
   animation, count-up statistics, code typing and scene transitions.
 
 The opening take is available on the test deployment:
-[Qwen narration preview](https://mail.tailec998.ts.net:8451/hermes-release/narration-preview.wav).
+[Qwen narration preview](https://<your-host>/hermes-release/narration-preview.wav).
 The final graphics-backed deliverables are published:
 
-- [Watch the complete video](https://mail.tailec998.ts.net:8451/hermes-release/index.html).
-- [Download MP4](https://mail.tailec998.ts.net:8451/hermes-release/video.mp4)
+- [Watch the complete video](https://<your-host>/hermes-release/index.html).
+- [Download MP4](https://<your-host>/hermes-release/video.mp4)
   — 40,409,471 bytes, 1920×1080, 30 fps, 5,700 frames.
-- [Editable project bundle](https://mail.tailec998.ts.net:8451/hermes-release/package.zip)
+- [Editable project bundle](https://<your-host>/hermes-release/package.zip)
   — 58,969,980 bytes, 69 archive entries.
-- [English captions](https://mail.tailec998.ts.net:8451/hermes-release/captions.srt).
+- [English captions](https://<your-host>/hermes-release/captions.srt).
 
 The earlier fake-render MP4 uses placeholder media; the published MP4 uses the
 real collected graphics and corrected presenter clips.

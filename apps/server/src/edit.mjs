@@ -11,7 +11,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { canonicalJson } from '../../../packages/planner/dist/src/index.js';
+import { compilePackage } from './compile-package.mjs';
 
 /**
  * The timeline the renderer reads: a committed `timeline.json` next to the package when
@@ -23,7 +24,7 @@ import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/s
 export function packageTimeline(packagePath, pkg) {
   const timelinePath = join(dirname(packagePath), 'timeline.json');
   if (existsSync(timelinePath)) return JSON.parse(readFileSync(timelinePath, 'utf8'));
-  return compileTimeline(pkg);
+  return compilePackage(pkg, dirname(packagePath));
 }
 
 /**

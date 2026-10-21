@@ -86,6 +86,7 @@ SEMANTIC_CODES = (
     "SEM_AUDIO_UNKNOWN_SCENE",
     "SEM_LAYOUT_REQUIRES_MEDIA",
     "SEM_CODE_REQUIRED",
+    "SEM_MOTION_FOCUS_RECT",
 )
 
 # Published layout contract (PLAN.md A5 / SPEC.md 6.3); the schema holds the loose
@@ -393,6 +394,15 @@ def _check_voice(doc, errors) -> None:
     voiced = voice.get("engine") in ("kokoro", "qwen3-tts")
     if not voiced or not _is_str(voice_id) or voice_id == "":
         errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro or qwen3-tts and a non-empty voice"))
+    if voice.get("engine") == "qwen3-tts":
+        if voice.get("speed", 1) != 1:
+            errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/speed", "Qwen requires speed=1; use delivery direction for pacing"))
+        if voice.get("blend"):
+            errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/blend", "Voice blending is only supported by Kokoro"))
+        if voice.get("qwen_mode") == "custom" and str(voice_id).lower() not in {"ryan", "aiden", "vivian", "serena", "uncle_fu", "dylan", "eric", "ono_anna", "sohee"}:
+            errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/voice", "Unknown Qwen CustomVoice speaker"))
+    if isinstance(voice.get("blend"), list) and len({str(part.get("voice", ""))[:1] if _is_obj(part) else "" for part in voice["blend"]}) > 1:
+        errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/blend", "Kokoro blend voices must use the same language/accent"))
     assets = doc.get("assets") if _is_obj(doc.get("assets")) else {}
     ref_asset = voice.get("ref_asset")
     if _is_str(ref_asset) and not _is_obj(assets.get(ref_asset)):
@@ -486,6 +496,22 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
                         "foreground item; this scene would render an empty frame",
                     )
                 )
+        # Storytelling recipe focus window: JSON Schema bounds each number but cannot sum
+        # x + width, so this cross-field rule is semantic (same as semantic.mjs).
+        motion = scene.get("motion")
+        focus = motion.get("focus") if _is_obj(motion) and _is_obj(motion.get("focus")) else None
+        if focus is not None:
+            values = [focus.get(key) for key in ("x", "y", "width", "height")]
+            if all(_is_number(value) for value in values):
+                x, y, width, height = values
+                if x + width > 1 + 1e-9 or y + height > 1 + 1e-9:
+                    errors.append(
+                        _err(
+                            "SEM_MOTION_FOCUS_RECT",
+                            f"{at}/motion/focus",
+                            "focus rectangle must stay inside the frame (x + width <= 1 and y + height <= 1)",
+                        )
+                    )
 
 
 def _check_presenter(doc, scenes, assets, errors) -> None:
@@ -1052,4 +1078,3 @@ def _check_asset_variants(asset, at: str, errors) -> None:
                         f"({media['width']}x{media['height']}, got {width}x{height})",
                     )
                 )
-

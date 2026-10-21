@@ -228,6 +228,10 @@ package, a first render fills the cache, a second stub run applies one `storyboa
 ffprobe frames == compiled timeline), while a `preferredFrames` edit forces the full-render
 fallback (`x-comfyrizz-full-render: 1`, reason `scene durations changed`).
 
+## Pipeline render location
+
+`POST /api/pipeline/plan` and `POST /api/pipeline` accept `renderLocation`: `local` (default) or `colab`. `colab` is honored only with the Google Colab backend and generated media. The worker then renders and mix-checks on that VM, returns the MP4 plus reports, and stops the VM before local verification and export. A remote failure logs `REMOTE_RENDER_FALLBACK` and renders on this machine after a confirmed stop. See `docs/PIPELINE_OBSERVABILITY.md`.
+
 ## Security checks
 
 - Host must be `127.0.0.1`, `localhost` or `[::1]` (any port) — DNS-rebinding hosts get `403`.

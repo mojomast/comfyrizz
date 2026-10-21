@@ -1,0 +1,381 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_recipe_showcase01",
+  "title": "Renderer recipe showcase",
+  "createdAt": "2026-10-19T12:00:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#0b1020",
+      "#1a2544",
+      "#7aa2ff",
+      "#f2f5ff"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": false,
+    "engine": "none"
+  },
+  "scenes": [
+    {
+      "id": "s_sketch",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "Sketchbook explainer",
+        "headline": "Draw the mechanism",
+        "sub": "Seeded rough outlines, marker accents and editable cards."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 4
+        }
+      },
+      "motion": {
+        "recipe": "sketch",
+        "seed": 17,
+        "intensity": 0.72,
+        "entry": "maskRise"
+      },
+      "transitionOut": {
+        "type": "draw-reveal",
+        "frames": 20
+      }
+    },
+    {
+      "id": "s_sketch_list",
+      "layout": "list",
+      "variant": "bullets",
+      "preferredFrames": 190,
+      "copy": {
+        "kicker": "Sketch cards",
+        "headline": "Draw the editable cards",
+        "items": [
+          "Frame the question",
+          "Draw the parts",
+          "Trace the cause"
+        ]
+      },
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 14
+        }
+      },
+      "motion": {
+        "recipe": "sketch",
+        "seed": 19,
+        "intensity": 0.62,
+        "cue_phrases": [
+          "Frame the question",
+          "Draw the parts",
+          "Trace the cause"
+        ],
+        "cue_seconds": [
+          0.7,
+          2.4,
+          4.2
+        ]
+      },
+      "transitionOut": {
+        "type": "paper-reveal",
+        "frames": 16
+      }
+    },
+    {
+      "id": "s_paper",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 340,
+      "copy": {
+        "headline": "A paper trail",
+        "sub": "Layered cutouts and offset shadows hold the story.",
+        "body": "Every sheet is geometry generated from the scene seed and the text safe zone, so the copy stays readable and the collage never re-rolls between frames."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 12,
+          "palette": [
+            "#0b1020",
+            "#1a2544",
+            "#7aa2ff"
+          ]
+        }
+      },
+      "motion": {
+        "recipe": "paper-cut",
+        "seed": 24,
+        "intensity": 0.75
+      },
+      "transitionOut": {
+        "type": "paper-reveal",
+        "frames": 18
+      }
+    },
+    {
+      "id": "s_morph",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 285,
+      "copy": {
+        "headline": "One idea becomes a system",
+        "sub": "A bounded shape change carries the transformation.",
+        "body": "The morph runs between two speech cues, with both endpoint ghosts visible so the before and after stay understandable."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "dots",
+          "seed": 8
+        }
+      },
+      "motion": {
+        "recipe": "morph",
+        "seed": 31,
+        "intensity": 0.7,
+        "morph": {
+          "from": "circle",
+          "to": "blob"
+        },
+        "cue_seconds": [
+          0.8,
+          3.2
+        ]
+      },
+      "transitionOut": {
+        "type": "shape-reveal",
+        "frames": 18
+      }
+    },
+    {
+      "id": "s_flow",
+      "layout": "list",
+      "variant": "bullets",
+      "preferredFrames": 210,
+      "copy": {
+        "headline": "Request to result",
+        "kicker": "Technical blueprint",
+        "items": [
+          "Receive the brief",
+          "Plan the scenes",
+          "Render on CPU",
+          "Review the cut"
+        ]
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 2
+        }
+      },
+      "motion": {
+        "recipe": "technical-flow",
+        "seed": 33,
+        "cue_seconds": [
+          0.7,
+          2.2,
+          4.1,
+          6.3
+        ],
+        "cue_phrases": [
+          "Receive the brief",
+          "Plan the scenes",
+          "Render on CPU",
+          "Review the cut"
+        ]
+      },
+      "transitionOut": {
+        "type": "draw-reveal",
+        "frames": 16
+      }
+    },
+    {
+      "id": "s_paper_split",
+      "layout": "split",
+      "preferredFrames": 160,
+      "copy": {
+        "headline": "Two sides of the story"
+      },
+      "media": [
+        {
+          "label": "Before",
+          "procedural": {
+            "pattern": "gradient",
+            "palette": [
+              "#1a2544",
+              "#7aa2ff"
+            ]
+          }
+        },
+        {
+          "label": "After",
+          "procedural": {
+            "pattern": "mesh",
+            "seed": 21,
+            "palette": [
+              "#243056",
+              "#f2f5ff"
+            ]
+          }
+        }
+      ],
+      "motion": {
+        "recipe": "paper-cut",
+        "seed": 44,
+        "intensity": 0.55
+      },
+      "transitionOut": {
+        "type": "paper-reveal",
+        "frames": 18
+      }
+    },
+    {
+      "id": "s_focus",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 186,
+      "copy": {
+        "headline": "Read the evidence",
+        "sub": "The focus frame dims the rest and keeps the source visible."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 9
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_evidence",
+          "x": 0.72,
+          "y": 0.5,
+          "w": 0.36,
+          "anim": "fade-in"
+        }
+      ],
+      "motion": {
+        "recipe": "focus",
+        "seed": 51,
+        "intensity": 0.75,
+        "focus": {
+          "x": 0.52,
+          "y": 0.3,
+          "width": 0.4,
+          "height": 0.4
+        }
+      },
+      "transitionOut": {
+        "type": "paper-reveal",
+        "frames": 18
+      }
+    },
+    {
+      "id": "s_kinetic",
+      "layout": "list",
+      "variant": "bullets",
+      "preferredFrames": 190,
+      "copy": {
+        "headline": "Make the invisible visible",
+        "kicker": "Kinetic editorial type",
+        "items": [
+          "Name the idea",
+          "Reveal the phrase",
+          "Hold for the voice"
+        ]
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 6
+        }
+      },
+      "motion": {
+        "recipe": "kinetic",
+        "seed": 67,
+        "cue_phrases": [
+          "Make the invisible",
+          "visible"
+        ],
+        "cue_seconds": [
+          0.6,
+          2.2
+        ]
+      },
+      "transitionOut": {
+        "type": "draw-reveal",
+        "frames": 14
+      }
+    },
+    {
+      "id": "s_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "Comfyrizz",
+        "headline": "Build the next explainer",
+        "sub": "Six recipes, one deterministic render clock.",
+        "cta": "Start with a brief"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid",
+          "seed": 5
+        }
+      },
+      "motion": {
+        "recipe": "paper-cut",
+        "seed": 73,
+        "intensity": 0.6,
+        "entry": "pop"
+      },
+      "transitionOut": {
+        "type": "none",
+        "frames": 0
+      }
+    }
+  ],
+  "assets": {
+    "a_evidence": {
+      "kind": "svg",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/evidence.svg",
+      "sha256": "a27c2af1459c1c3bc618a98a7dd27e2236a8f88400fd38b4f06c4de1045ed091",
+      "bytes": 1506,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 640,
+          "height": 360,
+          "palette_ok": true
+        },
+        "caption": "Flat product screenshot: a titled workspace with a line chart and two source rows."
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true
+  }
+}

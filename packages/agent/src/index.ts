@@ -27,11 +27,114 @@ export {
 export type { CutdownResult, CutdownSeconds, PresenterPlan, VoiceFn, VoiceInput, VoiceResult } from './cutdown.js';
 export type { AgentTool, PlannedImage, SvgAssetResult, ToolsetOptions } from './tools.js';
 export { runAgent } from './agent.js';
+export { RENDER_LOCATIONS, DEFAULT_RENDER_LOCATION } from './render-location.js';
+export type { RenderLocation } from './render-location.js';
 export { runCpuSlice, defaultCpuScript } from './cpu-slice.js';
 export type { CpuSliceOptions, CpuSliceResult } from './cpu-slice.js';
 export { createScriptedModel } from './scripted-model.js';
-export { conversationPlanSchema, CONVERSATION_TOOLS, CONVERSATION_LIMITS, CONVERSATION_PROMPT_VERSION, runConversationTurn, patchConversationPlan, conversationPlanWarnings, budgetConversationMessages } from './conversation.js';
-export type { ConversationPlan } from './conversation.js';
+export {
+  conversationPlanSchema, CONVERSATION_TOOLS, CONVERSATION_LIMITS, CONVERSATION_PROMPT_VERSION,
+  CONVERSATION_LAYOUTS, CONVERSATION_RECIPES, CONVERSATION_MORPH_SHAPES, CONVERSATION_TRANSITIONS,
+  CONVERSATION_TRANSITION_DIRECTIONS, CONVERSATION_ENTRIES, CONVERSATION_EASES, CONVERSATION_SPRINGS,
+  CONVERSATION_STAGGERS, CONVERSATION_EMPHASIS, CONVERSATION_ENERGIES, CONVERSATION_PATTERNS,
+  runConversationTurn, patchConversationPlan, conversationPlanWarnings, budgetConversationMessages,
+} from './conversation.js';
+export type { ConversationCharacters, ConversationClips, ConversationPlan, ConversationReferences } from './conversation.js';
+export {
+  CHARACTER_BIBLE_NOTES_MAX_CHARS,
+  CHARACTER_IDENTITY_PROMPT_MAX_CHARS,
+  CHARACTER_IMAGE_VIEWS,
+  CHARACTER_IMAGES_MAX,
+  CHARACTER_LIBRARY_MAX,
+  CHARACTER_NAME_MAX_CHARS,
+  CHARACTER_NEGATIVE_MAX_CHARS,
+  CHARACTER_PROJECT_CAST_MAX,
+  CHARACTER_QWEN_MODES,
+  CHARACTER_QUESTION_MAX_CHARS,
+  CHARACTER_REASON_MAX_CHARS,
+  CHARACTER_ROLES,
+  CHARACTER_RULES,
+  CHARACTER_SAMPLE_LINES_MAX,
+  CHARACTER_SCENES_MAX,
+  CHARACTER_SHEET_STATUSES,
+  CHARACTER_SPEAKING_STYLE_MAX_CHARS,
+  CHARACTER_SUMMARY_MAX_CHARS,
+  CHARACTER_TOOLS,
+  CHARACTER_TOOL_NAMES,
+  CHARACTER_VOICE_CHUNKING,
+  CHARACTER_VOICE_ENGINES,
+  hasCharacters,
+  isCharacterToolName,
+  runCharacterTool,
+} from './character-tools.js';
+export type {
+  CharacterBible,
+  CharacterCompactRow,
+  CharacterDraft,
+  CharacterImage,
+  CharacterProposal,
+  CharacterProposeResult,
+  CharacterRecord,
+  CharacterRole,
+  CharacterToolCall,
+  CharacterToolContext,
+  CharacterToolResult,
+  CharacterVisual,
+  CharacterVoice,
+  ProjectCastEntry,
+} from './character-tools.js';
+export {
+  REFERENCE_NOTE_MAX_CHARS,
+  REFERENCE_QUESTION_MAX_CHARS,
+  REFERENCE_REASON_MAX_CHARS,
+  REFERENCE_RULES,
+  REFERENCE_SLOTS,
+  REFERENCE_TOOLS,
+  REFERENCE_TOOL_NAMES,
+  isReferenceToolName,
+  runReferenceTool,
+} from './reference-tools.js';
+export type {
+  ReferenceManifestEntry,
+  ReferenceProposal,
+  ReferenceProposeResult,
+  ReferenceSlot,
+  ReferenceToolCall,
+  ReferenceToolContext,
+  ReferenceToolResult,
+} from './reference-tools.js';
+export {
+  CLIP_ID_MAX_CHARS,
+  CLIP_MANIFEST_MAX_ROWS,
+  CLIP_NOTE_MAX_CHARS,
+  CLIP_REASON_MAX_CHARS,
+  CLIP_RULES,
+  CLIP_STATES,
+  CLIP_TOOLS,
+  CLIP_TOOL_NAMES,
+  CLIP_VERDICTS,
+  MAX_CLIP_MANIFEST_ROWS,
+  MAX_MANIFEST_ROWS,
+  clipManifestBlock,
+  isClipToolName,
+  manifestBlock,
+  runClipTool,
+} from './clip-tools.js';
+export type {
+  ClipCorrectionInput,
+  ClipEntry,
+  ClipGateResult,
+  ClipProposalResult,
+  ClipSelectionInput,
+  ClipState,
+  ClipTake,
+  ClipTakeCorrection,
+  ClipToolCall,
+  ClipToolContext,
+  ClipToolResult,
+  ClipVerdict,
+  ClipVerdictInput,
+} from './clip-tools.js';
 export { composeConversationSkills, SKILL_CATALOG_VERSION, BUNDLED_SKILL_IDS } from './skills/index.js';
 export type { ScriptedCall } from './scripted-model.js';
 export { DEFAULT_PALETTE, defaultCpuDatasets, defaultCpuScenes, foregroundFor, titleFor } from './package.js';

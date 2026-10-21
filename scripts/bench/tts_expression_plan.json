@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "date": "2026-10-19",
+  "seeds": [123, 456],
+  "sharedTorch": true,
+  "earlyDownload": true,
+  "allocator": "expandable_segments:True",
+  "customVoice": "Ryan",
+  "scripts": [
+    {
+      "id": "curiosity",
+      "title": "Curiosity and momentum",
+      "text": "Ever had an idea you couldn't leave alone? You build a small version, try it, and suddenly you can see what comes next. That's the fun of making things. One working experiment opens the door to another.",
+      "direction": "Warm, curious, conversational American English. Ask the opening question with genuine interest; build a little excitement on suddenly, then land the final sentence calmly. Speak as if talking to one person."
+    },
+    {
+      "id": "explanation",
+      "title": "Clear explanation with contrast",
+      "text": "Here's the interesting part: you can make a video faster without rushing the story. Let the machines handle the waiting, and give the narrator room to breathe. The result should feel clear, curious, and alive.",
+      "direction": "Calm, assured, conversational American English. Make the contrast between faster and rushing clear. Give room to breathe a little space, then finish with a warm, confident landing."
+    },
+    {
+      "id": "reflection",
+      "title": "A thoughtful story",
+      "text": "The first version barely worked. But it worked well enough to show us what mattered. We stopped trying to solve everything at once, and focused on the next useful step. That's when the project started to feel real.",
+      "direction": "Thoughtful and intimate, like sharing something you learned with a friend. Begin gently, let the realization brighten the middle, and finish with quiet confidence. Natural American English and unhurried phrasing."
+    }
+  ],
+  "phrasedText": "Here's the interesting part. You can make a video faster—without rushing the story. Let the machines handle the waiting. And give the narrator room to breathe. The result should feel clear, curious, and alive.",
+  "referenceText": "Here is what changed, why it matters, and how it works. We will walk through the details together, one clear step at a time.",
+  "referenceDirection": "An adult female narrator with a warm low-mid register and clear neutral American English. Curious, friendly and conversational, as if sharing a discovery with one person. Varied intonation, relaxed breath pauses and gentle emphasis on what changed and why it matters. Clean close-microphone studio sound.",
+  "referenceSeeds": [42, 73],
+  "kokoroText": "You start with an idea. Then a small experiment. Something you can actually try. The first version doesn't have to be perfect. It just has to make the next step possible.",
+  "kokoroVoice": "am_michael",
+  "kokoroSpeed": 0.98
+}

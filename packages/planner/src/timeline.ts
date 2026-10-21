@@ -16,16 +16,17 @@
  *               a pacing advisory, never speeding up, clipping or cutting speech.
  */
 
-import { createHash } from 'node:crypto';
 import type {
   CompileOptions,
   ComfyrizzPackage,
   LayoutId,
   NarrationChunk,
+  NarrationTiming,
   NarrationWord,
   Scene,
   SceneLowerThird,
 } from './package-types.js';
+import { sha256Hex } from './sha256.js';
 
 export const TIMELINE_VERSION = 1;
 export const DEFAULT_FPS = 30;
@@ -73,6 +74,14 @@ export interface TimelineScene {
   lowerThird: SceneLowerThird | null;
   narration: string | null;
   provisional: boolean;
+  /**
+   * Resolved `scene.motion.cue_phrases` (absolute frames). Present only when the package uses
+   * cue_phrases, so packages without them keep their exact timeline shape and hash.
+   * `source` is deliberately conservative: `word-cues` means per-word timing existed, not that
+   * the words were provably forced-aligned; `timing` is copied only when the chunk declared it,
+   * and `syllable-fallback` marks measured audio with estimated word boundaries.
+   */
+  motionCues?: TimelineCueResolution[];
 }
 
 export interface TimelineCaption {
@@ -83,6 +92,12 @@ export interface TimelineCaption {
   estimated: boolean;
   /** K1: per-word cues inside this sentence (absolute frames). Absent when unmeasured. */
   words?: TimelineWord[];
+  /**
+   * Provenance of `words[]`, copied from `NarrationChunk.timing` only when the chunk declared it.
+   * Absent keeps the legacy caption shape. `syllable-fallback` means measured sentence audio with
+   * estimated word boundaries.
+   */
+  timing?: NarrationTiming;
 }
 
 /** K1: one word inside a caption cue, in absolute frames. */
@@ -90,6 +105,48 @@ export interface TimelineWord {
   text: string;
   from: number;
   to: number;
+}
+
+/**
+ * Where a resolved cue phrase got its timing. Deliberately does not say "forced alignment":
+ * the current narration options may carry word cues without a timing-provenance field.
+ */
+export type TimelineCueSource =
+  | 'explicit-seconds'
+  | 'word-cues'
+  | 'measured-caption'
+  | 'estimated-caption'
+  | 'unresolved';
+
+export interface TimelineCueResolution {
+  phrase: string;
+  /** Absolute timeline frame, or null when no caption/word cue matched. */
+  frame: number | null;
+  /** Scene-local seconds (frame - scene.from), or null when unresolved. */
+  seconds: number | null;
+  source: TimelineCueSource;
+  /**
+   * True when the anchor's word positions are estimated, not when the sentence audio itself is
+   * unmeasured: `word-cues` + `syllable-fallback` is measured audio with estimated word boundaries.
+   */
+  estimated: boolean;
+  /** Word-timing provenance from a matched caption, when the chunk declared it. */
+  timing?: NarrationTiming;
+  /** 1-based occurrence of the phrase inside the scene when it was found. */
+  occurrence?: number;
+}
+
+export type TimelineCueDiagnosticCode =
+  | 'MOTION_CUE_PHRASE_MISSING'
+  | 'MOTION_CUE_PHRASE_AMBIGUOUS'
+  | 'MOTION_CUE_ESTIMATED';
+
+export interface TimelineCueDiagnostic {
+  code: TimelineCueDiagnosticCode;
+  severity: 'warning';
+  scene: string;
+  phrase: string;
+  message: string;
 }
 
 /**
@@ -148,6 +205,8 @@ export interface Timeline {
   provisional: boolean;
   warnings: string[];
   proposals: string[];
+  /** Structured cue-phrase diagnostics; present only when at least one cue needed one. */
+  motionCueDiagnostics?: TimelineCueDiagnostic[];
   sourceHash: string;
   hash: string;
 }
@@ -207,7 +266,28 @@ function sortValue(value: unknown): unknown {
 
 export function hashTimeline(timeline: Omit<Timeline, 'hash'> | Timeline): string {
   const { hash: _ignored, ...rest } = timeline as Timeline;
-  return createHash('sha256').update(canonicalJson(rest)).digest('hex');
+  return sha256Hex(canonicalJson(rest));
+}
+
+/** Integer project fps. Non-finite or non-positive rates fall back to 30. */
+export function projectFps(format?: { fps?: number } | null): number {
+  return isFiniteNumber(format?.fps) && (format?.fps ?? 0) > 0 ? Math.floor(format!.fps) : DEFAULT_FPS;
+}
+
+/**
+ * Lower bound for TrimScene, in integer project frames.
+ * Measured speech (chunks + gap + padding) wins over the layout minimum.
+ * Unmeasured scenes use the layout minimum. Speech is never the thing being trimmed.
+ */
+export function speechFloorFrames(
+  scene: { id: string; layout: LayoutId },
+  options: CompileOptions,
+  fps: number,
+): { frames: number; measured: boolean } {
+  const limit = sceneLimit(scene.layout);
+  const spoken = narrationFrames(options.narration?.[scene.id], options, fps);
+  if (spoken === null) return { frames: limit.min, measured: false };
+  return { frames: spoken, measured: true };
 }
 
 function frameSecondsToFrames(seconds: number, fps: number): number {
@@ -331,6 +411,7 @@ function buildCaptions(plans: TimelineScene[], pkg: ComfyrizzPackage, options: C
         const caption: TimelineCaption = { text: chunk.text, from: cursor, to, sceneId: scene.id, estimated: false };
         const words = cueWords(chunk.words, cursor, to, fps);
         if (words) caption.words = words;
+        if (typeof chunk.timing === 'string' && chunk.timing.trim().length > 0) caption.timing = chunk.timing;
         captions.push(caption);
         cursor += frames + frameSecondsToFrames(gap, fps);
       }
@@ -366,6 +447,180 @@ function cueWords(words: NarrationWord[] | undefined, from: number, to: number, 
     out.push({ text: word.text, from: wordFrom, to: wordTo });
   }
   return out;
+}
+
+interface CueToken {
+  text: string;
+  from: number | null;
+  to: number | null;
+}
+
+/** Case/punctuation-insensitive word tokens; keeps letters and numbers in any script. */
+function cueTokens(text: string): CueToken[] {
+  const matches = String(text).normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu);
+  return (matches ?? []).map(token => ({ text: token, from: null, to: null }));
+}
+
+function captionTokens(caption: TimelineCaption): CueToken[] {
+  if (Array.isArray(caption.words) && caption.words.length > 0) {
+    const out: CueToken[] = [];
+    for (const word of caption.words) {
+      for (const token of cueTokens(word.text)) out.push({ text: token.text, from: word.from, to: word.to });
+    }
+    return out;
+  }
+  return cueTokens(caption.text);
+}
+
+interface PhraseMatch {
+  from: number;
+  to: number;
+  source: Exclude<TimelineCueSource, 'explicit-seconds' | 'unresolved'>;
+  /** True when a word boundary is estimated (syllable fallback) or the whole caption is estimated. */
+  estimated: boolean;
+  /** Known word-timing provenance, only when the matched caption carried one. */
+  timing?: NarrationTiming;
+  count: number;
+}
+
+/**
+ * Find every occurrence of a phrase's token sequence in the scene's captions, in order.
+ * The first occurrence wins; the count lets the caller emit an explicit ambiguity diagnostic
+ * instead of silently deciding what a repeated phrase meant.
+ */
+function findPhrase(phrase: string, captions: TimelineCaption[]): PhraseMatch | null {
+  const needle = cueTokens(phrase).map(token => token.text);
+  if (needle.length === 0) return null;
+  let count = 0;
+  let first: Omit<PhraseMatch, 'count'> | null = null;
+  for (const caption of captions) {
+    const tokens = captionTokens(caption);
+    for (let i = 0; i + needle.length <= tokens.length; i += 1) {
+      if (!needle.every((token, offset) => tokens[i + offset].text === token)) continue;
+      count += 1;
+      if (first) continue;
+      const start = tokens[i];
+      const end = tokens[i + needle.length - 1];
+      const wordCues = start.from !== null && end.to !== null;
+      const timing = wordCues && typeof caption.timing === 'string' && caption.timing.length > 0 ? caption.timing : undefined;
+      first = {
+        from: wordCues ? start.from! : caption.from,
+        to: wordCues ? end.to! : caption.to,
+        source: wordCues ? 'word-cues' : caption.estimated ? 'estimated-caption' : 'measured-caption',
+        // A syllable fallback has measured audio but estimated word boundaries; an aligner and an
+        // unknown/absent timing keep the conservative legacy behaviour (not claimed as estimated).
+        estimated: wordCues ? caption.estimated || timing === 'syllable-fallback' : caption.estimated,
+        ...(timing ? { timing } : {}),
+      };
+    }
+  }
+  return first ? { ...first, count } : null;
+}
+
+/**
+ * Resolve `scene.motion.cue_phrases` against the compiled captions.
+ *
+ * Explicit `cue_seconds` wins per index. Otherwise a phrase is matched token-for-token against
+ * measured word cues first, then the caption text. A caption-level anchor uses the caption's
+ * start frame and is labelled `measured-caption`/`estimated-caption`; it never claims
+ * word-perfect/forced alignment. A phrase with no match stays unresolved with a diagnostic.
+ *
+ * Pure: reads package scenes and captions, changes no scene timing or narration.
+ */
+function resolveMotionCues(
+  pkg: ComfyrizzPackage,
+  scenes: TimelineScene[],
+  captions: TimelineCaption[],
+  fps: number,
+): { byScene: Map<string, TimelineCueResolution[]>; diagnostics: TimelineCueDiagnostic[] } {
+  const byScene = new Map<string, TimelineCueResolution[]>();
+  const diagnostics: TimelineCueDiagnostic[] = [];
+  const packageScenes = new Map(pkg.scenes.map(scene => [scene.id, scene]));
+  for (const scene of scenes) {
+    const motion = packageScenes.get(scene.id)?.motion;
+    if (!motion || !Array.isArray(motion.cue_phrases)) continue;
+    const phrases = motion.cue_phrases.filter(phrase => typeof phrase === 'string' && phrase.trim().length > 0);
+    if (phrases.length === 0) continue;
+    const explicitSeconds = Array.isArray(motion.cue_seconds) ? motion.cue_seconds : [];
+    const sceneCaptions = captions.filter(caption => caption.sceneId === scene.id);
+    const cues: TimelineCueResolution[] = [];
+    phrases.forEach((phrase, index) => {
+      const explicit = explicitSeconds[index];
+      if (isFiniteNumber(explicit) && explicit >= 0) {
+        cues.push({ phrase, frame: scene.from + Math.round(explicit * fps), seconds: explicit, source: 'explicit-seconds', estimated: false });
+        return;
+      }
+      const match = findPhrase(phrase, sceneCaptions);
+      if (!match) {
+        cues.push({ phrase, frame: null, seconds: null, source: 'unresolved', estimated: false });
+        diagnostics.push({
+          code: 'MOTION_CUE_PHRASE_MISSING',
+          severity: 'warning',
+          scene: scene.id,
+          phrase,
+          message: `Cue phrase ${JSON.stringify(phrase)} in ${scene.id} has no matching measured caption or word cue; left unresolved (no forced alignment is claimed).`,
+        });
+        return;
+      }
+      cues.push({
+        phrase,
+        frame: match.from,
+        seconds: (match.from - scene.from) / fps,
+        source: match.source,
+        estimated: match.estimated,
+        ...(match.timing ? { timing: match.timing } : {}),
+        occurrence: 1,
+      });
+      if (match.count > 1) {
+        diagnostics.push({
+          code: 'MOTION_CUE_PHRASE_AMBIGUOUS',
+          severity: 'warning',
+          scene: scene.id,
+          phrase,
+          message: `Cue phrase ${JSON.stringify(phrase)} occurs ${match.count} times in ${scene.id}; using occurrence 1. Add explicit cue_seconds when a later occurrence is meant.`,
+        });
+      }
+      if (match.estimated) {
+        const message = match.source === 'estimated-caption'
+          ? `Cue phrase ${JSON.stringify(phrase)} in ${scene.id} is anchored to estimated captions, not measured narration; it will move when audio is measured.`
+          : match.timing === 'syllable-fallback'
+            ? `Cue phrase ${JSON.stringify(phrase)} in ${scene.id} uses syllable-fallback word positions: the sentence audio is measured, but this word boundary is estimated.`
+            : `Cue phrase ${JSON.stringify(phrase)} in ${scene.id} has estimated word positions; its sentence audio is measured but the word boundary is not treated as exact.`;
+        diagnostics.push({
+          code: 'MOTION_CUE_ESTIMATED',
+          severity: 'warning',
+          scene: scene.id,
+          phrase,
+          message,
+        });
+      }
+    });
+    byScene.set(scene.id, cues);
+  }
+  return { byScene, diagnostics };
+}
+
+/**
+ * Editor caption corrections. Only cue text changes: frames, word cues, timing provenance and
+ * scene narration stay exactly as compiled. Motion cues keep resolving against the spoken
+ * captions below, so correcting display wording cannot move a cue in time.
+ */
+function applyCaptionOverrides(captions: TimelineCaption[], overrides: CompileOptions['captionOverrides']): TimelineCaption[] {
+  if (!overrides || overrides.length === 0) return captions;
+  const next = captions.map(cue => ({ ...cue }));
+  const byScene = new Map<string, number[]>();
+  next.forEach((cue, index) => {
+    const list = byScene.get(cue.sceneId) ?? [];
+    list.push(index);
+    byScene.set(cue.sceneId, list);
+  });
+  const ordered = [...overrides].sort((a, b) => a.sceneId.localeCompare(b.sceneId) || a.index - b.index);
+  for (const override of ordered) {
+    const at = byScene.get(override.sceneId)?.[override.index];
+    if (at === undefined) continue;
+    next[at] = { ...next[at]!, text: override.text };
+  }
+  return next;
 }
 
 function plateRetimes(pkg: ComfyrizzPackage, fps: number): PlateRetime[] {
@@ -455,7 +710,7 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
   if (!pkg || !Array.isArray(pkg.scenes) || pkg.scenes.length === 0) {
     throw new TimelineError('empty-package', 'A package needs at least one scene.');
   }
-  const fps = isFiniteNumber(pkg.format?.fps) && pkg.format.fps > 0 ? Math.floor(pkg.format.fps) : DEFAULT_FPS;
+  const fps = projectFps(pkg.format);
   const ids = new Set<string>();
   for (const scene of pkg.scenes) {
     if (!scene.id || typeof scene.id !== 'string') throw new TimelineError('missing-scene-id', 'Every scene needs a string id.');
@@ -516,8 +771,18 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
     requiresAcceptance: requested !== null && requested !== actual,
   };
 
-  const { captions, warnings: captionWarnings } = buildCaptions(scenes, pkg, options, fps);
-  warnings.push(...captionWarnings);
+  const built = buildCaptions(scenes, pkg, options, fps);
+  const captions = applyCaptionOverrides(built.captions, options.captionOverrides);
+  warnings.push(...built.warnings);
+
+  // Storytelling cues: resolve against the spoken captions (before display-only wording fixes),
+  // and never change scene timing or narration.
+  const { byScene: motionCuesByScene, diagnostics: motionCueDiagnostics } = resolveMotionCues(pkg, scenes, built.captions, fps);
+  for (const scene of scenes) {
+    const cues = motionCuesByScene.get(scene.id);
+    if (cues) scene.motionCues = cues;
+  }
+  warnings.push(...motionCueDiagnostics.map(diagnostic => diagnostic.message));
 
   const presenters = resolvePresenterTrack(pkg, scenes);
 
@@ -537,7 +802,9 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
     provisional,
     warnings,
     proposals,
-    sourceHash: createHash('sha256').update(canonicalJson(pkg)).digest('hex'),
+    // Only emitted when a cue phrase needed a diagnostic, so ordinary packages are unchanged.
+    ...(motionCueDiagnostics.length > 0 ? { motionCueDiagnostics } : {}),
+    sourceHash: sha256Hex(canonicalJson(pkg)),
   };
 
   return { ...withoutHash, hash: hashTimeline(withoutHash) };

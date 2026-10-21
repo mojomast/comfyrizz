@@ -23,6 +23,8 @@ ENGINE_QWEN = "qwen3-tts"
 SAMPLE_RATE = 24_000
 BASE_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+CUSTOM_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+CUSTOM_SPEAKERS = {"ryan", "aiden", "vivian", "serena", "uncle_fu", "dylan", "eric", "ono_anna", "sohee"}
 MODEL_LICENSE = "Apache-2.0"
 ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
 ASR_MODEL = "Qwen/Qwen3-ASR-0.6B"
@@ -31,6 +33,8 @@ DEFAULT_REFERENCE = "Here is what changed, why it matters, and how it works. We 
 _LANG_NAMES = {
     "en": "English",
     "fr": "French",
+    "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "de": "German",
+    "it": "Italian", "pt": "Portuguese", "es": "Spanish", "ru": "Russian",
 }
 
 
@@ -59,12 +63,7 @@ def strict_voice(voice_cfg: dict | None) -> bool:
 
 
 def qwen_language_name(voice_cfg: dict | None) -> str:
-    """``English`` or ``French`` for the Qwen3-TTS call.
-
-    ``voice.lang`` wins (``en`` / ``fr``). Otherwise ``voice.language``
-    (``en-us``, ``fr-fr``, …) is mapped. Anything else stays English: this
-    backend promises English and French, and does not guess a third language.
-    """
+    """Map a supported Qwen language tag; voice.lang wins over voice.language."""
     raw = ""
     if isinstance(voice_cfg, dict):
         candidate = voice_cfg.get("lang")
@@ -73,9 +72,7 @@ def qwen_language_name(voice_cfg: dict | None) -> str:
         if isinstance(candidate, str):
             raw = candidate
     key = raw.strip().lower().replace("_", "-")
-    if key.startswith("fr"):
-        return _LANG_NAMES["fr"]
-    return _LANG_NAMES["en"]
+    return _LANG_NAMES.get(key.split('-')[0], "English")
 
 
 def to_sample_rate(audio: np.ndarray, src_rate: int, dst_rate: int = SAMPLE_RATE) -> np.ndarray:
@@ -189,7 +186,11 @@ class Qwen3Asr:
 
 
 class Qwen3Tts:
-    """Real VoiceDesign + Base-clone adapter. Tests never construct a successful call."""
+    """Real designed-reference cloning or instruction-following preset narration."""
+
+    def __init__(self, voice_cfg: dict | None = None):
+        self.config = voice_cfg or {}
+        self.custom = self.config.get("qwen_mode", "design") == "custom"
 
     def available(self) -> bool:
         return importlib.util.find_spec("qwen_tts") is not None
@@ -200,6 +201,12 @@ class Qwen3Tts:
         model_cls = getattr(qwen_tts, "Qwen3TTSModel", None)
         if model_cls is None:
             raise QwenRuntimeUnavailable("qwen_tts.Qwen3TTSModel is missing")
+        if self.custom:
+            speaker = self.config.get("voice", "Ryan")
+            if speaker.lower() not in CUSTOM_SPEAKERS:
+                raise ValueError(f"Unknown Qwen CustomVoice speaker: {speaker}")
+            self._base = model_cls.from_pretrained(model_path(CUSTOM_MODEL), **model_options())
+            return {"speaker": speaker}
         self._seed(42)
         design = model_cls.from_pretrained(model_path(DESIGN_MODEL), **model_options())
         wavs, sr = design.generate_voice_design(text=reference_line, language=lang, instruct=persona, max_new_tokens=2048)
@@ -227,17 +234,20 @@ class Qwen3Tts:
         model_cls = getattr(qwen_tts, "Qwen3TTSModel", None)
         if model_cls is None:
             raise QwenRuntimeUnavailable("qwen_tts.Qwen3TTSModel is missing")
-        base = getattr(self, "_base", None) or model_cls.from_pretrained(model_path(BASE_MODEL), **model_options())
+        base = getattr(self, "_base", None) or model_cls.from_pretrained(model_path(CUSTOM_MODEL if self.custom else BASE_MODEL), **model_options())
         self._base = base
         self._seed(seed)
         kwargs = {
             "text": text,
             "language": lang,
-            "voice_clone_prompt": prompt.get("voice_clone_prompt", prompt),
             "max_new_tokens": 2048,
+            "non_streaming_mode": self.config.get("non_streaming", self.custom),
         }
-        # Base supports cloning, not instruction following. Persona is applied in VoiceDesign.
-        wavs, sr = base.generate_voice_clone(**kwargs)
+        if self.custom:
+            wavs, sr = base.generate_custom_voice(**kwargs, speaker=prompt["speaker"], instruct=instruct or "")
+        else:
+            # Base supports cloning, not instruction following. Direction is applied in VoiceDesign.
+            wavs, sr = base.generate_voice_clone(**kwargs, voice_clone_prompt=prompt.get("voice_clone_prompt", prompt))
         audio = to_sample_rate(np.asarray(wavs[0], dtype=np.float32), int(sr), SAMPLE_RATE)
         return audio, SAMPLE_RATE
 

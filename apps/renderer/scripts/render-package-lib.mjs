@@ -1,17 +1,18 @@
 // Shared CPU render path: validate package -> A2 compile -> Remotion render -> ffprobe-free
 // metadata. Used by the C1 dev route and the C2 local server. No network.
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { compileTimeline, measuredFromReport } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
 import { narrationWarning } from '../src/audio-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { normalizeMixLoudness } from './mix-loudness.mjs';
+import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '..', '..', '..');
@@ -39,18 +40,17 @@ export function inlineGeneratedAssets(pkg, packageDir) {
   return assets;
 }
 
-function assetDirs(pkg) {
-  const dirs = new Set();
+function assetFiles(pkg) {
+  const files = new Set();
   const add = file => {
     if (typeof file !== 'string') return;
-    const [top] = file.split('/');
-    if (top && top !== file) dirs.add(top);
+    files.add(file);
   };
   for (const asset of Object.values(pkg.assets ?? {})) add(asset?.file);
   // B1: a brand font lives in `theme.fonts[].file`, not in `assets`, but the
-  // renderer still loads it through `staticFile`, so its directory must be copied.
+  // renderer still loads it through `staticFile`, so its bytes must be copied.
   for (const font of pkg.theme?.fonts ?? []) add(font?.file);
-  return [...dirs];
+  return [...files];
 }
 
 function needsMediaPublicDir(pkg) {
@@ -111,20 +111,7 @@ export function applyFinalRender(pkg, packageDir, final = {}) {
 export function narrationOptions(packageDir) {
   const durationsPath = join(packageDir, 'audio', 'durations.json');
   if (!existsSync(durationsPath)) return {};
-  const durations = JSON.parse(readFileSync(durationsPath, 'utf8'));
-  const narration = {};
-  for (const [sceneId, scene] of Object.entries(durations.scenes ?? {})) {
-    narration[sceneId] = (scene.chunks ?? []).map(chunk =>
-      chunk.words && chunk.words.length > 0
-        ? { text: chunk.text, seconds: chunk.seconds, words: chunk.words }
-        : { text: chunk.text, seconds: chunk.seconds },
-    );
-  }
-  return {
-    narration,
-    narrationGapSeconds: durations.gapSeconds,
-    narrationPaddingSeconds: durations.paddingSeconds,
-  };
+  return measuredFromReport(JSON.parse(readFileSync(durationsPath, 'utf8')));
 }
 
 /**
@@ -137,13 +124,19 @@ export function missingMediaFiles(pkg, packageDir) {
   return listMediaFiles(pkg).filter(item => !existsSync(join(packageDir, item.file)));
 }
 
-/** Copy fonts + the package's asset folders into a throwaway Remotion public dir. */
+/** Copy fonts + declared asset bytes into a throwaway Remotion public dir. */
 export function preparePublicDir(pkg, packageDir) {
   const temp = mkdtempSync(join(tmpdir(), 'comfyrizz-public-'));
   cpSync(join(rendererDir, 'public', 'fonts'), join(temp, 'fonts'), { recursive: true });
-  for (const dir of assetDirs(pkg)) {
-    const source = join(packageDir, dir);
-    if (existsSync(source)) cpSync(source, join(temp, dir), { recursive: true });
+  for (const file of assetFiles(pkg)) {
+    const source = join(packageDir, file);
+    // Colab links generated media into the project. Remotion's bundle copy skips
+    // symlinks, so stage real bytes before handing the public directory to it.
+    if (existsSync(source)) {
+      const dest = join(temp, file);
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(source, dest);
+    }
   }
   return temp;
 }
@@ -160,12 +153,23 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
   }
   // A9: the final-export option overrides the format to 1920×1080 and prefers upscaled media.
   const applied = final ? applyFinalRender(raw, packageDir, typeof final === 'boolean' ? {} : final) : null;
-  const pkg = applied?.pkg ?? raw;
+  let pkg = applied?.pkg ?? raw;
   // L1: a language variant has its own narration text, so callers pass the
   // variant's measured durations (or `{}` to re-estimate from the translated
   // `scene.narration`) instead of the base package's English durations.
   const compileOptions = narration !== undefined ? narration : narrationOptions(packageDir);
-  const timeline = compileTimeline(pkg, compileOptions);
+  let timeline = compileTimeline(pkg, compileOptions);
+  if (loadCompositionManifest(packageDir, pkg)) {
+    if (pkg.voice?.enabled && timeline.provisional) throw new Error('Composition narration timing is still provisional');
+    const task = spawnSync(process.execPath, [join(here, 'composition-task.mjs')], {
+      input: JSON.stringify({ pkg, packageDir: resolve(packageDir), timeline }),
+      encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15 * 60 * 1000,
+    });
+    if (task.status !== 0) throw new Error(`Composition preparation failed: ${(task.stderr || task.error?.message || '').slice(-1500)}`);
+    pkg = JSON.parse(task.stdout).pkg;
+    if (!validatePackage(pkg).valid) throw new Error('Materialized render package failed validation');
+    timeline = compileTimeline(pkg, compileOptions);
+  }
   if (applied) {
     onLog(`final render ${applied.width}×${applied.height}${applied.used.length > 0 ? `, ${applied.used.length} upscaled variant(s)` : ', no upscaled variants'}`);
     for (const item of applied.used) onLog(`using upscaled ${item.id}: ${item.file}`);

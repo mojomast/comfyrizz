@@ -1,0 +1,184 @@
+{
+  "schema": "comfyrizz.character-library/v1",
+  "synthetic": true,
+  "characters": [
+    {
+      "schema": "comfyrizz.character/v1",
+      "id": "chr_1111111111111111",
+      "revision": 3,
+      "name": "Pip",
+      "handle": "pip",
+      "role": "presenter",
+      "kind": "fictional",
+      "summary": "Round, cheerful coffee-bean mascot who hosts the grinder launch.",
+      "visual": {
+        "identityPrompt": "small round coffee bean, glossy brown, big white eyes, tiny arms",
+        "negative": "human face, text, extra limbs",
+        "style": "flat 3D, soft studio light",
+        "palette": [
+          "#5b3a1e",
+          "#f4e9dc"
+        ],
+        "wardrobe": [
+          {
+            "id": "w1",
+            "label": "barista apron",
+            "prompt": "green apron with a bean logo",
+            "default": true
+          },
+          {
+            "id": "w2",
+            "label": "workshop apron",
+            "prompt": "leather workshop apron with brass clips"
+          }
+        ],
+        "expressions": [
+          {
+            "id": "e1",
+            "label": "delighted",
+            "prompt": "wide smile, eyes closed"
+          },
+          {
+            "id": "e2",
+            "label": "curious",
+            "prompt": "one eyebrow raised, leaning forward"
+          }
+        ],
+        "images": [
+          {
+            "imgId": "img_1111111111111111",
+            "view": "front",
+            "primary": true,
+            "source": "upload",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "width": 768,
+            "height": 768
+          }
+        ],
+        "sheet": {
+          "status": "ready"
+        },
+        "seed": 123456789,
+        "identity": {
+          "method": "klein_ref"
+        }
+      },
+      "voice": {
+        "engine": "kokoro",
+        "voice": "am_michael",
+        "speed": 0.98,
+        "chunking": "paragraph",
+        "presetId": "michael-context",
+        "sampleLines": [
+          "Fresh is best.",
+          "Let us grind something good."
+        ]
+      },
+      "bible": {
+        "personality": "upbeat, a little nerdy about coffee",
+        "mannerisms": [
+          "bounces when excited",
+          "taps the scoop twice before measuring"
+        ],
+        "catchphrases": [
+          "Fresh is best."
+        ],
+        "speakingStyle": "short sentences, warm and precise, no jargon",
+        "do": [
+          "always smiles at the end of a scene",
+          "keeps the bean logo facing the camera"
+        ],
+        "dont": [
+          "never shown drinking coffee",
+          "never removes the apron on camera"
+        ],
+        "notes": "Synthetic demo character. Every detail here is invented for the cassette fixture."
+      },
+      "tags": [
+        "coffee",
+        "mascot"
+      ],
+      "createdAt": "2026-10-20T12:00:00.000Z",
+      "updatedAt": "2026-10-21T09:00:00.000Z"
+    },
+    {
+      "schema": "comfyrizz.character/v1",
+      "id": "chr_2222222222222222",
+      "revision": 2,
+      "name": "Nib",
+      "handle": "nib",
+      "role": "supporting",
+      "kind": "fictional",
+      "summary": "Tiny cocoa-nib helper who carries the measuring scoop.",
+      "visual": {
+        "identityPrompt": "tiny cocoa nib creature, matte brown, stubby legs, oversized scoop",
+        "negative": "human face, text, sharp teeth",
+        "style": "flat 3D, soft studio light",
+        "palette": [
+          "#3a2418",
+          "#d9c7a7"
+        ],
+        "wardrobe": [
+          {
+            "id": "w1",
+            "label": "tool belt",
+            "prompt": "mini canvas tool belt with a measuring scoop",
+            "default": true
+          }
+        ],
+        "expressions": [
+          {
+            "id": "e1",
+            "label": "saluting",
+            "prompt": "one stubby arm raised in a salute"
+          }
+        ],
+        "images": [
+          {
+            "imgId": "img_2222222222222222",
+            "view": "three_quarter",
+            "primary": true,
+            "source": "upload",
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "width": 640,
+            "height": 640
+          }
+        ],
+        "sheet": {
+          "status": "none"
+        },
+        "seed": null,
+        "identity": {
+          "method": "klein_ref"
+        }
+      },
+      "voice": {
+        "engine": "none",
+        "sampleLines": []
+      },
+      "bible": {
+        "personality": "eager, literal-minded helper",
+        "mannerisms": [
+          "salutes with the scoop"
+        ],
+        "catchphrases": [
+          "Scoop first, ask later."
+        ],
+        "speakingStyle": "clipped and cheerful",
+        "do": [
+          "stays at Pip's side until the final shot"
+        ],
+        "dont": [
+          "never speaks over Pip"
+        ],
+        "notes": "Synthetic demo character. No voice in this video; Pip keeps the single narrator voice."
+      },
+      "tags": [
+        "cocoa",
+        "sidekick"
+      ],
+      "createdAt": "2026-10-20T12:00:00.000Z",
+      "updatedAt": "2026-10-20T18:00:00.000Z"
+    }
+  ]
+}

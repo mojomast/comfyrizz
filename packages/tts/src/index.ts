@@ -20,6 +20,7 @@ export interface NarrationChunk {
   text: string;
   seconds: number;
   words?: NarrationWord[];
+  timing?: 'aligner' | 'syllable-fallback';
 }
 
 export interface SceneNarration {
@@ -85,7 +86,10 @@ export function parseDurations(input: unknown): NarrationDurations {
         throw new Error(`scene ${sceneId} chunk ${index} is invalid`);
       }
       if (!(chunk.seconds > 0)) throw new Error(`scene ${sceneId} chunk ${index} has no duration`);
-      return { text: chunk.text, seconds: chunk.seconds, words: parseWords(chunk.words, chunk.seconds, sceneId, index) };
+      const words = parseWords(chunk.words, chunk.seconds, sceneId, index);
+      const timing: NarrationChunk['timing'] = chunk.timing === 'aligner' || chunk.timing === 'syllable-fallback'
+        ? chunk.timing : words?.length && String(input.engine ?? '').startsWith('kokoro') ? 'syllable-fallback' : undefined;
+      return { text: chunk.text, seconds: chunk.seconds, words, ...(timing ? { timing } : {}) };
     });
     const seconds = typeof value.seconds === 'number' ? value.seconds : 0;
     scenes[sceneId] = {
@@ -147,7 +151,8 @@ function parseWords(input: unknown, seconds: number, sceneId: string, chunkIndex
 export function compileOptionsFromDurations(durations: NarrationDurations): CompileNarrationOptions {
   const narration: Record<string, NarrationChunk[]> = {};
   for (const [sceneId, scene] of Object.entries(durations.scenes)) {
-    narration[sceneId] = scene.chunks.map(chunk => (chunk.words && chunk.words.length > 0 ? { text: chunk.text, seconds: chunk.seconds, words: chunk.words } : { text: chunk.text, seconds: chunk.seconds }));
+    narration[sceneId] = scene.chunks.map(chunk => ({ text: chunk.text, seconds: chunk.seconds,
+      ...(chunk.words?.length ? { words: chunk.words } : {}), ...(chunk.timing ? { timing: chunk.timing } : {}) }));
   }
   return {
     narration,

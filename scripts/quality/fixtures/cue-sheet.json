@@ -1,0 +1,22 @@
+{
+  "stems": ["room_tone", "foley", "music", "dialogue"],
+  "cues": [
+    {"id": "cue_kettle", "stem": "foley", "sound": "kettle", "shot": "shot_01", "eventFrame": 100, "visualEvent": "kettle_boil", "gainDb": -20},
+    {"id": "cue_brush", "stem": "foley", "sound": "brush", "shot": "shot_02", "eventFrame": 200, "visualEvent": "brush_stroke", "gainDb": -25},
+    {"id": "cue_bell_off", "stem": "foley", "sound": "bell", "shot": "shot_03", "eventFrame": 300, "visualEvent": "bell_ring", "gainDb": -30},
+    {"id": "cue_drip", "stem": "foley", "sound": "ceiling_drip", "shot": "shot_04", "eventFrame": 400, "visualEvent": "ceiling_drip", "gainDb": -35},
+    {"id": "cue_music_01", "stem": "music", "sound": "work_stoppage", "shot": "shot_05", "eventFrame": 500, "visualEvent": "work_stop", "gainDb": -10},
+    {"id": "cue_music_over_pause", "stem": "music", "sound": "kettle", "shot": "shot_01", "eventFrame": 220, "visualEvent": "kettle_boil", "gainDb": -15}
+  ],
+  "pauses": [
+    {"id": "pause_reaction", "startFrame": 210, "endFrame": 230, "reason": "reaction pause after dialogue"}
+  ],
+  "shots": {
+    "shot_01": {"visualEventFrames": {"kettle_boil": 100}, "reactionPause": [210, 230]},
+    "shot_02": {"visualEventFrames": {"brush_stroke": 200}},
+    "shot_03": {"visualEventFrames": {"bell_ring": 310}},
+    "shot_04": {"visualEventFrames": {"ceiling_drip": 400}},
+    "shot_05": {"visualEventFrames": {"work_stop": 500}},
+    "shot_06": {"visualEventFrames": {"ceiling_drip": 410}}
+  }
+}

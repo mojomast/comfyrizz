@@ -3,16 +3,41 @@
 // captions.vtt, CREDITS.md and package.zip. package.zip carries only assets the
 // v0.1 rights policy allows; everything else is listed with its source and
 // licence reason in CREDITS.md and manifest.json. No network and no keys.
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 import { buildCredits, buildPackageZip, isAssetRedistributable } from '../../../packages/sources/dist/src/index.js';
 import { captionsToSrt, captionsToVtt, captionsToWordVtt } from '../../../packages/tts/dist/src/index.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions } from '../../renderer/scripts/render-package-lib.mjs';
 import { buildSocialPack, SOCIAL_PIXEL_FILES } from './social.mjs';
 import { collectCapturedWorkflows } from './workflow.mjs';
+import { collectCompositionExtras, loadCompositionManifest, validateCompositionManifest, compileComposition } from '../../../packages/compositions/src/index.mjs';
+import { collectCompositionCacheExtras, materializeCompositions } from '../../renderer/scripts/composition-worker.mjs';
 
 export const EXPORT_FILE_NAMES = ['video.mp4', 'captions.srt', 'captions.vtt', 'CREDITS.md', 'package.zip'];
+
+async function hashFile(file) {
+  const digest = createHash('sha256');
+  for await (const chunk of createReadStream(file)) digest.update(chunk);
+  return digest.digest('hex');
+}
+
+// Composition export receipts cover actual media/font/sidecar bytes, not only
+// caller-maintained hashes. Source edits and ordinary plate edits both matter.
+export async function compositionRenderFingerprint({ pkg, timeline, mixAudio, sources, packageDir }) {
+  const names = new Set(Object.values(pkg.assets ?? {}).flatMap(asset => [asset.file, ...Object.values(asset.variants ?? {}).map(variant => variant.file)]).filter(Boolean));
+  for (const font of pkg.theme?.fonts ?? []) if (font.file) names.add(font.file);
+  if (existsSync(join(packageDir, 'media.json'))) names.add('media.json');
+  const root = realpathSync(packageDir);
+  const inputs = [];
+  for (const name of [...names].sort()) {
+    const file = resolve(root, name);
+    if (!file.startsWith(root + sep) || !realpathSync(file).startsWith(root + sep) || !statSync(file).isFile()) throw new Error('Composition export input escapes the project or is not a file');
+    inputs.push([name, await hashFile(file)]);
+  }
+  return createHash('sha256').update(JSON.stringify({ pkg, timeline, mixAudio, inputs, sources: sources.map(extra => [extra.path, createHash('sha256').update(extra.data).digest('hex')]) })).digest('hex');
+}
 
 /** K1: the word-level VTT is optional; it is written only when cues carry word timings. */
 export function hasWordCues(cues) {
@@ -106,11 +131,11 @@ export function collectNarrationExtras(pkg, packageDir) {
  * @param {string} options.exportsDir   every package gets `<exportsDir>/<package-id>/`
  * @param {(packagePath: string, outputPath: string, opts: object) => object} options.render
  */
-export function createExporter({ exportsDir, render } = {}) {
+export function createExporter({ exportsDir, render, materialize = materializeCompositions } = {}) {
   if (!exportsDir) throw new Error('createExporter needs an exportsDir');
   if (typeof render !== 'function') throw new Error('createExporter needs a render function');
 
-  async function exportPackage({ pkg, packagePath, revision = null, force = false, onLog = () => {}, narration, mixAudio } = {}) {
+  async function exportPackage({ pkg, packagePath, revision = null, force = false, onLog = () => {}, narration, mixAudio, signal, verifiedVideoSha256 } = {}) {
     if (!pkg || typeof pkg !== 'object') throw new Error('exportPackage needs a package');
     if (!packagePath) throw new Error('exportPackage needs a packagePath');
     const packageDir = dirname(packagePath);
@@ -122,21 +147,52 @@ export function createExporter({ exportsDir, render } = {}) {
     // L1: a language variant passes its own narration (`{}` re-estimates from
     // the translated `scene.narration`) so captions never show the base language.
     const compileOptions = narration !== undefined ? narration : narrationOptions(packageDir);
-    const timeline = compileTimeline(pkg, compileOptions);
+    let timeline = compileTimeline(pkg, compileOptions);
+    const compositionExtras = collectCompositionExtras(pkg, packageDir);
+    if (compositionExtras.length) {
+      if (pkg.voice?.enabled && timeline.provisional) throw new Error('Composition narration timing is still provisional');
+      const prepared = await materialize({ pkg, packageDir, timeline, signal });
+      pkg = prepared.pkg;
+      timeline = compileTimeline(pkg, compileOptions);
+    }
     if (timeline.provisional) onLog('warning: narration is not measured; the timeline is provisional');
 
     const videoPath = join(dir, 'video.mp4');
+    const fingerprint = compositionExtras.length ? await compositionRenderFingerprint({ pkg, timeline, mixAudio, sources: compositionExtras, packageDir }) : null;
+    const receiptPath = join(dir, 'composition-video.json');
+    const videoHash = () => hashFile(videoPath);
+    let matchingComposition = !fingerprint && !existsSync(receiptPath);
+    if (fingerprint && existsSync(videoPath)) {
+      const sha256 = await videoHash();
+      if (verifiedVideoSha256 === sha256) matchingComposition = true;
+      else if (existsSync(receiptPath)) {
+        try {
+          const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
+          matchingComposition = receipt.fingerprint === fingerprint && receipt.sha256 === sha256;
+        } catch { /* An invalid receipt is never evidence of a reusable export. */ }
+      }
+    }
     let reused = false;
     let video;
-    if (!force && existsSync(videoPath)) {
+    if (!force && existsSync(videoPath) && matchingComposition) {
       reused = true;
       video = { output: videoPath, frames: timeline.durationInFrames, hash: timeline.hash, bytes: statSync(videoPath).size };
       onLog(`reusing ${videoPath} (${video.bytes} bytes)`);
     } else {
       onLog(`rendering ${videoPath}`);
-      video = await render(packagePath, videoPath, { onLog, ...(narration !== undefined ? { narration } : {}), ...(mixAudio === false ? { mixAudio: false } : {}) });
+      // The renderer needs the materialized package while relative assets still
+      // resolve against the source directory. Never rewrite the saved package.
+      const renderPath = fingerprint ? join(packageDir, `.composition-export-${randomUUID()}.json`) : packagePath;
+      try {
+        if (fingerprint) writeFileSync(renderPath, JSON.stringify(pkg), { flag: 'wx', mode: 0o600 });
+        video = await render(renderPath, videoPath, { onLog, signal, ...(narration !== undefined ? { narration } : {}), ...(mixAudio === false ? { mixAudio: false } : {}) });
+      } finally {
+        if (fingerprint) rmSync(renderPath, { force: true });
+      }
       if (!existsSync(videoPath)) throw new Error('render finished without writing an MP4');
     }
+    if (fingerprint) writeFileSync(receiptPath, JSON.stringify({ fingerprint, sha256: await videoHash() }));
+    else rmSync(receiptPath, { force: true });
 
     const cues = Array.isArray(timeline.captions) ? timeline.captions : [];
     const srtPath = join(dir, 'captions.srt');
@@ -152,7 +208,7 @@ export function createExporter({ exportsDir, render } = {}) {
     const generatedAt = new Date().toISOString();
     const social = buildSocialPack({ mp4: videoPath, timeline, pkg, outDir: dir, onLog });
     const blocked = blockedSceneAsset(pkg);
-    const extras = narration === undefined ? collectNarrationExtras(pkg, packageDir) : [];
+    const extras = [...(narration === undefined ? collectNarrationExtras(pkg, packageDir) : []), ...compositionExtras, ...await collectCompositionCacheExtras(pkg, packageDir)];
     const extraExcluded = [];
     for (const file of social) {
       const pixels = SOCIAL_PIXEL_FILES.includes(file.name);
@@ -223,7 +279,8 @@ export function createExporter({ exportsDir, render } = {}) {
   }
 
   /**
-   * L1: export a bundle for every variant. Each variant package is written as a
+   * L1: export a bundle for every variant. Composition variants stage their base
+   * inputs and variant-scoped source in isolation; ordinary variants use a
    * sidecar in the base package dir (so its relative asset paths resolve), then
    * exported as its own `exports/<variant-id>/` bundle, and a `variants.json`
    * manifest is written into the base bundle listing language, aspect, frame
@@ -237,13 +294,46 @@ export function createExporter({ exportsDir, render } = {}) {
     if (!packagePath) throw new Error('exportVariantSet needs a packagePath');
     if (!Array.isArray(variants) || variants.length === 0) throw new Error('exportVariantSet needs variants');
     const packageDir = dirname(packagePath);
+    const compositionManifest = loadCompositionManifest(packageDir, pkg);
     const sidecars = new Set();
+    const scratchDirs = new Set();
     const results = [];
     try {
       for (const variant of variants) {
         if (!variant?.package || !variant.slug) throw new Error('each variant needs a package and slug');
-        const variantPath = join(packageDir, `${variant.slug}.variant.json`);
-        sidecars.add(variantPath);
+        let variantPath;
+        if (compositionManifest) {
+          const id = variant.package.id;
+          if (typeof id !== 'string' || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('Invalid composition variant package id');
+          const retained = new Set((variant.package.scenes ?? []).map(scene => scene.id));
+          const source = { ...compositionManifest, scenes: compositionManifest.scenes.filter(entry => retained.has(entry.sceneId)) };
+          validateCompositionManifest(source, variant.package);
+          mkdirSync(exportsDir, { recursive: true });
+          const scratch = mkdtempSync(join(exportsDir, '.composition-variant-'));
+          scratchDirs.add(scratch);
+          // Dynamic import avoids export <-> pipeline-media initialization cycles.
+          const { stagePipelineInputs } = await import('./pipeline-media.mjs');
+          await stagePipelineInputs(pkg, packageDir, scratch);
+          const mediaPath = join(packageDir, 'media.json');
+          if (existsSync(mediaPath)) {
+            if (!realpathSync(mediaPath).startsWith(realpathSync(packageDir) + sep) || !statSync(mediaPath).isFile()) throw new Error('Composition variant media sidecar escapes the project or is not a file');
+            writeFileSync(join(scratch, 'media.json'), readFileSync(mediaPath));
+          }
+          const sourceDir = join(scratch, 'compositions', id);
+          mkdirSync(sourceDir, { recursive: true });
+          writeFileSync(join(sourceDir, 'manifest.json'), `${JSON.stringify(source, null, 2)}\n`);
+          const timeline = compileTimeline(variant.package, variant.narration !== undefined ? variant.narration : narrationOptions(scratch));
+          if (variant.package.voice?.enabled && timeline.provisional) throw new Error('Composition variant narration timing is still provisional; provide measured variant narration');
+          // Catch missing datasets, invalid local frame cues and unsupported phrase
+          // bindings before a materializer/render can silently use fallback scenes.
+          for (const entry of source.scenes) compileComposition({ entry, pkg: variant.package,
+            scene: variant.package.scenes.find(scene => scene.id === entry.sceneId),
+            timelineScene: timeline.scenes.find(scene => scene.id === entry.sceneId), timeline });
+          variantPath = join(scratch, 'package.json');
+        } else {
+          variantPath = join(packageDir, `${variant.slug}.variant.json`);
+          sidecars.add(variantPath);
+        }
         writeFileSync(variantPath, `${JSON.stringify(variant.package, null, 2)}\n`);
         onLog(`variant ${variant.slug}: ${variant.package.id} ${variant.package.format?.width}x${variant.package.format?.height}`);
         const result = await exportPackage({
@@ -259,6 +349,7 @@ export function createExporter({ exportsDir, render } = {}) {
       }
     } finally {
       for (const sidecar of sidecars) rmSync(sidecar, { force: true });
+      for (const scratch of scratchDirs) rmSync(scratch, { recursive: true, force: true });
     }
 
     const manifest = {
