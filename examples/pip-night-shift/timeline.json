@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "mode": "flexible",
+  "durationInFrames": 572,
+  "scenes": [
+    {
+      "id": "s1_dawn",
+      "layout": "title",
+      "variant": "centered",
+      "from": 0,
+      "durationInFrames": 150,
+      "transitionInFrames": 0,
+      "transitionOutFrames": 10,
+      "copy": {
+        "kicker": "05:58, Rue Lumière",
+        "headline": "Pip's Night Shift",
+        "sub": "A small café wakes before the city."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 1058
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": "Dawn comes to a small café on Rue Lumière. Pip is already awake.",
+      "provisional": false
+    },
+    {
+      "id": "s2_counter",
+      "layout": "hero",
+      "variant": "split",
+      "from": 140,
+      "durationInFrames": 150,
+      "transitionInFrames": 10,
+      "transitionOutFrames": 9,
+      "copy": {
+        "headline": "Still warm. Still open.",
+        "sub": "Pip, barista bot",
+        "body": "Rain and roasted coffee."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 2058
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": {
+        "kicker": "Pip",
+        "text": "Pip, barista bot"
+      },
+      "narration": "Pip works the counter, still warm from the first pot of the night.",
+      "provisional": false
+    },
+    {
+      "id": "s3_juno",
+      "layout": "stat",
+      "from": 281,
+      "durationInFrames": 150,
+      "transitionInFrames": 9,
+      "transitionOutFrames": 9,
+      "copy": {
+        "headline": "Orders before seven",
+        "sub": "Counted before sunrise.",
+        "body": "347 orders before 7 am"
+      },
+      "data": {
+        "dataset": "d_orders",
+        "display": "counter"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 3058
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": {
+        "kicker": "Juno",
+        "text": "Juno, courier"
+      },
+      "narration": "Three hundred and forty-seven orders before seven. Juno brings the last one in.",
+      "provisional": false
+    },
+    {
+      "id": "s4_outro",
+      "layout": "title",
+      "variant": "outro",
+      "from": 422,
+      "durationInFrames": 150,
+      "transitionInFrames": 9,
+      "transitionOutFrames": 0,
+      "copy": {
+        "kicker": "Pip's Night Shift",
+        "headline": "Open all night",
+        "cta": "Come in",
+        "sub": "A fictional café, Rue Lumière."
+      },
+      "data": null,
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 4058
+        }
+      },
+      "foreground": [],
+      "mediaOnly": false,
+      "lowerThird": null,
+      "narration": null,
+      "provisional": false
+    }
+  ],
+  "captions": [
+    {
+      "text": "Dawn comes to a small café on Rue Lumière.",
+      "from": 0,
+      "to": 100,
+      "sceneId": "s1_dawn",
+      "estimated": true
+    },
+    {
+      "text": "Pip is already awake.",
+      "from": 100,
+      "to": 150,
+      "sceneId": "s1_dawn",
+      "estimated": true
+    },
+    {
+      "text": "Pip works the counter, still warm from the first pot of the night.",
+      "from": 140,
+      "to": 290,
+      "sceneId": "s2_counter",
+      "estimated": true
+    },
+    {
+      "text": "Three hundred and forty-seven orders before seven.",
+      "from": 281,
+      "to": 377,
+      "sceneId": "s3_juno",
+      "estimated": true
+    },
+    {
+      "text": "Juno brings the last one in.",
+      "from": 377,
+      "to": 431,
+      "sceneId": "s3_juno",
+      "estimated": true
+    }
+  ],
+  "plates": [],
+  "target": {
+    "requested": null,
+    "actual": 572,
+    "deviationFrames": 0,
+    "requiresAcceptance": false
+  },
+  "provisional": false,
+  "warnings": [
+    "Captions for s1_dawn are estimated until narration audio is measured.",
+    "Captions for s2_counter are estimated until narration audio is measured.",
+    "Captions for s3_juno are estimated until narration audio is measured."
+  ],
+  "proposals": [],
+  "sourceHash": "b899b9783104cf3c0a1577e57c4889c66c6e9186fef8351b66c87f119bfb24b5",
+  "hash": "b6a5eab79fca48c3ef1ce8714c024ea6639c1b85ae07dc45c85eb16ff553f3b1"
+}

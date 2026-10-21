@@ -1,0 +1,197 @@
+{
+  "schema": "comfyrizz.takes/v1",
+  "packageId": "pkg_pipnightshift01",
+  "clips": {
+    "a_dawn_plate": {
+      "selected": "tk_9a800606deae",
+      "takes": [
+        {
+          "takeId": "tk_9a800606deae",
+          "assetId": "a_dawn_plate",
+          "n": 1,
+          "file": "takes/a_dawn_plate/tk_9a800606deae.mp4",
+          "sha256": "9a800606deaef43f882bc6f441573b8e70633be33b3386a5d0cbfd55b477d7ca",
+          "bytes": 428160,
+          "media": {
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "frames": 150,
+            "durationSeconds": 5,
+            "codec": "h264",
+            "audio": "muted"
+          },
+          "gen": {
+            "generator": "ltx25",
+            "workflow_sha256": "26a8ea590880881dead7b515ca71b018949e2f5ad541b0247c6279f099ec9272",
+            "seed": 1058,
+            "inputs": {
+              "prompt": "Placeholder dawn exterior for a small café on Rue Lumière, warm 35mm film, slow drift, no text.",
+              "negative": "text, watermark, flicker, distorted faces, extra limbs",
+              "scene": "s1_dawn",
+              "frames": 150,
+              "fps": 30,
+              "seed": 1058
+            }
+          },
+          "createdAt": "2026-10-20T21:10:00.000Z",
+          "verdict": "approved",
+          "verdictNote": "Dawn plate reads warm and steady."
+        }
+      ]
+    },
+    "a_counter_plate": {
+      "selected": "tk_b1c22d07c9c0",
+      "takes": [
+        {
+          "takeId": "tk_b1c22d07c9c0",
+          "assetId": "a_counter_plate",
+          "n": 1,
+          "file": "takes/a_counter_plate/tk_b1c22d07c9c0.mp4",
+          "sha256": "b1c22d07c9c0f6f0915748e3c86e6250d95f80d48bcbb5ce70972f60cb20884e",
+          "bytes": 396544,
+          "media": {
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "frames": 150,
+            "durationSeconds": 5,
+            "codec": "h264",
+            "audio": "muted"
+          },
+          "gen": {
+            "generator": "ltx25",
+            "workflow_sha256": "26a8ea590880881dead7b515ca71b018949e2f5ad541b0247c6279f099ec9272",
+            "seed": 2058,
+            "inputs": {
+              "prompt": "Placeholder counter shot of Pip the barista robot, warm 35mm film, steam and rain, no text.",
+              "negative": "text, watermark, flicker, distorted faces, extra limbs",
+              "scene": "s2_counter",
+              "frames": 150,
+              "fps": 30,
+              "seed": 2058
+            }
+          },
+          "createdAt": "2026-10-20T21:12:00.000Z",
+          "verdict": "approved",
+          "verdictNote": "Counter plate keeps Pip on-model."
+        }
+      ]
+    },
+    "a_juno_plate": {
+      "selected": "tk_27ff51ac5119",
+      "takes": [
+        {
+          "takeId": "tk_72d27ea08916",
+          "assetId": "a_juno_plate",
+          "n": 1,
+          "file": "takes/a_juno_plate/tk_72d27ea08916.mp4",
+          "sha256": "72d27ea089163a8b2632d15a02f16f9683d5ff67322706c2d7d792b0f86d4775",
+          "bytes": 412288,
+          "media": {
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "frames": 150,
+            "durationSeconds": 5,
+            "codec": "h264",
+            "audio": "muted"
+          },
+          "gen": {
+            "generator": "ltx25",
+            "workflow_sha256": "26a8ea590880881dead7b515ca71b018949e2f5ad541b0247c6279f099ec9272",
+            "seed": 3058,
+            "inputs": {
+              "prompt": "Juno the courier bursts through the café door, grey jacket, fast entry, warm 35mm film.",
+              "negative": "text, watermark, flicker, distorted faces, extra limbs",
+              "scene": "s3_juno",
+              "frames": 150,
+              "fps": 30,
+              "seed": 3058
+            }
+          },
+          "correction": {
+            "note": "keep Juno's yellow jacket and helmet, slower entry",
+            "diff": [
+              {
+                "path": "/gen/inputs/prompt",
+                "before": "Juno the courier bursts through the café door, grey jacket, fast entry, warm 35mm film.",
+                "after": "Juno the courier bursts through the café door, keep Juno's yellow jacket and helmet, slower entry, warm 35mm film."
+              }
+            ],
+            "by": "user"
+          },
+          "createdAt": "2026-10-20T22:40:00.000Z",
+          "verdict": "rejected",
+          "verdictNote": "Off-model: grey jacket, no helmet, rushed entry."
+        },
+        {
+          "takeId": "tk_27ff51ac5119",
+          "assetId": "a_juno_plate",
+          "n": 2,
+          "file": "takes/a_juno_plate/tk_27ff51ac5119.mp4",
+          "sha256": "27ff51ac51190db9e4e2966739f72d4fbd2509c035e3408910da2c05dfa96441",
+          "bytes": 431872,
+          "media": {
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "frames": 150,
+            "durationSeconds": 5,
+            "codec": "h264",
+            "audio": "muted"
+          },
+          "gen": {
+            "generator": "ltx25",
+            "workflow_sha256": "26a8ea590880881dead7b515ca71b018949e2f5ad541b0247c6279f099ec9272",
+            "seed": 3158,
+            "inputs": {
+              "prompt": "Juno the courier bursts through the café door, keep Juno's yellow jacket and helmet, slower entry, warm 35mm film.",
+              "negative": "text, watermark, flicker, distorted faces, extra limbs",
+              "scene": "s3_juno",
+              "frames": 150,
+              "fps": 30,
+              "seed": 3158
+            }
+          },
+          "createdAt": "2026-10-20T23:05:00.000Z",
+          "verdict": "unreviewed"
+        }
+      ]
+    },
+    "a_outro_still": {
+      "selected": "tk_c7a196fd5d7e",
+      "takes": [
+        {
+          "takeId": "tk_c7a196fd5d7e",
+          "assetId": "a_outro_still",
+          "n": 1,
+          "file": "takes/a_outro_still/tk_c7a196fd5d7e.png",
+          "sha256": "c7a196fd5d7e4d5f5dbdad11dfbd7f9eae5ecb6bb4c5e50bfec99b928040aafe",
+          "bytes": 186432,
+          "media": {
+            "width": 1920,
+            "height": 1080
+          },
+          "gen": {
+            "generator": "ltx25",
+            "workflow_sha256": "26a8ea590880881dead7b515ca71b018949e2f5ad541b0247c6279f099ec9272",
+            "seed": 4058,
+            "inputs": {
+              "prompt": "Placeholder still of the café's open-all-night window, warm 35mm film, no text.",
+              "negative": "text, watermark, flicker",
+              "scene": "s4_outro",
+              "frames": 1,
+              "fps": 30,
+              "seed": 4058
+            }
+          },
+          "createdAt": "2026-10-20T23:12:00.000Z",
+          "verdict": "approved",
+          "verdictNote": "Outro still reads clearly at 1080p."
+        }
+      ]
+    }
+  },
+  "overrides": []
+}

@@ -1,3 +1,6 @@
+/* UO01: the hidden attribute always wins over component display rules (e.g. .pane{display:flex}). */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #080a0f;
   --panel: #0f131b;
