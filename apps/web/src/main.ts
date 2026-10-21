@@ -2,6 +2,7 @@ import './style.css';
 import './project-chat.css';
 import './characters/characters.css';
 import { mountSettingsCard } from './colab-card';
+import { mountRemoteGpuProgress } from './colab-progress';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
 import { createReferenceApi } from './references/api.ts';
@@ -48,6 +49,9 @@ function md(value: string): string {
 // credential on its behalf.
 const colabHost = document.getElementById('colab-card-host');
 if (colabHost) mountSettingsCard(colabHost, apiFetch);
+// Live gauges of Google Colab runs: the notebook's bars, polled from /api/colab/progress.
+const colabProgressHost = document.getElementById('colab-progress-host');
+if (colabProgressHost) mountRemoteGpuProgress(colabProgressHost, apiFetch);
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 const editorStore = createEditorStore({ package: pkg as never });

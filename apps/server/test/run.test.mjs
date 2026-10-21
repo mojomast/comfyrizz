@@ -250,3 +250,19 @@ test('a render failure cannot publish a successful legacy run finish', async t =
   assert.ok(emitted.some(event => event.type === 'run.failed' && event.phase === 'render'));
   assert.ok(!emitted.some(event => event.type === 'run.finished'));
 });
+
+// PO-3 review: a pipeline spending on the same account must block every run start, including the
+// queued-regenerate drain that calls start() directly.
+test('a busy pipeline refuses run starts at the controller, not only at the HTTP route', async t => {
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'comfyrizz-run-busy-'));
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  let pipelineBusy = true;
+  const controller = createRunController({ runtimeDir, backendFactory: async id => fakeBackend(id), events: null, isBusy: () => pipelineBusy });
+  const refused = await controller.start({ backendId: 'byo-comfyui', pkg: fixturePackage() });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.error, 'pipeline busy');
+  pipelineBusy = false;
+  const started = await controller.start({ backendId: 'byo-comfyui', pkg: fixturePackage() });
+  assert.ok(started.runId);
+  await controller.wait(started.runId);
+});
