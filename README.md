@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/logo-dark.svg">
-  <img src="docs/media/logo-light.svg" alt="Comfyrizz" width="420">
+  <source media="(prefers-color-scheme: dark)" srcset="brand/comfyrizz-logo-dark.svg">
+  <img src="brand/comfyrizz-logo-light.svg" alt="Comfyrizz" width="420">
 </picture>
 
 ### Chat in a brief. Get a narrated motion-graphics explainer, rendered on open weights.
