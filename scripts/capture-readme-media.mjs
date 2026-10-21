@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -341,6 +341,59 @@ async function seedDemoExtras(env) {
   }
 }
 
+/**
+ * Attach the example takes as generated scene assets (same as
+ * apps/web/e2e/default-project.spec.ts packageWithTakes), so the timeline
+ * chips, Takes tab and render gate have clips to show. Runtime-only.
+ */
+async function attachPipTakes(env) {
+  const exampleDir = join(repoRoot, 'examples', 'pip-night-shift');
+  const headers = { 'x-comfyrizz-token': env.token, origin: env.api };
+  const response = await fetch(`${env.api}/api/package/${encodeURIComponent(pipPackageId)}`, { headers });
+  if (!response.ok) throw new Error(`attach takes: GET package HTTP ${response.status}`);
+  const project = await response.json();
+  const takes = JSON.parse(readFileSync(join(exampleDir, 'takes.json'), 'utf8'));
+  const packageRoot = join(env.runtimeDir, 'packages', pipPackageId);
+  const next = structuredClone(project.package);
+  let changed = false;
+  for (const [assetId, entry] of Object.entries(takes.clips ?? {})) {
+    if (next.assets?.[assetId]?.gen) continue;
+    const take = entry.takes.find(candidate => candidate.takeId === entry.selected);
+    const sceneId = take?.gen?.inputs?.scene;
+    const scene = typeof sceneId === 'string' ? next.scenes.find(candidate => candidate.id === sceneId) : null;
+    if (!take || !scene) continue;
+    const sourceFile = [take.file, take.file.replace(/\.(?:mp4|mov|webm)$/i, '.svg')]
+      .map(file => join(packageRoot, file)).find(file => existsSync(file));
+    const extension = sourceFile ? extname(sourceFile).slice(1).toLowerCase() : (take.file.split('.').pop() ?? 'mp4');
+    if (sourceFile) {
+      mkdirSync(join(packageRoot, 'assets'), { recursive: true });
+      copyFileSync(sourceFile, join(packageRoot, 'assets', `${assetId}.${extension}`));
+    }
+    scene.background = { asset: assetId };
+    next.assets[assetId] = {
+      kind: extension === 'png' || extension === 'svg' ? 'image' : 'video',
+      origin: 'generated',
+      status: 'ready',
+      file: `assets/${assetId}.${extension}`,
+      sha256: take.sha256,
+      bytes: take.bytes,
+      media: structuredClone(take.media),
+      license: { id: 'CC0-1.0' },
+      model_license: { id: 'LTX-2.x-Community', commercial_ok_if: 'revenue<10M' },
+      redistributable: true,
+      gen: structuredClone(take.gen),
+    };
+    changed = true;
+  }
+  if (!changed) return;
+  const saved = await fetch(`${env.api}/api/package/${encodeURIComponent(pipPackageId)}`, {
+    method: 'PATCH',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ baseRevision: project.revision, package: next, ...(project.editor ? { editor: project.editor } : {}), editSequence: 0 }),
+  });
+  if (!saved.ok) throw new Error(`attach takes: PATCH package HTTP ${saved.status}`);
+}
+
 async function waitForSeededPackage(env) {
   const deadline = Date.now() + 45_000;
   let last = 'not requested';
@@ -401,8 +454,8 @@ async function waitForSelector(page, selector, options = {}) {
   await page.locator(selector).first().waitFor({ state: options.state ?? 'visible', timeout });
 }
 
-async function waitForRequired(page, selectors) {
-  for (const selector of selectors) await waitForSelector(page, selector);
+async function waitForRequired(page, selectors, state = 'visible') {
+  for (const selector of selectors) await waitForSelector(page, selector, { state });
 }
 
 async function firstVisible(page, selectors, timeout = 1500) {
@@ -456,7 +509,8 @@ async function maskSensitive(page, context) {
     const replace = value => {
       let text = String(value ?? '');
       for (const secret of values) text = text.split(secret).join('[redacted]');
-      return text.replace(pathPattern, '[path]');
+      // Live Google Colab account balance from the capturing machine is not README content.
+      return text.replace(pathPattern, '[path]').replace(/\s*·\s*[\d.,]+ compute units left/g, '');
     };
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const nodes = [];
@@ -526,6 +580,15 @@ async function ensureTakesTab(page) {
   const tab = page.locator('[data-inspector-tab="takes"]');
   await tab.waitFor({ state: 'visible', timeout: 20_000 });
   await tab.click();
+  // The take panel only mounts once a clip is chosen; pick the clip still in
+  // review (s3) when the picker is shown, as the default-project e2e does.
+  const picker = page.getByTestId('takes-clip');
+  if ((await picker.count()) > 0 && (await page.locator('[data-take-panel]').count()) === 0) {
+    await picker.locator('option').nth(0).waitFor({ state: 'attached', timeout: 20_000 });
+    const values = await picker.locator('option').evaluateAll(options => options.map(option => option.value).filter(Boolean));
+    const review = values.find(value => /s3|juno/i.test(value)) ?? values[0];
+    if (review) await picker.selectOption(review);
+  }
   await waitForSelector(page, '[data-take-panel]', { timeout: 25_000 });
 }
 
@@ -707,10 +770,15 @@ async function captureShot(page, shot, context, outDir, converter) {
   const network = context.networkFor(page);
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 35_000 });
   if (!(await network.idle())) console.warn(`warning: ${shot.name} network did not settle before the first checkpoint`);
-  await waitForRequired(page, shot.required);
+  // Required selectors are checked after preparation: some targets (the
+  // Characters pane and its editor) only appear once prepareShot opens them,
+  // now that UO01 keeps [hidden] panes hidden.
+  await waitForSelector(page, '#app, body', { state: 'attached' });
   await fontsAndFrames(page);
   await disableMotion(page);
   await prepareShot(shot.name, page, context);
+  // A shot may fall back to the demo page (ui-colab-spend); its own checks ran.
+  if ((shot.target === 'demo') === page.url().includes('/demo.html')) await waitForRequired(page, shot.required);
   if (!(await network.idle({ quietMs: 400, timeoutMs: 10_000 }))) console.warn(`warning: ${shot.name} network did not settle after preparation`);
   await disableMotion(page);
   await fontsAndFrames(page);
@@ -744,6 +812,7 @@ async function runCapture(selection, outDir) {
     if (usesEditor) {
       await waitForSeededPackage(env);
       await seedDemoExtras(env);
+      await attachPipTakes(env);
     }
     browser = await chromium.launch({
       headless: true,
