@@ -180,7 +180,20 @@ export function createApp({
   events.publish = (event) => {
     const entry = publishEntry(event);
     try {
-      if (event?.type === 'pipeline.event' && event.kind === 'stage'
+      if (event?.type === 'run.event' && event.event?.type === 'preview_ready') {
+        const record = runs.get(event.runId);
+        if (record) {
+          const staged = readJsonFile(join(record.workDir, 'package.json'));
+          const pkg = staged?.id ? store.read(staged.id) : null;
+          if (pkg) {
+            const ingested = ingestRun({ pkg, manifest: event.event.manifest,
+              jobsDoc: readJsonFile(join(record.workDir, 'jobs.json')), outputDir: event.event.outputDir,
+              store: takeStore, runId: event.runId, backend: record.backendId });
+            for (const take of ingested.takes) publishEntry({ type: 'clip.take.landed', packageId: pkg.id,
+              assetId: take.assetId, takeId: take.takeId, runId: event.runId });
+          }
+        }
+      } else if (event?.type === 'pipeline.event' && event.kind === 'stage'
         && event.stageId === 'media' && event.status === 'completed') {
         ingestPipelineRun(event.runId);
       } else if (event?.type === 'pipeline.event' && event.kind === 'completed') {

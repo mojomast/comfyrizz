@@ -2,14 +2,42 @@
 
 ## Status
 
-Prepared for rendering; no new episode-two footage has been generated.
-Standard Colab G4 allocation attempts returned `Service Unavailable`; the cause
-has not been confirmed. The separate high-memory request was rejected. The last
-usage check showed zero active assignments, zero usage and a 326.34-credit balance.
+The user-started run `run_e73e113be46f` is generating on Colab session
+`comfyrizz-nrcu_episode2`. All 53 still jobs completed; FastH3 video generation
+is in progress. Earlier allocation failures were overcome. Spending must be
+reconciled after teardown; the earlier 326.34-credit balance predates this run.
 
 The user selected the full four-minute episode and authorized up to **14.5 credits**
 for this render, increasing the combined ceiling to **34.70 credits**. Previous
-combined spending is **20.20 credits**; episode-two spending is currently zero.
+combined spending before this run was **20.20 credits**.
+
+### Incremental timeline previews
+
+The Colab backend now checks the atomically written manifest while a batch runs,
+downloads completed media into a separate preview cache, verifies its SHA-256 and
+size, and emits `preview_ready`. The server ingests each verified output as a take
+and emits `clip.take.landed`. The browser refreshes selected take tickets, marks
+pending slots playable in its preview copy, and keeps the authored package and
+scene timing intact. It also polls clips every ten seconds during an active run
+to recover missed events. Final collection remains the authoritative run verdict.
+
+The active server was not restarted to install the backend changes. For this
+already-running episode, `scripts/demos/attach-live-previews.mjs` uses the same
+verified collector and take store. One attached process is running; its log is
+`live-previews.log` in the production root. It exits when generation ends. Do not
+start a duplicate or restart the main server during this run. Future runs use the
+built-in backend integration after a normal server restart.
+
+Attachment command for an existing run (only when no attachment is running):
+
+```sh
+node scripts/demos/attach-live-previews.mjs RUNTIME RUN_ID SESSION [API_ORIGIN]
+```
+
+Checks cover corrupt-transfer retry, plan matching, deduplication, pending-slot
+playback, and take arrival before completion without saving the package. Browser
+verification loaded the opening FastH3 clip at 1344×768 through a private media
+ticket while the run continued.
 
 ## Prepared production
 

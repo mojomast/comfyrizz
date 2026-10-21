@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
@@ -140,6 +141,45 @@ test('BYO ComfyUI runs without approval and reports an unknown cost', async () =
     app.close();
     rmSync(runtime, { recursive: true, force: true });
   }
+});
+
+test('a verified live preview lands before run completion without changing the editable package', async () => {
+  let release;
+  let landed;
+  const ready = new Promise(resolve => { landed = resolve; });
+  const held = new Promise(resolve => { release = resolve; });
+  const factory = async id => ({
+    id,
+    describe: async () => ({ costVisibility: 'external-unknown' }),
+    async runPackage(pkg, opts) {
+      const jobsDoc = { jobs: [{ id: 'a_live.still', kind: 'still', generator: 'flux3-klein', dims: { width: 16, height: 16 } }] };
+      if (opts.dryRun) return { jobsDoc, estimate: { gpuMinutes: 0, overheadMinutes: 0 } };
+      writeFileSync(join(opts.workDir, 'jobs.json'), JSON.stringify(jobsDoc));
+      mkdirSync(join(opts.outDir, 'assets'), { recursive: true });
+      const bytes = Buffer.from('verified test image');
+      writeFileSync(join(opts.outDir, 'assets', 'a_live.png'), bytes);
+      opts.onEvent({ type: 'preview_ready', outputDir: opts.outDir, manifest: { complete: false, jobs: [{ job: 'a_live.still', status: 'succeeded', outputs: [{ relative: 'assets/a_live.png', sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length }] }] } });
+      landed();
+      await held;
+      return { ok: false, package: null, teardown: { state: 'stopped' } };
+    },
+  });
+  const { app, runtime } = makeApp({ factory });
+  try {
+    const pkg = fixturePackage();
+    pkg.assets.a_live = { kind: 'image', origin: 'generated', status: 'pending', gen: { generator: 'flux3-klein', inputs: { prompt: 'live image' } } };
+    const saved = app.store.write(pkg);
+    const started = await app.runs.start({ backendId: 'byo-comfyui', pkg: saved });
+    await ready;
+    assert.equal(app.runs.get(started.runId).status, 'running');
+    const clip = app.takeStore.read(pkg.id).clips.a_live;
+    assert.equal(clip.takes.length, 1);
+    assert.equal(clip.selected, clip.takes[0].takeId);
+    assert.deepEqual(app.store.read(pkg.id), saved);
+    release();
+    await app.runs.wait(started.runId);
+    assert.equal(app.takeStore.read(pkg.id).clips.a_live.takes.length, 1, 'later failure preserves the preview');
+  } finally { release(); app.close(); rmSync(runtime, { recursive: true, force: true }); }
 });
 
 test('an unconfirmed stop is surfaced honestly', async () => {

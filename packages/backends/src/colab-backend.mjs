@@ -13,6 +13,7 @@
 //   * unknown comfyrizz-* sessions are offered, never auto-stopped       -> orphans()
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { withRunPackage } from "./run-package.mjs";
+import { createLivePreviewCollector } from './live-previews.mjs';
 import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -848,14 +849,30 @@ export function createColabBackend({
 
         await uploadProgressTap();
         const progress = progressLines(tapColabProgress(onEvent, progressSink(name ? `run-${name}` : "run")));
-        const exec = await execScript(runJobsScript, {
-          step: "run",
-          timeout: 3600,
-          wallMs: 3660000,
-          onEvent: null,
-          signal,
-          onLog: text => progress.write(text),
+        const previews = createLivePreviewCollector({
+          jobsDoc: doc, directory: join(scratch, 'live-previews'), remoteRoot: `${REMOTE_ROOT}/out`,
+          download: async ({ remote, local }) => {
+            mkdirSync(dirname(local), { recursive: true });
+            const result = await step(argvDownload({ session, remotePath: remote, localPath: local }), { label: 'preview-download', wallMs: 60000 });
+            if (result.code !== 0) throw new Error('Live preview download unavailable; will retry');
+          },
+          onReady: payload => emit(onEvent, { type: 'preview_ready', ...payload }),
+          onError: error => emit(onEvent, { type: 'preview_wait', message: error.message }),
         });
+        previews.start();
+        let exec;
+        try {
+          exec = await execScript(runJobsScript, {
+            step: "run",
+            timeout: 3600,
+            wallMs: 3660000,
+            onEvent: null,
+            signal,
+            onLog: text => progress.write(text),
+          });
+        } finally {
+          await previews.stop();
+        }
         progress.end();
         signal?.throwIfAborted();
         // G4-6: a batch's verdict is the manifest (downloaded and verified below), but a *missing

@@ -140,6 +140,17 @@ test('compiling the preview keeps every scene from and duration unchanged', () =
   assert.equal(candidate.durationInFrames, base.durationInFrames);
 });
 
+test('a landed take makes a pending slot playable without saving over the editable package', () => {
+  const pkg = fixture();
+  pkg.assets.a_plate.status = 'pending';
+  delete pkg.assets.a_plate.file;
+  const before = structuredClone(pkg);
+  const preview = previewPackage(pkg, clips());
+  assert.equal(preview.assets.a_plate.status, 'ready');
+  assert.equal(preview.assets.a_plate.file, SELECTED_URL);
+  assert.deepEqual(pkg, before);
+});
+
 test('A/B selects the candidate take only for the named clip and clearing it restores selected', () => {
   const pkg = fixture();
 
