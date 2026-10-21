@@ -13,12 +13,27 @@ const raw = readFileSync(cassettePath, 'utf8');
 const cassette = JSON.parse(raw);
 const manifest = JSON.parse(readFileSync(new URL('references/manifest.json', exampleDir), 'utf8'));
 const takesDoc = JSON.parse(readFileSync(new URL('takes.json', exampleDir), 'utf8'));
+const charactersDoc = JSON.parse(readFileSync(new URL('characters.json', exampleDir), 'utf8'));
+const libraryDoc = JSON.parse(readFileSync(new URL('characters/library.json', exampleDir), 'utf8'));
 
 const referenceSource = readFileSync(new URL('../../../../packages/agent/src/reference-tools.ts', import.meta.url), 'utf8');
 const clipSource = readFileSync(new URL('../../../../packages/agent/src/clip-tools.ts', import.meta.url), 'utf8');
 
+const characterSource = (() => {
+  for (const name of ['character-tools.ts', 'characters.ts', 'cast-tools.ts']) {
+    try {
+      const source = readFileSync(new URL(`../../../../packages/agent/src/${name}`, import.meta.url), 'utf8');
+      if (source.includes('character_list') || source.includes('propose_cast')) return { name, source };
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  return null;
+})();
+
 const MAX_BYTES = 40 * 1024;
 const JUNO_CLIP_ID = 's3_juno:a_juno_plate';
+const CHARACTER_TOOLS = ['character_list', 'propose_cast'];
 const REQUIRED_ARGS = {
   reference_list: [],
   reference_get: ['ref_id'],
@@ -27,6 +42,8 @@ const REQUIRED_ARGS = {
   clip_get: ['clip_id'],
   clip_render_readiness: [],
   clip_propose_verdict: ['clip_id', 'verdict', 'reason'],
+  character_list: [],
+  propose_cast: ['character_id', 'scene_id', 'reason'],
 };
 
 function assistantCalls(document) {
@@ -224,18 +241,104 @@ test('PN08: the takes turns read the Juno plate, report 3/4 blocked, and propose
   assert.match(closing.message.content, /confirm/i);
 });
 
+test('PN12: the character turn lists the library and proposes @pip and @juno in their scenes', () => {
+  const calls = assistantCalls(cassette);
+  const results = toolResults(cassette);
+
+  const castTurn = cassette.entries.find(entry =>
+    entry.request.messages.some(message => message.role === 'user' && /@pip/.test(message.content)));
+  assert.ok(castTurn, 'the conversation includes an @pip character turn');
+  assert.match(castTurn.request.messages.at(-1).content, /@juno/);
+
+  const listCalls = calls.filter(call => call.name === 'character_list');
+  assert.equal(listCalls.length, 1);
+  const listed = results.get(listCalls[0].id);
+  assert.equal(listed.ok, true);
+  assert.equal(listed.status, 'listed');
+  assert.deepEqual(listed.characters.map(character => character.handle), ['pip', 'juno']);
+  assert.deepEqual(listed.characters.map(character => character.mention), ['@pip', '@juno']);
+  assert.deepEqual(listed.characters.map(character => character.character_id), libraryDoc.characters.map(character => character.id));
+  for (const row of listed.characters) {
+    assert.equal(row.kind, 'fictional');
+    assert.match(row.cast_id, /^c_[a-z]+$/);
+  }
+
+  const proposals = calls.filter(call => call.name === 'propose_cast');
+  assert.equal(proposals.length, 2);
+  const placements = new Map(charactersDoc.placements.map(placement => [placement.sceneId, placement.castId]));
+  for (const proposal of proposals) {
+    const member = charactersDoc.cast.find(item => item.characterId === proposal.args.character_id);
+    assert.ok(member, 'propose_cast names a cast character');
+    assert.equal(proposal.args.handle, member.handle);
+    assert.equal(placements.get(proposal.args.scene_id), member.castId);
+    assert.match(proposal.args.reason, new RegExp(`@${member.handle}`));
+
+    const result = results.get(proposal.id);
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'proposed');
+    assert.equal(result.applied, false);
+    assert.equal(result.placement.characterId, member.characterId);
+    assert.equal(result.placement.handle, member.handle);
+    assert.equal(result.placement.sceneId, proposal.args.scene_id);
+    assert.equal(result.placement.confirmed, false);
+    assert.match(result.message, /Waiting for the user to confirm/i);
+  }
+
+  const pipProposal = proposals.find(call => call.args.handle === 'pip');
+  const junoProposal = proposals.find(call => call.args.handle === 'juno');
+  assert.equal(pipProposal.args.scene_id, 's2_counter');
+  assert.equal(junoProposal.args.scene_id, 's3_juno');
+  assert.equal(pipProposal.args.character_id, charactersDoc.cast.find(member => member.handle === 'pip').characterId);
+  assert.equal(junoProposal.args.character_id, charactersDoc.cast.find(member => member.handle === 'juno').characterId);
+
+  assert.doesNotMatch(raw, /"applied"\s*:\s*true/);
+  assert.match(raw, /@pip/);
+  assert.match(raw, /@juno/);
+});
+
+test('PN12: character_list and propose_cast are declared and used', () => {
+  const declared = requestToolNames(cassette);
+  const used = new Set(assistantCalls(cassette).map(call => call.name));
+  const schemas = toolSchemas(cassette);
+  for (const name of CHARACTER_TOOLS) {
+    assert.ok(declared.has(name), `${name} is declared in request.tools`);
+    assert.ok(used.has(name), `${name} is used by a turn`);
+    assert.ok(schemas.has(name), `${name} has a JSON schema`);
+  }
+});
+
+test('PN12: character tool names exist in the merged agent sources', {
+  skip: characterSource ? false : 'character-creator agent tools are not present in this checkout (after-CC dependency)',
+}, () => {
+  const sourceNames = new Set([
+    ...sourceToolNames(characterSource.source, 'character_'),
+    ...sourceToolNames(characterSource.source, 'propose_'),
+  ]);
+  for (const name of CHARACTER_TOOLS) {
+    assert.ok(sourceNames.has(name), `${name} is missing from ${characterSource.name}`);
+  }
+});
+
 test('PN08: every tool name exists and every call has a declared schema and result', () => {
   const exposed = new Set([
     ...sourceToolNames(referenceSource, 'reference_'),
     ...sourceToolNames(clipSource, 'clip_'),
   ]);
+  if (characterSource) {
+    for (const prefix of ['character_', 'propose_']) {
+      for (const name of sourceToolNames(characterSource.source, prefix)) exposed.add(name);
+    }
+  }
   const calls = assistantCalls(cassette);
   const results = toolResults(cassette);
   const schemas = toolSchemas(cassette);
   const used = new Set([...requestToolNames(cassette), ...calls.map(call => call.name)]);
 
   assert.deepEqual([...used].sort(), Object.keys(REQUIRED_ARGS).sort());
-  for (const name of used) assert.ok(exposed.has(name), `${name} is missing from the agent tool sources`);
+  for (const name of used) {
+    if (!characterSource && CHARACTER_TOOLS.includes(name)) continue;
+    assert.ok(exposed.has(name), `${name} is missing from the agent tool sources`);
+  }
 
   for (const call of calls) {
     const schema = schemas.get(call.name);
