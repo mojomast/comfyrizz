@@ -19,7 +19,7 @@ work is present as server modules, workflow/model assets, Google Colab workers
 and standalone UI controls with tests. Sections that are **module only** say so;
 they are not reachable from the mounted tab or a mounted HTTP route yet.
 
-![Character library and project cast](docs/media/character-library.webp)
+![Character library and project cast](media/character-library.webp)
 
 ## 1. At a glance
 
@@ -73,7 +73,7 @@ Click **New character**. The editor has four sections: **Identity**, **Look**,
 **Voice**, **Bible**. On a new character, fill the draft and click **Create
 character**; after that, each field saves on blur and bumps the revision.
 
-![Cast mention and pinned version](docs/media/character-cast-mention.webp)
+![Cast mention and pinned version](media/character-cast-mention.webp)
 
 ### 3.1 Identity
 
@@ -215,7 +215,7 @@ this checkout.
 
 ## 5. Identity per character
 
-![Identity method and reference](docs/media/character-identity.webp)
+![Identity method and reference](media/character-identity.webp)
 
 `visual.identity` records the choice:
 
@@ -348,7 +348,7 @@ without an injected `embed` function, or precomputed vectors, it fails with
 
 ## 6. Multi-speaker voices
 
-![Per-scene speaker picker](docs/media/character-speaker.webp)
+![Per-scene speaker picker](media/character-speaker.webp)
 
 ### 6.1 Package fields
 
@@ -419,7 +419,7 @@ character agent tool sets `scene.speaker` in this checkout.
 
 ## 7. Authorized real-person characters
 
-![Consent checkbox and likeness warning](docs/media/character-real-consent.webp)
+![Consent checkbox and likeness warning](media/character-real-consent.webp)
 
 ### 7.1 Character kind and consent record
 
