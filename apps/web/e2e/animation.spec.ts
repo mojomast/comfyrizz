@@ -85,6 +85,25 @@ const animation = (page: Page) => page.locator('[data-animation-section]');
 const animationStatus = (page: Page) => page.locator('[data-anim-status]');
 const voice = (page: Page) => page.locator('#voice-panel').locator('[aria-label="Voice and narration"]');
 
+/**
+ * UO05/UO06: the top bar's run controls (backend, llm, model, budget, render
+ * location) live in the "Run settings" popover. Open it, act, then close it so
+ * the popover cannot overlay the panel the next assertion looks at.
+ */
+async function openRunSettings(page: Page): Promise<void> {
+  const popover = page.locator('#run-settings-popover');
+  if (await popover.isVisible()) return;
+  await page.locator('#run-settings-toggle').click();
+  await expect(popover).toBeVisible();
+}
+
+async function closeRunSettings(page: Page): Promise<void> {
+  const popover = page.locator('#run-settings-popover');
+  if (!await popover.isVisible()) return;
+  await page.locator('#run-settings-close').click();
+  await expect(popover).toBeHidden();
+}
+
 test.beforeEach(() => {
   resetProject(loadEnv());
 });
@@ -265,7 +284,9 @@ test('the generation plan can render on the Google Colab VM', async ({ page }) =
     });
   });
   await openEditor(page, env);
+  await openRunSettings(page);
   await page.locator('#render-location').selectOption('colab');
+  await closeRunSettings(page);
   await expect(voice(page).getByLabel('Final render')).toHaveValue('colab');
   await voice(page).getByRole('button', { name: 'Check generation plan' }).click();
   expect(planBody!.renderLocation).toBe('colab');
