@@ -24,7 +24,7 @@ def stamp(t):
     return f'{ms//3600000:02}:{ms//60000%60:02}:{ms//1000%60:02},{ms%1000:03}'
 
 
-def finish(root,film):
+def finish(root,film,plan_only=False):
     duration=float(film['seconds']);target_frames=round(duration*24)
     if abs(target_frames/24-duration)>1e-6:raise ValueError('Duration must land on a 24 fps frame')
     out=root/'final';parts=out/'parts';parts.mkdir(exist_ok=True,parents=True)
@@ -68,6 +68,12 @@ def finish(root,film):
     for shot in sorted(edits,key=lambda s:(bool(s['line']),-(s['maximumFrames']-s['editFrames']))):
         add=min(max(-excess,0),shot['maximumFrames']-shot['editFrames']);shot['editFrames']+=add;excess+=add
     if excess:raise ValueError('Cannot fit protected performances into target duration')
+    cursor=0
+    for shot in edits:
+        shot['start']=cursor/24;shot['seconds']=shot['editFrames']/24;cursor+=shot['editFrames']
+    (out/'edit.json').write_text(json.dumps(edits,indent=2))
+    if plan_only:
+        print(json.dumps({'shots':len(edits),'frames':cursor,'seconds':cursor/24,'editPlanReady':True}));return
     cursor=0;cues=[]
     for shot in edits:
         shot['start']=cursor/24;shot['seconds']=shot['editFrames']/24;cursor+=shot['editFrames']
@@ -98,14 +104,16 @@ def finish(root,film):
     srt=out/'captions.srt';srt.write_text('\n\n'.join(f'{i}\n{stamp(a)} --> {stamp(b)}\n'+ '\n'.join(textwrap.wrap(t,width=42)) for i,(a,b,t) in enumerate(cues,1))+'\n')
     (out/'captions.vtt').write_text('WEBVTT\n\n'+re.sub(r'(\d{2}:\d{2}:\d{2}),(\d{3})',r'\1.\2',srt.read_text()))
     listing=out/'parts.txt';listing.write_text(''.join(f"file 'parts/{s['id']}.mkv'\n" for s in edits))
-    feature=out/'hermes-the-lower-road-1080p.mp4'
+    stem=film.get('exportStem','hermes-the-lower-road')
+    if not re.fullmatch(r'[a-z0-9-]+',stem):raise ValueError('Invalid export stem')
+    feature=out/(stem+'-1080p.mp4')
     run(['ffmpeg','-v','error','-y','-f','concat','-safe','1','-i',listing,'-i',root/'audio/music.wav','-i',root/'audio/ambience.wav','-i',srt,
          '-filter_complex',f'[0:v]setpts=N/(24*TB)[v];[0:a]asetpts=N/SR/TB[d];[d][1:a][2:a]amix=inputs=3:normalize=0,loudnorm=I=-18:TP=-1.5:LRA=9,aresample=48000,atrim=duration={duration}[a]',
          '-map','[v]','-map','[a]','-map','3:0','-r','24','-fps_mode','cfr','-c:v','libx264','-preset','fast','-crf','18','-pix_fmt','yuv420p','-c:a','aac','-b:a','192k','-c:s','mov_text',
          '-metadata:s:s:0','language=eng','-metadata','title='+film['title'],'-t',duration,'-movflags','+faststart',feature])
     metadata=probe(feature);video=next(s for s in metadata['streams'] if s['codec_type']=='video')
     assert int(video['nb_frames'])==target_frames and abs(float(video['duration'])-duration)<.01
-    compact=out/'hermes-the-lower-road-small.mp4'
+    compact=out/(stem+'-small.mp4')
     run(['ffmpeg','-v','error','-y','-i',feature,'-map','0:v:0','-map','0:a:0','-map','0:s?',
          '-vf','fps=24,scale=1280:720','-r','24','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',
          '-c:s','copy','-t',duration,'-movflags','+faststart',compact])
@@ -123,9 +131,9 @@ def finish(root,film):
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('mode',choices=['review','finish']);p.add_argument('root',type=Path);p.add_argument('--shots',nargs='+');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('mode',choices=['review','finish']);p.add_argument('root',type=Path);p.add_argument('--shots',nargs='+');p.add_argument('--plan-only',action='store_true');a=p.parse_args()
     film=json.loads((a.root/'film.json').read_text())
-    if a.mode=='finish':finish(a.root,film)
+    if a.mode=='finish':finish(a.root,film,a.plan_only)
     else:
         path=Path(__file__).with_name('gpu-artists-finish.py');spec=importlib.util.spec_from_file_location('review_helpers',path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
         m.review(a.root,[s for s in film['shots'] if not a.shots or s['id'] in a.shots])

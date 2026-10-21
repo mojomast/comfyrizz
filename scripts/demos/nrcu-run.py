@@ -21,7 +21,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('root',type=Path);p.add_argument('web',type=Path)
     p.add_argument('mode',choices=['images','video']);p.add_argument('--plan',choices=['assets','keyframes'],default='assets')
-    p.add_argument('--ids',nargs='+');a=p.parse_args()
+    p.add_argument('--ids',nargs='+');p.add_argument('--session',default='nrcu-pilot');a=p.parse_args()
     root=a.root.resolve();web=a.web.resolve();(root/'logs').mkdir(exist_ok=True)
     state_path=web/'status.json'
     def status(message,**fields):
@@ -50,12 +50,12 @@ def main():
               ['python','/content/fasth3/fasth3_run.py','/content/fasth3/film','--shots',sid,'--max-seconds','300'])
         code='import subprocess\nr=subprocess.run('+repr(argv)+')\nprint("NRCU_EXIT",r.returncode)\n'
         try:
-            text=command(['colab','exec','-s','nrcu-pilot','--timeout','360'],input=code,timeout=400)
+            text=command(['colab','exec','-s',a.session,'--timeout','360'],input=code,timeout=400)
             (root/'logs'/f'{a.mode}-{a.plan}-{sid}.log').write_text(text)
             if not re.search(r'NRCU_EXIT\s+0\b',text):raise RuntimeError('Remote generation failed: '+sid)
             target=root/output;target.mkdir(parents=True,exist_ok=True)
             for ext in ['.json',suffix]:
-                command(['colab','download',f'/content/fasth3/film/{output}/{sid}{ext}',str(target/f'{sid}{ext}'),'-s','nrcu-pilot'],timeout=90)
+                command(['colab','download',f'/content/fasth3/film/{output}/{sid}{ext}',str(target/f'{sid}{ext}'),'-s',a.session],timeout=90)
             receipt=json.loads((target/f'{sid}.json').read_text());media=target/f'{sid}{suffix}'
             digest=hashlib.sha256(media.read_bytes()).hexdigest()
             if receipt['status']!='succeeded' or receipt['sha256']!=digest:raise RuntimeError('Receipt verification failed: '+sid)

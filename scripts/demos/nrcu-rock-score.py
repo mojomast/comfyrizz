@@ -27,6 +27,9 @@ def save(path, audio):
 def main():
     root = Path(sys.argv[1]); out = root / 'audio'; out.mkdir(exist_ok=True)
     film = json.loads((root / 'film.json').read_text())
+    edit_path = root / 'final/edit.json'
+    edit = json.loads(edit_path.read_text()) if edit_path.exists() else film['shots']
+    cues = film.get('musicCues', {})
     overrides = json.loads((root / 'review-overrides.json').read_text())
     duration = film['seconds']; n = round(duration * RATE)
     rng = np.random.default_rng(SEED)
@@ -34,11 +37,11 @@ def main():
     bass = np.zeros_like(guitar); drums = np.zeros_like(guitar)
     ambience = np.zeros_like(guitar)
     shots = {}; windows = []; cursor = 0
-    for shot in film['shots']:
+    for shot in edit:
         shots[shot['id']] = (cursor, shot['seconds'])
         if shot['line']:
             review = json.loads((root / 'review' / (shot['id'] + '.json')).read_text())
-            source_start = round(overrides.get(shot['id'], {}).get('sourceStart', 0) * 24) / 24
+            source_start = round(shot.get('sourceStart', overrides.get(shot['id'], {}).get('sourceStart', 0)) * 24) / 24
             words = [w for w in review['usableWords'] if w['start'] >= source_start]
             windows.append((cursor + words[0]['start'] - source_start,
                             cursor + words[-1]['end'] - source_start))
@@ -89,12 +92,13 @@ def main():
 
     # A four-bar D–C–Bb–C riff, original syncopation with double-tracked guitars.
     roots = [73.416, 65.406, 58.270, 65.406]
-    last_action = shots['s17'][0]
-    choice_start = shots['s08'][0]
-    choice_end = shots['s12'][0]
+    last_action = shots[cues.get('quietStart', 's17')][0]
+    choice_start = shots[cues.get('choiceStart', 's08')][0]
+    choice_end = shots[cues.get('choiceEnd', 's12')][0]
+    quiet_end = shots[cues.get('quietEnd', 's20')][0]
     for bar_start in np.arange(0, duration, 4*BEAT):
         bar = round(bar_start/(4*BEAT)); freq = roots[bar % 4]
-        quiet = choice_start <= bar_start < choice_end or last_action <= bar_start < shots['s20'][0]
+        quiet = choice_start <= bar_start < choice_end or last_action <= bar_start < quiet_end
         pattern = [(0, .85), (.5, .38), (1.5, .38), (2, .7), (2.75, .25), (3.5, .4)]
         if quiet: pattern = [(0, 1.8), (2, 1.3)]
         for beat, length_beats in pattern:
@@ -120,7 +124,7 @@ def main():
                 add(drums, bar_start+offset*BEAT, percussion('snare', .18), .2, pan)
 
     # Picture-synced accents: cable failure, descent, boarding, final reassuring beat.
-    for sid, offset in [('s06', .6), ('s12', 0), ('s14', 2.8), ('s20', .15)]:
+    for sid, offset in cues.get('accents', [('s06', .6), ('s12', 0), ('s14', 2.8), ('s20', .15)]):
         at = shots[sid][0]+offset
         add(drums, at, percussion('crash', 1.3), .23, -.2)
         add(drums, at, percussion('kick', .4), .30)
@@ -148,12 +152,12 @@ def main():
     wind = np.convolve(rng.standard_normal(n),np.ones(93)/93,mode='same')*.009
     ambience[:,0] = wind; ambience[:,1] = np.roll(wind,700)
     # Original nonvocal Foley bridges muted source takes.
-    for sid in ['s05','s09','s12','s16']:
+    for sid in cues.get('engineShots', ['s05','s09','s12','s16']):
         at,length = shots[sid]; t = np.arange(round(length*RATE))/RATE
         motor = (.008*np.sin(2*np.pi*(58*t+3*t*t)) + .003*np.sin(2*np.pi*137*t))
         motor *= np.minimum(t/.08,1)*np.minimum((length-t)/.12,1)
         add(ambience,at,motor)
-    at = shots['s06'][0]+.6; t=np.arange(round(.6*RATE))/RATE
+    at = shots[cues.get('cableShot', 's06')][0]+.6; t=np.arange(round(.6*RATE))/RATE
     snap=(rng.standard_normal(len(t))*.05+np.sin(2*np.pi*690*t)*.07)*np.exp(-t*15)
     add(ambience,at,snap)
     ambience[-fade:] *= np.linspace(1,0,fade)[:,None]
