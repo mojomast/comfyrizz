@@ -348,7 +348,7 @@ export function renderPendingItems(pending: readonly PendingUpload[]): string {
       return `<li class="ref-pending ref-pending-error" data-pending-key="${escapeHtml(entry.key)}">
         <div class="ref-pending-name">${name}</div>
         <p class="ref-error" role="alert">${escapeHtml(entry.error ?? 'Upload failed')}</p>
-        <button type="button" class="ref-dismiss" data-dismiss-pending="${escapeHtml(entry.key)}" aria-label="Dismiss upload error for ${name}">Dismiss</button>
+        <button type="button" class="btn btn-secondary btn-sm ref-dismiss" data-dismiss-pending="${escapeHtml(entry.key)}" aria-label="Dismiss upload error for ${name}">Dismiss</button>
       </li>`;
     }
     const status = entry.status === 'queued' ? 'Queued' : entry.status === 'done' ? 'Done' : 'Uploading';
@@ -496,7 +496,7 @@ function renderAssignmentChips(ref: Reference, assignments: readonly ReferenceAs
     .filter(assignment => assignment.refId === ref.id)
     .map(assignment => {
       const proposed = assignment.status === 'proposed';
-      return `<li class="ref-chip${proposed ? ' ref-chip-proposed' : ''}">${escapeHtml(assignmentChipText(assignment))}</li>`;
+      return `<li class="chip ref-chip${proposed ? ' ref-chip-proposed' : ''}">${escapeHtml(assignmentChipText(assignment))}</li>`;
     });
   if (chips.length === 0) return '<p class="ref-unassigned">Not assigned to a scene yet.</p>';
   return `<ul class="ref-chips" aria-label="Assigned to">${chips.join('')}</ul>`;
@@ -529,24 +529,32 @@ export function renderReferenceCard(
         ? ''
         : undefined;
   const badge = question !== undefined
-    ? `<button type="button" class="ref-question" data-question-ref="${id}"${question ? ` title="${escapeHtml(question)}"` : ''} aria-label="Agent has a question about ${escapeHtml(label)}">agent has a question</button>`
+    ? `<button type="button" class="badge badge-warn ref-question" data-question-ref="${id}"${question ? ` title="${escapeHtml(question)}"` : ''} aria-label="Agent has a question about ${escapeHtml(label)}">agent has a question</button>`
     : '';
   const roleOptions = ROLES.map(value =>
     `<option value="${value}"${value === role ? ' selected' : ''}>${escapeHtml(ROLE_LABELS[value])}</option>`).join('');
-  return `<article class="ref-card" data-ref-id="${id}">
+  const roleChips = ROLES.map(value =>
+    `<button type="button" class="chip ref-role-chip${value === role ? ' is-active' : ''}" data-role-chip="${value}" data-ref-id="${id}" role="radio" aria-checked="${value === role}">${escapeHtml(ROLE_LABELS[value])}</button>`).join('');
+  return `<article class="ref-card panel" data-ref-id="${id}">
     <div class="ref-thumb${video ? ' ref-thumb-video' : ''}">${media}${duration}</div>
     <div class="ref-body">
       <div class="ref-title-row">
-        <label class="ref-field ref-label-field">Label
-          <input type="text" data-label-ref="${id}" value="${escapeHtml(label)}" maxlength="${LIMITS.labelMaxChars}" autocomplete="off" />
+        <label class="field ref-field ref-label-field">Label
+          <input type="text" class="field-control" data-label-ref="${id}" value="${escapeHtml(label)}" maxlength="${LIMITS.labelMaxChars}" autocomplete="off" />
         </label>
         ${badge}
       </div>
-      <label class="ref-field">Role
-        <select data-role-ref="${id}">${roleOptions}</select>
-      </label>
-      <label class="ref-field">Usage note
-        <textarea data-note-ref="${id}" maxlength="${LIMITS.noteMaxChars}" rows="3" placeholder="Tell the agent how to use this reference">${escapeHtml(note)}</textarea>
+      <div class="field ref-field ref-role-field">
+        <div class="ref-role-label-row">
+          <label class="field-label" for="${id}-role">Role</label>
+          <select id="${id}-role" class="field-control ref-role-select" data-role-ref="${id}">${roleOptions}</select>
+        </div>
+        <div class="ref-role-chips" role="radiogroup" aria-label="Role for ${escapeHtml(label)}">
+          ${roleChips}
+        </div>
+      </div>
+      <label class="field ref-field">Usage note
+        <textarea class="field-control" data-note-ref="${id}" maxlength="${LIMITS.noteMaxChars}" rows="3" placeholder="Tell the agent how to use this reference">${escapeHtml(note)}</textarea>
       </label>
       <div class="ref-note-meta">
         <span class="ref-note-count" data-note-count="${id}" aria-live="polite">${note.length} / ${LIMITS.noteMaxChars}</span>
@@ -554,7 +562,7 @@ export function renderReferenceCard(
       </div>
       ${renderAssignmentChips(ref, assignments)}
       <div class="ref-actions">
-        <button type="button" class="ref-delete" data-delete-ref="${id}" aria-label="Delete ${escapeHtml(label)}">Delete</button>
+        <button type="button" class="btn btn-secondary btn-sm ref-delete" data-delete-ref="${id}" aria-label="Delete ${escapeHtml(label)}">Delete</button>
       </div>
     </div>
   </article>`;
@@ -565,7 +573,14 @@ export function renderReferenceCardList(
   options: RenderOptions = {},
 ): string {
   if (state.references.length === 0) {
-    return '<p class="ref-empty">No references yet. Drop an image or a short video to get started.</p>';
+    return `<div class="empty-state ref-empty" data-ref-empty>
+      <span class="empty-state-icon" aria-hidden="true">🖼</span>
+      <h3 class="empty-state-title">No references yet</h3>
+      <p class="empty-state-line">Drop an image or a short video to get started.</p>
+      <div class="empty-state-cta">
+        <button type="button" class="btn btn-secondary btn-sm" data-ref-pick>Browse files</button>
+      </div>
+    </div>`;
   }
   return `<ul class="ref-list">${state.references.map(ref => {
     const question = referenceQuestion(ref, state.questions);
@@ -587,15 +602,15 @@ export function renderReferencePanel(
   const count = state.references.length;
   const prefix = options.idPrefix ?? 'reference-panel';
   const countLabel = `${count} reference${count === 1 ? '' : 's'}`;
-  return `<section class="reference-panel" aria-labelledby="${escapeHtml(prefix)}-title">
-    <header class="ref-header">
-      <h2 id="${escapeHtml(prefix)}-title">References <span class="ref-count" data-ref-count aria-label="${countLabel}">${count}</span></h2>
+  return `<section class="panel reference-panel" aria-labelledby="${escapeHtml(prefix)}-title">
+    <header class="panel-header ref-header">
+      <h2 class="panel-header-title" id="${escapeHtml(prefix)}-title">References <span class="badge ref-count" data-ref-count aria-label="${countLabel}">${count}</span></h2>
       <p class="ref-hint">Attach images or short videos and tell the agent how to use them.</p>
     </header>
     <div class="ref-dropzone-wrap">
       <button type="button" class="ref-dropzone" data-ref-pick aria-describedby="${escapeHtml(prefix)}-drop-hint">
         <span class="ref-dropzone-title">Drop images or videos here</span>
-        <span class="ref-dropzone-sub">or choose files · PNG, JPEG, WEBP, GIF, MP4, MOV, WEBM</span>
+        <span class="btn btn-secondary btn-sm ref-browse-btn">Browse files</span>
       </button>
       <input class="ref-file-input" data-ref-file type="file" multiple hidden accept="${ACCEPT_ATTRIBUTE}" />
       <p class="ref-hint" id="${escapeHtml(prefix)}-drop-hint">Images up to 20 MB; videos up to 200 MB and 60 seconds. At most 24 references per conversation.</p>
@@ -1176,7 +1191,7 @@ export function mountReferencePanel(el: HTMLElement, options: MountOptions): Ref
   const onClick = (event: Event) => {
     const target = event.target as HTMLElement | null;
     if (!target || typeof target.closest !== 'function') return;
-    const action = target.closest<HTMLElement>('[data-ref-pick], [data-delete-ref], [data-dismiss-pending], [data-question-ref]');
+    const action = target.closest<HTMLElement>('[data-ref-pick], [data-delete-ref], [data-dismiss-pending], [data-question-ref], [data-role-chip]');
     if (!action || !el.contains(action)) return;
     if (action.hasAttribute('data-ref-pick')) {
       input?.click();
@@ -1191,6 +1206,14 @@ export function mountReferencePanel(el: HTMLElement, options: MountOptions): Ref
     if (pendingKey) {
       controller.dismissPending(pendingKey);
       return;
+    }
+    const roleChip = action.getAttribute('data-role-chip');
+    if (roleChip) {
+      const refId = action.getAttribute('data-ref-id');
+      if (refId) {
+        void controller.setRole(refId, roleChip);
+        return;
+      }
     }
     const questionId = action.getAttribute('data-question-ref');
     if (questionId) {
