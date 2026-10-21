@@ -180,11 +180,6 @@ async function openEditor(page: Page, env: Env): Promise<void> {
   await expect(page.getByTestId('scene')).toHaveCount(4);
   await expect(page.locator('#save-status')).toHaveText('Saved');
   await expect(page).not.toHaveURL(/token=/);
-  // `.pane` sets display:flex, which overrides the `hidden` attribute on the
-  // fixed full-screen Characters pane, so it sits over the editor and swallows
-  // pointer events. The test neutralizes that overlay without touching app
-  // source; the app itself should scope `.pane` or add `[hidden]{display:none}`.
-  await page.addStyleTag({ content: '#characters-pane[hidden]{display:none!important}' });
 }
 
 const renderBar = (page: Page) => page.locator('[data-render-bar]');
