@@ -8,6 +8,7 @@ character research and story-architecture work, then consolidated into this plan
 
 Companion documents:
 
+- [Reusable character library, references and voice settings](../examples/nrcu-characters/README.md)
 - [Research, sources and canon boundaries](research/NOUS_UNIVERSE_LORE_20261021.md)
 - [Production, voices, references, review and cost basis](NOUS_UNIVERSE_PRODUCTION.md)
 - [Pilot delivery, selected takes, review coverage and spending](NRCU_PILOT_PRODUCTION.md)
