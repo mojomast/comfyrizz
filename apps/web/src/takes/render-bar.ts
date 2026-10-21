@@ -165,28 +165,28 @@ export function renderRenderBar(gate: RenderGateSummary, options: RenderBarRende
     : `<div class="render-bar-blockers" data-render-blockers>
         <p class="render-bar-hint">${gate.blocking.length} clip${gate.blocking.length === 1 ? '' : 's'} still need approval:</p>
         <ul class="render-bar-list">${gate.blocking.map(blocker => `<li>
-          <button type="button" class="render-bar-blocker" data-render-blocker="${escapeHtml(blocker.clipId)}" title="Review ${escapeHtml(blockerLabel(blocker))}">${escapeHtml(blockerLabel(blocker))}</button>
+          <button type="button" class="btn btn-secondary btn-sm chip render-bar-blocker" data-render-blocker="${escapeHtml(blocker.clipId)}" title="Review ${escapeHtml(blockerLabel(blocker))}">${escapeHtml(blockerLabel(blocker))}</button>
         </li>`).join('')}</ul>
       </div>`;
   const action = gate.ok
-    ? `<button type="button" class="primary" data-render-run${disabled}>Render</button>`
-    : `<button type="button" class="render-bar-override-open" data-render-open-override${disabled}>Render anyway</button>`;
+    ? `<button type="button" class="btn btn-primary primary" data-render-run${disabled}>Render</button>`
+    : `<button type="button" class="btn btn-secondary render-bar-override-open" data-render-open-override${disabled}>Render anyway</button>`;
   const dialog = gate.ok
     ? ''
-    : `<form class="render-bar-override" data-render-override hidden aria-label="Override the render gate">
-        <label for="${escapeHtml(prefix)}-reason">Override reason</label>
-        <textarea id="${escapeHtml(prefix)}-reason" name="reason" data-override-reason rows="2" required minlength="${MIN_OVERRIDE_REASON}" maxlength="${MAX_OVERRIDE_REASON}" placeholder="Why is this render allowed before every clip is approved?"${disabled}></textarea>
+    : `<form class="render-bar-override panel" data-render-override hidden aria-label="Override the render gate">
+        <label for="${escapeHtml(prefix)}-reason" class="field-label">Override reason</label>
+        <textarea id="${escapeHtml(prefix)}-reason" name="reason" class="field-control" data-override-reason rows="2" required minlength="${MIN_OVERRIDE_REASON}" maxlength="${MAX_OVERRIDE_REASON}" placeholder="Why is this render allowed before every clip is approved?"${disabled}></textarea>
         <p class="render-bar-hint" data-override-count aria-live="polite">0 / ${MAX_OVERRIDE_REASON}</p>
         <p class="render-bar-error" data-override-error role="alert"></p>
-        <div class="render-bar-actions">
-          <button type="submit" class="primary" data-override-submit${disabled}>Render with override</button>
-          <button type="button" data-override-cancel${disabled}>Cancel</button>
+        <div class="render-bar-actions toolbar">
+          <button type="submit" class="btn btn-primary primary" data-override-submit${disabled}>Render with override</button>
+          <button type="button" class="btn btn-secondary" data-override-cancel${disabled}>Cancel</button>
         </div>
       </form>`;
-  return `<div class="render-bar" data-render-bar data-gate-ok="${gate.ok ? 'true' : 'false'}" aria-label="Final render gate">
+  return `<div class="render-bar toolbar" data-render-bar data-gate-ok="${gate.ok ? 'true' : 'false'}" aria-label="Final render gate">
     <span class="render-bar-title">Final render</span>
-    <span class="render-bar-count" data-render-approved aria-live="polite">${escapeHtml(label)}</span>
-    ${gate.ok ? '<span class="render-bar-ready" data-render-ready>All clips approved</span>' : blockers}
+    <span class="render-bar-count badge ${gate.ok ? 'badge-ok' : 'badge-warn'}" data-render-approved aria-live="polite">${escapeHtml(label)}</span>
+    ${gate.ok ? '<span class="render-bar-ready badge badge-ok" data-render-ready>All clips approved</span>' : blockers}
     ${action}
     ${options.description ? `<span class="render-bar-hint">${escapeHtml(options.description)}</span>` : ''}
     ${dialog}
@@ -222,20 +222,21 @@ function installStyles(): void {
   const style = document.createElement('style');
   style.dataset.comfyrizz = 'render-bar';
   style.textContent = `
-.render-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-height:32px; }
-.render-bar-title { font-size:12px; font-weight:600; white-space:nowrap; }
-.render-bar-count { font-size:12px; color:var(--muted,#8b93a7); white-space:nowrap; }
-.render-bar[data-gate-ok="false"] .render-bar-count { color:var(--warn,#e0a33a); }
-.render-bar[data-gate-ok="true"] .render-bar-count { color:var(--ok,#55c98a); }
-.render-bar-blockers { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-.render-bar-list { display:flex; gap:4px; flex-wrap:wrap; list-style:none; margin:0; padding:0; }
+.render-bar { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; min-height:var(--space-6); }
+.render-bar-title { font-size:var(--font-size-12); font-weight:var(--font-weight-600); color:var(--text-1); white-space:nowrap; }
+.render-bar-count { font-size:var(--font-size-12); color:var(--text-2); white-space:nowrap; }
+.render-bar[data-gate-ok="false"] .render-bar-count { color:var(--warn); }
+.render-bar[data-gate-ok="true"] .render-bar-count { color:var(--ok); }
+.render-bar-ready { font-size:var(--font-size-12); color:var(--ok); }
+.render-bar-blockers { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; }
+.render-bar-list { display:flex; gap:var(--space-1); flex-wrap:wrap; list-style:none; margin:0; padding:0; }
 .render-bar-blocker { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.render-bar-override { display:flex; flex-direction:column; gap:4px; min-width:260px; }
+.render-bar-override { display:flex; flex-direction:column; gap:var(--space-1); min-width:260px; padding:var(--space-3); background:var(--bg-2); border:var(--elevation-border-1); border-radius:var(--radius-control); }
 .render-bar-override[hidden] { display:none; }
-.render-bar-actions { display:flex; gap:6px; }
-.render-bar-error { margin:0; color:var(--warn,#e0a33a); font-size:12px; }
+.render-bar-actions { display:flex; gap:var(--space-2); }
+.render-bar-error { margin:0; color:var(--danger); font-size:var(--font-size-12); }
 .render-bar-error:empty { display:none; }
-.render-bar-hint { margin:0; font-size:12px; color:var(--muted,#8b93a7); }
+.render-bar-hint { margin:0; font-size:var(--font-size-12); color:var(--text-2); }
 `;
   document.head.append(style);
 }
