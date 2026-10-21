@@ -697,15 +697,172 @@ async function downloadWorkflow(assetId: string, format: 'api' | 'readme', varia
   logActivity(`Downloaded ${filename} for ${assetId}.${limitation}`);
 }
 
+/**
+ * DN05: the right rail is one APG tablist (Run / Activity / Assets / GPU queue).
+ * Filters and windows only change what is rendered; the data model and the
+ * package stay untouched, so switching tabs never clears an input.
+ */
+type RailTab = 'run' | 'activity' | 'assets' | 'gpu';
+type RunFilter = 'all' | 'errors' | 'phases';
+const RAIL_TABS: readonly RailTab[] = ['run', 'activity', 'assets', 'gpu'];
+const RUN_FILTERS: readonly RunFilter[] = ['all', 'errors', 'phases'];
+const ASSET_PAGE_SIZE = 30;
+const ACTIVITY_PAGE_SIZE = 50;
+const railState = {
+  bound: false,
+  tab: 'run' as RailTab,
+  runFilter: 'all' as RunFilter,
+  assetType: 'all',
+  assetLicence: 'all',
+  assetPage: 0,
+  activityAll: false,
+};
+
+const isRailTab = (value: string | undefined): value is RailTab => RAIL_TABS.includes(value as RailTab);
+const isRunFilter = (value: string | undefined): value is RunFilter => RUN_FILTERS.includes(value as RunFilter);
+
+/** The stable key/value behind every asset filter chip. */
+function assetTypeOf(asset: Asset): string {
+  return String(asset.kind ?? 'other');
+}
+
+function assetLicenceOf(asset: Asset): string {
+  const id = asset.license?.id;
+  if (id) return String(id);
+  if (asset.origin === 'generated') return 'generated';
+  if (asset.origin === 'upload') return asset.redistributable ? 'upload (shareable)' : 'upload (not shareable)';
+  return 'unknown';
+}
+
+function fillRailSelect(select: HTMLSelectElement | null, values: string[], allLabel: string, current: string): string {
+  if (!select) return current;
+  const signature = values.join('\u0000');
+  if (select.dataset.options !== signature) {
+    select.innerHTML = [`<option value="all">${esc(allLabel)}</option>`, ...values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`)].join('');
+    select.dataset.options = signature;
+  }
+  const next = values.includes(current) ? current : 'all';
+  select.value = next;
+  return next;
+}
+
+/** Bind the rail once. Each render function calls this; the guard keeps listeners single. */
+function initRail(): void {
+  if (railState.bound) return;
+  const tabs = document.getElementById('rail-tabs');
+  const pane = document.getElementById('activity-pane');
+  if (!tabs || !pane) return;
+  railState.bound = true;
+  const tabButtons = Array.from(tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+
+  const activate = (tab: RailTab, moveFocus = false): void => {
+    railState.tab = tab;
+    for (const button of tabButtons) {
+      const selected = button.dataset.railTab === tab;
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
+      button.tabIndex = selected ? 0 : -1;
+      if (selected && moveFocus) button.focus();
+    }
+    pane.querySelectorAll<HTMLElement>('[data-rail-panel]').forEach(panel => {
+      panel.hidden = panel.dataset.railPanel !== tab;
+    });
+  };
+
+  tabs.addEventListener('click', event => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-rail-tab]');
+    if (button && isRailTab(button.dataset.railTab)) activate(button.dataset.railTab);
+  });
+
+  tabs.addEventListener('keydown', event => {
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const current = Math.max(0, tabButtons.findIndex(button => button.dataset.railTab === railState.tab));
+    const last = tabButtons.length - 1;
+    const index =
+      event.key === 'Home' ? 0
+        : event.key === 'End' ? last
+          : event.key === 'ArrowLeft' ? (current <= 0 ? last : current - 1)
+            : (current >= last ? 0 : current + 1);
+    const next = tabButtons[index]?.dataset.railTab;
+    if (isRailTab(next)) activate(next, true);
+  });
+
+  pane.addEventListener('click', event => {
+    const target = event.target as HTMLElement;
+    const filterButton = target.closest<HTMLButtonElement>('[data-run-filter]');
+    if (filterButton && isRunFilter(filterButton.dataset.runFilter)) {
+      railState.runFilter = filterButton.dataset.runFilter;
+      renderRunPanel();
+      return;
+    }
+    const pageButton = target.closest<HTMLButtonElement>('[data-asset-page]');
+    if (pageButton) {
+      railState.assetPage += pageButton.dataset.assetPage === 'prev' ? -1 : 1;
+      renderAssets();
+      return;
+    }
+    if (target.closest('#activity-show-all')) {
+      railState.activityAll = !railState.activityAll;
+      renderActivity();
+    }
+  });
+
+  pane.addEventListener('change', event => {
+    const select = event.target as HTMLSelectElement;
+    if (select.id === 'asset-type-filter') {
+      railState.assetType = select.value;
+      railState.assetPage = 0;
+      renderAssets();
+    } else if (select.id === 'asset-licence-filter') {
+      railState.assetLicence = select.value;
+      railState.assetPage = 0;
+      renderAssets();
+    }
+  });
+
+  activate(railState.tab);
+}
+
 function renderAssets(): void {
+  initRail();
   const host = $('assets');
   const entries = Object.entries(withTakePreview(pkg).assets ?? {});
+  const types = Array.from(new Set(entries.map(([, asset]) => assetTypeOf(asset)))).sort();
+  const licences = Array.from(new Set(entries.map(([, asset]) => assetLicenceOf(asset)))).sort();
+  railState.assetType = fillRailSelect($<HTMLSelectElement>('asset-type-filter'), types, 'All types', railState.assetType);
+  railState.assetLicence = fillRailSelect($<HTMLSelectElement>('asset-licence-filter'), licences, 'All licences', railState.assetLicence);
+
+  const filtered = entries.filter(([, asset]) =>
+    (railState.assetType === 'all' || assetTypeOf(asset) === railState.assetType)
+    && (railState.assetLicence === 'all' || assetLicenceOf(asset) === railState.assetLicence));
+  const pageCount = Math.max(1, Math.ceil(filtered.length / ASSET_PAGE_SIZE));
+  railState.assetPage = Math.min(Math.max(0, railState.assetPage), pageCount - 1);
+  const start = railState.assetPage * ASSET_PAGE_SIZE;
+  const windowEntries = filtered.slice(start, start + ASSET_PAGE_SIZE);
+
+  const windowHost = document.getElementById('asset-window');
+  const count = document.getElementById('asset-window-count');
+  const previous = document.getElementById('asset-prev') as HTMLButtonElement | null;
+  const next = document.getElementById('asset-next') as HTMLButtonElement | null;
+  if (windowHost) windowHost.hidden = filtered.length <= ASSET_PAGE_SIZE;
+  if (count) count.textContent = filtered.length === 0 ? 'No assets match these filters' : `Showing ${start + 1}–${start + windowEntries.length} of ${filtered.length}`;
+  if (previous) previous.disabled = railState.assetPage === 0;
+  if (next) next.disabled = start + ASSET_PAGE_SIZE >= filtered.length;
+
   if (entries.length === 0) {
     host.innerHTML = '<div class="empty">No assets yet.<br /><span class="hint">Send a brief to generate the first package.</span></div>';
     renderGpuQueue();
     return;
   }
-  host.innerHTML = entries
+  if (windowEntries.length === 0) {
+    host.innerHTML = '<div class="empty">No assets match these filters.<br /><span class="hint">Clear the type or licence filter to see everything.</span></div>';
+    renderGpuQueue();
+    return;
+  }
+  // At most ASSET_PAGE_SIZE rows exist in the DOM at once; the rest are a
+  // window over the same entries, so a 48-asset package never grows the rail.
+  host.innerHTML = windowEntries
     .map(([id, asset]) => {
       const origin = asset.origin === 'generated' ? asset.gen?.generator ?? 'generated' : asset.origin;
       const pending = asset.status === 'pending';
@@ -715,7 +872,7 @@ function renderAssets(): void {
       const statusText = pending ? 'pending gpu' : previewReady ? 'preview ready' : (asset.license?.id ?? asset.status);
       const chip = `<span class="badge badge-${tone} chip${pending ? ' warn' : ''}" data-tone="${tone}">${esc(statusText)}</span>`;
       const timeInfo = asset.media?.frames ? `<time class="job-time hint tabular-nums mono">${asset.media.frames}f</time>` : '';
-      return `<div class="asset job-row${pending ? ' pending' : ''}" data-asset-id="${esc(id)}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(id)}</b>${chip}${timeInfo}</div><span class="job-progress hint">${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}</div>`;
+      return `<div class="asset job-row rail-row${pending ? ' pending' : ''}" data-asset-id="${esc(id)}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(id)}</b>${chip}${timeInfo}</div><span class="job-progress hint">${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}</div>`;
     })
     .join('');
   renderGpuQueue();
@@ -734,7 +891,7 @@ function renderGpuQueue(): void {
   host.innerHTML = remaining
     .map(
       item =>
-        `<div class="asset job-row pending" data-asset-id="${esc(item.assetId)}"><div class="thumb">◌</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(item.assetId)}</b><span class="badge badge-warn chip warn" data-tone="warn">pending spend</span></div><span class="job-progress hint">${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div></div>`,
+        `<div class="asset job-row rail-row pending" data-asset-id="${esc(item.assetId)}"><div class="thumb">◌</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(item.assetId)}</b><span class="badge badge-warn chip warn" data-tone="warn">pending spend</span></div><span class="job-progress hint">${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div></div>`,
     )
     .join('');
 }
@@ -748,15 +905,28 @@ function activityTone(text: string): { tone: 'ok' | 'warn' | 'danger' | 'info'; 
 }
 
 function renderActivity(): void {
+  initRail();
   const host = $('activity');
-  host.innerHTML = state.activity.length
-    ? state.activity
+  const total = state.activity.length;
+  const visible = railState.activityAll ? state.activity : state.activity.slice(0, ACTIVITY_PAGE_SIZE);
+  host.innerHTML = visible.length
+    ? visible
         .map(event => {
           const { tone, label } = activityTone(event.text);
-          return `<div class="event job-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><span class="job-text">${esc(event.text)}</span></div><time class="tabular-nums mono hint">${esc(event.at)}</time></div>`;
+          return `<div class="event job-row rail-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><span class="job-text">${esc(event.text)}</span></div><time class="tabular-nums mono hint">${esc(event.at)}</time></div>`;
         })
         .join('')
     : '<div class="empty">No activity yet.<br /><span class="hint">Agent and render events will show up here.</span></div>';
+  const more = document.getElementById('activity-more');
+  const count = document.getElementById('activity-count');
+  const button = document.getElementById('activity-show-all') as HTMLButtonElement | null;
+  if (more) more.hidden = total <= ACTIVITY_PAGE_SIZE;
+  if (count) count.textContent = total > ACTIVITY_PAGE_SIZE ? `Latest ${ACTIVITY_PAGE_SIZE} of ${total}` : `${total} event${total === 1 ? '' : 's'}`;
+  if (button) {
+    button.hidden = total <= ACTIVITY_PAGE_SIZE;
+    button.textContent = railState.activityAll ? `Show latest ${ACTIVITY_PAGE_SIZE}` : `Show all ${total}`;
+    button.setAttribute('aria-expanded', String(railState.activityAll));
+  }
 }
 
 function summarizeRunEvent(event: RunEvent): string {
@@ -822,28 +992,68 @@ function runStatusTone(status: string): 'ok' | 'warn' | 'danger' | 'info' {
   return 'info';
 }
 
+type CollapsedRunEvent = { event: RunEvent; count: number };
+
+/** Consecutive identical events are one row with a ×N count, not N rows. */
+function runEventKey(event: RunEvent): string {
+  return [event.event ?? event.type ?? 'event', event.phase ?? '', event.state ?? '', summarizeRunEvent(event)].join('\u0001');
+}
+
+function collapseRunEvents(events: RunEvent[]): CollapsedRunEvent[] {
+  const groups: CollapsedRunEvent[] = [];
+  for (const event of events) {
+    const last = groups.at(-1);
+    if (last && runEventKey(last.event) === runEventKey(event)) last.count += 1;
+    else groups.push({ event, count: 1 });
+  }
+  return groups;
+}
+
+function matchesRunFilter(event: RunEvent, filter: RunFilter): boolean {
+  if (filter === 'errors') return runEventTone(event).tone === 'danger';
+  if (filter === 'phases') return event.event === 'run_phase' || typeof event.phase === 'string';
+  return true;
+}
+
+function paintRunFilters(): void {
+  document.querySelectorAll<HTMLButtonElement>('[data-run-filter]').forEach(button => {
+    const active = button.dataset.runFilter === railState.runFilter;
+    button.setAttribute('aria-pressed', String(active));
+    button.classList.toggle('is-active', active);
+  });
+}
+
 function renderRunPanel(): void {
+  initRail();
+  paintRunFilters();
   const host = $('run-panel');
   if (!runState.active) {
     host.innerHTML = '<div class="empty">No backend run yet.<br /><span class="hint">Pick a backend and press Run.</span></div>';
     return;
   }
   const activeTone = runStatusTone(runState.active.status);
-  const rows = runState.events
-    .map(event => {
+  const rows = collapseRunEvents(runState.events.filter(event => matchesRunFilter(event, railState.runFilter)))
+    .map(({ event, count }) => {
       const { tone, label } = runEventTone(event);
       const at = event.at ?? event.time ?? event.timestamp;
       const timeStr = at ? `<time class="tabular-nums mono hint">${esc(String(at))}</time>` : '';
-      return `<div class="event job-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><b class="job-name">${esc(String(event.event ?? event.type ?? 'event'))}</b><span class="job-progress hint">${esc(summarizeRunEvent(event))}</span></div>${timeStr}</div>`;
+      const name = String(event.event ?? event.type ?? 'event');
+      const countLabel = count > 1 ? `<span class="event-count rail-event-count" title="${count} identical events" aria-label="${count} identical events">×${count}</span>` : '';
+      return `<div class="event job-row rail-row" data-tone="${tone}" data-event="${esc(name)}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><b class="job-name">${esc(name)}</b>${countLabel}<span class="job-progress hint">${esc(summarizeRunEvent(event))}</span></div>${timeStr}</div>`;
     })
     .join('');
-  const teardown = runState.teardown
-    ? `<div class="event job-row" data-tone="${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}"><span class="badge badge-${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}">teardown</span><div class="job-content"><b class="job-name">teardown</b><span class="job-progress hint">${esc(teardownLabel(runState.teardown))}</span></div></div>`
+  const noMatches = runState.events.length === 0 || !rows
+    ? `<div class="empty">No events match this filter.<br /><span class="hint">Choose All to see the full run.</span></div>`
     : '';
-  const render = runState.render
-    ? `<div class="run-render job-row"><span class="badge badge-ok" data-tone="ok">ready</span><div class="job-content"><b class="job-name">run MP4</b><span class="job-progress hint tabular-nums mono">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div><div class="job-actions"><button type="button" id="run-video" class="btn btn-secondary btn-sm">Download run MP4</button></div></div>`
+  // The filters apply to the event list; the run summary stays, while the
+  // teardown/render details belong to the unfiltered view.
+  const teardown = railState.runFilter === 'all' && runState.teardown
+    ? `<div class="event job-row rail-row" data-tone="${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}"><span class="badge badge-${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}">teardown</span><div class="job-content"><b class="job-name">teardown</b><span class="job-progress hint">${esc(teardownLabel(runState.teardown))}</span></div></div>`
     : '';
-  host.innerHTML = `<div class="run-head job-row"><div class="job-content"><b class="job-name">${esc(runState.active.runId)}</b><span class="job-meta hint">${esc(runState.active.backendId)}</span></div><span class="badge badge-${activeTone} chip" data-tone="${activeTone}">${esc(runState.active.status)}</span></div>${rows}${teardown}${render}`;
+  const render = railState.runFilter === 'all' && runState.render
+    ? `<div class="run-render job-row rail-row"><span class="badge badge-ok" data-tone="ok">ready</span><div class="job-content"><b class="job-name">run MP4</b><span class="job-progress hint tabular-nums mono">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div><div class="job-actions"><button type="button" id="run-video" class="btn btn-secondary btn-sm">Download run MP4</button></div></div>`
+    : '';
+  host.innerHTML = `<div class="run-head job-row"><div class="job-content"><b class="job-name">${esc(runState.active.runId)}</b><span class="job-meta hint">${esc(runState.active.backendId)}</span></div><span class="badge badge-${activeTone} chip" data-tone="${activeTone}">${esc(runState.active.status)}</span></div>${rows || noMatches}${teardown}${render}`;
   const video = $('run-video');
   if (video) video.addEventListener('click', () => void downloadRunVideo());
 }
