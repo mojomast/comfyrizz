@@ -3,6 +3,7 @@ import './project-chat.css';
 import './characters/characters.css';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
+import { readRunSnapshot } from './run-progress.ts';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
 import { createReferenceApi } from './references/api.ts';
@@ -754,6 +755,8 @@ function summarizeRunEvent(event: RunEvent): string {
   }
   if (event.type === 'ensure_up') return `state ${event.state ?? '?'}`;
   if (event.type === 'bootstrap_log') return String(event.message ?? '').trim();
+  if (event.type === 'collection_progress') return `${event.completed ?? 0}/${event.total ?? '?'} files · ${event.file ?? ''}`;
+  if (event.type === 'batch_start') return `${event.batch ?? 'media'} · ${event.jobs ?? '?'} jobs`;
   if (event.type === 'health') return `${event.ok ? 'ok' : 'not ok'} · ${event.detail ?? ''}`;
   if (event.type === 'collected' || event.event === 'collect') return `${event.files ?? '?'} file(s) → ${event.destDir ?? ''}`;
   if (event.type === 'teardown') return teardownLabel({ state: String(event.state ?? ''), evidence: event.evidence as string | undefined });
@@ -980,6 +983,16 @@ async function refreshSpend(): Promise<void> {
     if (!response.ok) return;
     const body = (await response.json()) as { spentEstimate?: number };
     if (typeof body.spentEstimate === 'number') $('spend').textContent = `${body.spentEstimate.toFixed(2)} GPU units (est.)`;
+    if (!runState.active) {
+      const run = await readRunSnapshot(apiFetch);
+      if (run && !runState.active) {
+        runState.active = { runId: run.runId, backendId: run.backendId, status: run.status };
+        runState.events = run.events ?? [];
+        runState.render = run.render ?? null;
+        runState.teardown = run.teardown ?? null;
+        renderRunPanel();
+      }
+    }
   } catch {
     /* the meter is best-effort */
   }

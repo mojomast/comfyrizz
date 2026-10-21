@@ -1,6 +1,7 @@
 // Live gauges for Google Colab runs: the bars a notebook would draw (tqdm, ComfyUI sampler steps,
 // per-node progress, render frames), from /api/colab/progress. Rendering is a pure function of the
 // snapshot so it can be tested as a string; the mount polls inside a scrollable drawer.
+import { readRunSnapshot, runIsActive, runProgressSummary, type RunSnapshot } from './run-progress.ts';
 
 export interface ColabGauge {
   job: string;
@@ -78,6 +79,18 @@ export function colabProgressHtml(runs: ColabRun[] | null, error: string | null 
   return `<div class="colab-progress"><div class="colab-head"><b>Google Colab runs</b></div>${body}</div>`;
 }
 
+export function backendProgressHtml(run: RunSnapshot | null, error: string | null = null): string {
+  if (error) return `<p class="colab-warn">Could not read active run: ${esc(error)}</p>`;
+  if (!run) return '';
+  const summary = runProgressSummary(run);
+  return `<section class="colab-run colab-current-run" aria-label="Current run">
+    <h3>${esc(summary.label)}</h3><p>${esc(run.runId)} · ${esc(run.status)}</p>
+    <p>${summary.completed}${summary.total ? ` / ${summary.total}` : ''} generation jobs completed</p>
+    <p>${esc(summary.detail)}</p>
+    ${summary.percent === null ? '' : `<progress aria-label="Generation jobs completed" max="100" value="${summary.percent}" style="width:100%"></progress>`}
+  </section>`;
+}
+
 const STYLE = `.colab-progress{margin-top:12px}.colab-run{border:1px solid #2a3140;border-radius:8px;padding:8px;margin:8px 0}
 .colab-run h4{margin:0 0 6px;font-size:13px}.colab-run small{opacity:.7;font-weight:400}.colab-gauge{margin:6px 0;font-size:12px}
 .colab-gauge-head{display:flex;justify-content:space-between}.colab-gauge-bar{height:8px;background:#1d2330;border-radius:4px;overflow:hidden}
@@ -134,22 +147,26 @@ export function mountColabProgress(host: HTMLElement, request: (input: string, i
   let timer: ReturnType<typeof setTimeout> | undefined;
   const tick = async (): Promise<void> => {
     let live = 0;
+    const snapshot = readRunSnapshot(request).then(run => ({ run, error: null as string | null })).catch(error => ({ run: null, error: String(error.message ?? error) }));
     try {
       const response = await request('/api/colab/progress');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = (await response.json()) as { runs: ColabRun[] };
+      const backend = await snapshot;
       if (stopped) return;
-      live = (data.runs ?? []).filter(run => run.active).length;
+      live = backend.run ? (runIsActive(backend.run) ? 1 : 0) : (data.runs ?? []).filter(run => run.active).length;
       // Only replace the content: the drawer, focus, and scroll container persist
       // as new gauges arrive, so polling cannot resize the toolbar or reset scroll.
-      body.innerHTML = colabProgressHtml(data.runs ?? []);
+      body.innerHTML = backendProgressHtml(backend.run, backend.error) + colabProgressHtml(data.runs ?? []);
       status.textContent = live ? `${live} live` : 'Idle';
       status.dataset.live = String(live > 0);
     } catch (failure) {
+      const backend = await snapshot;
       if (stopped) return;
-      body.innerHTML = colabProgressHtml(null, failure instanceof Error ? failure.message : String(failure));
-      status.textContent = 'Unavailable';
-      status.dataset.live = 'false';
+      live = backend.run && runIsActive(backend.run) ? 1 : 0;
+      body.innerHTML = backendProgressHtml(backend.run, backend.error) + colabProgressHtml(null, failure instanceof Error ? failure.message : String(failure));
+      status.textContent = live ? '1 live' : 'Unavailable';
+      status.dataset.live = String(live > 0);
     }
     if (!stopped) timer = setTimeout(() => void tick(), (live ? 1 : 5) * intervalMs);
   };
