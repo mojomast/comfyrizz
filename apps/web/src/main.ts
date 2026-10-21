@@ -1707,6 +1707,7 @@ async function runBrief(brief: string): Promise<void> {
 }
 
 function init(opened: OpenedProject): void {
+  if (opened.budgetUnits !== undefined) $<HTMLInputElement>('budget').value = String(opened.budgetUnits);
   renderMessages();
   renderStoryboard();
   renderPalette();
@@ -1744,6 +1745,7 @@ function init(opened: OpenedProject): void {
     voiceHost.id = 'voice-panel';
     scriptHost.append(voiceHost);
     mountVoiceSettings(voiceHost, {
+      initialBudgetUnits: opened.budgetUnits,
       getPackage: () => editorStore.getState().doc.package as unknown as PackageV1,
       setVoice: voice => {
         const result = editorStore.dispatch({ type: 'SetVoice', voice: voice as never });

@@ -14,6 +14,7 @@ export type VoiceSaveResult = {
   text?: string;
 };
 type Options = {
+  initialBudgetUnits?: number;
   /** Read-only: every edit goes through setVoice/setNarrationStyle. */
   getPackage: () => PackageV1;
   /** Existing EditorStore SetVoice command, so undo and autosave see the edit. */
@@ -95,6 +96,7 @@ export function mountVoiceSettings(element: HTMLElement, configuration: Options)
   unsubscribe?.();
   host = element;
   options = configuration;
+  if (typeof configuration.initialBudgetUnits === 'number' && Number.isFinite(configuration.initialBudgetUnits) && configuration.initialBudgetUnits >= 0) budget = configuration.initialBudgetUnits;
   if (!deliverySceneId) deliverySceneId = configuration.getPackage().scenes[0]?.id ?? '';
   let observedPackage = configuration.getPackage();
   unsubscribe = configuration.subscribe?.(() => {

@@ -41,6 +41,16 @@ export class PackageStore {
     }
   }
 
+  /** Optional deployment-owned starting values; these do not approve a run. */
+  runDefaults(id) {
+    this.path(id); // Validate before resolving the sidecar.
+    try {
+      const value = JSON.parse(readFileSync(join(this.dir, 'run-defaults', `${id}.json`), 'utf8'));
+      return typeof value.budgetUnits === 'number' && Number.isFinite(value.budgetUnits) && value.budgetUnits >= 0
+        ? { budgetUnits: value.budgetUnits } : null;
+    } catch { return null; }
+  }
+
   /** Seed only when the id is absent; never overwrites an owner edit. */
   seed(pkg) {
     if (!this.read(pkg.id)) this.write(pkg);

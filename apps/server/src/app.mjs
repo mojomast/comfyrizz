@@ -933,7 +933,9 @@ export function createApp({
         if (!pkg) return sendJson(response, 404, { error: 'package not found' });
         let editor = null;
         try { editor = readEditor(runtimeDir, id); } catch { editor = null; }
-        return sendJson(response, 200, editor ? { package: pkg, revision: pkg.revision, editor } : { package: pkg, revision: pkg.revision });
+        const runDefaults = store.runDefaults(id);
+        return sendJson(response, 200, { package: pkg, revision: pkg.revision,
+          ...(editor ? { editor } : {}), ...(runDefaults ? { runDefaults } : {}) });
       }
       if (request.method === 'PATCH') {
         const body = await readJson(request);

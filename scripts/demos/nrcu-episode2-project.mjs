@@ -36,7 +36,7 @@ const pkg = {
   scenes: [], assets: {}, cast: [],
   compliance: { open_weights_only: true, backends_used: [], warnings: [
     'Episode-two working edit: 48 new native FastH3 takes remain pending. Review generated speech and timing before final delivery.',
-    'Approved episode ceiling: 12 Colab credits. All motion and spoken performances must use FastH3 Omni; narrator TTS is disabled.',
+    'Approved episode ceiling: 14.5 Colab credits. All motion and spoken performances must use FastH3 Omni; narrator TTS is disabled.',
     'Draft music bed reuses the original 144 BPM pilot rock instrumental. Fine timing/ducking follows take review.',
   ] },
 };
@@ -140,10 +140,11 @@ const timeline = compileTimeline(pkg);if(timeline.durationInFrames!==5760)throw 
 const placements = pkg.scenes.flatMap(s => (s.cast??[]).map(castId => ({castId,sceneId:s.id,role:'subject'})));
 const conversation = {id:chatId,revision:1,phase:'built',projectId:id,projectRevision:1,plan:null,
   cast:[...cast],castPlacements:placements,castProposals:[],referenceAssignments:[],
-  messages:[{role:'user',content:'Episode 2: The Road Beneath the World. Four minutes, native FastH3, rock music, Don speaks broken English, Molty sounds menacing. Episode ceiling: 12 credits.'},
-    {role:'assistant',content:'The 68-shot episode is prepared: 20 verified pilot edits, 48 pending FastH3 performances, and 53 reference/keyframe still jobs. Six characters and their voice-conditioning WAVs are attached. Narrator TTS is off so speech stays native to FastH3. Choose Google Colab and a 12-credit ceiling. Use the clip/Takes controls to generate and review shots, or explicitly choose a working-preview override in the render gate for a full pipeline attempt. G4 availability is determined when you start. The music bed is a draft and new speech timing needs review.'}],
+  messages:[{role:'user',content:'Episode 2: The Road Beneath the World. Four minutes, native FastH3, rock music, Don speaks broken English, Molty sounds menacing. Episode ceiling: 14.5 credits.'},
+    {role:'assistant',content:'The 68-shot episode is prepared: 20 verified pilot edits, 48 pending FastH3 performances, and 53 reference/keyframe still jobs. Six characters and their voice-conditioning WAVs are attached. Narrator TTS is off so speech stays native to FastH3. Choose Google Colab and a 14.5-credit ceiling. Use the clip/Takes controls to generate and review shots, or explicitly choose a working-preview override in the render gate for a full pipeline attempt. G4 availability is determined when you start. The music bed is a draft and new speech timing needs review.'}],
 };
 store.seed(pkg);write(join(runtime,'conversations',chatId+'.json'),conversation);
+write(join(root,'run-defaults',id+'.json'),{budgetUnits:14.5});
 write(join(production,'ui-project.json'),pkg);write(join(production,'ui-jobs.json'),jobs);write(join(production,'ui-timeline.json'),timeline);
 const report={packageId:id,chatId,scenes:pkg.scenes.length,frames:timeline.durationInFrames,seconds:timeline.durationInFrames/24,cast:cast.length,jobs:jobs.jobs.length,
   stills:jobs.jobs.filter(j=>j.kind==='still').length,videos:jobs.jobs.filter(j=>j.generator==='fasth3-omni').length,

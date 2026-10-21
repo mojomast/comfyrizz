@@ -7,8 +7,8 @@ Standard Colab G4 allocation attempts returned `Service Unavailable`; the cause
 has not been confirmed. The separate high-memory request was rejected. The last
 usage check showed zero active assignments, zero usage and a 326.34-credit balance.
 
-The user selected the full four-minute episode and authorized up to **12 credits**
-for this render, increasing the combined ceiling to **32.20 credits**. Previous
+The user selected the full four-minute episode and authorized up to **14.5 credits**
+for this render, increasing the combined ceiling to **34.70 credits**. Previous
 combined spending is **20.20 credits**; episode-two spending is currently zero.
 
 ## Prepared production
@@ -36,7 +36,7 @@ local Kokoro model cache. It refuses to overwrite an existing `film.json`.
 
 `scripts/demos/nrcu-run.py --session nrcu-episode2` selects the allocated session
 for generation and collection; allocation and runtime setup remain separate.
-Keep a bounded stop timer and reconcile usage against the 12-credit ceiling.
+Keep a bounded stop timer and reconcile usage against the 14.5-credit ceiling.
 
 Once all selected takes have passed review:
 
@@ -70,8 +70,11 @@ inputs on subsequent estimates, and the native-ambience audio configuration.
 
 **Budget finding:** the backend point estimate is 9.880 credits; its conservative
 admission calculation (margin plus collection/shutdown reserve) requires **14.227**.
-Consequently, the full run is refused at the authorized 12-credit ceiling. No ceiling
-was raised and no GPU was allocated during these fixes. The static pipeline preflight's
+The original 12-credit ceiling was insufficient. The user subsequently authorized
+**14.5 credits**, recorded in the production budget and the project's `run-defaults`
+sidecar. Both UI budget controls load that value when the project opens. This sets
+the starting ceiling, not automatic run approval. No GPU was allocated during the fixes.
+The static pipeline preflight's
 `ready` flag does not include this later measured-backend admission check.
 
 The prepared episode is installed in the private native project store as
@@ -85,7 +88,7 @@ draft rock bed are staged as normal package assets. Generated narration is off.
 The music bed and new dialogue timing still require editorial review.
 
 In **Script → Voice & narration → Generate narrated video**, select
-**Google Colab GPU**, set **Total compute-unit ceiling** to **12**, keep final
+**Google Colab GPU**, confirm **Total compute-unit ceiling** is **14.5**, keep final
 render on **This machine**, and click **Check generation plan**. The live plan
 has passed preflight with 101 jobs and no issues. **Approve ceiling & generate**
 uses the existing review-gate override for a working preview; generated takes
