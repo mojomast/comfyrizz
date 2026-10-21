@@ -28,7 +28,8 @@ NODE = shutil.which("node")
 #: Parameter names the planner can emit for a job. A params map may only use these (or a
 #: documented node-specific extra), so a typo cannot silently become a dead entry.
 KNOWN_PARAMS = {
-    "still": {"prompt", "image", "reference", "mask", "audio", "width", "height", "seed", "steps", "denoise", "megapixels", "cutout"},
+    # CCL3c: `lora` / `lora_strength` select a trained character LoRA in character_lora_klein
+    "still": {"prompt", "image", "reference", "mask", "audio", "width", "height", "seed", "steps", "denoise", "megapixels", "cutout", "lora", "lora_strength"},
     # R1: `strength` (stage-1 LTXVImgToVideoInplace) and `stage2_strength` (the stage-2 one) are the
     # knobs that hold a UI/diagram frame still; the graph's own default is 0.7
     "plate": {"prompt", "image", "reference", "width", "height", "frames", "fps", "seed", "stage2_seed", "stage2_sigmas", "upscale", "strength", "stage2_strength"},
@@ -68,16 +69,26 @@ def test_presenter_freezes_original_audio_in_both_sampling_stages():
     assert graph["12"]["inputs"]["sampler_name"] == "euler"
 
 
+#: The GPU-test-1 set the fixture package plans jobs for.
+GPU1_WORKFLOWS = {
+    "flux3_klein_t2i.api.json",
+    "flux3_klein_img2img.api.json",
+    "flux3_klein_ref_edit.api.json",
+    "ltx25_a2v_2stage.api.json",
+    "ltx25_i2v_2stage.api.json",
+    "ltx25_t2v_2stage.api.json",
+}
+#: Character-creator workflows (CCL2a PuLID identity, CCL3c character LoRA). They are
+#: contract-checked like the rest, but the GPU-test-1 fixture package does not plan jobs for them.
+CHARACTER_WORKFLOWS = {
+    "character_identity_pulid.api.json",
+    "character_lora_klein.api.json",
+}
+
+
 def test_the_gpu_test_1_workflow_set_is_present():
     names = {p.name for p in GRAPH_FILES}
-    assert names == {
-        "flux3_klein_t2i.api.json",
-        "flux3_klein_img2img.api.json",
-        "flux3_klein_ref_edit.api.json",
-        "ltx25_a2v_2stage.api.json",
-        "ltx25_i2v_2stage.api.json",
-        "ltx25_t2v_2stage.api.json",
-    }, names
+    assert names == GPU1_WORKFLOWS | CHARACTER_WORKFLOWS, names
 
 
 @pytest.mark.parametrize("graph_path", GRAPH_FILES, ids=[p.name for p in GRAPH_FILES])
@@ -156,7 +167,7 @@ def test_the_fixture_package_is_valid_and_plans_jobs_for_every_workflow(tmp_path
     doc = plan(PACKAGE, tmp_path / "jobs.json")
     assert validate_jobs(doc) == []
     workflows_planned = {job["workflow"] for job in doc["jobs"]}
-    expected = {f"workflows/{p.name}" for p in GRAPH_FILES}
+    expected = {f"workflows/{name}" for name in GPU1_WORKFLOWS}
     assert workflows_planned == expected, sorted(expected - workflows_planned)
 
 
