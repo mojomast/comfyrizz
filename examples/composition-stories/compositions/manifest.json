@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "scenes": [
+    {
+      "sceneId": "s_transfer",
+      "component": "object-transfer",
+      "params": {
+        "title": "A receipt finds its project",
+        "objectLabel": "Receipt",
+        "fromLabel": "Inbox",
+        "toLabel": "Project Atlas",
+        "resultLabel": "Assigned to Project Atlas",
+        "qualifier": "Illustrative workflow"
+      },
+      "cues": { "action": { "frame": 24 }, "result": { "frame": 90 } }
+    },
+    {
+      "sceneId": "s_mechanism",
+      "component": "mechanism-journey",
+      "params": {
+        "title": "Follow the signal",
+        "signalLabel": "Signal",
+        "stations": [
+          { "label": "Input", "detail": "A request arrives" },
+          { "label": "Review", "detail": "A rule checks the request" },
+          { "label": "Result", "detail": "An outcome becomes visible" }
+        ],
+        "resultLabel": "The request reaches its result",
+        "qualifier": "Illustrative mechanism"
+      },
+      "cues": { "action": { "frame": 24 }, "result": { "frame": 138 } }
+    },
+    {
+      "sceneId": "s_evidence",
+      "component": "evidence-reveal",
+      "params": {
+        "title": "Make the evidence inspectable",
+        "dataset": "d_review",
+        "rows": ["Before", "After"],
+        "resultLabel": "12 → 7 minutes in this example",
+        "qualifier": "Source: illustrative; invented values, not measured evidence."
+      },
+      "cues": { "action": { "frame": 24 }, "result": { "frame": 90 } }
+    }
+  ]
+}

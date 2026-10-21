@@ -1,0 +1,529 @@
+{
+  "schema": "comfyrizz.effects/v1",
+  "effects": [
+    {
+      "id": "film-grain",
+      "label": "Film grain",
+      "family": "grain-texture",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 0.12 },
+        "size": { "min": 0.5, "max": 8, "default": 2 },
+        "seed": { "min": 0, "max": 9999, "default": 1337 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "feTurbulence fractalNoise with a seed advanced every two frames. A WebGL grain shader may replace it after the gated renderer task."
+    },
+    {
+      "id": "grain-fine",
+      "label": "Fine grain",
+      "family": "grain-texture",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 0.06 },
+        "size": { "min": 0.5, "max": 4, "default": 1 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Tighter, higher frequency grain than film-grain; sits under flat vector art."
+    },
+    {
+      "id": "paper-grain",
+      "label": "Paper grain",
+      "family": "grain-texture",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 0.08 },
+        "contrast": { "min": 0, "max": 1, "default": 0.5 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Low frequency fibre noise for print-like backgrounds."
+    },
+    {
+      "id": "paper-texture",
+      "label": "Paper texture",
+      "family": "grain-texture",
+      "params": {
+        "scale": { "min": 0.5, "max": 4, "default": 1 },
+        "opacity": { "min": 0, "max": 1, "default": 0.35 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "https://ambientcg.com",
+      "license": "CC0-1.0",
+      "notes": "Fetch-on-demand CC0 paper tile at 1K JPG. When the asset is unavailable the renderer draws an SVG speckle field instead."
+    },
+    {
+      "id": "dust-scratches",
+      "label": "Dust and scratches",
+      "family": "grain-texture",
+      "params": {
+        "density": { "min": 0, "max": 1, "default": 0.3 },
+        "opacity": { "min": 0, "max": 1, "default": 0.5 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "https://www.forfilmcreation.com",
+      "license": "CC0-1.0",
+      "notes": "Fetch-on-demand CC0 overlay video; the CPU path emits seeded specks and hairline scratches as SVG."
+    },
+    {
+      "id": "halftone",
+      "label": "Halftone",
+      "family": "grain-texture",
+      "params": {
+        "dotSize": { "min": 0.5, "max": 8, "default": 2 },
+        "angle": { "min": 0, "max": 360, "default": 45 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "SVG pattern of rotated dots used by the riso and print looks."
+    },
+    {
+      "id": "light-leak",
+      "label": "Light leak",
+      "family": "light",
+      "params": {
+        "intensity": { "min": 0, "max": 1, "default": 0.6 },
+        "hue": { "min": 0, "max": 360, "default": 25 },
+        "softness": { "min": 0, "max": 1, "default": 0.5 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Radial gradients composited with mix-blend-mode: screen. A WebGL variant is optional once the renderer layer exists."
+    },
+    {
+      "id": "halation",
+      "label": "Halation",
+      "family": "light",
+      "params": {
+        "threshold": { "min": 0, "max": 1, "default": 0.7 },
+        "radius": { "min": 1, "max": 60, "default": 18 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Blur of the highlights bleeding into the surrounding colour, as on film."
+    },
+    {
+      "id": "bloom",
+      "label": "Bloom",
+      "family": "light",
+      "params": {
+        "intensity": { "min": 0, "max": 1, "default": 0.5 },
+        "radius": { "min": 2, "max": 80, "default": 24 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Stacked drop-shadow and blur copies of the layer, tinted toward the accent colour."
+    },
+    {
+      "id": "glow-text",
+      "label": "Glow text",
+      "family": "light",
+      "params": {
+        "intensity": { "min": 0, "max": 1, "default": 0.6 },
+        "spread": { "min": 0, "max": 40, "default": 12 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "text-shadow stack around headlines; used by the mono-terminal and synthwave looks."
+    },
+    {
+      "id": "chrome-sheen",
+      "label": "Chrome sheen",
+      "family": "light",
+      "params": {
+        "angle": { "min": 0, "max": 360, "default": 105 },
+        "sharpness": { "min": 0.01, "max": 1, "default": 0.35 },
+        "width": { "min": 0.05, "max": 1, "default": 0.35 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Sweeping linear-gradient highlight band that travels across metallic fills."
+    },
+    {
+      "id": "soft-glow",
+      "label": "Soft glow",
+      "family": "light",
+      "params": {
+        "intensity": { "min": 0, "max": 1, "default": 0.35 },
+        "radius": { "min": 4, "max": 100, "default": 30 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Large diffuse halo for product and glass looks."
+    },
+    {
+      "id": "vignette-soft",
+      "label": "Soft vignette",
+      "family": "lens",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 0.35 },
+        "radius": { "min": 0.2, "max": 1, "default": 0.65 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Wide radial-gradient darkening at the frame edges."
+    },
+    {
+      "id": "vignette-hard",
+      "label": "Hard vignette",
+      "family": "lens",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 0.6 },
+        "radius": { "min": 0.1, "max": 0.9, "default": 0.45 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Tighter, darker vignette for the noir and archive looks."
+    },
+    {
+      "id": "chroma-shift",
+      "label": "Chroma shift",
+      "family": "lens",
+      "params": {
+        "offset": { "min": 0, "max": 12, "default": 2 },
+        "angle": { "min": 0, "max": 360, "default": 0 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Three offset copies of the frame tinted red, green and blue. SVG feOffset gives the same result."
+    },
+    {
+      "id": "motion-smear",
+      "label": "Motion smear",
+      "family": "lens",
+      "params": {
+        "amount": { "min": 0, "max": 30, "default": 6 },
+        "direction": { "min": 0, "max": 360, "default": 0 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Directional blur via feGaussianBlur with an anisotropic stdDeviation."
+    },
+    {
+      "id": "depth-blur",
+      "label": "Depth blur",
+      "family": "lens",
+      "params": {
+        "amount": { "min": 0, "max": 20, "default": 4 },
+        "layers": { "min": 1, "max": 8, "default": 3 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Per-layer blur derived from each layer depth value."
+    },
+    {
+      "id": "scanlines",
+      "label": "Scanlines",
+      "family": "display",
+      "params": {
+        "count": { "min": 20, "max": 600, "default": 240 },
+        "opacity": { "min": 0, "max": 1, "default": 0.35 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Repeating-linear-gradient CRT line pattern."
+    },
+    {
+      "id": "scanlines-soft",
+      "label": "Soft scanlines",
+      "family": "display",
+      "params": {
+        "count": { "min": 20, "max": 600, "default": 120 },
+        "opacity": { "min": 0, "max": 0.6, "default": 0.15 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Softer variant that reads as a subtle texture rather than a CRT."
+    },
+    {
+      "id": "crt-curve",
+      "label": "CRT curve",
+      "family": "display",
+      "params": {
+        "curvature": { "min": 0, "max": 1, "default": 0.4 },
+        "bezel": { "min": 0, "max": 40, "default": 6 }
+      },
+      "cost": "webgl",
+      "cpuFallback": "scanlines",
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Barrel distortion and phosphor mask need a WebGL pass; the CPU path uses flat scanlines."
+    },
+    {
+      "id": "vhs-tracking",
+      "label": "VHS tracking",
+      "family": "display",
+      "params": {
+        "bandHeight": { "min": 0.02, "max": 0.6, "default": 0.18 },
+        "intensity": { "min": 0, "max": 1, "default": 0.5 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Horizontal displacement band that drifts down the frame."
+    },
+    {
+      "id": "glitch-slice",
+      "label": "Glitch slice",
+      "family": "display",
+      "params": {
+        "slices": { "min": 2, "max": 30, "default": 8 },
+        "offset": { "min": 0, "max": 80, "default": 18 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Clip-path slices of the frame shifted horizontally on a seeded cadence."
+    },
+    {
+      "id": "pixelate-in",
+      "label": "Pixelate in",
+      "family": "display",
+      "params": {
+        "size": { "min": 2, "max": 64, "default": 12 },
+        "steps": { "min": 2, "max": 12, "default": 6 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "feMorphology driven block reduction, resolved over a fixed number of steps."
+    },
+    {
+      "id": "mono-grade",
+      "label": "Mono grade",
+      "family": "grade",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 1 },
+        "contrast": { "min": 0, "max": 2, "default": 1.05 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "feColorMatrix desaturation to luminance with a contrast trim."
+    },
+    {
+      "id": "sepia-grade",
+      "label": "Sepia grade",
+      "family": "grade",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 0.8 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Warm archival tone built from a single feColorMatrix."
+    },
+    {
+      "id": "duotone",
+      "label": "Duotone",
+      "family": "grade",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 0.9 },
+        "contrast": { "min": 0, "max": 2, "default": 1 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Maps luminance onto two palette colours, shadow and highlight."
+    },
+    {
+      "id": "teal-orange",
+      "label": "Teal and orange",
+      "family": "grade",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 0.85 },
+        "balance": { "min": -1, "max": 1, "default": 0.25 }
+      },
+      "cost": "svg",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Splits shadows to teal and highlights to orange; balance shifts the crossover point."
+    },
+    {
+      "id": "lut",
+      "label": "LUT",
+      "family": "grade",
+      "params": {
+        "amount": { "min": 0, "max": 1, "default": 1 },
+        "contrast": { "min": 0, "max": 2, "default": 1 }
+      },
+      "cost": "webgl",
+      "cpuFallback": "duotone",
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Procedural .cube LUT generated at build time. WebGL applies it exactly; the CPU path approximates the curve with feComponentTransfer and a duotone map."
+    },
+    {
+      "id": "riso-misregister",
+      "label": "Riso misregister",
+      "family": "print",
+      "params": {
+        "offset": { "min": 0, "max": 12, "default": 3 },
+        "angle": { "min": 0, "max": 360, "default": 8 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Offset accent ink layer multiplied over the base ink."
+    },
+    {
+      "id": "hard-shadow",
+      "label": "Hard shadow",
+      "family": "print",
+      "params": {
+        "offset": { "min": 0, "max": 40, "default": 8 },
+        "blur": { "min": 0, "max": 20, "default": 0 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Crisp offset shadow for the brutalist and print looks."
+    },
+    {
+      "id": "drop-shadow",
+      "label": "Drop shadow",
+      "family": "print",
+      "params": {
+        "offsetY": { "min": 0, "max": 40, "default": 10 },
+        "blur": { "min": 0, "max": 40, "default": 14 },
+        "opacity": { "min": 0, "max": 1, "default": 0.35 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Neutral soft shadow under cards and cut-out shapes."
+    },
+    {
+      "id": "soft-shadow",
+      "label": "Soft shadow",
+      "family": "print",
+      "params": {
+        "offsetY": { "min": 0, "max": 40, "default": 6 },
+        "blur": { "min": 0, "max": 60, "default": 24 },
+        "opacity": { "min": 0, "max": 1, "default": 0.3 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Wide, diffuse shadow for clay and glass looks."
+    },
+    {
+      "id": "boil-line",
+      "label": "Boil line",
+      "family": "drawn",
+      "params": {
+        "jitter": { "min": 0, "max": 6, "default": 2 },
+        "rate": { "min": 1, "max": 24, "default": 8 },
+        "seed": { "min": 0, "max": 9999, "default": 4242 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Seeded per-frame path jitter from the shared noise module, so the wobble is reproducible."
+    },
+    {
+      "id": "push-in",
+      "label": "Push in",
+      "family": "camera",
+      "params": {
+        "amount": { "min": 0, "max": 0.6, "default": 0.12 },
+        "duration": { "min": 1, "max": 8, "default": 4 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Slow scale ramp across the scene, driven by the scene duration in seconds."
+    },
+    {
+      "id": "drift",
+      "label": "Drift",
+      "family": "camera",
+      "params": {
+        "amount": { "min": 0, "max": 20, "default": 4 },
+        "rate": { "min": 0.1, "max": 4, "default": 0.6 },
+        "seed": { "min": 0, "max": 9999, "default": 77 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Low frequency handheld wobble from the seeded noise field."
+    },
+    {
+      "id": "parallax-layers",
+      "label": "Parallax layers",
+      "family": "camera",
+      "params": {
+        "depth": { "min": 0.1, "max": 3, "default": 0.6 },
+        "amount": { "min": 0, "max": 80, "default": 24 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Each layer translates by camera move divided by its z value."
+    },
+    {
+      "id": "rack-focus",
+      "label": "Rack focus",
+      "family": "camera",
+      "params": {
+        "amount": { "min": 0, "max": 20, "default": 5 },
+        "duration": { "min": 0.5, "max": 6, "default": 2 }
+      },
+      "cost": "css",
+      "cpuFallback": null,
+      "source": "own:scripts/motionkit",
+      "license": "own-MIT",
+      "notes": "Depth blur animating from the near layer to the far layer over the given duration."
+    }
+  ]
+}

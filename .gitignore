@@ -13,3 +13,10 @@ runs/
 .env.*
 !.env.example
 *.log
+# Run/ops artifacts that must never be committed (GPU test logs, pids, session and usage dumps)
+*.pid
+*.pgid
+**/logs/sessions*.txt
+**/logs/usage*.txt
+test/gpu*/logs/
+assets/motionkit/cache/

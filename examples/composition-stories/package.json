@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_composition_stories",
+  "title": "Three composition stories — illustrative",
+  "format": { "width": 1280, "height": 720, "fps": 30 },
+  "duration": { "mode": "flexible", "flexibleCeilingFrames": 2700 },
+  "theme": { "palette": ["#101827", "#2DD4BF", "#F8FAFC"], "font": "Inter" },
+  "voice": { "enabled": false, "engine": "none" },
+  "datasets": {
+    "d_review": {
+      "unit": "minutes",
+      "label": "Illustrative review time",
+      "values": [{ "label": "Before", "value": 12 }, { "label": "After", "value": 7 }],
+      "source": "example",
+      "approved": true,
+      "note": "illustrative — invented values for an animation example, not a measured product claim"
+    }
+  },
+  "scenes": [
+    {
+      "id": "s_transfer", "layout": "hero", "preferredFrames": 150,
+      "copy": { "headline": "A receipt finds its project", "sub": "Receipt → Project Atlas → Assigned" },
+      "transitionOut": { "type": "cut", "frames": 0 }
+    },
+    {
+      "id": "s_mechanism", "layout": "list", "preferredFrames": 180,
+      "copy": { "headline": "Follow the signal", "items": ["Input", "Review", "Result"] },
+      "transitionOut": { "type": "cut", "frames": 0 }
+    },
+    {
+      "id": "s_evidence", "layout": "chart", "preferredFrames": 150,
+      "copy": { "headline": "Make the evidence inspectable", "footnote": "Source: illustrative; invented example, not measured evidence." },
+      "data": { "dataset": "d_review", "display": "bar" },
+      "transitionOut": { "type": "cut", "frames": 0 }
+    }
+  ],
+  "assets": {},
+  "compliance": { "open_weights_only": true }
+}

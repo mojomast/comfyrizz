@@ -116,6 +116,15 @@ test('K1: a chunk with no words stays exactly as before', () => {
   assert.equal(options.narration.s_title[0].words, undefined);
 });
 
+test('animation anchors retain known word timing provenance within measured audio', () => {
+  const input = (engine: string, timing?: string) => ({ version: 1, engine, sampleRate: 24000,
+    scenes: { s1: { chunks: [{ text: 'Hello.', seconds: 1, words: [{ text: 'Hello.', start: 0, end: 1 }], ...(timing ? { timing } : {}) }] } } });
+  assert.equal(compileOptionsFromDurations(parseDurations(input('kokoro-onnx'))).narration.s1[0].timing, 'syllable-fallback');
+  assert.equal(compileOptionsFromDurations(parseDurations(input('qwen3-tts', 'aligner'))).narration.s1[0].timing, 'aligner');
+  assert.equal(compileOptionsFromDurations(parseDurations(input('qwen3-tts', 'syllable-fallback'))).narration.s1[0].timing, 'syllable-fallback');
+  assert.equal(compileOptionsFromDurations(parseDurations(input('unknown'))).narration.s1[0].timing, undefined);
+});
+
 test('K1: bad word timings are rejected, not silently repaired', () => {
   const scene = (words: unknown) => ({
     version: 1,

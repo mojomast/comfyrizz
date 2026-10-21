@@ -14,7 +14,9 @@ voice/sync/export stages automatically.
 
 The new endpoint accepts a **saved package revision** and processes it through
 voice generation, measured timing, generated media, presenter diagnostics and
-bounded correction, CPU rendering, verification and an editable export. There
+bounded correction, rendering, verification and an editable export. The final
+MP4 is rendered on this machine by default. `renderLocation: "colab"` opts in
+to assembling it on the Google Colab VM that just generated the media. There
 are no manual shell steps between these stages. Server model/runtime configuration
 is still required, and reported in preflight or the failing stage.
 
@@ -60,7 +62,7 @@ instead of publishing a successful finish after rendering failed.
 | `presenter_inputs` | Prepare presenter audio | Scene ID; exact source window and native frame lattice |
 | `media` | Generate and collect visual media | Dependency/job list, active attempts, reported ComfyUI progress, collected files, teardown |
 | `presenter_sync` | Check and correct presenter timing | Scene ID, correction frames, verified presenters, offset/confidence |
-| `render` | Render video | Bundling, rendered/encoded frames, encoding/muxing, audio normalization |
+| `render` | Render video | Bundling, rendered/encoded frames, encoding/muxing, audio normalization. Google Colab mode also reports preparing, uploading, bootstrapping, and collecting the MP4 |
 | `verify` | Verify video and audio | Indeterminate technical inspection, then pass/fail |
 | `export` | Package editable project | Packaging milestones, then ZIP integrity and asset-hash validation |
 
@@ -92,15 +94,22 @@ documents, telemetry and copied links.
   "backendId": "colab",
   "budgetUnits": 6,
   "narrationRuntime": "colab",
-  "narrationUnits": 2
+  "narrationUnits": 2,
+  "renderLocation": "local"
 }
 ```
 
 - `backendId`: `cpu`, `colab`, `byo-comfyui`.
 - `narrationRuntime`: `local` or `colab`; remote voice currently supports Qwen.
+- `renderLocation`: `local` (default) or `colab`. `colab` renders the MP4 on the
+  Google Colab VM after visual generation, then stops that VM. It requires
+  `backendId: "colab"` and a generated-media session. A backend other than Google Colab
+  returns issue `REMOTE_RENDER_REQUIRES_GOOGLE_COLAB` and `ready: false`. A
+  Google Colab plan with nothing to generate stays ready and renders locally,
+  with `remoteRenderNote` explaining why.
 - `comfyuiUrl`: optional HTTP(S) URL for the external backend; no embedded credentials.
 - `budgetUnits`: whole-run allocation ceiling. `narrationUnits`: Qwen's portion,
-  at most 4 units. The remaining allocation belongs to Colab visual media.
+  at most 4 units. The remaining allocation belongs to Google Colab visual media.
 - An unchanged ready visual asset is reused. Enabled voice is synthesized for
   the run; regenerated voice invalidates its conditioned presenter clips.
 
@@ -109,6 +118,39 @@ Response includes `version`, `planHash`, `inputHash`, `baseRevision`, `stages`,
 `code/message/action`. Allocation ceilings are **not predicted charges**.
 The detailed media estimate is recalculated after real narration fixes the clip
 lengths; if it exceeds the allocation, the pipeline stops before media allocation.
+`planHash` includes `renderLocation`. Changing it requires a fresh approval.
+
+### Google Colab final render
+
+When the plan's `remoteRender` is true, the media stage keeps the VM (`teardownMode: "never"`)
+and collects only `manifest.json`, `health.json`, `ready.json`, and `attempts/`.
+The runtime event stays `running` with the note `Held for the Google Colab render`.
+Presenter clips needed for local SyncNet correction are downloaded by name; the
+corrected files travel back inside the project archive.
+
+The render stage then uploads three files: the renderer bundle, a project archive
+(package, compiled timeline, narration, and files already on the host, including
+editor edits and animation timing), and `job.json`. The VM installs Node.js,
+renderer dependencies, ffmpeg, and a headless browser into
+`/content/comfyrizz/render-cache` when they are not already there, links generated
+plates that are still on the VM, runs Remotion, normalizes loudness, and runs the
+same mix verification as the host (`scripts/tts/verify_mix.py`, exit 0 or 2 must
+agree with a fresh `passed` boolean). Progress phases include `bundling`,
+`preparing`, `uploading`, `bootstrapping`, `rendering`, `normalizing`, `verify`,
+and `collecting`.
+
+Two archives come back: `results.zip` (MP4, `render.json`, `verification.json`,
+loudness and props) and `media.zip` (named assets so the editable export can
+still hash them). The VM is stopped before the host repeats verification and
+export. `result.renderLocation` is `colab`.
+
+If the remote render fails, the worker logs warning `REMOTE_RENDER_FALLBACK`,
+collects the generated media, and confirms the VM is `stopped` before rendering
+locally. The warning text is `Google Colab render failed (…). Falling back to the
+local render after the VM is stopped.` An unconfirmed shutdown does not start
+the local render; the warning says the shutdown is unconfirmed. Cancellation
+does not fall back. A failure after the MP4 is already local does not fall back
+either. Tokens are not passed with `--env`.
 
 `POST /api/pipeline` uses the same body, adding `approvedPlanHash` when metered
 compute is required. Approval binds the entire input package and options, including
@@ -179,11 +221,12 @@ retains its redacted step logs locally.
 
 - `POST /api/pipeline/:runId/cancel` with `{}`: requests cancellation; poll or
   subscribe through cleanup. Local subprocess groups receive termination;
-  active Colab exec is stopped and the owned VM is torn down. Cancelling during
-  allocation interrupts the allocation itself, so a run that is stopped before
-  it starts is not billed. Cancelling a reconcile stops the reconcile, not the
-  run. Allocation/control requests already in flight may finish before
-  cancellation reaches cleanup.
+  active Google Colab exec is stopped and the owned VM is torn down. Cancelling
+  during allocation interrupts the allocation itself; any session the allocation
+  created is found through `colab sessions` and stopped before the run reports
+  clean. Cancelling a reconcile stops the reconcile, not the run.
+  Allocation/control requests already in flight may finish before cancellation
+  reaches cleanup.
 - `POST /api/pipeline/:runId/reconcile` with `{}`: for a terminal/interrupted run,
   checks the persisted owned runtime identities and verifies/stops them. Does
   not regenerate assets or start a new allocation. Unconfirmed managed runtimes
@@ -239,10 +282,10 @@ announce every frame to screen readers; announce stage changes and milestones.
 Server environment:
 
 - `COMFYRIZZ_PYTHON`: host Python with local TTS/NumPy and pipeline dependencies.
-- `COMFYRIZZ_HF_TOKEN_FILE`: protected model-access token file for Colab graphics.
+- `COMFYRIZZ_HF_TOKEN_FILE`: protected model-access token file for Google Colab graphics.
 - `COMFYRIZZ_COLAB_BIN`: optional Qwen CLI executable override.
 - `COMFYRIZZ_QWEN_TTS_PYTHON` / `COMFYRIZZ_QWEN_ASR_PYTHON`: isolated local Qwen
-  environments when `narrationRuntime: local`; Colab creates its pinned environments.
+  environments when `narrationRuntime: local`; Google Colab creates its pinned environments.
 - `COMFYRIZZ_SYNCNET_PYTHON` / `COMFYRIZZ_SYNCNET_DIR`: installed SyncNet environment
   and checkout containing `syncnet_v2.model` for presenter generation.
 - `REMOTION_BROWSER`: installed headless browser executable.
@@ -260,8 +303,8 @@ Automated coverage includes revision/approval binding, start races, durable
 replay, restart interruption, cancellation cleanup state, secret redaction,
 authenticated range downloads, stage ordering, failed generation and failed sync.
 An actual CPU narration → timing → Remotion → audio verification → editable ZIP
-smoke run exercises the production worker. Existing backend tests use fake Colab
-and ComfyUI; no new paid allocation is needed for these tests.
+smoke run exercises the production worker. Existing backend tests use a fake Google Colab
+CLI and ComfyUI; no new paid allocation is needed for these tests.
 
 Evidence on this host: a real **151-frame** Kokoro-narrated CPU run completed all
 applicable stages and produced 12 measured render-progress updates. Automatic
@@ -269,13 +312,14 @@ SyncNet correction was also run against both original Hermes presenter clips:
 the pipeline independently applied **3/4 native frames**, then measured **0 ms**
 for both, with confidence **9.292/9.818**. Exact presenter-input preparation
 produced **305/369 frames at 24 fps** and two valid, workflow-hashed jobs.
-No new Colab allocation was used; balance remained **365.95**, usage **0.00/hr**,
-active assignments **0**. A live paid run of the newly combined API remains
-unverified; its provider components were previously exercised during production.
+No new Colab allocation was used: the account balance was unchanged, usage was
+**0.00/hr** and active assignments were **0**. A live paid run of the newly
+combined API remains unverified; its provider components were previously
+exercised during production.
 
-A full-HD version of the short CPU smoke test is published at
-[CPU pipeline example](https://mail.tailec998.ts.net:8451/cpu-pipeline/index.html),
-with MP4, captions and editable ZIP links. It is 151 frames at 30 fps, with local
+A full-HD version of the short CPU smoke test was also published to the private
+test deployment (the URL is not recorded here), with MP4, captions and editable
+ZIP artifacts. It is 151 frames at 30 fps, with local
 Kokoro narration. The original 360p test exposed fixed-pixel caption sizing in
 `apps/renderer/src/captions.tsx`; technical checks passed but captions were too
 large at that resolution. This is a remaining low-resolution layout issue for

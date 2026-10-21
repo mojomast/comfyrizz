@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-20",
+  "baseCommit": "184bde6",
+  "execution": "Isolated local execution of the actual Colab bootstrap and remote-render entry point; no live Colab allocation",
+  "bundle": {
+    "version": 2,
+    "sourceOnly": true,
+    "hostNodeModulesIncluded": false,
+    "hostPlannerVectorDistIncluded": false,
+    "includesCompositionCompiler": true,
+    "includesRendererConfigAndFonts": true,
+    "productionEntryRequiresDemoFixtures": false,
+    "cacheStamp": "SHA-256 over relative names and file contents"
+  },
+  "bootstrap": {
+    "installedPackages": ["renderer", "schema", "planner", "vector"],
+    "builtFromSource": ["planner", "vector"],
+    "hyperframesVersion": "0.8.181",
+    "hyperframesInstalledInIsolatedCache": true,
+    "browserDownloadedByRemotion": true,
+    "nodeMinimumMajor": 22,
+    "telemetryDisabled": true
+  },
+  "render": {
+    "componentCount": 3,
+    "sceneFrames": [150, 180, 150],
+    "frames": 480,
+    "fps": 30,
+    "width": 1280,
+    "height": 720,
+    "seconds": 16,
+    "allTechnicalChecksPassed": true,
+    "videoSha256": "633dfb3d060f1b11734a89633b067da862f00dda19ca4eb9b635c5a1f6696341"
+  },
+  "hostDelivery": {
+    "adapterUsedReturnedResultsAndMediaArchives": true,
+    "sourceAndTimingValidated": true,
+    "hostHyperframesEnvironmentRemovedForExport": true,
+    "exportReusedVerifiedMovie": true,
+    "completeEditableZip": true,
+    "portableCompositionReceipts": 3,
+    "manifestAndMitNoticesIncluded": true,
+    "zipSha256": "0c982b6e1a2885b280c4305022832de8e7ad2bebbfdb109d9a22de13685b4374"
+  },
+  "colabCreditsSpent": 0,
+  "verification": {
+    "rendererTestsPassed": 242,
+    "serverTestsPassed": 201,
+    "backendTestsPassed": 127,
+    "colabPythonTestsPassed": 11,
+    "pythonRegressionDuringIntegration": { "passed": 365, "skipped": 1 },
+    "rendererTypecheck": "passed",
+    "diffWhitespaceCheck": "passed",
+    "note": "Suite counts overlap. Colab-specific Python tests were rerun after additions."
+  },
+  "limits": [
+    "Live Colab allocation, apt library installation on a fresh Colab image and cloud transfer performance were not exercised",
+    "Example is silent; existing narration verification remains in the remote and host pipelines",
+    "Remote rendering retains the existing held-media-session policy"
+  ]
+}

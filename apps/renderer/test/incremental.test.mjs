@@ -66,6 +66,10 @@ test('mergeScenes keeps committed timing but takes current package content', () 
   const withTransition = mergeScenes(edited, timeline);
   assert.deepEqual(withTransition[1].transitionOut, { type: 'push', direction: 'left', frames: 12 });
   assert.deepEqual(withTransition[1].motion, { entry: 'waterfall' });
+  const withCues = structuredClone(timeline);
+  withCues.scenes[1].motionCues = [{ phrase: 'Fresh', frame: withCues.scenes[1].from + 30, seconds: 1, source: 'word-cues', estimated: false }];
+  const mergedCues = mergeScenes(edited, withCues);
+  assert.deepEqual(mergedCues[1].motionCues, withCues.scenes[1].motionCues, 'planner-resolved motionCues survive the package merge');
 });
 
 test('planSegments keys package content, not just the committed timeline', () => {

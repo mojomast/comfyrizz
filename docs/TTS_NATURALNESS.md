@@ -86,9 +86,9 @@ The publication script uses **constant gain only**, selecting one common integra
 
 ## Results and listening links
 
-- **[Full listening lab](https://mail.tailec998.ts.net:8451/tts-expression/index.html)**: nine comparisons, alternate Qwen takes, shuffled A/B labels and local preference export.
-- **[Kokoro quick player](https://mail.tailec998.ts.net:8451/kokoro-expression/index.html)**: four CPU samples plus the sentence/paragraph pair.
-- **[Download all examples and settings](https://mail.tailec998.ts.net:8451/tts-expression/examples.zip)**: raw and normalized WAVs, 15 before/after tracks, model revisions, transcripts and measurements; 40,009,142 bytes.
+- **[Full listening lab](https://<your-host>/tts-expression/index.html)**: nine comparisons, alternate Qwen takes, shuffled A/B labels and local preference export.
+- **[Kokoro quick player](https://<your-host>/kokoro-expression/index.html)**: four CPU samples plus the sentence/paragraph pair.
+- **[Download all examples and settings](https://<your-host>/tts-expression/examples.zip)**: raw and normalized WAVs, 15 before/after tracks, model revisions, transcripts and measurements; 40,009,142 bytes.
 
 The bounded L4 trial completed in **877.179 seconds** including allocation, setup, generation, ASR, transfer and shutdown. All **27/27 source clips** passed the automated intelligibility gate with **zero measured WER**. This establishes transcript agreement with Qwen ASR, not a perceptual naturalness ranking.
 
@@ -108,7 +108,7 @@ All normalized clips target **−24.2 LUFS**, selected to retain the most demand
 
 The final account balance was **359.35 units**, down **0.38** from the campaign start. The initial shutdown receipt showed 359.47 before the later billing update; accounting uses the later balance. Cumulative authorized spending is **10.22/20 units**, leaving **9.78**. Runtime shutdown was verified, with zero active assignments, zero hourly usage and no server sessions.
 
-Evidence: `/home/mojo/comfyrizz-gpu-tests/tts-expression-20261019/`, including exact `input.zip`, `qwen-run-01/output.zip`, shutdown receipt, publication measurements and browser verification. Published files are in ignored `apps/web/dist/{tts-expression,kokoro-expression}/`; rebuilding the web app clears these static directories, so retain the archive when redeploying.
+Evidence: `~/comfyrizz-gpu-tests/tts-expression-20261019/`, including exact `input.zip`, `qwen-run-01/output.zip`, shutdown receipt, publication measurements and browser verification. Published files are in ignored `apps/web/dist/{tts-expression,kokoro-expression}/`; rebuilding the web app clears these static directories, so retain the archive when redeploying.
 
 ## Integration recommendations
 

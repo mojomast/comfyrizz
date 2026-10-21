@@ -34,6 +34,8 @@ illustration of a nebula" becomes one SVG route and one FLUX route.
 | `assets.search` / `assets.attach` | Fallback metadata; attach requires approval |
 | `presenter.set` | Opt-in AI presenter (C-pres): coverage `none|bookends|all`, per-scene `off|pip|split`, placement/shape/size/label; returns `portrait_prompt` for `assets.generate_image` + advisory `presenter_fixes` |
 
+The agent does not choose where the MP4 is rendered and does not start a Google Colab session. That opt-in is the editor setting `renderLocation` (`local` by default, or `colab`).
+
 `createToolset({generateSvg, planImage, initialPackage})` injects the real generator.
 Wire A5's loop as:
 
@@ -120,6 +122,19 @@ values keyed by scene id or 1-based index. `split` only works on the `hero` layo
 keeps the presenter off chart/stat scenes (`PRESENTER_ON_READ_ONLY_SCENE`) and returns advisory
 `presenter_fixes`. `presenterPortraitPrompt` emits a **fictional person** portrait prompt
 ("Fictional person, no real identity").
+
+## Content-authoring skills
+
+The conversation agent loads three compact skill bodies per turn from `src/skills/`:
+brief or revision guidance, plus script and storyboard direction. Catalog **1.3.0**
+adds worked-example storytelling, observable shot outcomes, continuity, caption-aware
+copy, measured-timing review and capability-aware production handoffs. Sources remain
+in the Markdown for maintainers and are excluded from the injected prompt.
+
+See [research and production guidance](../../docs/CONTENT_QUALITY_RESEARCH.md) and
+the [content-quality evaluation rubric](evals/CONTENT_QUALITY.md). State-preservation
+tests and live behavioral checks establish different things from rendered quality;
+the rubric explicitly records missing audiovisual evidence.
 
 ## Evidence
 

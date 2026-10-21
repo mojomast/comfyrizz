@@ -13,8 +13,8 @@ import { planJobs } from '../../../packages/jobs/src/index.mjs';
  * @param {string} sceneId
  * @returns {string[] | null} null when the scene does not exist
  */
-export function sceneAssetIds(pkg, sceneId) {
-  const timeline = compileTimeline(pkg);
+export function sceneAssetIds(pkg, sceneId, measured = {}) {
+  const timeline = compileTimeline(pkg, measured);
   const scene = (timeline.scenes ?? []).find((entry) => entry.id === sceneId);
   if (!scene) return null;
   const ids = new Set();
@@ -39,8 +39,8 @@ export function sceneAssetIds(pkg, sceneId) {
  * @param {string} sceneId
  * @param {{ includeReady?: boolean }} [options]
  */
-export function sceneJobsPlan(pkg, sceneId, { includeReady = true } = {}) {
-  const assetIds = sceneAssetIds(pkg, sceneId);
+export function sceneJobsPlan(pkg, sceneId, { includeReady = true, measured = {} } = {}) {
+  const assetIds = sceneAssetIds(pkg, sceneId, measured);
   if (assetIds === null) {
     const error = new Error(`unknown scene ${sceneId}`);
     error.status = 404;

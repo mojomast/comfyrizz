@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
@@ -11,11 +11,14 @@ import { narrationOptions, repoRoot } from '../../renderer/scripts/render-packag
 import { renderPipeline } from '../../renderer/scripts/render-pipeline.mjs';
 import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
-import { json, writeJson, preparePresenterInputs, correctPresenters } from './pipeline-media.mjs';
+import { json, writeJson, preparePresenterInputs, correctPresenters, presenterScenes } from './pipeline-media.mjs';
 import { summarizeJobs } from './pipeline-contract.mjs';
 import { assessBudget, nextJobUpperEstimate } from '../../../packages/backends/src/budget.mjs';
+import { decideRenderFallback } from '../../../packages/backends/src/colab-render-plan.mjs';
+import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
+import { runColabRender } from './pipeline-colab-render.mjs';
 
-export async function executePipeline(spec, { send = () => {}, signal = new AbortController().signal, runCommand = pipelineCommand, render = renderPipeline, colabFactory = createColabBackend, byoFactory = createByoBackend, qwenRunner = runQwenColab, presenterPreparation = preparePresenterInputs, presenterCorrection = correctPresenters } = {}) {
+export async function executePipeline(spec, { send = () => {}, signal = new AbortController().signal, runCommand = pipelineCommand, render = renderPipeline, colabFactory = createColabBackend, byoFactory = createByoBackend, qwenRunner = runQwenColab, presenterPreparation = preparePresenterInputs, presenterCorrection = correctPresenters, colabRender = runColabRender } = {}) {
 const { runDir, workDir, plan, runId } = spec;
 const packagePath = join(workDir, 'package.json');
 let stageId = null;
@@ -55,14 +58,38 @@ async function stage(id, fn, skip = false) {
   return result;
 }
 
+let heldBackend = null;
+async function releaseHeld(reason) {
+  if (!heldBackend) return { state: 'stopped' };
+  const backend = heldBackend;
+  heldBackend = null;
+  let teardown;
+  try { teardown = await backend.teardown(reason); }
+  catch (error) { teardown = { state: 'stop_unconfirmed', evidence: error.message }; }
+  const state = teardown?.state === 'not_owned' ? 'stopped' : (teardown?.state ?? 'stop_unconfirmed');
+  let spentUnits = null;
+  try {
+    const after = await backend.usage?.();
+    if (Number.isFinite(backend.inspect?.().usageBefore?.balance) && Number.isFinite(after?.balance)) spentUnits = Number((backend.inspect().usageBefore.balance - after.balance).toFixed(3));
+  } catch { /* unknown is not zero */ }
+  send({ kind: 'runtime', runtime: 'media', value: { state, ownership: 'managed', spentUnits, costSource: 'account_balance_delta', note: reason } });
+  if (state !== 'stopped') {
+    const error = new Error('Google Colab shutdown is unconfirmed');
+    error.teardown = teardown;
+    throw error;
+  }
+  return teardown;
+}
+
 async function main() {
   let pkg = json(packagePath), renderResult;
+  const remoteRender = plan.remoteRender === true && plan.options?.backendId === 'colab' && plan.options?.renderLocation === 'colab';
   await stage('preflight', async () => {
     const validation = validatePackage(pkg);
     if (!validation.valid) throw new Error('Invalid pipeline input');
     await command('ffmpeg', ['-version']); await command('ffprobe', ['-version']);
     if (plan.voiced) await command(process.env.COMFYRIZZ_PYTHON || 'python3', ['-c', 'import numpy']);
-    if (!existsSync(process.env.REMOTION_BROWSER || '/usr/bin/google-chrome') && render === renderPipeline) throw new Error('Configure REMOTION_BROWSER with an installed headless browser before starting generation.');
+    if (!remoteRender && !existsSync(process.env.REMOTION_BROWSER || '/usr/bin/google-chrome') && render === renderPipeline) throw new Error('Configure REMOTION_BROWSER with an installed headless browser before starting generation.');
     cpSync(join(repoRoot, 'workflows'), join(workDir, 'workflows'), { recursive: true });
     if (plan.presenters) await command(process.env.COMFYRIZZ_SYNCNET_PYTHON, ['-c', 'import cv2, torch, numpy; assert hasattr(cv2, "CascadeClassifier")']);
     if (plan.voiced && !plan.remoteVoice) {
@@ -102,6 +129,9 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     await command(process.execPath, [join(repoRoot, 'packages/tts/scripts/narrate.mjs'), '--example', workDir]);
     pkg = json(packagePath);
     const timeline = compileTimeline(pkg, narrationOptions(workDir));
+    for (const diagnostic of timeline.motionCueDiagnostics ?? []) {
+      send({ kind: 'warning', stageId, code: diagnostic.code, sceneId: diagnostic.scene, message: diagnostic.message });
+    }
     const durations = json(join(workDir, 'audio/durations.json'));
     for (const scene of timeline.scenes) {
       if (durations.scenes[scene.id] && scene.durationInFrames / timeline.fps + 0.001 < durations.scenes[scene.id].seconds) throw new Error(`${scene.id}: narration exceeds scene duration`);
@@ -129,56 +159,149 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     }
     send({ kind: 'task', stageId, detail: { event: 'media_plan', jobs: summarizeJobs(pkg, jobs), estimate, admission } });
     let before, result, teardown;
+    const holdForRender = remoteRender && colab;
+    if (holdForRender && typeof backend.setCollectPolicy === 'function') backend.setCollectPolicy('manifest');
     send({ kind: 'runtime', runtime: 'media', value: { state: 'allocating', ownership: colab ? 'managed' : 'external', spentUnits: null } });
     try {
       if (colab) before = await backend.usage();
-      result = await backend.runPackage(pkg, { workDir, outDir, budget: admission, approved: true, teardownMode: 'done', gateCommand: null, signal, onEvent: sourceEvent });
+      result = await backend.runPackage(pkg, { workDir, outDir, budget: admission, approved: true, teardownMode: holdForRender ? 'never' : 'done', gateCommand: null, signal, onEvent: sourceEvent });
       teardown = result.teardown;
       if (!result.ok) throw new Error('Media generation did not complete; collected assets are retained for diagnosis');
+      if (holdForRender) heldBackend = backend;
     } catch (error) {
+      heldBackend = null;
       teardown = error.runPackage?.teardown ?? teardown;
       throw error;
     } finally {
-      if (!teardown) { try { teardown = await backend.teardown('pipeline cleanup'); } catch (error) { teardown = { state: 'stop_unconfirmed', evidence: error.message }; } }
-      let spentUnits = null;
-      if (colab) {
-        try { const after = await backend.usage(); if (Number.isFinite(before?.balance) && Number.isFinite(after.balance)) spentUnits = Number((before.balance - after.balance).toFixed(3)); } catch { /* unknown is not zero */ }
+      if (heldBackend) {
+        send({ kind: 'runtime', runtime: 'media', value: { state: 'running', ownership: 'managed', spentUnits: null, costSource: 'account_balance_delta', note: 'Held for the Google Colab render' } });
+      } else {
+        if (!teardown) { try { teardown = await backend.teardown('pipeline cleanup'); } catch (error) { teardown = { state: 'stop_unconfirmed', evidence: error.message }; } }
+        let spentUnits = null;
+        if (colab) {
+          try { const after = await backend.usage(); if (Number.isFinite(before?.balance) && Number.isFinite(after.balance)) spentUnits = Number((before.balance - after.balance).toFixed(3)); } catch { /* unknown is not zero */ }
+        }
+        // A rejected allocation never creates an owned runtime. Preserve its real
+        // failure (for example, no GPU capacity), just as releaseHeld does above.
+        const state = teardown?.state === 'not_owned' ? 'stopped' : (teardown?.state ?? 'stop_unconfirmed');
+        send({ kind: 'runtime', runtime: 'media', value: { state, ownership: colab ? 'managed' : 'external', spentUnits, costSource: colab ? 'account_balance_delta' : 'external_unknown' } });
+        if (colab && state !== 'stopped') throw new Error('Media runtime shutdown is unconfirmed');
+        if (colab && spentUnits !== null && spentUnits > ceiling) throw new Error('Media spend exceeded its allocation; no further work will start');
       }
-      send({ kind: 'runtime', runtime: 'media', value: { state: teardown?.state ?? 'stop_unconfirmed', ownership: colab ? 'managed' : 'external', spentUnits, costSource: colab ? 'account_balance_delta' : 'external_unknown' } });
-      if (colab && teardown?.state !== 'stopped') throw new Error('Media runtime shutdown is unconfirmed');
-      if (colab && spentUnits !== null && spentUnits > ceiling) throw new Error('Media spend exceeded its allocation; no further work will start');
     }
     const collected = colab ? join(scratch, 'out') : outDir;
     copyNamedAssets({ pkg: result.package, outputDir: collected, packageDir: workDir });
     pkg = result.package; writeJson(packagePath, pkg);
   }, jobs.length === 0);
 
-  await stage('presenter_sync', () => presenterCorrection(workDir, runDir, { signal, onEvent: event => {
-    progress(event.phase, event.total ? { mode: 'measured', completed: event.completed, total: event.total, unit: 'presenters' } : null, { sceneId: event.sceneId });
-    send({ kind: 'task', stageId, detail: event });
-  } }), !plan.presenters);
+  await stage('presenter_sync', async () => {
+    if (heldBackend && typeof heldBackend.downloadListed === 'function') {
+      const current = json(packagePath);
+      const files = presenterScenes(current).map((scene) => current.assets?.[scene.presenter_asset]?.file).filter((file) => typeof file === 'string');
+      progress('Collecting presenter clips for timing correction', { mode: 'measured', completed: 0, total: files.length, unit: 'files' });
+      await heldBackend.downloadListed(files, workDir, { onEvent: sourceEvent });
+    }
+    return presenterCorrection(workDir, runDir, { signal, onEvent: event => {
+      progress(event.phase, event.total ? { mode: 'measured', completed: event.completed, total: event.total, unit: 'presenters' } : null, { sceneId: event.sceneId });
+      send({ kind: 'task', stageId, detail: event });
+    } });
+  }, !plan.presenters);
 
   await stage('render', async () => {
-    renderResult = await render(packagePath, join(runDir, 'video.mp4'), { signal, onEvent: event => progress(event.phase, event.progress) });
-    progress('Normalizing the final audio mix', null);
-    await command(process.execPath, [fileURLToPath(new URL('./pipeline-cpu-task.mjs', import.meta.url)), 'normalize', workDir, runDir]);
-    renderResult.bytes = statSync(join(runDir, 'video.mp4')).size;
-    writeJson(join(runDir, 'render.json'), renderResult);
+    const localRender = async () => {
+      renderResult = await render(packagePath, join(runDir, 'video.mp4'), { signal, onEvent: event => progress(event.phase, event.progress) });
+      // Only the isolated run snapshot receives derived assets; the saved project
+      // and its editable composition manifest remain authoritative source.
+      if (renderResult.package) {
+        pkg = renderResult.package;
+        writeJson(packagePath, pkg);
+      }
+      progress('Normalizing the final audio mix', null);
+      await command(process.execPath, [fileURLToPath(new URL('./pipeline-cpu-task.mjs', import.meta.url)), 'normalize', workDir, runDir]);
+      renderResult.bytes = statSync(join(runDir, 'video.mp4')).size;
+      renderResult.location = 'local';
+      writeJson(join(runDir, 'render.json'), renderResult);
+    };
+    if (heldBackend) {
+      let delivered = false;
+      try {
+        progress('Rendering on the Google Colab VM', null);
+        const remote = await colabRender({ backend: heldBackend, workDir, runDir, voiced: plan.voiced, presenters: plan.presenters, signal, onEvent: event => progress(event.message || event.phase || 'rendering', event.progress ?? null) });
+        renderResult = remote.renderResult;
+        if (renderResult.package) {
+          pkg = renderResult.package;
+          writeJson(packagePath, pkg);
+        }
+        if (!existsSync(join(runDir, 'loudness.json'))) {
+          progress('Normalizing the final audio mix', null);
+          await command(process.execPath, [fileURLToPath(new URL('./pipeline-cpu-task.mjs', import.meta.url)), 'normalize', workDir, runDir]);
+        }
+        renderResult.bytes = statSync(join(runDir, 'video.mp4')).size;
+        writeJson(join(runDir, 'render.json'), renderResult);
+        delivered = true;
+        await releaseHeld('render done');
+      } catch (error) {
+        if (signal.aborted || delivered) throw error;
+        const message = redactForLog(error.message || 'remote render failed');
+        let shutdownState = 'stopped';
+        try {
+          if (heldBackend && typeof heldBackend.setCollectPolicy === 'function') heldBackend.setCollectPolicy('full');
+          if (heldBackend && typeof heldBackend.collectOut === 'function') {
+            progress('Collecting generated media for the local render', null);
+            const collected = await heldBackend.collectOut({ onEvent: sourceEvent });
+            copyNamedAssets({ pkg: json(packagePath), outputDir: collected.local || join(runDir, 'media-runtime', 'out'), packageDir: workDir });
+          }
+        } catch (collectError) {
+          send({ kind: 'warning', stageId: 'render', code: 'REMOTE_RENDER_COLLECT', message: redactForLog(collectError.message || 'Could not collect generated media') });
+        }
+        try { await releaseHeld('remote render failed'); }
+        catch (stopError) {
+          shutdownState = 'stop_unconfirmed';
+          const decision = decideRenderFallback({ remoteError: message, shutdownState });
+          send({ kind: 'warning', stageId: 'render', code: 'REMOTE_RENDER_FALLBACK', message: decision.warning });
+          throw stopError;
+        }
+        const decision = decideRenderFallback({ remoteError: message, cancelled: signal.aborted, shutdownState });
+        send({ kind: 'warning', stageId: 'render', code: 'REMOTE_RENDER_FALLBACK', message: decision.warning });
+        if (!decision.fallback) throw error;
+        renderResult = null;
+      }
+    }
+    if (!renderResult) await localRender();
   });
 
   await stage('verify', async () => {
-    const probe = JSON.parse((await command('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,width,height,nb_read_frames,sample_rate:format=duration', '-of', 'json', join(runDir, 'video.mp4')])).stdout);
-    const video = probe.streams.find(s => s.codec_type === 'video'), audio = probe.streams.find(s => s.codec_type === 'audio');
-    const checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !plan.voiced || Boolean(audio) };
-    if (plan.voiced) {
-      const measure = await command('ffmpeg', ['-hide_banner', '-nostats', '-i', join(runDir, 'video.mp4'), '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
-      const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(measure.stderr);
-      checks.nonSilentAudio = Boolean(mean) && Number(mean[1]) > -60;
-      await command(process.env.COMFYRIZZ_PYTHON || 'python3', [join(repoRoot, 'scripts/tts/verify_mix.py'), '--video', join(runDir, 'video.mp4'), '--narration', join(workDir, 'audio/narration.norm.wav'), '--out', join(runDir, 'audio-verification.json')]);
-      checks.narrationEnvelope = json(join(runDir, 'audio-verification.json')).passed;
+    // Exit 2 from the mix check is a failed narration verdict only when it comes with
+    // a fresh report. Remove any old report, require the checker to write a new one,
+    // and require its exit code and verdict to agree before recording it.
+    const report = { checks: {}, probe: null, note: 'Technical checks do not replace perceptual review.' };
+    try {
+      report.probe = JSON.parse((await command('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,width,height,nb_read_frames,sample_rate:format=duration', '-of', 'json', join(runDir, 'video.mp4')])).stdout);
+      const video = report.probe.streams.find(s => s.codec_type === 'video'), audio = report.probe.streams.find(s => s.codec_type === 'audio');
+      report.checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(report.probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !plan.voiced || Boolean(audio) };
+      if (plan.voiced) {
+        const measure = await command('ffmpeg', ['-hide_banner', '-nostats', '-i', join(runDir, 'video.mp4'), '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
+        const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(measure.stderr);
+        report.checks.nonSilentAudio = Boolean(mean) && Number(mean[1]) > -60;
+        const narrationPath = join(runDir, 'audio-verification.json');
+        rmSync(narrationPath, { force: true });
+        const verdict = await command(process.env.COMFYRIZZ_PYTHON || 'python3', [join(repoRoot, 'scripts/tts/verify_mix.py'), '--video', join(runDir, 'video.mp4'), '--narration', join(workDir, 'audio/narration.norm.wav'), '--out', narrationPath], { allowedCodes: [0, 2] });
+        let narration;
+        try { narration = json(narrationPath); }
+        catch { throw new Error(`Mix checker exited ${verdict.code} without writing a report`); }
+        if (!narration || typeof narration.passed !== 'boolean') throw new Error(`Mix checker exited ${verdict.code} with an invalid report`);
+        if ((verdict.code === 0) !== (narration.passed === true)) throw new Error(`Mix checker exit ${verdict.code} contradicts its ${narration.passed ? 'passing' : 'failing'} report`);
+        report.narration = narration;
+        report.checks.narrationEnvelope = narration.passed === true;
+      }
+      if (Object.values(report.checks).some(value => !value)) throw new Error('Final video verification failed');
+    } catch (error) {
+      report.error = error.message;
+      if (plan.voiced && report.checks.narrationEnvelope === undefined) report.checks.narrationEnvelope = false;
+      throw error;
+    } finally {
+      writeJson(join(runDir, 'verification.json'), report);
     }
-    writeJson(join(runDir, 'verification.json'), { checks, probe, note: 'Technical checks do not replace perceptual review.' });
-    if (Object.values(checks).some(value => !value)) throw new Error('Final video verification failed');
   });
 
   await stage('export', async () => {
@@ -196,16 +319,24 @@ with zipfile.ZipFile(sys.argv[1]) as z:
  for a in p['assets'].values():
   if a.get('file') and a.get('sha256'): assert hashlib.sha256(z.read(a['file'])).hexdigest()==a['sha256']`, join(target, 'package.zip')]);
     const files = json(join(runDir, 'export.json')).files.map(file => ({ name: file.name, bytes: file.bytes, url: `/api/pipeline/${runId}/files/${file.name}` }));
-    send({ kind: 'result', result: { packageId: pkg.id, baseRevision: plan.baseRevision, inputHash: plan.inputHash, frames: renderResult.frames, fps: renderResult.fps, files, packageUrl: `/api/pipeline/${runId}/package`, verificationUrl: `/api/pipeline/${runId}/verification` } });
+    send({ kind: 'result', result: { packageId: pkg.id, baseRevision: plan.baseRevision, inputHash: plan.inputHash, frames: renderResult.frames, fps: renderResult.fps, renderLocation: renderResult.location ?? 'local', files, packageUrl: `/api/pipeline/${runId}/package`, verificationUrl: `/api/pipeline/${runId}/verification` } });
   });
 }
 
 try { await main(); return 0; }
 catch (error) {
+  if (heldBackend) {
+    try { await releaseHeld(signal.aborted ? 'cancelled' : 'pipeline cleanup'); }
+    catch { /* releaseHeld already reported an unconfirmed stop */ }
+  }
   send({ kind: signal.aborted ? 'cancelled' : 'failed', stageId, code: signal.aborted ? 'CANCELLED' : 'STAGE_FAILED', message: signal.aborted ? 'Pipeline cancelled. Check the runtime states for shutdown confirmation.' : error.message });
   return 1;
 } finally {
   clearInterval(heartbeat);
+  if (heldBackend) {
+    try { await releaseHeld('pipeline cleanup'); }
+    catch { /* the failure event already names the stage; shutdown state was sent */ }
+  }
 }
 }
 

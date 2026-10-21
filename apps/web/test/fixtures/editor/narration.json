@@ -1,0 +1,38 @@
+{
+  "id": "pkg_narrationeditor",
+  "title": "Narration sidecar",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible"
+  },
+  "voice": {
+    "enabled": true
+  },
+  "scenes": [
+    {
+      "id": "s_voice",
+      "layout": "hero",
+      "preferredFrames": 90,
+      "narration": "Measured line.",
+      "narration_asset": "a_voice",
+      "copy": {
+        "headline": "Voice"
+      },
+      "transitionOut": {
+        "type": "none",
+        "frames": 0
+      }
+    }
+  ],
+  "assets": {
+    "a_voice": {
+      "kind": "audio",
+      "status": "ready",
+      "file": "audio/narration.wav"
+    }
+  }
+}

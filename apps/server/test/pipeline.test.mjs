@@ -79,6 +79,33 @@ test('paid approval binds voice, project content and allocation ceilings', () =>
   assert.notEqual(planPipeline(pkg, { ...options, budgetUnits: 5 }).planHash, before.planHash);
 });
 
+test('render location defaults to local and is part of the approved plan', () => {
+  const local = planPipeline(example, { backendId: 'cpu' });
+  assert.equal(local.options.renderLocation, 'local');
+  assert.equal(local.remoteRender, false);
+  assert.equal(planPipeline(example, { backendId: 'cpu', renderLocation: 'local' }).planHash, local.planHash);
+  assert.notEqual(planPipeline(example, { backendId: 'cpu', renderLocation: 'colab' }).planHash, local.planHash);
+  assert.throws(() => planPipeline(example, { renderLocation: 'remote' }), /Unknown render location/);
+});
+
+test('Google Colab rendering requires that backend and a generated-media session', () => {
+  const wrong = planPipeline(example, { backendId: 'cpu', renderLocation: 'colab' });
+  assert.equal(wrong.remoteRender, false);
+  assert.equal(wrong.ready, false);
+  assert.ok(wrong.issues.some(issue => issue.code === 'REMOTE_RENDER_REQUIRES_GOOGLE_COLAB'));
+  const idle = planPipeline(example, { backendId: 'colab', budgetUnits: 1, renderLocation: 'colab' });
+  assert.equal(idle.remoteRender, false);
+  assert.match(idle.remoteRenderNote, /stays on this machine/);
+  assert.equal(idle.issues.some(issue => issue.code === 'REMOTE_RENDER_REQUIRES_GOOGLE_COLAB'), false);
+  const data = JSON.parse(readFileSync(new URL('../../../examples/data-story/package.json', import.meta.url)));
+  for (const asset of Object.values(data.assets)) if (asset.gen?.workflow) asset.gen.workflow_sha256 = '0'.repeat(64);
+  const remote = planPipeline(data, { backendId: 'colab', budgetUnits: 4, narrationUnits: 0, renderLocation: 'colab' });
+  assert.equal(remote.options.renderLocation, 'colab');
+  assert.equal(remote.remoteRender, true);
+  assert.match(remote.remoteRenderNote, /Google Colab VM/);
+  assert.match(remote.budget.estimateNote, /final render/);
+});
+
 test('split JSON records and trailing records survive transport boundaries', () => {
   const events = [], lines = progressLines(e => events.push(e));
   lines.write('{"event":"pro'); lines.write('gress","value":0.'); lines.write('5}\n{"event":"job_done"}'); lines.end();

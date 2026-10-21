@@ -12,7 +12,7 @@ Research deliverables:
 
 - This code audit, design guidance, effect recipes and staged integration plan.
 - [Machine-readable candidate/license evidence](animation-candidates-20261019.json): 20 projects, root license sources and SHA-256 hashes, observed npm versions, and four individually inspected shader headers.
-- Raw license/source/registry responses archived locally at `/home/mojo/comfyrizz-gpu-tests/animation-research-20261019/`.
+- Raw license/source/registry responses archived locally at `~/comfyrizz-gpu-tests/animation-research-20261019/`.
 - No paid compute was used for this research.
 
 ## 1. What the pipeline already has—and what limits variety

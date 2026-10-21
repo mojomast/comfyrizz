@@ -38,7 +38,7 @@ MOTION_VOCABULARY = {
     "staggers": ("none", "word", "listItem", "dot"),
     "entries": ("none", "fadeUp", "maskRise", "pop", "countUp", "waterfall", "drawOn"),
     "emphasis": ("none", "keyword", "hero"),
-    "transitionTypes": ("none", "cut", "fade", "blur", "slide", "push", "wipe", "zoom", "iris"),
+    "transitionTypes": ("none", "cut", "fade", "blur", "slide", "push", "wipe", "zoom", "iris", "paper-reveal", "draw-reveal", "shape-reveal"),
     "transitionDirections": ("left", "right", "up", "down", "in", "out"),
 }
 
@@ -52,12 +52,17 @@ TRANSITIONS = {
     "wipe": {"axis": "planar", "minSeconds": 0.25, "maxSeconds": 0.6},
     "zoom": {"axis": "depth", "minSeconds": 0.15, "maxSeconds": 0.4},
     "iris": {"axis": "depth", "minSeconds": 0.25, "maxSeconds": 0.45},
+    # Storytelling reveals (animation research 2026 section 4): no travel axis, so a
+    # direction on them is MOTION_DIRECTION_UNUSED.
+    "paper-reveal": {"axis": None, "minSeconds": 0.3, "maxSeconds": 0.8},
+    "draw-reveal": {"axis": None, "minSeconds": 0.35, "maxSeconds": 0.9},
+    "shape-reveal": {"axis": None, "minSeconds": 0.25, "maxSeconds": 0.6},
 }
 
 ENERGY_TRANSITIONS = {
-    "calm": ("none", "cut", "fade", "blur"),
-    "medium": ("none", "cut", "fade", "slide", "push", "wipe"),
-    "high": ("none", "cut", "push", "zoom", "iris"),
+    "calm": ("none", "cut", "fade", "blur", "paper-reveal", "draw-reveal"),
+    "medium": ("none", "cut", "fade", "slide", "push", "wipe", "paper-reveal", "draw-reveal", "shape-reveal"),
+    "high": ("none", "cut", "push", "zoom", "iris", "shape-reveal"),
 }
 
 ENERGY_SCALES = {

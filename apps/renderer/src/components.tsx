@@ -18,6 +18,13 @@ import { MotionDiagram } from './diagram';
 import { STAGGER_SECONDS, countUp, fadeUp, maskRise, pop, prog, staggerFrames } from './motion/primitives.js';
 import { energyProfile } from './motion/index.js';
 import { highlightSweep, canDrawOn, drawOnSvg, splitHighlight, waterfallEntry, waterfallPlan } from './motion/kinetic.js';
+import { RecipeLayer } from './recipes/RecipeLayer';
+import { TechnicalFlow } from './recipes/TechnicalFlow';
+import { resolveRecipe } from './recipes/model.js';
+import { cueDiagnostic, sceneCuePlan } from './recipes/cues.js';
+import { listRowBoxes } from './recipes/geometry.js';
+import { sketchAnnotations, sketchPaths } from './recipes/sketch.js';
+import { activeGroupAt, kineticPlan, kineticWordState } from './recipes/kinetic.js';
 
 /* ------------------------------------------------------------------ *
  * Motion: the eased entry tokens live in ./motion (MS1). Every layout uses
@@ -308,12 +315,72 @@ function HighlightBand({ scene, pkg, frame, fps, children }: { scene: Scene; pkg
 function AnimatedHeadline({
   scene, pkg, frame, text, style, delay = 2, duration = 22, distance = 42,
 }: { scene: Scene; pkg: PackageV1; frame: number; text?: string; style?: React.CSSProperties; delay?: number; duration?: number; distance?: number }) {
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const entry = scene.motion?.entry;
   const energy = energyProfile(scene.motion?.energy ?? pkg.motion?.energy);
   const dist = distance * energy.distanceScale;
   const highlight = scene.motion?.emphasis && scene.motion.emphasis !== 'none' ? scene.motion.highlight : undefined;
   const content = typeof text === 'string' ? text : '';
+
+  // AI2 kinetic recipe: the same copy, grouped into planner-resolved phrase
+  // beats. The existing entry vocabulary still applies when recipe is absent.
+  const recipe = resolveRecipe(scene);
+  if (recipe.recipe === 'kinetic' && content) {
+    const timelineCues = (scene as Scene & { motionCues?: Array<{ phrase?: string }> }).motionCues;
+    const phrases = recipe.cuePhrases.length > 0
+      ? recipe.cuePhrases
+      : (timelineCues ?? []).map(cue => cue.phrase).filter((phrase): phrase is string => typeof phrase === 'string');
+    const cuePlan = sceneCuePlan({ scene, fps, count: phrases.length, sceneFrames: durationInFrames });
+    cueDiagnostic(scene, cuePlan);
+    const plan = kineticPlan({
+      headline: content,
+      phrases,
+      cues: cuePlan.seconds,
+      fps,
+      sceneFrames: durationInFrames,
+      seed: recipe.seed,
+    });
+    const activeGroup = activeGroupAt(plan.groups, frame);
+    const accent = palette(pkg)[2];
+    return (
+      <div
+        style={{ ...style, display: 'block', lineHeight: style?.lineHeight ?? 1.06 }}
+        data-recipe="kinetic"
+        data-cue-source={cuePlan.source}
+        data-cue-fallback={cuePlan.fallback ? 'true' : 'false'}
+      >
+        {plan.words.map(word => {
+          const state = kineticWordState({ word, frame, fps, activeGroup });
+          return (
+            <span
+              key={`${word.text}-${word.index}`}
+              style={{
+                display: 'inline-block',
+                overflow: 'hidden',
+                verticalAlign: 'top',
+                marginRight: word.trailing ? '0.24em' : 0,
+                paddingBottom: '0.08em',
+                marginBottom: '-0.08em',
+              }}
+            >
+              <span
+                style={{
+                  display: 'inline-block',
+                  opacity: state.opacity,
+                  transform: `translateY(${state.translateYPercent}%) scale(${state.scale})`,
+                  transformOrigin: 'left bottom',
+                  color: state.active ? accent : undefined,
+                  textShadow: state.active ? `0 0 32px ${accent}55` : undefined,
+                }}
+              >
+                {word.text}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
 
   if (entry === 'waterfall') {
     const plan = waterfallPlan(content, highlight);
@@ -574,6 +641,98 @@ function ChartLayout({ scene, pkg, frame, media }: LayoutProps) {
   );
 }
 
+/**
+ * AI2 sketch list: a recipe-owned row layout so the rough cards, ticks and text
+ * come from one geometry. The default ListLayout remains untouched for every
+ * other scene. Six items still end above the caption band (198 + 6 * 66 px).
+ */
+function SketchListLayout({ scene, pkg, frame, media }: LayoutProps) {
+  const family = useFontFamily();
+  const { width, height, fps, durationInFrames } = useVideoConfig();
+  const colors = palette(pkg);
+  const text = textColors(pkg);
+  const copy = (scene.copy ?? {}) as Record<string, string | undefined | string[]>;
+  const items = Array.isArray(copy.items) ? (copy.items as string[]) : [];
+  const recipe = resolveRecipe(scene);
+  const cuePlan = sceneCuePlan({ scene, fps, count: items.length, sceneFrames: durationInFrames });
+  cueDiagnostic(scene, cuePlan);
+  const rows = listRowBoxes({ scene, width, height, count: items.length });
+  const annotations = sketchAnnotations(scene, width, height, recipe.seed, recipe.intensity, cuePlan.frames);
+  const paths = sketchPaths(annotations, { stroke: text.primary, accent: colors[2], fill: colors[1] });
+  return (
+    <AbsoluteFill
+      style={{ fontFamily: family, color: text.primary }}
+      data-recipe="sketch-list"
+      data-cue-source={cuePlan.source}
+      data-cue-fallback={cuePlan.fallback ? 'true' : 'false'}
+      data-cue-missing={cuePlan.missing.length > 0 ? cuePlan.missing.join(' | ') : undefined}
+    >
+      <Background scene={scene} pkg={pkg} media={media} />
+      <div style={{ position: 'absolute', left: SAFE_AREA.x, right: SAFE_AREA.x, top: SAFE_AREA.y, zIndex: 7 }}>
+        <AnimatedHeadline scene={scene} pkg={pkg} frame={frame} text={typeof copy.headline === 'string' ? copy.headline : undefined} delay={2} duration={22} style={{ fontSize: TYPE_SCALE.headlineMd, fontWeight: 800, maxWidth: 1100 }} />
+      </div>
+      {rows.map((row, index) => {
+        const start = cuePlan.frames[index] ?? 0;
+        const enter = prog(frame, start, 16, 'enter');
+        return (
+          <div
+            key={`${items[index]}-${index}`}
+            style={{
+              position: 'absolute',
+              left: row.x,
+              top: row.y,
+              width: row.w,
+              height: row.h,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 20,
+              opacity: enter,
+              transform: `translateY(${(1 - enter) * 12}px)`,
+              zIndex: 7,
+            }}
+          >
+            <div style={{ width: 44, height: 44, flex: '0 0 44px', borderRadius: 999, background: colors[2], color: text.onAccent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 24 }}>
+              {index + 1}
+            </div>
+            <div style={{ fontSize: Math.min(34, Math.max(24, width * 0.025)), lineHeight: 1.2 }}>{items[index]}</div>
+          </div>
+        );
+      })}
+      <AbsoluteFill style={{ pointerEvents: 'none', zIndex: 2.5 }}>
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ position: 'absolute', inset: 0 }}>
+          {paths.map((path, index) => {
+            const start = path.startFrame !== null && path.startFrame !== undefined ? path.startFrame : 3 + path.order * 1.8;
+            const draw = prog(frame, start, 24, 'enter');
+            const common = {
+              d: path.d,
+              fill: path.fill,
+              stroke: path.stroke,
+              strokeWidth: path.strokeWidth,
+              strokeLinecap: 'round' as const,
+              strokeLinejoin: 'round' as const,
+              opacity: draw > 0 ? 1 : 0,
+            };
+            if (path.draw) {
+              return (
+                <path
+                  key={`${path.order}-${index}`}
+                  {...common}
+                  pathLength={1}
+                  strokeDasharray={1}
+                  strokeDashoffset={1 - draw}
+                  fillOpacity={path.fill === 'none' ? 0 : draw * 0.35}
+                />
+              );
+            }
+            return <path key={`${path.order}-${index}`} {...common} fillOpacity={draw * 0.86} />;
+          })}
+        </svg>
+      </AbsoluteFill>
+      <Foreground scene={scene} pkg={pkg} frame={frame} />
+    </AbsoluteFill>
+  );
+}
+
 function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
   const family = useFontFamily();
   const { fps } = useVideoConfig();
@@ -582,6 +741,19 @@ function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
   const copy = (scene.copy ?? {}) as Record<string, string | undefined | string[]>;
   const quote = scene.variant === 'quote';
   const items = Array.isArray(copy.items) ? (copy.items as string[]) : [];
+  const recipe = resolveRecipe(scene);
+  if (recipe.recipe === 'technical-flow' && items.length >= 2) {
+    return (
+      <AbsoluteFill>
+        <Background scene={scene} pkg={pkg} media={media} />
+        <TechnicalFlow scene={scene} pkg={pkg} frame={frame} />
+        <Foreground scene={scene} pkg={pkg} frame={frame} />
+      </AbsoluteFill>
+    );
+  }
+  if (recipe.recipe === 'sketch' && items.length >= 2) {
+    return <SketchListLayout scene={scene} pkg={pkg} frame={frame} media={media} />;
+  }
   if (scene.motion?.diagram) return <AbsoluteFill><Background scene={scene} pkg={pkg} media={media} /><MotionDiagram scene={scene} pkg={pkg} frame={frame} /></AbsoluteFill>;
   return (
     <AbsoluteFill style={{ fontFamily: family, color: text.primary }}>
@@ -622,6 +794,7 @@ export function SceneView({ scene, pkg, media }: { scene: Scene; pkg: PackageV1;
     return (
       <AbsoluteFill>
         <Background scene={scene} pkg={pkg} media={media} />
+        <RecipeLayer scene={scene} pkg={pkg} frame={frame} />
         <Foreground scene={scene} pkg={pkg} frame={frame} />
         {resolved.lowerThird ? <LowerThird {...resolved.lowerThird} pkg={pkg} /> : null}
       </AbsoluteFill>
@@ -636,6 +809,7 @@ export function SceneView({ scene, pkg, media }: { scene: Scene; pkg: PackageV1;
       {scene.layout === 'list' ? <ListLayout {...props} /> : null}
       {scene.layout === 'split' || scene.layout === 'compare' ? <SplitCompareLayout {...props} /> : null}
       {scene.layout === 'code' ? <CodeLayout {...props} /> : null}
+      <RecipeLayer scene={scene} pkg={pkg} frame={frame} />
       {resolved.lowerThird ? <LowerThird {...resolved.lowerThird} pkg={pkg} /> : null}
     </CopyGuard>
   );

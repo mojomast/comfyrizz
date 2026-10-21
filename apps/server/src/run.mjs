@@ -27,6 +27,34 @@ function isMetered(costVisibility) {
   return typeof costVisibility === 'string' && costVisibility.includes('account-estimate');
 }
 
+// TR07: a job's progress event is also a clip event. The job id is `<assetId>.<kind>`, so
+// the timeline can update one clip without knowing the runner's job kinds.
+function clipJobFor(record, event) {
+  if (!event || typeof event.job !== 'string' || event.job === '') return null;
+  const assetId = event.job.split('.')[0];
+  if (!assetId) return null;
+  const status = typeof event.status === 'string' ? event.status.toLowerCase() : null;
+  const kind = typeof event.event === 'string' ? event.event : '';
+  let state = typeof event.state === 'string' ? event.state : 'generating';
+  if (status === 'failed' || status === 'error' || kind === 'job_failed' || kind === 'failed' || kind === 'error') {
+    state = 'failed';
+  } else if (status === 'succeeded' || status === 'cached' || kind === 'job_done') {
+    state = status === 'cached' ? 'cached' : 'succeeded';
+  } else if (kind === 'job_start' || kind === 'submitted' || kind === 'started' || kind === 'job_progress') {
+    state = 'generating';
+  } else if (status === 'running' || status === 'active' || status === 'pending' || status === 'queued') {
+    state = status;
+  }
+  const progress = Number.isFinite(event.progress)
+    ? event.progress
+    : (Number.isFinite(event.value)
+      ? event.value
+      : (Number.isFinite(event.completed) && Number.isFinite(event.total) && event.total > 0
+        ? event.completed / event.total
+        : null));
+  return { type: 'clip.job', assetId, runId: record.runId, state, progress };
+}
+
 /**
  * @param {object} options
  * @param {(backendId: string, opts: object) => object} options.backendFactory
@@ -121,6 +149,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     const emit = (event) => {
       record.events.push(event);
       publish({ type: 'run.event', runId: record.runId, event });
+      const clipJob = clipJobFor(record, event);
+      if (clipJob) publish(clipJob);
     };
     try {
       const instance = await backend(backendId, {
@@ -154,7 +184,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
 
       if (onComplete) {
         try {
-          const after = await onComplete({ pkg, result, record });
+          const after = await onComplete({ pkg, result, record, mode: record.mode, corrections: record.corrections });
           record.revision = after?.revision ?? null;
           record.render = after?.render ?? null;
         } catch (error) {
@@ -204,7 +234,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     }
   }
 
-  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = defaultRatePerHour, teardownMode = 'done', includeReady = false, assets = null }) {
+  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = defaultRatePerHour, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null }) {
+    if (mode !== 'final' && mode !== 'take') throw new Error("mode must be 'final' or 'take'");
     if (activeRunId) return { error: 'run busy', runId: activeRunId, status: 409 };
     const preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
     if (preview.requiresApproval && !(approved || approvals.has(preview.planHash))) {
@@ -215,6 +246,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       publish({ type: 'run.refused', ...preview });
       return { ...preview, refused: true };
     }
+    const runMode = mode === 'take' ? 'take' : 'final';
+    const runCorrections = corrections && typeof corrections === 'object' && !Array.isArray(corrections) ? corrections : null;
     const runId = runIdFor(preview.planHash);
     const workDir = join(runsDir, runId, 'work');
     const outputDir = join(runsDir, runId, 'out');
@@ -234,6 +267,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       outputDir,
       revision: null,
       render: null,
+      mode: runMode,
+      corrections: runCorrections,
       startedAt: new Date().toISOString(),
       signal: new AbortController().signal,
     };

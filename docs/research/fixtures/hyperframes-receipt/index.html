@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Comfyrizz scene-worker feasibility probe</title>
+<style>
+@font-face{font-family:Inter;src:url('assets/Inter-Variable.ttf')}
+*{box-sizing:border-box}body{margin:0;background:#102c2d;font-family:Inter,sans-serif;color:#f2e8d5}
+#root{position:relative;width:1280px;height:720px;overflow:hidden}
+.clip{position:absolute}#ground{inset:0;background:#102c2d}
+#title{left:80px;top:55px;font-size:48px;margin:0}
+#origin{left:100px;top:205px;font-size:28px}
+#project{left:730px;top:195px;width:410px;height:340px;border:3px solid #b78c48;border-radius:12px;padding:28px;font-size:30px}
+#receipt{left:120px;top:290px;width:200px;height:180px;background:#64c4b2;color:#102c2d;padding:24px;font-size:28px;border-radius:8px;font-weight:700}
+#result{left:780px;top:475px;font-size:26px;opacity:0}
+#note{left:80px;top:635px;font-size:24px;color:#f2e8d5}
+</style>
+<script src="assets/gsap.min.js"></script>
+</head>
+<body>
+<div id="root" data-composition-id="receipt" data-start="0" data-duration="4" data-width="1280" data-height="720" data-fps="30">
+<div id="ground" class="clip" data-start="0" data-duration="4" data-track-index="0"></div>
+<h1 id="title" class="clip" data-start="0" data-duration="4" data-track-index="1">Give this receipt a home</h1>
+<div id="origin" class="clip" data-start="0" data-duration="4" data-track-index="2">Unassigned</div>
+<div id="project" class="clip" data-start="0" data-duration="4" data-track-index="3">Project Atlas</div>
+<div id="receipt" class="clip" data-start="0" data-duration="4" data-track-index="4">Receipt<br>£24.00</div>
+<div id="result" class="clip" data-start="2.7" data-duration="1.3" data-track-index="5">1 receipt assigned</div>
+<div id="note" class="clip" data-start="0" data-duration="4" data-track-index="6">Illustrative workflow • silent render probe</div>
+</div>
+<script>
+const timeline=gsap.timeline({paused:true});
+timeline.fromTo('#title',{opacity:0,y:16},{opacity:1,y:0,duration:.4,ease:'power2.out'},0);
+timeline.fromTo('#receipt',{x:0,y:0},{x:660,y:0,duration:1.3,ease:'power2.inOut'},1.2);
+timeline.fromTo('#result',{opacity:0},{opacity:1,duration:.25},2.7);
+window.__timelines={receipt:timeline};
+</script>
+</body>
+</html>

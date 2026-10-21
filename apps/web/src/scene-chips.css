@@ -1,0 +1,53 @@
+/* Compact storyboard scene chips. */
+.scene-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.scene-chips > li { min-width: 0; margin: 0; }
+.scene-chips .scene-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 9px;
+  border: 1px solid var(--line, #232b3a);
+  border-radius: 999px;
+  background: var(--panel, #0f131b);
+  color: var(--muted, #8a93a6);
+  font-size: 11px;
+  line-height: 1.25;
+  cursor: pointer;
+}
+.scene-chips .scene-chip:hover {
+  border-color: var(--accent, #6d8cff);
+  color: var(--accent-2, #9fb2ff);
+}
+.scene-chips .scene-chip[aria-current="true"] {
+  border-color: var(--accent, #6d8cff);
+  background: var(--panel-2, #141924);
+  color: var(--text, #e8ebf3);
+}
+.scene-chips .scene-chip[data-status="provisional"] { border-style: dashed; }
+.scene-chips .scene-chip:focus-visible {
+  outline: 2px solid var(--accent, #6d8cff);
+  outline-offset: 2px;
+}
+.scene-chip-index {
+  color: var(--accent-2, #9fb2ff);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.scene-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scene-chip-time {
+  color: var(--muted, #8a93a6);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

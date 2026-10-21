@@ -1,5 +1,6 @@
 import json, sys
-sys.path.insert(0, "/home/box/comfyrizz/workflows")
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "workflows"))
 from build_gpu1 import klein_t2i, klein_img2img, klein_ref, ltx
 P_EXPLAIN=("Flat vector editorial illustration in a clean geometric style with soft gradients, set on a deep navy background (#0d0f14). "
  "In the center, a stylized laptop in three-quarter view emits a stream of small glowing cubes that travel to the right along a gentle arc "

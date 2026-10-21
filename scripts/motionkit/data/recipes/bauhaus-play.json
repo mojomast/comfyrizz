@@ -1,0 +1,25 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "bauhaus-play",
+  "label": "Bauhaus play",
+  "taxonomy": { "era": "modernist", "finish": "clean", "energy": "medium", "geometry": "geometric", "type": "display" },
+  "palette": [
+    { "role": "background", "hex": "#f4efe1" },
+    { "role": "text", "hex": "#1d1d1b" },
+    { "role": "accent", "hex": "#d6402b" },
+    { "role": "secondary", "hex": "#2a5db0" }
+  ],
+  "fonts": { "display": "unbounded", "text": "inter" },
+  "easing": { "personality": "elastic", "entry": "land", "exit": "exit", "spring": "elastic" },
+  "entries": ["pop", "maskRise", "waterfall"],
+  "emphasis": ["hero", "keyword"],
+  "transitions": { "primary": "shape-reveal", "accent": ["slide", "wipe"] },
+  "storyRecipe": "morph",
+  "background": { "pattern": "gradient" },
+  "finish": [{ "id": "paper-grain", "params": { "amount": 0.05, "contrast": 0.4 } }],
+  "rules": {
+    "do": ["primary-colour circles, squares and triangles", "elastic geometric reveals"],
+    "dont": ["photorealistic shading", "pastel palettes"]
+  },
+  "prompt": "Bauhaus play poster, primary red and blue shapes on cream, elastic geometric motion"
+}

@@ -1,0 +1,30 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "film-35mm",
+  "label": "Warm 35 mm film",
+  "taxonomy": { "era": "retro-70s", "finish": "film", "energy": "calm", "geometry": "flat", "type": "serif-editorial" },
+  "palette": [
+    { "role": "background", "hex": "#1a1410" },
+    { "role": "text", "hex": "#f6ead8" },
+    { "role": "accent", "hex": "#ff8a3d" },
+    { "role": "muted", "hex": "#6b4a33" }
+  ],
+  "fonts": { "display": "instrument-serif", "text": "inter" },
+  "easing": { "personality": "floaty", "entry": "move", "exit": "exit", "spring": "settle" },
+  "entries": ["fadeUp", "maskRise", "waterfall"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "fade", "accent": ["blur", "cut"] },
+  "storyRecipe": "focus",
+  "background": { "pattern": "grain" },
+  "finish": [
+    { "id": "film-grain", "params": { "amount": 0.14, "size": 2 } },
+    { "id": "halation", "params": { "threshold": 0.7, "radius": 18 } },
+    { "id": "light-leak", "params": { "intensity": 0.5, "hue": 25, "softness": 0.6 } },
+    { "id": "gate-weave", "params": { "amount": 0.02 } }
+  ],
+  "rules": {
+    "do": ["warm, slightly soft focus", "let light leak across the frame edge"],
+    "dont": ["cool blue grades", "hard digital edges"]
+  },
+  "prompt": "Warm 35 mm film still, soft halation, orange light leak, visible grain, gentle gate weave"
+}

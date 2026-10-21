@@ -1,7 +1,7 @@
 {
   "checkedOn": "2026-10-19",
   "scope": "Research only: root project license files and observed npm latest metadata, not a full dependency/assets audit or compatibility benchmark.",
-  "archive": "/home/mojo/comfyrizz-gpu-tests/animation-research-20261019",
+  "archive": "~/comfyrizz-gpu-tests/animation-research-20261019",
   "projects": [
     {
       "repository": "rough-stuff/rough",

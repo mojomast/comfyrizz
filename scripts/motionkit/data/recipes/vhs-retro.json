@@ -1,0 +1,29 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "vhs-retro",
+  "label": "90s camcorder",
+  "taxonomy": { "era": "retro-90s", "finish": "crt", "energy": "medium", "geometry": "flat", "type": "mono" },
+  "palette": [
+    { "role": "background", "hex": "#120c1f" },
+    { "role": "text", "hex": "#f8f4ff" },
+    { "role": "accent", "hex": "#ff2fd1" },
+    { "role": "muted", "hex": "#19e3ff" }
+  ],
+  "fonts": { "display": "vt323", "text": "ibm-plex-mono", "mono": "ibm-plex-mono" },
+  "easing": { "personality": "mechanical", "entry": "linear", "exit": "linear", "spring": "snap" },
+  "entries": ["pop", "maskRise", "fadeUp"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "cut", "accent": ["wipe", "slide"] },
+  "storyRecipe": "kinetic",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "vhs-tracking", "params": { "bandHeight": 0.2, "intensity": 0.5 } },
+    { "id": "chroma-shift", "params": { "offset": 2, "angle": 0 } },
+    { "id": "scanlines", "params": { "count": 240, "opacity": 0.35 } }
+  ],
+  "rules": {
+    "do": ["timestamp and tracking error chrome", "magenta and cyan chroma edges"],
+    "dont": ["smooth gradients", "clean type"]
+  },
+  "prompt": "90s camcorder VHS, tracking band, magenta and cyan chroma shift, scanlines, timestamp"
+}

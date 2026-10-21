@@ -1,0 +1,57 @@
+[
+  {
+    "path": "apps/server/test",
+    "rules": ["assigned-secret"],
+    "reason": "fake fixture credential in a test"
+  },
+  {
+    "path": "apps/web/test",
+    "rules": ["assigned-secret"],
+    "reason": "fake fixture credential in a test"
+  },
+  {
+    "path": "apps/renderer/test",
+    "rules": ["workspace-path"],
+    "reason": "historical GPU run log referenced in a render regression test"
+  },
+  {
+    "path": "packages/backends/test",
+    "rules": ["assigned-secret", "hf-token", "openai-style-key", "google-oauth"],
+    "reason": "fake fixture credential in a test"
+  },
+  {
+    "path": "packages/sources/test",
+    "rules": ["assigned-secret"],
+    "reason": "fake fixture credential in a test"
+  },
+  {
+    "path": "pipeline-py/tests",
+    "rules": ["assigned-secret"],
+    "reason": "fake fixture credential in a test"
+  },
+  {
+    "path": "scripts/gpu*/**",
+    "rules": ["workspace-path"],
+    "reason": "historical GPU run log, post-hackathon cleanup"
+  },
+  {
+    "path": "scripts/willem/**",
+    "rules": ["workspace-path"],
+    "reason": "historical GPU run log, post-hackathon cleanup"
+  },
+  {
+    "path": "docs/**",
+    "rules": ["workspace-path"],
+    "reason": "historical GPU run log, post-hackathon cleanup"
+  },
+  {
+    "path": "colab/README*.md",
+    "rules": ["workspace-path"],
+    "reason": "historical GPU run log in documentation, post-hackathon cleanup"
+  },
+  {
+    "path": "workflows/svg-guided/README.md",
+    "rules": ["workspace-path"],
+    "reason": "historical GPU run log in documentation, post-hackathon cleanup"
+  }
+]

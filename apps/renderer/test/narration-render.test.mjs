@@ -3,7 +3,8 @@
 // (36.4 s narrated). It now feeds audio/durations.json to compileTimeline.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -57,5 +58,45 @@ test('the compiled timeline replaces the media.json sidecar (N8)', () => {
     const fromTimeline = resolveSceneMedia(timeline.scenes.find(item => item.id === scene.id), pkg);
     assert.equal(fromTimeline.mediaOnly, fromPackage.mediaOnly, scene.id);
     assert.deepEqual(fromTimeline.lowerThird, fromPackage.lowerThird, scene.id);
+  }
+});
+
+test('narrationOptions preserves timing provenance and infers legacy Kokoro syllable fallback', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'comfyrizz-durations-'));
+  try {
+    mkdirSync(join(dir, 'audio'), { recursive: true });
+    const write = (engine, timing) => {
+      const chunk = {
+        text: 'A measured line.',
+        seconds: 1.5,
+        words: [
+          { text: 'A', start: 0, end: 0.2 },
+          { text: 'measured', start: 0.2, end: 0.9 },
+          { text: 'line.', start: 0.9, end: 1.5 },
+        ],
+        ...(timing ? { timing } : {}),
+      };
+      writeFileSync(join(dir, 'audio', 'durations.json'), JSON.stringify({
+        version: 1,
+        engine,
+        gapSeconds: 0.15,
+        paddingSeconds: 0.25,
+        scenes: { s1: { chunks: [chunk], gapSeconds: 0.15, paddingSeconds: 0.25 } },
+      }));
+      return narrationOptions(dir).narration.s1[0];
+    };
+
+    assert.equal(write('kokoro-onnx').timing, 'syllable-fallback', 'legacy Kokoro words are not forced-aligned');
+    assert.equal(write('qwen3-tts', 'aligner').timing, 'aligner');
+    assert.equal(write('qwen3-tts', 'syllable-fallback').timing, 'syllable-fallback');
+    assert.equal(write('unknown-engine').timing, undefined, 'unknown engines keep missing provenance');
+    const legacy = write('kokoro-onnx');
+    assert.deepEqual(legacy.words, [
+      { text: 'A', start: 0, end: 0.2 },
+      { text: 'measured', start: 0.2, end: 0.9 },
+      { text: 'line.', start: 0.9, end: 1.5 },
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

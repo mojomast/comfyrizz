@@ -1,0 +1,29 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "documentary-archive",
+  "label": "Archival doc",
+  "taxonomy": { "era": "retro-70s", "finish": "archival", "energy": "calm", "geometry": "flat", "type": "serif-editorial" },
+  "palette": [
+    { "role": "background", "hex": "#e8e0cf" },
+    { "role": "text", "hex": "#241f1a" },
+    { "role": "accent", "hex": "#8a3b12" },
+    { "role": "muted", "hex": "#7d7464" }
+  ],
+  "fonts": { "display": "dm-serif-display", "text": "ibm-plex-mono", "mono": "ibm-plex-mono" },
+  "easing": { "personality": "heavy", "entry": "land", "exit": "exit", "spring": "heavy" },
+  "entries": ["fadeUp", "maskRise", "countUp"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "fade", "accent": ["paper-reveal", "cut"] },
+  "storyRecipe": "focus",
+  "background": { "pattern": "grain" },
+  "finish": [
+    { "id": "dust-scratches", "params": { "density": 0.3, "opacity": 0.5 } },
+    { "id": "sepia-grade", "params": { "amount": 0.8 } },
+    { "id": "gate-weave", "params": { "amount": 0.02 } }
+  ],
+  "rules": {
+    "do": ["sepia archival grade and dust", "slow fades between archive frames"],
+    "dont": ["saturated colour", "modern UI chrome"]
+  },
+  "prompt": "Archival documentary, sepia photo, dust and scratches, gate weave, serif captions on aged paper"
+}

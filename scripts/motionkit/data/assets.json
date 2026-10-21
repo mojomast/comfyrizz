@@ -1,0 +1,287 @@
+{
+  "fonts": [
+    {
+      "id": "inter",
+      "kind": "font",
+      "name": "Inter",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/inter",
+      "source": "https://github.com/google/fonts/tree/main/ofl/inter",
+      "files": ["inter-Variable.ttf", "OFL.txt"],
+      "vendor": "vendored",
+      "sha256": null
+    },
+    {
+      "id": "jetbrains-mono",
+      "kind": "font",
+      "name": "JetBrains Mono",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/jetbrains-mono",
+      "source": "https://github.com/google/fonts/tree/main/ofl/jetbrains-mono",
+      "files": ["JetBrainsMono-Regular.ttf", "OFL.txt"],
+      "vendor": "vendored",
+      "sha256": null
+    },
+    {
+      "id": "space-grotesk",
+      "kind": "font",
+      "name": "Space Grotesk",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/space-grotesk",
+      "source": "https://github.com/google/fonts/tree/main/ofl/space-grotesk",
+      "files": ["SpaceGrotesk[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "playfair-display",
+      "kind": "font",
+      "name": "Playfair Display",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/playfair-display",
+      "source": "https://github.com/google/fonts/tree/main/ofl/playfair-display",
+      "files": ["PlayfairDisplay[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "fraunces",
+      "kind": "font",
+      "name": "Fraunces",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/fraunces",
+      "source": "https://github.com/google/fonts/tree/main/ofl/fraunces",
+      "files": ["Fraunces[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "dm-serif-display",
+      "kind": "font",
+      "name": "DM Serif Display",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/dm-serif-display",
+      "source": "https://github.com/google/fonts/tree/main/ofl/dm-serif-display",
+      "files": ["DMSerifDisplay[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "archivo-black",
+      "kind": "font",
+      "name": "Archivo Black",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/archivo-black",
+      "source": "https://github.com/google/fonts/tree/main/ofl/archivo-black",
+      "files": ["ArchivoBlack-Regular.ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "bebas-neue",
+      "kind": "font",
+      "name": "Bebas Neue",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/bebas-neue",
+      "source": "https://github.com/google/fonts/tree/main/ofl/bebas-neue",
+      "files": ["BebasNeue[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "ibm-plex-mono",
+      "kind": "font",
+      "name": "IBM Plex Mono",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/ibm-plex-mono",
+      "source": "https://github.com/google/fonts/tree/main/ofl/ibm-plex-mono",
+      "files": ["IBMPlexMono[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "instrument-serif",
+      "kind": "font",
+      "name": "Instrument Serif",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/instrument-serif",
+      "source": "https://github.com/google/fonts/tree/main/ofl/instrument-serif",
+      "files": ["InstrumentSerif[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "syne",
+      "kind": "font",
+      "name": "Syne",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/syne",
+      "source": "https://github.com/google/fonts/tree/main/ofl/syne",
+      "files": ["Syne[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "press-start-2p",
+      "kind": "font",
+      "name": "Press Start 2P",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/press-start-2p",
+      "source": "https://github.com/google/fonts/tree/main/ofl/press-start-2p",
+      "files": ["PressStart2P-Regular.ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "caveat",
+      "kind": "font",
+      "name": "Caveat",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/caveat",
+      "source": "https://github.com/google/fonts/tree/main/ofl/caveat",
+      "files": ["Caveat[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "orbitron",
+      "kind": "font",
+      "name": "Orbitron",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/orbitron",
+      "source": "https://github.com/google/fonts/tree/main/ofl/orbitron",
+      "files": ["Orbitron[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "unbounded",
+      "kind": "font",
+      "name": "Unbounded",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/unbounded",
+      "source": "https://github.com/google/fonts/tree/main/ofl/unbounded",
+      "files": ["Unbounded[wght].ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    },
+    {
+      "id": "vt323",
+      "kind": "font",
+      "name": "VT323",
+      "license": "OFL-1.1",
+      "licenseUrl": "https://fonts.google.com/license/vt323",
+      "source": "https://github.com/google/fonts/tree/main/ofl/vt323",
+      "files": ["VT323-Regular.ttf", "OFL.txt"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    }
+  ],
+  "icons": [
+    {
+      "id": "phosphor-icons",
+      "kind": "icons",
+      "name": "Phosphor Icons",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/phosphor-icons/core/raw/main/LICENSE",
+      "source": "https://github.com/phosphor-icons/core",
+      "files": ["phosphor-icons.woff2", "LICENSE"],
+      "vendor": "vendored",
+      "sha256": "93f4c76209946a99ea21ce73108c22a05ff41d96a337855969a15d871b44eacc"
+    },
+    {
+      "id": "tabler-icons",
+      "kind": "icons",
+      "name": "Tabler Icons",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/tabler/tabler-icons/raw/main/LICENSE",
+      "source": "https://github.com/tabler/tabler-icons",
+      "files": ["tabler-icons.woff2", "LICENSE"],
+      "vendor": "vendored",
+      "sha256": "a4693493dcd6a26fa6b34967e97801d70b389851d37fd33754f5ef9188192dac"
+    },
+    {
+      "id": "lucide",
+      "kind": "icons",
+      "name": "Lucide",
+      "license": "ISC",
+      "licenseUrl": "https://github.com/lucide-icons/lucide/raw/main/LICENSE",
+      "source": "https://github.com/lucide-icons/lucide",
+      "files": ["lucide.woff2"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    }
+  ],
+  "sfx": [
+    {
+      "id": "kenney-interface-sounds",
+      "kind": "sfx",
+      "name": "Kenney Interface Sounds",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://github.com/kenneyassets/interface-sounds/raw/main/LICENSE",
+      "source": "https://github.com/kenneyassets/interface-sounds",
+      "files": ["click.ogg", "whoosh.ogg", "pop.ogg"],
+      "vendor": "vendored",
+      "sha256": "b960c837bd5b73d6b5f8515967e4ae9e23a71ad90885c29a76126f3ae7be2c68"
+    },
+    {
+      "id": "kenney-ui-audio",
+      "kind": "sfx",
+      "name": "Kenney UI Audio",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://github.com/kenneyassets/ui-audio/raw/main/LICENSE",
+      "source": "https://github.com/kenneyassets/ui-audio",
+      "files": ["button-click.ogg", "notification.ogg"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    }
+  ],
+  "textures": [
+    {
+      "id": "polyhaven-ambientcg-textures",
+      "kind": "texture",
+      "name": "Poly Haven / ambientCG Textures",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "source": "https://polyhaven.com",
+      "files": ["paper.jpg", "concrete.jpg"],
+      "vendor": "fetch-on-demand",
+      "sha256": null
+    }
+  ],
+  "shaders": [
+    {
+      "id": "gl-transitions",
+      "kind": "shader",
+      "name": "gl-transitions",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/gl-transitions/gl-transitions/raw/main/LICENSE",
+      "source": "https://github.com/gl-transitions/gl-transitions",
+      "files": ["burn.glsl", "fade.glsl", "wipe.glsl"],
+      "vendor": "vendored",
+      "sha256": "c53d8c09e0fb36921e9fdf8b947d96d9bb3253d5e87c69abd157b844dc4e0b37"
+    },
+    {
+      "id": "webgl-noise",
+      "kind": "shader",
+      "name": "webgl-noise",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/stegu/webgl-noise/raw/main/LICENSE",
+      "source": "https://github.com/stegu/webgl-noise",
+      "files": ["simplex-noise.glsl"],
+      "vendor": "vendored",
+      "sha256": "3f718b10e4350fb97d75c8c6e36075102a350cc514c90c55a18b34bd97a95379"
+    },
+    {
+      "id": "glsl-film-grain",
+      "kind": "shader",
+      "name": "glsl-film-grain",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/mattdesl/glsl-film-grain/raw/main/LICENSE",
+      "source": "https://github.com/mattdesl/glsl-film-grain",
+      "files": ["film-grain.glsl"],
+      "vendor": "vendored",
+      "sha256": "e1f35681ed190f622bdbee3c461f3984ae1132b0e6e06d2e46087c00eba948bc"
+    }
+  ]
+}

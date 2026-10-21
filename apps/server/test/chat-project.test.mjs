@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { conversationPlanSchema } from '../../../packages/agent/dist/src/index.js';
+import { conversationPlanSchema, patchConversationPlan } from '../../../packages/agent/dist/src/index.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { buildChatProject } from '../src/chat-project.mjs';
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 240"><rect width="400" height="240" fill="#05070d"/><circle cx="200" cy="120" r="70" fill="#6d8cff"/></svg>';
@@ -19,7 +20,68 @@ function makePlan() {
   });
 }
 
+function richPlan() {
+  return conversationPlanSchema.parse({
+    title: 'Measured latency', brief: 'Explain a measured latency improvement without inventing data.', audience: 'Engineers',
+    aspect: '16:9', stylePreset: 'cinematic-dark',
+    datasets: {
+      d_latency: {
+        unit: 'ms', label: 'Median latency', values: [{ label: 'Before', value: 20 }, { label: 'After', value: 8 }],
+        source: 'user', source_url: 'https://example.test/measurements', retrieved_at: '2026-10-19T00:00:00Z', note: 'Measured locally.',
+      },
+    },
+    scenes: [
+      {
+        id: 's_title', layout: 'title', headline: 'Latency, measured', sub: 'A real before and after', seconds: 4,
+        narration: 'This is a measured latency comparison.', visual: 'A kinetic opening card',
+        motion: { recipe: 'kinetic', seed: 11, intensity: 0.45, entry: 'waterfall', cue_phrases: ['measured'] },
+        transition: { type: 'paper-reveal', frames: 18 },
+      },
+      {
+        id: 's_stat', layout: 'stat', headline: '8 ms', sub: 'After the fix', body: '8 ms', footnote: 'Median of our runs.', seconds: 6,
+        narration: 'The median latency fell to eight milliseconds.', visual: 'A focused stat card',
+        data: { dataset: 'd_latency', display: 'number' },
+        motion: { recipe: 'focus', seed: 12, intensity: 0.6, focus: { x: 0.2, y: 0.2, width: 0.55, height: 0.45 } },
+      },
+      {
+        id: 's_chart', layout: 'chart', headline: 'Before and after', footnote: 'Median of our runs.', seconds: 6,
+        narration: 'The chart shows the two measured values.', visual: 'A bar chart of the measured series',
+        data: { dataset: 'd_latency' }, motion: { recipe: 'technical-flow', cue_seconds: [0.5, 2] },
+        transition: { type: 'draw-reveal', frames: 20 },
+      },
+      {
+        id: 's_split', layout: 'split', headline: 'Two states', seconds: 6,
+        narration: 'The shape changes from one state to another.', visual: 'Two labeled plates',
+        plates: [{ label: 'Before', pattern: 'grid', seed: 3 }, { label: 'After', pattern: 'dots', seed: 4 }],
+        motion: { recipe: 'morph', seed: 13, intensity: 0.7, morph: { from: 'circle', to: 'blob' }, cue_phrases: ['shape'] },
+        transition: { type: 'shape-reveal', frames: 14 },
+      },
+      {
+        id: 's_compare', layout: 'compare', headline: 'Compare the detail', seconds: 6,
+        narration: 'These are the two plates side by side.', visual: 'Two SVG plates',
+        plates: [{ label: 'Old', svg: SVG }, { label: 'New', svg: SVG }],
+      },
+      {
+        id: 's_code', layout: 'code', seconds: 6,
+        narration: 'Here is the actual variable.', visual: 'A real terminal block',
+        code: { language: 'js', code: 'const latency = 8;', highlights: [1], typing: { charsPerSecond: 20 } },
+        motion: { recipe: 'technical-flow', seed: 14 },
+      },
+    ],
+  });
+}
+
+async function setupRich(t) {
+  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-rich-');
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  const previousPlan = richPlan();
+  const previous = await buildChatProject({ plan: previousPlan, runtimeDir });
+  const revise = (plan = previousPlan, extra = {}) => buildChatProject({ plan, previous, previousPlan, runtimeDir, ...extra });
+  return { runtimeDir, previousPlan, previous, revise };
+}
+
 async function setup(t) {
+  mkdirSync('/tmp/opencode', { recursive: true });
   const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-');
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const previousPlan = makePlan();
@@ -233,4 +295,348 @@ test('new projects do not assert unverified compliance and aborted builds genera
   const files = readdirSync(join(runtimeDir, 'packages', 'assets'));
   await assert.rejects(buildChatProject({ plan: previousPlan, runtimeDir, signal: controller.signal }), { name: 'AbortError' });
   assert.deepEqual(readdirSync(join(runtimeDir, 'packages', 'assets')), files);
+});
+
+test('expanded layouts build a valid package with datasets, code, plates, recipe motion and transitions', async t => {
+  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-expanded-');
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  const plan = richPlan();
+  const pkg = await buildChatProject({ plan, runtimeDir });
+  const validation = validatePackage(pkg);
+  assert.equal(validation.valid, true, JSON.stringify(validation.errors));
+  const timeline = compileTimeline(pkg);
+  assert.equal(timeline.scenes.length, plan.scenes.length);
+  assert.deepEqual(timeline.scenes.find(scene => scene.id === 's_split').motionCues.map(cue => cue.phrase), ['shape']);
+  const byId = Object.fromEntries(pkg.scenes.map(scene => [scene.id, scene]));
+
+  assert.deepEqual(pkg.datasets.d_latency, plan.datasets.d_latency);
+  assert.equal(pkg.datasets.d_latency.source, 'user');
+  assert.equal(pkg.datasets.d_latency.source_url, 'https://example.test/measurements');
+  assert.equal(pkg.datasets.d_latency.note, 'Measured locally.');
+
+  assert.equal(byId.s_stat.layout, 'stat');
+  assert.equal(byId.s_stat.copy.headline, '8 ms');
+  assert.equal(byId.s_stat.copy.sub, 'After the fix');
+  assert.equal(byId.s_stat.copy.body, '8 ms');
+  assert.equal(byId.s_stat.copy.footnote, 'Median of our runs.');
+  assert.deepEqual(byId.s_stat.data, { dataset: 'd_latency', display: 'number' });
+  assert.deepEqual(byId.s_stat.motion, { recipe: 'focus', seed: 12, intensity: 0.6, focus: { x: 0.2, y: 0.2, width: 0.55, height: 0.45 } });
+  assert.deepEqual(byId.s_stat.preferredFrames, 180);
+
+  assert.equal(byId.s_chart.layout, 'chart');
+  assert.equal(byId.s_chart.variant, 'bar');
+  assert.equal(byId.s_chart.copy.footnote, 'Median of our runs.');
+  assert.deepEqual(byId.s_chart.data, { dataset: 'd_latency' });
+  assert.deepEqual(byId.s_chart.motion.cue_seconds, [0.5, 2]);
+  assert.deepEqual(byId.s_chart.transitionOut, { type: 'draw-reveal', frames: 20 });
+
+  assert.equal(byId.s_split.layout, 'split');
+  assert.deepEqual(byId.s_split.media, [
+    { procedural: { pattern: 'grid', seed: 3 }, label: 'Before' },
+    { procedural: { pattern: 'dots', seed: 4 }, label: 'After' },
+  ]);
+  assert.deepEqual(byId.s_split.motion, { recipe: 'morph', seed: 13, intensity: 0.7, morph: { from: 'circle', to: 'blob' }, cue_phrases: ['shape'] });
+  assert.deepEqual(byId.s_split.transitionOut, { type: 'shape-reveal', frames: 14 });
+
+  assert.equal(byId.s_compare.layout, 'compare');
+  assert.equal(byId.s_compare.media.length, 2);
+  assert.deepEqual(byId.s_compare.media.map(plate => plate.label), ['Old', 'New']);
+  assert.notEqual(byId.s_compare.media[0].asset, byId.s_compare.media[1].asset);
+  for (const plate of byId.s_compare.media) assert.equal(pkg.assets[plate.asset].kind, 'svg');
+  assert.deepEqual(byId.s_compare.transitionOut, { type: 'fade', frames: 12 });
+
+  assert.equal(byId.s_code.layout, 'code');
+  assert.deepEqual(byId.s_code.code, { language: 'js', code: 'const latency = 8;', highlights: [1], typing: { charsPerSecond: 20 } });
+  assert.deepEqual(byId.s_code.copy, {});
+  assert.equal(byId.s_code.transitionOut, undefined);
+  assert.deepEqual(byId.s_code.motion, { recipe: 'technical-flow', seed: 14 });
+  assert.deepEqual(byId.s_title.transitionOut, { type: 'paper-reveal', frames: 18 });
+  assert.equal(pkg.scenes.at(-1).id, 's_code');
+  assert.equal(pkg.scenes.at(-1).transitionOut, undefined);
+});
+
+test('manual motion, transition, dataset and code edits survive an unrelated plan revision', async t => {
+  const { previous, previousPlan, revise } = await setupRich(t);
+  const stat = previous.scenes.find(scene => scene.id === 's_stat');
+  const split = previous.scenes.find(scene => scene.id === 's_split');
+  const compare = previous.scenes.find(scene => scene.id === 's_compare');
+  const code = previous.scenes.find(scene => scene.id === 's_code');
+  stat.motion.entry = 'maskRise';
+  stat.motion.stagger = 'word';
+  stat.data.display = 'counter';
+  split.transitionOut = { type: 'fade', frames: 8 };
+  split.motion.intensity = 0.2;
+  compare.media[0].label = 'My own label';
+  code.code.highlights = [1, 2];
+  previous.datasets.d_latency.note = 'Verified on the local machine.';
+  const snapshot = structuredClone(previous);
+
+  const next = structuredClone(previousPlan);
+  next.scenes.find(scene => scene.id === 's_stat').headline = 'Eight milliseconds';
+  const result = await revise(next);
+  const revisedStat = result.scenes.find(scene => scene.id === 's_stat');
+  const revisedSplit = result.scenes.find(scene => scene.id === 's_split');
+  const revisedCompare = result.scenes.find(scene => scene.id === 's_compare');
+  const revisedCode = result.scenes.find(scene => scene.id === 's_code');
+  assert.equal(revisedStat.copy.headline, 'Eight milliseconds');
+  assert.equal(revisedStat.motion.entry, 'maskRise');
+  assert.equal(revisedStat.motion.stagger, 'word');
+  assert.equal(revisedStat.motion.recipe, 'focus');
+  assert.equal(revisedStat.data.display, 'counter');
+  assert.deepEqual(revisedSplit.transitionOut, { type: 'fade', frames: 8 });
+  assert.equal(revisedSplit.motion.intensity, 0.2);
+  assert.equal(revisedSplit.motion.recipe, 'morph');
+  assert.equal(revisedCompare.media[0].label, 'My own label');
+  assert.deepEqual(revisedCode.code.highlights, [1, 2]);
+  assert.equal(result.datasets.d_latency.note, 'Verified on the local machine.');
+  assert.deepEqual(previous, snapshot, 'the input project is never mutated');
+});
+
+test('plan changes update changed motion fields while preserving manual recipe details', async t => {
+  const { previous, previousPlan, revise } = await setupRich(t);
+  const stat = previous.scenes.find(scene => scene.id === 's_stat');
+  stat.motion.entry = 'pop';
+  const snapshot = structuredClone(previous);
+  const next = structuredClone(previousPlan);
+  next.scenes.find(scene => scene.id === 's_stat').motion.intensity = 0.9;
+  const result = await revise(next);
+  const revised = result.scenes.find(scene => scene.id === 's_stat');
+  assert.equal(revised.motion.intensity, 0.9);
+  assert.equal(revised.motion.entry, 'pop', 'a manual token not mentioned by the plan is retained');
+  assert.equal(revised.motion.recipe, 'focus');
+  assert.deepEqual(previous, snapshot);
+});
+
+test('a manual transition conflicts only when the plan changes that transition', async t => {
+  const { previous, previousPlan, revise } = await setupRich(t);
+  const split = previous.scenes.find(scene => scene.id === 's_split');
+  split.transitionOut = { type: 'fade', frames: 8 };
+  const next = structuredClone(previousPlan);
+  next.scenes.find(scene => scene.id === 's_split').transition = { type: 'paper-reveal', frames: 18 };
+  await assert.rejects(revise(next), error => error.status === 409 && /transitionOut was manually edited/.test(error.message));
+  const unchanged = structuredClone(previousPlan);
+  unchanged.scenes.find(scene => scene.id === 's_split').headline = 'Two clearly different states';
+  assert.deepEqual((await revise(unchanged)).scenes.find(scene => scene.id === 's_split').transitionOut, { type: 'fade', frames: 8 });
+});
+
+test('locked expanded scenes keep motion, transitions and plates and reject plan changes', async t => {
+  const { previous, previousPlan, revise } = await setupRich(t);
+  const split = previous.scenes.find(scene => scene.id === 's_split');
+  split.locked = true;
+  split.transitionOut = { type: 'fade', frames: 8 };
+  split.motion.entry = 'pop';
+  const lockedSnapshot = structuredClone(split);
+  const next = structuredClone(previousPlan);
+  next.scenes.find(scene => scene.id === 's_title').headline = 'A revised opening';
+  assert.deepEqual((await revise(next)).scenes.find(scene => scene.id === 's_split'), lockedSnapshot);
+  next.scenes.find(scene => scene.id === 's_split').motion.intensity = 0.1;
+  await assert.rejects(revise(next), /locked scene s_split cannot be modified/);
+  next.scenes.find(scene => scene.id === 's_split').motion.intensity = previousPlan.scenes.find(scene => scene.id === 's_split').motion.intensity;
+  next.scenes.find(scene => scene.id === 's_split').plates[0].label = 'Changed';
+  await assert.rejects(revise(next), /locked scene s_split cannot be modified/);
+});
+
+test('a dataset is updated only when unchanged and a manual provenance edit conflicts', async t => {
+  const { previous, previousPlan, revise } = await setupRich(t);
+  previous.datasets.d_latency.note = 'Manually checked.';
+  const next = structuredClone(previousPlan);
+  next.scenes.find(scene => scene.id === 's_stat').headline = 'Eight milliseconds';
+  assert.equal((await revise(next)).datasets.d_latency.note, 'Manually checked.');
+  next.datasets.d_latency.label = 'A different label';
+  await assert.rejects(revise(next), error => error.status === 409 && /dataset d_latency was manually edited/.test(error.message));
+});
+
+test('reordering scenes recalculates defaults, keeps explicit transitions and drops the final outgoing transition', async t => {
+  const { previous, previousPlan, revise } = await setupRich(t);
+  const next = structuredClone(previousPlan);
+  next.scenes.reverse();
+  const code = next.scenes.find(scene => scene.id === 's_code');
+  code.transition = { type: 'fade', frames: 16 };
+  const result = await revise(next);
+  assert.deepEqual(result.scenes.map(scene => scene.id), ['s_code', 's_compare', 's_split', 's_chart', 's_stat', 's_title']);
+  assert.deepEqual(result.scenes[0].transitionOut, { type: 'fade', frames: 16 });
+  for (const scene of result.scenes.slice(1, -1)) assert.ok(scene.transitionOut, `${scene.id} keeps a transition`);
+  assert.equal(result.scenes.at(-1).id, 's_title');
+  assert.equal(result.scenes.at(-1).transitionOut, undefined);
+  assert.equal(result.duration.targetFrames, compileTimeline(result).durationInFrames);
+});
+
+test('a final-scene transition authored by the plan is ignored without failing the build', async t => {
+  const { previousPlan, runtimeDir } = await setupRich(t);
+  const next = structuredClone(previousPlan);
+  next.scenes.at(-1).transition = { type: 'shape-reveal', frames: 18 };
+  // A new project has no previous revision to merge, so this exercises the same
+  // post-order final-transition handling through a fresh build.
+  const fresh = structuredClone(next);
+  const pkg = await buildChatProject({ plan: fresh, runtimeDir });
+  assert.equal(pkg.scenes.at(-1).transitionOut, undefined);
+  const previous = await buildChatProject({ plan: previousPlan, runtimeDir });
+  const result = await buildChatProject({ plan: next, previous, previousPlan, runtimeDir });
+  assert.equal(result.scenes.at(-1).transitionOut, undefined);
+});
+
+test('a locked scene rejects a plan that changes the dataset it displays', async t => {
+  const { previous, previousPlan, revise } = await setupRich(t);
+  previous.scenes.find(scene => scene.id === 's_stat').locked = true;
+  const next = structuredClone(previousPlan);
+  next.scenes.find(scene => scene.id === 's_title').headline = 'A revised opening';
+  assert.equal((await revise(next)).scenes.find(scene => scene.id === 's_stat').locked, true);
+  next.datasets.d_latency.label = 'A changed label';
+  await assert.rejects(revise(next), error => error.status === 409 && /locked scene s_stat cannot use a changed dataset d_latency/.test(error.message));
+});
+
+test('a divergent manual transition on the final scene is refused rather than left invalid', async t => {
+  const { previous, previousPlan, revise } = await setupRich(t);
+  previous.scenes.at(-1).transitionOut = { type: 'fade', frames: 8 };
+  const next = structuredClone(previousPlan);
+  next.scenes.find(scene => scene.id === 's_title').headline = 'A revised opening';
+  await assert.rejects(revise(next), error => error.status === 409 && /transition that cannot be preserved at the end/.test(error.message));
+});
+
+test('layout switches add newly visible copy fields even when the plan value was hidden before', async t => {
+  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-copy-switch-');
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  const make = (layout, extra = {}) => conversationPlanSchema.parse({
+    title: 'Copy switch', brief: 'Copy switch.', audience: 'Test', aspect: '16:9', stylePreset: 'cinematic-dark',
+    datasets: { d_x: { unit: 'ms', values: [{ label: 'one', value: 1 }], source: 'user' } },
+    scenes: [
+      { id: 's_x', layout, headline: 'Head', sub: 'Sub', body: 'Body text', footnote: 'Footnote text', items: ['one', 'two'], seconds: 6, narration: 'Text.', visual: 'A card', ...extra },
+      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end' },
+    ],
+  });
+
+  const titlePlan = make('title');
+  const titleProject = await buildChatProject({ plan: titlePlan, runtimeDir });
+  assert.deepEqual(titleProject.scenes[0].copy, { headline: 'Head', sub: 'Sub' });
+  const statPlan = make('stat', { data: { dataset: 'd_x' } });
+  const statProject = await buildChatProject({ plan: statPlan, previous: titleProject, previousPlan: titlePlan, runtimeDir });
+  assert.deepEqual(statProject.scenes[0].copy, { headline: 'Head', sub: 'Sub', body: 'Body text', footnote: 'Footnote text' });
+  assert.equal(validatePackage(statProject).valid, true);
+
+  const heroPlan = make('hero');
+  const heroProject = await buildChatProject({ plan: heroPlan, runtimeDir });
+  assert.deepEqual(heroProject.scenes[0].copy, { headline: 'Head', sub: 'Sub', body: 'Body text' });
+  const listPlan = make('list');
+  const listProject = await buildChatProject({ plan: listPlan, previous: heroProject, previousPlan: heroPlan, runtimeDir });
+  assert.deepEqual(listProject.scenes[0].copy, { headline: 'Head', sub: 'Sub', items: ['one', 'two'] });
+  assert.equal(validatePackage(listProject).valid, true);
+});
+
+test('a formerly-middle plan transition that becomes final is recognised as plan-owned', async t => {
+  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-transition-reorder-');
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  const basePlan = () => conversationPlanSchema.parse({
+    title: 'Order', brief: 'Transition reorder.', audience: 'Test', aspect: '16:9', stylePreset: 'cinematic-dark',
+    scenes: [
+      { id: 's_a', layout: 'title', headline: 'A', seconds: 4, narration: 'A opening.', visual: 'A card', transition: { type: 'paper-reveal', frames: 18 } },
+      { id: 's_b', layout: 'hero', headline: 'B', seconds: 6, narration: 'B middle.', visual: 'B card' },
+      { id: 's_c', layout: 'list', headline: 'C', items: ['one', 'two'], seconds: 6, narration: 'C list.', visual: 'C card' },
+    ],
+  });
+  const previousPlan = basePlan();
+  const previous = await buildChatProject({ plan: previousPlan, runtimeDir });
+
+  const deleted = structuredClone(previousPlan);
+  deleted.scenes.reverse();
+  delete deleted.scenes.find(scene => scene.id === 's_a').transition;
+  const deletedResult = await buildChatProject({ plan: deleted, previous, previousPlan, runtimeDir });
+  assert.equal(deletedResult.scenes.at(-1).id, 's_a');
+  assert.equal(deletedResult.scenes.at(-1).transitionOut, undefined);
+  assert.ok(deletedResult.scenes[0].transitionOut && deletedResult.scenes[1].transitionOut);
+
+  const changed = structuredClone(previousPlan);
+  changed.scenes.reverse();
+  changed.scenes.find(scene => scene.id === 's_a').transition = { type: 'draw-reveal', frames: 20 };
+  const changedResult = await buildChatProject({ plan: changed, previous, previousPlan, runtimeDir });
+  assert.equal(changedResult.scenes.at(-1).id, 's_a');
+  assert.equal(changedResult.scenes.at(-1).transitionOut, undefined);
+  assert.equal(validatePackage(changedResult).valid, true);
+});
+
+test('deep motion patches reach the built project without erasing manual recipe details', async t => {
+  const { previous, previousPlan, runtimeDir } = await setupRich(t);
+  const stat = previous.scenes.find(scene => scene.id === 's_stat');
+  stat.motion.recipe = 'sketch';
+  stat.motion.entry = 'pop';
+  const next = patchConversationPlan(previousPlan, { scenePatches: [{ id: 's_stat', changes: { motion: { intensity: 0.9 } } }] });
+  assert.equal(next.scenes.find(scene => scene.id === 's_stat').motion.recipe, 'focus');
+  assert.equal(next.scenes.find(scene => scene.id === 's_stat').motion.seed, 12);
+  assert.deepEqual(next.scenes.find(scene => scene.id === 's_stat').motion.focus, { x: 0.2, y: 0.2, width: 0.55, height: 0.45 });
+  const result = await buildChatProject({ plan: next, previous, previousPlan, runtimeDir });
+  const motion = result.scenes.find(scene => scene.id === 's_stat').motion;
+  assert.equal(motion.recipe, 'sketch');
+  assert.equal(motion.entry, 'pop');
+  assert.equal(motion.intensity, 0.9);
+  assert.equal(motion.seed, 12);
+  assert.deepEqual(motion.focus, { x: 0.2, y: 0.2, width: 0.55, height: 0.45 });
+  assert.equal(validatePackage(result).valid, true);
+});
+
+test('split/compare plate media types drive style and palette invalidation', async t => {
+  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-plate-style-');
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  const imagePlan = stylePreset => conversationPlanSchema.parse({
+    title: 'Plate restyle', brief: 'Plate restyle.', audience: 'Test', aspect: '16:9', stylePreset,
+    scenes: [
+      { id: 's_a', layout: 'title', headline: 'A', seconds: 4, narration: 'A opening.', visual: 'A card' },
+      { id: 's_b', layout: 'split', headline: 'B', seconds: 6, narration: 'B plates.', visual: 'Two plates',
+        plates: [
+          { label: 'Before', mediaType: 'image', visual: 'A weathered brick factory at dawn' },
+          { label: 'After', mediaType: 'image', visual: 'A modern glass factory at dawn' },
+        ] },
+      { id: 's_c', layout: 'title', headline: 'C', seconds: 4, narration: 'C ending.', visual: 'C card' },
+    ],
+  });
+  const darkPlan = imagePlan('cinematic-dark');
+  const dark = await buildChatProject({ plan: darkPlan, runtimeDir });
+  const before = dark.scenes.find(scene => scene.id === 's_b').media;
+  const clayPlan = imagePlan('clay');
+  const clay = await buildChatProject({ plan: clayPlan, previous: dark, previousPlan: darkPlan, runtimeDir });
+  const after = clay.scenes.find(scene => scene.id === 's_b').media;
+  assert.notDeepEqual(after, before);
+  for (const plate of after) assert.match(clay.assets[plate.asset].gen.inputs.prompt, /clay; palette #f4e9dd/i);
+  assert.equal(validatePackage(clay).valid, true);
+
+  const paletteSvg = SVG.replace('#05070d', '#6d8cff');
+  const svgPlan = stylePreset => conversationPlanSchema.parse({
+    title: 'Plate palette', brief: 'Plate palette.', audience: 'Test', aspect: '16:9', stylePreset,
+    scenes: [
+      { id: 's_svg', layout: 'compare', headline: 'Compare', seconds: 6, narration: 'Compare.', visual: 'Two plates',
+        plates: [{ label: 'Old', svg: paletteSvg }, { label: 'New', svg: paletteSvg }] },
+      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end' },
+    ],
+  });
+  const svgDarkPlan = svgPlan('cinematic-dark');
+  const svgDark = await buildChatProject({ plan: svgDarkPlan, runtimeDir });
+  await assert.rejects(
+    buildChatProject({ plan: svgPlan('clay'), previous: svgDark, previousPlan: svgDarkPlan, runtimeDir }),
+    /SVG render check failed/,
+  );
+});
+
+test('removing a scene and dataset preserves manually edited unreferenced provenance', async t => {
+  const runtimeDir = mkdtempSync('/tmp/opencode/chat-project-dataset-remove-');
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  const plan = () => conversationPlanSchema.parse({
+    title: 'Data', brief: 'Dataset removal.', audience: 'Test', aspect: '16:9', stylePreset: 'cinematic-dark',
+    datasets: { d_x: { unit: 'ms', values: [{ label: 'one', value: 1 }], source: 'user', note: 'Plan note.' } },
+    scenes: [
+      { id: 's_stat', layout: 'stat', headline: '1 ms', seconds: 6, narration: 'One.', visual: 'stat', data: { dataset: 'd_x' } },
+      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end' },
+    ],
+  });
+  const previousPlan = plan();
+  const previous = await buildChatProject({ plan: previousPlan, runtimeDir });
+  previous.datasets.d_x.note = 'Verified manually.';
+  const next = structuredClone(previousPlan);
+  next.scenes = next.scenes.filter(scene => scene.id !== 's_stat');
+  delete next.datasets.d_x;
+  const preserved = await buildChatProject({ plan: next, previous, previousPlan, runtimeDir });
+  assert.deepEqual(preserved.scenes.map(scene => scene.id), ['s_end']);
+  assert.equal(preserved.datasets.d_x.note, 'Verified manually.');
+  assert.equal(validatePackage(preserved).valid, true);
+
+  previous.datasets.d_x = structuredClone(previousPlan.datasets.d_x);
+  const dropped = await buildChatProject({ plan: next, previous, previousPlan, runtimeDir });
+  assert.equal(dropped.datasets.d_x, undefined);
 });

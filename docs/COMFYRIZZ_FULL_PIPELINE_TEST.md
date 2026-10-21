@@ -23,7 +23,7 @@ an upscale, and an audio-driven presenter. Remotion rendered the composition.
 Local artifacts are under
 `~/comfyrizz-gpu-tests/comfyrizz-20261019-174606/gpu-run-01/`.
 The test deployment serves the player at
-`https://mail.tailec998.ts.net:8451/comfyrizz-test/index.html`.
+`https://<your-host>/comfyrizz-test/index.html`.
 These are deployment artifacts, not committed fixtures.
 
 ## Verification and limitations

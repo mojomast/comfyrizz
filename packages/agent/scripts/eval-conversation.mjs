@@ -38,6 +38,16 @@ function check(expect, result, previous) {
   if (expect.samePlan) test(isDeepStrictEqual(p, previous?.conversation.plan), 'plan changed unexpectedly');
   if (expect.sameProject) test(isDeepStrictEqual(result.project?.package, previous?.project?.package), 'project changed unexpectedly');
   if (expect.sameIds) test(isDeepStrictEqual(p?.scenes.map(s => s.id), previous?.conversation.plan?.scenes.map(s => s.id)), 'scene IDs changed');
+  if (expect.layouts) test(isDeepStrictEqual(p?.scenes.map(s => s.layout), expect.layouts), 'layout sequence differs');
+  if (expect.recipes) test(isDeepStrictEqual(p?.scenes.map(s => s.motion?.recipe ?? null), expect.recipes), 'recipe sequence differs');
+  if (expect.motion) for (const [index, fields] of Object.entries(expect.motion)) {
+    for (const [key, value] of Object.entries(fields)) test(isDeepStrictEqual(p?.scenes[Number(index)]?.motion?.[key] ?? null, value), `scene ${Number(index) + 1} motion.${key} differs`);
+  }
+  if (expect.preserveSceneContent) {
+    const content = plan => plan?.scenes.map(({ motion, ...scene }) => scene);
+    test(isDeepStrictEqual(content(p), content(previous?.conversation.plan)), 'non-motion scene content changed');
+  }
+  if (expect.noGpu) test(result.project?.pendingGpu?.length === 0, 'unexpected pending GPU work');
   if (expect.preserveExceptSecondHeadline) test(isDeepStrictEqual(stripSecondHeadline(p), stripSecondHeadline(previous?.conversation.plan)), 'unrelated plan fields changed');
   return failures;
 }

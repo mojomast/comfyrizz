@@ -27,6 +27,19 @@ Third-party software (not vendored unless stated; see each package's lockfile):
   dependency of @comfyrizz/renderer. The code layout highlights with Shiki's
   JavaScript regex engine and the grammars and github-dark theme shipped in
   that package, so a render does not fetch them.
+- Rough.js 4.6.6 (MIT, Copyright (c) 2019 Preet Shihn), a dependency of
+  @comfyrizz/renderer used by the sketch recipe to generate seeded hand-drawn
+  outlines.
+- perfect-freehand 1.2.3 (MIT, Copyright (c) 2021 Stephen Ruiz Ltd), a
+  dependency of @comfyrizz/renderer used by the sketch recipe for pressure-shaped
+  marker strokes and arrows.
+- Flubber 0.4.2 (MIT, Copyright (c) 2017 Noah Veltman), a dependency of
+  @comfyrizz/renderer used by the morph recipe for bounded SVG shape
+  interpolation. Flubber's transitive dependencies are recorded by the
+  package manager, not vendored here.
+- @dagrejs/dagre 3.1.1 (MIT, Copyright (c) 2012-2014 Chris Pettitt), a
+  dependency of @comfyrizz/renderer used by the technical-flow recipe for
+  deterministic directed-graph layout.
 
 Models are not distributed with this repository. FLUX 3 Image Klein (FLUX
 Kommunity License v1.0), LTX-2.5 (LTX-2.x Community License) and Kokoro-82M

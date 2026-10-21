@@ -80,6 +80,14 @@ def test_non_finite_number_is_reported():
     assert math.isnan(doc["datasets"]["d_bad"]["values"][0]["value"])  # sanity: the probe really is NaN
 
 
+def test_focus_rectangle_must_stay_inside_the_frame():
+    doc = json.loads((FIXTURES / "valid" / "motion-fields.json").read_text(encoding="utf-8"))
+    doc["scenes"][0]["motion"]["focus"] = {"x": 0.7, "y": 0.2, "width": 0.5, "height": 0.4}
+    result = S.validate_package(doc)
+    assert result["schemaOk"], "each individual bound is valid"
+    assert [(e["code"], e["path"]) for e in result["semantic"]] == [("SEM_MOTION_FOCUS_RECT", "/scenes/0/motion/focus")]
+
+
 @pytest.mark.parametrize(
     "value,expected",
     [

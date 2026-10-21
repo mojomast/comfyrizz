@@ -1,4 +1,4 @@
-import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
@@ -18,21 +18,37 @@ import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
 import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
+import { createReferenceRoutes } from './references/routes.mjs';
+import { ingestRun } from './takes/ingest.mjs';
+import { selectTake } from './takes/select.mjs';
+import { createTakeStore } from './takes/store.mjs';
+import { TAKES_SCHEMA } from './takes/model.mjs';
+import { createTakeRoutes } from './takes/routes.mjs';
+import { buildCorrection } from './takes/correction.mjs';
+import { listClips } from './takes/clips.mjs';
+import { finalGate } from './takes/gate.mjs';
 import { applySceneChip, sceneChipList } from '../../../packages/agent/dist/src/index.js';
 import { applyPresenterSet, presenterChips, presenterPresets } from '../../../packages/agent/dist/src/index.js';
 import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { compilePackage, measuredOptionsFromDir } from './compile-package.mjs';
+import { handleCompile } from './compile-route.mjs';
+import { handleMedia } from './media-route.mjs';
+import { readEditor, validateEditor, writeEditor } from './editor-sidecar.mjs';
 import { serveStaticFile } from './static-file.mjs';
 import { createPipelineController } from './pipeline.mjs';
 import { stagePipelineInputs } from './pipeline-media.mjs';
 import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/tts/voices.mjs';
+import { animationOptions } from './animation-options.mjs';
+import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
+import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.ttf': 'font/ttf',
   '.woff2': 'font/woff2',
@@ -138,15 +154,42 @@ export function createApp({
   backendFactory = defaultBackendFactory,
   datasetFetch = globalThis.fetch,
   pipelineLaunch,
+  mediaRoot = join(runtimeDir, 'media'),
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
+  mkdirSync(mediaRoot, { recursive: true });
+  const mediaTickets = createMediaTickets();
   const rendersDir = join(runtimeDir, 'renders');
   const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
   const store = new PackageStore(join(runtimeDir, 'packages'));
+  const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
   const projectChat = createProjectChat({ runtimeDir, store, providerSettings, prepareBrand });
   const events = new EventLog();
+  const publishEntry = events.publish.bind(events);
+  const pipelineIngested = new Set();
+  const runPackages = new Map();
+  // TR09: pipelines finish in the worker, so the server consumes the run directory
+  // afterwards (never editing the worker). A terminal media run schedules one queued
+  // regenerate; both hooks run after the completed/finished event has been published.
+  events.publish = (event) => {
+    const entry = publishEntry(event);
+    try {
+      if (event?.type === 'pipeline.event' && event.kind === 'stage'
+        && event.stageId === 'media' && event.status === 'completed') {
+        ingestPipelineRun(event.runId);
+      } else if (event?.type === 'pipeline.event' && event.kind === 'completed') {
+        ingestPipelineRun(event.runId);
+        scheduleQueuedDrain(event.runId);
+      } else if (event?.type === 'run.finished' || event?.type === 'run.failed') {
+        scheduleQueuedDrain(event.runId);
+      }
+    } catch (error) {
+      try { publishEntry({ type: 'takes.ingest.failed', message: error.message }); } catch { /* best effort */ }
+    }
+    return entry;
+  };
 
   // C9: stage where H8's runPackage resolves relative paths: the package JSON, the repo's
   // workflow graphs, and any assets the package already has on disk.
@@ -170,10 +213,55 @@ export function createApp({
   // the accepted revision to an MP4 the run panel can offer. The applied compliance tag comes from
   // H8's `runPackage`/`backend.appliedBackendId` (H-fix7), so no server-side normaliser is needed.
   async function completeRun({ pkg, result, record }) {
+    if (pkg?.id && record?.runId) runPackages.set(record.runId, pkg.id);
     if (!result?.package) return { revision: null, render: null };
     const id = pkg.id;
     const packageDir = dirname(store.path(id));
     const collectedAssets = join(record.outputDir, 'assets');
+    if (record.mode === 'take') {
+      // TR07: snapshot the run's outputs as takes *before* the collected assets are copied over
+      // the package's own files. The take store keeps the bytes, so a later overwrite cannot
+      // destroy the take that produced it.
+      const ingested = ingestRun({
+        pkg,
+        manifest: result.manifest,
+        jobsDoc: result.jobsDoc,
+        outputDir: record.outputDir,
+        store: takeStore,
+        corrections: record.corrections ?? {},
+        runId: record.runId,
+        backend: record.backendId,
+      });
+      if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
+      const copied = copyNamedAssets({ pkg: result.package, outputDir: record.outputDir, packageDir });
+      if (copied.length) {
+        events.publish({ type: 'run.log', runId: record.runId, line: `collected ${copied.length} package file(s): ${copied.join(', ')}` });
+      }
+      // ingestRun has already written the new takes (including lastJob), so read the fresh doc
+      // before applying the auto-selected takes to the package.
+      const takeDoc = takeStore.read(id) ?? { schema: TAKES_SCHEMA, packageId: id, clips: {}, overrides: [] };
+      let next = result.package;
+      for (const [assetId, takeId] of Object.entries(ingested.selected)) {
+        next = selectTake(next, takeDoc, assetId, takeId);
+      }
+      takeStore.write(id, takeDoc);
+      const current = store.read(id);
+      const saved = current ? store.save(id, next, pkg.revision) : store.write(next);
+      events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
+      const landed = new Map();
+      for (const take of ingested.takes) landed.set(take.assetId, take);
+      for (const [assetId, take] of landed) {
+        events.publish({
+          type: 'clip.take.landed',
+          packageId: id,
+          assetId,
+          takeId: take.takeId,
+          selected: ingested.selected[assetId] ?? null,
+          runId: record.runId,
+        });
+      }
+      return { revision: saved.revision, render: null };
+    }
     if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
     // G5-10: the applied package can also name files outside `assets/` (the runner's
     // non-upscaled plates live at `out/intermediates/<id>.plate.mp4`), so copy every path it
@@ -215,6 +303,281 @@ export function createApp({
   let activeExport = null;
   let activeSceneRender = null;
   const pipelines = createPipelineController({ runtimeDir, events, stageInputs: stagePipelineInputs, ...(pipelineLaunch ? { launch: pipelineLaunch } : {}), isBusy: () => Boolean(runs.status().activeRunId || activeRender || activeExport || activeSceneRender) });
+
+  function takeDocFor(pkgId) {
+    try {
+      return takeStore.read(pkgId);
+    } catch {
+      return null;
+    }
+  }
+
+  function gateClips(pkg) {
+    const measured = measuredOptionsFromDir(dirname(store.path(pkg.id)));
+    return listClips(pkg, measured).filter((clip) => {
+      const asset = pkg.assets?.[clip.assetId];
+      if (asset?.kind === 'svg' || asset?.kind === 'vector-anim') return false;
+      return !(typeof asset?.file === 'string' && extname(asset.file).toLowerCase() === '.svg');
+    });
+  }
+
+  function appendOverride(pkg, reason) {
+    const doc = takeDocFor(pkg.id) ?? { schema: TAKES_SCHEMA, packageId: pkg.id, clips: {}, overrides: [] };
+    if (!Array.isArray(doc.overrides)) doc.overrides = [];
+    doc.overrides.push({
+      at: new Date().toISOString(),
+      reason,
+      revision: Number.isSafeInteger(pkg.revision) && pkg.revision >= 0 ? pkg.revision : 0,
+    });
+    takeStore.write(pkg.id, doc);
+    return doc;
+  }
+
+  // Returns null when the render may proceed, or {status, body} when it must not.
+  function renderGate(pkg, body, pathname) {
+    const gate = finalGate(pkg, takeDocFor(pkg.id), gateClips(pkg));
+    if (gate.ok) return null;
+
+    const override = body?.override;
+    const reason = override && typeof override === 'object' && !Array.isArray(override) ? override.reason : undefined;
+    const validReason = typeof reason === 'string' && reason.length >= 4 && reason.length <= 500 && reason.trim().length >= 4;
+
+    if (!validReason) {
+      events.publish({
+        type: 'render.gate.blocked',
+        packageId: pkg.id,
+        path: pathname,
+        approved: gate.approved,
+        total: gate.total,
+        blocking: gate.blocking,
+      });
+      if (override !== undefined) {
+        return {
+          status: 400,
+          body: { error: 'override.reason must be a string of 4 to 500 characters', code: 'INVALID_OVERRIDE', gate },
+        };
+      }
+      return {
+        status: 409,
+        body: {
+          error: `${gate.blocking.length} of ${gate.total} clip(s) still need approval`,
+          code: 'RENDER_GATE_BLOCKED',
+          approved: gate.approved,
+          total: gate.total,
+          blocking: gate.blocking,
+          gate,
+        },
+      };
+    }
+
+    appendOverride(pkg, reason);
+    events.publish({
+      type: 'render.gate.override',
+      packageId: pkg.id,
+      path: pathname,
+      approved: gate.approved,
+      total: gate.total,
+      blocking: gate.blocking,
+      reason,
+    });
+    return null;
+  }
+
+  function pathInside(root, target) {
+    const base = resolve(root);
+    const full = resolve(target);
+    if (full === base) return true;
+    return full.startsWith(`${base}${sep}`);
+  }
+
+  function readJsonFile(file) {
+    try {
+      return JSON.parse(readFileSync(file, 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  // A runner always leaves media-out/manifest.json. When an older/fake worker did not,
+  // derive the same answer by reading the collected files and matching package assets.
+  function manifestFromFiles(pkg, outDir, jobsDoc) {
+    const jobs = new Map((Array.isArray(jobsDoc?.jobs) ? jobsDoc.jobs : [])
+      .filter(job => job && typeof job.id === 'string')
+      .map(job => [job.id, job]));
+    const entries = [];
+    for (const [assetId, asset] of Object.entries(pkg.assets ?? {})) {
+      if (!asset || typeof asset.gen?.generator !== 'string' || !asset.gen.generator.trim()) continue;
+      const candidates = [];
+      if (typeof asset.file === 'string' && asset.file) candidates.push(asset.file);
+      for (const ext of ['mp4', 'webm', 'png', 'jpg', 'webp']) candidates.push(`assets/${assetId}.${ext}`);
+      const relative = candidates.find(candidate => {
+        const file = resolve(outDir, candidate);
+        if (!pathInside(outDir, file)) return false;
+        try { return statSync(file).isFile(); } catch { return false; }
+      });
+      if (!relative) continue;
+      const job = [...jobs.values()].find(candidate => candidate.asset === assetId);
+      const jobId = job?.id ?? `${assetId}.${asset.kind === 'image' ? 'still' : 'plate'}`;
+      const bytes = statSync(resolve(outDir, relative)).size;
+      entries.push({ job: jobId, status: 'succeeded', outputs: [{ relative, bytes }] });
+    }
+    return entries.length ? { v: 1, complete: true, updatedAt: new Date().toISOString(), jobs: entries } : null;
+  }
+
+  function ingestPipelineRun(runId) {
+    if (typeof runId !== 'string' || pipelineIngested.has(runId)) return;
+    const record = pipelines.get(runId);
+    if (!record) return;
+    const directory = pipelines.directory(runId);
+    if (!directory) return;
+    const outDir = join(directory, 'media-out');
+    if (!existsSync(outDir) || !statSync(outDir).isDirectory()) return;
+
+    const workDir = join(directory, 'work');
+    let pkg = readJsonFile(join(workDir, 'package.json'));
+    if (!pkg?.id) {
+      try { pkg = store.read(record.packageId); } catch { pkg = null; }
+    }
+    if (!pkg?.id) return;
+    const jobsDoc = readJsonFile(join(workDir, 'jobs.json'));
+    let manifest = readJsonFile(join(outDir, 'manifest.json'));
+    if (!manifest || !Array.isArray(manifest.jobs) || manifest.jobs.length === 0) {
+      manifest = manifestFromFiles(pkg, outDir, jobsDoc);
+    }
+    if (!manifest) return;
+
+    const ingested = ingestRun({ pkg, manifest, jobsDoc, outputDir: outDir, store: takeStore, runId });
+    pipelineIngested.add(runId);
+    for (const take of ingested.takes) {
+      events.publish({
+        type: 'clip.take.landed',
+        packageId: pkg.id,
+        assetId: take.assetId,
+        takeId: take.takeId,
+        selected: ingested.selected[take.assetId] ?? null,
+        runId,
+      });
+    }
+  }
+
+  function takeDocIds(preferred = null) {
+    const ids = [];
+    if (typeof preferred === 'string' && preferred) ids.push(preferred);
+    try {
+      for (const name of readdirSync(join(runtimeDir, 'takes'))) {
+        if (!name.endsWith('.json')) continue;
+        const id = name.slice(0, -5);
+        if (!ids.includes(id)) ids.push(id);
+      }
+    } catch {
+      // no takes sidecar directory yet
+    }
+    return ids;
+  }
+
+  function findQueued(preferred = null) {
+    for (const packageId of takeDocIds(preferred)) {
+      const doc = takeDocFor(packageId);
+      if (!doc || !doc.clips || typeof doc.clips !== 'object') continue;
+      for (const [assetId, entry] of Object.entries(doc.clips)) {
+        if (!entry || typeof entry !== 'object' || !entry.queued || typeof entry.queued !== 'object') continue;
+        return { packageId, assetId, entry, doc };
+      }
+    }
+    return null;
+  }
+
+  function correctionChange(correction) {
+    const change = {};
+    for (const key of ['note', 'by', 'promptAppend', 'promptReplace', 'negativeAppend', 'seed', 'inputs']) {
+      if (correction?.[key] !== undefined) change[key] = correction[key];
+    }
+    return change;
+  }
+
+  async function drainOneQueued(runId) {
+    const found = findQueued(runPackages.get(runId) ?? null);
+    if (!found) return false;
+    let pkg;
+    try { pkg = store.read(found.packageId); } catch { pkg = null; }
+    if (!pkg) return false;
+
+    const active = Array.isArray(found.entry.takes) ? found.entry.takes.filter(take => take && take.purged !== true).length : 0;
+    let built;
+    try {
+      built = buildCorrection(pkg, found.assetId, correctionChange(found.entry.queued.correction), { takesCount: active });
+    } catch {
+      return false;
+    }
+
+    const queue = found.entry.queued;
+    const planHash = typeof queue.planHash === 'string' ? queue.planHash : null;
+    const approvals = runs.status().approvals ?? [];
+    let result;
+    try {
+      result = await runs.start({
+        backendId: typeof queue.backendId === 'string' && queue.backendId ? queue.backendId : 'colab',
+        pkg: built.package,
+        assets: [found.assetId],
+        includeReady: true,
+        mode: 'take',
+        corrections: { [found.assetId]: built.correction },
+        approved: Boolean(planHash && approvals.includes(planHash)),
+        budgetUnits: queue.budgetUnits,
+      });
+    } catch (error) {
+      if (/run busy|busy/i.test(error?.message ?? '')) return false;
+      throw error;
+    }
+    if (result?.error === 'run busy' || result?.status === 409) return false;
+    // Approval is still the user's decision: leave the request queued for a later approval.
+    if (result?.approvalRequired || result?.refused) return true;
+    if (!result?.runId) return false;
+
+    const latest = takeDocFor(found.packageId);
+    const entry = latest?.clips?.[found.assetId];
+    if (entry) {
+      delete entry.queued;
+      entry.lastJob = { runId: result.runId, state: result.status ?? 'starting' };
+      takeStore.write(found.packageId, latest);
+    }
+    const clip = gateClips(pkg).find(candidate => candidate.assetId === found.assetId);
+    events.publish({
+      type: 'clip.job',
+      packageId: found.packageId,
+      ...(clip ? { clipId: clip.clipId } : {}),
+      assetId: found.assetId,
+      runId: result.runId,
+      state: result.status ?? 'starting',
+      progress: 0,
+    });
+    return true;
+  }
+
+  function scheduleQueuedDrain(runId) {
+    setImmediate(() => {
+      (async () => {
+        try {
+          if (runs.status().activeRunId) return;
+          if (!findQueued(runPackages.get(runId) ?? null)) return;
+          await drainOneQueued(runId);
+        } catch {
+          // A queued regenerate is best effort; the run that just ended is unaffected.
+        } finally {
+          runPackages.delete(runId);
+        }
+      })();
+    });
+  }
+
+  const takeRoutes = createTakeRoutes({
+    store,
+    takeStore,
+    runs,
+    events,
+    mediaTickets,
+    measuredFor: pkg => measuredOptionsFromDir(dirname(store.path(pkg.id))),
+  });
   // C13: the last successfully rendered timeline per package, so an edit can be diffed
   // against what the frame grid actually was. In-memory: a server restart just makes the
   // next edit a first render (the A6 cache still reuses unchanged segments).
@@ -227,12 +590,27 @@ export function createApp({
    * a throwaway file (C1 compatibility, never mutating the stored package); otherwise the stored
    * package is read and the base revision is checked.
    */
-  function resolveRenderTarget(body, suffix) {
+  function draftRenderTarget(pkg, suffix, response) {
+    let existing;
+    try {
+      if (typeof pkg.id !== 'string') throw new Error('invalid package id');
+      existing = store.read(pkg.id); // path() validates the ID before any filesystem lookup.
+    } catch (error) {
+      error.status = 400;
+      throw error;
+    }
+    const sourceDir = existing ? dirname(store.path(pkg.id)) : rendersDir;
+    const packagePath = join(sourceDir, `.draft-${suffix}-${randomUUID()}.package.json`);
+    writeFileSync(packagePath, JSON.stringify(pkg, null, 2), { flag: 'wx', mode: 0o600 });
+    const cleanup = () => rmSync(packagePath, { force: true });
+    response.once('finish', cleanup);
+    response.once('close', cleanup);
+    return { pkg, packagePath, revision: Number.isFinite(pkg.revision) ? pkg.revision : null };
+  }
+
+  function resolveRenderTarget(body, suffix, response) {
     if (body.package && typeof body.package === 'object') {
-      const pkg = body.package;
-      const packagePath = join(rendersDir, `${suffix}.package.json`);
-      writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
-      return { pkg, packagePath, revision: Number.isFinite(pkg.revision) ? pkg.revision : null };
+      return draftRenderTarget(body.package, suffix, response);
     }
     const id = body.packageId;
     if (!id) {
@@ -325,8 +703,26 @@ export function createApp({
       return serveStatic(request, response, url);
     }
 
+    // Ticket URLs are the credential for native media elements, which cannot send
+    // the API header. The ticket is not the API token and is not written to exports.
+    const mediaGet = /^\/api\/media\/([a-f0-9]{32})$/.exec(url.pathname);
+    if (mediaGet && (request.method === 'GET' || request.method === 'HEAD')) {
+      const file = mediaTickets.resolve(mediaGet[1]);
+      if (!file) return sendJson(response, 401, { error: 'media ticket expired' });
+      return serveTicket(request, response, file);
+    }
+
     const denied = auth(request, url);
     if (denied) return sendJson(response, denied.status, { error: denied.error });
+
+    if (url.pathname === '/api/media-ticket' && request.method === 'POST') {
+      const body = await readJson(request);
+      const file = safeMediaPath(mediaRoot, body?.path);
+      if (!file) return sendJson(response, 400, { error: 'bad path' });
+      if (!existsSync(file)) return sendJson(response, 404, { error: 'media not found' });
+      const minted = mediaTickets.mint(file);
+      return sendJson(response, 200, { ticket: minted.ticket, expiresAt: minted.expiresAt, url: minted.url });
+    }
 
     if (url.pathname === '/api/events' && request.method === 'GET') {
       const lastEventId = request.headers['last-event-id'] ?? url.searchParams.get('lastEventId');
@@ -345,12 +741,20 @@ export function createApp({
       });
     }
 
+    if (url.pathname === '/api/animation-options' && request.method === 'GET') {
+      return sendJson(response, 200, animationOptions());
+    }
+
     // Full-production API. Existing /api/run remains the media-only API.
     if (['/api/pipeline/plan', '/api/pipeline'].includes(url.pathname) && request.method === 'POST') {
       const body = await readJson(request);
       const pkg = body.packageId ? store.read(body.packageId) : null;
       if (!pkg) return sendJson(response, 404, { error: 'package not found' });
       if (body.baseRevision !== pkg.revision) return sendJson(response, 409, { error: 'revision conflict', currentRevision: pkg.revision });
+      if (!url.pathname.endsWith('/plan')) {
+        const gate = renderGate(pkg, body, url.pathname);
+        if (gate) return sendJson(response, gate.status, gate.body);
+      }
       try {
         if (url.pathname.endsWith('/plan')) return sendJson(response, 200, pipelines.plan(pkg, body));
         const result = await pipelines.start(pkg, body, dirname(store.path(pkg.id)));
@@ -395,7 +799,20 @@ export function createApp({
         const name = resource.slice(6);
         const file = record.result?.files?.find(item => item.name === name);
         if (record.status !== 'completed' || !file) return sendJson(response, 404, { error: 'artifact not available' });
-        return serveStaticFile(request, response, join(directory, 'exports', record.packageId, name), { 'content-type': MIME[extname(name)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
+        const exportRoot = resolve(directory, 'exports', record.packageId);
+        const target = safeMediaPath(exportRoot, name);
+        try {
+          // Membership in the result manifest is not permission to follow a
+          // replaced artifact (or export directory) outside its pipeline run.
+          const realRoot = realpathSync(exportRoot);
+          if (!target || !realRoot.startsWith(realpathSync(directory) + sep)
+            || !realpathSync(target).startsWith(realRoot + sep) || !statSync(target).isFile()) {
+            return sendJson(response, 404, { error: 'artifact not available' });
+          }
+        } catch {
+          return sendJson(response, 404, { error: 'artifact not available' });
+        }
+        return serveStaticFile(request, response, target, { 'content-type': MIME[extname(name)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
       }
       return sendJson(response, 404, { error: 'not found' });
     }
@@ -496,21 +913,31 @@ export function createApp({
       return sendBytes(response, 200, loaded.body, headers);
     }
 
+    if (await handleCompile({ request, response, url, readJson, sendJson, store })) return;
+    if (handleMedia({ request, response, url, sendJson, runtimeDir, store })) return;
+
     const packageMatch = /^\/api\/package\/([^/]+)$/.exec(url.pathname);
     if (packageMatch) {
       const id = packageMatch[1];
       if (request.method === 'GET') {
         const pkg = store.read(id);
         if (!pkg) return sendJson(response, 404, { error: 'package not found' });
-        return sendJson(response, 200, { package: pkg, revision: pkg.revision });
+        let editor = null;
+        try { editor = readEditor(runtimeDir, id); } catch { editor = null; }
+        return sendJson(response, 200, editor ? { package: pkg, revision: pkg.revision, editor } : { package: pkg, revision: pkg.revision });
       }
       if (request.method === 'PATCH') {
         const body = await readJson(request);
         if (!body.package || typeof body.package !== 'object') return sendJson(response, 400, { error: 'package required' });
+        const parsed = validateEditor(body.editor);
+        if (parsed.error) return sendJson(response, 400, { error: parsed.error });
         try {
           const saved = store.save(id, body.package, body.baseRevision);
+          if (parsed.editor) writeEditor(runtimeDir, id, parsed.editor);
           events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
-          return sendJson(response, 200, { package: saved, revision: saved.revision });
+          const editor = parsed.editor ?? readEditor(runtimeDir, id);
+          const ack = Number.isInteger(body.editSequence) ? { editSequence: body.editSequence } : {};
+          return sendJson(response, 200, { package: saved, revision: saved.revision, ...ack, ...(editor ? { editor } : {}) });
         } catch (error) {
           if (error instanceof ConflictError) {
             return sendJson(response, 409, { error: 'conflict', currentRevision: error.currentRevision });
@@ -597,7 +1024,7 @@ export function createApp({
           onEvent: event => events.publish({ type: 'agent.event', event }),
         });
         const saved = store.write(result.package);
-        const timeline = compileTimeline(saved);
+        const timeline = compilePackage(saved, dirname(store.path(saved.id)));
         events.publish({ type: 'agent.finished', packageId: saved.id, revision: saved.revision, svgAssets: result.svgAssets?.length ?? 0, live: Boolean(result.live) });
         return sendJson(response, 200, {
           package: saved,
@@ -643,6 +1070,8 @@ export function createApp({
           teardownMode: body.teardownMode,
           includeReady: body.includeReady === true,
           assets: body.assets,
+          mode: body.mode,
+          corrections: body.corrections,
         });
         return sendJson(response, result.status === 409 ? 409 : 200, result);
       } catch (error) {
@@ -714,10 +1143,7 @@ export function createApp({
       try {
         if (body.package && typeof body.package === 'object') {
           // C1 compatibility: an edited draft draft-exported without mutating the store.
-          pkg = body.package;
-          packagePath = join(rendersDir, `${exportId}.package.json`);
-          writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
-          revision = Number.isFinite(pkg.revision) ? pkg.revision : null;
+          ({ pkg, packagePath, revision } = draftRenderTarget(body.package, exportId, response));
         } else {
           const id = body.packageId;
           if (!id) return sendJson(response, 400, { error: 'packageId or package required' });
@@ -794,10 +1220,12 @@ export function createApp({
       let revision = null;
       if (body.package && typeof body.package === 'object') {
         // C1 compatibility: an edited draft, rendered without mutating the stored package.
-        pkg = body.package;
-        packagePath = join(rendersDir, `${renderId}.package.json`);
-        writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
-        revision = Number.isFinite(pkg.revision) ? pkg.revision : null;
+        try {
+          ({ pkg, packagePath, revision } = draftRenderTarget(body.package, renderId, response));
+        } catch (error) {
+          activeRender = null;
+          return sendJson(response, error.status ?? 400, { error: error.message });
+        }
       } else {
         const id = body.packageId;
         if (!id) {
@@ -815,6 +1243,12 @@ export function createApp({
         }
         packagePath = store.path(id);
         revision = pkg.revision;
+      }
+
+      const gate = renderGate(pkg, body, url.pathname);
+      if (gate) {
+        activeRender = null;
+        return sendJson(response, gate.status, gate.body);
       }
 
       events.publish({ type: 'render.started', renderId, packageId: pkg.id, revision });
@@ -880,7 +1314,7 @@ export function createApp({
       if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
       let target;
       try {
-        target = resolveRenderTarget(body, `chip_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+        target = resolveRenderTarget(body, `chip_${randomUUID().replaceAll('-', '').slice(0, 8)}`, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -940,7 +1374,7 @@ export function createApp({
       }
       let target;
       try {
-        target = resolveRenderTarget(body, `presenter_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+        target = resolveRenderTarget(body, `presenter_${randomUUID().replaceAll('-', '').slice(0, 8)}`, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -992,7 +1426,7 @@ export function createApp({
         presenter: result.package.presenter ?? null,
         findings: result.findings ?? [],
         portrait_prompt: result.portrait_prompt ?? null,
-        presenters: compileTimeline(result.package).presenters ?? [],
+        presenters: compilePackage(result.package, dirname(target.packagePath)).presenters ?? [],
         package: result.package,
       });
     }
@@ -1008,7 +1442,7 @@ export function createApp({
       }
       let target;
       try {
-        target = resolveRenderTarget(body, `plan_${randomUUID().replaceAll('-', '').slice(0, 8)}`);
+        target = resolveRenderTarget(body, `plan_${randomUUID().replaceAll('-', '').slice(0, 8)}`, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -1016,7 +1450,10 @@ export function createApp({
         });
       }
       try {
-        const plan = sceneJobsPlan(target.pkg, body.sceneId, { includeReady: body.includeReady !== false });
+        const plan = sceneJobsPlan(target.pkg, body.sceneId, {
+          includeReady: body.includeReady !== false,
+          measured: measuredOptionsFromDir(dirname(target.packagePath)),
+        });
         return sendJson(response, 200, {
           packageId: target.pkg.id,
           revision: target.revision,
@@ -1039,7 +1476,7 @@ export function createApp({
       const renderId = `sr_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
       let target;
       try {
-        target = resolveRenderTarget(body, renderId);
+        target = resolveRenderTarget(body, renderId, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -1047,7 +1484,7 @@ export function createApp({
         });
       }
       if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
-      const assets = sceneAssetIds(target.pkg, body.sceneId);
+      const assets = sceneAssetIds(target.pkg, body.sceneId, measuredOptionsFromDir(dirname(target.packagePath)));
       if (assets === null) return sendJson(response, 404, { error: `unknown scene ${body.sceneId}` });
       activeSceneRender = renderId;
       const output = join(rendersDir, `${renderId}.mp4`);
@@ -1070,6 +1507,8 @@ export function createApp({
           timeline_sha256: result.timelineHash,
           rendered: result.rendered,
           reused: result.reused,
+          full: result.full ?? false,
+          reason: result.reason ?? null,
         });
         response.writeHead(200, {
           'content-type': 'video/mp4',
@@ -1082,6 +1521,8 @@ export function createApp({
           'x-comfyrizz-frames': String(result.frames),
           'x-comfyrizz-rendered': String(result.rendered.length),
           'x-comfyrizz-reused': String(result.reused.length),
+          'x-comfyrizz-full-render': result.full ? '1' : '0',
+          'x-comfyrizz-full-reason': result.reason ?? '',
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
         });
         createReadStream(result.output).pipe(response);
@@ -1109,7 +1550,7 @@ export function createApp({
       const renderId = `er_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
       let target;
       try {
-        target = resolveRenderTarget(body, renderId);
+        target = resolveRenderTarget(body, renderId, response);
       } catch (error) {
         return sendJson(response, error.status ?? 400, {
           error: error.message,
@@ -1118,7 +1559,9 @@ export function createApp({
       }
       const previous = lastRendered.get(target.pkg.id) ?? null;
       const nextTimeline = packageTimeline(target.packagePath, target.pkg);
-      const fullReason = timingChangeReason(previous?.timeline ?? null, nextTimeline);
+      const fullReason = loadCompositionManifest(dirname(target.packagePath), target.pkg)
+        ? 'compositions require a full render'
+        : timingChangeReason(previous?.timeline ?? null, nextTimeline);
       const full = Boolean(fullReason);
       activeSceneRender = renderId;
       const output = join(rendersDir, `${renderId}.mp4`);
@@ -1193,6 +1636,8 @@ export function createApp({
       return;
     }
 
+    if (await takeRoutes.handle(request, response, url)) return;
+    if (await createReferenceRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     return sendJson(response, 404, { error: 'not found' });
   }
 
@@ -1207,6 +1652,7 @@ export function createApp({
       });
     },
     store,
+    takeStore,
     events,
     runs,
     pipelines,

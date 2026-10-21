@@ -8,6 +8,7 @@
   "engines": { "node": ">=20" },
   "exports": {
     ".": "./src/index.mjs",
+    "./animation": "./src/animation.mjs",
     "./schema": "./package-v1.schema.json",
     "./types": "./types.ts"
   },

@@ -1,0 +1,29 @@
+{
+  "schema": "comfyrizz.recipe/v1",
+  "id": "vaporwave",
+  "label": "Pastel internet",
+  "taxonomy": { "era": "retro-90s", "finish": "glitch", "energy": "calm", "geometry": "organic", "type": "grotesk" },
+  "palette": [
+    { "role": "background", "hex": "#2b1055" },
+    { "role": "text", "hex": "#fef6ff" },
+    { "role": "accent", "hex": "#ff71ce" },
+    { "role": "muted", "hex": "#01cdfe" }
+  ],
+  "fonts": { "display": "syne", "text": "vt323", "mono": "vt323" },
+  "easing": { "personality": "floaty", "entry": "move", "exit": "exit", "spring": "settle" },
+  "entries": ["fadeUp", "maskRise", "waterfall"],
+  "emphasis": ["keyword", "hero"],
+  "transitions": { "primary": "blur", "accent": ["fade"] },
+  "storyRecipe": "morph",
+  "background": { "pattern": "gradient" },
+  "finish": [
+    { "id": "chroma-shift", "params": { "offset": 2, "angle": 0 } },
+    { "id": "grain-fine", "params": { "amount": 0.06, "size": 1 } },
+    { "id": "duotone", "params": { "amount": 0.9, "contrast": 1 } }
+  ],
+  "rules": {
+    "do": ["pastel statues and dreamy gradients", "slow, hazy transitions"],
+    "dont": ["high contrast", "fast cuts"]
+  },
+  "prompt": "Vaporwave pastel internet, pink and cyan duotone, soft blur, subtle grain, hazy gradient"
+}

@@ -91,5 +91,5 @@ alone does not translate a non-OpenAI protocol.
 Run the targeted server coverage with:
 
 ```bash
-TMPDIR=/tmp/opencode node --test apps/server/test/provider-settings.test.mjs apps/server/test/server.test.mjs
+TMPDIR="$(mktemp -d)" node --test apps/server/test/provider-settings.test.mjs apps/server/test/server.test.mjs
 ```

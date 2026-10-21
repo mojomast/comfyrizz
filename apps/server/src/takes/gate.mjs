@@ -1,0 +1,43 @@
+// TR09: the final-render gate. A clip is only approved when its selected take's
+// verdict is approved (and that take still matches the asset's current gen). This
+// module is pure: the caller supplies the package, the takes sidecar and the clips.
+
+import { listClips } from './clips.mjs';
+import { deriveClipState } from './model.mjs';
+
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Evaluate every reviewable clip against its selected take.
+ *
+ * @param {object} pkg package document
+ * @param {object|null} takeDoc `comfyrizz.takes/v1` sidecar
+ * @param {Array<{clipId: string, assetId: string}>} [clips] clips from TR03;
+ *   derived from the package when omitted
+ * @returns {{ok: boolean, approved: number, total: number, blocking: Array<{clipId: string, state: string}>}}
+ */
+export function finalGate(pkg, takeDoc, clips) {
+  const list = Array.isArray(clips) ? clips : listClips(isObject(pkg) ? pkg : {});
+  const blocking = [];
+  let approved = 0;
+
+  for (const clip of list) {
+    if (!isObject(clip) || typeof clip.clipId !== 'string') continue;
+    const assetId = typeof clip.assetId === 'string' ? clip.assetId : null;
+    const entry = assetId && isObject(takeDoc?.clips?.[assetId]) ? takeDoc.clips[assetId] : null;
+    const asset = assetId && isObject(pkg?.assets?.[assetId]) ? pkg.assets[assetId] : null;
+    const state = deriveClipState({
+      clip: isObject(asset) ? asset : clip,
+      takes: isObject(entry) ? entry : { selected: null, takes: [] },
+      assetGen: isObject(asset?.gen) ? asset.gen : undefined,
+    });
+    if (state === 'approved') approved += 1;
+    else blocking.push({ clipId: clip.clipId, state });
+  }
+
+  return { ok: blocking.length === 0, approved, total: list.length, blocking };
+}
+
+export default finalGate;
