@@ -7,6 +7,7 @@ import { sanitizeSvg, renderCheck, SANITIZER_VERSION } from '../../../packages/v
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compilePackage } from './compile-package.mjs';
 import { toPackageInputs, validateAssignment } from './references/assign.mjs';
+import { applyCast } from './characters/build.mjs';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 
 export function chatProjectResponse(pkg, runtimeDir) {
@@ -409,11 +410,75 @@ function applyReferenceAssignments({ draft, references, runtimeDir }) {
   return sidecar;
 }
 
+// CC14: project cast snapshots become ordinary package assets through applyCast.
+// The state is deliberately tolerant like references: an entry that cannot be
+// built is reported in characters.json rather than failing the whole project.
+function characterBuildState(characters) {
+  if (!characters || typeof characters !== 'object') return null;
+  const cast = Array.isArray(characters)
+    ? characters
+    : characters.cast ?? characters.entries ?? characters.projectCast;
+  if (!Array.isArray(cast) || !cast.length) return null;
+  const placements = Array.isArray(characters)
+    ? []
+    : characters.placements ?? characters.castPlacements ?? [];
+  const files = Array.isArray(characters)
+    ? {}
+    : characters.files ?? characters.characterFiles ?? {};
+  const options = Array.isArray(characters) || !characters.options || typeof characters.options !== 'object'
+    ? {}
+    : characters.options;
+  return {
+    cast,
+    placements: Array.isArray(placements) ? placements : [],
+    files: files && typeof files === 'object' ? files : {},
+    options,
+  };
+}
+
+function writeCharacterCopy(copy, assetsDir) {
+  const destination = join(assetsDir, basename(copy?.to ?? ''));
+  if (!destination || destination === assetsDir) return false;
+  let bytes = copy?.bytes;
+  if (bytes === undefined || bytes === null) {
+    const source = copy?.from;
+    if (typeof source !== 'string' || !source) return false;
+    try {
+      bytes = readFileSync(source);
+    } catch {
+      return false;
+    }
+  }
+  writeFileSync(destination, bytes, { mode: 0o600 });
+  return true;
+}
+
+function applyCharacterBuild({ draft, characters, runtimeDir }) {
+  const state = characterBuildState(characters);
+  if (!state) return null;
+  let result;
+  try {
+    result = applyCast(draft, state.cast, state.placements, state.files, state.options);
+  } catch (error) {
+    throw new Error(`Character cast could not be applied: ${error?.message ?? 'invalid cast'}`);
+  }
+  const assetsDir = join(runtimeDir, 'packages', 'assets');
+  mkdirSync(assetsDir, { recursive: true });
+  for (const copy of Array.isArray(result.copies) ? result.copies : []) {
+    writeCharacterCopy(copy, assetsDir);
+  }
+  const sidecarPath = join(runtimeDir, 'packages', 'characters.json');
+  const temp = `${sidecarPath}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(result.characters, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temp, sidecarPath);
+  return result;
+}
+
 const ASPECTS = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
 const DEFAULT_TRANSITION = { type: 'fade', frames: 12 };
 
 /** Compile model-authored content, merging revisions into the current project. */
-export async function buildChatProject({ plan: rawPlan, previous, previousPlan, brand, runtimeDir, signal, references }) {
+export async function buildChatProject({ plan: rawPlan, previous, previousPlan, brand, runtimeDir, signal, references, characters, cast, placements, characterFiles }) {
   signal?.throwIfAborted();
   const plan = conversationPlanSchema.parse(rawPlan);
   if (previous && !previousPlan) throw conflict('the last built plan is missing');
@@ -712,6 +777,10 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   draft.renders = [];
   signal?.throwIfAborted();
   applyReferenceAssignments({ draft, references, runtimeDir });
+  signal?.throwIfAborted();
+  const characterState = characters ?? (cast ? { cast, placements, files: characterFiles } : null);
+  const castResult = applyCharacterBuild({ draft, characters: characterState, runtimeDir });
+  if (castResult?.pkg) draft = castResult.pkg;
   signal?.throwIfAborted();
   const validation = validatePackage(draft);
   if (!validation.valid) throw new Error(`Project validation failed: ${validation.errors.slice(0, 5).map(error => `${error.path}: ${error.message}`).join('; ')}`);
