@@ -18,7 +18,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { applyManifestToPackage, mediaFor } from '../../../../packages/jobs/src/apply.mjs';
-import { MAX_RETRY_ATTEMPTS, retryRecord } from './model.mjs';
+import { MAX_RETRY_ATTEMPTS, genFingerprint, retryRecord } from './model.mjs';
 
 const SHA256_RE = /^[0-9a-f]{64}$/i;
 const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
@@ -320,6 +320,7 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
         bytes: item.bytes ?? output?.bytes,
         media,
         gen,
+        sourceGenFingerprint: genFingerprint(asset.gen),
         correction,
         runId: effectiveRunId,
         createdAt: updatedAt,

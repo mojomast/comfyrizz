@@ -1,7 +1,7 @@
 ---
 name: project-revision
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 description: Apply focused revisions while preserving project identity and manual edits.
 ---
 # Project revision
@@ -56,6 +56,13 @@ narration synthesis, and final export. Final render location is an editor settin
 (local by default; Google Colab is opt-in). Do not start a Google Colab session.
 Reuse suitable existing assets and preserve
 manual work throughout; a small revision should stay a small revision.
+
+After a generation review, distinguish reusable takes, editable timing, rejected
+performances and missing outputs. Preserve original media and current owner edits.
+Correct reference composition before regenerating motion; repair contamination
+with shot-specific voice inputs rather than longer cuts that retain wrong words.
+Keep generation stopped when requested. Resume only reviewed corrections/missing
+shots, accounting for spending already incurred against the remaining ceiling.
 
 ## Sources
 

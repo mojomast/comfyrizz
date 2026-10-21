@@ -156,6 +156,9 @@ function validateTake(errors, take, path, assetId) {
   if (typeof take.sha256 !== 'string' || !SHA256_RE.test(take.sha256)) {
     push(errors, `${path}/sha256`, 'INVALID_SHA256', `${path}/sha256 must be a 64-character hexadecimal digest`);
   }
+  if (take.sourceGenFingerprint !== undefined && (typeof take.sourceGenFingerprint !== 'string' || !SHA256_RE.test(take.sourceGenFingerprint))) {
+    push(errors, `${path}/sourceGenFingerprint`, 'INVALID_SHA256', `${path}/sourceGenFingerprint must be a sha256 digest`);
+  }
 
   if (!Number.isSafeInteger(take.bytes) || take.bytes < 0) {
     push(errors, `${path}/bytes`, 'INVALID_BYTES', `${path}/bytes must be a non-negative integer`);
@@ -385,6 +388,7 @@ export function genFingerprint(gen) {
     negative: source.negative ?? null,
     seed: source.seed ?? null,
     inputs: source.inputs ?? null,
+    ...(source.direction !== undefined ? { direction: source.direction } : {}),
     workflow_sha256: source.workflow_sha256 ?? null,
   };
   return createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex');
@@ -424,7 +428,8 @@ function verdictState(take, takes, assetGen) {
   if (!selected) return 'planned';
 
   if (isPlainObject(selected.gen) && isPlainObject(assetGen)
-    && genFingerprint(selected.gen) !== genFingerprint(assetGen)) {
+    && genFingerprint(selected.gen) !== genFingerprint(assetGen)
+    && selected.sourceGenFingerprint !== genFingerprint(assetGen)) {
     return 'stale';
   }
 

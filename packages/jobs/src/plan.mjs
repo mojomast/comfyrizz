@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { pathProblem } from "../../schema/src/semantic.mjs";
 import { applyMotionRoleDefaults, applyPresenterDefaults, applyPromptDefaults } from "./defaults.mjs";
 import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
+import { buildFastH3Prompt, fastH3SlotSeconds } from "./fasth3-direction.mjs";
 
 export const JOBS_VERSION = 1;
 export const BATCH_ORDER = ["stills", "plates", "upscales", "audio", "presenters"];
@@ -510,6 +511,9 @@ export function planJobs(pkg, opts = {}) {
     const asset = assets[assetId];
     const kind = kinds.get(assetId);
     const gen = asset.gen || {};
+    if (gen.direction !== undefined && gen.generator !== 'fasth3-omni') {
+      errors.push(`${assetId}: structured direction is supported only by FastH3 Omni`);
+    }
     const inputs = gen.inputs && typeof gen.inputs === "object" ? gen.inputs : {};
     const sceneIndex = sceneIndexOf(pkg, assetId);
     const scene = sceneIndex >= 0 ? pkg.scenes[sceneIndex].id : null;
@@ -686,18 +690,23 @@ export function planJobs(pkg, opts = {}) {
       params.height = dims.height;
       params.frames = frames;
       params.fps = FASTH3_FPS;
-      // The three references decide the render, so their *content* is part of the cache key: a new
-      // portrait or a new voice take has to invalidate the take, even when the asset ids stay the
-      // same (the LTX rule only folds a cast reference's sha256 in).
-      castRefSha256 = sha256Hex(
-        canonical(
-          ["image", "reference", "audio"].map((name) => ({
-            name,
-            asset: params[name],
-            sha256: assets[params[name]]?.sha256 ?? null,
-          })),
-        ),
-      );
+      if (gen.direction !== undefined) {
+        try {
+          params.prompt = buildFastH3Prompt(gen.direction, {
+            slotSeconds: fastH3SlotSeconds(pkg, assetId, gen.direction?.slotSeconds),
+            sourceSeconds: frames / 24,
+            conditioningSeconds: assets[inputs.audio]?.media?.durationSeconds,
+          });
+        } catch (error) { errors.push(`${assetId}: ${error.message}`); }
+      } else {
+        warnings.push({ asset: assetId, code: 'PLAN_H3_DIRECTION_UNREVIEWED',
+          message: 'Legacy FastH3 prompt: reference roles, exact-line conditioning and editorial speech fit have not been checked. Use gen.direction for structured direction.' });
+      }
+      if (inputs.image === inputs.reference) warnings.push({ asset: assetId, code: 'PLAN_H3_DUPLICATE_REFERENCE',
+        message: 'The same image occupies both reference slots; this does not anchor a first frame. Prefer distinct identity and composition references when available.' });
+      castRefSha256 = sha256Hex(canonical(["image", "reference", "audio"].map(name => ({
+        name, asset: params[name], sha256: assets[params[name]]?.sha256 ?? null,
+      }))));
     } else if (kind === "plate") {
       // the default is a 64-multiple in 16:9 (N9); 960x544 used to be the default and came back
       // 960x512 from the graph, because half of 544 is 272 and LTX floors to 32

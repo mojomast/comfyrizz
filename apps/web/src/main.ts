@@ -198,6 +198,7 @@ async function hydrateTakePreview(clips: readonly ClipSummary[], request: number
   previewClipMap = next;
   if (previewAb && !clipStore.get(previewAb.clipId)) previewAb = null;
   updatePreview(pkg, timeline, generatedAssets);
+  renderAssets();
 }
 
 /** Refresh the shared clips map from the take routes (called on load and clip.* SSE). */
@@ -209,6 +210,9 @@ async function refreshClips(): Promise<void> {
   try {
     const result = await takesApi.listClips(packageId);
     if (request !== clipsRequest) return;
+    for (const clip of result.clips) {
+      if (takeInfoCache.get(clip.clipId)?.selected !== clip.selected) takeInfoCache.delete(clip.clipId);
+    }
     clipStore.replace(result.clips, { packageId, revision: result.revision });
     scriptPanel?.setClips(result.clips);
     renderBar?.update();
@@ -693,7 +697,7 @@ async function downloadWorkflow(assetId: string, format: 'api' | 'readme', varia
 
 function renderAssets(): void {
   const host = $('assets');
-  const entries = Object.entries(pkg.assets ?? {});
+  const entries = Object.entries(withTakePreview(pkg).assets ?? {});
   if (entries.length === 0) {
     host.innerHTML = '<div class="empty">No assets yet.<br /><span class="hint">Send a brief to generate the first package.</span></div>';
     renderGpuQueue();
@@ -703,8 +707,10 @@ function renderAssets(): void {
     .map(([id, asset]) => {
       const origin = asset.origin === 'generated' ? asset.gen?.generator ?? 'generated' : asset.origin;
       const pending = asset.status === 'pending';
-      const tone = pending ? 'warn' : 'ok';
-      const statusText = pending ? 'pending gpu' : (asset.license?.id ?? asset.status);
+      // PR #19: a pending package asset whose local preview already streamed in reads "preview ready".
+      const previewReady = !pending && pkg.assets?.[id]?.status === 'pending';
+      const tone = pending ? 'warn' : previewReady ? 'info' : 'ok';
+      const statusText = pending ? 'pending gpu' : previewReady ? 'preview ready' : (asset.license?.id ?? asset.status);
       const chip = `<span class="badge badge-${tone} chip${pending ? ' warn' : ''}" data-tone="${tone}">${esc(statusText)}</span>`;
       const timeInfo = asset.media?.frames ? `<time class="job-time hint tabular-nums mono">${asset.media.frames}f</time>` : '';
       return `<div class="asset job-row${pending ? ' pending' : ''}" data-asset-id="${esc(id)}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(id)}</b>${chip}${timeInfo}</div><span class="job-progress hint">${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}</div>`;
@@ -717,11 +723,13 @@ function renderAssets(): void {
 function renderGpuQueue(): void {
   const host = $('gpu-queue');
   if (!host) return;
-  if (pendingGpu.length === 0) {
+  const preview = withTakePreview(pkg);
+  const remaining = pendingGpu.filter(item => preview.assets?.[item.assetId]?.status !== 'ready');
+  if (remaining.length === 0) {
     host.innerHTML = '<div class="empty">Nothing queued.<br /><span class="hint">GPU assets appear here when a brief asks for video.</span></div>';
     return;
   }
-  host.innerHTML = pendingGpu
+  host.innerHTML = remaining
     .map(
       item =>
         `<div class="asset job-row pending" data-asset-id="${esc(item.assetId)}"><div class="thumb">◌</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(item.assetId)}</b><span class="badge badge-warn chip warn" data-tone="warn">pending spend</span></div><span class="job-progress hint">${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div></div>`,
@@ -1045,6 +1053,15 @@ async function refreshSpend(): Promise<void> {
     /* the meter is best-effort */
   }
 }
+
+// Recover landed takes even if their SSE event was missed during a refresh or
+// reconnect. Also supports collecting previews from an already-running worker.
+let refreshingLiveClips = false;
+setInterval(() => {
+  if (refreshingLiveClips || !runState.active || !['starting', 'running', 'budget ok', 'rendering'].includes(runState.active.status)) return;
+  refreshingLiveClips = true;
+  void refreshClips().finally(() => { refreshingLiveClips = false; });
+}, 10000);
 
 async function runOnBackend(approved = false): Promise<void> {
   const backendId = $<HTMLSelectElement>('backend').value;

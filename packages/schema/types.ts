@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 7fd801b5b61e0b2ee0d86bd03603dc0063cf250c30fc3ebfddf56233a42f1d00
+// Schema sha256: 4ce8351a679c4e690728d93113d4018f320514c035d32feeb4541c7f115db9a5
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -841,6 +841,25 @@ export interface AssetSource {
   original_file?: string;
   }
 
+export interface FastH3Direction {
+  subject: string;
+  composition: string;
+  action: string;
+  camera: string;
+  soundscape: string;
+  characterCount: number;
+  slotSeconds?: number;
+  reactionSeconds?: number;
+  dialogue?: {
+    text: string;
+    conditioningText: string;
+    language: string;
+    voice: string;
+    delivery: string;
+    offscreen?: boolean;
+    };
+  }
+
 export interface Gen {
   /**
    * llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein
@@ -856,6 +875,7 @@ export interface Gen {
   model_revision?: string;
   model_sha256?: Sha256Hex;
   quantization?: string;
+  direction?: FastH3Direction;
   /**
    * Resolved workflow inputs. Paths here are repository-relative and any value naming an asset must
    * resolve.

@@ -123,6 +123,7 @@ export function previewPackage<T extends PreviewPackageLike>(
     const asset = assets[clip.assetId];
     if (!isRecord(asset)) continue;
     asset.file = url;
+    asset.status = 'ready';
     if (isRecord(take.media)) {
       asset.media = structuredClone(take.media) as typeof asset.media;
     }

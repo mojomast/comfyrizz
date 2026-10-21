@@ -117,12 +117,21 @@ for (const shot of film.shots) {
     execFileSync('ffmpeg', ['-v','error','-y','-i',join(recut,`final/parts/${oldId}.mkv`),'-map','0:v:0','-map','0:a:0','-c','copy','-movflags','+faststart',join(root,file)]);
     ready(assetId,file,'video',{width:1920,height:1080,fps:24,frames:Math.round(shot.seconds*24),durationSeconds:shot.seconds,audio:'present'});
   } else {
-    const deadline = Math.max(1, shot.seconds - .2).toFixed(2);
-    const prompt = shot.prompt.replace(/finish before [\d.]+ seconds/, `finish before ${deadline} seconds`);
+    if (shot.line && (!shot.audio?.startsWith('refs/dialogue/') || shot.conditioningFitsSlot === false)) {
+      throw Error(`Shot ${shot.id} needs exact-line conditioning that fits its timeline slot; review its timing before importing.`);
+    }
+    let audio = voiceIds.silence;
+    if (shot.line) {
+      const file = `${prefix}/dialogue-${shot.id}.wav`;
+      copyFileSync(join(production, shot.audio), join(root, file));
+      audio = ready(`a_ep2_dialogue_${shot.id}`, file, 'audio', { audio: 'present', durationSeconds: shot.conditioningSeconds }, true);
+    }
+    if (!shot.direction) throw Error(`Shot ${shot.id} needs structured FastH3 direction; prepare the revised authoring plan first.`);
     generated(assetId, 'fasth3-omni', 'workflows/fasth3_omni_ref2va.api.json', {
-      image:'a_ep2_key_'+shot.id, reference:'a_ep2_key_'+shot.id, audio:voiceIds[shot.speaker || 'silence'],
-      prompt, width:shot.width,height:shot.height,frames:shot.frames,fps:24,seed:shot.seed,
+      image:sourceAssets[shot.image] ?? 'a_ep2_key_'+shot.id, reference:'a_ep2_key_'+shot.id, audio,
+      prompt:shot.prompt, width:shot.width,height:shot.height,frames:shot.frames,fps:24,seed:shot.seed,
     }, 'video');
+    pkg.assets[assetId].gen.direction = shot.direction;
   }
   const ids = new Set();
   const key = keys.find(s => s.id === shot.id);

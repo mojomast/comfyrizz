@@ -11,9 +11,9 @@ const readSource = (id: string) => readFileSync(new URL(`../../src/skills/${id}/
 const words = (text: string) => text.trim().split(/\s+/).length;
 const VERSIONS: Record<string, string> = {
   'video-brief': '1.1.0',
-  'explainer-script': '1.1.0',
-  'storyboard-direction': '1.3.0',
-  'project-revision': '1.2.0',
+  'explainer-script': '1.2.0',
+  'storyboard-direction': '1.4.0',
+  'project-revision': '1.3.0',
 };
 
 test('skills: deterministic selection includes drafting guidance and at most three skills', () => {
@@ -34,7 +34,7 @@ test('skills: deterministic selection includes drafting guidance and at most thr
       }
     }
   }
-  assert.equal(SKILL_CATALOG_VERSION, '1.4.0');
+  assert.equal(SKILL_CATALOG_VERSION, '1.5.0');
 });
 
 test('skills: compiled loader includes canonical bodies and excludes metadata and research links', () => {
@@ -51,8 +51,8 @@ test('skills: compiled loader includes canonical bodies and excludes metadata an
       seen.add(id);
     }
     assert.doesNotMatch(composed.text, /## Sources|https:\/\/|^description:|^version:/m);
-    assert.ok(words(composed.text) <= 2000, 'selected instructions including production review stay compact');
-    assert.ok(composed.text.length <= 14500, 'character budget bounds prompt overhead');
+    assert.ok(words(composed.text) <= 2600, 'selected instructions including native AV review stay compact');
+    assert.ok(composed.text.length <= 19000, 'character budget bounds prompt overhead');
   }
   const conversationSkillIds = BUNDLED_SKILL_IDS.filter(id => id !== 'motion-style');
   assert.deepEqual([...seen].sort(), [...conversationSkillIds].sort());
@@ -63,7 +63,7 @@ test('skills: every bundle is compact, self-contained, and refers only to suppor
   for (const id of BUNDLED_SKILL_IDS) {
     const source = readSource(id);
     const count = words(source);
-    assert.ok(count >= 200 && count <= (id === 'storyboard-direction' ? 1000 : 550), `${id}: ${count} words including metadata and sources`);
+    assert.ok(count >= 200 && count <= (id === 'storyboard-direction' ? 1250 : 850), `${id}: ${count} words including metadata and sources`);
     assert.match(source, /^## Sources$/m);
     const links = [...source.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)].map(match => match[1]);
     assert.ok(links.length > 0, `${id}: documented sources`);
