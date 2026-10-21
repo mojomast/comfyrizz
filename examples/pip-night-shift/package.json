@@ -1,0 +1,220 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_pipnightshift01",
+  "title": "Pip's Night Shift",
+  "createdAt": "2026-10-21T07:28:00.000Z",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "flexibleCeilingFrames": 2700
+  },
+  "theme": {
+    "palette": [
+      "#1a1410",
+      "#f6ead8",
+      "#ff8a3d",
+      "#6b4a33"
+    ],
+    "font": "Instrument Serif",
+    "text": "#f6ead8",
+    "text_muted": "#6b4a33",
+    "text_on_accent": "#f7f9fc"
+  },
+  "motion": {
+    "energy": "medium",
+    "direction": "left"
+  },
+  "captions": {
+    "style": "karaoke"
+  },
+  "voice": {
+    "enabled": false,
+    "engine": "none"
+  },
+  "datasets": {
+    "d_orders": {
+      "unit": "orders",
+      "label": "Orders before 7 am",
+      "values": [
+        {
+          "label": "Before 7 am",
+          "value": 347
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "Invented café data for the demo; labelled as an example."
+    }
+  },
+  "scenes": [
+    {
+      "id": "s1_dawn",
+      "layout": "title",
+      "variant": "centered",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "05:58, Rue Lumière",
+        "headline": "Pip's Night Shift",
+        "sub": "A small café wakes before the city."
+      },
+      "narration": "Dawn comes to a small café on Rue Lumière. Pip is already awake.",
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 1058
+        }
+      },
+      "motion": {
+        "recipe": "kinetic",
+        "seed": 1058,
+        "intensity": 0.7,
+        "entry": "maskRise",
+        "ease": "move",
+        "spring": "settle",
+        "stagger": "word",
+        "emphasis": "keyword",
+        "highlight": "Night Shift",
+        "energy": "high"
+      },
+      "transitionOut": {
+        "type": "iris",
+        "frames": 10
+      }
+    },
+    {
+      "id": "s2_counter",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Still warm. Still open.",
+        "sub": "Pip, barista bot",
+        "body": "Rain and roasted coffee."
+      },
+      "lower_third": {
+        "kicker": "Pip",
+        "text": "Pip, barista bot"
+      },
+      "narration": "Pip works the counter, still warm from the first pot of the night.",
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 2058
+        }
+      },
+      "motion": {
+        "recipe": "paper-cut",
+        "seed": 2058,
+        "intensity": 0.6,
+        "entry": "fadeUp",
+        "ease": "move",
+        "spring": "settle",
+        "stagger": "none",
+        "emphasis": "keyword",
+        "highlight": "warm",
+        "energy": "medium"
+      },
+      "transitionOut": {
+        "type": "paper-reveal",
+        "frames": 9
+      }
+    },
+    {
+      "id": "s3_juno",
+      "layout": "stat",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Orders before seven",
+        "sub": "Counted before sunrise.",
+        "body": "347 orders before 7 am"
+      },
+      "data": {
+        "dataset": "d_orders",
+        "display": "counter"
+      },
+      "lower_third": {
+        "kicker": "Juno",
+        "text": "Juno, courier"
+      },
+      "narration": "Three hundred and forty-seven orders before seven. Juno brings the last one in.",
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 3058
+        }
+      },
+      "motion": {
+        "recipe": "focus",
+        "seed": 3058,
+        "intensity": 0.7,
+        "focus": {
+          "x": 0.08,
+          "y": 0.18,
+          "width": 0.84,
+          "height": 0.56
+        },
+        "entry": "countUp",
+        "ease": "move",
+        "spring": "settle",
+        "stagger": "none",
+        "emphasis": "hero",
+        "energy": "high"
+      },
+      "transitionOut": {
+        "type": "push",
+        "frames": 9,
+        "direction": "left"
+      }
+    },
+    {
+      "id": "s4_outro",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "kicker": "Pip's Night Shift",
+        "headline": "Open all night",
+        "cta": "Come in",
+        "sub": "A fictional café, Rue Lumière."
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grain",
+          "seed": 4058
+        }
+      },
+      "motion": {
+        "recipe": "sketch",
+        "seed": 4058,
+        "intensity": 0.5,
+        "entry": "waterfall",
+        "ease": "move",
+        "spring": "settle",
+        "stagger": "word",
+        "emphasis": "keyword",
+        "highlight": "Open",
+        "energy": "calm"
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 0
+      }
+    }
+  ],
+  "assets": {},
+  "compliance": {
+    "open_weights_only": true,
+    "backends_used": [],
+    "closed_apis_used": [],
+    "warnings": [
+      "Every scene draws its background procedurally; generated stills and clips are optional.",
+      "Narration text is present but voice is off, so captions are estimated until audio is measured."
+    ]
+  }
+}
