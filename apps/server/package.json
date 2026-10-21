@@ -8,7 +8,7 @@
     "start": "npm --prefix ../../packages/vector run build && npm --prefix ../../packages/planner run build && npm --prefix ../../packages/llm run build && npm --prefix ../../packages/agent run build && npm --prefix ../../packages/sources run build && npm --prefix ../../packages/tts run build && npm --prefix ../web run build && node src/index.mjs",
     "dev": "npm --prefix ../../packages/vector run build && npm --prefix ../../packages/planner run build && npm --prefix ../../packages/llm run build && npm --prefix ../../packages/agent run build && npm --prefix ../../packages/sources run build && npm --prefix ../../packages/tts run build && node --watch src/index.mjs",
     "pretest": "npm --prefix ../../packages/vector run build && npm --prefix ../../packages/planner run build && npm --prefix ../../packages/llm run build && npm --prefix ../../packages/agent run build && npm --prefix ../../packages/sources run build && npm --prefix ../../packages/tts run build",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs test/*/*.test.mjs"
   },
   "engines": { "node": ">=20" },
   "license": "MIT"
