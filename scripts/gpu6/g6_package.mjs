@@ -8,7 +8,7 @@
 // is a licence-clean geometric face (not the nebula still). Lip-sync and ducking can then be judged
 // on a real Google Colab run (section 5.4 of the handoff).
 import { createHash, randomBytes } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -228,7 +228,15 @@ export function writeGpu6Package(dir) {
   } catch {
     linkPresent = false;
   }
-  if (!linkPresent) symlinkSync(join(REPO, "workflows"), workflows);
+  if (!linkPresent) {
+    symlinkSync(join(REPO, "workflows"), workflows);
+  } else if (!existsSync(workflows)) {
+    // A link that is there but points at a worktree that no longer exists is worse than no link: the
+    // bundle then ships without any of the graph files, and the run fails on a missing workflow rather
+    // than here. Point it back at this repo's workflows.
+    unlinkSync(workflows);
+    symlinkSync(join(REPO, "workflows"), workflows);
+  }
 
   const audioDir = join(dir, "audio");
   mkdirSync(audioDir, { recursive: true });
