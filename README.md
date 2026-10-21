@@ -13,7 +13,7 @@ motion plates are generated through the Comfy SDK on a Google Colab GPU that Com
 stops for you, or on your own ComfyUI. MIT licensed.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
-[![Node.js 20+](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=nodedotjs&logoColor=white)](#quick-start)
+[![Node.js 22.6+](https://img.shields.io/badge/node-%E2%89%A522.6-339933?logo=nodedotjs&logoColor=white)](#quick-start)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Comfy%20SDK-7c5cff)](https://github.com/comfyanonymous/ComfyUI)
 [![Remotion](https://img.shields.io/badge/render-Remotion-0b84f3)](https://www.remotion.dev)
 [![Hackathon](https://img.shields.io/badge/Comfy-Open%20Source%20Higgsfield%20hackathon-f59e0b)](#hackathon-submission)
@@ -113,9 +113,11 @@ captured from those branches.
 
 ## Quick start
 
-Requirements: **Node.js 20+** (Node 22 recommended), **pnpm 10**, **ffmpeg** and Chrome or Chromium
+Requirements: **Node.js 22.6+**, **pnpm 10**, **ffmpeg** and Chrome or Chromium
 for Remotion (`REMOTION_BROWSER` overrides the default `/usr/bin/google-chrome`). Python 3.10+ is
-needed only for the GPU pipeline and Kokoro narration.
+needed only for the GPU pipeline and Kokoro narration. Supported operating systems: Linux and
+macOS, or WSL on Windows. Set `COMFYRIZZ_PYTHON` to the Python interpreter with the pipeline
+dependencies (for example `.venv/bin/python`); it defaults to `python3`.
 
 ```bash
 git clone https://github.com/mojomast/comfyrizz
