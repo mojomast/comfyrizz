@@ -124,10 +124,10 @@ test('scene lengths are 75-frame bars at 96 BPM', () => {
   }
 });
 
-test('there is no audio block yet', () => {
-  assert.equal(Object.hasOwn(pkg, 'audio'), false);
-  assert.equal(Object.hasOwn(timeline, 'audio'), false);
-  for (const asset of Object.values(pkg.assets)) assert.notEqual(asset.kind, 'audio');
+test('the only assets are the PN18 generated audio (music bed + sfx)', () => {
+  assert.equal(Object.hasOwn(pkg, 'audio'), true);
+  assert.equal(pkg.audio.music.asset, 'a_music_bed');
+  for (const [id, asset] of Object.entries(pkg.assets)) assert.equal(asset.kind, 'audio', `${id} is audio`);
 });
 
 test('motion lint is clean, with and without the compiled timeline', () => {
@@ -151,7 +151,7 @@ test('timeline.json is exactly the planner compile of package.json', async () =>
 });
 
 test('every scene draws text with no generated media present', () => {
-  assert.deepEqual(pkg.assets, {});
+  for (const asset of Object.values(pkg.assets)) assert.equal(asset.kind, 'audio', 'no generated visual media is required');
   for (const scene of pkg.scenes) {
     assert.equal(scene.background.asset, undefined, `${scene.id} must not require a media asset`);
     assert.equal(scene.media, undefined);
