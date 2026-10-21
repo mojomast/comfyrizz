@@ -25,7 +25,9 @@ import { PACKAGE_ID, writeGpu6Package, wavDurationSeconds, wavIsAudible } from "
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = resolve(HERE, "..", "..");
 const COLAB_DIR = join(REPO, "colab");
-const PYTHON = join(REPO, ".venv", "bin", "python");
+// Q-H1: the pipeline's python is wherever COMFYRIZZ_PYTHON says it is; the repo's own .venv is
+// only the fallback, because a worktree or another host has no .venv at that path at all.
+const PYTHON = process.env.COMFYRIZZ_PYTHON || (existsSync(join(REPO, ".venv", "bin", "python")) ? join(REPO, ".venv", "bin", "python") : "python3");
 const FAKE_SERVER = join(REPO, "pipeline-py", "tests", "fake_comfy_server.py");
 const PLANNER_FIXTURE = join(REPO, "pipeline-py", "tests", "fixtures", "package-gpu1-workflows.json");
 

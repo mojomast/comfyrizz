@@ -1,0 +1,88 @@
+{
+  "schema": "comfyrizz.character-identity-models/v1",
+  "v": 1,
+  "purpose": "Pinned, licence-checked weights for the optional character identity tier. The Klein multi-reference path remains the default; this lock only feeds workflows/character_identity_pulid.api.json when a user opts into it. Base image/video weights stay in colab/models.lock.json and are not duplicated here.",
+  "method": "pulid",
+  "workflow": "workflows/character_identity_pulid.api.json",
+  "baseModels": {
+    "lock": "colab/models.lock.json",
+    "note": "The Klein base model, text encoder and VAE are already pinned there. This file adds identity weights only."
+  },
+  "policy": {
+    "commercialUse": true,
+    "note": "Every download below is Apache-2.0 or MIT, so the identity tier may be used and redistributed under the repository's MIT terms. Models whose weights are non-commercial research only are listed under excluded and are never downloaded.",
+    "excluded": [
+      {
+        "id": "antelopev2",
+        "source": "https://github.com/deepinsight/insightface/tree/master/model_zoo",
+        "licence": "InsightFace-NC",
+        "reason": "InsightFace model-zoo weights are limited to non-commercial research; the graph uses the Apache-2.0 ArcFace encoder below instead."
+      },
+      {
+        "id": "infiniteyou",
+        "source": "https://huggingface.co/ByteDance/InfiniteYou",
+        "licence": "CC-BY-NC-4.0",
+        "reason": "The InfiniteYou weights are CC-BY-NC-4.0, which the repository's permissive-output policy does not allow; not used by this lock."
+      }
+    ]
+  },
+  "models": [
+    {
+      "id": "pulid_flux_v0.9.1",
+      "role": "identity-adapter",
+      "description": "PuLID-Flux identity adapter; conditions the Flux backbone on a face embedding.",
+      "repo": "guozinan/PuLID",
+      "revision": "492b1451255dc9d9bc3c857259690b5f8b998d4a",
+      "path": "pulid_flux_v0.9.1.safetensors",
+      "url": "https://huggingface.co/guozinan/PuLID/resolve/492b1451255dc9d9bc3c857259690b5f8b998d4a/pulid_flux_v0.9.1.safetensors",
+      "sha256": "92c41c3af322b02e58e1b32842e4601e08c8f16ec1fe80089dbe957df510f51d",
+      "size": 1142099520,
+      "target": "pulid/pulid_flux_v0.9.1.safetensors",
+      "licence": {
+        "id": "Apache-2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0",
+        "source": "https://huggingface.co/guozinan/PuLID",
+        "commercial_use": true,
+        "redistributable": true
+      }
+    },
+    {
+      "id": "eva02_clip_l_336",
+      "role": "image-encoder",
+      "description": "EVA02 CLIP-L/14 336px vision tower used to condition the identity adapter.",
+      "repo": "QuanSun/EVA-CLIP",
+      "revision": "11afd202f2ae80869d6cef18b1ec775e79bd8d12",
+      "path": "EVA02_CLIP_L_336_psz14_s6B.pt",
+      "url": "https://huggingface.co/QuanSun/EVA-CLIP/resolve/11afd202f2ae80869d6cef18b1ec775e79bd8d12/EVA02_CLIP_L_336_psz14_s6B.pt",
+      "sha256": "84c3a17a228c567a155259b2245b0b59072bf7da510260a0a02ec54de6d50b05",
+      "size": 856461210,
+      "target": "clip/EVA02_CLIP_L_336_psz14_s6B.pt",
+      "licence": {
+        "id": "MIT",
+        "url": "https://opensource.org/license/mit",
+        "source": "https://huggingface.co/QuanSun/EVA-CLIP",
+        "commercial_use": true,
+        "redistributable": true
+      }
+    },
+    {
+      "id": "arcfaceresnet100_8",
+      "role": "face-encoder",
+      "description": "ArcFace ResNet-100 ONNX face encoder supplying the identity embedding.",
+      "repo": "onnxmodelzoo/arcfaceresnet100-8",
+      "revision": "36326aa66a9d9bd72def50e9324a1028658b05d8",
+      "path": "arcfaceresnet100-8.onnx",
+      "url": "https://huggingface.co/onnxmodelzoo/arcfaceresnet100-8/resolve/36326aa66a9d9bd72def50e9324a1028658b05d8/arcfaceresnet100-8.onnx",
+      "sha256": "f3a6bc281e72f88862f5748b53be3d76b3b48f8f1ab1f4a537941bdc4e1b01da",
+      "size": 261036388,
+      "target": "insightface/arcfaceresnet100-8.onnx",
+      "licence": {
+        "id": "Apache-2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0",
+        "source": "https://huggingface.co/onnxmodelzoo/arcfaceresnet100-8",
+        "commercial_use": true,
+        "redistributable": true
+      }
+    }
+  ]
+}

@@ -24,7 +24,9 @@ import { validatePackage } from "../../schema/src/index.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..");
-const PYTHON = join(REPO, ".venv", "bin", "python");
+// Q-H1: the pipeline's python is wherever COMFYRIZZ_PYTHON says it is; the repo's own .venv is
+// only the fallback, because a worktree or another host has no .venv at that path at all.
+const PYTHON = process.env.COMFYRIZZ_PYTHON || (existsSync(join(REPO, ".venv", "bin", "python")) ? join(REPO, ".venv", "bin", "python") : "python3");
 const FAKE_SERVER = join(REPO, "pipeline-py", "tests", "fake_comfy_server.py");
 const LAUNCH_DEMO = join(REPO, "examples", "launch-demo", "package.json");
 const WORKFLOW_SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

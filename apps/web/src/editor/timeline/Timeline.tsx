@@ -7,7 +7,9 @@ import { ANIMATION_TRANSITIONS } from '../../../../../packages/schema/src/animat
 import { nextTransition } from '../../animation-controls.mjs';
 import { nextSceneId, type Command } from '../commands.ts';
 import type { EditorExtras, EditorStore } from '../store.ts';
+import type { ClipSummary } from '../../takes/api.ts';
 import { clampTrim, mediaRangeCommand, trimBounds, trimFloorMessage } from './bounds.ts';
+import { clipChips, clipKeyboardAction, type ClipChip } from './clip-state.ts';
 import {
   captionBlocks,
   fitZoom,
@@ -33,15 +35,32 @@ export interface SceneTimelineProps {
   store: EditorStore & EditorExtras;
   onSeek: (frame: number) => void;
   onTogglePlay: () => void;
+  /** Clip summaries from the takes API; chips render only for these. */
+  clips?: readonly ClipSummary[];
+  /** Controlled focused chip; omit to let the timeline keep it locally. */
+  focusedClipId?: string | null;
+  onClipSelect?: (chip: ClipChip) => void;
+  onClipCycle?: (chip: ClipChip, delta: -1 | 1) => void;
+  onClipApprove?: (chip: ClipChip) => void;
 }
 
 type OriginScene = { id: string; from: number; durationInFrames: number };
 
-export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProps) {
+export function SceneTimeline({
+  store,
+  onSeek,
+  onTogglePlay,
+  clips,
+  focusedClipId,
+  onClipSelect,
+  onClipCycle,
+  onClipApprove,
+}: SceneTimelineProps) {
   const [state, setState] = useState(() => store.getState());
   const [message, setMessage] = useState('');
   const [announcement, setAnnouncement] = useState('');
   const [snap, setSnap] = useState(true);
+  const [localFocusedClip, setLocalFocusedClip] = useState<string | null>(null);
   const anchorRef = useRef<string | null>(store.getState().session.selectedSceneIds[0] ?? null);
   const stateRef = useRef(state);
   stateRef.current = store.getState();
@@ -95,6 +114,9 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
   const orderedIds = doc.package.scenes.map(scene => scene.id);
   const zoom = session.zoom;
   const fps = compiled?.fps ?? doc.package.format?.fps ?? 30;
+  const chips = clipChips(compiled, clips ?? []);
+  const activeClipId = focusedClipId !== undefined ? focusedClipId : localFocusedClip;
+  const focusedChip = chips.find(chip => chip.clipId === activeClipId) ?? null;
 
   const writeSession = (patch: { selectedSceneIds?: string[]; playheadFrame?: number; zoom?: number }) => {
     store.setSession(patch);
@@ -218,6 +240,30 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const typing = target.matches('input, textarea, select') || target.isContentEditable;
+    if (focusedChip) {
+      const clipAction = clipKeyboardAction({
+        key: event.key,
+        meta: event.metaKey,
+        ctrl: event.ctrlKey,
+        shift: event.shiftKey,
+        alt: event.altKey,
+        typing,
+        onButton: target.tagName === 'BUTTON',
+      });
+      if (clipAction?.type === 'approve' && onClipApprove) {
+        event.preventDefault();
+        onClipApprove(focusedChip);
+        setAnnouncement(`Approve ${focusedChip.ariaLabel}`);
+        return;
+      }
+      if ((clipAction?.type === 'prev-take' || clipAction?.type === 'next-take') && onClipCycle) {
+        event.preventDefault();
+        const delta = clipAction.type === 'prev-take' ? -1 : 1;
+        onClipCycle(focusedChip, delta);
+        setAnnouncement(`${delta < 0 ? 'Previous' : 'Next'} take for ${focusedChip.ariaLabel}`);
+        return;
+      }
+    }
     const action = keyboardAction({
       key: event.key,
       meta: event.metaKey,
@@ -311,6 +357,12 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
   const duration = compiled.durationInFrames;
   const canvasWidth = Math.max(duration, session.playheadFrame) * zoom + 48;
   const musicAsset = (doc.package.audio as { music?: { asset?: string } } | undefined)?.music?.asset ?? null;
+  const chipsByScene = new Map<string, ClipChip[]>();
+  for (const chip of chips) {
+    const list = chipsByScene.get(chip.sceneId);
+    if (list) list.push(chip);
+    else chipsByScene.set(chip.sceneId, [chip]);
+  }
   const lanes: Array<{ name: string; blocks: LaneBlock[]; readonly: boolean }> = [
     { name: 'Narration', blocks: narrationBlocks(compiled), readonly: true },
     { name: 'Captions', blocks: captionBlocks(compiled), readonly: true },
@@ -402,6 +454,7 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
                 const widthFrames = scene.durationInFrames;
                 const source = doc.package.scenes.find(item => item.id === scene.id);
                 const label = sceneLabel(source?.copy as Record<string, unknown> | undefined, scene.narration, scene.id);
+                const sceneChips = chipsByScene.get(scene.id) ?? [];
                 return (
                   <div
                     key={scene.id}
@@ -433,6 +486,54 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
                       }}
                     />
                     <span className="tl-name">{label}{proposed != null ? ` · ${proposed}f pref` : ''}</span>
+                    {sceneChips.length > 0 ? (
+                      <span className="tl-clips">
+                        {sceneChips.map(chip => {
+                          const focused = chip.clipId === activeClipId;
+                          return (
+                            <button
+                              type="button"
+                              key={chip.clipId}
+                              className="tl-clip"
+                              data-testid="clip-chip"
+                              data-clip-id={chip.clipId}
+                              data-scene-id={chip.sceneId}
+                              data-state={chip.state}
+                              data-tone={chip.tone}
+                              data-striped={chip.striped ? 'true' : undefined}
+                              data-left={chip.left}
+                              data-width={chip.width}
+                              data-focused={focused ? 'true' : 'false'}
+                              aria-label={chip.ariaLabel}
+                              aria-current={focused ? 'true' : undefined}
+                              title={chip.title}
+                              onPointerDown={event => event.stopPropagation()}
+                              onClick={event => {
+                                event.stopPropagation();
+                                setLocalFocusedClip(chip.clipId);
+                                onClipSelect?.(chip);
+                              }}
+                            >
+                              <span className="tl-clip-badge">{chip.badge}</span>
+                              <span className="tl-clip-slot">{chip.slotLabel}</span>
+                              {chip.takeCounter ? <span className="tl-clip-take">{chip.takeCounter}</span> : null}
+                              {chip.state === 'generating' ? (
+                                <span
+                                  className="tl-clip-progress"
+                                  role="progressbar"
+                                  aria-label={`${chip.ariaLabel} progress`}
+                                  aria-valuemin={0}
+                                  aria-valuemax={100}
+                                  aria-valuenow={chip.progress == null ? undefined : Math.round(chip.progress * 100)}
+                                  data-indeterminate={chip.indeterminate ? 'true' : 'false'}
+                                  style={chip.progress == null ? undefined : { width: `${Math.round(chip.progress * 100)}%` }}
+                                />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       className="tl-handle"
@@ -493,7 +594,7 @@ export function SceneTimeline({ store, onSeek, onTogglePlay }: SceneTimelineProp
       <span className="tl-sr" role="status">{announcement}</span>
       <details className="tl-help">
         <summary>Keyboard</summary>
-        <p>Arrows step one frame. Shift+arrows step one second. Alt+Left or Alt+Right selects a scene; add Shift to extend the range. Alt+Up or Alt+Down moves the scene. [ and ] trim. Space plays. S toggles snap, F fits, + and − zoom. Delete, Ctrl+D or Cmd+D duplicate, Ctrl+Z undoes. Escape cancels a drag. Hold Alt while dragging to ignore snap. Every drag also has a button or a number field.</p>
+        <p>Arrows step one frame. Shift+arrows step one second. Alt+Left or Alt+Right selects a scene; add Shift to extend the range. Alt+Up or Alt+Down moves the scene. [ and ] trim. With a clip chip focused, [ and ] cycle takes and A approves. Space plays. S toggles snap, F fits, + and − zoom. Delete, Ctrl+D or Cmd+D duplicate, Ctrl+Z undoes. Escape cancels a drag. Hold Alt while dragging to ignore snap. Every drag also has a button or a number field.</p>
       </details>
     </div>
   );

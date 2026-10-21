@@ -63,6 +63,101 @@ and the CPU backend.
 </tr>
 </table>
 
+### Pip's Night Shift, the default project
+
+<img src="docs/media/ui-pip-default.webp" alt="Pip's Night Shift open in the editor with motion-graphics scenes, text styles and a music bed on the timeline" width="880">
+
+The local editor opens Pip's Night Shift (`examples/pip-night-shift`) by default when the server
+starts. It is a finished motion-graphics project with styled text scenes and a generated CC0 music
+bed plus sound effects, so there is something real to play, edit and export before you write a
+brief. `examples/launch-demo` stays bundled and is still the package behind `render:example`. See
+[docs/DEFAULT_PROJECT.md](docs/DEFAULT_PROJECT.md).
+
+### Characters
+
+<img src="docs/media/character-library.webp" alt="Character library: cards for each saved character with role, revision and primary portrait" width="880">
+
+Characters is a library for the people and mascots in a video. Define a character once with a name,
+`@handle`, role, look, voice and bible, upload PNG, JPEG or WEBP reference images, then add a pinned
+snapshot to a project. Library edits never change an existing project: the cast chip offers **Update
+to vN**, and timeline review marks rebuilt clips **stale** instead of re-rendering silently.
+
+<img src="docs/media/character-cast-mention.webp" alt="Project cast strip above the chat composer showing a pinned character and an @mention autocomplete" width="880">
+
+The **Cast** strip above the chat composer shows each member and its pinned revision. `@handle` in
+the chat box autocompletes to the project cast id; an unknown handle is reported, never invented.
+The agent proposes placements, and only confirmed placements reach `scene.cast`.
+
+<img src="docs/media/character-identity.webp" alt="Character look panel with a primary reference image, identity prompt, negative prompt and identity method" width="880">
+
+Identity defaults to Klein multi-reference editing with the primary image (or a ready turnaround
+sheet). For a fictional character you can choose PuLID when its models are present, or a trained LoRA
+asset; if that tier is unavailable the build falls back to the Klein reference workflow and the job
+plan shows which graph will run. **Generate sheet** runs one Klein reference edit for a front,
+three-quarter, side and back turnaround plus expression studies, with its own spend approval; the
+sheet is saved as a non-primary image.
+
+<img src="docs/media/character-speaker.webp" alt="Per-scene speaker picker assigning cast voices to scenes" width="880">
+
+Each scene can name a cast **speaker**. The build resolves that character's voice and groups
+consecutive scenes into one TTS job per voice segment; scenes without a speaker use the narrator,
+then the package voice. A missing or voiceless speaker is reported and falls back rather than
+silently changing the voice.
+
+<img src="docs/media/character-real-consent.webp" alt="Real-person character form showing the likeness warning and required permission checkbox" width="880">
+
+A character can be **fictional** or a **real person**. The real-person path shows a likeness warning
+and requires a consent record (who gave permission, when, and the scope) before it will save; a
+fictional character keeps the simpler fictional-only checkbox. See
+[docs/CHARACTER_CREATOR.md](docs/CHARACTER_CREATOR.md).
+
+### References panel
+
+<img src="docs/media/ui-references.webp" alt="References panel with uploaded images and a video, each tagged with a role and usage note, plus proposed placements" width="880">
+
+Upload images (PNG, JPEG, WEBP, GIF) and videos (MP4, MOV, WEBM, up to 60 seconds), then give each
+file one role and a short usage note. The agent reads the manifest, asks when a note or role is
+ambiguous, and proposes a scene and slot. Only **confirmed** assignments are copied into the package
+as `a_ref_*` assets and passed to the Comfy workflows. Files stay local; the model sees the label,
+role, note and dimensions, not the pixels. See [docs/REFERENCE_ASSETS.md](docs/REFERENCE_ASSETS.md).
+
+### Timeline review
+
+<img src="docs/media/ui-timeline-review.webp" alt="Timeline review with a take strip, clip state chips and an n/m clips approved render bar" width="880">
+
+Every generated clip has **takes**. Preview them in the Player, A/B the old and new take, write a
+correction for one clip, and regenerate only that clip. Clip chips on the timeline show `planned`,
+`generating`, `review`, `approved`, `stale` and the rest. The final render is gated by
+`n/m clips approved`; a `stale` clip blocks it, and **Render anyway** needs a written 4–500
+character reason. See [docs/TIMELINE_REVIEW.md](docs/TIMELINE_REVIEW.md).
+
+### Google Colab progress, rates and cancel
+
+<img src="docs/media/colab-gauges-preview.webp" alt="Live Google Colab progress gauges in the editor for setup, sampler, nodes, render frames and encode" width="880">
+
+While a run is active the editor polls `/api/colab/progress` and draws the VM's own gauges: setup and
+model-download phases, sampler and per-node progress, render frames and encoding. Each run writes a
+per-run JSONL progress file, so the gauge data stays out of the job log.
+
+<img src="docs/media/ui-colab-spend.webp" alt="Google Colab spend card showing the accelerator rate, teardown reserve and account balance check" width="880">
+
+Allocation is priced **per accelerator** from the measured table (G4 8.90, L4 4.8, CPU 0.08 units/h);
+H100 and A100 are refused until a rate is configured. Admission, the watchdog deadlines and the
+balance check all include the same six-minute collect-and-stop reserve. `colab usage` is read
+before anything is allocated, and a balance that cannot be read refuses the run. **Cancel** during
+allocation aborts the allocation itself and stops any session it already created before the run is
+reported clean. See [docs/PIPELINE_OBSERVABILITY.md](docs/PIPELINE_OBSERVABILITY.md).
+
+### Quality checks before the render
+
+<img src="docs/media/qa-cli-preview.webp" alt="QA CLI flagging caption and Foley issues on fixtures" width="880">
+
+`node scripts/quality/cli.mjs` runs seven JSON-only passes: `beats`, `takes`, `continuity`, `edit`,
+`captions`, `sound` and `receipt`. They catch story beats that contradict their prompt, unreadable
+caption rates and splits, Foley and cue mismatches, and ducking that fills a deliberate pause. A
+blocking finding or a missing review exits `1`. The CLI never decodes media or edits a package. See
+[docs/QUALITY_PIPELINE.md](docs/QUALITY_PIPELINE.md).
+
 ### 24 named style recipes
 
 <img src="docs/media/style-recipes.webp" alt="Twelve of the 24 style recipes rendered as SVG style frames" width="880">
@@ -100,17 +195,6 @@ or network. See [docs/DEMO_WEBAPP_RUNBOOK.md](docs/DEMO_WEBAPP_RUNBOOK.md).
 `pnpm run doctor` checks every prerequisite in one screen and prints a fix command for each
 problem. It is read-only and never prints secret values. See [docs/DOCTOR.md](docs/DOCTOR.md).
 
-### Landing next
-
-These features are on their branches and not yet merged to `main`. The previews below were
-captured from those branches.
-
-| Feature | Branch | Preview |
-| --- | --- | --- |
-| Live Google Colab progress gauges: model download, sampler, nodes, frame render and encode | `feat/colab-progress` | <img src="docs/media/colab-gauges-preview.webp" alt="Google Colab progress gauges from a simulated run" width="360"> |
-| Quality QA CLI: story beat lint, caption reading rate and splitting, Foley cue sheets, motion review | `feat/quality-fixes` | <img src="docs/media/qa-cli-preview.webp" alt="QA CLI flagging caption and Foley issues on fixtures" width="360"> |
-| References panel: uploads, per-asset notes and roles, agent placement proposals | `feat/reference-assets` | <!-- TODO(screenshot): References panel; capture after feat/reference-assets merges (the panel is not mounted in the app on the branch yet) --> _Screenshot to follow after merge._ |
-
 ## Quick start
 
 Requirements: **Node.js 20+** (Node 22 recommended), **pnpm 10**, **ffmpeg** and Chrome or Chromium
@@ -126,10 +210,11 @@ pnpm run doctor --offline
 cd apps/server && npm start
 ```
 
-Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). The bundled
-`examples/launch-demo` loads in the Player. Send a brief in **Plan** mode with the
-**local · scripted model**, edit a headline or a chart value, then **Export MP4** or
-**Export bundle**. This path needs no GPU and no API key.
+Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). The editor opens Pip's
+Night Shift (`examples/pip-night-shift`) by default; `examples/launch-demo` stays bundled.
+Send a brief in **Plan** mode with the **local · scripted model**, edit a headline or a
+chart value, then **Export MP4** or **Export bundle**. This path needs no GPU and no API
+key.
 
 > Use `pnpm run doctor`, not bare `pnpm doctor`: the bare form runs pnpm's own built-in command.
 
@@ -247,7 +332,7 @@ pipeline-py/    Comfy SDK runner, attempt records, manifest, reconcile
 colab/          Scripts the Google Colab backend runs on the VM
 workflows/      ComfyUI API-format graphs (FLUX 3 Klein, LTX-2.5)
 scripts/        doctor/, cassette/, motionkit/, release scan, credits audit, gallery
-examples/       Bundled packages (launch-demo, hook-20s, csv-charts, licensing-demo, …)
+examples/       Bundled packages: Pip's Night Shift (default), launch-demo, hook-20s, csv-charts, licensing-demo, …
 docs/           SPEC, guides, specs/, submission/, media
 ```
 
@@ -262,7 +347,8 @@ pnpm --filter @comfyrizz/web test:e2e   # Playwright (Chromium, loopback only)
 ```
 
 GPU paths are tested against a fake `colab` CLI and a fake Comfy server, so no suite starts a
-runtime or spends anything. The motion library's tests are listed in
+runtime or spends anything. Backend and pipeline tests honour `COMFYRIZZ_PYTHON` for the pipeline
+interpreter and keep scratch files under `os.tmpdir()`. The motion library's tests are listed in
 [docs/MOTION_STYLES.md](docs/MOTION_STYLES.md#every-command).
 
 ## Hackathon submission

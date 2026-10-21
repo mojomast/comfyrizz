@@ -1,0 +1,190 @@
+{
+  "schema": "comfyrizz.character-library/v1",
+  "synthetic": true,
+  "characters": [
+    {
+      "schema": "comfyrizz.character/v1",
+      "id": "chr_542077e0091abbc6",
+      "revision": 1,
+      "name": "Pip",
+      "handle": "pip",
+      "role": "mascot",
+      "kind": "fictional",
+      "summary": "Pip is a fictional barista robot who keeps the café on Rue Lumière running through the night. Not a real person.",
+      "visual": {
+        "identityPrompt": "small round barista robot, warm cream enamel shell, soft orange ring light, tiny articulated arms, steam curling from a ceramic cup",
+        "negative": "text, watermark, human face, extra limbs, sharp edges",
+        "style": "warm 35mm film, soft halation, gentle grain",
+        "palette": [
+          "#1a1410",
+          "#f6ead8",
+          "#ff8a3d",
+          "#6b4a33"
+        ],
+        "wardrobe": [
+          {
+            "id": "w1",
+            "label": "barista apron",
+            "prompt": "deep brown canvas apron with a small orange cup emblem",
+            "default": true
+          }
+        ],
+        "expressions": [
+          {
+            "id": "e1",
+            "label": "steady",
+            "prompt": "calm friendly posture, eyes softly lit"
+          },
+          {
+            "id": "e2",
+            "label": "warm",
+            "prompt": "small satisfied nod, steam curling beside the cup"
+          }
+        ],
+        "images": [
+          {
+            "imgId": "img_542077e0091abbc6",
+            "view": "front",
+            "primary": true,
+            "source": "generated",
+            "sha256": "542077e0091abbc62adbe92fb222c976c80520f43a66c8b0318e0efe21f40aa3",
+            "width": 768,
+            "height": 768
+          }
+        ],
+        "sheet": {
+          "status": "none"
+        },
+        "seed": 2058,
+        "identity": {
+          "method": "klein_ref"
+        }
+      },
+      "voice": {
+        "engine": "none",
+        "sampleLines": []
+      },
+      "bible": {
+        "personality": "upbeat, precise, quietly proud of the first pot of the night",
+        "mannerisms": [
+          "wipes the counter once before every order",
+          "tilts its head when the rain gets loud"
+        ],
+        "catchphrases": [
+          "Still warm. Still open."
+        ],
+        "speakingStyle": "short, warm sentences with no jargon",
+        "do": [
+          "keeps the cup upright and the counter clean"
+        ],
+        "dont": [
+          "never shown drinking coffee",
+          "never leaves the café during service"
+        ],
+        "notes": "Fictional character invented for the Pip's Night Shift demo. No real person or user photo is depicted."
+      },
+      "tags": [
+        "barista",
+        "robot",
+        "mascot"
+      ],
+      "createdAt": "2026-10-21T08:00:00.000Z",
+      "updatedAt": "2026-10-21T08:00:00.000Z"
+    },
+    {
+      "schema": "comfyrizz.character/v1",
+      "id": "chr_94945d9324b614f3",
+      "revision": 1,
+      "name": "Juno",
+      "handle": "juno",
+      "role": "supporting",
+      "kind": "fictional",
+      "summary": "Juno is a fictional night courier with a yellow jacket and helmet who brings the last order in from the rain. Not a real person.",
+      "visual": {
+        "identityPrompt": "night courier in a bright yellow rain jacket and matching helmet, visor beaded with rain, insulated delivery bag, purposeful stride",
+        "negative": "text, watermark, human face, extra limbs, grey jacket",
+        "style": "warm 35mm film, soft halation, gentle grain",
+        "palette": [
+          "#1a1410",
+          "#f6ead8",
+          "#ff8a3d",
+          "#6b4a33"
+        ],
+        "wardrobe": [
+          {
+            "id": "w1",
+            "label": "yellow rain jacket",
+            "prompt": "bright yellow rain jacket with reflective piping",
+            "default": true
+          },
+          {
+            "id": "w2",
+            "label": "courier helmet",
+            "prompt": "matching yellow helmet with a rain-beaded visor",
+            "default": false
+          }
+        ],
+        "expressions": [
+          {
+            "id": "e1",
+            "label": "focused",
+            "prompt": "chin lifted, eyes on the counter"
+          },
+          {
+            "id": "e2",
+            "label": "relieved",
+            "prompt": "shoulders easing as the door closes behind her"
+          }
+        ],
+        "images": [
+          {
+            "imgId": "img_94945d9324b614f3",
+            "view": "three_quarter",
+            "primary": true,
+            "source": "generated",
+            "sha256": "94945d9324b614f3d682d5fb41573f11452e033c4d15c9f0df2126628a7904b4",
+            "width": 768,
+            "height": 768
+          }
+        ],
+        "sheet": {
+          "status": "none"
+        },
+        "seed": 3058,
+        "identity": {
+          "method": "klein_ref"
+        }
+      },
+      "voice": {
+        "engine": "none",
+        "sampleLines": []
+      },
+      "bible": {
+        "personality": "brisk, kind, always a little out of breath",
+        "mannerisms": [
+          "shakes rain from one sleeve at the door",
+          "taps the delivery bag twice before handing it over"
+        ],
+        "catchphrases": [
+          "Last one before seven."
+        ],
+        "speakingStyle": "quick, clipped sentences that soften at the end",
+        "do": [
+          "keeps the yellow jacket and helmet on screen"
+        ],
+        "dont": [
+          "never removes the helmet indoors",
+          "never enters without the delivery bag"
+        ],
+        "notes": "Fictional character invented for the Pip's Night Shift demo. No real person or user photo is depicted."
+      },
+      "tags": [
+        "courier",
+        "night",
+        "yellow"
+      ],
+      "createdAt": "2026-10-21T08:00:00.000Z",
+      "updatedAt": "2026-10-21T08:00:00.000Z"
+    }
+  ]
+}

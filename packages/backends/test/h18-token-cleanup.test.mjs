@@ -45,7 +45,12 @@ test("a token file that is not 0600 is refused rather than copied (G6-5)", () =>
   assert.match(staged.error, /0600/);
 });
 
-test("a whole fakes-only run leaves no staged token behind (G6-5)", () => {
+const PIPELINE_PYTHON = process.env.COMFYRIZZ_PYTHON || null;
+
+test("a whole fakes-only run leaves no staged token behind (G6-5)", (t) => {
+  // the child run starts the fake Comfy server with the pipeline's python; without one, the run never
+  // gets as far as staging a token and the assertion would be about the environment, not the cleanup
+  if (!PIPELINE_PYTHON) return t.skip("no pipeline python (set COMFYRIZZ_PYTHON)");
   const before = new Set(stagedDirs());
   const out = mkdtempSync(join(tmpdir(), "comfyrizz-g6-runout-"));
   const run = spawnSync(process.execPath, [RUN, "--fake", "--no-render", "--out", out], { encoding: "utf8", timeout: 300000 });

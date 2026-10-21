@@ -10,9 +10,10 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { assessBudget, nextJobUpperEstimate } from '../../../packages/backends/src/budget.mjs';
+import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PER_HOUR, DEFAULT_GPU } from '../../../packages/backends/src/budget.mjs';
 
-export const G4_RATE_PER_HOUR = 8.9;
+/** Kept as the exported name earlier code and tests reference; the value is the shared default (PO-3). */
+export const G4_RATE_PER_HOUR = DEFAULT_RATE_PER_HOUR;
 
 export function planHashFor({ backendId, jobs, budgetUnits }) {
   const body = JSON.stringify({ backendId, jobs: jobs ?? [], budgetUnits: Number(budgetUnits) || 0 });
@@ -27,6 +28,34 @@ function isMetered(costVisibility) {
   return typeof costVisibility === 'string' && costVisibility.includes('account-estimate');
 }
 
+// TR07: a job's progress event is also a clip event. The job id is `<assetId>.<kind>`, so
+// the timeline can update one clip without knowing the runner's job kinds.
+function clipJobFor(record, event) {
+  if (!event || typeof event.job !== 'string' || event.job === '') return null;
+  const assetId = event.job.split('.')[0];
+  if (!assetId) return null;
+  const status = typeof event.status === 'string' ? event.status.toLowerCase() : null;
+  const kind = typeof event.event === 'string' ? event.event : '';
+  let state = typeof event.state === 'string' ? event.state : 'generating';
+  if (status === 'failed' || status === 'error' || kind === 'job_failed' || kind === 'failed' || kind === 'error') {
+    state = 'failed';
+  } else if (status === 'succeeded' || status === 'cached' || kind === 'job_done') {
+    state = status === 'cached' ? 'cached' : 'succeeded';
+  } else if (kind === 'job_start' || kind === 'submitted' || kind === 'started' || kind === 'job_progress') {
+    state = 'generating';
+  } else if (status === 'running' || status === 'active' || status === 'pending' || status === 'queued') {
+    state = status;
+  }
+  const progress = Number.isFinite(event.progress)
+    ? event.progress
+    : (Number.isFinite(event.value)
+      ? event.value
+      : (Number.isFinite(event.completed) && Number.isFinite(event.total) && event.total > 0
+        ? event.completed / event.total
+        : null));
+  return { type: 'clip.job', assetId, runId: record.runId, state, progress };
+}
+
 /**
  * @param {object} options
  * @param {(backendId: string, opts: object) => object} options.backendFactory
@@ -37,7 +66,7 @@ function isMetered(costVisibility) {
  * @param {(context: {pkg: object, result: object, record: object}) => Promise<{revision?: number, render?: object}>} [options.onComplete]
  *   persist the applied package and render it; the return value lands on the run record
  */
-export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, defaultRatePerHour = G4_RATE_PER_HOUR } = {}) {
+export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false } = {}) {
   if (typeof backendFactory !== 'function') throw new Error('createRunController needs a backendFactory');
   const runsDir = join(runtimeDir, 'runs');
   mkdirSync(runsDir, { recursive: true });
@@ -56,11 +85,15 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     return instance;
   }
 
-  async function estimate({ backendId, pkg, budgetUnits, ratePerHour = defaultRatePerHour, includeReady = false, assets = null, comfyuiUrl = null }) {
+  async function estimate({ backendId, pkg, budgetUnits, ratePerHour = null, includeReady = false, assets = null, comfyuiUrl = null }) {
     if (!pkg || typeof pkg !== 'object') throw new Error('a package is required to plan a run');
+    // PO-3 review: priced from the per-accelerator table for this controller's gpu (overridable per gpu),
+    // and a measured rate can only raise it: max(table, measured). The approved plan uses the same number
+    // the admission check will.
+    const plannedRate = resolveRatePerHour({ gpu, explicit: ratePerHour });
     const instance = await backend(backendId, {
       budgetUnits,
-      ratePerHour,
+      ratePerHour: plannedRate,
       packageId: pkg.id,
       workDir: join(runsDir, 'plan', backendId),
       outDir: join(runsDir, 'plan', backendId, 'out'),
@@ -72,7 +105,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     const planned = await instance.runPackage(pkg, { workDir: join(runsDir, 'plan', backendId), dryRun: true, includeReady, assets });
     const jobList = planned.jobsDoc?.jobs ?? [];
     const est = planned.estimate ?? (typeof instance.estimate === 'function' ? await instance.estimate(jobList) : { gpuMinutes: 0, overheadMinutes: 0 });
-    const rate = est.ratePerHour ?? ratePerHour;
+    const rate = resolveRatePerHour({ gpu, explicit: ratePerHour, measured: est.ratePerHour });
     const upper = nextJobUpperEstimate({
       gpuMinutes: est.gpuMinutes ?? 0,
       overheadMinutes: est.overheadMinutes ?? 0,
@@ -103,6 +136,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       jobs: jobList.length,
       jobsDoc: planned.jobsDoc,
       estimate: est,
+      ratePerHour: rate,
       budget,
       planHash,
       requiresApproval: backendId === 'colab',
@@ -121,6 +155,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     const emit = (event) => {
       record.events.push(event);
       publish({ type: 'run.event', runId: record.runId, event });
+      const clipJob = clipJobFor(record, event);
+      if (clipJob) publish(clipJob);
     };
     try {
       const instance = await backend(backendId, {
@@ -154,7 +190,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
 
       if (onComplete) {
         try {
-          const after = await onComplete({ pkg, result, record });
+          const after = await onComplete({ pkg, result, record, mode: record.mode, corrections: record.corrections });
           record.revision = after?.revision ?? null;
           record.render = after?.render ?? null;
         } catch (error) {
@@ -204,8 +240,12 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     }
   }
 
-  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = defaultRatePerHour, teardownMode = 'done', includeReady = false, assets = null }) {
+  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null }) {
+    if (mode !== 'final' && mode !== 'take') throw new Error("mode must be 'final' or 'take'");
     if (activeRunId) return { error: 'run busy', runId: activeRunId, status: 409 };
+    // PO-3 review: a pipeline spending on the same account must block every run start, including the
+    // queued-regenerate drain, not only the HTTP route that remembered to check.
+    if (isBusy()) return { error: 'pipeline busy', status: 409 };
     const preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
     if (preview.requiresApproval && !(approved || approvals.has(preview.planHash))) {
       publish({ type: 'run.approval_required', ...preview });
@@ -215,6 +255,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       publish({ type: 'run.refused', ...preview });
       return { ...preview, refused: true };
     }
+    const runMode = mode === 'take' ? 'take' : 'final';
+    const runCorrections = corrections && typeof corrections === 'object' && !Array.isArray(corrections) ? corrections : null;
     const runId = runIdFor(preview.planHash);
     const workDir = join(runsDir, runId, 'work');
     const outputDir = join(runsDir, runId, 'out');
@@ -234,6 +276,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       outputDir,
       revision: null,
       render: null,
+      mode: runMode,
+      corrections: runCorrections,
       startedAt: new Date().toISOString(),
       signal: new AbortController().signal,
     };
@@ -241,7 +285,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     activeRunId = runId;
     publish({ type: 'run.budget', runId, backendId, budget: preview.budget, estimate: preview.estimate, jobs: preview.jobs });
     publish({ type: 'run.started', runId, backendId, planHash: preview.planHash, budget: preview.budget });
-    record.done = execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour, teardownMode, includeReady, assets }).finally(() => {
+    record.done = execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour: preview.ratePerHour, teardownMode, includeReady, assets }).finally(() => {
       activeRunId = null;
     });
     return { runId, status: record.status, ...preview };

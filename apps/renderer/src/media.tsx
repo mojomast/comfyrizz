@@ -3,6 +3,7 @@ import { AbsoluteFill, Img, Loop, OffthreadVideo, interpolate, staticFile, useCu
 import type { Asset, ForegroundItem, PackageV1 } from '../../../packages/schema/types';
 import { palette, textColors, useFontFamily } from './theme';
 import { isMissingMedia } from './media-model.js';
+import { resolveMediaSrc } from './media-src.js';
 
 export type { MediaSidecar, LowerThirdContent, ResolvedSceneMedia } from './media-model.js';
 export { isRenderableMedia, resolveSceneMedia } from './media-model.js';
@@ -103,11 +104,18 @@ export function MediaFill({
 }) {
   const { fps } = useVideoConfig();
   const missing = useMissingMedia();
-  const [failed, setFailed] = useState(false);
+  // Remember which file failed, so a later src (e.g. a take's media ticket
+  // replacing the static path) gets its own chance to load.
+  const [failedFile, setFailedFile] = useState<string | null>(null);
+  const failed = failedFile !== null && failedFile === (asset.file ?? '');
+  const setFailed = (value: boolean) => setFailedFile(value ? (asset.file ?? '') : null);
   if (failed || isMissingMedia(asset, missing)) {
     return <MissingMediaPlaceholder assetId={assetId} asset={asset} pkg={pkg} />;
   }
-  const src = staticFile(asset.file ?? '');
+  // A take preview swaps asset.file for a media-ticket or blob URL; staticFile
+  // would turn "/api/media/..." into a broken path, so let those through as-is.
+  const file = asset.file ?? '';
+  const src = resolveMediaSrc(file, { [file]: file }, staticFile);
   // Cover/contain is centred so a wrong declared size can crop, never stretch.
   const style: React.CSSProperties = { width: '100%', height: '100%', objectFit: fit, objectPosition: 'center' };
   if (asset.kind === 'image') return <AbsoluteFill><Img src={src} style={style} onError={() => setFailed(true)} /></AbsoluteFill>;

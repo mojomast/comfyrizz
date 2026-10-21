@@ -129,6 +129,77 @@
   clip: rect(0, 0, 0, 0);
   border: 0;
 }
+.tl-scene .tl-clips {
+  position: absolute;
+  left: 26px;
+  right: 4px;
+  bottom: 1px;
+  display: flex;
+  gap: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.tl .tl-clip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid #34446a;
+  border-radius: 4px;
+  background: #1a2436;
+  color: var(--text);
+  font-size: 9px;
+  line-height: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.tl .tl-clip[data-tone="neutral"] { border-color: #43506b; background: #1a2230; color: var(--muted); }
+.tl .tl-clip[data-state="planned"] { border-style: dashed; }
+.tl .tl-clip[data-tone="blue"] { border-color: #3b82f6; background: #152945; color: #bfdbfe; }
+.tl .tl-clip[data-tone="amber"] { border-color: #d59b3c; background: #33280f; color: #f5d08a; }
+.tl .tl-clip[data-tone="green"] { border-color: #3f9b68; background: #122b1e; color: #a7e8c1; }
+.tl .tl-clip[data-tone="red"] { border-color: #b74a4a; background: #331417; color: #f3b4b4; }
+.tl .tl-clip[data-striped="true"] {
+  background-image: repeating-linear-gradient(135deg, rgba(213, 155, 60, 0.22) 0 4px, transparent 4px 8px);
+}
+.tl .tl-clip[data-focused="true"], .tl .tl-clip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  z-index: 2;
+}
+.tl-clip-badge {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.tl-clip-slot, .tl-clip-take { overflow: hidden; text-overflow: ellipsis; }
+.tl-clip-slot { opacity: 0.85; }
+.tl-clip-take { color: inherit; opacity: 0.95; }
+.tl-clip-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: #7fb0ff;
+  border-radius: 0 0 0 4px;
+}
+.tl-clip-progress[data-indeterminate="true"] {
+  width: 40% !important;
+  animation: tl-clip-progress 1.1s ease-in-out infinite alternate;
+}
+@keyframes tl-clip-progress {
+  from { transform: translateX(0); opacity: 0.45; }
+  to { transform: translateX(150%); opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .tl-scene, .tl-block, .tl-playhead { transition: none; }
+  .tl-scene, .tl-block, .tl-playhead, .tl-clip-progress { transition: none; animation: none; }
 }
