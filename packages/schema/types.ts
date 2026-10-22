@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 929aa04b506e02bb682484ff9f6392313101cfdf5b71fb9debe5a329e2673cd7
+// Schema sha256: 0d3dace4eee24b4637401a085080049b9cc726642c6dc65cf54ca372a4e39b69
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -153,11 +153,6 @@ export interface PackageV1 {
       model: NonEmptyString;
       weights: "open" | "closed" | "unknown";
       };
-    /**
-     * Backends that produced this package. `cpu` marks a dev/test CPU placeholder take
-     * (never a paid GPU session); the other accepted values are `colab:<id>` and
-     * `byo-comfyui`/`byo-comfyui:v2`.
-     */
     backends_used?: Array<string>;
     closed_apis_used?: Array<NonEmptyString>;
     warnings?: Array<NonEmptyString>;
@@ -931,10 +926,6 @@ export interface Gen {
       message: string;
       }>;
     };
-  /**
-   * Provenance backend. `cpu` marks a dev/test CPU placeholder take; `colab:<id>` and
-   * `byo-comfyui`/`byo-comfyui:v2` mark real runs.
-   */
   backend?: string;
   attempt_id?: string;
   job_id?: string;
