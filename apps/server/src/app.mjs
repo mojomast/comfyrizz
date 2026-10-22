@@ -280,14 +280,8 @@ export function createApp({
     }
     const current = store.read(id);
     const merged = mergeRunMedia({ staged: pkg, current, generated: result.package });
-    // Snapshot all finished full-run outputs as takes too: interruption must not
-    // strand generated footage outside the review UI.
-    if (result.manifest?.jobs) {
-      const ingested = ingestRun({ pkg, manifest: result.manifest, jobsDoc: result.jobsDoc,
-        outputDir: record.outputDir, store: takeStore, runId: record.runId, backend: record.backendId });
-      for (const take of ingested.takes) events.publish({ type: 'clip.take.landed', packageId: id,
-        assetId: take.assetId, takeId: take.takeId, runId: record.runId });
-    }
+    // TR07: only an explicit take-mode run lands takes. A final run's outputs stay in the
+    // package, and any verified in-flight preview already landed its own take before now.
     // G5-10: the applied package can also name files outside `assets/` (the runner's
     // non-upscaled plates live at `out/intermediates/<id>.plate.mp4`), so copy every path it
     // names — otherwise the renderer falls back to placeholders.
