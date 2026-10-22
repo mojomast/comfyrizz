@@ -38,7 +38,7 @@ summary,
   font: inherit;
   color: inherit;
   min-width: var(--target-min, 24px);
-  min-height: calc(var(--space-5) + var(--space-1));
+  min-height: var(--control-height, 24px);
 }
 button {
   background: var(--panel-2);
@@ -664,7 +664,8 @@ main {
   padding: var(--space-1) var(--space-2);
 }
 
-/* UO04: ensure all child controls across panels meet target-size >= 24px (prefer 28px) */
+/* UO04: controls follow the density tokens (24px compact, 32px comfortable)
+   and always keep a target-size of at least 24px. */
 #app button,
 #app input:not([type="checkbox"]):not([type="radio"]),
 #app select,
@@ -673,7 +674,7 @@ main {
 #app [role="button"],
 #app [role="tab"] {
   min-width: var(--target-min, 24px);
-  min-height: calc(var(--space-5) + var(--space-1));
+  min-height: var(--control-height, 24px);
 }
 #app input[type="checkbox"],
 #app input[type="radio"] {

@@ -7,6 +7,7 @@
  * and `startSeconds: null` clear a caption override or a source trim.
  */
 import { type MeasuredInput } from '../../../../packages/planner/dist/src/browser.js';
+import { getPrefs, setDensity, type UiDensity } from '../ui/prefs.ts';
 import {
   narrationFromChunks,
   narrationInputFingerprint,
@@ -576,14 +577,27 @@ export interface CommandRegistry {
   filter(query: string): PaletteCommand[];
 }
 
+function chooseDensity(density: UiDensity): void {
+  try {
+    setDensity(density);
+  } catch {
+    // The palette is best-effort when storage or the document is unavailable.
+  }
+}
+
+function toggleDensity(): void {
+  chooseDensity(getPrefs().density === 'compact' ? 'comfortable' : 'compact');
+}
+
 const DEFAULT_COMMANDS: ReadonlyArray<PaletteCommand> = Object.freeze([
   { id: 'palette.open', title: 'Command palette', shortcut: 'Ctrl+K', group: 'General', keywords: ['commands', 'search'] },
   { id: 'shortcuts.open', title: 'Keyboard shortcuts', shortcut: '?', group: 'General', keywords: ['help', 'keys'] },
   { id: 'view.toggleMode', title: 'Toggle Easy / Advanced view', shortcut: 'Ctrl/Cmd+Shift+A', group: 'View', keywords: ['mode', 'easy', 'advanced'] },
   { id: 'view.easy', title: 'Switch to Easy view', group: 'View', keywords: ['mode', 'easy'] },
   { id: 'view.advanced', title: 'Switch to Advanced view', group: 'View', keywords: ['mode', 'advanced'] },
-  { id: 'density.compact', title: 'Density: Compact', group: 'View', keywords: ['density', 'compact'] },
-  { id: 'density.comfortable', title: 'Density: Comfortable', group: 'View', keywords: ['density', 'comfortable'] },
+  { id: 'density.compact', title: 'Density: Compact', group: 'View', keywords: ['density', 'compact'], run: () => chooseDensity('compact') },
+  { id: 'density.comfortable', title: 'Density: Comfortable', group: 'View', keywords: ['density', 'comfortable'], run: () => chooseDensity('comfortable') },
+  { id: 'density.toggle', title: 'Toggle density', group: 'View', keywords: ['density', 'toggle', 'compact', 'comfortable'], run: () => toggleDensity() },
   { id: 'panel.toggleLeft', title: 'Toggle left panel', shortcut: 'Ctrl+B', group: 'Layout', keywords: ['panel', 'chat', 'left'] },
   { id: 'panel.toggleRight', title: 'Toggle right panel', shortcut: 'Ctrl+Alt+B', group: 'Layout', keywords: ['panel', 'right', 'rail'] },
   { id: 'panel.toggleTimeline', title: 'Toggle timeline', shortcut: 'Ctrl+J', group: 'Layout', keywords: ['timeline', 'dock'] },

@@ -89,6 +89,7 @@ test('advanced defaults to compact until the user picks a density explicitly', (
   assert.deepEqual(storage.read(), {
     mode: 'advanced',
     density: 'compact',
+    densityExplicit: false,
     panels: { left: true, right: true, timeline: true },
   });
 
@@ -114,6 +115,56 @@ test('an explicit density choice survives mode switches and reloads', () => {
   const reloaded = createPrefsStore({ storage, root }).load();
   assert.equal(reloaded.mode, 'easy');
   assert.equal(reloaded.density, 'compact');
+});
+
+test('a mode-derived density is not explicit, so a reload still follows the mode default', () => {
+  const { storage, root, store } = makeStore();
+  store.load();
+
+  store.setMode('advanced');
+  assert.equal(storage.read().densityExplicit, false);
+
+  const reloaded = createPrefsStore({ storage, root }).load();
+  assert.equal(reloaded.mode, 'advanced');
+  assert.equal(reloaded.density, 'compact');
+
+  const easy = createPrefsStore({ storage, root }).setMode('easy');
+  assert.equal(easy.mode, 'easy');
+  assert.equal(easy.density, 'comfortable');
+  assert.equal(storage.read().densityExplicit, false);
+});
+
+test('an explicit density choice is persisted with its flag and survives a reload', () => {
+  const { storage, root, store } = makeStore();
+  store.load();
+
+  store.setDensity('compact');
+  assert.equal(storage.read().densityExplicit, true);
+  assert.equal(storage.read().density, 'compact');
+
+  const reloaded = createPrefsStore({ storage, root }).load();
+  assert.equal(reloaded.density, 'compact');
+
+  const advanced = createPrefsStore({ storage, root }).setMode('advanced');
+  assert.equal(advanced.mode, 'advanced');
+  assert.equal(advanced.density, 'compact');
+  assert.equal(storage.read().densityExplicit, true);
+});
+
+test('legacy records without an explicit flag keep their stored density', () => {
+  const { storage } = makeStore();
+  storage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ mode: 'easy', density: 'compact', panels: DEFAULT_PANELS }),
+  );
+
+  const reloaded = createPrefsStore({ storage, root: fakeRoot() }).load();
+  assert.equal(reloaded.mode, 'easy');
+  assert.equal(reloaded.density, 'compact');
+
+  const advanced = createPrefsStore({ storage, root: fakeRoot() }).setMode('advanced');
+  assert.equal(advanced.density, 'compact');
+  assert.equal(storage.read().densityExplicit, true);
 });
 
 test('saved preferences load and panel changes merge without dropping defaults', () => {

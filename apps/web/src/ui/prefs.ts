@@ -118,10 +118,7 @@ export function normalizePanels(value: unknown): UiPanels {
 }
 
 export function normalizePrefs(value: unknown): UiPrefs {
-  if (!isRecord(value)) return defaultPrefs();
-  const mode = isUiMode(value.mode) ? value.mode : DEFAULT_MODE;
-  const density = isUiDensity(value.density) ? value.density : defaultDensityFor(mode);
-  return { mode, density, panels: normalizePanels(value.panels) };
+  return parsePrefs(value).prefs;
 }
 
 export const normalisePrefs = normalizePrefs;
@@ -136,7 +133,14 @@ function parsePrefs(value: unknown): ParsedPrefs {
     return { prefs: defaultPrefs(), densityExplicit: false };
   }
   const mode = isUiMode(value.mode) ? value.mode : DEFAULT_MODE;
-  const densityExplicit = isUiDensity(value.density);
+  const storedDensity = isUiDensity(value.density);
+  // Records written before DN12 have no explicit-choice flag. Their stored
+  // density came from an explicit choice or the old mode default, so keep it:
+  // existing users keep their saved layout, while new records can fall back
+  // to the mode default after a reload.
+  const densityExplicit = typeof value.densityExplicit === 'boolean'
+    ? value.densityExplicit && storedDensity
+    : storedDensity;
   const density = densityExplicit ? (value.density as UiDensity) : defaultDensityFor(mode);
   return {
     prefs: { mode, density, panels: normalizePanels(value.panels) },
@@ -229,7 +233,12 @@ export function createPrefsStore(env: PrefsEnv = {}): UiPrefsStore {
     try {
       storage()?.setItem(
         STORAGE_KEY,
-        JSON.stringify({ mode: prefs.mode, density: prefs.density, panels: prefs.panels }),
+        JSON.stringify({
+          mode: prefs.mode,
+          density: prefs.density,
+          densityExplicit,
+          panels: prefs.panels,
+        }),
       );
     } catch {
       return;
