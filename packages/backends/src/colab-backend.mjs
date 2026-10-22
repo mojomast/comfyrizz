@@ -12,7 +12,7 @@
 //   * a wall-clock cap applies even if metering is stale                 -> admit()
 //   * unknown comfyrizz-* sessions are offered, never auto-stopped       -> orphans()
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { withRunPackage } from "./run-package.mjs";
+import { withRunPackage, verifyAgainstManifest } from "./run-package.mjs";
 import { createLivePreviewCollector } from './live-previews.mjs';
 import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
 import { dirname, join, resolve } from "node:path";
@@ -54,6 +54,30 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..");
+
+/** A production id is used as one path segment, so it may not carry a separator or a traversal part. */
+export const PRODUCTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/**
+ * The per-production scratch root for Google Colab work (ITERATIVE_PRODUCTION_AGENT §9.2).
+ *
+ * A production's session must never share a temporary directory with another production, and the
+ * fallback must never be inside the repository (only `.runtime/` is gitignored). Both the production
+ * id and the runtime root are therefore required: with neither, `createColabBackend` keeps its old
+ * per-package `$TMPDIR/comfyrizz-colab-<packageId>` default instead of pretending a package id is a
+ * production.
+ */
+export function productionScratchDir({ productionId, runtimeDir = process.env.COMFYRIZZ_RUNTIME || null } = {}) {
+  if (typeof productionId !== "string" || !PRODUCTION_ID_PATTERN.test(productionId)) {
+    throw new Error(
+      "productionScratchDir needs a path-safe productionId (letters, digits, dot, dash or underscore; no separators or '..')",
+    );
+  }
+  if (!runtimeDir) {
+    throw new Error("productionScratchDir needs a runtimeDir (or COMFYRIZZ_RUNTIME); it never defaults inside the repository");
+  }
+  return join(resolve(runtimeDir), "productions", productionId, "scratch");
+}
 
 /**
  * Measured wall minutes per job kind (SPEC.md 6.6).
@@ -172,6 +196,10 @@ export function createColabBackend({
   // API refused with a 400 after the session was already paid for. A backend has no business guessing
   // which directory the package lives in: without one, the bundle carries the runner and the schemas.
   packageDir = null,
+  // per-production scratch (IP09): when a production id is given, the runtime root is required too,
+  // so the fallback can never be a non-gitignored folder inside the repository
+  productionId = null,
+  runtimeDir = process.env.COMFYRIZZ_RUNTIME || null,
   scratchDir = null,
   logDir = null,
   budgetUnits = 0,
@@ -207,8 +235,15 @@ export function createColabBackend({
   // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
   ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
   if (!packageId) throw new Error("createColabBackend needs a packageId (it names the session)");
+  if (productionId !== null && productionId !== undefined && (typeof productionId !== "string" || !PRODUCTION_ID_PATTERN.test(productionId))) {
+    throw new Error("createColabBackend needs a path-safe productionId (letters, digits, dot, dash or underscore; no separators or '..')");
+  }
   const session = sessionNameFor(packageId);
-  const scratch = scratchDir || join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${packageId}`);
+  const scratch =
+    scratchDir
+    || (productionId
+      ? productionScratchDir({ productionId, runtimeDir })
+      : join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${packageId}`));
   const logs = logDir || join(scratch, "logs");
   mkdirSync(scratch, { recursive: true });
   if (modelsLock === join(REPO, 'colab', 'models.lock.json')) {
@@ -221,6 +256,7 @@ export function createColabBackend({
   const client = cli || new ColabCli({ logDir: logs, detached: false, bin: resolvedBinary.bin, home: home || undefined });
   const state = {
     session,
+    productionId: productionId || null,
     createdByUs: false,
     startedAtMs: null,
     usageBefore: null,
@@ -895,8 +931,14 @@ export function createColabBackend({
         if (collect.manifest) batchManifests.push(collect.manifest);
       }
 
-      collect = await collectOut({ onEvent, expectComplete: true });
-      manifest = collect.manifest || manifest;
+      // A single-batch plan already collected its whole tree in the loop above; collecting it a second
+      // time only lists it again and re-downloads nothing (the remembered listing skips every file),
+      // but it still costs a billed `colab exec`. A multi-batch plan needs the final collect to merge
+      // what the last batch wrote.
+      if (perBatch || !collect) {
+        collect = await collectOut({ onEvent, expectComplete: true });
+        manifest = collect.manifest || manifest;
+      }
       if (perBatch && batchManifests.length) manifest = mergeBatchManifests([...batchManifests, ...(manifest ? [manifest] : [])], jobs);
       if (!manifest) {
         // G5-7: without a manifest there is no verdict to apply, and the run panel used to show a bare
@@ -934,10 +976,54 @@ export function createColabBackend({
       };
     },
 
-    async collect(manifest, destDir) {
-      const downloaded = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: destDir });
-      if (!downloaded.ok) throw new ColabCliError("collecting out/ from the VM failed");
-      return verifyAgainstManifest(manifest, destDir);
+    /**
+     * Collect is its own retryable step (IP09): re-fetch the VM's existing out/ tree, then verify.
+     *
+     * It never runs `run_jobs.py` or `reconcile.py` - a failed transfer must not cost inference. The
+     * tree is listed again on the VM and every file is downloaded again (`remember: null`), because a
+     * retry follows a failed digest and the cached "size and mtime agreed" record cannot be trusted.
+     */
+    async collect(manifest, destDir, { onEvent = null } = {}) {
+      const downloaded = await downloadTree({
+        remoteDir: `${REMOTE_ROOT}/out`,
+        localDir: destDir,
+        onEvent,
+        remember: null,
+      });
+      const verification = downloaded.ok
+        ? verifyAgainstManifest(manifest, destDir, { hashes: true })
+        : {
+            manifest,
+            verified: false,
+            outputs: [],
+            problems: [`collecting out/ from the VM failed${downloaded.detail ? `: ${downloaded.detail}` : ""}`],
+          };
+      emit(onEvent, {
+        type: "collect",
+        retry: true,
+        verified: verification.verified,
+        problems: verification.problems,
+        files: downloaded.files ?? 0,
+        fetched: downloaded.fetched ?? 0,
+        skipped: downloaded.skipped ?? 0,
+        missing: downloaded.missing ?? [],
+      });
+      return {
+        ok: downloaded.ok && verification.verified,
+        local: destDir,
+        verified: verification.verified,
+        problems: verification.problems,
+        outputs: verification.outputs,
+        missing: downloaded.missing ?? [],
+        files: downloaded.files ?? 0,
+        fetched: downloaded.fetched ?? 0,
+        skipped: downloaded.skipped ?? 0,
+      };
+    },
+
+    /** Pure verification (no transfer): the apply-time check over an already-collected directory. */
+    async verify(manifest, destDir) {
+      return verifyAgainstManifest(manifest, destDir, { hashes: true });
     },
 
     /**
@@ -1361,21 +1447,7 @@ export function assertBundleComplete(bundle, opts = {}) {
   return true;
 }
 
-/** The manifest alone decides success; every recorded output is re-hashed on disk. */
-export function verifyAgainstManifest(manifest, destDir) {
-  const problems = [];
-  for (const entry of manifest?.jobs || []) {
-    for (const output of entry.outputs || []) {
-      const file = join(destDir, output.relative || output.file || "");
-      if (!existsSync(file)) {
-        problems.push(`${entry.job}: ${output.relative || output.file} was not collected`);
-        continue;
-      }
-      const size = statSync(file).size;
-      if (output.bytes && size !== output.bytes) problems.push(`${entry.job}: ${output.relative} is ${size} bytes, the manifest says ${output.bytes}`);
-    }
-  }
-  return { manifest, verified: problems.length === 0, problems };
-}
+/** The manifest alone decides success; the shared verifier lives in run-package.mjs. */
+export { verifyAgainstManifest };
 
 export { REMOTE_ROOT, HF_TOKEN_REMOTE_PATH };
