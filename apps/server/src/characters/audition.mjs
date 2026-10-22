@@ -327,6 +327,113 @@ function extractBytes(result, api) {
   return null;
 }
 
+function isWaveBytes(value) {
+  const bytes = toBuffer(value);
+  if (!bytes || bytes.length < 12) return false;
+  if (bytes.toString('latin1', 0, 4) !== 'RIFF') return false;
+  if (bytes.toString('latin1', 8, 12) !== 'WAVE') return false;
+
+  const riffSize = bytes.readUInt32LE(4);
+  if (riffSize !== 0 && riffSize + 8 > bytes.length) return false;
+
+  let offset = 12;
+  let hasFormat = false;
+  let hasData = false;
+  while (offset + 8 <= bytes.length) {
+    const id = bytes.toString('latin1', offset, offset + 4);
+    const size = bytes.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (size > bytes.length - body) return false;
+    if (id === 'fmt ') {
+      if (size < 16) return false;
+      hasFormat = true;
+    } else if (id === 'data') {
+      if (size === 0) return false;
+      hasData = true;
+    }
+    offset = body + size + (size % 2);
+  }
+  return hasFormat && hasData;
+}
+
+function resolveAuditionRequest(characterOrVoice, lineOrOptions, maybeOptions, baseOptions) {
+  let callOptions = {};
+  if (typeof lineOrOptions === 'string') callOptions = { line: lineOrOptions };
+  else if (isPlainObject(lineOrOptions)) callOptions = { ...lineOrOptions };
+  if (isPlainObject(maybeOptions)) callOptions = { ...callOptions, ...maybeOptions };
+
+  const { character, voice: rawVoice } = resolveVoiceInput(characterOrVoice, callOptions);
+  if (!rawVoice) {
+    return { error: failure(AUDITION_INVALID_VOICE, 'a character or voice is required') };
+  }
+
+  let voice;
+  try {
+    voice = validateVoice(rawVoice);
+  } catch (error) {
+    if (error instanceof VoiceValidationError) {
+      return {
+        error: failure(AUDITION_INVALID_VOICE, error.message, { cause: error.code, field: error.field }),
+      };
+    }
+    return { error: failure(AUDITION_INVALID_VOICE, 'the voice could not be validated') };
+  }
+
+  if (voice.engine === 'none') {
+    return { error: failure(AUDITION_UNAVAILABLE, UNAVAILABLE_MESSAGE.none, { engine: 'none' }) };
+  }
+
+  const requestedLine = firstDefined(
+    callOptions.line,
+    callOptions.text,
+    typeof characterOrVoice === 'string' ? characterOrVoice : undefined,
+    voice.sampleLines?.[0],
+    DEFAULT_AUDITION_LINE,
+  );
+  const line = normalizeLine(requestedLine);
+  if (!line) {
+    return {
+      error: failure(AUDITION_INVALID_LINE, `line must be 1 to ${MAX_SAMPLE_LINE_CHARS} characters`, {
+        engine: voice.engine,
+      }),
+    };
+  }
+
+  let hash;
+  try {
+    hash = computeVoiceHash(voice);
+  } catch {
+    return { error: failure(AUDITION_INVALID_VOICE, 'the voice hash could not be computed') };
+  }
+
+  const file = auditionFile(hash, line);
+  if (!FILE_RE.test(basename(file))) {
+    return { error: failure(AUDITION_INVALID_INPUT, 'the audition cache key is invalid') };
+  }
+
+  const directory = resolveDirectory(character, callOptions, baseOptions);
+  if (!directory) {
+    return {
+      error: failure(
+        AUDITION_INVALID_DIRECTORY,
+        'pass a store, rootDir or auditionsDir so the cached wave has a home',
+        { engine: voice.engine, voiceHash: hash, line },
+      ),
+    };
+  }
+
+  return {
+    callOptions,
+    character,
+    voice,
+    line,
+    hash,
+    file,
+    directory,
+    target: join(directory, basename(file)),
+  };
+}
+
 /**
  * Create a cache bound to one library directory and synthesizer.
  *
@@ -487,65 +594,9 @@ export function createAuditionCache(options = {}) {
   }
 
   async function ensure(characterOrVoice, lineOrOptions, maybeOptions) {
-    let callOptions = {};
-    if (typeof lineOrOptions === 'string') callOptions = { line: lineOrOptions };
-    else if (isPlainObject(lineOrOptions)) callOptions = { ...lineOrOptions };
-    if (isPlainObject(maybeOptions)) callOptions = { ...callOptions, ...maybeOptions };
-
-    const { character, voice: rawVoice } = resolveVoiceInput(characterOrVoice, callOptions);
-    if (!rawVoice) {
-      return failure(AUDITION_INVALID_VOICE, 'a character or voice is required');
-    }
-
-    let voice;
-    try {
-      voice = validateVoice(rawVoice);
-    } catch (error) {
-      if (error instanceof VoiceValidationError) {
-        return failure(AUDITION_INVALID_VOICE, error.message, { cause: error.code, field: error.field });
-      }
-      return failure(AUDITION_INVALID_VOICE, 'the voice could not be validated');
-    }
-
-    if (voice.engine === 'none') {
-      return failure(AUDITION_UNAVAILABLE, UNAVAILABLE_MESSAGE.none, { engine: 'none' });
-    }
-
-    const requestedLine = firstDefined(
-      callOptions.line,
-      callOptions.text,
-      typeof characterOrVoice === 'string' ? characterOrVoice : undefined,
-      voice.sampleLines?.[0],
-      DEFAULT_AUDITION_LINE,
-    );
-    const line = normalizeLine(requestedLine);
-    if (!line) {
-      return failure(AUDITION_INVALID_LINE, `line must be 1 to ${MAX_SAMPLE_LINE_CHARS} characters`, {
-        engine: voice.engine,
-      });
-    }
-
-    let hash;
-    try {
-      hash = computeVoiceHash(voice);
-    } catch {
-      return failure(AUDITION_INVALID_VOICE, 'the voice hash could not be computed');
-    }
-
-    const file = auditionFile(hash, line);
-    if (!FILE_RE.test(basename(file))) {
-      return failure(AUDITION_INVALID_INPUT, 'the audition cache key is invalid');
-    }
-
-    const directory = resolveDirectory(character, callOptions, baseOptions);
-    if (!directory) {
-      return failure(
-        AUDITION_INVALID_DIRECTORY,
-        'pass a store, rootDir or auditionsDir so the cached wave has a home',
-        { engine: voice.engine, voiceHash: hash, line },
-      );
-    }
-    const target = join(directory, basename(file));
+    const request = resolveAuditionRequest(characterOrVoice, lineOrOptions, maybeOptions, baseOptions);
+    if (request.error) return request.error;
+    const { character, voice, line, hash, file, directory, target, callOptions } = request;
 
     if (ready.has(target) && api.sizeOf(target) === 0) ready.delete(target);
     if (ready.has(target)) {
@@ -604,8 +655,14 @@ export function createAuditionCache(options = {}) {
   }
 
   async function has(characterOrVoice, lineOrOptions, maybeOptions) {
-    const result = await ensure(characterOrVoice, lineOrOptions, maybeOptions);
-    return Boolean(result.ok && result.cached);
+    const request = resolveAuditionRequest(characterOrVoice, lineOrOptions, maybeOptions, baseOptions);
+    if (request.error) return false;
+
+    try {
+      return isWaveBytes(api.readFileSync(request.target));
+    } catch {
+      return false;
+    }
   }
 
   return Object.freeze({
