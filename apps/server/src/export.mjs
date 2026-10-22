@@ -8,7 +8,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { buildCredits, buildPackageZip, isAssetRedistributable } from '../../../packages/sources/dist/src/index.js';
 import { captionsToSrt, captionsToVtt, captionsToWordVtt } from '../../../packages/tts/dist/src/index.js';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions } from '../../renderer/scripts/render-package-lib.mjs';
 import { buildSocialPack, SOCIAL_PIXEL_FILES } from './social.mjs';
 import { collectCapturedWorkflows } from './workflow.mjs';
@@ -23,20 +23,103 @@ async function hashFile(file) {
   return digest.digest('hex');
 }
 
-// Composition export receipts cover actual media/font/sidecar bytes, not only
-// caller-maintained hashes. Source edits and ordinary plate edits both matter.
-export async function compositionRenderFingerprint({ pkg, timeline, mixAudio, sources, packageDir }) {
-  const names = new Set(Object.values(pkg.assets ?? {}).flatMap(asset => [asset.file, ...Object.values(asset.variants ?? {}).map(variant => variant.file)]).filter(Boolean));
-  for (const font of pkg.theme?.fonts ?? []) if (font.file) names.add(font.file);
-  if (existsSync(join(packageDir, 'media.json'))) names.add('media.json');
-  const root = realpathSync(packageDir);
-  const inputs = [];
-  for (const name of [...names].sort()) {
-    const file = resolve(root, name);
-    if (!file.startsWith(root + sep) || !realpathSync(file).startsWith(root + sep) || !statSync(file).isFile()) throw new Error('Composition export input escapes the project or is not a file');
-    inputs.push([name, await hashFile(file)]);
+function hashText(text) {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+function inputName(root, name) {
+  if (typeof name !== 'string' || name.length === 0 || name.includes('\0')) return null;
+  const file = resolve(root, name);
+  if (file !== root && !file.startsWith(root + sep)) throw new Error('Export input escapes the project');
+  return file;
+}
+
+async function hashOptionalInput(root, name) {
+  const file = inputName(root, name);
+  if (file === null) return null;
+  let real;
+  try {
+    real = realpathSync(file);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+    throw error;
   }
-  return createHash('sha256').update(JSON.stringify({ pkg, timeline, mixAudio, inputs, sources: sources.map(extra => [extra.path, createHash('sha256').update(extra.data).digest('hex')]) })).digest('hex');
+  if (real !== root && !real.startsWith(root + sep)) throw new Error('Export input escapes the project');
+  let stat;
+  try {
+    stat = statSync(real);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+    throw error;
+  }
+  if (!stat.isFile()) return null;
+  return hashFile(real);
+}
+
+function declaredInputNames(pkg) {
+  const names = new Set();
+  for (const asset of Object.values(pkg.assets ?? {})) {
+    if (asset?.file) names.add(asset.file);
+    for (const variant of Object.values(asset?.variants ?? {})) if (variant?.file) names.add(variant.file);
+  }
+  for (const font of pkg.theme?.fonts ?? []) if (font.file) names.add(font.file);
+  names.add('media.json');
+  names.add('audio/durations.json');
+  names.add('audio/voice-reference.wav');
+  names.add('audio/voice-reference.json');
+  names.add('audio/models.lock.json');
+  return names;
+}
+
+function narrationFileNames(packageDir) {
+  const names = new Set();
+  const path = join(packageDir, 'audio', 'durations.json');
+  if (!existsSync(path)) return names;
+  try {
+    const report = JSON.parse(readFileSync(path, 'utf8'));
+    for (const scene of Object.values(report?.scenes ?? {})) if (typeof scene?.file === 'string') names.add(scene.file);
+  } catch {
+    // A malformed report is hashed as bytes; compilation or rendering reports it.
+  }
+  return names;
+}
+
+async function collectExportInputs(pkg, packageDir) {
+  const root = realpathSync(packageDir);
+  const names = declaredInputNames(pkg);
+  for (const name of narrationFileNames(packageDir)) names.add(name);
+  const inputs = [];
+  for (const name of [...names].sort()) inputs.push([name, await hashOptionalInput(root, name)]);
+  return inputs;
+}
+
+function captionsDigest({ srt, vtt, wordsVtt }) {
+  return hashText(JSON.stringify({ srt, vtt, wordsVtt: wordsVtt ?? null }));
+}
+
+/**
+ * IP13: every export input that can change pixels, audio or captions. The
+ * compiled timeline already binds package source and cue timing; this adds the
+ * actual declared bytes and composition sources, so stale renders cannot be
+ * reused after an edit that leaves package metadata unchanged.
+ */
+export async function exportRenderFingerprint({ pkg, timeline, mixAudio, sources = [], packageDir }) {
+  const inputs = await collectExportInputs(pkg, packageDir);
+  return hashText(JSON.stringify({
+    version: 2,
+    packageHash: hashText(canonicalJson(pkg)),
+    sourceHash: timeline?.sourceHash ?? null,
+    timelineHash: timeline?.hash ?? null,
+    mixAudio: mixAudio !== false,
+    inputs,
+    sources: sources.map(extra => [extra.path, hashText(extra.data)]).sort((a, b) => a[0].localeCompare(b[0])),
+  }));
+}
+
+// Composition receipts keep their historical name and now use the same
+// full-input fingerprint as every other export.
+export async function compositionRenderFingerprint({ pkg, timeline, mixAudio, sources, packageDir }) {
+  return exportRenderFingerprint({ pkg, timeline, mixAudio, sources, packageDir });
 }
 
 /** K1: the word-level VTT is optional; it is written only when cues carry word timings. */
@@ -157,53 +240,74 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
     }
     if (timeline.provisional) onLog('warning: narration is not measured; the timeline is provisional');
 
+    // Captions and video are two outputs of this one compiled timeline. Build
+    // both caption payloads before deciding reuse so the receipt binds them.
+    const cues = Array.isArray(timeline.captions) ? timeline.captions : [];
+    const srtText = captionsToSrt(cues, timeline.fps);
+    const vttText = captionsToVtt(cues, timeline.fps);
+    // K1: a word-level VTT is optional and only written when the timeline has
+    // measured word cues. The sentence SRT/VTT above never change.
+    const hasWords = hasWordCues(cues);
+    const wordsVttText = hasWords ? captionsToWordVtt(cues, timeline.fps) : null;
+    const captionsSha256 = captionsDigest({ srt: srtText, vtt: vttText, wordsVtt: wordsVttText });
+
     const videoPath = join(dir, 'video.mp4');
-    const fingerprint = compositionExtras.length ? await compositionRenderFingerprint({ pkg, timeline, mixAudio, sources: compositionExtras, packageDir }) : null;
-    const receiptPath = join(dir, 'composition-video.json');
+    const fingerprint = await exportRenderFingerprint({ pkg, timeline, mixAudio, sources: compositionExtras, packageDir });
+    const receiptPath = join(dir, 'export-video.json');
+    const compositionReceiptPath = join(dir, 'composition-video.json');
     const videoHash = () => hashFile(videoPath);
-    let matchingComposition = !fingerprint && !existsSync(receiptPath);
-    if (fingerprint && existsSync(videoPath)) {
+    let matchingVideo = false;
+    if (existsSync(videoPath)) {
       const sha256 = await videoHash();
-      if (verifiedVideoSha256 === sha256) matchingComposition = true;
-      else if (existsSync(receiptPath)) {
+      if (verifiedVideoSha256 === sha256) matchingVideo = true;
+      else {
         try {
           const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
-          matchingComposition = receipt.fingerprint === fingerprint && receipt.sha256 === sha256;
-        } catch { /* An invalid receipt is never evidence of a reusable export. */ }
+          matchingVideo = receipt.version === 2
+            && receipt.fingerprint === fingerprint
+            && receipt.sha256 === sha256
+            && receipt.timelineHash === timeline.hash
+            && receipt.captionsSha256 === captionsSha256;
+        } catch { /* An invalid or missing receipt is never evidence of a reusable export. */ }
       }
     }
     let reused = false;
     let video;
-    if (!force && existsSync(videoPath) && matchingComposition) {
+    if (!force && existsSync(videoPath) && matchingVideo) {
       reused = true;
       video = { output: videoPath, frames: timeline.durationInFrames, hash: timeline.hash, bytes: statSync(videoPath).size };
       onLog(`reusing ${videoPath} (${video.bytes} bytes)`);
     } else {
       onLog(`rendering ${videoPath}`);
-      // The renderer needs the materialized package while relative assets still
-      // resolve against the source directory. Never rewrite the saved package.
-      const renderPath = fingerprint ? join(packageDir, `.composition-export-${randomUUID()}.json`) : packagePath;
+      // Render the exact package snapshot the fingerprint covers. The saved
+      // package is never rewritten, and relative assets still resolve here.
+      const renderPath = join(packageDir, `.export-${randomUUID()}.json`);
       try {
-        if (fingerprint) writeFileSync(renderPath, JSON.stringify(pkg), { flag: 'wx', mode: 0o600 });
+        writeFileSync(renderPath, JSON.stringify(pkg), { flag: 'wx', mode: 0o600 });
         video = await render(renderPath, videoPath, { onLog, signal, ...(narration !== undefined ? { narration } : {}), ...(mixAudio === false ? { mixAudio: false } : {}) });
       } finally {
-        if (fingerprint) rmSync(renderPath, { force: true });
+        rmSync(renderPath, { force: true });
       }
       if (!existsSync(videoPath)) throw new Error('render finished without writing an MP4');
     }
-    if (fingerprint) writeFileSync(receiptPath, JSON.stringify({ fingerprint, sha256: await videoHash() }));
-    else rmSync(receiptPath, { force: true });
+    const renderedSha256 = await videoHash();
+    writeFileSync(receiptPath, JSON.stringify({
+      version: 2,
+      packageId: pkg.id,
+      fingerprint,
+      sha256: renderedSha256,
+      timelineHash: timeline.hash,
+      captionsSha256,
+    }));
+    if (compositionExtras.length) writeFileSync(compositionReceiptPath, JSON.stringify({ fingerprint, sha256: renderedSha256 }));
+    else rmSync(compositionReceiptPath, { force: true });
 
-    const cues = Array.isArray(timeline.captions) ? timeline.captions : [];
     const srtPath = join(dir, 'captions.srt');
     const vttPath = join(dir, 'captions.vtt');
-    writeFileSync(srtPath, captionsToSrt(cues, timeline.fps));
-    writeFileSync(vttPath, captionsToVtt(cues, timeline.fps));
-    // K1: a word-level VTT is optional and only written when the timeline has
-    // measured word cues. The sentence SRT/VTT above never change.
-    const hasWords = hasWordCues(cues);
+    writeFileSync(srtPath, srtText);
+    writeFileSync(vttPath, vttText);
     const wordsVttPath = join(dir, 'captions.words.vtt');
-    if (hasWords) writeFileSync(wordsVttPath, captionsToWordVtt(cues, timeline.fps));
+    if (wordsVttText !== null) writeFileSync(wordsVttPath, wordsVttText);
 
     const generatedAt = new Date().toISOString();
     const social = buildSocialPack({ mp4: videoPath, timeline, pkg, outDir: dir, onLog });
