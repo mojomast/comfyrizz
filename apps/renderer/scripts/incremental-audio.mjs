@@ -76,7 +76,8 @@ export function muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timel
   }
 
   // The music bed's fades live in the model; re-read them from the package.
-  const music = mix.music;
+  // IP51P review fix-up: `mix` lives in planAudioBuses now; re-resolve the (pure) music bed here.
+  const music = mixAudio ? resolveAudioMix(pkg, timeline).music : null;
   const fadeIn = music && typeof pkg.audio?.music?.fade_in_seconds === 'number' ? pkg.audio.music.fade_in_seconds : 0.5;
   const fadeOut = music && typeof pkg.audio?.music?.fade_out_seconds === 'number' ? pkg.audio.music.fade_out_seconds : 1;
   if (buses[0]?.kind === 'music') {
