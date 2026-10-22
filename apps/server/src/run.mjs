@@ -48,6 +48,62 @@ export class BackendUnavailableError extends Error {
   }
 }
 
+// IP06: spend is a ledger, not a running estimate. `budget.required` is the admission
+// figure and already includes everything spent before this run, so the run's own cost is
+// the increment over `budget.spent`. A run settles once, in `finally`, whether it
+// succeeded, failed, or failed after the paid media work had already happened.
+function incrementOf(record) {
+  const required = record?.budget?.required;
+  const spent = record?.budget?.spent;
+  if (typeof required !== 'number' || typeof spent !== 'number') return 0;
+  const increment = required - spent;
+  return Number.isFinite(increment) && increment > 0 ? increment : 0;
+}
+
+function unitsFromReading(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (value && typeof value === 'object' && Number.isFinite(value.units)) return value.units;
+  return null;
+}
+
+/** The backend's own account reading, if it has one: explicit fields first, then `spend()`. */
+function readSpend(instance, values) {
+  for (const value of values) {
+    const units = unitsFromReading(value);
+    if (units !== null) return units;
+  }
+  if (instance && typeof instance.spend === 'function') {
+    try {
+      const units = unitsFromReading(instance.spend());
+      if (units !== null) return units;
+    } catch { /* a failed reading is not a zero */ }
+  }
+  return null;
+}
+
+function sawAllocatingEvent(record) {
+  const events = Array.isArray(record?.events) ? record.events : [];
+  return events.some((event) => event?.event === 'allocating' || event?.phase === 'allocating');
+}
+
+/**
+ * A failure is proven pre-allocation only when we can show nothing was ever created:
+ * the backend was never constructed, no `allocating` event was emitted and the partial
+ * result names no up/session, or Google Colab's cleanup confirmed nothing was ever
+ * listed. An interrupted allocation is unknown, not zero.
+ */
+function provesNoAllocation({ record, partial, error, constructed }) {
+  if (!constructed) return true;
+  const cleanup = error?.allocationCleanup ?? error?.cause?.allocationCleanup ?? partial?.allocationCleanup ?? null;
+  if (cleanup && cleanup.confirmedGone === true && cleanup.listedEver !== true) return true;
+  const teardownState = partial?.teardown?.state ?? null;
+  if (teardownState !== null && teardownState !== 'none' && teardownState !== 'skipped') return false;
+  const up = partial?.up ?? null;
+  const session = partial?.session ?? null;
+  if (up || session) return false;
+  return !sawAllocatingEvent(record);
+}
+
 // TR07: a job's progress event is also a clip event. The job id is `<assetId>.<kind>`, so
 // the timeline can update one clip without knowing the runner's job kinds.
 function clipJobFor(record, event) {
@@ -97,6 +153,20 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   let spentEstimate = 0;
 
   const publish = (event) => events?.publish?.(event);
+
+  /** Settle a run's spend exactly once; the ledger survives retries and double waits. */
+  function settle(record, units, kind) {
+    if (record.settled) return record.settled;
+    const amount = Number.isFinite(units) ? Math.max(0, units) : 0;
+    const settled = { kind, units: amount, at: new Date().toISOString() };
+    record.settled = settled;
+    record.settledUnits = amount;
+    spentEstimate = Math.max(0, spentEstimate + amount);
+    try {
+      publish({ type: 'run.settled', runId: record.runId, kind, units: amount, spentEstimate });
+    } catch { /* the ledger is durable even when an observer is not */ }
+    return settled;
+  }
 
   async function backend(backendId, opts = {}) {
     let instance;
@@ -207,11 +277,23 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       const clipJob = clipJobFor(record, event);
       if (clipJob) publish(clipJob);
     };
+    let instance = null;
+    let outcome = null;
     try {
-      const instance = await backend(backendId, {
-        budgetUnits, ratePerHour, comfyuiUrl, packageId: pkg.id,
-        workDir: record.workDir, outDir: record.outputDir, scratchDir: dirname(record.outputDir),
-      });
+      try {
+        instance = await backend(backendId, {
+          budgetUnits, ratePerHour, comfyuiUrl, packageId: pkg.id,
+          workDir: record.workDir, outDir: record.outputDir, scratchDir: dirname(record.outputDir),
+        });
+      } catch (error) {
+        // No backend instance exists, so no compute can have been billed for this run.
+        record.status = 'failed';
+        record.error = error.message;
+        emit({ v: 1, event: 'error', message: error.message, teardown: null });
+        publish({ type: 'run.failed', runId: record.runId, backendId, message: error.message, teardown: null });
+        outcome = { kind: 'not_allocated', units: 0 };
+        return;
+      }
       record.status = 'running';
       // H8's runPackage does plan -> estimate -> up -> health -> run -> collect -> apply -> teardown.
       const result = await instance.runPackage(pkg, {
@@ -235,7 +317,6 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       const complete = result.ok !== false && (result.manifest?.complete ?? true) !== false;
       const finalStatus = complete ? (result.teardown?.state === 'stopped' ? 'done' : result.teardown?.state === 'idle' ? 'idle' : 'stop_unconfirmed') : 'failed';
       record.status = complete && onComplete ? 'rendering' : finalStatus;
-      if (typeof record.budget?.required === 'number') spentEstimate += record.budget.required;
 
       if (onComplete) {
         try {
@@ -243,17 +324,24 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           record.revision = after?.revision ?? null;
           record.render = after?.render ?? null;
         } catch (error) {
-          // Media succeeded, but the end-to-end request has not produced a video.
+          // Media succeeded, but the end-to-end request has not produced a video. The media was
+          // still generated and billed, so this settles like a completed media run.
           record.renderError = error.message;
           record.status = 'failed';
           emit({ v: 1, event: 'render_failed', message: error.message });
           publish({ type: 'run.failed', runId: record.runId, backendId, phase: 'render', message: error.message, teardown: record.teardown, counts: record.counts });
+          const actual = readSpend(instance, [result.spend, result.usage, error.spend, error.usage]);
+          outcome = { kind: 'media_completed', units: actual !== null && actual > 0 ? actual : incrementOf(record) };
           return;
         }
       }
       record.status = finalStatus;
       if (!complete) {
         const unfinished = record.counts?.failed ?? record.counts?.pending ?? record.manifest?.counts?.failed ?? 0;
+        const actual = readSpend(instance, [result.spend, result.usage]);
+        outcome = actual !== null
+          ? { kind: 'actual', units: actual }
+          : { kind: 'reservation_unverified', units: incrementOf(record) };
         publish({
           type: 'run.failed',
           runId: record.runId,
@@ -266,6 +354,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         });
         return;
       }
+      outcome = { kind: 'completed', units: incrementOf(record) };
       publish({
         type: 'run.finished',
         runId: record.runId,
@@ -286,6 +375,26 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       record.counts = partial?.counts ?? record.counts;
       emit({ v: 1, event: 'error', message: error.message, teardown: record.teardown?.state ?? null });
       publish({ type: 'run.failed', runId: record.runId, backendId, message: error.message, teardown: record.teardown ?? null });
+      const actual = readSpend(instance, [
+        partial?.spend, partial?.usage,
+        error.spend, error.usage,
+        error?.cause?.spend, error?.cause?.usage,
+      ]);
+      if (provesNoAllocation({ record, partial, error, constructed: Boolean(instance) })) {
+        outcome = { kind: 'not_allocated', units: 0 };
+      } else if (actual !== null && actual > 0) {
+        outcome = { kind: 'actual', units: actual };
+      } else {
+        // A VM may have existed and been billed: unknown is not zero.
+        outcome = { kind: 'reservation_unverified', units: incrementOf(record) };
+      }
+    } finally {
+      if (!outcome) {
+        outcome = record.status === 'failed'
+          ? { kind: 'reservation_unverified', units: incrementOf(record) }
+          : { kind: 'completed', units: incrementOf(record) };
+      }
+      settle(record, outcome.units, outcome.kind);
     }
   }
 
