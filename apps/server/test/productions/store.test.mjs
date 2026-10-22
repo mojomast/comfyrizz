@@ -650,3 +650,48 @@ test('generated event ids are deterministic for the same command and index', (t)
   assert.equal(first.events[0].id, expected);
   assert.equal(store.readEvents(production.id)[0].id, expected);
 });
+
+test('requestHash is persisted and a conflicting replay commits nothing', (t) => {
+  const runtimeDir = tempRuntime(t);
+  const store = makeStore(t, runtimeDir);
+  const production = makeProduction();
+  store.create(production);
+
+  const requestHash = createHash('sha256').update('same-request').digest('hex');
+  const first = store.commit(production.id, {
+    commandId: 'cmd_hash',
+    idempotencyKey: 'key_hash',
+    baseRevision: 0,
+    production: { ...production, intent: 'paused' },
+    events: [makeEvent('stage.entered', { stage: 'media' })],
+    requestHash,
+  });
+  assert.equal(first.commit.requestHash, requestHash);
+  assert.equal(store.findCommit(production.id, { commandId: 'cmd_hash', idempotencyKey: 'key_hash' }).requestHash, requestHash);
+
+  const replay = store.commit(production.id, {
+    commandId: 'cmd_hash',
+    idempotencyKey: 'key_hash',
+    production: { ...production, intent: 'paused' },
+    events: [makeEvent('stage.entered', { stage: 'media' })],
+    requestHash,
+  });
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.revision, 1);
+  assert.equal(store.readEvents(production.id).length, 1);
+
+  assert.throws(
+    () => store.commit(production.id, {
+      commandId: 'cmd_hash',
+      idempotencyKey: 'key_hash',
+      baseRevision: 1,
+      production: { ...production, intent: 'archived' },
+      events: [makeEvent('stage.completed', { stage: 'media' })],
+      requestHash: createHash('sha256').update('different-request').digest('hex'),
+    }),
+    (error) => error instanceof ProductionStoreError && error.code === 'IDEMPOTENCY_CONFLICT',
+  );
+  assert.equal(store.read(production.id).intent, 'paused');
+  assert.equal(store.read(production.id).revision, 1);
+  assert.equal(store.readEvents(production.id).length, 1);
+});

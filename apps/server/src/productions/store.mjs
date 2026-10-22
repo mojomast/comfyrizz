@@ -515,6 +515,22 @@ export function createProductionStore(options = {}) {
   }
 
   /**
+   * The committed command record for this command id or idempotency key, or
+   * null when the command has not committed. This is a read-only lookup so the
+   * command handler can compare request hashes before any approval gate.
+   */
+  function findCommit(productionId, input = {}) {
+    const paths = pathsFor(productionId);
+    const state = readStateAt(paths);
+    if (!state) return null;
+    if (!isPlainObject(input)) fail('INVALID_COMMIT', 'findCommit input must be an object');
+    const commandId = input.commandId === undefined ? undefined : assertGeneralId(input.commandId, 'commandId');
+    const idempotencyKey = input.idempotencyKey === undefined ? undefined : assertGeneralId(input.idempotencyKey, 'idempotencyKey');
+    const commit = findDuplicateCommit(state, commandId, idempotencyKey);
+    return commit ? clone(commit) : null;
+  }
+
+  /**
    * Commit one command atomically. `production` is the next full production
    * document (revision and lastSequence are assigned by the store). `events`
    * are event inputs; `outbox` entries become committed, pending side effects.
@@ -530,8 +546,21 @@ export function createProductionStore(options = {}) {
       ? commandId
       : assertGeneralId(input.idempotencyKey, 'idempotencyKey');
 
+    const requestHash = input.requestHash === undefined
+      ? undefined
+      : assertGeneralId(input.requestHash, 'requestHash');
+
     const prior = findDuplicateCommit(state, commandId, idempotencyKey);
     if (prior) {
+      // Spec 7.1: the same command id (or key) with a different canonical
+      // payload is a conflict, never a silent first-write-wins replay. Records
+      // written before request hashes existed keep their old duplicate shape.
+      if (prior.requestHash !== undefined && requestHash !== undefined && prior.requestHash !== requestHash) {
+        fail('IDEMPOTENCY_CONFLICT', 'command id or idempotency key was reused with a different request', {
+          commandId,
+          idempotencyKey,
+        });
+      }
       // The commit record, not the journal, is the proof. A duplicate returns
       // every event and outbox id the command committed, exactly once.
       return {
@@ -633,6 +662,7 @@ export function createProductionStore(options = {}) {
     const record = {
       commandId,
       idempotencyKey,
+      ...(requestHash === undefined ? {} : { requestHash }),
       revision: production.revision,
       firstSequence: events.length > 0 ? events[0].sequence : production.lastSequence,
       lastSequence: production.lastSequence,
@@ -828,6 +858,7 @@ export function createProductionStore(options = {}) {
     read,
     list,
     commit,
+    findCommit,
     appendEvents,
     readEvents,
     enqueueOutbox,
