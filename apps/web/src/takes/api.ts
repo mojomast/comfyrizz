@@ -255,6 +255,104 @@ export class TakesApiError extends Error {
 const MEDIA_URL_RE = /^\/api\/media\/[A-Za-z0-9_-]+$/;
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
+export const TAKE_IMAGE_EXTENSIONS = Object.freeze([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.avif',
+] as const);
+
+const TAKE_IMAGE_EXTENSION_SET: ReadonlySet<string> = new Set(TAKE_IMAGE_EXTENSIONS);
+const TAKE_VIDEO_EXTENSION_SET: ReadonlySet<string> = new Set([
+  '.mp4',
+  '.m4v',
+  '.mov',
+  '.webm',
+  '.mkv',
+  '.avi',
+]);
+
+/** A media-ticket URL is the only take media path the browser may load. */
+export function isMediaTicketUrl(value: unknown): value is string {
+  return typeof value === 'string' && MEDIA_URL_RE.test(value.trim());
+}
+
+/** The lower-case extension of a take's stored file, including the dot. */
+export function takeFileExtension(take: ClipTake | null | undefined): string {
+  const file = textValue(take?.file).split(/[?#]/, 1)[0] ?? '';
+  const name = file.slice(file.lastIndexOf('/') + 1);
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot).toLowerCase() : '';
+}
+
+function takeMediaText(take: ClipTake | null | undefined, keys: readonly string[]): string {
+  const media = take?.media;
+  if (!isObject(media)) return '';
+  for (const key of keys) {
+    const value = media[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+/** Images can be shown directly; video takes need a poster frame or fallback. */
+export function takeLooksLikeImage(take: ClipTake | null | undefined): boolean {
+  const extension = takeFileExtension(take);
+  if (TAKE_IMAGE_EXTENSION_SET.has(extension)) return true;
+  if (TAKE_VIDEO_EXTENSION_SET.has(extension)) return false;
+  const mime = takeMediaText(take, ['mime', 'mimeType', 'contentType', 'type']).toLowerCase();
+  if (mime) return mime.startsWith('image/');
+  return true;
+}
+
+/** An existing poster/frame URL recorded on the take, if the server has one. */
+export function takePosterMediaUrl(take: ClipTake | null | undefined): string | null {
+  const media = take?.media;
+  if (isObject(media)) {
+    for (const key of ['poster', 'posterUrl', 'thumbnail', 'thumbnailUrl', 'thumb', 'thumbUrl']) {
+      const value = media[key];
+      if (isMediaTicketUrl(value)) return value.trim();
+    }
+  }
+  const record = take as unknown as Record<string, unknown> | null | undefined;
+  if (record) {
+    for (const key of ['poster', 'posterUrl', 'thumbnail', 'thumbnailUrl', 'thumbUrl']) {
+      const value = record[key];
+      if (isMediaTicketUrl(value)) return value.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * The take a review thumbnail should show: the selected take when it still
+ * exists, otherwise the newest non-purged take.
+ */
+export function activeReviewTake(
+  takes: readonly ClipTake[] | null | undefined,
+  selected?: string | null,
+): ClipTake | null {
+  const list = Array.isArray(takes)
+    ? takes.filter(take => isObject(take) && typeof take.takeId === 'string' && take.purged !== true)
+    : [];
+  if (list.length === 0) return null;
+  if (typeof selected === 'string' && selected) {
+    const found = list.find(take => take.takeId === selected);
+    if (found) return found;
+  }
+  return [...list].sort((a, b) => {
+    const numberA = Number.isFinite(Number(a.n)) ? Number(a.n) : 0;
+    const numberB = Number.isFinite(Number(b.n)) ? Number(b.n) : 0;
+    if (numberA !== numberB) return numberB - numberA;
+    const createdA = textValue(a.createdAt);
+    const createdB = textValue(b.createdAt);
+    if (createdA !== createdB) return createdB.localeCompare(createdA);
+    return b.takeId.localeCompare(a.takeId);
+  })[0] ?? null;
+}
+
 export function clipsPath(packageId: string): string {
   return `/api/package/${encodeURIComponent(packageId)}/clips`;
 }

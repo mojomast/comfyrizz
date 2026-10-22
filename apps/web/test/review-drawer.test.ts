@@ -9,6 +9,7 @@ import {
   REVIEW_ROW_HEIGHT_COMPACT,
   REVIEW_ROW_HEIGHT_COMFORTABLE,
   ReviewDrawerModel,
+  ReviewThumbCache,
   clipNeedsReview,
   createReviewDrawerModel,
   currentReviewRowHeight,
@@ -26,6 +27,12 @@ import {
   windowRange,
 } from '../src/takes/review-drawer.ts';
 import { approvedPillLabel, renderRenderBar, summarizeGate } from '../src/takes/render-bar.ts';
+import {
+  activeReviewTake,
+  createTakesApi,
+  takeLooksLikeImage,
+  takePosterMediaUrl,
+} from '../src/takes/api.ts';
 
 function clip(n: number, overrides: Record<string, unknown> = {}) {
   const id = `ep2_video_a${String(n).padStart(2, '0')}`;
@@ -642,6 +649,232 @@ test('Esc still closes the drawer after the last visible clip is approved', asyn
     pressKey(doc.activeElement, 'Escape');
     assert.equal(handle.isOpen(), false);
     assert.equal(handle.element.hidden, true);
+
+    handle.destroy();
+  } finally {
+    restore();
+  }
+});
+
+function fakeTake(n, overrides = {}) {
+  const takeId = overrides.takeId ?? `tk_${String(n).repeat(12)}`;
+  return {
+    takeId,
+    assetId: 'a_icon_check',
+    n,
+    file: `takes/a_icon_check/${takeId}.png`,
+    sha256: 'a'.repeat(64),
+    bytes: 640,
+    media: {},
+    gen: {},
+    createdAt: `2026-10-2${n % 10}T00:00:00.000Z`,
+    verdict: 'unreviewed',
+    ...overrides,
+  };
+}
+
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function stubReviewFetch(takesByClip = {}) {
+  const calls = [];
+  const fetchImpl = async (input, init = {}) => {
+    const url = new URL(String(input), 'http://127.0.0.1');
+    const method = String(init.method ?? 'GET').toUpperCase();
+    calls.push({ path: url.pathname, method });
+
+    const takesMatch = /^\/api\/package\/([^/]+)\/clips\/([^/]+)\/takes$/.exec(url.pathname);
+    if (takesMatch) {
+      const clipId = decodeURIComponent(takesMatch[2]);
+      const entry = takesByClip[clipId] ?? { selected: null, takes: [] };
+      const takes = entry.takes ?? [];
+      const selected = entry.selected ?? null;
+      return jsonResponse({
+        packageId: decodeURIComponent(takesMatch[1]),
+        revision: 1,
+        clip: { clipId },
+        assetId: takes[0]?.assetId ?? 'a_icon_check',
+        selected,
+        takes,
+        history: [],
+        lastJob: null,
+        queued: null,
+      });
+    }
+
+    const ticketMatch = /^\/api\/package\/([^/]+)\/clips\/([^/]+)\/takes\/([^/]+)\/ticket$/.exec(url.pathname);
+    if (ticketMatch && method === 'POST') {
+      const takeId = decodeURIComponent(ticketMatch[3]);
+      return jsonResponse({
+        kind: 'ticket',
+        takeId,
+        ticket: `ticket_${takeId}`,
+        url: `/api/media/ticket_${takeId}`,
+      });
+    }
+
+    return jsonResponse({ error: 'not found' }, 404);
+  };
+  return {
+    calls,
+    apiFetch: fetchImpl,
+    getCalls() { return calls.filter(call => call.method === 'GET').length; },
+    ticketCalls() { return calls.filter(call => call.path.endsWith('/ticket')); },
+  };
+}
+
+async function flushThumbs() {
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+test('the thumbnail source is the selected take, then the newest active take', () => {
+  const one = fakeTake(1);
+  const two = fakeTake(2);
+  const three = fakeTake(3);
+  const purgedSelected = fakeTake(4, { purged: true });
+
+  assert.equal(activeReviewTake([one, three, two], two.takeId).takeId, two.takeId);
+  assert.equal(activeReviewTake([one, three, purgedSelected], purgedSelected.takeId).takeId, three.takeId);
+  assert.equal(activeReviewTake([one, two, three], null).takeId, three.takeId);
+  assert.equal(activeReviewTake([], one.takeId), null);
+
+  assert.equal(takeLooksLikeImage(one), true);
+  assert.equal(takeLooksLikeImage(fakeTake(5, { file: 'takes/a/clip.mp4' })), false);
+  assert.equal(
+    takePosterMediaUrl(fakeTake(5, { file: 'takes/a/clip.mp4', media: { poster: '/api/media/poster_frame1' } })),
+    '/api/media/poster_frame1',
+  );
+});
+
+test('thumbnails are cached per takeId and failures stay on the kind fallback', async () => {
+  const shared = fakeTake(2, { takeId: 'tk_shared123456' });
+  const selected = shared.takeId;
+  const stub = stubReviewFetch({
+    's_title:a_icon_check': {
+      selected,
+      takes: [fakeTake(1), shared],
+    },
+    's_stat:a_icon_check': {
+      selected: shared.takeId,
+      takes: [shared],
+    },
+    's_empty:a_none': { selected: null, takes: [] },
+  });
+  const api = createTakesApi({ apiFetch: stub.apiFetch });
+  const cache = new ReviewThumbCache({ packageId: 'pkg_launchdemo0001', api });
+
+  const first = await cache.load('s_title:a_icon_check', selected);
+  assert.equal(first.source, 'image');
+  assert.equal(first.takeId, selected);
+  assert.equal(first.url, `/api/media/ticket_${selected}`);
+  assert.equal(stub.ticketCalls().length, 1);
+
+  const callsAfterFirst = stub.calls.length;
+  const cachedAgain = await cache.load('s_title:a_icon_check', selected);
+  assert.equal(cachedAgain.url, first.url);
+  assert.equal(stub.calls.length, callsAfterFirst, 'a rendered row is not fetched twice');
+
+  const sameTakeOtherClip = await cache.load('s_stat:a_icon_check', shared.takeId);
+  assert.equal(sameTakeOtherClip.url, `/api/media/ticket_${shared.takeId}`);
+  assert.equal(stub.ticketCalls().length, 1, 'a shared takeId reuses its media ticket');
+
+  const empty = await cache.load('s_empty:a_none');
+  assert.equal(empty.source, 'fallback');
+  assert.equal(empty.url, null);
+
+  const failing = new ReviewThumbCache({
+    packageId: 'pkg_launchdemo0001',
+    api: {
+      async getTakes() { throw new Error('offline'); },
+      async takeUrl() { throw new Error('offline'); },
+    },
+  });
+  assert.deepEqual(await failing.load('s_title:a_icon_check'), { takeId: null, url: null, source: 'fallback' });
+});
+
+test('the drawer hydrates only the virtualized rows and keeps the 64x36 fallback', async () => {
+  const list = clips(48);
+  const takesByClip = {};
+  for (const item of list) {
+    takesByClip[item.clipId] = {
+      selected: item.selected,
+      takes: [fakeTake(2, { takeId: item.selected, media: { width: 640, height: 360 } })],
+    };
+  }
+  const stub = stubReviewFetch(takesByClip);
+  const api = createTakesApi({ apiFetch: stub.apiFetch });
+  const { doc, restore } = installFakeDom();
+  try {
+    const host = doc.createElement('div');
+    const handle = mountReviewDrawer({
+      host,
+      clips: list,
+      takesApi: api,
+      packageId: 'pkg_launchdemo0001',
+    });
+    assert.equal(stub.calls.length, 0, 'a hidden drawer does not request thumbnails');
+
+    handle.open();
+    const view = handle.model.window();
+    assert.ok(view.end < list.length);
+    assert.equal(stub.getCalls(), view.end, 'only the rendered window asks for takes');
+
+    await flushThumbs();
+    const thumbs = handle.element.querySelectorAll('.review-thumb');
+    assert.equal(thumbs.length, view.end - view.start);
+    for (const thumb of thumbs) {
+      const img = thumb.querySelector('img');
+      assert.ok(img, 'a row with a selected take shows its image');
+      assert.equal(img.getAttribute('alt'), '');
+      assert.equal(img.getAttribute('loading'), 'lazy');
+      assert.equal(img.getAttribute('decoding'), 'async');
+      assert.equal(thumb.getAttribute('data-has-thumb'), 'true');
+    }
+
+    const beforeScroll = stub.getCalls();
+    handle.model.setScrollTop(REVIEW_ROW_HEIGHT * 30);
+    const scrolled = handle.model.window();
+    await flushThumbs();
+    assert.equal(stub.getCalls(), beforeScroll + (scrolled.end - scrolled.start));
+    assert.ok(stub.getCalls() < list.length, 'scrolling never loads all 48 clips at once');
+
+    handle.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test('a clip without a take keeps the kind text instead of an image', async () => {
+  const withTake = clip(1);
+  const withoutTake = clip(2, { selected: null, selectedN: null, takeCount: 0 });
+  const stub = stubReviewFetch({
+    [withTake.clipId]: { selected: withTake.selected, takes: [fakeTake(2, { takeId: withTake.selected })] },
+    [withoutTake.clipId]: { selected: null, takes: [] },
+  });
+  const { doc, restore } = installFakeDom();
+  try {
+    const host = doc.createElement('div');
+    const handle = mountReviewDrawer({
+      host,
+      clips: [withTake, withoutTake],
+      takesApi: createTakesApi({ apiFetch: stub.apiFetch }),
+      packageId: 'pkg_launchdemo0001',
+    });
+    handle.open();
+    await flushThumbs();
+
+    const rows = handle.element.querySelectorAll('[data-review-clip]');
+    assert.equal(rows.length, 2);
+    assert.ok(rows[0].querySelector('.review-thumb').querySelector('img'));
+    assert.equal(rows[1].querySelector('.review-thumb').querySelector('img'), null);
+    const fallback = rows[1].querySelector('[data-review-thumb-fallback]');
+    assert.equal(fallback.textContent, 'plate');
+    assert.equal(rows[1].querySelector('.review-thumb').getAttribute('data-has-thumb'), null);
 
     handle.destroy();
   } finally {

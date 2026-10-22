@@ -6,7 +6,18 @@
  * point and it does nothing until it is called. The drawer is non-modal, keeps
  * every input alive while it is hidden and only moves focus after an approval.
  */
-import type { ClipSummary } from './api.ts';
+import { apiFetch } from '../editor/api.ts';
+import {
+  activeReviewTake,
+  createTakesApi,
+  isMediaTicketUrl,
+  takeLooksLikeImage,
+  takePosterMediaUrl,
+  type ClipSummary,
+  type ClipTake,
+  type TakesApi,
+  type TakesResponse,
+} from './api.ts';
 
 export const REVIEW_FILTERS = ['needs', 'stale', 'approved', 'failed'] as const;
 
@@ -90,6 +101,170 @@ export interface ReviewRow {
   title: string;
 }
 
+export type ReviewThumbSourceKind = 'image' | 'poster' | 'fallback';
+
+export interface ReviewThumbResult {
+  takeId: string | null;
+  url: string | null;
+  source: ReviewThumbSourceKind;
+}
+
+export const REVIEW_THUMB_FALLBACK: Readonly<ReviewThumbResult> = Object.freeze({
+  takeId: null,
+  url: null,
+  source: 'fallback',
+});
+
+/**
+ * `?package=` is what the shell opens from the server. The data attribute is a
+ * hook for hosts that already know the package, and the empty fallback keeps
+ * the drawer usable offline (the kind text stays in the thumbnail).
+ */
+export function reviewPackageIdFromSearch(search: unknown, fallback = ''): string {
+  try {
+    const requested = new URLSearchParams(typeof search === 'string' ? search : '').get('package')?.trim();
+    return requested || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function currentReviewPackageId(): string {
+  let fallback = '';
+  try {
+    const root = typeof document === 'undefined' ? null : document.documentElement;
+    fallback = String(root?.dataset?.packageId ?? root?.dataset?.package ?? '').trim();
+  } catch {
+    fallback = '';
+  }
+  try {
+    return reviewPackageIdFromSearch(globalThis.location?.search ?? '', fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+/** The slice of the takes client a thumbnail needs. */
+export interface ReviewThumbApi {
+  getTakes(packageId: string, clipId: string): Promise<TakesResponse>;
+  takeUrl(packageId: string, clipId: string, takeId: string): Promise<string>;
+}
+
+export interface ReviewThumbCacheOptions {
+  packageId: string | (() => string);
+  api: ReviewThumbApi;
+}
+
+const EMPTY_THUMB_RESULT: ReviewThumbResult = REVIEW_THUMB_FALLBACK;
+
+/**
+ * Resolves review-row thumbnails without ever mounting them. The caller only
+ * asks for rows in the virtualized window; results (including failures) are
+ * cached per clip/selection and ticket URLs are shared per takeId, so a shared
+ * asset or a scroll back into view never mints a second ticket.
+ */
+export class ReviewThumbCache {
+  private readonly packageIdSource: string | (() => string);
+  private readonly api: ReviewThumbApi;
+  private readonly results = new Map<string, ReviewThumbResult>();
+  private readonly pending = new Map<string, Promise<ReviewThumbResult>>();
+  private readonly ticketUrls = new Map<string, string>();
+
+  constructor(options: ReviewThumbCacheOptions) {
+    this.packageIdSource = options.packageId;
+    this.api = options.api;
+  }
+
+  get size(): number {
+    return this.results.size;
+  }
+
+  packageId(): string {
+    const value = typeof this.packageIdSource === 'function'
+      ? this.packageIdSource()
+      : this.packageIdSource;
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  private key(packageId: string, clipId: string, selected: string | null): string {
+    return `${packageId}\u0000${clipId}\u0000${selected ?? ''}`;
+  }
+
+  private ticketKey(packageId: string, takeId: string): string {
+    return `${packageId}\u0000${takeId}`;
+  }
+
+  load(clipId: string, selected: string | null = null): Promise<ReviewThumbResult> {
+    const packageId = this.packageId();
+    if (!packageId || !clipId) return Promise.resolve(EMPTY_THUMB_RESULT);
+    const key = this.key(packageId, clipId, selected);
+    const cached = this.results.get(key);
+    if (cached) return Promise.resolve(cached);
+    const inflight = this.pending.get(key);
+    if (inflight) return inflight;
+    const task = this.resolve(packageId, clipId, selected)
+      .then(result => {
+        this.results.set(key, result);
+        return result;
+      })
+      .catch(() => {
+        this.results.set(key, EMPTY_THUMB_RESULT);
+        return EMPTY_THUMB_RESULT;
+      })
+      .finally(() => {
+        this.pending.delete(key);
+      });
+    this.pending.set(key, task);
+    return task;
+  }
+
+  private async resolve(
+    packageId: string,
+    clipId: string,
+    selected: string | null,
+  ): Promise<ReviewThumbResult> {
+    let data: TakesResponse;
+    try {
+      data = await this.api.getTakes(packageId, clipId);
+    } catch {
+      return EMPTY_THUMB_RESULT;
+    }
+    const take: ClipTake | null = activeReviewTake(
+      data?.takes,
+      (typeof data?.selected === 'string' && data.selected) ? data.selected : selected,
+    );
+    if (!take) return EMPTY_THUMB_RESULT;
+
+    if (!takeLooksLikeImage(take)) {
+      const poster = takePosterMediaUrl(take);
+      return poster
+        ? { takeId: take.takeId, url: poster, source: 'poster' }
+        : EMPTY_THUMB_RESULT;
+    }
+
+    const ticketKey = this.ticketKey(packageId, take.takeId);
+    const cachedUrl = this.ticketUrls.get(ticketKey);
+    if (cachedUrl) {
+      return { takeId: take.takeId, url: cachedUrl, source: 'image' };
+    }
+    try {
+      const url = await this.api.takeUrl(packageId, clipId, take.takeId);
+      if (!isMediaTicketUrl(url)) return EMPTY_THUMB_RESULT;
+      const normalized = url.trim();
+      this.ticketUrls.set(ticketKey, normalized);
+      return { takeId: take.takeId, url: normalized, source: 'image' };
+    } catch {
+      return EMPTY_THUMB_RESULT;
+    }
+  }
+
+  clear(): void {
+    this.results.clear();
+    this.pending.clear();
+    this.ticketUrls.clear();
+  }
+}
+
 export interface ReviewFilterOptions {
   filter?: ReviewFilter;
   query?: string;
@@ -134,6 +309,10 @@ export interface ReviewKeyOptions {
 export interface ReviewDrawerMountOptions extends ReviewDrawerModelOptions {
   host?: HTMLElement;
   id?: string;
+  /** The takes client for row thumbnails. Defaults to the shell's `apiFetch`. */
+  takesApi?: ReviewThumbApi | null;
+  /** Usually `?package=`; a getter keeps a re-opened project current. */
+  packageId?: string | (() => string);
   onOpenChange?: (open: boolean) => void;
   onRender?: (overrideReason?: string) => void | Promise<void>;
 }
@@ -326,7 +505,7 @@ export function renderReviewRows(
     const active = row.clipId === activeId;
     const blocking = row.group === 'approved' ? '' : ` data-render-blocker="${escapeReviewHtml(row.clipId)}"`;
     return `<div class="review-row" id="${rowId(index)}" role="option" tabindex="${active ? '0' : '-1'}" aria-selected="${active ? 'true' : 'false'}" data-review-clip="${escapeReviewHtml(row.clipId)}" data-review-status="${row.group}" data-tone="${row.tone}"${blocking} title="${escapeReviewHtml(row.title)}">
-      <span class="review-thumb" aria-hidden="true"><span>${escapeReviewHtml(row.kind)}</span></span>
+      <span class="review-thumb" aria-hidden="true" data-review-thumb><span data-review-thumb-fallback>${escapeReviewHtml(row.kind)}</span></span>
       <span class="review-row-main">
         <span class="review-row-title" title="${escapeReviewHtml(row.fullId)}">${escapeReviewHtml(row.shortId)}</span>
         <span class="review-row-meta">
@@ -795,6 +974,14 @@ export function mountReviewDrawer(
   let lastFocus: HTMLElement | null = null;
   let pendingOverride: ((reason: string | null) => void) | null = null;
   let destroyed = false;
+  let thumbToken = 0;
+
+  const thumbs = options.takesApi === null
+    ? null
+    : new ReviewThumbCache({
+        packageId: options.packageId ?? currentReviewPackageId,
+        api: options.takesApi ?? createTakesApi({ apiFetch }),
+      });
 
   function syncRowHeight(): void {
     const height = reviewRowHeight(currentDensity());
@@ -852,6 +1039,61 @@ export function mountReviewDrawer(
     row?.focus();
   }
 
+  function findThumb(clipId: string): HTMLElement | null {
+    for (const row of list.querySelectorAll<HTMLElement>('[data-review-clip]')) {
+      if (row.dataset.reviewClip === clipId) {
+        return row.querySelector<HTMLElement>('.review-thumb');
+      }
+    }
+    return null;
+  }
+
+  function applyThumb(thumb: HTMLElement, result: ReviewThumbResult): void {
+    if (!result.url) return;
+    const img = document.createElement('img');
+    img.setAttribute('src', result.url);
+    img.setAttribute('alt', '');
+    img.setAttribute('loading', 'lazy');
+    img.setAttribute('decoding', 'async');
+    if (result.takeId) img.setAttribute('data-review-thumb-take', result.takeId);
+    if (result.source === 'poster') img.setAttribute('data-review-thumb-poster', 'true');
+    img.addEventListener('error', () => {
+      img.remove();
+      thumb.removeAttribute('data-has-thumb');
+      thumb.removeAttribute('data-thumb-take');
+    });
+    thumb.setAttribute('data-has-thumb', 'true');
+    if (result.takeId) thumb.setAttribute('data-thumb-take', result.takeId);
+    thumb.appendChild(img);
+  }
+
+  /**
+   * Only the rows the virtualizer rendered are asked for a thumbnail. The
+   * window changes on scroll (which repaints), so a 48-clip list never starts
+   * 48 ticket requests at once.
+   */
+  function hydrateThumbs(): void {
+    if (!thumbs || aside.hidden || destroyed) {
+      thumbToken += 1;
+      return;
+    }
+    const token = ++thumbToken;
+    const byId = new Map(model.clips.map(clip => [clip.clipId, clip]));
+    for (const row of list.querySelectorAll<HTMLElement>('[data-review-clip]')) {
+      const clipId = row.dataset.reviewClip;
+      if (!clipId) continue;
+      const thumb = row.querySelector<HTMLElement>('.review-thumb');
+      if (!thumb || thumb.dataset.hasThumb === 'true') continue;
+      const selected = byId.get(clipId)?.selected ?? null;
+      void thumbs.load(clipId, selected).then(result => {
+        if (token !== thumbToken || destroyed || aside.hidden || !result.url) return;
+        const current = findThumb(clipId);
+        if (!current || current.dataset.hasThumb === 'true') return;
+        applyThumb(current, result);
+      }).catch(() => undefined);
+    }
+  }
+
   function paint(): void {
     if (destroyed) return;
     const counts = model.counts;
@@ -883,6 +1125,7 @@ export function mountReviewDrawer(
     if (approveAll) approveAll.disabled = !rows.some(row => row.group === 'needs') || model.busy;
     if (live.textContent !== model.liveMessage) live.textContent = model.liveMessage;
     bindGateActions();
+    hydrateThumbs();
   }
 
   function settleOverride(value: string | null): void {
@@ -1039,6 +1282,8 @@ export function mountReviewDrawer(
     },
     destroy() {
       destroyed = true;
+      thumbToken += 1;
+      thumbs?.clear();
       densityObserver?.disconnect();
       document.removeEventListener('keydown', onDocumentKey);
       settleOverride(null);
