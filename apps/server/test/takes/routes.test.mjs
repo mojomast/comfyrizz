@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { PackageStore } from '../../src/store.mjs';
 import { createTakeStore } from '../../src/takes/store.mjs';
 import { createTakeRoutes } from '../../src/takes/routes.mjs';
+import { createCommandHandler } from '../../src/productions/commands.mjs';
+import { createProductionStore } from '../../src/productions/store.mjs';
 
 const fixturePath = fileURLToPath(new URL('../../../../packages/schema/fixtures/valid/variants.json', import.meta.url));
 const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
@@ -103,7 +105,7 @@ async function call(routes, path, { method, body } = {}) {
   return { matched, ...response.out };
 }
 
-function setup(t, { runMode = 'started' } = {}) {
+function setup(t, { runMode = 'started', bindProduction = false } = {}) {
   const space = workspace(t);
   const store = new PackageStore(space.packageDir);
   const pkg = makePackage();
@@ -127,8 +129,38 @@ function setup(t, { runMode = 'started' } = {}) {
       return { ticket: 'd'.repeat(32), expiresAt: '2026-10-20T12:10:00.000Z', url: `/api/media/${'d'.repeat(32)}` };
     },
   };
-  const routes = createTakeRoutes({ store, takeStore, runs, events, mediaTickets });
-  return { ...space, store, pkg, takeStore, runs, events, mints, routes };
+  let production = null;
+  if (bindProduction) {
+    const clock = () => new Date('2026-10-20T12:00:00.000Z');
+    const productionStore = createProductionStore({ runtimeDir: join(space.runtimeDir, 'production'), clock });
+    t.after(() => productionStore.close?.());
+    const handler = createCommandHandler({ store: productionStore, clock });
+    const context = { actor: 'user', userEventId: 'ue_routes' };
+    const created = handler.execute({
+      commandId: 'cmd_production_create',
+      idempotencyKey: 'key_production_create',
+      kind: 'production.create',
+      expected: { productionRevision: 0 },
+      payload: { conversationId: 'conv_routes', packageId: pkg.id },
+    }, { actor: 'user', userEventId: 'ue_create' });
+    production = {
+      store: productionStore,
+      handler,
+      context,
+      productionId: created.productionId,
+      revision: created.revision,
+      bind: async () => ({ productionId: created.productionId, handler, context }),
+    };
+  }
+  const routes = createTakeRoutes({
+    store,
+    takeStore,
+    runs,
+    events,
+    mediaTickets,
+    ...(production ? { production: production.bind } : {}),
+  });
+  return { ...space, store, pkg, takeStore, runs, events, mints, routes, production };
 }
 
 function addTake(ctx, bytes, name = 'take.mp4') {
@@ -394,4 +426,172 @@ test('TR08: invalid JSON is a client error and unknown clip routes are 404', asy
 
   const unknown = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/nope`, { body: {} });
   assert.equal(unknown.status, 404);
+});
+
+
+function boundBody(overrides = {}) {
+  return {
+    commandId: 'cmd_take_request',
+    idempotencyKey: 'key_take_request',
+    expected: { productionRevision: 1 },
+    ...overrides,
+  };
+}
+
+test('IP23: bound regenerate journals take.request and never dispatches paid work', async (t) => {
+  const ctx = setup(t, { bindProduction: true });
+  const beforeEvents = ctx.production.store.readEvents(ctx.production.productionId).length;
+
+  const response = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/regenerate`, {
+    body: boundBody({
+      change: { note: 'cleaner background', seed: 'keep' },
+      backendId: 'colab',
+      approved: true,
+      budgetUnits: 99,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  assert.equal(response.json.kind, 'requested');
+  assert.equal(response.json.productionId, ctx.production.productionId);
+  assert.equal(response.json.productionRevision, 2);
+  assert.equal(response.json.commandId, 'cmd_take_request');
+  assert.equal(response.json.clip.assetId, 'a_plate1');
+  assert.equal(response.json.clip.clipId, CLIP);
+  assert.equal(ctx.runs.calls.length, 0, 'a bound request never starts a run');
+  assert.equal(ctx.takeStore.read(ctx.pkg.id), null, 'a bound request does not write legacy queued state');
+
+  const events = ctx.production.store.readEvents(ctx.production.productionId);
+  assert.equal(events.length, beforeEvents + 1);
+  const event = events.at(-1);
+  assert.equal(event.type, 'take.requested');
+  assert.equal(event.commandId, 'cmd_take_request');
+  assert.equal(event.userEventId, 'ue_routes');
+  assert.equal(event.data.assetId, 'a_plate1');
+  assert.equal(event.data.correction.note, 'cleaner background');
+  assert.equal(event.data.approved, undefined, 'the legacy approval flag is not journaled');
+  assert.equal(event.data.budgetUnits, undefined, 'the legacy budget is not journaled');
+});
+
+test('IP23: bound regenerate-batch journals one take.request and never dispatches paid work', async (t) => {
+  const ctx = setup(t, { bindProduction: true });
+
+  const response = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/regenerate-batch`, {
+    body: boundBody({
+      commandId: 'cmd_take_batch',
+      idempotencyKey: 'key_take_batch',
+      items: [
+        { clipId: CLIP, change: { note: 'warmer background', seed: 11 } },
+        { clipId: CLIP_STILL, change: { note: 'sharper still', seed: 12 } },
+      ],
+      backendId: 'colab',
+      approved: true,
+      budgetUnits: 50,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  assert.equal(response.json.kind, 'requested');
+  assert.equal(response.json.productionId, ctx.production.productionId);
+  assert.equal(response.json.productionRevision, 2);
+  assert.equal(response.json.commandId, 'cmd_take_batch');
+  assert.equal(response.json.items.length, 2);
+  assert.equal(ctx.runs.calls.length, 0);
+  const event = ctx.production.store.readEvents(ctx.production.productionId).at(-1);
+  assert.equal(event.type, 'take.requested');
+  assert.equal(event.data.items.length, 2);
+  assert.equal(event.data.approved, undefined);
+  assert.equal(event.data.budgetUnits, undefined);
+});
+
+test('IP23: a bound request without a command id or idempotency key is rejected', async (t) => {
+  const ctx = setup(t, { bindProduction: true });
+  const beforeEvents = ctx.production.store.readEvents(ctx.production.productionId).length;
+
+  const response = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/regenerate`, {
+    body: {
+      change: { note: 'no key', seed: 'keep' },
+      expected: { productionRevision: 1 },
+    },
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.json.code, 'MISSING_COMMAND_ID');
+  assert.equal(ctx.runs.calls.length, 0);
+  assert.equal(ctx.production.store.readEvents(ctx.production.productionId).length, beforeEvents);
+});
+
+test('IP23: a bound request requires expected.productionRevision', async (t) => {
+  const ctx = setup(t, { bindProduction: true });
+
+  const response = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/regenerate`, {
+    body: {
+      change: { note: 'no revision', seed: 'keep' },
+      commandId: 'cmd_no_revision',
+      idempotencyKey: 'key_no_revision',
+    },
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.json.code, 'PRODUCTION_REVISION_REQUIRED');
+  assert.equal(ctx.runs.calls.length, 0);
+});
+
+test('IP23: a stale bound revision is a 409 with the current revision', async (t) => {
+  const ctx = setup(t, { bindProduction: true });
+
+  const response = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/regenerate`, {
+    body: boundBody({
+      change: { note: 'stale attempt', seed: 'keep' },
+      commandId: 'cmd_stale_request',
+      idempotencyKey: 'key_stale_request',
+      expected: { productionRevision: 0 },
+    }),
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.json.code, 'REVISION_CONFLICT');
+  assert.equal(response.json.currentRevision, 1);
+  assert.equal(ctx.runs.calls.length, 0);
+  assert.equal(ctx.production.store.readEvents(ctx.production.productionId).length, 1);
+});
+
+test('IP23: a duplicate bound select after a crash reapplies the selection', async (t) => {
+  const ctx = setup(t, { bindProduction: true });
+  const first = addTake(ctx, Buffer.from('take-one'), 'one.mp4');
+  const second = addTake(ctx, Buffer.from('take-two'), 'two.mp4');
+  const originalSave = ctx.store.save.bind(ctx.store);
+  let failOnce = true;
+  ctx.store.save = (...args) => {
+    if (failOnce) {
+      failOnce = false;
+      throw new Error('simulated crash between journal and package save');
+    }
+    return originalSave(...args);
+  };
+  const body = {
+    takeId: first.takeId,
+    commandId: 'cmd_take_select',
+    idempotencyKey: 'key_take_select',
+    expected: { productionRevision: 1 },
+  };
+
+  const crashed = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/select`, { body });
+  assert.equal(crashed.status, 500);
+  const journal = ctx.production.store.readEvents(ctx.production.productionId);
+  assert.equal(journal.at(-1).type, 'take.selected');
+  assert.equal(journal.at(-1).data.takeId, first.takeId);
+  assert.equal(ctx.takeStore.read(ctx.pkg.id).clips.a_plate1.selected, second.takeId);
+  assert.notEqual(ctx.store.read(ctx.pkg.id).assets.a_plate1.sha256, first.sha256);
+
+  const retried = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/select`, { body });
+  assert.equal(retried.status, 200);
+  assert.equal(retried.json.kind, 'selected');
+  assert.equal(retried.json.duplicate, true);
+  assert.equal(retried.json.takeId, first.takeId);
+  assert.equal(retried.json.productionId, ctx.production.productionId);
+  assert.equal(retried.json.productionRevision, 2);
+  assert.equal(retried.json.commandId, 'cmd_take_select');
+  assert.equal(ctx.takeStore.read(ctx.pkg.id).clips.a_plate1.selected, first.takeId);
+  assert.equal(ctx.store.read(ctx.pkg.id).assets.a_plate1.sha256, first.sha256);
 });

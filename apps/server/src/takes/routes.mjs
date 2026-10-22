@@ -93,7 +93,11 @@ function respondError(response, error) {
   if (status >= 500) logUnexpected(error);
   const code = typeof error?.code === 'string' ? error.code : (status === 500 ? 'INTERNAL' : 'INVALID_REQUEST');
   const message = status === 500 ? 'clip request failed' : (error?.message ?? 'clip request failed');
-  return sendError(response, status, code, message);
+  const body = { error: message, code };
+  if (Number.isSafeInteger(error?.currentRevision)) body.currentRevision = error.currentRevision;
+  if (Number.isSafeInteger(error?.baseRevision)) body.baseRevision = error.baseRevision;
+  if (Array.isArray(error?.errors)) body.errors = error.errors;
+  return sendJson(response, status, body);
 }
 
 function safeDecode(value) {
@@ -154,6 +158,39 @@ function publish(events, payload) {
   } catch {
     void payload;
   }
+}
+
+function boundIdentity(body) {
+  const commandId = typeof body.commandId === 'string' && body.commandId.trim() !== '' ? body.commandId : null;
+  const idempotencyKey = typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim() !== ''
+    ? body.idempotencyKey
+    : null;
+  if (!commandId && !idempotencyKey) {
+    throw new RouteError(400, 'MISSING_COMMAND_ID', 'commandId or idempotencyKey is required on a production-bound request');
+  }
+  return {
+    commandId: commandId ?? idempotencyKey,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  };
+}
+
+function boundExpected(body) {
+  const expected = isPlainObject(body.expected) ? body.expected : {};
+  if (!Number.isSafeInteger(expected.productionRevision) || expected.productionRevision < 0) {
+    throw new RouteError(400, 'PRODUCTION_REVISION_REQUIRED', 'expected.productionRevision is required on a production-bound request');
+  }
+  return expected;
+}
+
+function boundEnvelope(binding, identity, expected, kind, payload) {
+  return {
+    commandId: identity.commandId,
+    kind,
+    productionId: binding.productionId,
+    expected,
+    payload,
+    ...(identity.idempotencyKey ? { idempotencyKey: identity.idempotencyKey } : {}),
+  };
 }
 
 function emptyDoc(pkgId) {
@@ -263,10 +300,26 @@ export function createTakeRoutes(options = {}) {
   }
   if (!runs || typeof runs.start !== 'function') throw new TypeError('createTakeRoutes requires a run controller');
   const measuredFor = typeof options.measuredFor === 'function' ? options.measuredFor : () => ({});
+  const productionFor = typeof options.production === 'function' ? options.production : null;
 
   async function measured(pkg) {
     const value = await measuredFor(pkg);
     return isPlainObject(value) ? value : {};
+  }
+
+  async function productionBinding(pkg) {
+    if (!productionFor) return null;
+    const binding = await productionFor(pkg);
+    if (!binding) return null;
+    if (!isPlainObject(binding)
+      || typeof binding.productionId !== 'string'
+      || binding.productionId === ''
+      || !isPlainObject(binding.context)
+      || !binding.handler
+      || typeof binding.handler.execute !== 'function') {
+      throw new RouteError(500, 'PRODUCTION_BINDING_INVALID', 'production binding is invalid');
+    }
+    return binding;
   }
 
   function readPackage(pkgId) {
@@ -369,11 +422,37 @@ export function createTakeRoutes(options = {}) {
     const body = await readJson(request);
     if (!isPlainObject(body)) throw new RouteError(400, 'INVALID_BODY', 'body must be an object');
     const pkg = readPackage(pkgId);
+    const binding = await productionBinding(pkg);
     const { clip } = await clipFor(pkg, clipId);
+    const identity = binding ? boundIdentity(body) : null;
+    const expected = binding ? boundExpected(body) : null;
     const doc = takeStore.read(pkgId) ?? emptyDoc(pkgId);
     const entry = isPlainObject(doc.clips?.[clip.assetId]) ? doc.clips[clip.assetId] : null;
     const built = buildCorrection(pkg, clip.assetId, body.change, { takesCount: activeTakes(entry).length });
     const backendId = typeof body.backendId === 'string' && body.backendId ? body.backendId : 'colab';
+
+    if (binding) {
+      const result = binding.handler.execute(
+        boundEnvelope(binding, identity, expected, 'take.request', {
+          clipId,
+          assetId: clip.assetId,
+          diff: built.diff,
+          correction: built.correction,
+          backendId,
+        }),
+        binding.context,
+      );
+      const common = { clipId, assetId: clip.assetId, diff: built.diff, correction: built.correction };
+      return sendJson(response, 202, {
+        kind: 'requested',
+        productionId: binding.productionId,
+        productionRevision: result.revision,
+        commandId: identity.commandId,
+        clip: common,
+        ...common,
+      });
+    }
+
     const outcome = await startTakeRun({
       pkg: built.package,
       assetIds: [clip.assetId],
@@ -456,6 +535,9 @@ export function createTakeRoutes(options = {}) {
       throw new RouteError(400, 'INVALID_BODY', `items must contain at most ${MAX_BATCH_ITEMS} entries`);
     }
     const pkg = readPackage(pkgId);
+    const binding = await productionBinding(pkg);
+    const identity = binding ? boundIdentity(body) : null;
+    const expected = binding ? boundExpected(body) : null;
     const clips = await clipsFor(pkg);
     const doc = takeStore.read(pkgId) ?? emptyDoc(pkgId);
     const seenAssets = new Set();
@@ -489,6 +571,25 @@ export function createTakeRoutes(options = {}) {
     const backendId = typeof body.backendId === 'string' && body.backendId
       ? body.backendId
       : (typeof items[0].backendId === 'string' && items[0].backendId ? items[0].backendId : 'colab');
+    const publicItems = items.map(({ clipId, assetId, diff, correction }) => ({ clipId, assetId, diff, correction }));
+
+    if (binding) {
+      const result = binding.handler.execute(
+        boundEnvelope(binding, identity, expected, 'take.request', {
+          items: publicItems,
+          backendId,
+        }),
+        binding.context,
+      );
+      return sendJson(response, 202, {
+        kind: 'requested',
+        productionId: binding.productionId,
+        productionRevision: result.revision,
+        commandId: identity.commandId,
+        items: publicItems,
+      });
+    }
+
     const assetIds = items.map(item => item.assetId);
     const outcome = await startTakeRun({
       pkg: corrected,
@@ -498,8 +599,6 @@ export function createTakeRoutes(options = {}) {
       approved: body.approved === true,
       budgetUnits: body.budgetUnits,
     });
-    const publicItems = items.map(({ clipId, assetId, diff, correction }) => ({ clipId, assetId, diff, correction }));
-
     if (outcome.kind === 'queued') {
       const planHash = outcome.result?.planHash;
       recordQueued(takeStore, pkgId, items.map(item => ({
@@ -571,26 +670,56 @@ export function createTakeRoutes(options = {}) {
       throw new RouteError(400, 'INVALID_BODY', 'takeId is required');
     }
     const pkg = readPackage(pkgId);
+    const binding = await productionBinding(pkg);
     const { clip } = await clipFor(pkg, clipId);
+    const identity = binding ? boundIdentity(body) : null;
+    const expected = binding ? boundExpected(body) : null;
     const doc = takeStore.read(pkgId);
     if (!doc) throw new RouteError(404, 'NOT_FOUND', 'takes document does not exist');
     const entry = isPlainObject(doc.clips?.[clip.assetId]) ? doc.clips[clip.assetId] : null;
     const take = activeTakes(entry).find(candidate => candidate.takeId === body.takeId);
     if (!take) throw new RouteError(404, 'UNKNOWN_TAKE', 'take is not in this clip');
 
+    const result = binding
+      ? binding.handler.execute(
+        boundEnvelope(binding, identity, expected, 'take.select', {
+          clipId,
+          assetId: clip.assetId,
+          takeId: body.takeId,
+        }),
+        binding.context,
+      )
+      : null;
+
+    const docBefore = binding ? JSON.stringify(doc) : null;
     const next = selectTake(pkg, doc, clip.assetId, body.takeId);
-    const saved = savePackage(store, pkg, next);
-    takeStore.write(pkgId, doc);
+    let saved;
+    if (binding) {
+      const packageChanged = JSON.stringify(next) !== JSON.stringify(pkg);
+      const documentChanged = JSON.stringify(doc) !== docBefore;
+      saved = packageChanged ? savePackage(store, pkg, next) : pkg;
+      if (documentChanged) takeStore.write(pkgId, doc);
+    } else {
+      saved = savePackage(store, pkg, next);
+      takeStore.write(pkgId, doc);
+    }
     publish(events, {
       type: 'clip.take.selected', packageId: pkgId, clipId, assetId: clip.assetId, takeId: body.takeId,
     });
-    return sendJson(response, 200, {
+    const selected = {
       kind: 'selected',
       packageId: pkgId,
       revision: saved.revision ?? null,
       clip: clipView(saved, clip, doc),
       takeId: body.takeId,
-    });
+    };
+    if (binding) {
+      selected.productionId = binding.productionId;
+      selected.productionRevision = result.revision;
+      selected.commandId = identity.commandId;
+      if (result.duplicate) selected.duplicate = true;
+    }
+    return sendJson(response, 200, selected);
   }
 
   async function handleRevert(request, response, pkgId, clipId) {
