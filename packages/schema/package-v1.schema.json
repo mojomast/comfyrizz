@@ -1699,6 +1699,32 @@
         "narration_asset": {
           "$ref": "#/$defs/assetId"
         },
+        "audio_trim": {
+          "type": "object",
+          "description": "IP51: optional trim of this scene's audio. startSeconds is the inclusive in-point and endSeconds the exclusive out-point; endSeconds must be greater than startSeconds. offsetFrames shifts the trimmed audio on the timeline and may be negative. linked keeps the trim attached to the scene when the scene is re-timed. The cross-field endSeconds > startSeconds rule is documented here because package-v1 has no trim semantic validator.",
+          "required": [
+            "startSeconds",
+            "endSeconds",
+            "offsetFrames",
+            "linked"
+          ],
+          "unevaluatedProperties": false,
+          "properties": {
+            "startSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "endSeconds": {
+              "type": "number"
+            },
+            "offsetFrames": {
+              "type": "integer"
+            },
+            "linked": {
+              "type": "boolean"
+            }
+          }
+        },
         "presenter_asset": {
           "$ref": "#/$defs/assetId"
         },
