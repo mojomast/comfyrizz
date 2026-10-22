@@ -315,6 +315,15 @@ export function createTakeRoutes(options = {}) {
       });
     } catch (error) {
       if (isBusyError(error)) return { kind: 'queued', result: null };
+      // IP02: a CPU runner exists, but a deployment must register it. Say that
+      // plainly instead of implying the CPU slice has no media path at all.
+      if (backendId === 'cpu' && error?.code === 'BACKEND_UNAVAILABLE') {
+        throw new RouteError(
+          422,
+          'BACKEND_UNAVAILABLE',
+          'the CPU backend is not configured on this server; use Google Colab or your own ComfyUI',
+        );
+      }
       throw error;
     }
     if (isBusyResult(result)) return { kind: 'queued', result };
@@ -424,7 +433,10 @@ export function createTakeRoutes(options = {}) {
       type: 'clip.job', packageId: pkgId, clipId, assetId: clip.assetId, runId: result.runId,
       state: result.status ?? 'starting', progress: 0,
     });
-    return sendJson(response, 200, {
+    // IP02: a local CPU take is dispatched the same way as a paid run, but there is
+    // nothing to approve and no remote session: 202 Accepted says so. The new take
+    // lands asynchronously through the normal ingest path.
+    return sendJson(response, backendId === 'cpu' ? 202 : 200, {
       kind: 'started',
       ...common,
       runId: result.runId,
@@ -542,7 +554,7 @@ export function createTakeRoutes(options = {}) {
         state: result.status ?? 'starting', progress: 0,
       });
     }
-    return sendJson(response, 200, {
+    return sendJson(response, backendId === 'cpu' ? 202 : 200, {
       kind: 'started',
       items: publicItems,
       runId: result.runId,

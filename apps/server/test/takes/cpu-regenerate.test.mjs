@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,11 +19,13 @@ import { createRunController } from '../../src/run.mjs';
 import { PackageStore } from '../../src/store.mjs';
 import { createTakeStore } from '../../src/takes/store.mjs';
 import { createTakeRoutes } from '../../src/takes/routes.mjs';
+import { createCpuBackend } from '../../../../packages/backends/src/cpu-backend.mjs';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const PACKAGE_ID = 'pkg_launchdemo0001';
 const CLIP_ID = 's_title:a_icon_check';
 const EXAMPLE_PATH = fileURLToPath(new URL('../../../../examples/launch-demo/package.json', import.meta.url));
+const EXAMPLE_DIR = fileURLToPath(new URL('../../../../examples/launch-demo/', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
 // A minimal PNG header: the take store copies the bytes and keeps their digest; it
@@ -115,6 +117,7 @@ test('DN18: CPU regenerate of the launch-demo still clip is a specific 4xx, neve
   assert.equal(regenerated.json.code, 'BACKEND_UNAVAILABLE');
   assert.notEqual(regenerated.json.code, 'INTERNAL');
   assert.match(regenerated.json.error, /CPU/i);
+  assert.match(regenerated.json.error, /not configured/i);
   assert.match(regenerated.json.error, /Google Colab/);
   assert.equal(app.runs.status().runs.length, 0, 'nothing was started');
 
@@ -173,12 +176,56 @@ test('DN18: a registered CPU media backend starts a take run for the same clip',
     `/api/package/${PACKAGE_ID}/clips/${encodeURIComponent(CLIP_ID)}/regenerate`,
     { backendId: 'cpu', change: { note: 'review seed' } },
   );
-  assert.equal(started.status, 200);
+  assert.equal(started.status, 202, 'a dispatched CPU take is accepted, not a server fault');
   assert.equal(started.json.kind, 'started');
   assert.ok(started.json.runId);
   assert.equal(started.json.assetId, 'a_icon_check');
   const finished = await runs.wait(started.json.runId);
   assert.equal(finished.mode, 'take');
+});
+
+test('DN18: the real CPU backend lands a new take for the regenerated clip', async (t) => {
+  const runtime = tempRuntime(t, 'cpu-e2e');
+  const pkg = launchPackage();
+  const app = createApp({
+    root: REPO_ROOT,
+    token: TOKEN,
+    runtimeDir: runtime,
+    backendFactory: async (backendId) => (backendId === 'cpu' ? createCpuBackend() : null),
+    render: async () => ({ output: 'unused.mp4', bytes: 0, frames: 0, hash: 'unused' }),
+  });
+  t.after(() => app.close());
+  app.store.seed(pkg);
+  // The app stages the package's named files; the launch demo keeps its SVG assets
+  // beside package.json, so copy them where the package directory resolves them.
+  cpSync(join(EXAMPLE_DIR, 'assets'), join(app.store.dir, 'assets'), { recursive: true });
+
+  const takeStore = seedTakes(runtime, pkg, app.store.dir);
+  const before = takeStore.read(PACKAGE_ID).clips.a_icon_check.takes.length;
+
+  const server = createServer(app.handler);
+  const port = await listen(server);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+
+  const started = await request(
+    port,
+    `/api/package/${PACKAGE_ID}/clips/${encodeURIComponent(CLIP_ID)}/regenerate`,
+    { backendId: 'cpu', change: { note: 'review seed' } },
+  );
+  assert.equal(started.status, 202);
+  assert.equal(started.json.kind, 'started');
+  assert.ok(started.json.runId);
+
+  const finished = await app.runs.wait(started.json.runId);
+  assert.equal(finished.status, 'done');
+  assert.equal(finished.mode, 'take');
+
+  const after = takeStore.read(PACKAGE_ID).clips.a_icon_check;
+  assert.equal(after.takes.length, before + 1, 'the CPU run landed exactly one new take');
+  const landed = after.takes.at(-1);
+  assert.ok(landed.takeId);
+  assert.match(landed.file, /^takes\/a_icon_check\/tk_[0-9a-f]{12}\.png$/);
+  assert.match(landed.sha256, /^[0-9a-f]{64}$/);
 });
 
 test('DN18: an unexpected route failure logs its stack to stderr and masks token-shaped values', async (t) => {
