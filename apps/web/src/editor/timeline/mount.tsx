@@ -7,6 +7,7 @@ import type { PackageV1 } from '../../../../../packages/schema/types';
 import type { CompiledTimeline } from '../../../../../packages/planner/dist/src/browser.js';
 import type { EditorExtras, EditorStore } from '../store.ts';
 import { SceneTimeline } from './Timeline.tsx';
+import type { ClipChip } from './clip-state.ts';
 import type { ClipSummary } from '../../takes/api.ts';
 
 export interface SceneTimelineHandle {
@@ -25,6 +26,10 @@ export function mountSceneTimeline(
     togglePlay: () => void;
     /** Shared clips map (TR17); chips re-render when it changes. */
     clips?: { all(): readonly ClipSummary[]; subscribe(listener: () => void): () => void };
+    /** Review surface callbacks; chips stay a view of the takes store. */
+    onClipSelect?: (chip: ClipChip) => void;
+    onClipCycle?: (chip: ClipChip, delta: -1 | 1) => void;
+    onClipApprove?: (chip: ClipChip) => void;
   },
 ): SceneTimelineHandle {
   if (store.getState().session.zoom === 1) store.setSession({ zoom: 2 });
@@ -40,7 +45,15 @@ export function mountSceneTimeline(
   });
   const root: Root = createRoot(container);
   const render = () => root.render(
-    <SceneTimeline store={store} onSeek={hooks.seek} onTogglePlay={hooks.togglePlay} clips={hooks.clips?.all()} />,
+    <SceneTimeline
+      store={store}
+      onSeek={hooks.seek}
+      onTogglePlay={hooks.togglePlay}
+      clips={hooks.clips?.all()}
+      onClipSelect={hooks.onClipSelect}
+      onClipCycle={hooks.onClipCycle}
+      onClipApprove={hooks.onClipApprove}
+    />,
   );
   render();
   const unsubscribeClips = hooks.clips?.subscribe(render);
