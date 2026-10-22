@@ -24,6 +24,37 @@ function adelayMs(frame, fps) {
 }
 
 /**
+ * IP51P: the pure bus plan for the incremental mix. Scene audio with `audio_trim`
+ * carries its source in/out so the ffmpeg pass can seek into the file; a scene
+ * without it yields the legacy bus with no `startSeconds`/`endSeconds` keys.
+ * Kept separate from `muxPackageAudio` so timing can be tested without ffmpeg.
+ */
+export function planAudioBuses({ pkg, timeline, mixAudio = true }) {
+  const fps = timeline?.fps ?? 30;
+  const mix = mixAudio ? resolveAudioMix(pkg, timeline) : { enabled: false, music: null, ambience: [], sfx: [] };
+  const buses = [];
+  if (mix.music) {
+    buses.push({ kind: 'music', file: mix.music.file, gainDb: mix.music.gainDb, duck: mix.music.duck, loop: mix.music.loop, fadeIn: mix.music.fadeInSeconds ?? 0, fadeOut: mix.music.fadeOutSeconds ?? 0 });
+  }
+  for (const ambience of mix.ambience) {
+    buses.push({
+      kind: 'ambience',
+      file: ambience.file,
+      gainDb: ambience.gainDb,
+      duck: ambience.duck,
+      from: ambience.from,
+      seconds: ambience.durationInFrames / fps,
+      ...(typeof ambience.startSeconds === 'number' ? { startSeconds: ambience.startSeconds } : {}),
+      ...(typeof ambience.endSeconds === 'number' ? { endSeconds: ambience.endSeconds } : {}),
+    });
+  }
+  for (const sfx of mix.sfx) {
+    buses.push({ kind: 'sfx', file: sfx.file, gainDb: sfx.gainDb, from: sfx.from, seconds: sfx.durationInFrames / fps });
+  }
+  return buses;
+}
+
+/**
  * Mux the package's audio (narration + music bed + ambience + SFX) onto a silent
  * segment concat. Returns `{ audio, loudness }`; `audio` is null when the result
  * is silent. Missing bus files are skipped, like the P-fix4 narration fallback.
@@ -36,21 +67,9 @@ export function muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timel
   const hasNarration = Boolean(narrationPath && existsSync(narrationPath));
   if (narrationPath && !hasNarration) onLog(`warning: media not in this clone: ${narration.file}; exporting silent`);
 
-  const mix = mixAudio ? resolveAudioMix(pkg, timeline) : { enabled: false, music: null, ambience: [], sfx: [] };
-  const buses = [];
-  if (mix.music && existsSync(join(packageDir, mix.music.file))) {
-    buses.push({ kind: 'music', path: join(packageDir, mix.music.file), gainDb: mix.music.gainDb, duck: mix.music.duck, loop: mix.music.loop, fadeIn: mix.music.fadeInSeconds ?? 0, fadeOut: mix.music.fadeOutSeconds ?? 0 });
-  }
-  for (const ambience of mix.ambience) {
-    if (existsSync(join(packageDir, ambience.file))) {
-      buses.push({ kind: 'ambience', path: join(packageDir, ambience.file), gainDb: ambience.gainDb, duck: ambience.duck, from: ambience.from, seconds: ambience.durationInFrames / fps });
-    }
-  }
-  for (const sfx of mix.sfx) {
-    if (existsSync(join(packageDir, sfx.file))) {
-      buses.push({ kind: 'sfx', path: join(packageDir, sfx.file), gainDb: sfx.gainDb, from: sfx.from, seconds: sfx.durationInFrames / fps });
-    }
-  }
+  const buses = planAudioBuses({ pkg, timeline, mixAudio })
+    .filter(bus => existsSync(join(packageDir, bus.file)))
+    .map(bus => ({ ...bus, path: join(packageDir, bus.file) }));
 
   if (!hasNarration && buses.length === 0) {
     return { audio: null, loudness: null };
@@ -98,6 +117,13 @@ export function muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timel
       if (bus.fadeOut > 0) parts.push(`afade=t=out:st=${Math.max(0, durationSeconds - bus.fadeOut)}:d=${bus.fadeOut}`);
       parts.push(`atrim=0:${durationSeconds}`);
     } else {
+      // IP51P: seek into the source first, then reset its timestamps so the
+      // timeline delay below is measured from the trimmed window's first frame.
+      if (typeof bus.startSeconds === 'number' || typeof bus.endSeconds === 'number') {
+        const start = Math.max(0, typeof bus.startSeconds === 'number' ? bus.startSeconds : 0);
+        const end = typeof bus.endSeconds === 'number' ? Math.max(start, bus.endSeconds) : start + bus.seconds;
+        parts.push(`atrim=start=${start}:end=${end}`, 'asetpts=PTS-STARTPTS');
+      }
       parts.push(`adelay=${adelayMs(bus.from, fps)}:all=1`);
       parts.push(`atrim=0:${Math.max(0, (bus.from / fps) + bus.seconds)}`);
     }

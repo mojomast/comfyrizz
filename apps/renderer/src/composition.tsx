@@ -13,7 +13,7 @@ import { LookLayer, type LookSidecar } from './look-layer';
 export type MediaSources = Record<string, string>;
 
 /** Audio that disappears instead of crashing when its file is not in this clone. */
-export function SafeAudio({ file, volume, gains, loop, src }: { file: string; volume?: number; gains?: number[]; loop?: boolean; src?: string }) {
+export function SafeAudio({ file, volume, gains, loop, src, trimBefore, durationInFrames }: { file: string; volume?: number; gains?: number[]; loop?: boolean; src?: string; trimBefore?: number; durationInFrames?: number }) {
   const frame = useCurrentFrame();
   const [failed, setFailed] = useState(false);
   if (failed) return null;
@@ -22,7 +22,33 @@ export function SafeAudio({ file, volume, gains, loop, src }: { file: string; vo
   // `?? 1` default, so the second pass of the bed played at full level. Index the
   // composition (or enclosing <Sequence>) frame instead, rounded, and default to 0.
   const level = gains ? gains[Math.min(Math.max(0, Math.round(frame)), gains.length - 1)] ?? 0 : volume;
-  return <Audio src={src ?? staticFile(file)} pauseWhenBuffering {...(level !== undefined ? { volume: level } : {})} {...(loop ? { loop } : {})} onError={() => setFailed(true)} />;
+  return (
+    <Audio
+      src={src ?? staticFile(file)}
+      pauseWhenBuffering
+      {...(level !== undefined ? { volume: level } : {})}
+      {...(loop ? { loop } : {})}
+      {...(trimBefore !== undefined ? { trimBefore } : {})}
+      {...(durationInFrames !== undefined ? { durationInFrames } : {})}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/**
+ * IP51P: map a resolved scene-audio window to Remotion's source trim. A scene
+ * without `audio_trim` resolves no startSeconds, so this spreads nothing and the
+ * `<Audio>` props stay exactly as before.
+ */
+function sourceTrim(item: { [key: string]: unknown }, fps: number) {
+  const startSeconds = item.startSeconds;
+  if (typeof startSeconds !== 'number') return {};
+  const trimBefore = Math.max(0, Math.round(startSeconds * fps));
+  const endSeconds = item.endSeconds;
+  return {
+    trimBefore,
+    ...(typeof endSeconds === 'number' ? { durationInFrames: Math.max(0, Math.round(endSeconds * fps) - trimBefore) } : {}),
+  };
 }
 
 /**
@@ -58,6 +84,7 @@ export function PackageComposition({
   );
   const src = (file: string) => resolveMediaSrc(file, mediaSources, staticFile);
   const mix = resolved.mix;
+  const fps = timeline.fps ?? 30;
   const missing = new Set(missingMedia ?? []);
   return (
     <>
@@ -70,7 +97,7 @@ export function PackageComposition({
           {mix.ambience.map(ambience =>
             missing.has(ambience.file) ? null : (
               <Sequence key={ambience.sceneId} from={ambience.from} durationInFrames={ambience.durationInFrames}>
-                <SafeAudio file={ambience.file} src={src(ambience.file)} gains={ambience.gains} />
+                <SafeAudio file={ambience.file} src={src(ambience.file)} gains={ambience.gains} {...sourceTrim(ambience, fps)} />
               </Sequence>
             ),
           )}
