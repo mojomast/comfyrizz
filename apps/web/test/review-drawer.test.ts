@@ -22,6 +22,7 @@ import {
   reviewGroupFor,
   reviewRowHeight,
   reviewRows,
+  sharedAssetIndex,
   shortClipId,
   takeProgressLabel,
   windowRange,
@@ -525,6 +526,110 @@ test('keyboard A approves and advances focus to the next clip needing review', a
   assert.equal(model.activeId, 'ep2_video_a03');
   assert.equal(await model.handleKey('arrowup'), true);
   assert.equal(model.activeId, 'ep2_video_a02');
+});
+
+test('rows whose asset backs two scenes show a shared chip count', () => {
+  const list = [
+    clip(1, { clipId: 's_title:a_icon_check', sceneId: 's_title', assetId: 'a_icon_check', from: 0 }),
+    clip(2, { clipId: 's_hero:a_diagram_flow', sceneId: 's_hero', assetId: 'a_diagram_flow', from: 90 }),
+    clip(3, { clipId: 's_stat:a_icon_check', sceneId: 's_stat', assetId: 'a_icon_check', from: 180 }),
+    clip(4, { clipId: 's_list:a_pattern_dots', sceneId: 's_list', assetId: 'a_pattern_dots', from: 270 }),
+    clip(5, { clipId: 's_outro:a_anim_bars', sceneId: 's_outro', assetId: 'a_anim_bars', from: 360 }),
+  ];
+
+  const index = sharedAssetIndex(list);
+  assert.equal(index.get('a_icon_check').clipCount, 2);
+  assert.equal(index.get('a_icon_check').sceneCount, 2);
+  assert.deepEqual(index.get('a_icon_check').clipIds, ['s_title:a_icon_check', 's_stat:a_icon_check']);
+  assert.equal(index.get('a_diagram_flow').clipCount, 1);
+
+  const rows = reviewRows(list);
+  assert.deepEqual(
+    rows.filter(row => row.sharedSceneCount === 2).map(row => row.clipId),
+    ['s_title:a_icon_check', 's_stat:a_icon_check'],
+  );
+
+  const sharedHtml = renderReviewRows(rows.filter(row => row.sharedSceneCount === 2));
+  assert.match(sharedHtml, /class="badge review-shared"/);
+  assert.match(sharedHtml, /data-review-shared="2"/);
+  assert.match(sharedHtml, /shared · 2 scenes/);
+  assert.equal((sharedHtml.match(/shared · 2 scenes/g) ?? []).length, 2);
+
+  const uniqueHtml = renderReviewRows(rows.filter(row => row.assetId === 'a_diagram_flow'));
+  assert.doesNotMatch(uniqueHtml, /review-shared/);
+  assert.doesNotMatch(uniqueHtml, /shared · /);
+});
+
+test('approving a shared asset keeps the drawer count, pill and gate in sync', async () => {
+  const list = [
+    clip(1, { clipId: 's_title:a_icon_check', sceneId: 's_title', assetId: 'a_icon_check', from: 0 }),
+    clip(2, { clipId: 's_hero:a_diagram_flow', sceneId: 's_hero', assetId: 'a_diagram_flow', from: 90 }),
+    clip(3, { clipId: 's_stat:a_icon_check', sceneId: 's_stat', assetId: 'a_icon_check', from: 180 }),
+    clip(4, { clipId: 's_list:a_pattern_dots', sceneId: 's_list', assetId: 'a_pattern_dots', from: 270 }),
+    clip(5, { clipId: 's_outro:a_anim_bars', sceneId: 's_outro', assetId: 'a_anim_bars', from: 360 }),
+  ];
+  const verdicts: string[] = [];
+  const announced: string[] = [];
+  const model = createReviewDrawerModel({
+    clips: list,
+    onApprove: item => { verdicts.push(item.assetId); },
+    onAnnounce: message => { announced.push(message); },
+  });
+
+  assert.equal(model.activeId, 's_title:a_icon_check');
+  assert.equal(await model.handleKey('a'), true);
+  assert.deepEqual(verdicts, ['a_icon_check'], 'one verdict per asset, not one per clip');
+  assert.equal(model.counts.approved, 2);
+  assert.equal(model.counts.needs, 3);
+  assert.equal(model.gate.approved, 2);
+  assert.equal(model.gate.total, 5);
+  assert.equal(model.liveMessage, 'Approved a_icon_check in 2 scenes (2/5)');
+  assert.equal(announced.at(-1), 'Approved a_icon_check in 2 scenes (2/5)');
+
+  // The drawer, the pill and the gate read the same counter.
+  assert.equal(approvedPillLabel(model.gate), '2/5 approved');
+  assert.equal(approvedPillLabel(summarizeGate(model.clips)), '2/5 approved');
+  assert.match(renderRenderBar(summarizeGate(model.clips)), /2\/5 approved/);
+
+  // Both shared clips moved to Approved; the active row advances to the next
+  // clip that still needs review.
+  assert.equal(model.rows.filter(row => row.group === 'approved').length, 0);
+  assert.equal(model.rows.length, 3);
+  assert.equal(model.activeId, 's_hero:a_diagram_flow');
+  model.setFilter('approved');
+  assert.deepEqual(model.rows.map(row => row.clipId), ['s_title:a_icon_check', 's_stat:a_icon_check']);
+  assert.ok(model.rows.every(row => row.sharedSceneCount === 2));
+});
+
+test('the mounted drawer progress matches the pill after a shared approval', async () => {
+  const { doc, restore } = installFakeDom();
+  try {
+    const list = [
+      clip(1, { clipId: 's_title:a_icon_check', sceneId: 's_title', assetId: 'a_icon_check', from: 0 }),
+      clip(2, { clipId: 's_hero:a_diagram_flow', sceneId: 's_hero', assetId: 'a_diagram_flow', from: 90 }),
+      clip(3, { clipId: 's_stat:a_icon_check', sceneId: 's_stat', assetId: 'a_icon_check', from: 180 }),
+      clip(4, { clipId: 's_list:a_pattern_dots', sceneId: 's_list', assetId: 'a_pattern_dots', from: 270 }),
+      clip(5, { clipId: 's_outro:a_anim_bars', sceneId: 's_outro', assetId: 'a_anim_bars', from: 360 }),
+    ];
+    const host = doc.createElement('div');
+    const handle = mountReviewDrawer({ host, clips: list });
+    handle.open();
+
+    const progress = () => handle.element.querySelector('[data-review-count]').textContent;
+    assert.equal(progress(), '0/5 approved');
+    assert.equal(handle.model.rows.length, 5);
+
+    assert.equal(await handle.model.approve('s_title:a_icon_check'), true);
+    assert.equal(progress(), '2/5 approved');
+    assert.equal(approvedPillLabel(handle.model.gate), '2/5 approved');
+    assert.equal(approvedPillLabel(summarizeGate(handle.model.clips)), '2/5 approved');
+    assert.match(handle.element.querySelector('[data-review-live]').textContent, /Approved a_icon_check in 2 scenes \(2\/5\)/);
+    assert.equal(handle.model.rows.length, 3);
+
+    handle.destroy();
+  } finally {
+    restore();
+  }
 });
 
 test('J/K and arrows move, D redoes, Enter opens Takes only in Advanced, and inputs suppress letters', async () => {

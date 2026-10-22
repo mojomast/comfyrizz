@@ -96,6 +96,22 @@ export const clipGate = summarizeGate;
 export const gateForClips = summarizeGate;
 export const finalGate = summarizeGate;
 
+/**
+ * A take verdict belongs to the generated asset, not to one timeline clip: the
+ * same asset can back several scenes (`<scene>:<asset>` clip ids). Apply the
+ * approved verdict to every clip that uses the asset so the drawer progress
+ * and the top-bar pill count the same clips the server will count.
+ */
+export function approveSharedAsset(
+  clips: readonly ClipSummary[] | null | undefined,
+  assetId: unknown,
+): ClipSummary[] {
+  const list = clipList(clips);
+  const id = textOf(assetId);
+  if (!id) return list;
+  return list.map(clip => (textOf(clip.assetId) === id ? { ...clip, state: 'approved' } : clip));
+}
+
 /** "3/5 clips approved" (the spec's "n/m clips approved"). */
 export function approvedLabel(gate: Pick<RenderGateSummary, 'approved' | 'total'> | null | undefined): string {
   const approved = Number.isFinite(gate?.approved) ? Math.max(0, Math.floor(gate!.approved)) : 0;

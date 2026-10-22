@@ -18,6 +18,7 @@ import {
   type TakesApi,
   type TakesResponse,
 } from './api.ts';
+import { approveSharedAsset, approvedPillLabel, summarizeGate } from './render-bar.ts';
 
 export const REVIEW_FILTERS = ['needs', 'stale', 'approved', 'failed'] as const;
 
@@ -94,11 +95,54 @@ export interface ReviewRow {
   scene: string;
   slot: string;
   kind: string;
+  assetId: string;
+  /** Distinct scenes the clip's asset backs; 0 when the asset is not shared. */
+  sharedSceneCount: number;
   group: ReviewFilter;
   statusLabel: string;
   tone: 'warn' | 'danger' | 'ok';
   takeLabel: string;
   title: string;
+}
+
+/** One generated asset can back several timeline clips, one per scene. */
+export interface SharedAssetSummary {
+  assetId: string;
+  clipCount: number;
+  sceneCount: number;
+  clipIds: string[];
+}
+
+/**
+ * Group clips by the asset a take verdict actually belongs to. The server
+ * stores one verdict per asset, so approving `a_icon_check` approves every
+ * scene that uses it; the drawer has to count those clips the same way.
+ */
+export function sharedAssetIndex(
+  clips: readonly ClipSummary[] | null | undefined,
+): Map<string, SharedAssetSummary> {
+  const groups = new Map<string, { clipIds: Set<string>; scenes: Set<string> }>();
+  for (const clip of clipList(clips)) {
+    const assetId = textOf(clip.assetId);
+    if (!assetId) continue;
+    let group = groups.get(assetId);
+    if (!group) {
+      group = { clipIds: new Set(), scenes: new Set() };
+      groups.set(assetId, group);
+    }
+    group.clipIds.add(clip.clipId);
+    group.scenes.add(textOf(clip.sceneId) || clip.clipId);
+  }
+  const index = new Map<string, SharedAssetSummary>();
+  for (const [assetId, group] of groups) {
+    index.set(assetId, {
+      assetId,
+      clipCount: group.clipIds.size,
+      sceneCount: group.scenes.size,
+      clipIds: Array.from(group.clipIds),
+    });
+  }
+  return index;
 }
 
 export type ReviewThumbSourceKind = 'image' | 'poster' | 'fallback';
@@ -439,13 +483,20 @@ export function filterReviewClips(
   );
 }
 
-export function reviewRowFor(clip: ClipSummary, index = 0): ReviewRow {
+export function reviewRowFor(
+  clip: ClipSummary,
+  index = 0,
+  sharedAssets: Map<string, SharedAssetSummary> | null = null,
+): ReviewRow {
   const group = reviewGroupFor(clip.state);
   const statusLabel = REVIEW_FILTER_LABELS[group];
   const fullId = textOf(clip.clipId);
   const shortId = shortClipId(fullId);
   const scene = clipSceneLabel(clip);
   const slot = textOf(clip.slot);
+  const assetId = textOf(clip.assetId);
+  const shared = assetId ? sharedAssets?.get(assetId) : null;
+  const sharedSceneCount = shared && shared.clipCount > 1 ? shared.sceneCount : 0;
   const title = slot && slot !== scene ? `${fullId} · ${scene} · ${slot}` : `${fullId} · ${scene}`;
   return {
     clip,
@@ -455,6 +506,8 @@ export function reviewRowFor(clip: ClipSummary, index = 0): ReviewRow {
     scene,
     slot,
     kind: textOf(clip.kind) || 'clip',
+    assetId,
+    sharedSceneCount,
     group,
     statusLabel,
     tone: group === 'approved' ? 'ok' : group === 'failed' ? 'danger' : 'warn',
@@ -464,7 +517,8 @@ export function reviewRowFor(clip: ClipSummary, index = 0): ReviewRow {
 }
 
 export function reviewRows(clips: readonly ClipSummary[] | null | undefined, options: ReviewFilterOptions = {}): ReviewRow[] {
-  return filterReviewClips(clips, options).map((clip, index) => reviewRowFor(clip, index));
+  const sharedAssets = sharedAssetIndex(clips);
+  return filterReviewClips(clips, options).map((clip, index) => reviewRowFor(clip, index, sharedAssets));
 }
 
 export function windowRange(
@@ -504,6 +558,9 @@ export function renderReviewRows(
     const index = offset + localIndex;
     const active = row.clipId === activeId;
     const blocking = row.group === 'approved' ? '' : ` data-render-blocker="${escapeReviewHtml(row.clipId)}"`;
+    const shared = row.sharedSceneCount > 1
+      ? `<span class="badge review-shared" data-tone="info" data-review-shared="${row.sharedSceneCount}" title="${escapeReviewHtml(`${row.assetId} is used by ${row.sharedSceneCount} scenes`)}">shared · ${row.sharedSceneCount} scenes</span>`
+      : '';
     return `<div class="review-row" id="${rowId(index)}" role="option" tabindex="${active ? '0' : '-1'}" aria-selected="${active ? 'true' : 'false'}" data-review-clip="${escapeReviewHtml(row.clipId)}" data-review-status="${row.group}" data-tone="${row.tone}"${blocking} title="${escapeReviewHtml(row.title)}">
       <span class="review-thumb" aria-hidden="true" data-review-thumb><span data-review-thumb-fallback>${escapeReviewHtml(row.kind)}</span></span>
       <span class="review-row-main">
@@ -513,6 +570,7 @@ export function renderReviewRows(
           <span class="review-take hint tabular-nums">${escapeReviewHtml(row.takeLabel)}</span>
         </span>
       </span>
+      ${shared}
       <span class="review-status review-status-${row.group} badge badge-${row.tone}" data-status="${row.group}">${escapeReviewHtml(row.statusLabel)}</span>
     </div>`;
   }).join('');
@@ -539,11 +597,8 @@ function gateFromClips(clips: readonly ClipSummary[] | null | undefined, fallbac
       blocking: Array.isArray(fallback.blocking) ? fallback.blocking : [],
     };
   }
-  const blocking = list
-    .filter(clip => clip.state !== 'approved')
-    .map(clip => ({ clipId: clip.clipId, state: textOf(clip.state) || 'unknown', sceneId: textOf(clip.sceneId) }));
-  const approved = list.length - blocking.length;
-  return { ok: blocking.length === 0, approved, total: list.length, blocking };
+  // Same counter as the top-bar pill: one gate implementation, one result.
+  return summarizeGate(list);
 }
 
 export class ReviewDrawerModel {
@@ -682,6 +737,34 @@ export class ReviewDrawerModel {
     this.clips = this.clips.map(clip => (clip.clipId === clipId ? { ...clip, ...patch } : clip));
   }
 
+  /** The asset verdict the server stores, and every scene it backs. */
+  private sharedAssetFor(clip: ClipSummary): SharedAssetSummary | null {
+    const assetId = textOf(clip.assetId);
+    if (!assetId) return null;
+    return sharedAssetIndex(this.clips).get(assetId) ?? null;
+  }
+
+  private applyApprovedVerdict(clip: ClipSummary): void {
+    const assetId = textOf(clip.assetId);
+    if (assetId) {
+      // One verdict per asset: keep every scene that uses it in sync locally so
+      // the drawer count matches the pill before the server refresh lands.
+      this.clips = approveSharedAsset(this.clips, assetId);
+      return;
+    }
+    this.updateClip(clip.clipId, { state: 'approved' });
+  }
+
+  private approvedMessage(clip: ClipSummary): string {
+    const gate = this.gate;
+    const shared = this.sharedAssetFor(clip);
+    if (shared && shared.clipCount > 1) {
+      const scenes = `${shared.sceneCount} scene${shared.sceneCount === 1 ? '' : 's'}`;
+      return `Approved ${shared.assetId} in ${scenes} (${gate.approved}/${gate.total})`;
+    }
+    return `Approved ${gate.approved}/${gate.total}`;
+  }
+
   private async runApprove(clip: ClipSummary): Promise<boolean> {
     let ok = true;
     try {
@@ -696,7 +779,7 @@ export class ReviewDrawerModel {
       this.setLive(`Could not approve ${shortClipId(clip.clipId)}`);
       return false;
     }
-    this.updateClip(clip.clipId, { state: 'approved' });
+    this.applyApprovedVerdict(clip);
     return true;
   }
 
@@ -730,8 +813,7 @@ export class ReviewDrawerModel {
         this.notify();
         return false;
       }
-      const counts = this.counts;
-      this.setLive(`Approved ${counts.approved}/${counts.total}`);
+      this.setLive(this.approvedMessage(clip));
       this.advanceAfterApprove();
       this.notify();
       return true;
@@ -786,17 +868,22 @@ export class ReviewDrawerModel {
     }
     this.busy = true;
     try {
-      let approved = 0;
+      const before = this.counts.approved;
+      let failed = 0;
       for (const row of visible) {
-        if (await this.runApprove(row.clip)) approved += 1;
+        // A shared asset approved earlier in this batch already covers the
+        // other clips that use it; do not send a second verdict for them.
+        const current = this.clips.find(clip => clip.clipId === row.clipId);
+        if (!current || reviewGroupFor(current.state) !== 'needs') continue;
+        if (!(await this.runApprove(current))) failed += 1;
       }
       const counts = this.counts;
-      this.setLive(approved === visible.length
+      this.setLive(failed === 0
         ? `Approved ${counts.approved}/${counts.total}`
-        : `Approved ${approved} of ${visible.length} visible clips`);
+        : `Approved ${counts.approved}/${counts.total} · ${failed} could not be approved`);
       this.advanceAfterApprove();
       this.notify();
-      return approved;
+      return Math.max(0, counts.approved - before);
     } finally {
       this.busy = false;
     }
@@ -849,7 +936,7 @@ function drawerShell(model: ReviewDrawerModel): string {
   return `<div class="review-head">
       <div class="review-head-title">
         <h2 id="review-drawer-title">Review takes</h2>
-        <span class="review-total hint tabular-nums" data-review-count>${model.gate.approved}/${model.gate.total} approved</span>
+        <span class="review-total hint tabular-nums" data-review-count>${escapeReviewHtml(approvedPillLabel(model.gate))}</span>
       </div>
       <button type="button" class="btn btn-ghost btn-icon btn-sm review-close" data-review-close aria-label="Close review drawer">✕</button>
     </div>
@@ -1098,7 +1185,7 @@ export function mountReviewDrawer(
     if (destroyed) return;
     const counts = model.counts;
     const total = q<HTMLElement>('[data-review-count]');
-    if (total) total.textContent = `${model.gate.approved}/${model.gate.total} approved`;
+    if (total) total.textContent = approvedPillLabel(model.gate);
     aside.querySelectorAll<HTMLButtonElement>('[data-review-filter]').forEach(button => {
       const filter = button.dataset.reviewFilter as ReviewFilter | undefined;
       if (!filter) return;
