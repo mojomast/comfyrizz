@@ -323,7 +323,15 @@ export interface ReviewWindow {
   total: number;
 }
 
-export type ReviewClipAction = (clip: ClipSummary) => boolean | void | Promise<boolean | void>;
+/** A failed clip action carries the reason the drawer announces. */
+export interface ReviewActionFailure {
+  ok: false;
+  reason: string;
+}
+
+export type ReviewActionResult = boolean | void | ReviewActionFailure;
+
+export type ReviewClipAction = (clip: ClipSummary) => ReviewActionResult | Promise<ReviewActionResult>;
 
 export interface ReviewDrawerModelOptions {
   clips?: readonly ClipSummary[];
@@ -822,19 +830,36 @@ export class ReviewDrawerModel {
     }
   }
 
+  private redoFailureReason(clip: ClipSummary, result: ReviewActionResult): string {
+    if (isObject(result) && result.ok === false) {
+      const reason = textOf(result.reason).trim();
+      if (reason) return reason;
+    }
+    return `Could not redo ${shortClipId(clip.clipId)}`;
+  }
+
   async redo(clipId = this.activeId): Promise<boolean> {
     if (this.busy) return false;
     const clip = this.clips.find(item => item.clipId === clipId);
     if (!clip) return false;
     this.busy = true;
     try {
-      let ok = true;
-      if (this.options.onRedo) {
-        const result = await this.options.onRedo(clip);
-        ok = result !== false;
+      let result: ReviewActionResult = true;
+      try {
+        if (this.options.onRedo) result = await this.options.onRedo(clip);
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : (typeof error === 'string' ? error : '');
+        this.setLive(message
+          ? `Redo failed: ${message}`
+          : `Could not redo ${shortClipId(clip.clipId)}`);
+        this.notify();
+        return false;
       }
-      if (!ok) {
-        this.setLive(`Could not redo ${shortClipId(clip.clipId)}`);
+      const failed = result === false || (isObject(result) && result.ok === false);
+      if (failed) {
+        this.setLive(this.redoFailureReason(clip, result));
         this.notify();
         return false;
       }
@@ -843,10 +868,6 @@ export class ReviewDrawerModel {
       this.ensureActive();
       this.notify();
       return true;
-    } catch {
-      this.setLive(`Could not redo ${shortClipId(clip.clipId)}`);
-      this.notify();
-      return false;
     } finally {
       this.busy = false;
     }

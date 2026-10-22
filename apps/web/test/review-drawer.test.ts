@@ -667,6 +667,53 @@ test('J/K and arrows move, D redoes, Enter opens Takes only in Advanced, and inp
   assert.equal(model.counts.approved, 0);
 });
 
+test('D announces the failure reason and never marks a failed redo queued', async () => {
+  const reason = 'Redo failed: the CPU backend cannot generate clip takes: it has no media runner, so use Google Colab or your own ComfyUI';
+  const model = createReviewDrawerModel({
+    clips: [clip(1)],
+    onRedo: () => ({ ok: false, reason }),
+  });
+
+  assert.equal(await model.handleKey('d'), false);
+  assert.equal(model.liveMessage, reason);
+  assert.equal(model.clips[0].state, 'review');
+  assert.equal(model.clips[0].queued, false);
+});
+
+test('D shows the spend-approval reason in the drawer live region', async () => {
+  const { doc, restore } = installFakeDom();
+  try {
+    const host = doc.createElement('div');
+    const reason = 'Redo needs spend approval in the Takes inspector';
+    const handle = mountReviewDrawer({
+      host,
+      clips: [clip(1)],
+      onRedo: () => ({ ok: false, reason }),
+    });
+    handle.open();
+
+    assert.equal(await handle.model.redo('ep2_video_a01'), false);
+    assert.equal(handle.model.liveMessage, reason);
+    assert.match(handle.element.querySelector('[data-review-live]').textContent, /Redo needs spend approval in the Takes inspector/);
+    assert.equal(handle.model.clips[0].state, 'review');
+
+    handle.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test('D surfaces a thrown server error message instead of the generic text', async () => {
+  const model = createReviewDrawerModel({
+    clips: [clip(1)],
+    onRedo: () => { throw new Error('the CPU backend cannot generate clip takes: it has no media runner'); },
+  });
+
+  assert.equal(await model.handleKey('d'), false);
+  assert.match(model.liveMessage, /^Redo failed: the CPU backend cannot generate clip takes: it has no media runner$/);
+  assert.equal(model.clips[0].state, 'review');
+});
+
 test('Shift+A approves all visible after a confirm and leaves nothing needing review', async () => {
   const list = [clip(1), clip(2), clip(3, { state: 'approved' })];
   const approved: string[] = [];

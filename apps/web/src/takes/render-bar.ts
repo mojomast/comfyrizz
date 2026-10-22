@@ -7,7 +7,7 @@
  * can exercise them without a DOM, a network or a server.
  */
 import type { ClipSummary } from './api.ts';
-import { mountReviewDrawer } from './review-drawer.ts';
+import { mountReviewDrawer, type ReviewClipAction } from './review-drawer.ts';
 
 export const MIN_OVERRIDE_REASON = 4;
 export const MAX_OVERRIDE_REASON = 500;
@@ -208,7 +208,7 @@ export interface RenderBarMountOptions {
   onRender?: (overrideReason?: string) => void | Promise<void>;
   onSelectBlocker?: (clipId: string) => void;
   onApprove?: (clip: ClipSummary) => boolean | void | Promise<boolean | void>;
-  onRedo?: (clip: ClipSummary) => boolean | void | Promise<boolean | void>;
+  onRedo?: ReviewClipAction;
   onOpenTakes?: (clipId: string) => void;
   disabled?: boolean | (() => boolean);
   description?: string;

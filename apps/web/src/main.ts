@@ -2211,19 +2211,24 @@ function init(opened: OpenedProject): void {
       }
     },
     onRedo: async clip => {
+      const backendSelect = document.getElementById('backend') as HTMLSelectElement | null;
+      const backendId = backendSelect?.value.trim() ?? '';
       try {
         const result = await takesApi.regenerate(String(pkg.id ?? ''), clip.clipId, {
           change: { note: 'Redo take from review drawer', seed: 'new', by: 'user' },
+          ...(backendId ? { backendId } : {}),
         });
         if (result.kind === 'approval') {
-          logActivity(`Redo for ${clip.clipId} needs spend approval in the Takes inspector`);
-          return false;
+          const reason = 'Redo needs spend approval in the Takes inspector';
+          logActivity(`Redo for ${clip.clipId}: ${reason}`);
+          return { ok: false as const, reason };
         }
         void refreshClips();
         return true;
       } catch (error) {
-        logActivity(`Could not redo ${clip.clipId}: ${(error as Error).message}`);
-        return false;
+        const cause = (error as Error).message || 'unknown error';
+        logActivity(`Could not redo ${clip.clipId}: ${cause}`);
+        return { ok: false as const, reason: `Redo failed: ${cause}` };
       }
     },
     onOpenTakes: clipId => { selectClipForReview(clipId); },
