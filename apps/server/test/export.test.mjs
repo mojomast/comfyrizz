@@ -5,6 +5,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -103,6 +104,14 @@ function countCues(text) {
   return (text.match(/-->/g) ?? []).length;
 }
 
+function sha256(data) {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+function sha256File(file) {
+  return sha256(readFileSync(file));
+}
+
 function ffprobe(file) {
   return JSON.parse(
     execFileSync('ffprobe', [
@@ -165,14 +174,39 @@ test('export renders launch-demo into all five bundle files', { timeout: 900_000
   assert.ok(types.includes('export.started') && types.includes('export.finished'));
 });
 
-test('a second export reuses the rendered MP4', { timeout: 60_000 }, async () => {
-  const response = await request({ method: 'POST', path: '/api/export', body: { packageId: 'pkg_launchdemo0001' } });
-  assert.equal(response.status, 200, response.text.slice(0, 500));
-  assert.equal(response.json.reused, true);
-  assert.equal(response.json.frames, compileTimeline(seed).durationInFrames);
+test('a second export reuses a real render only while its receipt fingerprint matches', { timeout: 900_000 }, async () => {
+  const pkg = structuredClone(seed);
+  pkg.id = 'pkg_exportreuse01';
+  pkg.revision = 1;
+  app.store.write(pkg);
+
+  // First export: no video exists, so this is the real CPU render.
+  const first = await request({ method: 'POST', path: '/api/export', body: { packageId: pkg.id } });
+  assert.equal(first.status, 200, first.text.slice(0, 500));
+  assert.equal(first.json.reused, false);
+  const firstReceiptPath = join(first.json.dir, 'export-video.json');
+  assert.ok(existsSync(firstReceiptPath), 'a real render writes its export receipt');
+  const firstReceipt = JSON.parse(readFileSync(firstReceiptPath, 'utf8'));
+  assert.equal(firstReceipt.version, 2);
+  assert.equal(firstReceipt.packageId, pkg.id);
+  assert.match(firstReceipt.fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(firstReceipt.sha256, sha256File(join(first.json.dir, 'video.mp4')));
+  assert.equal(firstReceipt.timelineHash, first.json.timelineHash);
+  assert.match(firstReceipt.captionsSha256, /^[a-f0-9]{64}$/);
+
+  // Second export: the inputs are unchanged, so the matching receipt allows reuse.
+  const second = await request({ method: 'POST', path: '/api/export', body: { packageId: pkg.id } });
+  assert.equal(second.status, 200, second.text.slice(0, 500));
+  assert.equal(second.json.reused, true);
+  assert.equal(second.json.frames, compileTimeline(pkg).durationInFrames);
+  const secondReceipt = JSON.parse(readFileSync(join(second.json.dir, 'export-video.json'), 'utf8'));
+  assert.equal(secondReceipt.fingerprint, firstReceipt.fingerprint);
+  assert.equal(secondReceipt.sha256, firstReceipt.sha256);
+  assert.equal(secondReceipt.timelineHash, firstReceipt.timelineHash);
+  assert.equal(secondReceipt.captionsSha256, firstReceipt.captionsSha256);
 });
 
-test('export excludes a CC BY-NC asset and still writes captions', { timeout: 60_000 }, async () => {
+test('export excludes a CC BY-NC asset and still writes captions', { timeout: 900_000 }, async () => {
   const pkg = structuredClone(seed);
   pkg.id = 'pkg_exportnc0001';
   pkg.revision = 1;
@@ -190,7 +224,8 @@ test('export excludes a CC BY-NC asset and still writes captions', { timeout: 60
   };
   app.store.write(pkg);
 
-  // Pre-place a video so the export reuses it instead of rendering a second MP4.
+  // IP13: an untracked video has no receipt, so it is not reused; the export
+  // rerenders over the pre-placed bytes and records their replacement.
   const exportDir = join(runtime, 'out', 'export', pkg.id);
   mkdirSync(exportDir, { recursive: true });
   writeFileSync(join(exportDir, 'video.mp4'), 'fake mp4 bytes');
@@ -198,7 +233,15 @@ test('export excludes a CC BY-NC asset and still writes captions', { timeout: 60
   const response = await request({ method: 'POST', path: '/api/export', body: { packageId: pkg.id } });
   assert.equal(response.status, 200, response.text.slice(0, 500));
   const body = response.json;
-  assert.equal(body.reused, true);
+  assert.equal(body.reused, false);
+  const receiptPath = join(body.dir, 'export-video.json');
+  assert.ok(existsSync(receiptPath), 'the rerender writes a receipt even with an untracked video present');
+  const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
+  assert.equal(receipt.version, 2);
+  assert.match(receipt.fingerprint, /^[a-f0-9]{64}$/);
+  const videoSha = sha256File(join(body.dir, 'video.mp4'));
+  assert.notEqual(videoSha, sha256('fake mp4 bytes'), 'the untracked pre-placed video must not be reused');
+  assert.equal(receipt.sha256, videoSha);
   assert.ok(body.captions >= 1, `expected captions, got ${body.captions}`);
   assert.equal(countCues(readFileSync(join(body.dir, 'captions.srt'), 'utf8')), body.captions);
   assert.equal(countCues(readFileSync(join(body.dir, 'captions.vtt'), 'utf8')), body.captions);
@@ -218,18 +261,14 @@ test('export excludes a CC BY-NC asset and still writes captions', { timeout: 60
   assert.ok(listed.includes('assets/a_icon_check.svg'), 'the CC0 asset still ships');
 });
 
-test('K1: the word-level VTT is only written when a cue carries word timings', async () => {
+test('K1: the word-level VTT is only written when a cue carries word timings', { timeout: 900_000 }, async () => {
   // A launch-demo package has measured sentences but no word cues, so the
   // optional captions.words.vtt must not appear and the sentence VTT is untouched.
   assert.equal(hasWordCues([{ text: 'No words.', from: 0, to: 30 }]), false);
   assert.equal(hasWordCues([{ text: 'Hi.', from: 0, to: 30, words: [{ text: 'Hi', from: 0, to: 30 }] }]), true);
   assert.equal(hasWordCues([]), false);
 
-  const pkg = { id: seed.id };
-  const exportDir = join(runtime, 'exports', pkg.id);
-  mkdirSync(exportDir, { recursive: true });
-  writeFileSync(join(exportDir, 'video.mp4'), 'fake mp4 bytes');
-  const response = await request({ method: 'POST', path: '/api/export', body: { packageId: pkg.id } });
+  const response = await request({ method: 'POST', path: '/api/export', body: { packageId: seed.id } });
   assert.equal(response.status, 200, response.text.slice(0, 300));
   assert.equal(existsSync(join(response.json.dir, 'captions.words.vtt')), false);
 });
