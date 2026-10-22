@@ -1,0 +1,147 @@
+/* DN08: command palette. Tokens only. */
+.palette {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 100);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: var(--space-8);
+  background: var(--bg-scrim);
+}
+
+.palette:not([hidden]) {
+  display: flex;
+}
+
+.palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+}
+
+.palette-dialog {
+  position: relative;
+  width: min(640px, calc(100vw - var(--space-8)));
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--elevation-2);
+  overflow: hidden;
+}
+
+.palette-input {
+  height: var(--control-height-comfortable, 32px);
+  padding: 0 var(--space-3);
+  border: none;
+  border-bottom: var(--elevation-border-1);
+  background: var(--bg-1);
+  color: var(--text-1);
+  font-size: var(--font-base);
+  outline: none;
+}
+
+.palette-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.palette-list {
+  overflow: auto;
+  padding: var(--space-1);
+}
+
+.palette-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.palette-option:hover,
+.palette-option[aria-selected="true"] {
+  background: var(--bg-2);
+}
+
+.palette-option-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-1);
+  font-size: var(--font-base);
+}
+
+.palette-option-description {
+  color: var(--text-3);
+  font-size: var(--font-size-12);
+  margin-left: var(--space-2);
+}
+
+.palette-option-shortcut {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-12);
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  padding: 0 var(--space-1);
+}
+
+.palette-empty {
+  padding: var(--space-4);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.palette-shortcuts {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 100);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-scrim);
+}
+
+.palette-shortcuts:not([hidden]) {
+  display: flex;
+}
+
+.palette-shortcuts-dialog {
+  width: min(560px, calc(100vw - var(--space-8)));
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
+  padding: var(--space-4);
+}
+
+.palette-shortcuts-dialog h2 {
+  margin: 0 0 var(--space-3);
+  color: var(--text-1);
+  font-size: var(--font-size-16);
+}
+
+.palette-shortcuts-dialog table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.palette-shortcuts-dialog td {
+  padding: var(--space-1) 0;
+  color: var(--text-2);
+  font-size: var(--font-base);
+}
+
+.palette-shortcuts-dialog kbd {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-12);
+  color: var(--text-2);
+}

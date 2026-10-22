@@ -2,6 +2,8 @@ import './style.css';
 import './project-chat.css';
 import './characters/characters.css';
 import './ui/look-picker.css';
+import { initShellLayout } from './ui/splitter';
+import { mountModeToggle, type ModeController } from './ui/mode';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { readRunSnapshot } from './run-progress.ts';
@@ -36,6 +38,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 // The C2 server prints http://127.0.0.1:4319/#token=...; the fragment never
 // leaves the browser. Strip it from the visible URL and keep it for API calls.
 const token = installSessionToken();
+initShellLayout();
 
 /* Lifted from Orbit's Grok Bots shell (MIT): escape, then a tiny markdown subset. */
 function esc(value: unknown): string {
@@ -478,6 +481,68 @@ function markDirty(reason: string): void {
   $('draft').textContent = `draft · ${reason} · recompiled on export`;
   syncTimeline();
   updatePreview(pkg, timeline, generatedAssets);
+  renderModeSummary();
+}
+
+function modeSummaryLabels(): string[] {
+  const source = (editorStore.getState().doc.package ?? pkg) as unknown as PackageV1;
+  const scenes = source.scenes ?? [];
+  const labels: string[] = [];
+  const customTransition = scenes.some(scene => {
+    const transition = scene.transitionOut;
+    if (!transition) return false;
+    return transition.type !== 'cut' || Number(transition.frames ?? 0) > 0;
+  });
+  if (customTransition) labels.push('Custom transition');
+  if (scenes.some(scene => typeof scene.preferredFrames === 'number')) labels.push('Custom timing');
+  if (scenes.some(scene => Boolean(scene.motion?.recipe || scene.motion?.seed !== undefined || scene.motion?.cue_phrases?.length))) {
+    labels.push('Custom motion');
+  }
+  if (source.voice?.enabled) labels.push('Custom voice');
+  if (source.presenter?.enabled === true) labels.push('AI presenter');
+  return labels;
+}
+
+function renderModeSummary(): void {
+  const host = document.getElementById('mode-summary');
+  if (!host) return;
+  host.innerHTML = modeSummaryLabels()
+    .map(label => `<span class="mode-chip" role="listitem">${esc(label)}</span>`)
+    .join('');
+}
+
+function mountEasyActions(mode: ModeController | null): void {
+  const transport = document.getElementById('transport');
+  if (!transport || document.getElementById('easy-actions')) return;
+  const host = document.createElement('div');
+  host.id = 'easy-actions';
+  host.className = 'easy-actions';
+  host.dataset.easySurface = 'true';
+  host.innerHTML = `
+    <span class="easy-actions-label">Easy view</span>
+    <button type="button" id="easy-generate" class="btn btn-primary btn-sm primary">Generate</button>
+    <button type="button" id="easy-preview" class="btn btn-secondary btn-sm">Preview</button>
+    <span id="mode-summary" class="mode-summary" role="list" aria-label="Custom settings hidden in Easy view"></span>
+    <span class="easy-actions-spacer"></span>
+    <button type="button" id="easy-advanced" class="btn btn-ghost btn-sm">Advanced settings</button>`;
+  transport.after(host);
+
+  host.querySelector<HTMLButtonElement>('#easy-generate')?.addEventListener('click', () => {
+    const prompt = document.getElementById('prompt') as HTMLTextAreaElement | null;
+    const composer = document.getElementById('composer') as HTMLFormElement | null;
+    if (!prompt) return;
+    if (prompt.value.trim() && composer) composer.requestSubmit();
+    else prompt.focus();
+  });
+  host.querySelector<HTMLButtonElement>('#easy-preview')?.addEventListener('click', () => {
+    player?.seekTo(0);
+    const play = document.getElementById('play');
+    if (play?.textContent?.trim() === 'Play') play.click();
+  });
+  host.querySelector<HTMLButtonElement>('#easy-advanced')?.addEventListener('click', () => {
+    mode?.setMode('advanced');
+  });
+  renderModeSummary();
 }
 
 /** C-pres: the storyboard's presenter toolbar (coverage + quick presets + placement + label). */
@@ -614,6 +679,7 @@ function renderStoryboard(): void {
     audioMixEnabled = mixToggle.checked;
     logActivity(`Sound design ${audioMixEnabled ? 'on' : 'off'} for the next render/export`);
   });
+  renderModeSummary();
 }
 
 function renderPalette(): void {
@@ -695,15 +761,172 @@ async function downloadWorkflow(assetId: string, format: 'api' | 'readme', varia
   logActivity(`Downloaded ${filename} for ${assetId}.${limitation}`);
 }
 
+/**
+ * DN05: the right rail is one APG tablist (Run / Activity / Assets / GPU queue).
+ * Filters and windows only change what is rendered; the data model and the
+ * package stay untouched, so switching tabs never clears an input.
+ */
+type RailTab = 'run' | 'activity' | 'assets' | 'gpu';
+type RunFilter = 'all' | 'errors' | 'phases';
+const RAIL_TABS: readonly RailTab[] = ['run', 'activity', 'assets', 'gpu'];
+const RUN_FILTERS: readonly RunFilter[] = ['all', 'errors', 'phases'];
+const ASSET_PAGE_SIZE = 30;
+const ACTIVITY_PAGE_SIZE = 50;
+const railState = {
+  bound: false,
+  tab: 'run' as RailTab,
+  runFilter: 'all' as RunFilter,
+  assetType: 'all',
+  assetLicence: 'all',
+  assetPage: 0,
+  activityAll: false,
+};
+
+const isRailTab = (value: string | undefined): value is RailTab => RAIL_TABS.includes(value as RailTab);
+const isRunFilter = (value: string | undefined): value is RunFilter => RUN_FILTERS.includes(value as RunFilter);
+
+/** The stable key/value behind every asset filter chip. */
+function assetTypeOf(asset: Asset): string {
+  return String(asset.kind ?? 'other');
+}
+
+function assetLicenceOf(asset: Asset): string {
+  const id = asset.license?.id;
+  if (id) return String(id);
+  if (asset.origin === 'generated') return 'generated';
+  if (asset.origin === 'upload') return asset.redistributable ? 'upload (shareable)' : 'upload (not shareable)';
+  return 'unknown';
+}
+
+function fillRailSelect(select: HTMLSelectElement | null, values: string[], allLabel: string, current: string): string {
+  if (!select) return current;
+  const signature = values.join('\u0000');
+  if (select.dataset.options !== signature) {
+    select.innerHTML = [`<option value="all">${esc(allLabel)}</option>`, ...values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`)].join('');
+    select.dataset.options = signature;
+  }
+  const next = values.includes(current) ? current : 'all';
+  select.value = next;
+  return next;
+}
+
+/** Bind the rail once. Each render function calls this; the guard keeps listeners single. */
+function initRail(): void {
+  if (railState.bound) return;
+  const tabs = document.getElementById('rail-tabs');
+  const pane = document.getElementById('activity-pane');
+  if (!tabs || !pane) return;
+  railState.bound = true;
+  const tabButtons = Array.from(tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+
+  const activate = (tab: RailTab, moveFocus = false): void => {
+    railState.tab = tab;
+    for (const button of tabButtons) {
+      const selected = button.dataset.railTab === tab;
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
+      button.tabIndex = selected ? 0 : -1;
+      if (selected && moveFocus) button.focus();
+    }
+    pane.querySelectorAll<HTMLElement>('[data-rail-panel]').forEach(panel => {
+      panel.hidden = panel.dataset.railPanel !== tab;
+    });
+  };
+
+  tabs.addEventListener('click', event => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-rail-tab]');
+    if (button && isRailTab(button.dataset.railTab)) activate(button.dataset.railTab);
+  });
+
+  tabs.addEventListener('keydown', event => {
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const current = Math.max(0, tabButtons.findIndex(button => button.dataset.railTab === railState.tab));
+    const last = tabButtons.length - 1;
+    const index =
+      event.key === 'Home' ? 0
+        : event.key === 'End' ? last
+          : event.key === 'ArrowLeft' ? (current <= 0 ? last : current - 1)
+            : (current >= last ? 0 : current + 1);
+    const next = tabButtons[index]?.dataset.railTab;
+    if (isRailTab(next)) activate(next, true);
+  });
+
+  pane.addEventListener('click', event => {
+    const target = event.target as HTMLElement;
+    const filterButton = target.closest<HTMLButtonElement>('[data-run-filter]');
+    if (filterButton && isRunFilter(filterButton.dataset.runFilter)) {
+      railState.runFilter = filterButton.dataset.runFilter;
+      renderRunPanel();
+      return;
+    }
+    const pageButton = target.closest<HTMLButtonElement>('[data-asset-page]');
+    if (pageButton) {
+      railState.assetPage += pageButton.dataset.assetPage === 'prev' ? -1 : 1;
+      renderAssets();
+      return;
+    }
+    if (target.closest('#activity-show-all')) {
+      railState.activityAll = !railState.activityAll;
+      renderActivity();
+    }
+  });
+
+  pane.addEventListener('change', event => {
+    const select = event.target as HTMLSelectElement;
+    if (select.id === 'asset-type-filter') {
+      railState.assetType = select.value;
+      railState.assetPage = 0;
+      renderAssets();
+    } else if (select.id === 'asset-licence-filter') {
+      railState.assetLicence = select.value;
+      railState.assetPage = 0;
+      renderAssets();
+    }
+  });
+
+  activate(railState.tab);
+}
+
 function renderAssets(): void {
+  initRail();
   const host = $('assets');
   const entries = Object.entries(withTakePreview(pkg).assets ?? {});
+  const types = Array.from(new Set(entries.map(([, asset]) => assetTypeOf(asset)))).sort();
+  const licences = Array.from(new Set(entries.map(([, asset]) => assetLicenceOf(asset)))).sort();
+  railState.assetType = fillRailSelect($<HTMLSelectElement>('asset-type-filter'), types, 'All types', railState.assetType);
+  railState.assetLicence = fillRailSelect($<HTMLSelectElement>('asset-licence-filter'), licences, 'All licences', railState.assetLicence);
+
+  const filtered = entries.filter(([, asset]) =>
+    (railState.assetType === 'all' || assetTypeOf(asset) === railState.assetType)
+    && (railState.assetLicence === 'all' || assetLicenceOf(asset) === railState.assetLicence));
+  const pageCount = Math.max(1, Math.ceil(filtered.length / ASSET_PAGE_SIZE));
+  railState.assetPage = Math.min(Math.max(0, railState.assetPage), pageCount - 1);
+  const start = railState.assetPage * ASSET_PAGE_SIZE;
+  const windowEntries = filtered.slice(start, start + ASSET_PAGE_SIZE);
+
+  const windowHost = document.getElementById('asset-window');
+  const count = document.getElementById('asset-window-count');
+  const previous = document.getElementById('asset-prev') as HTMLButtonElement | null;
+  const next = document.getElementById('asset-next') as HTMLButtonElement | null;
+  if (windowHost) windowHost.hidden = filtered.length <= ASSET_PAGE_SIZE;
+  if (count) count.textContent = filtered.length === 0 ? 'No assets match these filters' : `Showing ${start + 1}–${start + windowEntries.length} of ${filtered.length}`;
+  if (previous) previous.disabled = railState.assetPage === 0;
+  if (next) next.disabled = start + ASSET_PAGE_SIZE >= filtered.length;
+
   if (entries.length === 0) {
     host.innerHTML = '<div class="empty">No assets yet.<br /><span class="hint">Send a brief to generate the first package.</span></div>';
     renderGpuQueue();
     return;
   }
-  host.innerHTML = entries
+  if (windowEntries.length === 0) {
+    host.innerHTML = '<div class="empty">No assets match these filters.<br /><span class="hint">Clear the type or licence filter to see everything.</span></div>';
+    renderGpuQueue();
+    return;
+  }
+  // At most ASSET_PAGE_SIZE rows exist in the DOM at once; the rest are a
+  // window over the same entries, so a 48-asset package never grows the rail.
+  host.innerHTML = windowEntries
     .map(([id, asset]) => {
       const origin = asset.origin === 'generated' ? asset.gen?.generator ?? 'generated' : asset.origin;
       const pending = asset.status === 'pending';
@@ -713,7 +936,7 @@ function renderAssets(): void {
       const statusText = pending ? 'pending gpu' : previewReady ? 'preview ready' : (asset.license?.id ?? asset.status);
       const chip = `<span class="badge badge-${tone} chip${pending ? ' warn' : ''}" data-tone="${tone}">${esc(statusText)}</span>`;
       const timeInfo = asset.media?.frames ? `<time class="job-time hint tabular-nums mono">${asset.media.frames}f</time>` : '';
-      return `<div class="asset job-row${pending ? ' pending' : ''}" data-asset-id="${esc(id)}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(id)}</b>${chip}${timeInfo}</div><span class="job-progress hint">${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}</div>`;
+      return `<div class="asset job-row rail-row${pending ? ' pending' : ''}" data-asset-id="${esc(id)}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(id)}</b>${chip}${timeInfo}</div><span class="job-progress hint">${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}</div>`;
     })
     .join('');
   renderGpuQueue();
@@ -732,7 +955,7 @@ function renderGpuQueue(): void {
   host.innerHTML = remaining
     .map(
       item =>
-        `<div class="asset job-row pending" data-asset-id="${esc(item.assetId)}"><div class="thumb">◌</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(item.assetId)}</b><span class="badge badge-warn chip warn" data-tone="warn">pending spend</span></div><span class="job-progress hint">${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div></div>`,
+        `<div class="asset job-row rail-row pending" data-asset-id="${esc(item.assetId)}"><div class="thumb">◌</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(item.assetId)}</b><span class="badge badge-warn chip warn" data-tone="warn">pending spend</span></div><span class="job-progress hint">${esc(item.generator)}${item.workflow ? ` · ${esc(item.workflow)}` : ''} · procedural fallback preview</span></div></div>`,
     )
     .join('');
 }
@@ -746,15 +969,28 @@ function activityTone(text: string): { tone: 'ok' | 'warn' | 'danger' | 'info'; 
 }
 
 function renderActivity(): void {
+  initRail();
   const host = $('activity');
-  host.innerHTML = state.activity.length
-    ? state.activity
+  const total = state.activity.length;
+  const visible = railState.activityAll ? state.activity : state.activity.slice(0, ACTIVITY_PAGE_SIZE);
+  host.innerHTML = visible.length
+    ? visible
         .map(event => {
           const { tone, label } = activityTone(event.text);
-          return `<div class="event job-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><span class="job-text">${esc(event.text)}</span></div><time class="tabular-nums mono hint">${esc(event.at)}</time></div>`;
+          return `<div class="event job-row rail-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><span class="job-text">${esc(event.text)}</span></div><time class="tabular-nums mono hint">${esc(event.at)}</time></div>`;
         })
         .join('')
     : '<div class="empty">No activity yet.<br /><span class="hint">Agent and render events will show up here.</span></div>';
+  const more = document.getElementById('activity-more');
+  const count = document.getElementById('activity-count');
+  const button = document.getElementById('activity-show-all') as HTMLButtonElement | null;
+  if (more) more.hidden = total <= ACTIVITY_PAGE_SIZE;
+  if (count) count.textContent = total > ACTIVITY_PAGE_SIZE ? `Latest ${ACTIVITY_PAGE_SIZE} of ${total}` : `${total} event${total === 1 ? '' : 's'}`;
+  if (button) {
+    button.hidden = total <= ACTIVITY_PAGE_SIZE;
+    button.textContent = railState.activityAll ? `Show latest ${ACTIVITY_PAGE_SIZE}` : `Show all ${total}`;
+    button.setAttribute('aria-expanded', String(railState.activityAll));
+  }
 }
 
 function summarizeRunEvent(event: RunEvent): string {
@@ -820,28 +1056,68 @@ function runStatusTone(status: string): 'ok' | 'warn' | 'danger' | 'info' {
   return 'info';
 }
 
+type CollapsedRunEvent = { event: RunEvent; count: number };
+
+/** Consecutive identical events are one row with a ×N count, not N rows. */
+function runEventKey(event: RunEvent): string {
+  return [event.event ?? event.type ?? 'event', event.phase ?? '', event.state ?? '', summarizeRunEvent(event)].join('\u0001');
+}
+
+function collapseRunEvents(events: RunEvent[]): CollapsedRunEvent[] {
+  const groups: CollapsedRunEvent[] = [];
+  for (const event of events) {
+    const last = groups.at(-1);
+    if (last && runEventKey(last.event) === runEventKey(event)) last.count += 1;
+    else groups.push({ event, count: 1 });
+  }
+  return groups;
+}
+
+function matchesRunFilter(event: RunEvent, filter: RunFilter): boolean {
+  if (filter === 'errors') return runEventTone(event).tone === 'danger';
+  if (filter === 'phases') return event.event === 'run_phase' || typeof event.phase === 'string';
+  return true;
+}
+
+function paintRunFilters(): void {
+  document.querySelectorAll<HTMLButtonElement>('[data-run-filter]').forEach(button => {
+    const active = button.dataset.runFilter === railState.runFilter;
+    button.setAttribute('aria-pressed', String(active));
+    button.classList.toggle('is-active', active);
+  });
+}
+
 function renderRunPanel(): void {
+  initRail();
+  paintRunFilters();
   const host = $('run-panel');
   if (!runState.active) {
     host.innerHTML = '<div class="empty">No backend run yet.<br /><span class="hint">Pick a backend and press Run.</span></div>';
     return;
   }
   const activeTone = runStatusTone(runState.active.status);
-  const rows = runState.events
-    .map(event => {
+  const rows = collapseRunEvents(runState.events.filter(event => matchesRunFilter(event, railState.runFilter)))
+    .map(({ event, count }) => {
       const { tone, label } = runEventTone(event);
       const at = event.at ?? event.time ?? event.timestamp;
       const timeStr = at ? `<time class="tabular-nums mono hint">${esc(String(at))}</time>` : '';
-      return `<div class="event job-row" data-tone="${tone}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><b class="job-name">${esc(String(event.event ?? event.type ?? 'event'))}</b><span class="job-progress hint">${esc(summarizeRunEvent(event))}</span></div>${timeStr}</div>`;
+      const name = String(event.event ?? event.type ?? 'event');
+      const countLabel = count > 1 ? `<span class="event-count rail-event-count" title="${count} identical events" aria-label="${count} identical events">×${count}</span>` : '';
+      return `<div class="event job-row rail-row" data-adv data-tone="${tone}" data-event="${esc(name)}"><span class="badge badge-${tone}" data-tone="${tone}">${esc(label)}</span><div class="job-content"><b class="job-name">${esc(name)}</b>${countLabel}<span class="job-progress hint">${esc(summarizeRunEvent(event))}</span></div>${timeStr}</div>`;
     })
     .join('');
-  const teardown = runState.teardown
-    ? `<div class="event job-row" data-tone="${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}"><span class="badge badge-${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}">teardown</span><div class="job-content"><b class="job-name">teardown</b><span class="job-progress hint">${esc(teardownLabel(runState.teardown))}</span></div></div>`
+  const noMatches = runState.events.length === 0 || !rows
+    ? `<div class="empty">No events match this filter.<br /><span class="hint">Choose All to see the full run.</span></div>`
     : '';
-  const render = runState.render
-    ? `<div class="run-render job-row"><span class="badge badge-ok" data-tone="ok">ready</span><div class="job-content"><b class="job-name">run MP4</b><span class="job-progress hint tabular-nums mono">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div><div class="job-actions"><button type="button" id="run-video" class="btn btn-secondary btn-sm">Download run MP4</button></div></div>`
+  // The filters apply to the event list; the run summary stays, while the
+  // teardown/render details belong to the unfiltered view.
+  const teardown = railState.runFilter === 'all' && runState.teardown
+    ? `<div class="event job-row rail-row" data-adv data-tone="${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}"><span class="badge badge-${runState.teardown.state === 'stopped' ? 'ok' : 'warn'}">teardown</span><div class="job-content"><b class="job-name">teardown</b><span class="job-progress hint">${esc(teardownLabel(runState.teardown))}</span></div></div>`
     : '';
-  host.innerHTML = `<div class="run-head job-row"><div class="job-content"><b class="job-name">${esc(runState.active.runId)}</b><span class="job-meta hint">${esc(runState.active.backendId)}</span></div><span class="badge badge-${activeTone} chip" data-tone="${activeTone}">${esc(runState.active.status)}</span></div>${rows}${teardown}${render}`;
+  const render = railState.runFilter === 'all' && runState.render
+    ? `<div class="run-render job-row rail-row" data-adv><span class="badge badge-ok" data-tone="ok">ready</span><div class="job-content"><b class="job-name">run MP4</b><span class="job-progress hint tabular-nums mono">${runState.render.frames ?? '?'} frames${runState.render.bytes ? ` · ${(runState.render.bytes / 1e6).toFixed(1)} MB` : ''}</span></div><div class="job-actions"><button type="button" id="run-video" class="btn btn-secondary btn-sm">Download run MP4</button></div></div>`
+    : '';
+  host.innerHTML = `<div class="run-head job-row" data-adv><div class="job-content"><b class="job-name">${esc(runState.active.runId)}</b><span class="job-meta hint">${esc(runState.active.backendId)}</span></div><span class="badge badge-${activeTone} chip" data-tone="${activeTone}">${esc(runState.active.status)}</span></div>${rows || noMatches}${teardown}${render}`;
   const video = $('run-video');
   if (video) video.addEventListener('click', () => void downloadRunVideo());
 }
@@ -1800,6 +2076,16 @@ function init(opened: OpenedProject): void {
   renderExportPanel();
   renderSpendCard();
   renderBriefPanel();
+
+  const modeControl = mountModeToggle();
+  if (modeControl) {
+    const renderSplit = document.getElementById('render-split-button');
+    if (renderSplit?.parentElement) renderSplit.after(modeControl.element);
+    else document.getElementById('topbar')?.append(modeControl.element);
+  }
+  mountEasyActions(modeControl);
+  editorStore.subscribe(() => renderModeSummary());
+
   agentSettings = mountAgentSettings(apiFetch, logActivity);
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: opened.activity }];
   renderActivity();
@@ -1903,13 +2189,49 @@ function init(opened: OpenedProject): void {
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   const renderButton = $('render');
   const splitGroup = document.getElementById('render-split-button');
-  const renderBarHost = document.createElement('div');
-  renderBarHost.id = 'render-bar-host';
-  (splitGroup ?? renderButton).before(renderBarHost);
+  let renderBarHost = document.getElementById('render-bar-host');
+  if (!renderBarHost) {
+    renderBarHost = document.createElement('div');
+    renderBarHost.id = 'render-bar-host';
+    (splitGroup ?? renderButton).before(renderBarHost);
+  }
   renderBar = mountRenderBar(renderBarHost, {
+    clips: () => clipStore.all(),
     gate: () => clipStore.gate(),
     onRender: reason => exportMp4(reason),
     onSelectBlocker: selectClipForReview,
+    onApprove: async clip => {
+      try {
+        await takesApi.verdict(String(pkg.id ?? ''), clip.clipId, 'approved', clip.selected ? { takeId: clip.selected } : {});
+        void refreshClips();
+        return true;
+      } catch (error) {
+        logActivity(`Could not approve ${clip.clipId}: ${(error as Error).message}`);
+        return false;
+      }
+    },
+    onRedo: async clip => {
+      const backendSelect = document.getElementById('backend') as HTMLSelectElement | null;
+      const backendId = backendSelect?.value.trim() ?? '';
+      try {
+        const result = await takesApi.regenerate(String(pkg.id ?? ''), clip.clipId, {
+          change: { note: 'Redo take from review drawer', seed: 'new', by: 'user' },
+          ...(backendId ? { backendId } : {}),
+        });
+        if (result.kind === 'approval') {
+          const reason = 'Redo needs spend approval in the Takes inspector';
+          logActivity(`Redo for ${clip.clipId}: ${reason}`);
+          return { ok: false as const, reason };
+        }
+        void refreshClips();
+        return true;
+      } catch (error) {
+        const cause = (error as Error).message || 'unknown error';
+        logActivity(`Could not redo ${clip.clipId}: ${cause}`);
+        return { ok: false as const, reason: `Redo failed: ${cause}` };
+      }
+    },
+    onOpenTakes: clipId => { selectClipForReview(clipId); },
   });
   renderButton.addEventListener('click', () => void beginExport());
   const renderLocation = $<HTMLSelectElement>('render-location');

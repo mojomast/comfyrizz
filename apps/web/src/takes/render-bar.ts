@@ -7,6 +7,7 @@
  * can exercise them without a DOM, a network or a server.
  */
 import type { ClipSummary } from './api.ts';
+import { mountReviewDrawer, type ReviewClipAction } from './review-drawer.ts';
 
 export const MIN_OVERRIDE_REASON = 4;
 export const MAX_OVERRIDE_REASON = 500;
@@ -95,6 +96,22 @@ export const clipGate = summarizeGate;
 export const gateForClips = summarizeGate;
 export const finalGate = summarizeGate;
 
+/**
+ * A take verdict belongs to the generated asset, not to one timeline clip: the
+ * same asset can back several scenes (`<scene>:<asset>` clip ids). Apply the
+ * approved verdict to every clip that uses the asset so the drawer progress
+ * and the top-bar pill count the same clips the server will count.
+ */
+export function approveSharedAsset(
+  clips: readonly ClipSummary[] | null | undefined,
+  assetId: unknown,
+): ClipSummary[] {
+  const list = clipList(clips);
+  const id = textOf(assetId);
+  if (!id) return list;
+  return list.map(clip => (textOf(clip.assetId) === id ? { ...clip, state: 'approved' } : clip));
+}
+
 /** "3/5 clips approved" (the spec's "n/m clips approved"). */
 export function approvedLabel(gate: Pick<RenderGateSummary, 'approved' | 'total'> | null | undefined): string {
   const approved = Number.isFinite(gate?.approved) ? Math.max(0, Math.floor(gate!.approved)) : 0;
@@ -153,43 +170,31 @@ export interface RenderBarRenderOptions {
   idPrefix?: string;
   disabled?: boolean;
   description?: string;
+  open?: boolean;
 }
 
-/** Pure HTML for the render bar; the mount helper binds the buttons. */
+export function approvedPillLabel(gate: Pick<RenderGateSummary, 'approved' | 'total'> | null | undefined): string {
+  const approved = Number.isFinite(gate?.approved) ? Math.max(0, Math.floor(gate!.approved)) : 0;
+  const total = Number.isFinite(gate?.total) ? Math.max(0, Math.floor(gate!.total)) : 0;
+  return `${approved}/${total} approved`;
+}
+
+export const renderPillLabel = approvedPillLabel;
+
+/**
+ * Pure HTML for the top-bar approval pill. The drawer owns the blocker rows,
+ * the render action and the override form; the top bar keeps exactly one pill.
+ */
 export function renderRenderBar(gate: RenderGateSummary, options: RenderBarRenderOptions = {}): string {
-  const prefix = options.idPrefix ?? 'render-bar';
-  const label = approvedLabel(gate);
   const disabled = options.disabled ? ' disabled' : '';
-  const blockers = gate.blocking.length === 0
-    ? ''
-    : `<div class="render-bar-blockers" data-render-blockers>
-        <p class="render-bar-hint">${gate.blocking.length} clip${gate.blocking.length === 1 ? '' : 's'} still need approval:</p>
-        <ul class="render-bar-list">${gate.blocking.map(blocker => `<li>
-          <button type="button" class="btn btn-secondary btn-sm chip render-bar-blocker" data-render-blocker="${escapeHtml(blocker.clipId)}" title="Review ${escapeHtml(blockerLabel(blocker))}">${escapeHtml(blockerLabel(blocker))}</button>
-        </li>`).join('')}</ul>
-      </div>`;
-  const action = gate.ok
-    ? `<button type="button" class="btn btn-primary primary" data-render-run${disabled}>Render</button>`
-    : `<button type="button" class="btn btn-secondary render-bar-override-open" data-render-open-override${disabled}>Render anyway</button>`;
-  const dialog = gate.ok
-    ? ''
-    : `<form class="render-bar-override panel" data-render-override hidden aria-label="Override the render gate">
-        <label for="${escapeHtml(prefix)}-reason" class="field-label">Override reason</label>
-        <textarea id="${escapeHtml(prefix)}-reason" name="reason" class="field-control" data-override-reason rows="2" required minlength="${MIN_OVERRIDE_REASON}" maxlength="${MAX_OVERRIDE_REASON}" placeholder="Why is this render allowed before every clip is approved?"${disabled}></textarea>
-        <p class="render-bar-hint" data-override-count aria-live="polite">0 / ${MAX_OVERRIDE_REASON}</p>
-        <p class="render-bar-error" data-override-error role="alert"></p>
-        <div class="render-bar-actions toolbar">
-          <button type="submit" class="btn btn-primary primary" data-override-submit${disabled}>Render with override</button>
-          <button type="button" class="btn btn-secondary" data-override-cancel${disabled}>Cancel</button>
-        </div>
-      </form>`;
+  const title = options.description || 'Review clips (R)';
   return `<div class="render-bar toolbar" data-render-bar data-gate-ok="${gate.ok ? 'true' : 'false'}" aria-label="Final render gate">
-    <span class="render-bar-title">Final render</span>
-    <span class="render-bar-count badge ${gate.ok ? 'badge-ok' : 'badge-warn'}" data-render-approved aria-live="polite">${escapeHtml(label)}</span>
-    ${gate.ok ? '<span class="render-bar-ready badge badge-ok" data-render-ready>All clips approved</span>' : blockers}
-    ${action}
-    ${options.description ? `<span class="render-bar-hint">${escapeHtml(options.description)}</span>` : ''}
-    ${dialog}
+    <button type="button" class="btn btn-secondary btn-sm render-bar-pill" data-review-open aria-haspopup="dialog" aria-expanded="${options.open ? 'true' : 'false'}" aria-controls="review-drawer" aria-keyshortcuts="R" title="${escapeHtml(title)}"${disabled}>
+      <span class="render-bar-pill-dot" aria-hidden="true">●</span>
+      <span class="render-bar-pill-label" data-render-approved aria-live="polite">${escapeHtml(approvedPillLabel(gate))}</span>
+      <span class="render-bar-pill-caret" aria-hidden="true">▾</span>
+      ${gate.ok ? '<span hidden data-render-ready>All clips approved</span>' : ''}
+    </button>
   </div>`;
 }
 
@@ -202,8 +207,12 @@ export interface RenderBarMountOptions {
   clips?: readonly ClipSummary[] | (() => readonly ClipSummary[]);
   onRender?: (overrideReason?: string) => void | Promise<void>;
   onSelectBlocker?: (clipId: string) => void;
+  onApprove?: (clip: ClipSummary) => boolean | void | Promise<boolean | void>;
+  onRedo?: ReviewClipAction;
+  onOpenTakes?: (clipId: string) => void;
   disabled?: boolean | (() => boolean);
   description?: string;
+  drawerHost?: HTMLElement;
 }
 
 export interface RenderBarHandle {
@@ -213,7 +222,6 @@ export interface RenderBarHandle {
   destroy(): void;
 }
 
-let barSequence = 0;
 let stylesInstalled = false;
 
 function installStyles(): void {
@@ -222,138 +230,129 @@ function installStyles(): void {
   const style = document.createElement('style');
   style.dataset.comfyrizz = 'render-bar';
   style.textContent = `
-.render-bar { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; min-height:var(--space-6); }
-.render-bar-title { font-size:var(--font-size-12); font-weight:var(--font-weight-600); color:var(--text-1); white-space:nowrap; }
-.render-bar-count { font-size:var(--font-size-12); color:var(--text-2); white-space:nowrap; }
-.render-bar[data-gate-ok="false"] .render-bar-count { color:var(--warn); }
-.render-bar[data-gate-ok="true"] .render-bar-count { color:var(--ok); }
-.render-bar-ready { font-size:var(--font-size-12); color:var(--ok); }
-.render-bar-blockers { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; }
-.render-bar-list { display:flex; gap:var(--space-1); flex-wrap:wrap; list-style:none; margin:0; padding:0; }
-.render-bar-blocker { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.render-bar-override { display:flex; flex-direction:column; gap:var(--space-1); min-width:260px; padding:var(--space-3); background:var(--bg-2); border:var(--elevation-border-1); border-radius:var(--radius-control); }
-.render-bar-override[hidden] { display:none; }
-.render-bar-actions { display:flex; gap:var(--space-2); }
-.render-bar-error { margin:0; color:var(--danger); font-size:var(--font-size-12); }
-.render-bar-error:empty { display:none; }
-.render-bar-hint { margin:0; font-size:var(--font-size-12); color:var(--text-2); }
+.render-bar { display:inline-flex; align-items:center; gap:var(--space-2); min-height:var(--space-6); }
+.render-bar-pill { display:inline-flex; align-items:center; gap:var(--space-1); min-height:var(--target-min); padding:var(--space-1) var(--space-2); border-radius:var(--radius-pill); white-space:nowrap; }
+.render-bar-pill[aria-expanded="true"] { border-color:var(--accent-border); color:var(--accent); }
+.render-bar-pill-dot { color:var(--warn); font-size:var(--font-size-12); line-height:1; }
+.render-bar[data-gate-ok="true"] .render-bar-pill-dot { color:var(--ok); }
+.render-bar-pill-label { font-variant-numeric:var(--font-numeric-tabular); }
+.render-bar-pill-caret { color:var(--text-3); }
 `;
   document.head.append(style);
 }
 
+function clipsFromGate(gate: RenderGateSummary): ClipSummary[] {
+  return gate.blocking.map((blocker, index) => ({
+    clipId: blocker.clipId,
+    sceneId: blocker.sceneId ?? '',
+    assetId: blocker.assetId ?? '',
+    slot: blocker.label ?? '',
+    kind: 'plate',
+    from: index,
+    durationInFrames: 0,
+    state: (blocker.state || 'review') as ClipSummary['state'],
+    selected: null,
+    selectedN: null,
+    takeCount: 0,
+    newTakes: 0,
+    lastJob: null,
+    queued: false,
+  }));
+}
+
 /**
- * Mount the render bar into the existing render controls. It only requests a
- * reason when the gate is blocked; a valid reason is passed to onRender.
+ * Mount the one top-bar pill. The review drawer owns every render-bar hook
+ * (`data-render-blocker`, `data-render-run`, `data-render-open-override`) and
+ * the shared gate logic is unchanged.
  */
 export function mountRenderBar(el: HTMLElement, options: RenderBarMountOptions): RenderBarHandle {
   if (!el) throw new TypeError('mountRenderBar requires a host element');
-  const prefix = `render-bar-${++barSequence}`;
-  const asGate = (value: RenderGateSummary | readonly ClipSummary[] | undefined): RenderGateSummary | undefined => {
-    if (value === undefined) return undefined;
-    return Array.isArray(value) ? summarizeGate(value as readonly ClipSummary[]) : value as RenderGateSummary;
-  };
   const readGate = (): RenderGateSummary => {
     if (typeof options.gate === 'function') return options.gate();
     const clips = typeof options.clips === 'function' ? options.clips() : options.clips;
     return summarizeGate(clips ?? []);
   };
-  let gate = readGate();
-  let pending: ((reason: string | null) => void) | null = null;
+  const readClips = (): ClipSummary[] => {
+    const clips = typeof options.clips === 'function' ? options.clips() : options.clips;
+    if (Array.isArray(clips) && clips.length > 0) return [...clips];
+    const gate = readGate();
+    return clipsFromGate(gate);
+  };
+  let gateOverride: RenderGateSummary | null = null;
+  let usingClips = Boolean(options.clips);
   let destroyed = false;
 
   const disabledNow = (): boolean => (typeof options.disabled === 'function' ? options.disabled() : options.disabled === true);
 
-  const settle = (reason: string | null): void => {
-    const resolve = pending;
-    pending = null;
-    resolve?.(reason);
-  };
+  const drawer = mountReviewDrawer({
+    host: options.drawerHost,
+    clips: readClips(),
+    gate: readGate(),
+    onSelect: options.onSelectBlocker,
+    onApprove: options.onApprove,
+    onRedo: options.onRedo,
+    onOpenTakes: options.onOpenTakes,
+    onRender: options.onRender,
+    onChange: () => paintPill(),
+    onOpenChange: (open) => {
+      const button = el.querySelector<HTMLButtonElement>('[data-review-open]');
+      button?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    },
+  });
 
-  const bind = (): void => {
-    el.querySelector<HTMLButtonElement>('[data-render-run]')?.addEventListener('click', () => {
-      void options.onRender?.();
-    });
-    el.querySelector<HTMLButtonElement>('[data-render-open-override]')?.addEventListener('click', () => {
-      void open().then(reason => {
-        if (reason) void options.onRender?.(reason);
-      });
-    });
-    el.querySelectorAll<HTMLButtonElement>('[data-render-blocker]').forEach(button => {
-      button.addEventListener('click', () => {
-        const clipId = button.getAttribute('data-render-blocker');
-        if (clipId) options.onSelectBlocker?.(clipId);
-      });
-    });
-    const form = el.querySelector<HTMLFormElement>('[data-render-override]');
-    const reason = form?.querySelector<HTMLTextAreaElement>('[data-override-reason]');
-    reason?.addEventListener('input', () => {
-      const count = el.querySelector<HTMLElement>('[data-override-count]');
-      if (count) count.textContent = `${Math.min(MAX_OVERRIDE_REASON, reason.value.length)} / ${MAX_OVERRIDE_REASON}`;
-    });
-    form?.addEventListener('submit', event => {
-      event.preventDefault();
-      const checked = validateOverrideReason(reason?.value ?? '');
-      const error = el.querySelector<HTMLElement>('[data-override-error]');
-      if (!checked.ok) {
-        if (error) error.textContent = checked.error;
-        reason?.focus();
-        return;
-      }
-      if (error) error.textContent = '';
-      settle(checked.reason);
-      close();
-    });
-    el.querySelector<HTMLButtonElement>('[data-override-cancel]')?.addEventListener('click', () => {
-      settle(null);
-      close();
-    });
-  };
-
-  const paint = (nextGate?: RenderGateSummary): void => {
+  function paintPill(): void {
     if (destroyed) return;
-    gate = nextGate ?? readGate();
-    // A refresh must not wipe the reason the user is typing.
-    if (pending) return;
-    el.innerHTML = renderRenderBar(gate, { idPrefix: prefix, disabled: disabledNow(), description: options.description });
-    bind();
-  };
-
-  const open = (forced?: RenderGateSummary | readonly ClipSummary[]): Promise<string | null> => {
-    if (pending) settle(null);
-    gate = asGate(forced) ?? readGate();
-    paint(gate);
-    const form = el.querySelector<HTMLFormElement>('[data-render-override]');
-    if (!form) return Promise.resolve(null);
-    form.hidden = false;
-    const reason = form.querySelector<HTMLTextAreaElement>('[data-override-reason]');
-    reason?.focus();
-    return new Promise<string | null>(resolve => {
-      pending = resolve;
+    const gate = !usingClips && gateOverride
+      ? gateOverride
+      : (drawer.model.clips.length > 0 ? summarizeGate(drawer.model.clips) : (gateOverride ?? readGate()));
+    el.innerHTML = renderRenderBar(gate, {
+      disabled: disabledNow(),
+      description: options.description,
+      open: drawer.isOpen(),
     });
-  };
+    el.querySelector<HTMLButtonElement>('[data-review-open]')?.addEventListener('click', () => drawer.toggle());
+  }
 
-  const close = (): void => {
-    const form = el.querySelector<HTMLFormElement>('[data-render-override]');
-    if (form) form.hidden = true;
+  const asClips = (value: RenderGateSummary | readonly ClipSummary[] | undefined): ClipSummary[] | null => {
+    if (value === undefined) return null;
+    if (Array.isArray(value)) return [...value] as ClipSummary[];
+    gateOverride = value as RenderGateSummary;
+    return null;
   };
 
   installStyles();
-  paint();
+  paintPill();
 
   return {
     update(next?: RenderGateSummary | readonly ClipSummary[]) {
-      paint(asGate(next));
+      const clips = asClips(next);
+      if (clips) {
+        gateOverride = null;
+        usingClips = true;
+        drawer.setClips(clips);
+      } else if (next) {
+        usingClips = false;
+        if (drawer.model.clips.length === 0) drawer.setClips(clipsFromGate(next as RenderGateSummary));
+        else drawer.setGate(next as RenderGateSummary);
+      } else {
+        gateOverride = null;
+        usingClips = Boolean(options.clips);
+        drawer.setClips(readClips());
+      }
+      paintPill();
     },
     requestOverride(next?: RenderGateSummary | readonly ClipSummary[]) {
-      return open(next);
+      const clips = asClips(next);
+      if (clips) drawer.setClips(clips);
+      else if (next) drawer.setGate(next as RenderGateSummary);
+      return drawer.requestOverride();
     },
     closeOverride() {
-      settle(null);
-      close();
+      drawer.closeOverride();
     },
     destroy() {
       destroyed = true;
-      settle(null);
+      drawer.destroy();
       el.innerHTML = '';
     },
   };

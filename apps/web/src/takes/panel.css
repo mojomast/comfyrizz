@@ -1,15 +1,18 @@
 @import '../ui/tokens.css';
 @import '../ui/components.css';
 
-/* UO14: Takes review panel (PLAN section 5).
-   Calm, dense ComfyUI-like dark pro tool: borders over shadows, single indigo accent, no gradients/glows. */
+/* DN04: takes inspector (PLAN 3.5).
+   Sticky header (clip picker, status, approve/redo), a horizontal take strip
+   that is always open, and a tabbed body (Actions, Changes, Correct, Inputs).
+   Sections are flat: a hairline divider instead of a nested panel, no double
+   padding. Borders over shadows, one indigo accent, no gradients or glows. */
 
 .take-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--gap);
   min-width: 0;
-  padding: var(--space-4);
+  padding: var(--panel-padding);
   color: var(--text-1);
   background: var(--bg-1);
   border: var(--elevation-border-1);
@@ -35,12 +38,70 @@
   font-weight: var(--font-weight-600);
 }
 
+/* --------------------------------------------------------------------------
+   Sticky header: clip picker, status and the approve/redo pair stay visible
+   -------------------------------------------------------------------------- */
+
 .take-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--gap) var(--panel-padding);
+  background: var(--bg-1);
+  border-bottom: var(--elevation-border-1);
+}
+
+.take-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  min-width: 0;
+}
+
+.take-title {
+  white-space: nowrap;
+}
+
+.take-clip-field {
+  flex-direction: row;
+  gap: var(--gap);
+  align-items: center;
+  min-width: 0;
+}
+
+.take-clip-field .field-label {
+  white-space: nowrap;
+}
+
+.take-clip-picker {
+  width: auto;
+  min-width: 120px;
+  max-width: 240px;
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-12);
+  text-overflow: ellipsis;
+}
+
+.take-head-state {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
+}
+
+.take-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  margin-left: auto;
 }
 
 .take-count {
@@ -56,20 +117,6 @@
   background: var(--bg-2);
   border: var(--elevation-border-1);
   border-radius: var(--radius-pill);
-}
-
-.take-clip {
-  margin: var(--space-1) 0 0;
-  color: var(--text-2);
-  font-size: var(--font-size-12);
-  overflow-wrap: anywhere;
-}
-
-.take-head-state {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
 }
 
 .take-state,
@@ -142,7 +189,7 @@
 }
 
 .take-keys kbd,
-kbd {
+.take-panel kbd {
   padding: 0 var(--space-1);
   font-family: var(--font-mono);
   font-size: var(--font-size-12);
@@ -152,17 +199,24 @@ kbd {
   border-radius: var(--radius-control);
 }
 
+/* --------------------------------------------------------------------------
+   Take strip: horizontal, always open, one line of cards
+   -------------------------------------------------------------------------- */
+
 .take-strip-wrap {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--gap);
+  min-width: 0;
+  padding-top: var(--gap);
+  border-top: var(--elevation-border-1);
 }
 
 .take-strip-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--gap);
 }
 
 .take-strip-nav {
@@ -172,8 +226,8 @@ kbd {
 }
 
 .take-step {
-  min-width: calc(var(--space-5) + var(--space-1));
-  min-height: calc(var(--space-5) + var(--space-1));
+  min-width: var(--target-min);
+  min-height: var(--control-height);
   padding: 0 var(--space-2);
   font-size: var(--font-size-15);
   line-height: 1;
@@ -187,23 +241,27 @@ kbd {
   text-align: center;
 }
 
-/* Card grid: one .panel per take */
 .take-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-6) * 6), 1fr));
-  gap: var(--space-3);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--gap);
   margin: 0;
-  padding: 0;
+  padding: 0 0 var(--gap);
   list-style: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .take-item {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
+  width: calc(var(--space-6) * 4.5);
   min-width: 0;
   background: var(--bg-1);
   border: var(--elevation-border-1);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-control);
   overflow: hidden;
   transition: border-color var(--transition-fast);
 }
@@ -218,20 +276,19 @@ kbd {
 
 .take-item.is-previewed {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
 }
 
 .take-item.is-purged {
   opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .take-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
   width: 100%;
-  padding: var(--space-2);
+  min-height: var(--target-min);
+  padding: var(--space-1) var(--space-2);
   color: var(--text-1);
   text-align: left;
   background: transparent;
@@ -254,9 +311,9 @@ kbd {
 .take-filmstrip {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
   width: 100%;
-  padding: var(--space-1);
+  padding: 2px;
   background: var(--bg-0);
   border: var(--elevation-border-1);
   border-radius: var(--radius-control);
@@ -265,7 +322,7 @@ kbd {
 
 .take-filmstrip-sprockets {
   display: block;
-  height: var(--space-1);
+  height: 2px;
   width: 100%;
   background: var(--border-subtle);
   border-radius: var(--radius-control);
@@ -274,16 +331,16 @@ kbd {
 
 .take-filmstrip-frames {
   display: flex;
-  gap: var(--space-1);
+  gap: 2px;
   align-items: stretch;
-  min-height: calc(var(--space-6) + var(--space-4));
+  min-height: calc(var(--space-6) + var(--space-2));
 }
 
 .take-frame {
   flex: 1 1 0;
   min-width: 0;
-  min-height: calc(var(--space-6) + var(--space-4));
-  padding: var(--space-1);
+  min-height: calc(var(--space-6) + var(--space-2));
+  padding: 2px;
   background: var(--bg-2);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
@@ -291,7 +348,8 @@ kbd {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
+  gap: 2px;
+  overflow: hidden;
 }
 
 .take-frame-marker {
@@ -325,7 +383,7 @@ kbd {
 .take-card-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
   min-width: 0;
 }
 
@@ -354,14 +412,15 @@ kbd {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2) var(--space-2);
+  margin-top: auto;
+  padding: var(--space-1) var(--space-2);
   border-top: var(--elevation-border-1);
   background: var(--bg-1);
 }
 
 .take-card-actions .btn {
   flex: 1 1 0;
-  min-height: calc(var(--space-5) + var(--space-1));
+  min-height: var(--control-height);
   font-size: var(--font-size-12);
 }
 
@@ -415,29 +474,101 @@ kbd {
   list-style: none;
 }
 
-.take-actions,
-.take-diff,
-.take-correction,
-.take-approval {
+/* --------------------------------------------------------------------------
+   Tabs and flat sections
+   -------------------------------------------------------------------------- */
+
+.take-form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  background: var(--bg-1);
-  border: var(--elevation-border-1);
-  border-radius: var(--radius-panel);
+  gap: var(--gap);
+  min-width: 0;
+  margin: 0;
+  border-top: var(--elevation-border-1);
+  padding-top: var(--gap);
+}
+
+.take-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--gap);
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border-bottom: var(--elevation-border-1);
+}
+
+.take-tabs .tab {
+  flex: 0 0 auto;
+  min-height: var(--control-height);
+  min-width: var(--target-min);
+  padding: var(--space-1) var(--space-3);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  white-space: nowrap;
+}
+
+.take-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+  padding-top: var(--gap);
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
+}
+
+.take-tabpanel[hidden] {
+  display: none;
+}
+
+.take-tabpanel:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.take-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+}
+
+.take-section + .take-section {
+  padding-top: var(--gap);
+  border-top: var(--elevation-border-1);
+}
+
+.take-section-title {
+  margin: 0;
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  color: var(--text-1);
 }
 
 .take-action-row,
 .take-form-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--gap);
   align-items: center;
 }
 
+.take-active-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Controls
+   -------------------------------------------------------------------------- */
+
 .take-panel button {
-  min-height: var(--space-6);
+  min-height: var(--control-height);
   min-width: var(--target-min);
   padding: var(--space-1) var(--space-3);
   color: var(--text-1);
@@ -584,15 +715,15 @@ kbd {
 
 .take-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-6) * 5), 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: var(--gap);
 }
 
 .take-panel input,
 .take-panel select,
 .take-panel textarea {
   width: 100%;
-  min-height: var(--space-6);
+  min-height: var(--control-height);
   padding: var(--space-1) var(--space-2);
   color: var(--text-1);
   font: inherit;
@@ -620,26 +751,27 @@ kbd {
   font-variant-numeric: var(--tabular-nums);
 }
 
-.take-inputs {
-  padding: var(--space-2);
-  border: var(--elevation-border-1);
-  border-radius: var(--radius-control);
-  background: var(--bg-2);
-}
-
-.take-inputs summary {
-  color: var(--text-2);
-  font-size: var(--font-size-12);
-  cursor: pointer;
-}
-
-.take-inputs[open] summary {
-  margin-bottom: var(--space-2);
-}
+/* --------------------------------------------------------------------------
+   Spend approval: an inline banner, shown only while it is needed
+   -------------------------------------------------------------------------- */
 
 .take-approval {
-  border-color: var(--warn-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--gap) var(--panel-padding);
   background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-control);
+}
+
+.take-approval-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .take-estimate {
@@ -677,6 +809,401 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .take-panel,
   .take-panel * {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   DN03: Approval drawer
+   Non-modal right rail at >=1280, bottom sheet below. Borders over shadows,
+   one accent, no gradients or glows.
+   ========================================================================== */
+
+.review-drawer {
+  position: fixed;
+  /* DN17: start below the top bar and stop above the status bar so Run
+     settings, Render, Export and the approval pill stay visible and
+     clickable while the drawer is open. The offsets come from shell.css,
+     which sizes both bars from the same variables. */
+  top: var(--topbar-height, calc(var(--space-5) * 2));
+  right: 0;
+  bottom: var(--statusbar-height, calc(var(--space-5) + var(--space-2)));
+  z-index: 220;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 420px;
+  max-width: 100vw;
+  min-height: 0;
+  padding: var(--space-3);
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: 0;
+  border-left: var(--elevation-border-2);
+  border-radius: 0;
+  box-shadow: var(--elevation-2);
+}
+
+.review-drawer[hidden] { display: none; }
+
+.review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--elevation-border-1);
+}
+
+.review-head-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.review-head h2 {
+  margin: 0;
+  font-size: var(--font-size-15);
+  font-weight: var(--font-weight-600);
+  color: var(--text-1);
+}
+
+.review-total {
+  font-size: var(--font-size-12);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.review-close {
+  flex: 0 0 auto;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+}
+
+.review-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.review-chip {
+  min-height: var(--target-min);
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-pill);
+}
+
+.review-chip[aria-pressed="true"],
+.review-chip[data-active="true"] {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.review-chip-count {
+  color: inherit;
+  font-size: var(--font-size-12);
+}
+
+.review-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.review-controls label {
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+}
+
+.review-search {
+  flex: 1 1 140px;
+  min-width: 0;
+  min-height: var(--target-min);
+}
+
+.review-sort {
+  min-height: var(--target-min);
+  max-width: 160px;
+}
+
+.review-live {
+  margin: 0;
+  min-height: var(--target-min);
+  padding: var(--space-1) 0;
+  font-size: var(--font-size-12);
+  color: var(--text-2);
+}
+
+.review-live:empty { min-height: 0; padding: 0; }
+
+.review-list-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+.review-list {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  outline: none;
+}
+
+.review-list:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+.review-spacer { flex: 0 0 auto; }
+
+/*
+ * The virtualized row height is `--row-height + --space-2` (compact 36,
+ * comfortable 44). Keep this formula in sync with REVIEW_ROW_HEIGHT_* in
+ * review-drawer.ts: the window offsets use the same numbers.
+ */
+.review-row {
+  --review-row-height: calc(var(--row-height) + var(--space-2));
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  height: var(--review-row-height);
+  min-height: var(--review-row-height);
+  padding: 0 var(--space-2);
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: 0;
+  cursor: pointer;
+}
+
+.review-row::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-top: var(--elevation-border-1);
+  pointer-events: none;
+}
+
+.review-row:hover { background: var(--bg-2); }
+
+.review-row[aria-selected="true"] {
+  background: var(--accent-bg);
+  border-left: var(--focus-ring-width) solid var(--accent);
+}
+
+.review-row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+.review-thumb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 calc(var(--space-6) * 2);
+  width: calc(var(--space-6) * 2);
+  min-width: calc(var(--space-6) * 2);
+  height: var(--row-height-comfortable);
+  min-height: var(--row-height-comfortable);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
+  text-transform: uppercase;
+  background: var(--bg-3);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.review-thumb > span {
+  padding: 0 var(--space-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-thumb > img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.review-thumb[data-has-thumb="true"] > span { display: none; }
+
+.review-row-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.review-row-title {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  line-height: var(--line-height-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-row-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+}
+
+.review-row-scene {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-status {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 var(--space-1);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-600);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-pill);
+}
+
+.review-status-needs,
+.review-status-stale {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.review-status-approved {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.review-status-failed {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.review-take {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: var(--space-1);
+  color: var(--text-3);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+}
+
+.review-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: var(--elevation-border-1);
+}
+
+.review-gate-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.review-gate-actions .hint {
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+}
+
+.review-override {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--bg-2);
+  border: var(--elevation-border-2);
+  border-radius: var(--radius-control);
+}
+
+.review-override[hidden] { display: none; }
+
+.review-override-count,
+.review-override-error {
+  margin: 0;
+  font-size: var(--font-size-12);
+}
+
+.review-override-error { color: var(--danger); }
+.review-override-error:empty { display: none; }
+
+.review-override-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.review-drawer button,
+.review-drawer select,
+.review-drawer input,
+.review-drawer textarea {
+  min-height: var(--target-min);
+}
+
+@media (max-width: 1279px) {
+  .review-drawer {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: var(--statusbar-height, calc(var(--space-5) + var(--space-2)));
+    width: auto;
+    max-height: 70vh;
+    border-left: 0;
+    border-top: var(--elevation-border-2);
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-drawer,
+  .review-drawer * {
     transition: none;
     animation: none;
   }

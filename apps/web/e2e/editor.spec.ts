@@ -43,6 +43,21 @@ async function openEditor(page: Page, env: Env): Promise<void> {
   await expect(page.getByTestId('caption').first()).toHaveText('one two three four.');
   await expectSave(page, 'Saved');
   await expect(page).not.toHaveURL(/token=/);
+  await useAdvancedView(page);
+}
+
+/**
+ * DN09: Easy is the new default and hides the inspector and Advanced-only
+ * fields. These editor tests exercise the inspector, transition frames and
+ * caption controls, so open Advanced the way a user would before asserting.
+ */
+async function useAdvancedView(page: Page): Promise<void> {
+  const root = page.locator('html');
+  if (await root.getAttribute('data-mode') !== 'advanced') {
+    await page.locator('#ui-mode-advanced').click();
+  }
+  await expect(root).toHaveAttribute('data-mode', 'advanced');
+  await expect(page.getByTestId('inspector-tabs')).toBeVisible();
 }
 
 async function expectSave(page: Page, text: string): Promise<void> {

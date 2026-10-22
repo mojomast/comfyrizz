@@ -90,8 +90,17 @@
 
 .animation-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-6) * 4 + var(--space-2)), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 0 var(--space-2);
+}
+
+/* The group header stays visible while the group body scrolls. */
+.animation-group > summary {
+  color: var(--text-1);
+}
+
+.animation-group .form-group-body {
+  gap: var(--gap);
 }
 
 .animation-recipe-fields {
@@ -136,6 +145,7 @@
   font-size: var(--font-size-12);
   line-height: var(--line-height-base);
   margin: var(--space-1) 0 0;
+  max-width: 70ch;
 }
 
 .animation-hint a {

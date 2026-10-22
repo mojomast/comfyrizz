@@ -7,6 +7,7 @@
  * and `startSeconds: null` clear a caption override or a source trim.
  */
 import { type MeasuredInput } from '../../../../packages/planner/dist/src/browser.js';
+import { getPrefs, setDensity, type UiDensity } from '../ui/prefs.ts';
 import {
   narrationFromChunks,
   narrationInputFingerprint,
@@ -535,4 +536,286 @@ function splitScene(doc: ProjectDoc, scene: EditableScene, command: SplitScene, 
   const check = placeScenes(doc.package as EditorPackage, chunkMapFor(doc, measured));
   if (!check.ok) return fail('placement', check.reason);
   return { ok: true, doc };
+}
+
+// ---------------------------------------------------------------------------
+// Command palette registry (DN08). `commands.ts` only registers commands; the
+// palette UI lives in `src/ui/palette.ts`. These helpers are intentionally
+// DOM-free so they can be exercised by the unit tests.
+// ---------------------------------------------------------------------------
+
+export interface PaletteCommand {
+  id: string;
+  title?: string;
+  label?: string;
+  name?: string;
+  description?: string;
+  hint?: string;
+  shortcut?: string;
+  key?: string;
+  keybinding?: string;
+  keywords?: string[];
+  group?: string;
+  category?: string;
+  enabled?: boolean | (() => boolean);
+  run?: (context?: unknown) => void | Promise<void>;
+  action?: (context?: unknown) => void | Promise<void>;
+  execute?: (context?: unknown) => void | Promise<void>;
+}
+
+export type UiCommand = PaletteCommand;
+export type CommandDefinition = PaletteCommand;
+
+export interface CommandRegistry {
+  register(command: PaletteCommand): () => void;
+  unregister(id: string): void;
+  clear(): void;
+  reset(): void;
+  list(): PaletteCommand[];
+  get(id: string): PaletteCommand | undefined;
+  has(id: string): boolean;
+  filter(query: string): PaletteCommand[];
+}
+
+function chooseDensity(density: UiDensity): void {
+  try {
+    setDensity(density);
+  } catch {
+    // The palette is best-effort when storage or the document is unavailable.
+  }
+}
+
+function toggleDensity(): void {
+  chooseDensity(getPrefs().density === 'compact' ? 'comfortable' : 'compact');
+}
+
+const DEFAULT_COMMANDS: ReadonlyArray<PaletteCommand> = Object.freeze([
+  { id: 'palette.open', title: 'Command palette', shortcut: 'Ctrl+K', group: 'General', keywords: ['commands', 'search'] },
+  { id: 'shortcuts.open', title: 'Keyboard shortcuts', shortcut: '?', group: 'General', keywords: ['help', 'keys'] },
+  { id: 'view.toggleMode', title: 'Toggle Easy / Advanced view', shortcut: 'Ctrl/Cmd+Shift+A', group: 'View', keywords: ['mode', 'easy', 'advanced'] },
+  { id: 'view.easy', title: 'Switch to Easy view', group: 'View', keywords: ['mode', 'easy'] },
+  { id: 'view.advanced', title: 'Switch to Advanced view', group: 'View', keywords: ['mode', 'advanced'] },
+  { id: 'density.compact', title: 'Density: Compact', group: 'View', keywords: ['density', 'compact'], run: () => chooseDensity('compact') },
+  { id: 'density.comfortable', title: 'Density: Comfortable', group: 'View', keywords: ['density', 'comfortable'], run: () => chooseDensity('comfortable') },
+  { id: 'density.toggle', title: 'Toggle density', group: 'View', keywords: ['density', 'toggle', 'compact', 'comfortable'], run: () => toggleDensity() },
+  { id: 'panel.toggleLeft', title: 'Toggle left panel', shortcut: 'Ctrl+B', group: 'Layout', keywords: ['panel', 'chat', 'left'] },
+  { id: 'panel.toggleRight', title: 'Toggle right panel', shortcut: 'Ctrl+Alt+B', group: 'Layout', keywords: ['panel', 'right', 'rail'] },
+  { id: 'panel.toggleTimeline', title: 'Toggle timeline', shortcut: 'Ctrl+J', group: 'Layout', keywords: ['timeline', 'dock'] },
+  { id: 'review.drawer', title: 'Review drawer', shortcut: 'R', group: 'Review', keywords: ['review', 'takes', 'approval'] },
+  { id: 'layout.reset', title: 'Reset layout', group: 'Layout', keywords: ['reset', 'layout', 'panels'] },
+  { id: 'inspector.tab.1', title: 'Inspector tab 1: Scene', shortcut: '1', group: 'Inspector', keywords: ['inspector', 'scene', 'tab'] },
+  { id: 'inspector.tab.2', title: 'Inspector tab 2: Voice', shortcut: '2', group: 'Inspector', keywords: ['inspector', 'voice', 'tab'] },
+  { id: 'inspector.tab.3', title: 'Inspector tab 3: Animation', shortcut: '3', group: 'Inspector', keywords: ['inspector', 'animation', 'tab'] },
+  { id: 'inspector.tab.4', title: 'Inspector tab 4: Agent', shortcut: '4', group: 'Inspector', keywords: ['inspector', 'agent', 'tab'] },
+  { id: 'inspector.tab.5', title: 'Inspector tab 5: Takes', shortcut: '5', group: 'Inspector', keywords: ['inspector', 'takes', 'tab'] },
+]);
+
+function cloneCommand(command: PaletteCommand): PaletteCommand {
+  return { ...command, keywords: command.keywords ? [...command.keywords] : undefined };
+}
+
+export class DefaultCommandRegistry implements CommandRegistry {
+  private items = new Map<string, PaletteCommand>();
+
+  constructor(initial: readonly PaletteCommand[] = []) {
+    for (const command of initial) this.register(command);
+  }
+
+  register(command: PaletteCommand): () => void {
+    if (!command || typeof command.id !== 'string' || command.id === '') {
+      throw new Error('A command needs a non-empty id.');
+    }
+    this.items.set(command.id, cloneCommand(command));
+    const id = command.id;
+    return () => this.unregister(id);
+  }
+
+  unregister(id: string): void {
+    this.items.delete(id);
+  }
+
+  clear(): void {
+    this.items.clear();
+  }
+
+  reset(): void {
+    this.clear();
+    for (const command of DEFAULT_COMMANDS) this.register(command);
+  }
+
+  list(): PaletteCommand[] {
+    return Array.from(this.items.values()).map(cloneCommand);
+  }
+
+  get(id: string): PaletteCommand | undefined {
+    const command = this.items.get(id);
+    return command ? cloneCommand(command) : undefined;
+  }
+
+  has(id: string): boolean {
+    return this.items.has(id);
+  }
+
+  filter(query: string): PaletteCommand[] {
+    const needle = String(query ?? '').trim().toLowerCase();
+    if (!needle) return this.list();
+    return this.list().filter(command => {
+      const haystack = [
+        command.id,
+        command.title,
+        command.label,
+        command.name,
+        command.description,
+        command.hint,
+        command.shortcut,
+        command.key,
+        command.keybinding,
+        ...(command.keywords ?? []),
+        command.group,
+        command.category,
+      ]
+        .filter(value => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }
+}
+
+export const defaultCommandRegistry = new DefaultCommandRegistry(DEFAULT_COMMANDS);
+
+export function createCommandRegistry(initial: readonly PaletteCommand[] = []): CommandRegistry {
+  return new DefaultCommandRegistry(initial);
+}
+
+export const commandRegistry = defaultCommandRegistry;
+
+// Module-level convenience functions operate on the shared registry.
+export function registerCommand(command: PaletteCommand, registry: CommandRegistry = defaultCommandRegistry): () => void {
+  return registry.register(command);
+}
+
+export function registerCommands(commands: readonly PaletteCommand[], registry: CommandRegistry = defaultCommandRegistry): () => void {
+  const unregisters = commands.map(command => registry.register(command));
+  return () => {
+    for (const unregister of unregisters) unregister();
+  };
+}
+
+export function unregisterCommand(id: string, registry: CommandRegistry = defaultCommandRegistry): void {
+  registry.unregister(id);
+}
+
+export function clearCommands(registry: CommandRegistry = defaultCommandRegistry): void {
+  registry.clear();
+}
+
+export function resetCommands(registry: CommandRegistry = defaultCommandRegistry): void {
+  registry.reset();
+}
+
+export function getCommands(registry: CommandRegistry = defaultCommandRegistry): PaletteCommand[] {
+  return registry.list();
+}
+
+export function listCommands(registry: CommandRegistry = defaultCommandRegistry): PaletteCommand[] {
+  return registry.list();
+}
+
+export function findCommand(id: string, registry: CommandRegistry = defaultCommandRegistry): PaletteCommand | undefined {
+  return registry.get(id);
+}
+
+export function getCommand(id: string, registry: CommandRegistry = defaultCommandRegistry): PaletteCommand | undefined {
+  return registry.get(id);
+}
+
+export function hasCommand(id: string, registry: CommandRegistry = defaultCommandRegistry): boolean {
+  return registry.has(id);
+}
+
+export function filterCommands(query: string, registry: CommandRegistry = defaultCommandRegistry): PaletteCommand[] {
+  return registry.filter(query);
+}
+
+export function searchCommands(query: string, registry: CommandRegistry = defaultCommandRegistry): PaletteCommand[] {
+  return registry.filter(query);
+}
+
+export const commands: PaletteCommand[] = defaultCommandRegistry.list();
+// Keep the exported array in sync with the shared registry for callers that
+// read it directly. Registration after import updates both.
+const syncExportedCommands = (): void => {
+  const next = defaultCommandRegistry.list();
+  commands.splice(0, commands.length, ...next);
+};
+defaultCommandRegistry.reset();
+syncExportedCommands();
+const originalRegister = defaultCommandRegistry.register.bind(defaultCommandRegistry);
+defaultCommandRegistry.register = (command: PaletteCommand): (() => void) => {
+  const unregister = originalRegister(command);
+  syncExportedCommands();
+  return () => {
+    unregister();
+    syncExportedCommands();
+  };
+};
+const originalUnregister = defaultCommandRegistry.unregister.bind(defaultCommandRegistry);
+defaultCommandRegistry.unregister = (id: string): void => {
+  originalUnregister(id);
+  syncExportedCommands();
+};
+const originalClear = defaultCommandRegistry.clear.bind(defaultCommandRegistry);
+defaultCommandRegistry.clear = (): void => {
+  originalClear();
+  syncExportedCommands();
+};
+const originalReset = defaultCommandRegistry.reset.bind(defaultCommandRegistry);
+defaultCommandRegistry.reset = (): void => {
+  originalReset();
+  syncExportedCommands();
+};
+
+export const COMMANDS = commands;
+export const COMMAND_LIST = commands;
+export const PALETTE_COMMANDS = commands;
+
+export function commandTitle(command: PaletteCommand): string {
+  return command.title ?? command.label ?? command.name ?? command.id;
+}
+
+export function commandLabel(command: PaletteCommand): string {
+  return commandTitle(command);
+}
+
+export function commandName(command: PaletteCommand): string {
+  return commandTitle(command);
+}
+
+export function commandShortcut(command: PaletteCommand): string {
+  return command.shortcut ?? command.key ?? command.keybinding ?? '';
+}
+
+export function commandKeywords(command: PaletteCommand): string[] {
+  return Array.isArray(command.keywords) ? command.keywords : [];
+}
+
+export function runCommand(command: PaletteCommand, context?: unknown): void | Promise<void> {
+  const runner = command.run ?? command.action ?? command.execute;
+  if (typeof runner === 'function') return runner(context);
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('comfyrizz:command', { detail: { id: command.id, command } }));
+    }
+  } catch {
+    // Commands are metadata in tests; dispatch is best-effort.
+  }
+}
+
+export function executeCommand(command: PaletteCommand, context?: unknown): void | Promise<void> {
+  return runCommand(command, context);
+}
+
+export function invokeCommand(command: PaletteCommand, context?: unknown): void | Promise<void> {
+  return runCommand(command, context);
 }

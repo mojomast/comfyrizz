@@ -14,17 +14,36 @@
 }
 
 .voice-settings h3 {
-  margin: 0 0 var(--space-3);
+  margin: 0;
   font-size: var(--font-size-15);
   font-weight: var(--font-weight-600);
   color: var(--text-1);
 }
 
+.voice-head {
+  margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0;
+  border-top-left-radius: var(--radius-panel);
+  border-top-right-radius: var(--radius-panel);
+}
+
 .voice-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-6) * 5 + var(--space-4)), 1fr));
-  gap: var(--space-3);
-  margin: var(--space-3) 0;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--gap);
+  margin: 0;
+}
+
+/* The group header stays visible while the group body scrolls. */
+.voice-group > summary {
+  color: var(--text-1);
+}
+
+.voice-group .form-group-body {
+  gap: var(--gap);
+}
+
+.voice-settings .voice-footnote {
+  margin: 0;
 }
 
 .voice-settings label {
@@ -67,6 +86,7 @@
   color: var(--text-2);
   font-size: var(--font-size-12);
   margin: var(--space-2) 0;
+  max-width: 70ch;
 }
 
 .voice-settings a {
@@ -112,16 +132,11 @@
 }
 
 .voice-production {
-  margin-top: var(--space-3);
-  border-top: var(--elevation-border-1);
-  padding-top: var(--space-2);
+  margin-top: 0;
 }
 
-.voice-production summary {
-  color: var(--text-2);
-  font-size: var(--font-size-12);
-  font-weight: var(--font-weight-500);
-  cursor: pointer;
+.voice-production > summary {
+  color: var(--text-1);
 }
 
 @media (prefers-reduced-motion: reduce) {

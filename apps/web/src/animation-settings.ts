@@ -38,6 +38,9 @@ type EditableScene = Omit<PackageV1['scenes'][number], 'motion' | 'transitionOut
 type Timing = ReturnType<typeof timingProvenance>;
 type AnimationCommand = Extract<Command, { type: 'SetSceneMotion' | 'SetTransition' | 'ResetSceneTransition' }>;
 
+/** Open state per collapsible group, so a repaint never reopens a collapsed section. */
+const groupState = new Map<string, boolean>();
+
 export type { Timing };
 
 export type SceneAnimationSaveResult = {
@@ -152,6 +155,51 @@ function updateTransitionHint(host: HTMLElement, scene: EditableScene, fps: numb
   if (hint) hint.textContent = transitionHint(scene, fps);
 }
 
+/**
+ * Fold the shared animation markup into <details> groups. The markup helper
+ * stays untouched so the browser-safe tests keep their contract; grouping only
+ * changes how the section is read: one header per group, and the header stays
+ * visible while its own body scrolls.
+ */
+function groupAnimationSection(section: HTMLElement): void {
+  const children = Array.from(section.children);
+  const recipe = children.find(child => child.tagName === 'LABEL');
+  const description = children.find(child => child.classList.contains('animation-recipe-description'));
+  const transition = children.find(child => child.classList.contains('animation-transition'));
+  if (!recipe || !description || !transition) return;
+  const recipeIndex = children.indexOf(recipe);
+  const descriptionIndex = children.indexOf(description);
+  const transitionIndex = children.indexOf(transition);
+  if (recipeIndex < 0 || descriptionIndex <= recipeIndex || transitionIndex <= descriptionIndex) return;
+  const groups: Array<[string, Element[]]> = [
+    ['Recipe', children.slice(recipeIndex, descriptionIndex + 1)],
+    ['Motion', children.slice(descriptionIndex + 1, transitionIndex)],
+    ['Transition', children.slice(transitionIndex, transitionIndex + 1)],
+  ];
+  const anchor = children[transitionIndex + 1] ?? null;
+  const built: HTMLDetailsElement[] = [];
+  for (const [summary, nodes] of groups) {
+    if (!nodes.length) continue;
+    const key = `animation-${summary.toLowerCase()}`;
+    const details = document.createElement('details');
+    details.className = 'form-group animation-group';
+    details.dataset.group = key;
+    if (summary === 'Transition') details.dataset.adv = '';
+    details.open = groupState.get(key) ?? true;
+    const head = document.createElement('summary');
+    head.textContent = summary;
+    const body = document.createElement('div');
+    body.className = 'form-group-body';
+    details.append(head, body);
+    for (const node of nodes) body.append(node);
+    details.addEventListener('toggle', () => groupState.set(key, details.open));
+    built.push(details);
+  }
+  if (!built.length) return;
+  if (anchor) anchor.before(...built);
+  else section.append(...built);
+}
+
 export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOptions): void {
   const render = (): void => {
     const scene = sceneOf(options);
@@ -163,6 +211,8 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
     // The markup helper is deliberately shared with the browser-safe tests.
     host.dataset.animationScene = scene.id;
     host.innerHTML = animationMarkupFor(scene, options);
+    const section = host.querySelector<HTMLElement>('.animation-settings');
+    if (section) groupAnimationSection(section);
     bind(scene);
     restoreFocus(host, snapshot);
   };

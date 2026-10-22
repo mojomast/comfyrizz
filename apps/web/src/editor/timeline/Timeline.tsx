@@ -869,14 +869,14 @@ function sourceFrames(doc: { package: { assets?: Record<string, { media?: { fram
   return typeof frames === 'number' ? frames : null;
 }
 
-function FrameField({ label, value, onCommit }: { label: string; value: number; onCommit: (value: number) => void }) {
+function FrameField({ label, value, onCommit, advanced = false }: { label: string; value: number; onCommit: (value: number) => void; advanced?: boolean }) {
   const [text, setText] = useState(String(value));
   const focused = useRef(false);
   useEffect(() => {
     if (!focused.current) setText(String(value));
   }, [value]);
   return (
-    <label>
+    <label data-adv={advanced ? '' : undefined}>
       {label}{' '}
       <input
         inputMode="numeric"
@@ -931,7 +931,7 @@ function Inspector(props: {
         Speech minimum {props.bounds?.speech ?? 'none'} · readable floor {props.bounds?.min ?? '—'}
         {props.bounds?.source != null ? ` · source ceiling ${props.bounds.source}` : ''}
       </span>
-      <label>
+      <label data-adv="">
         Transition{' '}
         <select
           aria-label="Transition type"
@@ -945,12 +945,12 @@ function Inspector(props: {
           {types.map(type => <option key={type} value={type}>{type}</option>)}
         </select>
       </label>
-      <FrameField label="Transition frames" value={props.transition?.frames ?? 0} onCommit={frames => props.onTransition(props.transition?.type ?? 'fade', frames, props.transition?.direction)} />
-      <span className="tl-message">Compiled overlap in {props.transitionIn} · out {props.transitionOut}. The compiler owns sum(lengths) − overlaps.</span>
+      <FrameField advanced label="Transition frames" value={props.transition?.frames ?? 0} onCommit={frames => props.onTransition(props.transition?.type ?? 'fade', frames, props.transition?.direction)} />
+      <span className="tl-message" data-adv="">Compiled overlap in {props.transitionIn} · out {props.transitionOut}. The compiler owns sum(lengths) − overlaps.</span>
       {props.assetId ? (
         <>
-          <FrameField label="Source in" value={props.range?.inFrame ?? 0} onCommit={inFrame => props.onRange(inFrame, props.range?.outFrame ?? props.sourceFrames ?? inFrame + 1)} />
-          <FrameField label="Source out" value={props.range?.outFrame ?? props.sourceFrames ?? 1} onCommit={outFrame => props.onRange(props.range?.inFrame ?? 0, outFrame)} />
+          <FrameField advanced label="Source in" value={props.range?.inFrame ?? 0} onCommit={inFrame => props.onRange(inFrame, props.range?.outFrame ?? props.sourceFrames ?? inFrame + 1)} />
+          <FrameField advanced label="Source out" value={props.range?.outFrame ?? props.sourceFrames ?? 1} onCommit={outFrame => props.onRange(props.range?.inFrame ?? 0, outFrame)} />
         </>
       ) : null}
     </div>

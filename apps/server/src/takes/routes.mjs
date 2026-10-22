@@ -4,6 +4,7 @@ import { listClips } from './clips.mjs';
 import { buildCorrection } from './correction.mjs';
 import { MAX_NOTE_CHARS, TAKES_SCHEMA, VERDICTS, deriveClipState } from './model.mjs';
 import { revertTake, selectTake } from './select.mjs';
+import { redactForLog } from '../../../../packages/backends/src/colab-plan.mjs';
 
 const ROUTE_RE = /^\/api\/package\/([^/]+)\/clips(?:\/(.*))?$/;
 const PACKAGE_ID_RE = /^[A-Za-z0-9_.-]+$/;
@@ -53,6 +54,8 @@ function statusFor(error) {
       return 409;
     case 'PATH_ESCAPE':
       return 403;
+    case 'BACKEND_UNAVAILABLE':
+      return 422;
     case 'INVALID_BODY':
     case 'INVALID_CHANGE':
     case 'INVALID_TEXT':
@@ -73,8 +76,21 @@ function statusFor(error) {
   }
 }
 
+// Unexpected failures are still somebody's bug: leave the stack in the server log so
+// the next repro has a cause instead of a bare "clip request failed". The body stays
+// masked, and token-shaped values never reach stderr.
+function logUnexpected(error) {
+  const stack = typeof error?.stack === 'string' && error.stack ? error.stack : String(error);
+  try {
+    process.stderr.write(`[comfyrizz] unexpected clip route error\n${redactForLog(stack)}\n`);
+  } catch {
+    // Logging must never replace the response.
+  }
+}
+
 function respondError(response, error) {
   const status = statusFor(error);
+  if (status >= 500) logUnexpected(error);
   const code = typeof error?.code === 'string' ? error.code : (status === 500 ? 'INTERNAL' : 'INVALID_REQUEST');
   const message = status === 500 ? 'clip request failed' : (error?.message ?? 'clip request failed');
   return sendError(response, status, code, message);
