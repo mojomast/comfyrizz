@@ -332,7 +332,7 @@
           "maxItems": 16,
           "items": {
             "type": "string",
-            "pattern": "^(colab:[A-Za-z0-9]+|byo-comfyui(:v2)?)$"
+            "pattern": "^(colab:[A-Za-z0-9]+|byo-comfyui(:v2)?|cpu)$"
           }
         },
         "closed_apis_used": {
@@ -2121,7 +2121,7 @@
         },
         "backend": {
           "type": "string",
-          "pattern": "^(colab:[A-Za-z0-9]+|byo-comfyui(:v2)?)$"
+          "pattern": "^(colab:[A-Za-z0-9]+|byo-comfyui(:v2)?|cpu)$"
         },
         "attempt_id": {
           "type": "string",

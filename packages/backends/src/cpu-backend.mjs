@@ -19,10 +19,9 @@ import { applyManifestToPackage } from '../../jobs/src/apply.mjs';
 
 const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const DEFAULT_DIMS = Object.freeze({ width: 640, height: 360 });
-// The package schema's closed backend enum has no `cpu` value. A CPU run is local
-// compute, so its provenance is written as the schema's local backend (BYO ComfyUI)
-// while the run record itself keeps backendId `cpu`.
-const LOCAL_BACKEND = 'byo-comfyui';
+// IP02F: the package schema accepts `cpu` as its own provenance value, so a CPU take
+// never pretends it came from a BYO ComfyUI instance.
+const LOCAL_BACKEND = 'cpu';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

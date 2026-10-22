@@ -153,6 +153,11 @@ export interface PackageV1 {
       model: NonEmptyString;
       weights: "open" | "closed" | "unknown";
       };
+    /**
+     * Backends that produced this package. `cpu` marks a dev/test CPU placeholder take
+     * (never a paid GPU session); the other accepted values are `colab:<id>` and
+     * `byo-comfyui`/`byo-comfyui:v2`.
+     */
     backends_used?: Array<string>;
     closed_apis_used?: Array<NonEmptyString>;
     warnings?: Array<NonEmptyString>;
@@ -926,6 +931,10 @@ export interface Gen {
       message: string;
       }>;
     };
+  /**
+   * Provenance backend. `cpu` marks a dev/test CPU placeholder take; `colab:<id>` and
+   * `byo-comfyui`/`byo-comfyui:v2` mark real runs.
+   */
   backend?: string;
   attempt_id?: string;
   job_id?: string;

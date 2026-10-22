@@ -190,6 +190,9 @@ export function createApp({
   providers = providerAvailability(),
   providerSettings = null,
   backendFactory = defaultBackendFactory,
+  // IP02F: only the exact string '1' opts into the deterministic CPU placeholder
+  // backend; every other value (including 'true' and '0') leaves the default app as-is.
+  fakeBackend = process.env.COMFYRIZZ_FAKE_BACKEND === '1',
   datasetFetch = globalThis.fetch,
   pipelineLaunch,
   mediaRoot = join(runtimeDir, 'media'),
@@ -392,7 +395,20 @@ export function createApp({
     };
   }
 
-  const runs = createRunController({ backendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun, isBusy: () => Boolean(pipelines?.active()) });
+  // IP02F: the flag wraps the configured factory rather than replacing it, so an
+  // injected factory keeps handling 'cpu' itself and every other id is untouched.
+  let effectiveBackendFactory = backendFactory;
+  if (fakeBackend) {
+    console.warn('COMFYRIZZ_FAKE_BACKEND=1: CPU placeholder backend enabled (dev/test only)');
+    effectiveBackendFactory = async (backendId, opts = {}) => {
+      const delegated = await backendFactory(backendId, opts);
+      if (backendId !== 'cpu' || delegated) return delegated;
+      const mod = await import('../../../packages/backends/src/cpu-backend.mjs');
+      return mod.createCpuBackend();
+    };
+  }
+
+  const runs = createRunController({ backendFactory: effectiveBackendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun, isBusy: () => Boolean(pipelines?.active()) });
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
   // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
   // package's working resolution.
