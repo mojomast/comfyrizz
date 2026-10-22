@@ -159,6 +159,7 @@ export interface AuditionMix {
   musicLoop: boolean | null;
   musicDuck: { enabled: boolean; reductionDb: number; attackMs: number; releaseMs: number } | null;
   musicGains: number[] | null;
+  dialogue: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number; gains: number[]; startSeconds?: number; endSeconds?: number }>;
   ambience: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number; gains: number[]; startSeconds?: number; endSeconds?: number }>;
   sfx: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number }>;
 }

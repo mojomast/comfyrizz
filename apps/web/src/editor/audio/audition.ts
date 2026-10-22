@@ -14,6 +14,18 @@ export function auditionParams(pkg: unknown, timeline: { fps?: number; durationI
     musicLoop: mix.music ? mix.music.loop : null,
     musicDuck: mix.music ? mix.music.duck : null,
     musicGains: mix.music ? mix.music.gains : null,
+    dialogue: (mix.dialogue ?? []).map(raw => {
+      const item = raw as typeof raw & { startSeconds?: number; endSeconds?: number };
+      return {
+        sceneId: item.sceneId,
+        gainDb: item.gainDb,
+        from: item.from,
+        durationInFrames: item.durationInFrames,
+        gains: item.gains,
+        ...(typeof item.startSeconds === 'number' ? { startSeconds: item.startSeconds } : {}),
+        ...(typeof item.endSeconds === 'number' ? { endSeconds: item.endSeconds } : {}),
+      };
+    }),
     ambience: (mix.ambience ?? []).map(raw => {
       const item = raw as typeof raw & { startSeconds?: number; endSeconds?: number };
       return {

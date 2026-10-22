@@ -31,10 +31,24 @@ function adelayMs(frame, fps) {
  */
 export function planAudioBuses({ pkg, timeline, mixAudio = true }) {
   const fps = timeline?.fps ?? 30;
-  const mix = mixAudio ? resolveAudioMix(pkg, timeline) : { enabled: false, music: null, ambience: [], sfx: [] };
+  const mix = mixAudio ? resolveAudioMix(pkg, timeline) : { enabled: false, music: null, dialogue: [], ambience: [], sfx: [] };
   const buses = [];
   if (mix.music) {
     buses.push({ kind: 'music', file: mix.music.file, gainDb: mix.music.gainDb, duck: mix.music.duck, loop: mix.music.loop, fadeIn: mix.music.fadeInSeconds ?? 0, fadeOut: mix.music.fadeOutSeconds ?? 0 });
+  }
+  // IP51D: native dialogue sits between the music bed and the ambience. Its
+  // `duck` is disabled by the model, so the mux never sidechains it.
+  for (const dialogue of mix.dialogue ?? []) {
+    buses.push({
+      kind: 'dialogue',
+      file: dialogue.file,
+      gainDb: dialogue.gainDb,
+      duck: dialogue.duck,
+      from: dialogue.from,
+      seconds: dialogue.durationInFrames / fps,
+      ...(typeof dialogue.startSeconds === 'number' ? { startSeconds: dialogue.startSeconds } : {}),
+      ...(typeof dialogue.endSeconds === 'number' ? { endSeconds: dialogue.endSeconds } : {}),
+    });
   }
   for (const ambience of mix.ambience) {
     buses.push({

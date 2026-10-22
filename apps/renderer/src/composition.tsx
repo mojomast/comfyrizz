@@ -94,6 +94,13 @@ export function PackageComposition({
           {mix.music && !missing.has(mix.music.file) ? (
             <SafeAudio file={mix.music.file} src={src(mix.music.file)} gains={mix.music.gains} loop={mix.music.loop} />
           ) : null}
+          {mix.dialogue.map(dialogue =>
+            missing.has(dialogue.file) ? null : (
+              <Sequence key={`dlg-${dialogue.sceneId}`} from={dialogue.from} durationInFrames={dialogue.durationInFrames}>
+                <SafeAudio file={dialogue.file} src={src(dialogue.file)} gains={dialogue.gains} {...sourceTrim(dialogue, fps)} />
+              </Sequence>
+            ),
+          )}
           {mix.ambience.map(ambience =>
             missing.has(ambience.file) ? null : (
               <Sequence key={ambience.sceneId} from={ambience.from} durationInFrames={ambience.durationInFrames}>
