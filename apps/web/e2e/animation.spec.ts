@@ -77,11 +77,25 @@ async function openEditor(page: Page, env: Env): Promise<void> {
   await expect(page.getByTestId('scene')).toHaveCount(3);
   await expect(page.locator('#save-status')).toHaveText('Saved');
   await expect(page).not.toHaveURL(/token=/);
+  await useAdvancedView(page);
   // The inspector is a tab set: the animation and the voice panel are mounted
   // but only in view while their own tab is selected, so open both.
   await openAnimationPanel(page);
   await openVoicePanel(page);
   await selectInspectorTab(page, 'Scene');
+}
+
+/**
+ * DN09/DN13: Easy is the default and hides the inspector, so these animation
+ * and voice tests open Advanced the way a user would before asserting.
+ */
+async function useAdvancedView(page: Page): Promise<void> {
+  const root = page.locator('html');
+  if (await root.getAttribute('data-mode') !== 'advanced') {
+    await page.locator('#ui-mode-advanced').click();
+  }
+  await expect(root).toHaveAttribute('data-mode', 'advanced');
+  await expect(page.getByTestId('inspector-tabs')).toBeVisible();
 }
 
 const animation = (page: Page) => page.locator('[data-animation-section]');

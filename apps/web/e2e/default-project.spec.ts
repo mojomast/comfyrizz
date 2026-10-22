@@ -180,6 +180,20 @@ async function openEditor(page: Page, env: Env): Promise<void> {
   await expect(page.getByTestId('scene')).toHaveCount(4);
   await expect(page.locator('#save-status')).toHaveText('Saved');
   await expect(page).not.toHaveURL(/token=/);
+  await useAdvancedView(page);
+}
+
+/**
+ * DN09/DN13: Easy is the default and hides the cast strip, inspector and right
+ * rail, so these first-open tests open Advanced the way a user would.
+ */
+async function useAdvancedView(page: Page): Promise<void> {
+  const root = page.locator('html');
+  if (await root.getAttribute('data-mode') !== 'advanced') {
+    await page.locator('#ui-mode-advanced').click();
+  }
+  await expect(root).toHaveAttribute('data-mode', 'advanced');
+  await expect(page.getByTestId('inspector-tabs')).toBeVisible();
 }
 
 const renderBar = (page: Page) => page.locator('[data-render-bar]');
