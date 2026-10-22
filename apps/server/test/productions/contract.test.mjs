@@ -380,6 +380,8 @@ test('one valid fixture per record type validates', () => {
 test('production exists before a package and before a script (invariant I1)', () => {
   // 6.1 Production: packageId and scriptVersionId are nullable.
   assertValid(validateProduction(validProduction({ packageId: null, scriptVersionId: null })), 'pre-package production');
+  assertValid(validateProduction(validProduction({ briefVersionId: null })), 'spec 6.1: briefVersionId may be null');
+  assert.equal(validateProduction(validProduction({ briefVersionId: undefined })).ok, false, 'briefVersionId must be present (string or null)');
   assertValid(validateProduction(validProduction({ packageId: 'pkg_1', scriptVersionId: 'av_script_1' })), 'packaged production');
 });
 

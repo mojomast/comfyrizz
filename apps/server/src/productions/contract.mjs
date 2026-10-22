@@ -203,7 +203,7 @@ export const COMMANDS = Object.freeze([
  * @property {string} conversationId
  * @property {string|null} packageId Null until a package exists.
  * @property {'active'|'paused'|'cancel_requested'|'archived'} intent Durable intent, not a derived phase.
- * @property {string} briefVersionId
+ * @property {string|null} briefVersionId
  * @property {string|null} scriptVersionId
  * @property {string[]} shotIds
  * @property {Array<{characterId: string, voiceId?: string|null, artifactId?: string|null, role?: string}>} characterBindings
@@ -445,7 +445,11 @@ function production(errors, doc, path) {
     push(errors, joinPath(path, 'packageId'), 'INVALID_ID', 'packageId must be a string or null');
   }
   requireEnum(errors, doc.intent, PRODUCTION_INTENTS, joinPath(path, 'intent'), 'INVALID_INTENT');
-  requireId(errors, doc.briefVersionId, joinPath(path, 'briefVersionId'), { label: 'brief version id' });
+  // Spec 6.1: briefVersionId is string | null (a production can exist before its brief version).
+  if (doc.briefVersionId !== null) optionalId(errors, doc.briefVersionId, joinPath(path, 'briefVersionId'), 'brief version id');
+  if (doc.briefVersionId === undefined) {
+    push(errors, joinPath(path, 'briefVersionId'), 'INVALID_ID', 'briefVersionId must be a string or null');
+  }
   if (doc.scriptVersionId !== null) optionalId(errors, doc.scriptVersionId, joinPath(path, 'scriptVersionId'), 'script version id');
   if (doc.scriptVersionId === undefined) {
     push(errors, joinPath(path, 'scriptVersionId'), 'INVALID_ID', 'scriptVersionId must be a string or null');
