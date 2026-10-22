@@ -70,6 +70,55 @@ function hasNativeDialogue(asset) {
   return isObject(asset?.gen?.direction?.dialogue);
 }
 
+/**
+ * IP51: the window a scene's audio actually plays. `null` means the legacy
+ * scene-bound placement. A linked trim is derived from the current picture
+ * trim and the placed scene duration, so re-timing the scene keeps the audio
+ * attached; only an unlinked trim stores an independent J/L window.
+ */
+function audioPlacement(scene, timed, fps) {
+  const trim = isObject(scene?.audio_trim) ? scene.audio_trim : null;
+  if (!trim) return null;
+  const offsetFrames = Number.isInteger(trim.offsetFrames) ? trim.offsetFrames : 0;
+  const from = timed.from + offsetFrames;
+  if (trim.linked === true) {
+    const picture = isObject(scene.background?.trim) ? scene.background.trim : null;
+    const startSeconds =
+      typeof picture?.startSeconds === 'number' && Number.isFinite(picture.startSeconds) && picture.startSeconds >= 0
+        ? picture.startSeconds
+        : 0;
+    const durationInFrames = Math.max(0, Math.floor(timed.durationInFrames ?? 0));
+    return { from, durationInFrames, startSeconds, endSeconds: startSeconds + durationInFrames / fps };
+  }
+  const startSeconds = trim.startSeconds;
+  const endSeconds = trim.endSeconds;
+  if (
+    typeof startSeconds !== 'number' ||
+    typeof endSeconds !== 'number' ||
+    !Number.isFinite(startSeconds) ||
+    !Number.isFinite(endSeconds) ||
+    startSeconds < 0 ||
+    endSeconds <= startSeconds
+  ) {
+    return null;
+  }
+  return {
+    from,
+    durationInFrames: Math.max(1, Math.round((endSeconds - startSeconds) * fps)),
+    startSeconds,
+    endSeconds,
+  };
+}
+
+/** Gains for a trimmed window, indexed by output frame. */
+function timedGains(envelope, from, durationInFrames, base) {
+  const out = new Array(Math.max(0, durationInFrames));
+  for (let frame = 0; frame < out.length; frame += 1) {
+    out[frame] = (envelope[from + frame] ?? 1) * base;
+  }
+  return out;
+}
+
 /** Fill the ducking defaults from the schema. */
 export function normalizeDuck(duck) {
   const source = isObject(duck) ? duck : {};
@@ -231,15 +280,19 @@ export function resolveAudioMix(pkg, timeline) {
       if (!readyPlateWithAudio(asset) || !hasNativeDialogue(asset)) continue;
       const timed = timelineScenes.get(scene.id);
       if (!timed) continue;
+      const placement = audioPlacement(scene, timed, fps);
+      const from = placement ? placement.from : timed.from;
+      const durationInFrames = placement ? placement.durationInFrames : timed.durationInFrames;
       mix.dialogue.push({
         assetId: scene.background.asset,
         file: asset.file,
         sceneId: scene.id,
-        from: timed.from,
-        durationInFrames: timed.durationInFrames,
+        from,
+        durationInFrames,
+        ...(placement ? { startSeconds: placement.startSeconds, endSeconds: placement.endSeconds } : {}),
         gainDb,
         duck,
-        gains: new Array(Math.max(0, timed.durationInFrames)).fill(base),
+        gains: new Array(Math.max(0, durationInFrames)).fill(base),
       });
     }
   }
@@ -254,15 +307,19 @@ export function resolveAudioMix(pkg, timeline) {
       if (!readyPlateWithAudio(asset) || hasNativeDialogue(asset)) continue;
       const timed = timelineScenes.get(scene.id);
       if (!timed) continue;
+      const placement = audioPlacement(scene, timed, fps);
       mix.ambience.push({
         assetId: scene.background.asset,
         file: asset.file,
         sceneId: scene.id,
-        from: timed.from,
-        durationInFrames: timed.durationInFrames,
+        from: placement ? placement.from : timed.from,
+        durationInFrames: placement ? placement.durationInFrames : timed.durationInFrames,
+        ...(placement ? { startSeconds: placement.startSeconds, endSeconds: placement.endSeconds } : {}),
         gainDb,
         duck,
-        gains: envelope.slice(timed.from, timed.from + timed.durationInFrames).map(gain => gain * base),
+        gains: placement
+          ? timedGains(envelope, placement.from, placement.durationInFrames, base)
+          : envelope.slice(timed.from, timed.from + timed.durationInFrames).map(gain => gain * base),
       });
     }
   }

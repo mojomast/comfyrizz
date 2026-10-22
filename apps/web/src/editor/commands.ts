@@ -45,6 +45,17 @@ export interface EditorSidecar {
   presenterClips?: Record<string, PresenterClip>;
 }
 
+export interface AudioTrim {
+  /** Inclusive source in-point in seconds. Authoritative only when linked is false. */
+  startSeconds: number;
+  /** Exclusive source out-point in seconds. Authoritative only when linked is false. */
+  endSeconds: number;
+  /** Timeline shift of the audio relative to the scene start. */
+  offsetFrames: number;
+  /** Linked trims follow the placed scene and its picture in-point. */
+  linked: boolean;
+}
+
 export interface EditableScene {
   id: string;
   layout: string;
@@ -52,6 +63,7 @@ export interface EditableScene {
   copy?: Record<string, unknown>;
   background?: { asset?: string; trim?: { startSeconds: number; endSeconds?: number } | null; [key: string]: unknown } | null;
   media?: Array<{ asset?: string; trim?: { startSeconds: number; endSeconds?: number } | null; [key: string]: unknown } | null>;
+  audio_trim?: AudioTrim;
   narration?: string;
   narration_asset?: string;
   narration_duration_frames?: number;
@@ -88,11 +100,27 @@ export interface SetSceneCopy { type: 'SetSceneCopy'; sceneId: string; copy: Rec
 export interface SetMediaRange {
   type: 'SetMediaRange';
   sceneId: string;
-  target: 'background' | { mediaIndex: number };
+  target: 'background' | 'audio' | { mediaIndex: number };
   /** null clears the source trim. Seconds are source time, not project frames. */
   startSeconds: number | null;
   endSeconds?: number | null;
 }
+/** Set an independent audio in/out (a J/L cut) in source seconds. */
+export interface SetAudioRange {
+  type: 'SetAudioRange';
+  sceneId: string;
+  /** null clears audio_trim and returns to legacy scene-bound placement. */
+  startSeconds: number | null;
+  endSeconds?: number | null;
+  /** Omit to keep the existing offset, or 0 when there is none. */
+  offsetFrames?: number;
+}
+/** Snapshot the linked window so the audio can be moved independently of the picture. */
+export interface UnlinkAudio { type: 'UnlinkAudio'; sceneId: string }
+/** Re-attach the audio window to the scene's placed duration and picture in-point. */
+export interface RelinkAudio { type: 'RelinkAudio'; sceneId: string }
+/** Move the audio relative to the scene start by an integer frame count. */
+export interface SetAudioSync { type: 'SetAudioSync'; sceneId: string; offsetFrames: number }
 export interface SetCaptionText {
   type: 'SetCaptionText';
   sceneId: string;
@@ -128,6 +156,10 @@ export type Command =
   | TrimScene
   | SetSceneCopy
   | SetMediaRange
+  | SetAudioRange
+  | UnlinkAudio
+  | RelinkAudio
+  | SetAudioSync
   | SetCaptionText
   | DuplicateScene
   | DeleteScene
@@ -148,9 +180,9 @@ export function emptyEditor(): EditorSidecar {
 }
 
 const SCENE_ID = /^s[A-Za-z0-9_-]{0,63}$/;
-const LOCKED = new Set(['MoveScene', 'TrimScene', 'DeleteScene', 'DuplicateScene', 'SetMediaRange', 'SetTransition', 'ResetSceneTransition', 'SplitScene', 'SetSceneMotion', 'SetNarrationStyle']);
+const LOCKED = new Set(['MoveScene', 'TrimScene', 'DeleteScene', 'DuplicateScene', 'SetMediaRange', 'SetAudioRange', 'UnlinkAudio', 'RelinkAudio', 'SetAudioSync', 'SetTransition', 'ResetSceneTransition', 'SplitScene', 'SetSceneMotion', 'SetNarrationStyle']);
 
-function fail(code: string, error: string): ApplyResult {
+function fail(code: string, error: string): { ok: false; code: string; error: string } {
   return { ok: false, code, error };
 }
 
@@ -200,7 +232,15 @@ export function applyCommand(doc: ProjectDoc, command: Command, measured: Measur
     case 'SetSceneCopy':
       return setCopy(next, scene, command);
     case 'SetMediaRange':
-      return setMediaRange(next, scene, command);
+      return setMediaRange(next, scene, command, measured);
+    case 'SetAudioRange':
+      return setAudioRange(next, scene, command, measured);
+    case 'UnlinkAudio':
+      return unlinkAudio(next, scene, measured);
+    case 'RelinkAudio':
+      return relinkAudio(next, scene);
+    case 'SetAudioSync':
+      return setAudioSync(next, scene, command);
     case 'SetCaptionText':
       return setCaption(next, command);
     case 'DuplicateScene':
@@ -256,9 +296,17 @@ function setCopy(doc: ProjectDoc, scene: EditableScene, command: SetSceneCopy): 
   return { ok: true, doc };
 }
 
-function setMediaRange(doc: ProjectDoc, scene: EditableScene, command: SetMediaRange): ApplyResult {
+function setMediaRange(doc: ProjectDoc, scene: EditableScene, command: SetMediaRange, measured: MeasuredInput): ApplyResult {
   const trim = readTrim(command);
   if ('ok' in trim) return trim;
+  if (command.target === 'audio') {
+    if (trim.trim === null) {
+      delete scene.audio_trim;
+      return { ok: true, doc };
+    }
+    const offset = scene.audio_trim?.offsetFrames ?? 0;
+    return writeAudioRange(doc, scene, trim.trim.startSeconds, trim.trim.endSeconds ?? null, offset, measured);
+  }
   if (command.target === 'background') {
     if (!scene.background || typeof scene.background !== 'object') return fail('no-media', `Scene ${scene.id} has no background plate.`);
     if (trim.trim === null) delete scene.background.trim;
@@ -270,6 +318,94 @@ function setMediaRange(doc: ProjectDoc, scene: EditableScene, command: SetMediaR
   if (!item) return fail('no-media', `Scene ${scene.id} has no media plate ${index}.`);
   if (trim.trim === null) delete item.trim;
   else item.trim = trim.trim;
+  return { ok: true, doc };
+}
+
+function setAudioRange(doc: ProjectDoc, scene: EditableScene, command: SetAudioRange, measured: MeasuredInput): ApplyResult {
+  if (command.startSeconds === null) {
+    delete scene.audio_trim;
+    return { ok: true, doc };
+  }
+  const offset = readAudioOffset(command.offsetFrames ?? scene.audio_trim?.offsetFrames ?? 0);
+  if (offset.ok === false) return offset;
+  return writeAudioRange(doc, scene, command.startSeconds, command.endSeconds ?? null, offset.value, measured);
+}
+
+function readAudioOffset(value: unknown): { ok: true; value: number } | { ok: false; code: string; error: string } {
+  if (!Number.isInteger(value) || Math.abs(Number(value)) > 108000) {
+    return fail('bad-offset', 'An audio sync offset needs an integer frame count from -108000 to 108000.');
+  }
+  return { ok: true, value: Number(value) };
+}
+
+function writeAudioRange(
+  doc: ProjectDoc,
+  scene: EditableScene,
+  startSeconds: number,
+  endSeconds: number | null,
+  offsetFrames: number,
+  measured: MeasuredInput,
+): ApplyResult {
+  if (typeof startSeconds !== 'number' || !Number.isFinite(startSeconds) || startSeconds < 0) {
+    return fail('bad-range', 'An audio range starts at a non-negative number of source seconds.');
+  }
+  let end = endSeconds;
+  if (end == null) {
+    const slot = placedSlot(doc, scene, measured);
+    if (slot.ok === false) return slot;
+    end = startSeconds + slot.duration / slot.fps;
+  }
+  if (typeof end !== 'number' || !Number.isFinite(end) || end <= startSeconds) {
+    return fail('bad-range', 'An audio range ends after its start, in source seconds.');
+  }
+  scene.audio_trim = { startSeconds, endSeconds: end, offsetFrames, linked: false };
+  return { ok: true, doc };
+}
+
+function placedSlot(doc: ProjectDoc, scene: EditableScene, measured: MeasuredInput): { ok: true; duration: number; fps: number } | { ok: false; code: string; error: string } {
+  const placed = placeScenes(doc.package as EditorPackage, chunkMapFor(doc, measured));
+  if (!placed.ok) return fail('placement', placed.reason);
+  const slot = placed.scenes.find(item => item.id === scene.id);
+  if (!slot) return fail('placement', `Scene ${scene.id} is not on the timeline.`);
+  return { ok: true, duration: slot.duration, fps: placed.fps };
+}
+
+function pictureStartSeconds(scene: EditableScene): number {
+  const value = scene.background?.trim?.startSeconds;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+/** Snapshot exactly the window a linked trim currently plays. */
+function unlinkAudio(doc: ProjectDoc, scene: EditableScene, measured: MeasuredInput): ApplyResult {
+  const trim = scene.audio_trim;
+  if (!trim) return fail('no-audio-trim', `Scene ${scene.id} has no audio trim to unlink.`);
+  if (trim.linked === false) return { ok: true, doc };
+  const slot = placedSlot(doc, scene, measured);
+  if (slot.ok === false) return slot;
+  const startSeconds = pictureStartSeconds(scene);
+  scene.audio_trim = {
+    startSeconds,
+    endSeconds: startSeconds + slot.duration / slot.fps,
+    offsetFrames: Number.isInteger(trim.offsetFrames) ? trim.offsetFrames : 0,
+    linked: false,
+  };
+  return { ok: true, doc };
+}
+
+/** Re-attach the window; the stored start/end become a snapshot again, not the source of truth. */
+function relinkAudio(doc: ProjectDoc, scene: EditableScene): ApplyResult {
+  const trim = scene.audio_trim;
+  if (!trim) return fail('no-audio-trim', `Scene ${scene.id} has no audio trim to relink.`);
+  scene.audio_trim = { ...trim, linked: true };
+  return { ok: true, doc };
+}
+
+function setAudioSync(doc: ProjectDoc, scene: EditableScene, command: SetAudioSync): ApplyResult {
+  const offset = readAudioOffset(command.offsetFrames);
+  if (offset.ok === false) return offset;
+  const trim = scene.audio_trim;
+  if (!trim) return fail('no-audio-trim', `Scene ${scene.id} has no audio trim to sync.`);
+  scene.audio_trim = { ...trim, offsetFrames: offset.value };
   return { ok: true, doc };
 }
 
@@ -304,6 +440,8 @@ function duplicateScene(doc: ProjectDoc, index: number, scene: EditableScene, co
   const newId = command.newId ?? nextSceneId(doc.package.scenes, scene.id);
   if (!SCENE_ID.test(newId)) return fail('bad-id', `Scene id ${newId} does not match the scene id pattern.`);
   if (doc.package.scenes.some(item => item.id === newId)) return fail('duplicate-id', `Scene id ${newId} is already used.`);
+  // An explicit duplicate keeps the audio_trim window on both copies; unlike a split,
+  // the user asked for a second full scene and its audio.
   const copy = structuredClone(scene);
   copy.id = newId;
   copy.locked = false;
@@ -513,6 +651,16 @@ function splitScene(doc: ProjectDoc, scene: EditableScene, command: SplitScene, 
   right.narration_duration_frames = Math.max(1, Math.round(((original.range.outSample - cutSample) / original.sampleRate) * placed.fps));
   right.transitionOut = originalTransition;
   right.locked = false;
+  if (scene.audio_trim && scene.audio_trim.linked === false) {
+    const trim = scene.audio_trim;
+    const cutSeconds = trim.startSeconds + local / placed.fps;
+    if (cutSeconds < trim.endSeconds) {
+      scene.audio_trim = { ...trim, endSeconds: cutSeconds };
+      right.audio_trim = { ...trim, startSeconds: cutSeconds };
+    } else {
+      delete right.audio_trim;
+    }
+  }
   doc.package.scenes.splice(doc.package.scenes.findIndex(item => item.id === command.sceneId) + 1, 0, right);
   const takes = { ...(doc.editor.takes ?? {}) };
   takes[command.sceneId] = {
