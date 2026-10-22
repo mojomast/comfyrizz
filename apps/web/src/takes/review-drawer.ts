@@ -768,9 +768,10 @@ export function mountReviewDrawer(
   const error = q<HTMLElement>('[data-override-error]')!;
   const live = q<HTMLElement>('[data-review-live]')!;
 
+  const externalOnChange = options.onChange;
   model.options.onChange = () => {
     if (!destroyed) paint();
-    options.onChange?.(model);
+    externalOnChange?.(model);
   };
 
   function activeIndex(): number {
@@ -789,7 +790,10 @@ export function mountReviewDrawer(
 
   function focusActive(): void {
     const index = activeIndex();
-    if (index < 0) return;
+    if (index < 0) {
+      (q<HTMLElement>('[data-review-close]') ?? list)?.focus();
+      return;
+    }
     scrollActiveIntoView();
     let row = aside.querySelector<HTMLElement>(`[id="review-option-${index}"]`);
     if (!row) {

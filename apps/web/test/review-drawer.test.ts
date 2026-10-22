@@ -9,6 +9,7 @@ import {
   clipNeedsReview,
   createReviewDrawerModel,
   filterReviewClips,
+  mountReviewDrawer,
   renderReviewDrawer,
   renderReviewRows,
   reviewCounts,
@@ -43,6 +44,289 @@ function clip(n: number, overrides: Record<string, unknown> = {}) {
 
 function clips(count: number, overrides: Record<string, unknown> = {}) {
   return Array.from({ length: count }, (_, index) => clip(index + 1, overrides));
+}
+
+
+// Minimal DOM harness for mountReviewDrawer. The drawer renders its shell from
+// HTML, so this only needs the tags, attributes, events and focus state the
+// mount path actually touches.
+const decodeEntities = value => String(value)
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"')
+  .replace(/&#39;/g, "'")
+  .replace(/&amp;/g, '&');
+
+const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+const ATTRIBUTE = /([a-zA-Z_:][-\w:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+
+function matchSimple(element, selector) {
+  const value = String(selector ?? '').trim();
+  if (!value) return false;
+  if (value.startsWith('#')) return element.getAttribute('id') === value.slice(1);
+  if (value.startsWith('.')) return String(element.className ?? '').split(/\s+/).includes(value.slice(1));
+  const attribute = /^\[([\w-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]+)))?\]$/.exec(value);
+  if (attribute) {
+    const found = element.getAttribute(attribute[1]);
+    if (found === null) return false;
+    const wanted = attribute[2] ?? attribute[3] ?? attribute[4];
+    return wanted === undefined ? true : found === wanted;
+  }
+  return element.tagName.toLowerCase() === value.toLowerCase();
+}
+
+function parseAttributes(element, source) {
+  ATTRIBUTE.lastIndex = 0;
+  let match;
+  while ((match = ATTRIBUTE.exec(source ?? '')) !== null) {
+    element.setAttribute(match[1], decodeEntities(match[2] ?? match[3] ?? match[4] ?? ''));
+  }
+}
+
+function parseHtml(root, html, ownerDocument) {
+  const stack = [root];
+  const tokenizer = /<!--[\s\S]*?-->|<\/?([a-zA-Z][\w:-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>|[^<]+/g;
+  let token;
+  while ((token = tokenizer.exec(html)) !== null) {
+    const value = token[0];
+    if (value.startsWith('<!--')) continue;
+    if (value.startsWith('</')) {
+      const tag = token[1].toLowerCase();
+      for (let index = stack.length - 1; index > 0; index -= 1) {
+        if (stack[index].tagName.toLowerCase() === tag) {
+          stack.length = index;
+          break;
+        }
+      }
+      continue;
+    }
+    if (value.startsWith('<')) {
+      const element = ownerDocument.createElement(token[1]);
+      parseAttributes(element, token[2]);
+      stack[stack.length - 1].appendChild(element);
+      if (!VOID_TAGS.has(token[1].toLowerCase()) && !value.endsWith('/>')) stack.push(element);
+      continue;
+    }
+    stack[stack.length - 1].textContent += decodeEntities(value);
+  }
+}
+
+class FakeElement {
+  constructor(tagName, ownerDocument) {
+    this.tagName = String(tagName).toUpperCase();
+    this.ownerDocument = ownerDocument;
+    this.parentNode = null;
+    this.children = [];
+    this.attributes = new Map();
+    this.listeners = new Map();
+    this._classes = [];
+    this._html = '';
+    this.textContent = '';
+    this.value = '';
+    this.disabled = false;
+    this.hidden = false;
+    this.scrollTop = 0;
+    this.clientHeight = 0;
+    this.isContentEditable = false;
+  }
+
+  get className() {
+    return this._classes.join(' ');
+  }
+
+  set className(value) {
+    this._classes = String(value ?? '').split(/\s+/).filter(Boolean);
+  }
+
+  get classList() {
+    const element = this;
+    return {
+      contains: name => element._classes.includes(name),
+      add: name => { if (!element._classes.includes(name)) element._classes.push(name); },
+      remove: name => { element._classes = element._classes.filter(entry => entry !== name); },
+    };
+  }
+
+  get parentElement() {
+    return this.parentNode;
+  }
+
+  get dataset() {
+    const element = this;
+    const keyOf = name => `data-${String(name).replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`;
+    return new Proxy({}, {
+      get(_target, name) { return element.attributes.get(keyOf(name)); },
+      set(_target, name, value) { element.attributes.set(keyOf(name), String(value)); return true; },
+      deleteProperty(_target, name) { element.attributes.delete(keyOf(name)); return true; },
+      has(_target, name) { return element.attributes.has(keyOf(name)); },
+    });
+  }
+
+  setAttribute(name, value) {
+    const key = String(name).toLowerCase();
+    this.attributes.set(key, String(value));
+    if (key === 'class') this.className = value;
+    if (key === 'disabled') this.disabled = true;
+    if (key === 'hidden') this.hidden = true;
+  }
+
+  getAttribute(name) {
+    const key = String(name).toLowerCase();
+    return this.attributes.has(key) ? this.attributes.get(key) : null;
+  }
+
+  removeAttribute(name) {
+    this.attributes.delete(String(name).toLowerCase());
+  }
+
+  appendChild(child) {
+    child.parentNode = this;
+    child.ownerDocument = this.ownerDocument;
+    this.children.push(child);
+    return child;
+  }
+
+  append(...nodes) {
+    for (const node of nodes) {
+      if (typeof node === 'string') {
+        const text = this.ownerDocument.createElement('#text');
+        text.textContent = node;
+        this.appendChild(text);
+      } else {
+        this.appendChild(node);
+      }
+    }
+  }
+
+  remove() {
+    if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+    this.parentNode = null;
+  }
+
+  addEventListener(type, listener) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(listener);
+  }
+
+  removeEventListener(type, listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  dispatchEvent(event = {}) {
+    const payload = event;
+    if (payload.target === undefined) payload.target = this;
+    payload.defaultPrevented ??= false;
+    payload.preventDefault ??= () => { payload.defaultPrevented = true; };
+    payload.stopPropagation ??= () => { payload.propagationStopped = true; };
+    let node = this;
+    while (node) {
+      payload.currentTarget = node;
+      for (const listener of node.listeners.get(payload.type) ?? []) listener.call(node, payload);
+      if (payload.propagationStopped || payload.bubbles === false) break;
+      node = node.parentNode;
+    }
+    return !payload.defaultPrevented;
+  }
+
+  matches(selector) {
+    return matchSimple(this, selector);
+  }
+
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (node.matches?.(selector)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  querySelectorAll(selector) {
+    const found = [];
+    const walk = node => {
+      for (const child of node.children) {
+        if (child.matches?.(selector)) found.push(child);
+        walk(child);
+      }
+    };
+    walk(this);
+    return found;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] ?? null;
+  }
+
+  focus() {
+    this.ownerDocument.activeElement = this;
+  }
+
+  get innerHTML() {
+    return this._html;
+  }
+
+  set innerHTML(html) {
+    this._html = String(html);
+    this.children = [];
+    this.textContent = '';
+    parseHtml(this, this._html, this.ownerDocument);
+  }
+}
+
+class FakeDocument {
+  constructor() {
+    this.listeners = new Map();
+    this.documentElement = new FakeElement('html', this);
+    this.body = new FakeElement('body', this);
+    this.activeElement = this.body;
+  }
+
+  createElement(tagName) {
+    return new FakeElement(tagName, this);
+  }
+
+  addEventListener(type, listener) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(listener);
+  }
+
+  removeEventListener(type, listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  dispatchEvent(event = {}) {
+    const payload = event;
+    if (payload.target === undefined) payload.target = this;
+    payload.defaultPrevented ??= false;
+    payload.preventDefault ??= () => { payload.defaultPrevented = true; };
+    for (const listener of this.listeners.get(payload.type) ?? []) listener.call(this, payload);
+    return !payload.defaultPrevented;
+  }
+}
+
+function installFakeDom() {
+  const previousDocument = globalThis.document;
+  const previousElement = globalThis.Element;
+  const previousHTMLElement = globalThis.HTMLElement;
+  const doc = new FakeDocument();
+  globalThis.document = doc;
+  globalThis.Element = FakeElement;
+  globalThis.HTMLElement = FakeElement;
+  return {
+    doc,
+    restore() {
+      if (previousDocument === undefined) delete globalThis.document;
+      else globalThis.document = previousDocument;
+      if (previousElement === undefined) delete globalThis.Element;
+      else globalThis.Element = previousElement;
+      if (previousHTMLElement === undefined) delete globalThis.HTMLElement;
+      else globalThis.HTMLElement = previousHTMLElement;
+    },
+  };
+}
+
+function pressKey(element, key, extra = {}) {
+  return element.dispatchEvent({ type: 'keydown', key, bubbles: true, ...extra });
 }
 
 test('one top-bar pill summarises 48 clips and renders no per-clip chips', () => {
@@ -232,4 +516,65 @@ test('Shift+A is a no-op when the confirm is declined', async () => {
   assert.deepEqual(approved, []);
   assert.equal(model.liveMessage, 'Approve all cancelled');
   assert.equal(model.counts.needs, 2);
+});
+
+
+test('mounting keeps the caller onChange and notifies exactly once per change', async () => {
+  const { doc, restore } = installFakeDom();
+  try {
+    const host = doc.createElement('div');
+    const calls: string[] = [];
+    const handle = mountReviewDrawer({
+      host,
+      clips: [clip(1), clip(2)],
+      onChange: model => { calls.push(model.activeId); },
+    });
+
+    assert.doesNotThrow(() => handle.setClips([clip(1), clip(2), clip(3)]));
+    assert.equal(calls.length, 1);
+    assert.equal(handle.model.clips.length, 3);
+
+    assert.doesNotThrow(() => handle.setClips([clip(4), clip(5)]));
+    assert.equal(calls.length, 2);
+
+    assert.doesNotThrow(() => handle.model.setFilter('approved'));
+    assert.equal(calls.length, 3);
+    assert.equal(handle.model.filter, 'approved');
+
+    assert.equal(await handle.model.approve('ep2_video_a04'), true);
+    assert.equal(calls.length, 4);
+    assert.equal(handle.model.clips[0].state, 'approved');
+
+    handle.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test('Esc still closes the drawer after the last visible clip is approved', async () => {
+  const { doc, restore } = installFakeDom();
+  try {
+    const host = doc.createElement('div');
+    const handle = mountReviewDrawer({ host, clips: [clip(1)] });
+    handle.open();
+    assert.equal(handle.isOpen(), true);
+
+    const row = doc.activeElement;
+    assert.equal(row.getAttribute('id'), 'review-option-0');
+    pressKey(row, 'a');
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    assert.equal(handle.model.clips[0].state, 'approved');
+    assert.equal(handle.model.activeId, '');
+    const closeButton = handle.element.querySelector('[data-review-close]');
+    assert.equal(doc.activeElement, closeButton);
+
+    pressKey(doc.activeElement, 'Escape');
+    assert.equal(handle.isOpen(), false);
+    assert.equal(handle.element.hidden, true);
+
+    handle.destroy();
+  } finally {
+    restore();
+  }
 });
