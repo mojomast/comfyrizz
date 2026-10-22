@@ -104,6 +104,53 @@ function provesNoAllocation({ record, partial, error, constructed }) {
   return !sawAllocatingEvent(record);
 }
 
+function tidyAmount(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 0;
+  return Number(value.toPrecision(12));
+}
+
+/**
+ * IP08: translate the controller's settlement vocabulary into the ledger's.
+ * Unknown-usage failures deliberately carry no amount: the ledger charges the
+ * reservation's own hold (IP06 policy), which no caller can lower.
+ */
+function ledgerSettlementFor(settled) {
+  switch (settled.kind) {
+    case 'not_allocated':
+      return { kind: 'no_allocation', gpuAllocated: false, evidence: { reason: 'not_allocated' } };
+    case 'actual':
+      return { kind: 'actual', actualUnits: settled.units };
+    case 'reservation_unverified':
+      return { kind: 'reservation_unverified' };
+    case 'completed':
+    case 'media_completed':
+    default:
+      return { kind: 'estimated', actualUnits: settled.units };
+  }
+}
+
+function ledgerBudgetRefusal(status, message) {
+  return {
+    error: 'budget exceeded',
+    code: 'BUDGET_EXCEEDED',
+    refused: true,
+    budget: {
+      allowed: false,
+      warn: false,
+      state: 'refused',
+      required: null,
+      remaining: status?.available ?? null,
+      spent: status?.spent ?? 0,
+      committed: status?.committed ?? 0,
+      next: null,
+      reserve: null,
+      budget: status?.ceiling ?? null,
+      message,
+      formula: [],
+    },
+  };
+}
+
 // TR07: a job's progress event is also a clip event. The job id is `<assetId>.<kind>`, so
 // the timeline can update one clip without knowing the runner's job kinds.
 function clipJobFor(record, event) {
@@ -141,15 +188,19 @@ function clipJobFor(record, event) {
  *   stage `workflows/`, `package.json` and any on-disk assets where `runPackage` resolves them
  * @param {(context: {pkg: object, result: object, record: object}) => Promise<{revision?: number, render?: object}>} [options.onComplete]
  *   persist the applied package and render it; the return value lands on the run record
+ * @param {(context: {productionId: string|null, packageId: string|null}) => object|Promise<object|null>|null} [options.ledgerFor]
+ *   resolve the production's persistent budget ledger; null or omitted keeps the in-memory behaviour
  */
-export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false } = {}) {
+export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null } = {}) {
   if (typeof backendFactory !== 'function') throw new Error('createRunController needs a backendFactory');
+  if (ledgerFor !== null && typeof ledgerFor !== 'function') throw new Error('ledgerFor must be a function');
   const runsDir = join(runtimeDir, 'runs');
   mkdirSync(runsDir, { recursive: true });
 
   const runs = new Map();
   const approvals = new Set();
   let activeRunId = null;
+  let admissionPending = false;
   let spentEstimate = 0;
 
   const publish = (event) => events?.publish?.(event);
@@ -166,6 +217,117 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       publish({ type: 'run.settled', runId: record.runId, kind, units: amount, spentEstimate });
     } catch { /* the ledger is durable even when an observer is not */ }
     return settled;
+  }
+
+  /**
+   * Claim the admission hold before anything is estimated or constructed. The
+   * id comes from the persistent ledger revision (never a process counter), so
+   * a restart takes a fresh, unique key instead of replaying an old one.
+   */
+  function openAdmission(ledger, { idempotencyKey, userEventId, actor }) {
+    const snapshot = ledger.snapshot();
+    const before = snapshot.status;
+    const key = typeof idempotencyKey === 'string' && idempotencyKey.length > 0 ? idempotencyKey : null;
+    const reservationId = key ? `admission:${key}` : `admission:r${before.revision + 1}`;
+    const holdKey = `admission-hold:${reservationId}`;
+
+    if (key) {
+      const prior = snapshot.entries.find((entry) => entry.idempotencyKey === holdKey);
+      if (prior) {
+        const stillOpen = before.openReservations.some((reservation) => reservation.reservationId === reservationId);
+        return {
+          response: stillOpen
+            ? { error: 'run busy', code: 'RUN_BUSY', status: 409 }
+            : { error: 'duplicate start', code: 'DUPLICATE_START', status: 409 },
+        };
+      }
+    }
+
+    const available = before.capped ? Math.max(0, before.available ?? 0) : 0;
+    let reserved;
+    try {
+      reserved = ledger.reserve({
+        reservationId,
+        upperBound: available,
+        collectAndStopReserve: 0,
+        idempotencyKey: holdKey,
+        userEventId,
+        actor,
+        evidence: { reason: before.capped ? 'admission_cap_hold' : 'admission_preflight' },
+      });
+    } catch (error) {
+      if (error?.code === 'BUDGET_EXCEEDED') {
+        return { response: ledgerBudgetRefusal(before, 'the production budget cannot admit another run') };
+      }
+      // Another writer took the revision-derived key first: never proceed
+      // without a hold, and never take a second one.
+      if (error?.code === 'IDEMPOTENCY_CONFLICT') {
+        return { response: { error: 'run busy', code: 'RUN_BUSY', status: 409 } };
+      }
+      throw error;
+    }
+
+    if (reserved?.duplicate) {
+      return { response: { error: 'run busy', code: 'RUN_BUSY', status: 409 } };
+    }
+    if (before.capped && (before.available ?? 0) <= 0) {
+      closeAdmission(ledger, reservationId, 'budget_exhausted');
+      return { response: ledgerBudgetRefusal(before, 'the production budget has no remaining allowance') };
+    }
+    return { reservationId };
+  }
+
+  function closeAdmission(ledger, reservationId, reason) {
+    try {
+      return ledger.settle({
+        reservationId,
+        kind: 'no_allocation',
+        gpuAllocated: false,
+        idempotencyKey: `admission-close:${reservationId}`,
+        evidence: { reason },
+      });
+    } catch (error) {
+      if (error?.code === 'RESERVATION_NOT_OPEN') return null;
+      throw error;
+    }
+  }
+
+  function reserveRun(ledger, { runId, preview, userEventId, actor }) {
+    const required = preview?.budget?.required;
+    const spent = preview?.budget?.spent;
+    const metered = typeof required === 'number' && typeof spent === 'number';
+    const upperBound = metered ? tidyAmount(required - spent) : 0;
+    // The estimate's own collect-and-stop reserve, when it reports one. The
+    // budget figure already includes its reserve, so it is not added twice.
+    const reported = preview?.estimate?.collectAndStopReserve;
+    const collectAndStopReserve = typeof reported === 'number' && Number.isFinite(reported) && reported > 0
+      ? tidyAmount(reported)
+      : 0;
+    return ledger.reserve({
+      reservationId: `run:${runId}`,
+      upperBound,
+      collectAndStopReserve,
+      idempotencyKey: `run-hold:${runId}`,
+      userEventId,
+      actor,
+      evidence: { reason: 'run_reservation', planHash: preview?.planHash ?? null },
+    });
+  }
+
+  function closeRunReservation(ledger, runId, reason) {
+    return ledger.settle({
+      reservationId: `run:${runId}`,
+      kind: 'no_allocation',
+      gpuAllocated: false,
+      evidence: { reason },
+    });
+  }
+
+  function settleLedgerRun(ledger, runId, settled) {
+    return ledger.settle({
+      reservationId: `run:${runId}`,
+      ...ledgerSettlementFor(settled),
+    });
   }
 
   async function backend(backendId, opts = {}) {
@@ -270,7 +432,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     return { planHash, approved: true };
   }
 
-  async function execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour, teardownMode, includeReady, assets }) {
+  async function execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour, teardownMode, includeReady, assets, ledger = null }) {
     const emit = (event) => {
       record.events.push(event);
       publish({ type: 'run.event', runId: record.runId, event });
@@ -394,59 +556,117 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           ? { kind: 'reservation_unverified', units: incrementOf(record) }
           : { kind: 'completed', units: incrementOf(record) };
       }
-      settle(record, outcome.units, outcome.kind);
+      const settled = settle(record, outcome.units, outcome.kind);
+      if (ledger) settleLedgerRun(ledger, record.runId, settled);
     }
   }
 
-  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null }) {
+  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null, productionId = null, userEventId = undefined, actor = undefined, idempotencyKey = undefined }) {
     if (mode !== 'final' && mode !== 'take') throw new Error("mode must be 'final' or 'take'");
     if (activeRunId) return { error: 'run busy', runId: activeRunId, status: 409 };
+    // IP08: claim the one-start guard synchronously, before the first await, so
+    // two concurrent callers cannot both pass admission and dispatch.
+    if (admissionPending) return { error: 'run busy', runId: null, status: 409 };
     // PO-3 review: a pipeline spending on the same account must block every run start, including the
     // queued-regenerate drain, not only the HTTP route that remembered to check.
     if (isBusy()) return { error: 'pipeline busy', status: 409 };
-    const preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
-    if (preview.requiresApproval && !(approved || approvals.has(preview.planHash))) {
-      publish({ type: 'run.approval_required', ...preview });
-      return { ...preview, approvalRequired: true };
+    admissionPending = true;
+    let ledger = null;
+    let admission = null;
+    try {
+      if (ledgerFor) {
+        ledger = await ledgerFor({ productionId: productionId ?? null, packageId: pkg?.id ?? null });
+      }
+      if (ledger) {
+        admission = openAdmission(ledger, { idempotencyKey, userEventId, actor });
+        if (admission.response) return admission.response;
+      }
+      let preview;
+      try {
+        preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
+      } catch (error) {
+        if (admission) closeAdmission(ledger, admission.reservationId, 'estimate_failed');
+        throw error;
+      }
+      if (preview.requiresApproval && !(approved || approvals.has(preview.planHash))) {
+        if (admission) closeAdmission(ledger, admission.reservationId, 'approval_required');
+        publish({ type: 'run.approval_required', ...preview });
+        return { ...preview, approvalRequired: true };
+      }
+      if (!preview.budget.allowed) {
+        if (admission) closeAdmission(ledger, admission.reservationId, 'budget_refused');
+        publish({ type: 'run.refused', ...preview });
+        return { ...preview, refused: true };
+      }
+      const runMode = mode === 'take' ? 'take' : 'final';
+      const runCorrections = corrections && typeof corrections === 'object' && !Array.isArray(corrections) ? corrections : null;
+      const runId = runIdFor(preview.planHash);
+      let runReserved = false;
+      if (ledger && admission) {
+        closeAdmission(ledger, admission.reservationId, 'replaced_by_run_reservation');
+        let held;
+        try {
+          held = reserveRun(ledger, { runId, preview, userEventId, actor });
+        } catch (error) {
+          if (error?.code === 'BUDGET_EXCEEDED') {
+            const refused = ledgerBudgetRefusal(ledger.status(), 'the run reservation would exceed the user-set spend ceiling');
+            publish({ type: 'run.refused', ...preview, ...refused });
+            return { ...preview, ...refused };
+          }
+          throw error;
+        }
+        if (held?.duplicate) return { error: 'run busy', runId: null, status: 409 };
+        runReserved = true;
+      }
+      const workDir = join(runsDir, runId, 'work');
+      const outputDir = join(runsDir, runId, 'out');
+      try {
+        mkdirSync(outputDir, { recursive: true });
+        if (prepareWorkDir) await prepareWorkDir(pkg, workDir, { runId, backendId });
+      } catch (error) {
+        if (runReserved) closeRunReservation(ledger, runId, 'prepare_failed');
+        throw error;
+      }
+      const record = {
+        runId,
+        backendId,
+        status: 'starting',
+        planHash: preview.planHash,
+        budget: preview.budget,
+        estimate: preview.estimate,
+        backend: preview.backend,
+        jobs: preview.jobs,
+        events: [],
+        workDir,
+        outputDir,
+        revision: null,
+        render: null,
+        mode: runMode,
+        corrections: runCorrections,
+        startedAt: new Date().toISOString(),
+        signal: new AbortController().signal,
+      };
+      runs.set(runId, record);
+      activeRunId = runId;
+      publish({ type: 'run.budget', runId, backendId, budget: preview.budget, estimate: preview.estimate, jobs: preview.jobs });
+      publish({ type: 'run.started', runId, backendId, planHash: preview.planHash, budget: preview.budget });
+      record.done = execute(record, {
+        backendId,
+        pkg,
+        budgetUnits,
+        comfyuiUrl,
+        ratePerHour: preview.ratePerHour,
+        teardownMode,
+        includeReady,
+        assets,
+        ledger: runReserved ? ledger : null,
+      }).finally(() => {
+        activeRunId = null;
+      });
+      return { runId, status: record.status, ...preview };
+    } finally {
+      admissionPending = false;
     }
-    if (!preview.budget.allowed) {
-      publish({ type: 'run.refused', ...preview });
-      return { ...preview, refused: true };
-    }
-    const runMode = mode === 'take' ? 'take' : 'final';
-    const runCorrections = corrections && typeof corrections === 'object' && !Array.isArray(corrections) ? corrections : null;
-    const runId = runIdFor(preview.planHash);
-    const workDir = join(runsDir, runId, 'work');
-    const outputDir = join(runsDir, runId, 'out');
-    mkdirSync(outputDir, { recursive: true });
-    if (prepareWorkDir) await prepareWorkDir(pkg, workDir, { runId, backendId });
-    const record = {
-      runId,
-      backendId,
-      status: 'starting',
-      planHash: preview.planHash,
-      budget: preview.budget,
-      estimate: preview.estimate,
-      backend: preview.backend,
-      jobs: preview.jobs,
-      events: [],
-      workDir,
-      outputDir,
-      revision: null,
-      render: null,
-      mode: runMode,
-      corrections: runCorrections,
-      startedAt: new Date().toISOString(),
-      signal: new AbortController().signal,
-    };
-    runs.set(runId, record);
-    activeRunId = runId;
-    publish({ type: 'run.budget', runId, backendId, budget: preview.budget, estimate: preview.estimate, jobs: preview.jobs });
-    publish({ type: 'run.started', runId, backendId, planHash: preview.planHash, budget: preview.budget });
-    record.done = execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour: preview.ratePerHour, teardownMode, includeReady, assets }).finally(() => {
-      activeRunId = null;
-    });
-    return { runId, status: record.status, ...preview };
   }
 
   function get(runId) {
@@ -478,5 +698,5 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     return get(runId);
   }
 
-  return { estimate, approve, start, get, status, wait, runs, _reset: () => { approvals.clear(); spentEstimate = 0; runs.clear(); activeRunId = null; } };
+  return { estimate, approve, start, get, status, wait, runs, _reset: () => { approvals.clear(); spentEstimate = 0; runs.clear(); activeRunId = null; admissionPending = false; } };
 }
