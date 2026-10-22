@@ -28,6 +28,26 @@ function isMetered(costVisibility) {
   return typeof costVisibility === 'string' && costVisibility.includes('account-estimate');
 }
 
+/**
+ * A run was asked for a backend that this controller cannot construct. That is a
+ * configuration/capability problem, not a server fault: the HTTP layer reports it
+ * as a clear 4xx instead of masking it as an unexpected 500. The CPU slice is
+ * export/timeline work only; it has no media runner, so clip takes need Google
+ * Colab or the user's own ComfyUI.
+ */
+export class BackendUnavailableError extends Error {
+  constructor(backendId, { message = null, cause = undefined } = {}) {
+    const detail = message ?? (backendId === 'cpu'
+      ? 'the CPU backend cannot generate clip takes: it has no media runner, so use Google Colab or your own ComfyUI'
+      : `backend ${JSON.stringify(backendId)} is not available for a media run`);
+    super(detail, cause === undefined ? undefined : { cause });
+    this.name = 'BackendUnavailableError';
+    this.code = 'BACKEND_UNAVAILABLE';
+    this.status = 422;
+    this.backendId = backendId;
+  }
+}
+
 // TR07: a job's progress event is also a clip event. The job id is `<assetId>.<kind>`, so
 // the timeline can update one clip without knowing the runner's job kinds.
 function clipJobFor(record, event) {
@@ -79,9 +99,25 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   const publish = (event) => events?.publish?.(event);
 
   async function backend(backendId, opts = {}) {
-    const instance = await backendFactory(backendId, opts);
-    if (!instance || instance.id !== backendId) throw new Error(`unknown backend: ${backendId}`);
-    if (typeof instance.runPackage !== 'function') throw new Error(`backend ${backendId} cannot run a package (no runPackage; see H8)`);
+    let instance;
+    try {
+      instance = await backendFactory(backendId, opts);
+    } catch (error) {
+      // A factory that already classified the failure (status/code) is a deliberate
+      // refusal and keeps its answer. Any other construction failure means this
+      // backend is not available here, which is a clear capability answer, not a 500.
+      if (Number.isInteger(error?.status) || typeof error?.code === 'string') throw error;
+      throw new BackendUnavailableError(backendId, {
+        message: `backend ${JSON.stringify(backendId)} could not be created: ${error?.message ?? 'unknown error'}`,
+        cause: error,
+      });
+    }
+    if (!instance || instance.id !== backendId) throw new BackendUnavailableError(backendId);
+    if (typeof instance.runPackage !== 'function') {
+      throw new BackendUnavailableError(backendId, {
+        message: `backend ${JSON.stringify(backendId)} cannot run a package (no runPackage; see H8)`,
+      });
+    }
     return instance;
   }
 
