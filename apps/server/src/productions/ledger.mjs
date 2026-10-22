@@ -211,7 +211,9 @@ export function createBudgetLedger(options = {}) {
   // authorization entry). It is never required and never rewrites an existing
   // ledger's latest authorization.
   const initialCeiling = options.ceiling === undefined ? null : ceilingValue(options.ceiling);
-  const initialUserEventId = options.userEventId === undefined
+  // A seeded ceiling is a user authorization like setCeiling, so it must cite
+  // the originating user event (review fix-up: no unattributed authorization).
+  const initialUserEventId = options.userEventId === undefined && initialCeiling === null
     ? undefined
     : userEventIdValue(options.userEventId);
   const clock = options.clock;
@@ -727,7 +729,7 @@ export function createBudgetLedger(options = {}) {
         kind: 'authorization',
         ceiling: initialCeiling,
         actor: 'user',
-        ...(initialUserEventId === undefined ? {} : { userEventId: initialUserEventId }),
+        userEventId: initialUserEventId,
       };
       record.entries.push({
         id: 'lede_1',
@@ -739,7 +741,7 @@ export function createBudgetLedger(options = {}) {
           op: 'setCeiling',
           ceiling: initialCeiling,
           actor: 'user',
-          userEventId: initialUserEventId ?? null,
+          userEventId: initialUserEventId,
           unit,
         }),
         unit,

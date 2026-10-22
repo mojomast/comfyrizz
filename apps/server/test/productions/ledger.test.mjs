@@ -249,7 +249,7 @@ test('constructor ceiling seeds only a new ledger and never overrides an authori
 
   // Reopening, with or without a different ceiling argument, keeps the stored
   // user decision; the constructor option never overwrites it.
-  const reopened = makeLedger(runtimeDir, { ledgerId: 'ledger_seeded', ceiling: 999 });
+  const reopened = makeLedger(runtimeDir, { ledgerId: 'ledger_seeded', ceiling: 999, userEventId: 'evt_user_reopen' });
   status = reopened.status();
   assert.equal(status.ceiling, 20);
   assert.equal(reopened.entries().length, 1);
@@ -264,6 +264,11 @@ test('constructor ceiling seeds only a new ledger and never overrides an authori
   assert.equal(
     codeOf(() => makeLedger(runtimeDir, { ledgerId: 'ledger_seeded_neg', ceiling: -1 })),
     'INVALID_CEILING',
+  );
+
+  assert.equal(
+    codeOf(() => makeLedger(runtimeDir, { ledgerId: 'ledger_seeded_anon', ceiling: 10 })),
+    'USER_EVENT_REQUIRED',
   );
 
   const uncapped = makeLedger(runtimeDir, { ledgerId: 'ledger_seeded_none' });
