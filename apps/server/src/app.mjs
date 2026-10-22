@@ -1,6 +1,7 @@
 import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { colabStatus } from './colab-status.mjs';
@@ -23,7 +24,7 @@ import { createCharacterRoutes } from './characters/routes.mjs';
 import { ingestRun } from './takes/ingest.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
-import { TAKES_SCHEMA } from './takes/model.mjs';
+import { TAKES_SCHEMA, shouldAutoSelect } from './takes/model.mjs';
 import { createTakeRoutes } from './takes/routes.mjs';
 import { buildCorrection } from './takes/correction.mjs';
 import { listClips } from './takes/clips.mjs';
@@ -46,6 +47,9 @@ import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mj
 import { createRenderRoutes } from './routes/render.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
+// IP11: a completion save races with edits. Re-read the latest package and reapply the
+// run's result a bounded number of times instead of overwriting or failing the run.
+const MAX_CAS_ATTEMPTS = 5;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -143,6 +147,36 @@ async function defaultBackendFactory(backendId, opts = {}) {
   return null;
 }
 
+// IP11: did the owner change this asset after the run started? The comparison is against
+// the package the run started from (captured before staging), never the staged package:
+// a correction deliberately differs from what is stored, and must still auto-select.
+function assetEditedSinceBaseline({ baseline, current, pkg, assetId }) {
+  if (!current) return false;
+  const startRevision = baseline?.revision ?? pkg?.revision ?? null;
+  if (startRevision !== null && current.revision === startRevision) return false;
+  if (!baseline?.assets) return true;
+  const before = baseline.assets[assetId];
+  const after = current.assets?.[assetId];
+  if (before === undefined && after === undefined) return false;
+  return !isDeepStrictEqual(before, after);
+}
+
+// G5-10: a run can name an asset the package did not have yet (the runner's non-upscaled
+// plate). mergeRunMedia deliberately refuses to replace an asset that was in the staged
+// package, but a ready asset absent from both the staged and the live package is a new
+// output and belongs in the rebased package.
+function mergeFinalRunMedia({ staged, current, generated }) {
+  const merged = mergeRunMedia({ staged, current, generated });
+  if (!current) return merged;
+  for (const [assetId, asset] of Object.entries(generated.assets ?? {})) {
+    if (merged.assets?.[assetId] !== undefined) continue;
+    if (staged.assets?.[assetId] !== undefined) continue;
+    if (!asset || typeof asset !== 'object' || asset.status !== 'ready' || !asset.file) continue;
+    merged.assets = { ...merged.assets, [assetId]: structuredClone(asset) };
+  }
+  return merged;
+}
+
 export function createApp({
   root = repoRoot,
   colabProgressDir = null,
@@ -174,6 +208,8 @@ export function createApp({
   const publishEntry = events.publish.bind(events);
   const pipelineIngested = new Set();
   const runPackages = new Map();
+  // IP11: runId -> { revision, assets } captured from the stored package before staging.
+  const runBaselines = new Map();
   // TR09: pipelines finish in the worker, so the server consumes the run directory
   // afterwards (never editing the worker). A terminal media run schedules one queued
   // regenerate; both hooks run after the completed/finished event has been published.
@@ -210,7 +246,17 @@ export function createApp({
 
   // C9: stage where H8's runPackage resolves relative paths: the package JSON, the repo's
   // workflow graphs, and any assets the package already has on disk.
-  async function prepareRunWorkDir(pkg, workDir) {
+  async function prepareRunWorkDir(pkg, workDir, options = {}) {
+    // IP11: remember the stored package the run starts from. `pkg` can be a corrected
+    // staging copy, so its assets must never be the baseline for "was this edited?".
+    if (options?.runId && options.dryRun !== true) {
+      let stored = null;
+      try { stored = store.read(pkg.id); } catch { stored = null; }
+      runBaselines.set(options.runId, {
+        revision: stored?.revision ?? pkg.revision ?? null,
+        assets: stored ? JSON.parse(JSON.stringify(stored.assets ?? {})) : null,
+      });
+    }
     mkdirSync(workDir, { recursive: true });
     writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg, null, 2));
     const workflowsLink = join(workDir, 'workflows');
@@ -230,14 +276,16 @@ export function createApp({
   // H8's `runPackage`/`backend.appliedBackendId` (H-fix7), so no server-side normaliser is needed.
   async function completeRun({ pkg, result, record }) {
     if (pkg?.id && record?.runId) runPackages.set(record.runId, pkg.id);
+    const baseline = record?.runId ? runBaselines.get(record.runId) ?? null : null;
+    if (record?.runId) runBaselines.delete(record.runId);
     if (!result?.package) return { revision: null, render: null };
     const id = pkg.id;
     const packageDir = dirname(store.path(id));
-    const collectedAssets = join(record.outputDir, 'assets');
     if (record.mode === 'take') {
-      // TR07: snapshot the run's outputs as takes *before* the collected assets are copied over
-      // the package's own files. The take store keeps the bytes, so a later overwrite cannot
-      // destroy the take that produced it.
+      // IP11/TR07: snapshot the run's outputs as takes *before* the package is touched.
+      // The take store keeps the bytes, so a later overwrite cannot destroy the take that
+      // produced it, and the package asset points at the take file instead of a copy of
+      // the run's output.
       const ingested = ingestRun({
         pkg,
         manifest: result.manifest,
@@ -247,49 +295,82 @@ export function createApp({
         corrections: record.corrections ?? {},
         runId: record.runId,
         backend: record.backendId,
+        autoSelect: false,
       });
-      if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
-      const copied = copyNamedAssets({ pkg: result.package, outputDir: record.outputDir, packageDir });
-      if (copied.length) {
-        events.publish({ type: 'run.log', runId: record.runId, line: `collected ${copied.length} package file(s): ${copied.join(', ')}` });
+
+      const byAsset = new Map();
+      for (const take of ingested.takes) {
+        if (!byAsset.has(take.assetId)) byAsset.set(take.assetId, []);
+        byAsset.get(take.assetId).push(take);
       }
-      // ingestRun has already written the new takes (including lastJob), so read the fresh doc
-      // before applying the auto-selected takes to the package.
-      const takeDoc = takeStore.read(id) ?? { schema: TAKES_SCHEMA, packageId: id, clips: {}, overrides: [] };
-      let next = result.package;
-      for (const [assetId, takeId] of Object.entries(ingested.selected)) {
-        next = selectTake(next, takeDoc, assetId, takeId);
+
+      // Rebase onto the latest stored package. The stored asset is the baseline: a
+      // correction staging copy deliberately differs from it and must still auto-select,
+      // while any owner edit made during the run wins and leaves the output as a candidate.
+      let saved = null;
+      let attempt = 0;
+      const applied = {};
+      while (!saved) {
+        const current = store.read(id);
+        const takeDoc = takeStore.read(id) ?? { schema: TAKES_SCHEMA, packageId: id, clips: {}, overrides: [] };
+        let next = current ?? result.package;
+        const candidate = {};
+        for (const [assetId, assetTakes] of byAsset) {
+          if (assetEditedSinceBaseline({ baseline, current, pkg, assetId })) continue;
+          for (const take of assetTakes) {
+            if (!shouldAutoSelect(takeDoc.clips?.[assetId], take)) continue;
+            next = selectTake(next, takeDoc, assetId, take.takeId);
+            candidate[assetId] = take.takeId;
+          }
+        }
+        try {
+          saved = current ? store.save(id, next, current.revision) : store.write(next);
+        } catch (error) {
+          if (!(error instanceof ConflictError) || attempt >= MAX_CAS_ATTEMPTS) throw error;
+          attempt += 1;
+          continue;
+        }
+        // Persist the take document only after the package accepted the selection, so a
+        // conflicted attempt cannot leave a take selected over an owner-edited package.
+        takeStore.write(id, takeDoc);
+        Object.assign(applied, candidate);
       }
-      takeStore.write(id, takeDoc);
-      const current = store.read(id);
-      const saved = current ? store.save(id, next, pkg.revision) : store.write(next);
+
       events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
-      const landed = new Map();
-      for (const take of ingested.takes) landed.set(take.assetId, take);
-      for (const [assetId, take] of landed) {
+      for (const take of ingested.takes) {
         events.publish({
           type: 'clip.take.landed',
           packageId: id,
-          assetId,
+          assetId: take.assetId,
           takeId: take.takeId,
-          selected: ingested.selected[assetId] ?? null,
+          selected: applied[take.assetId] === take.takeId ? take.takeId : null,
           runId: record.runId,
         });
       }
       return { revision: saved.revision, render: null };
     }
-    const current = store.read(id);
-    const merged = mergeRunMedia({ staged: pkg, current, generated: result.package });
     // TR07: only an explicit take-mode run lands takes. A final run's outputs stay in the
     // package, and any verified in-flight preview already landed its own take before now.
     // G5-10: the applied package can also name files outside `assets/` (the runner's
     // non-upscaled plates live at `out/intermediates/<id>.plate.mp4`), so copy every path it
     // names — otherwise the renderer falls back to placeholders.
-    const copied = copyNamedAssets({ pkg: changedRunMedia(current, merged), outputDir: record.outputDir, packageDir });
+    let saved = null;
+    let attempt = 0;
+    let copied = [];
+    while (!saved) {
+      const current = store.read(id);
+      const merged = mergeFinalRunMedia({ staged: pkg, current, generated: result.package });
+      copied = copyNamedAssets({ pkg: changedRunMedia(current, merged), outputDir: record.outputDir, packageDir });
+      try {
+        saved = current ? store.save(id, merged, current.revision) : store.write(merged);
+      } catch (error) {
+        if (!(error instanceof ConflictError) || attempt >= MAX_CAS_ATTEMPTS) throw error;
+        attempt += 1;
+      }
+    }
     if (copied.length) {
       events.publish({ type: 'run.log', runId: record.runId, line: `collected ${copied.length} package file(s): ${copied.join(', ')}` });
     }
-    const saved = current ? store.save(id, merged, current.revision) : store.write(merged);
     events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
     // A partial run keeps its finished plates (H8 already applied them), but there is nothing
     // honest to render when the manifest says the run did not complete.
