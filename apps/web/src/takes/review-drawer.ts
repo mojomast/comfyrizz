@@ -23,9 +23,39 @@ export const REVIEW_FILTER_LABELS: Readonly<Record<ReviewFilter, string>> = Obje
   failed: 'Failed',
 });
 
-export const REVIEW_ROW_HEIGHT = 52;
+export type ReviewDensity = 'compact' | 'comfortable';
+
+/**
+ * The CSS row height is `--row-height + --space-2`:
+ * compact 28 + 8 = 36 and comfortable 36 + 8 = 44. The row has room for the
+ * 64x36 thumbnail plus its two-line title/meta block, so virtualization offsets
+ * and the rendered rows share the same height in both densities.
+ */
+export const REVIEW_ROW_HEIGHT_COMPACT = 36;
+export const REVIEW_ROW_HEIGHT_COMFORTABLE = 44;
+export const REVIEW_ROW_HEIGHT = REVIEW_ROW_HEIGHT_COMFORTABLE;
+export const REVIEW_ROW_HEIGHTS: Readonly<Record<ReviewDensity, number>> = Object.freeze({
+  compact: REVIEW_ROW_HEIGHT_COMPACT,
+  comfortable: REVIEW_ROW_HEIGHT_COMFORTABLE,
+});
 export const REVIEW_OVERSCAN = 4;
 export const REVIEW_DEFAULT_VIEWPORT = 480;
+
+export function reviewRowHeight(density: unknown = 'comfortable'): number {
+  return density === 'compact' ? REVIEW_ROW_HEIGHT_COMPACT : REVIEW_ROW_HEIGHT_COMFORTABLE;
+}
+
+function currentDensity(): ReviewDensity {
+  if (typeof document === 'undefined') return 'comfortable';
+  const root = document.documentElement;
+  const explicit = root?.dataset?.density;
+  if (explicit === 'compact' || explicit === 'comfortable') return explicit;
+  return root?.dataset?.mode === 'advanced' ? 'compact' : 'comfortable';
+}
+
+export function currentReviewRowHeight(): number {
+  return reviewRowHeight(currentDensity());
+}
 
 export const MIN_OVERRIDE_REASON = 4;
 export const MAX_OVERRIDE_REASON = 500;
@@ -82,6 +112,7 @@ export interface ReviewDrawerModelOptions {
   filter?: ReviewFilter;
   query?: string;
   sort?: ReviewSort;
+  density?: ReviewDensity;
   rowHeight?: number;
   viewportHeight?: number;
   overscan?: number;
@@ -298,12 +329,12 @@ export function renderReviewRows(
       <span class="review-thumb" aria-hidden="true"><span>${escapeReviewHtml(row.kind)}</span></span>
       <span class="review-row-main">
         <span class="review-row-title" title="${escapeReviewHtml(row.fullId)}">${escapeReviewHtml(row.shortId)}</span>
-        <span class="review-row-meta">${escapeReviewHtml(row.scene)}${row.slot ? ` · ${escapeReviewHtml(row.slot)}` : ''}</span>
+        <span class="review-row-meta">
+          <span class="review-row-scene">${escapeReviewHtml(row.scene)}${row.slot ? ` · ${escapeReviewHtml(row.slot)}` : ''}</span>
+          <span class="review-take hint tabular-nums">${escapeReviewHtml(row.takeLabel)}</span>
+        </span>
       </span>
-      <span class="review-row-side">
-        <span class="review-status review-status-${row.group} badge badge-${row.tone}" data-status="${row.group}">${escapeReviewHtml(row.statusLabel)}</span>
-        <span class="review-take hint tabular-nums">${escapeReviewHtml(row.takeLabel)}</span>
-      </span>
+      <span class="review-status review-status-${row.group} badge badge-${row.tone}" data-status="${row.group}">${escapeReviewHtml(row.statusLabel)}</span>
     </div>`;
   }).join('');
 }
@@ -358,7 +389,7 @@ export class ReviewDrawerModel {
     this.query = textOf(options.query);
     this.sort = REVIEW_SORTS.includes(options.sort as ReviewSort) ? options.sort as ReviewSort : 'timeline';
     this.viewportHeight = Math.max(1, Number(options.viewportHeight) || REVIEW_DEFAULT_VIEWPORT);
-    this.rowHeight = Math.max(1, Number(options.rowHeight) || REVIEW_ROW_HEIGHT);
+    this.rowHeight = Math.max(1, Number(options.rowHeight) || reviewRowHeight(options.density ?? currentDensity()));
     this.overscan = Math.max(0, Math.floor(Number(options.overscan ?? REVIEW_OVERSCAN) || 0));
     this.fallbackGate = options.gate ?? null;
     this.ensureActive();
@@ -434,6 +465,13 @@ export class ReviewDrawerModel {
 
   setViewportHeight(value: number): void {
     this.viewportHeight = Math.max(1, Number(value) || REVIEW_DEFAULT_VIEWPORT);
+    this.notify();
+  }
+
+  setRowHeight(value: number): void {
+    const height = Math.max(1, Number(value) || REVIEW_ROW_HEIGHT);
+    if (height === this.rowHeight) return;
+    this.rowHeight = height;
     this.notify();
   }
 
@@ -758,6 +796,17 @@ export function mountReviewDrawer(
   let pendingOverride: ((reason: string | null) => void) | null = null;
   let destroyed = false;
 
+  function syncRowHeight(): void {
+    const height = reviewRowHeight(currentDensity());
+    if (height !== model.rowHeight) model.setRowHeight(height);
+  }
+
+  const densityRoot = document.documentElement;
+  const densityObserver = densityRoot && typeof MutationObserver !== 'undefined'
+    ? new MutationObserver(() => syncRowHeight())
+    : null;
+  densityObserver?.observe(densityRoot, { attributes: true, attributeFilter: ['data-density', 'data-mode'] });
+
   const q = <T extends Element>(selector: string): T | null => aside.querySelector<T>(selector);
   const list = q<HTMLElement>('[data-review-list]')!;
   const search = q<HTMLInputElement>('[data-review-search]')!;
@@ -872,6 +921,7 @@ export function mountReviewDrawer(
   function open(): void {
     if (!aside.hidden) return;
     lastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    syncRowHeight();
     model.setViewportHeight(list.parentElement?.clientHeight || model.viewportHeight);
     aside.hidden = false;
     paint();
@@ -989,6 +1039,7 @@ export function mountReviewDrawer(
     },
     destroy() {
       destroyed = true;
+      densityObserver?.disconnect();
       document.removeEventListener('keydown', onDocumentKey);
       settleOverride(null);
       aside.remove();

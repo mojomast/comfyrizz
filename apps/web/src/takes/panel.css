@@ -964,26 +964,42 @@
 
 .review-spacer { flex: 0 0 auto; }
 
+/*
+ * The virtualized row height is `--row-height + --space-2` (compact 36,
+ * comfortable 44). Keep this formula in sync with REVIEW_ROW_HEIGHT_* in
+ * review-drawer.ts: the window offsets use the same numbers.
+ */
 .review-row {
+  --review-row-height: calc(var(--row-height) + var(--space-2));
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   box-sizing: border-box;
-  height: var(--row-height);
-  min-height: var(--row-height);
-  padding: var(--space-1) var(--space-2);
+  height: var(--review-row-height);
+  min-height: var(--review-row-height);
+  padding: 0 var(--space-2);
   color: var(--text-1);
   background: var(--bg-1);
   border: 0;
-  border-bottom: var(--elevation-border-1);
   cursor: pointer;
+}
+
+.review-row::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-top: var(--elevation-border-1);
+  pointer-events: none;
 }
 
 .review-row:hover { background: var(--bg-2); }
 
 .review-row[aria-selected="true"] {
   background: var(--accent-bg);
-  border-left: 2px solid var(--accent);
+  border-left: var(--focus-ring-width) solid var(--accent);
 }
 
 .review-row:focus-visible {
@@ -995,9 +1011,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 64px;
-  width: 64px;
-  height: 36px;
+  flex: 0 0 calc(var(--space-6) * 2);
+  width: calc(var(--space-6) * 2);
+  height: var(--row-height-comfortable);
   color: var(--text-3);
   font-family: var(--font-mono);
   font-size: var(--font-size-12);
@@ -1018,7 +1034,8 @@
 .review-row-main {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  justify-content: center;
+  gap: 0;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -1028,32 +1045,41 @@
   color: var(--text-1);
   font-size: var(--font-size-13);
   font-weight: var(--font-weight-600);
+  line-height: var(--line-height-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .review-row-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
   overflow: hidden;
   color: var(--text-2);
   font-size: var(--font-size-12);
-  text-overflow: ellipsis;
+  line-height: var(--line-height-tight);
   white-space: nowrap;
 }
 
-.review-row-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  flex: 0 0 auto;
+.review-row-scene {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .review-status {
   display: inline-flex;
   align-items: center;
-  min-height: var(--target-min);
+  align-self: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
   padding: 0 var(--space-1);
   font-size: var(--font-size-12);
+  font-weight: var(--font-weight-600);
+  line-height: var(--line-height-tight);
   white-space: nowrap;
   border: var(--elevation-border-1);
   border-radius: var(--radius-pill);
@@ -1079,8 +1105,12 @@
 }
 
 .review-take {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: var(--space-1);
   color: var(--text-3);
   font-size: var(--font-size-12);
+  line-height: var(--line-height-tight);
   white-space: nowrap;
 }
 

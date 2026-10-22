@@ -3,17 +3,23 @@
 // @ts-nocheck
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   REVIEW_ROW_HEIGHT,
+  REVIEW_ROW_HEIGHT_COMPACT,
+  REVIEW_ROW_HEIGHT_COMFORTABLE,
   ReviewDrawerModel,
   clipNeedsReview,
   createReviewDrawerModel,
+  currentReviewRowHeight,
   filterReviewClips,
   mountReviewDrawer,
   renderReviewDrawer,
   renderReviewRows,
+  renderReviewWindow,
   reviewCounts,
   reviewGroupFor,
+  reviewRowHeight,
   reviewRows,
   shortClipId,
   takeProgressLabel,
@@ -414,18 +420,82 @@ test('rows use a 64x36 thumbnail contract, a short id with the full title and ta
   assert.match(html, /take 2\/4/);
 });
 
-test('windowed rows keep a fixed height and only render the visible slice', () => {
-  const view = windowRange(48, 0, 480, REVIEW_ROW_HEIGHT, 4);
-  assert.equal(view.total, 48);
-  assert.equal(view.start, 0);
-  assert.equal(view.end, 14);
-  assert.equal(view.top, 0);
-  assert.equal(view.bottom, (48 - 14) * REVIEW_ROW_HEIGHT);
+test('row heights match the density CSS in compact and comfortable', () => {
+  // CSS: calc(var(--row-height) + var(--space-2)) = 28 + 8 / 36 + 8.
+  assert.equal(REVIEW_ROW_HEIGHT_COMPACT, 36);
+  assert.equal(REVIEW_ROW_HEIGHT_COMFORTABLE, 44);
+  assert.equal(REVIEW_ROW_HEIGHT, REVIEW_ROW_HEIGHT_COMFORTABLE);
+  assert.equal(reviewRowHeight('compact'), REVIEW_ROW_HEIGHT_COMPACT);
+  assert.equal(reviewRowHeight('comfortable'), REVIEW_ROW_HEIGHT_COMFORTABLE);
 
-  const scrolled = windowRange(48, REVIEW_ROW_HEIGHT * 20, 480, REVIEW_ROW_HEIGHT, 4);
-  assert.equal(scrolled.start, 16);
-  assert.equal(scrolled.top, 16 * REVIEW_ROW_HEIGHT);
-  assert.ok(scrolled.end < 48);
+  const css = readFileSync(new URL('../src/takes/panel.css', import.meta.url), 'utf8');
+  assert.match(css, /\.review-row\s*\{[\s\S]*?--review-row-height:\s*calc\(var\(--row-height\)\s*\+\s*var\(--space-2\)\)/);
+  assert.match(css, /\.review-row\s*\{[\s\S]*?height:\s*var\(--review-row-height\)/);
+  assert.match(css, /\.review-thumb\s*\{[\s\S]*?height:\s*var\(--row-height-comfortable\)/);
+  assert.match(css, /\.review-status\s*\{[\s\S]*?min-height:\s*0/);
+  assert.match(css, /\.review-status\s*\{[\s\S]*?align-self:\s*center/);
+
+  const compact = createReviewDrawerModel({ clips: [clip(1)], density: 'compact' });
+  const comfortable = createReviewDrawerModel({ clips: [clip(1)], density: 'comfortable' });
+  assert.equal(compact.rowHeight, REVIEW_ROW_HEIGHT_COMPACT);
+  assert.equal(comfortable.rowHeight, REVIEW_ROW_HEIGHT_COMFORTABLE);
+
+  const { doc, restore } = installFakeDom();
+  try {
+    assert.equal(currentReviewRowHeight(), REVIEW_ROW_HEIGHT_COMFORTABLE);
+    doc.documentElement.setAttribute('data-density', 'compact');
+    assert.equal(currentReviewRowHeight(), REVIEW_ROW_HEIGHT_COMPACT);
+    doc.documentElement.setAttribute('data-density', '');
+    doc.documentElement.setAttribute('data-mode', 'advanced');
+    assert.equal(currentReviewRowHeight(), REVIEW_ROW_HEIGHT_COMPACT);
+  } finally {
+    restore();
+  }
+});
+
+test('windowed rows keep the CSS height and start flush at scrollTop 0', () => {
+  for (const density of ['compact', 'comfortable']) {
+    const height = reviewRowHeight(density);
+    const view = windowRange(48, 0, 480, height, 4);
+    assert.equal(view.total, 48);
+    assert.equal(view.start, 0);
+    assert.equal(view.top, 0);
+    assert.equal(view.end, Math.min(48, Math.ceil(480 / height) + 4));
+    assert.equal(view.bottom, (48 - view.end) * height);
+
+    const rows = reviewRows(clips(view.end + 2));
+    const html = renderReviewWindow(rows, view, rows[0].clipId);
+    assert.ok(!html.startsWith('<div class="review-spacer"'), `${density}: no top spacer at scrollTop 0`);
+    assert.match(html, /id="review-option-0"/);
+
+    const scrolled = windowRange(48, height * 20, 480, height, 4);
+    assert.equal(scrolled.start, 16);
+    assert.equal(scrolled.top, 16 * height);
+    assert.ok(scrolled.end < 48);
+  }
+});
+
+test('take n/m sits on the row meta line and the badge is the only side item', () => {
+  const { doc, restore } = installFakeDom();
+  try {
+    const host = doc.createElement('div');
+    host.innerHTML = renderReviewRows(reviewRows([clip(7)]), { activeId: 'ep2_video_a07' });
+    const row = host.querySelector('.review-row');
+    const meta = host.querySelector('.review-row-meta');
+    const take = host.querySelector('.review-take');
+    const badge = host.querySelector('.review-status');
+    assert.ok(row);
+    assert.ok(meta);
+    assert.ok(take);
+    assert.ok(badge);
+    assert.equal(take.parentNode, meta);
+    assert.equal(meta.parentNode.parentNode, row);
+    assert.equal(badge.parentNode, row);
+    assert.equal(host.querySelector('.review-row-side'), null);
+    assert.match(take.textContent, /take 2\/4/);
+  } finally {
+    restore();
+  }
 });
 
 test('keyboard A approves and advances focus to the next clip needing review', async () => {
