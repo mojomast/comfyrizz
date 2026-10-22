@@ -1,6 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { runConversationTurn, brandTheme, CONVERSATION_PROMPT_VERSION, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
 import { createOpenAICompatibleModel } from '../../../packages/llm/dist/src/index.js';
 import { buildChatProject, chatProjectResponse } from './chat-project.mjs';
@@ -10,14 +10,16 @@ import { buildManifest, manifestBlock as referenceManifestBlock } from './refere
 import { validateAssignment } from './references/assign.mjs';
 import { listClips } from './takes/clips.mjs';
 import { buildCorrection } from './takes/correction.mjs';
-import { deriveClipState, TAKES_SCHEMA } from './takes/model.mjs';
+import { InvalidPackageError } from './store.mjs';
+import { validatePackage } from '../../../packages/schema/src/index.mjs';
+import { deriveClipState, TAKES_SCHEMA, VERDICTS } from './takes/model.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
 import { createCharacterStore } from './characters/store.mjs';
 import { addToProject, setCastOverrides } from './characters/cast.mjs';
 import { buildCastManifest, manifestBlock as castManifestBlock } from './characters/manifest.mjs';
 
-function fail(status, message) { throw Object.assign(new Error(message), { status }); }
+function fail(status, message, extra) { throw Object.assign(new Error(message), { status }, extra); }
 const clone = value => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
 
 /** The reference store mirrors confirmed placements only; proposals stay in the session. */
@@ -167,6 +169,8 @@ export function createProjectChat({
   events = null,
   measuredFor = null,
   characterStore = null,
+  hooks = null,
+  modelFactory = null,
 }) {
   const dir = join(runtimeDir, 'conversations');
   mkdirSync(dir, { recursive: true });
@@ -196,11 +200,194 @@ export function createProjectChat({
     const file = join(dir, `${id}.json`);
     return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
   }
-  function write(session) {
-    const file = join(dir, `${session.id}.json`);
+  function writeAtomic(file, text) {
     const temp = `${file}.${randomUUID()}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 });
+    writeFileSync(temp, text, { mode: 0o600 });
     renameSync(temp, file);
+  }
+  function write(session) {
+    writeAtomic(join(dir, `${session.id}.json`), `${JSON.stringify(session, null, 2)}\n`);
+  }
+  const intentPath = id => join(dir, `${id}.commit.json`);
+  const journalPath = id => join(dir, `${id}.turns.jsonl`);
+  const lockPath = id => join(dir, `${id}.lock`);
+  const packageHash = pkg => createHash('sha256').update(JSON.stringify(pkg)).digest('hex');
+
+  function readIntent(id) {
+    try {
+      return JSON.parse(readFileSync(intentPath(id), 'utf8'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+  function writeIntent(intent) {
+    writeAtomic(intentPath(intent.conversationId), `${JSON.stringify(intent, null, 2)}\n`);
+  }
+  function deleteIntent(id) {
+    try { unlinkSync(intentPath(id)); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  }
+
+  // The journal is append-only in spirit but repaired in place: a torn tail is
+  // dropped and a missing line for the committed snapshot is restored.
+  function readJournal(id) {
+    const file = journalPath(id);
+    if (!existsSync(file)) return { entries: [], text: '' };
+    const raw = readFileSync(file, 'utf8');
+    const entries = [];
+    const kept = [];
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        entries.push(JSON.parse(line));
+        kept.push(line);
+      } catch {
+        break;
+      }
+    }
+    return { entries, text: kept.length ? `${kept.join('\n')}\n` : '' };
+  }
+  function appendJournal(id, session, built) {
+    const { entries, text } = readJournal(id);
+    const trace = isPlainObject(session.trace) ? session.trace : {};
+    const entry = {
+      ...trace,
+      turnId: session.lastTurnId ?? null,
+      revision: session.revision,
+      built: Boolean(built ?? session.lastTurnBuilt),
+      provider: session.provider ?? null,
+      model: session.model ?? null,
+    };
+    const duplicate = entries.some(item => (entry.turnId && item.turnId === entry.turnId)
+      || (Number.isSafeInteger(item.revision) && item.revision === entry.revision));
+    writeAtomic(journalPath(id), duplicate ? text : `${text}${JSON.stringify(entry)}\n`);
+  }
+  const repairJournal = (id, session) => appendJournal(id, session, session.lastTurnBuilt);
+  function committedTurn(id, turnId) {
+    if (!turnId) return null;
+    const { entries } = readJournal(id);
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (entries[index]?.turnId === turnId) return entries[index];
+    }
+    return null;
+  }
+
+  function pidAlive(pid) {
+    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+    try { process.kill(pid, 0); return true; } catch (error) { return error?.code === 'EPERM'; }
+  }
+  // Evicting a stale lock is a compare-and-rename: the file we renamed away
+  // must still be the exact file we judged stale, otherwise it is put back.
+  function evictLock(file, observed, nonce) {
+    const evicted = `${file}.evict-${nonce}`;
+    try { renameSync(file, evicted); } catch { return; }
+    let moved = null;
+    try { moved = readFileSync(evicted, 'utf8'); } catch { moved = null; }
+    if (moved !== observed) {
+      try { if (!existsSync(file)) renameSync(evicted, file); else unlinkSync(evicted); } catch { /* best effort */ }
+      return;
+    }
+    try { unlinkSync(evicted); } catch { /* best effort */ }
+  }
+  function acquireLock(id) {
+    const file = lockPath(id);
+    const nonce = randomUUID();
+    const deadline = Date.now() + 4000;
+    for (;;) {
+      try {
+        writeFileSync(file, JSON.stringify({ nonce, pid: process.pid, at: Date.now() }), { flag: 'wx', mode: 0o600 });
+        return nonce;
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error;
+      }
+      let observed;
+      try { observed = readFileSync(file, 'utf8'); } catch (error) { if (error?.code === 'ENOENT') continue; throw error; }
+      let parsed = null;
+      try { parsed = JSON.parse(observed); } catch { parsed = null; }
+      let age = 0;
+      try { age = Date.now() - statSync(file).mtimeMs; } catch { age = 0; }
+      const stale = parsed
+        ? !pidAlive(parsed.pid) || age > 30 * 60 * 1000
+        : age > 5000;
+      if (stale) { evictLock(file, observed, nonce); continue; }
+      if (Date.now() > deadline) fail(409, 'This conversation is being updated. Try again.');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+  function releaseLock(id, nonce) {
+    const file = lockPath(id);
+    let parsed = null;
+    try { parsed = JSON.parse(readFileSync(file, 'utf8')); } catch { return; }
+    if (parsed?.nonce !== nonce) return;
+    try { unlinkSync(file); } catch { /* best effort */ }
+  }
+  function withLock(id, fn) {
+    const nonce = acquireLock(id);
+    try { return fn(); } finally { releaseLock(id, nonce); }
+  }
+  function writeCas(session, expectedRevision) {
+    const current = read(session.id);
+    const currentRevision = current ? current.revision : 0;
+    if (currentRevision !== expectedRevision) {
+      fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision });
+    }
+    write(session);
+  }
+  function applyTakeOps(ops) {
+    for (const op of Array.isArray(ops) ? ops : []) {
+      try {
+        if (op?.op === 'select') takes.setSelected(op.packageId, op.assetId, op.takeId);
+        else if (op?.op === 'verdict') takes.setVerdict(op.packageId, op.assetId, op.takeId, op.verdict, op.reason);
+      } catch { /* the package effect is already proven; keep recovery moving */ }
+    }
+  }
+  // A turn is rolled forward only when the package is exactly at the revision
+  // and content hash the intent recorded. Anything else is a real conflict.
+  function recoveryConflict(intent, pkg) {
+    return {
+      turnId: intent.turnId ?? null,
+      projectId: intent.package?.projectId ?? null,
+      expected: intent.package?.afterRevision ?? intent.package?.expectedRevision ?? null,
+      found: pkg ? pkg.revision : null,
+    };
+  }
+  function recoverLocked(id) {
+    const intent = readIntent(id);
+    const session = read(id);
+    if (!intent) {
+      if (session) repairJournal(id, session);
+      return null;
+    }
+    if (session && session.revision >= intent.revision) {
+      repairJournal(id, session);
+      deleteIntent(id);
+      return null;
+    }
+    const ref = isPlainObject(intent.package) ? intent.package : null;
+    const projectId = ref?.projectId ?? null;
+    const pkg = projectId ? store.read(projectId) : null;
+    const expected = ref?.expectedRevision ?? null;
+    const proven = ref?.afterRevision !== undefined && ref?.hash
+      && pkg && pkg.revision === ref.afterRevision && packageHash(pkg) === ref.hash;
+    if (proven && intent.session) {
+      applyTakeOps(intent.takesOps);
+      const latest = read(id);
+      const latestRevision = latest ? latest.revision : 0;
+      if (latestRevision === intent.baseRevision) {
+        write(intent.session);
+        appendJournal(id, intent.session, intent.session.lastTurnBuilt);
+        deleteIntent(id);
+        return null;
+      }
+      return recoveryConflict(intent, pkg);
+    }
+    if (ref?.afterRevision === undefined || !ref?.hash) {
+      if (!projectId) { deleteIntent(id); return null; }
+      const moved = pkg ? pkg.revision !== expected : expected !== null;
+      if (!moved) { deleteIntent(id); return null; }
+      return recoveryConflict(intent, pkg);
+    }
+    return recoveryConflict(intent, pkg);
   }
   function response(session, built = false) {
     const pkg = session.projectId ? store.read(session.projectId) : null;
@@ -213,13 +400,15 @@ export function createProjectChat({
     };
   }
   function get(id) {
+    const conflict = withLock(id, () => recoverLocked(id));
     const session = read(id);
     if (!session) fail(404, 'Conversation not found');
-    return response(session);
+    const body = response(session);
+    return conflict ? { ...body, recoveryConflict: conflict } : body;
   }
 
   /** Clip review is opt-in and derived from the same timeline/takes as the HTTP routes. */
-  async function buildClipContext(pkg, proposals) {
+  async function buildClipContext(pkg, proposals, docOverride = null) {
     if (!pkg) return undefined;
     let clips;
     try {
@@ -233,7 +422,7 @@ export function createProjectChat({
     } catch {
       void pkg;
     }
-    const doc = takes.read(pkg.id) ?? emptyTakesDoc(pkg.id);
+    const doc = docOverride ?? takes.read(pkg.id) ?? emptyTakesDoc(pkg.id);
     const views = clips.map(clip => clipView(pkg, clip, doc));
     const byId = new Map(views.map(view => [view.clipId, view]));
     const rows = views.map(view => compactClip(view, doc.clips?.[view.assetId]));
@@ -434,284 +623,338 @@ export function createProjectChat({
     }
     if (!input.provider || input.provider === 'none' || !providerSettings) fail(400, 'Choose a live provider and model in Agent settings to chat');
     if (active.has(id)) fail(409, 'This conversation already has a turn in progress');
-    let session = read(id) ?? { id, revision: 0, messages: [], plan: null, phase: 'chatting', projectId: null, projectRevision: null };
-    if (input.turnId && input.turnId === session.lastTurnId) return response(session, Boolean(session.lastTurnBuilt));
-    if (input.baseRevision !== undefined && input.baseRevision !== session.revision) fail(409, 'Conversation changed in another tab. Reload before continuing.');
-    if (session.messages.length >= 1000 || JSON.stringify(session.messages).length > 4000000) fail(400, 'This conversation is full. Start a new chat to continue.');
-    // Manual storyboard edits are authoritative and intentionally picked up by
-    // the next turn, so only the conversation revision is a concurrency lock.
-    let current = session.projectId ? store.read(session.projectId) : null;
-    let rebased = rebaseChatPlans(session.plan, session.previousPlan, current);
-    let clipProposals = Array.isArray(session.clipProposals) ? clone(session.clipProposals) : [];
-    let cast = Array.isArray(session.cast) ? clone(session.cast) : [];
-    let castPlacements = Array.isArray(session.castPlacements) ? clone(session.castPlacements) : [];
-    let castProposals = Array.isArray(session.castProposals) ? clone(session.castProposals) : [];
-    let packageChanged = false;
+    active.add(id);
+    try {
+      // Phase A: one short lock covers recovery and the read-modify snapshot of
+      // the conversation. The model call never runs under this lock.
+      let session = null;
+      let replay = null;
+      let baseRevision = 0;
+      let current = null;
+      let capturedPackageRevision = null;
+      let simCurrent = null;
+      let simDoc = null;
+      let packageChanged = false;
+      let rebased = { plan: null, previousPlan: null };
+      let clipProposals = [];
+      let cast = [];
+      let castPlacements = [];
+      let castProposals = [];
+      let corrections = [];
+      const selectOps = [];
+      const verdictOps = [];
+      withLock(id, () => {
+        const conflict = recoverLocked(id);
+        if (conflict) fail(409, 'RECOVERY_CONFLICT', { code: 'RECOVERY_CONFLICT', recoveryConflict: conflict });
+        session = read(id) ?? { id, revision: 0, messages: [], plan: null, phase: 'chatting', projectId: null, projectRevision: null };
+        if (input.turnId && input.turnId === session.lastTurnId) {
+          replay = response(session, Boolean(session.lastTurnBuilt));
+          return;
+        }
+        if (input.turnId) {
+          // A turn recorded in the journal stays idempotent even when a later
+          // turn has already advanced lastTurnId.
+          const committed = committedTurn(id, input.turnId);
+          if (committed) {
+            replay = response(session, Boolean(committed.built));
+            return;
+          }
+        }
+        if (input.baseRevision !== undefined && input.baseRevision !== session.revision) {
+          fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision: session.revision });
+        }
+        if (session.messages.length >= 1000 || JSON.stringify(session.messages).length > 4000000) fail(400, 'This conversation is full. Start a new chat to continue.');
+        baseRevision = session.revision;
+        // Manual storyboard edits are authoritative and intentionally picked up by
+        // the next turn, so only the conversation revision is a concurrency lock.
+        current = session.projectId ? store.read(session.projectId) : null;
+        capturedPackageRevision = current ? current.revision : null;
+        simCurrent = current;
+        clipProposals = Array.isArray(session.clipProposals) ? clone(session.clipProposals) : [];
+        cast = Array.isArray(session.cast) ? clone(session.cast) : [];
+        castPlacements = Array.isArray(session.castPlacements) ? clone(session.castPlacements) : [];
+        castProposals = Array.isArray(session.castProposals) ? clone(session.castProposals) : [];
 
-    // Clip proposals are proposals until the user confirms them by ID (a text "yes"
-    // trusts the model and still goes through the same take functions as the routes).
-    if (input.confirmClipProposals?.length) {
-      const confirmed = new Set(input.confirmClipProposals);
-      for (const proposal of clipProposals) {
-        if (!confirmed.has(proposal?.id) || proposal.status !== 'proposed') continue;
+        // Clip proposals are proposals until the user confirms them by ID (a text "yes"
+        // trusts the model and still goes through the same take functions as the routes).
+        // Selects change the package candidate; their disk write is deferred to the commit.
+        if (input.confirmClipProposals?.length) {
+          const confirmed = new Set(input.confirmClipProposals);
+          for (const proposal of clipProposals) {
+            if (!confirmed.has(proposal?.id) || proposal.status !== 'proposed') continue;
+            const now = new Date().toISOString();
+            try {
+              if (proposal.kind === 'select') {
+                if (!simCurrent) throw new Error('no project to apply this selection to');
+                if (!simDoc) simDoc = takes.read(simCurrent.id);
+                if (!simDoc) throw new Error('takes document does not exist');
+                const next = selectTake(simCurrent, simDoc, proposal.assetId, proposal.takeId);
+                simCurrent = next;
+                packageChanged = true;
+                proposal.status = 'confirmed';
+                proposal.confirmedAt = now;
+                selectOps.push({
+                  op: 'select', proposalId: proposal.id, clipId: proposal.clipId,
+                  packageId: simCurrent.id, assetId: proposal.assetId, takeId: proposal.takeId,
+                });
+              } else if (proposal.kind === 'verdict') {
+                if (!simCurrent) throw new Error('no project to apply this verdict to');
+                if (!VERDICTS.includes(proposal.verdict)) throw new Error('invalid verdict');
+                if (!simDoc) simDoc = takes.read(simCurrent.id);
+                if (!simDoc) throw new Error('takes document does not exist');
+                const entry = simDoc.clips?.[proposal.assetId];
+                const take = Array.isArray(entry?.takes)
+                  ? entry.takes.find(item => item?.takeId === proposal.takeId) : null;
+                if (!take) throw new Error('take is not in this clip');
+                take.verdict = proposal.verdict;
+                if (typeof proposal.reason === 'string') take.verdictNote = proposal.reason;
+                proposal.status = 'confirmed';
+                proposal.confirmedAt = now;
+                verdictOps.push({
+                  op: 'verdict', proposalId: proposal.id, clipId: proposal.clipId,
+                  packageId: simCurrent.id, assetId: proposal.assetId, takeId: proposal.takeId,
+                  verdict: proposal.verdict, reason: proposal.reason,
+                });
+              } else if (proposal.kind === 'correction') {
+                if (!simCurrent) throw new Error('no project to regenerate');
+                corrections.push(proposal);
+              }
+            } catch (error) {
+              proposal.lastError = String(error?.message ?? 'the proposal could not be applied').slice(0, 300);
+            }
+          }
+        }
+
+        // Cast proposals stay in the session; the library is untouched.
+        if (input.confirmCastProposals?.length) {
+          const confirmedIds = new Set(input.confirmCastProposals);
+          const libraryStore = charactersFor();
+          for (const proposal of castProposals) {
+            if (!confirmedIds.has(proposal?.id) || proposal.status !== 'proposed') continue;
+            const now = new Date().toISOString();
+            try {
+              const state = confirmCastProposal(proposal, { cast, placements: castPlacements, libraryStore, now });
+              cast = state.cast;
+              castPlacements = state.placements;
+            } catch (error) {
+              proposal.lastError = String(error?.message ?? 'the proposal could not be applied').slice(0, 300);
+            }
+          }
+        }
+
+        rebased = rebaseChatPlans(session.plan, session.previousPlan, simCurrent);
+      });
+      if (replay) return replay;
+
+      // Corrections start their run before the model sees the conversation, as
+      // they did before the commit split. Phase C contains no await.
+      for (const proposal of corrections) {
         const now = new Date().toISOString();
         try {
-          if (proposal.kind === 'select') {
-            if (!current) throw new Error('no project to apply this selection to');
-            const doc = takes.read(current.id);
-            if (!doc) throw new Error('takes document does not exist');
-            const next = selectTake(current, doc, proposal.assetId, proposal.takeId);
-            const saved = store.save(current.id, next, current.revision);
-            takes.write(current.id, doc);
+          if (typeof runs?.start !== 'function') throw new Error('clip regeneration is not available in chat');
+          const entry = takes.read(simCurrent.id)?.clips?.[proposal.assetId];
+          const built = buildCorrection(simCurrent, proposal.assetId, proposal.change, { takesCount: activeTakes(entry).length });
+          proposal.diff = built.diff;
+          proposal.correction = built.correction;
+          let result;
+          try {
+            result = await runs.start({
+              backendId: 'colab',
+              pkg: built.package,
+              assets: [proposal.assetId],
+              includeReady: true,
+              mode: 'take',
+              corrections: { [proposal.assetId]: built.correction },
+              approved: false,
+            });
+          } catch (error) {
+            if (!isBusyError(error)) throw error;
+            result = { error: 'run busy', status: 409 };
+          }
+          if (isBusyResult(result)) {
+            recordQueued(takes, simCurrent.id, proposal.assetId, built.correction, result?.planHash, 'colab');
             publishEvent(events, {
-              type: 'clip.take.selected', packageId: current.id, clipId: proposal.clipId,
-              assetId: proposal.assetId, takeId: proposal.takeId,
+              type: 'clip.queued', packageId: simCurrent.id, clipId: proposal.clipId,
+              assetId: proposal.assetId, backendId: 'colab',
+              ...(typeof result?.planHash === 'string' ? { planHash: result.planHash } : {}),
             });
             proposal.status = 'confirmed';
             proposal.confirmedAt = now;
-            proposal.revision = saved.revision ?? null;
-            packageChanged = true;
-            // A later proposal in this batch must save against the revision we just wrote.
-            current = store.read(current.id);
-          } else if (proposal.kind === 'verdict') {
-            if (!current) throw new Error('no project to apply this verdict to');
-            takes.setVerdict(current.id, proposal.assetId, proposal.takeId, proposal.verdict, proposal.reason);
+            proposal.queued = true;
+          } else if (result?.approvalRequired || (result?.requiresApproval && result?.approved === false)) {
+            proposal.status = 'approval_required';
+            proposal.planHash = result.planHash ?? null;
+            proposal.estimate = result.estimate ?? null;
+          } else if (result?.refused) {
+            throw new Error('the backend refused this regeneration');
+          } else {
+            recordStarted(takes, simCurrent.id, proposal.assetId, result);
             publishEvent(events, {
-              type: 'clip.verdict', packageId: current.id, clipId: proposal.clipId,
-              assetId: proposal.assetId, takeId: proposal.takeId, verdict: proposal.verdict,
-              ...(typeof proposal.reason === 'string' ? { note: proposal.reason } : {}),
+              type: 'clip.job', packageId: simCurrent.id, clipId: proposal.clipId,
+              assetId: proposal.assetId, runId: result?.runId,
+              state: result?.status ?? 'starting', progress: 0,
             });
             proposal.status = 'confirmed';
             proposal.confirmedAt = now;
-          } else if (proposal.kind === 'correction') {
-            if (!current) throw new Error('no project to regenerate');
-            if (typeof runs?.start !== 'function') throw new Error('clip regeneration is not available in chat');
-            const entry = takes.read(current.id)?.clips?.[proposal.assetId];
-            const built = buildCorrection(current, proposal.assetId, proposal.change, { takesCount: activeTakes(entry).length });
-            proposal.diff = built.diff;
-            proposal.correction = built.correction;
-            let result;
-            try {
-              result = await runs.start({
-                backendId: 'colab',
-                pkg: built.package,
-                assets: [proposal.assetId],
-                includeReady: true,
-                mode: 'take',
-                corrections: { [proposal.assetId]: built.correction },
-                approved: false,
-              });
-            } catch (error) {
-              if (!isBusyError(error)) throw error;
-              result = { error: 'run busy', status: 409 };
-            }
-            if (isBusyResult(result)) {
-              recordQueued(takes, current.id, proposal.assetId, built.correction, result?.planHash, 'colab');
-              publishEvent(events, {
-                type: 'clip.queued', packageId: current.id, clipId: proposal.clipId,
-                assetId: proposal.assetId, backendId: 'colab',
-                ...(typeof result?.planHash === 'string' ? { planHash: result.planHash } : {}),
-              });
-              proposal.status = 'confirmed';
-              proposal.confirmedAt = now;
-              proposal.queued = true;
-            } else if (result?.approvalRequired || (result?.requiresApproval && result?.approved === false)) {
-              proposal.status = 'approval_required';
-              proposal.planHash = result.planHash ?? null;
-              proposal.estimate = result.estimate ?? null;
-            } else if (result?.refused) {
-              throw new Error('the backend refused this regeneration');
-            } else {
-              recordStarted(takes, current.id, proposal.assetId, result);
-              publishEvent(events, {
-                type: 'clip.job', packageId: current.id, clipId: proposal.clipId,
-                assetId: proposal.assetId, runId: result?.runId,
-                state: result?.status ?? 'starting', progress: 0,
-              });
-              proposal.status = 'confirmed';
-              proposal.confirmedAt = now;
-              proposal.runId = result?.runId ?? null;
-            }
+            proposal.runId = result?.runId ?? null;
           }
         } catch (error) {
           proposal.lastError = String(error?.message ?? 'the proposal could not be applied').slice(0, 300);
         }
       }
-      if (packageChanged && current) {
-        current = store.read(current.id);
-        rebased = rebaseChatPlans(session.plan, session.previousPlan, current);
-      }
-    }
 
-    // Cast proposals are proposals until the user confirms them by ID. Confirmed
-    // membership and placements are persisted in the chat session; the library
-    // stays untouched (project cast entries are pinned snapshots).
-    if (input.confirmCastProposals?.length) {
-      const confirmedIds = new Set(input.confirmCastProposals);
-      const libraryStore = charactersFor();
-      for (const proposal of castProposals) {
-        if (!confirmedIds.has(proposal?.id) || proposal.status !== 'proposed') continue;
-        const now = new Date().toISOString();
-        try {
-          const state = confirmCastProposal(proposal, { cast, placements: castPlacements, libraryStore, now });
-          cast = state.cast;
-          castPlacements = state.placements;
-        } catch (error) {
-          proposal.lastError = String(error?.message ?? 'the proposal could not be applied').slice(0, 300);
+      // References are opt-in: a conversation without a library keeps the exact
+      // prompt and tool list it had before this feature existed.
+      const referenceStore = existsSync(join(runtimeDir, 'references', id, 'refs.json'))
+        ? createReferenceStore({ rootDir: runtimeDir, chatId: id })
+        : null;
+      let referenceAssignments = Array.isArray(session.referenceAssignments)
+        ? clone(session.referenceAssignments)
+        : [];
+      const syncReferenceAssignments = () => {
+        if (!referenceStore) return;
+        referenceStore.setAssignments(confirmedAssignments(referenceAssignments, referenceStore.list()));
+      };
+      // The UI confirms proposals by ID on the next turn (a text "yes" works the same way).
+      if (referenceStore && input.confirmAssignments?.length) {
+        const confirmedIds = new Set(input.confirmAssignments);
+        const removals = referenceAssignments.filter(assignment => assignment
+          && confirmedIds.has(assignment.id) && assignment.status === 'proposed' && assignment.action === 'unassign');
+        referenceAssignments = referenceAssignments.filter(assignment => !(assignment
+          && confirmedIds.has(assignment.id) && assignment.status === 'proposed' && assignment.action === 'unassign'));
+        const confirmedAt = new Date().toISOString();
+        referenceAssignments = referenceAssignments.map(assignment => (assignment
+          && confirmedIds.has(assignment.id) && assignment.status === 'proposed')
+          ? { ...assignment, status: 'confirmed', confirmedAt }
+          : assignment);
+        for (const removal of removals) {
+          referenceAssignments = referenceAssignments.filter(assignment => !sameTarget(assignment, removal));
         }
+        syncReferenceAssignments();
       }
-    }
-
-    // References are opt-in: a conversation without a library keeps the exact
-    // prompt and tool list it had before this feature existed.
-    const referenceStore = existsSync(join(runtimeDir, 'references', id, 'refs.json'))
-      ? createReferenceStore({ rootDir: runtimeDir, chatId: id })
-      : null;
-    let referenceAssignments = Array.isArray(session.referenceAssignments)
-      ? clone(session.referenceAssignments)
-      : [];
-    const syncReferenceAssignments = () => {
-      if (!referenceStore) return;
-      referenceStore.setAssignments(confirmedAssignments(referenceAssignments, referenceStore.list()));
-    };
-    // The UI confirms proposals by ID on the next turn (a text "yes" works the same way).
-    if (referenceStore && input.confirmAssignments?.length) {
-      const confirmedIds = new Set(input.confirmAssignments);
-      const removals = referenceAssignments.filter(assignment => assignment
-        && confirmedIds.has(assignment.id) && assignment.status === 'proposed' && assignment.action === 'unassign');
-      referenceAssignments = referenceAssignments.filter(assignment => !(assignment
-        && confirmedIds.has(assignment.id) && assignment.status === 'proposed' && assignment.action === 'unassign'));
-      const confirmedAt = new Date().toISOString();
-      referenceAssignments = referenceAssignments.map(assignment => (assignment
-        && confirmedIds.has(assignment.id) && assignment.status === 'proposed')
-        ? { ...assignment, status: 'confirmed', confirmedAt }
-        : assignment);
-      for (const removal of removals) {
-        referenceAssignments = referenceAssignments.filter(assignment => !sameTarget(assignment, removal));
-      }
-      syncReferenceAssignments();
-    }
-    const references = (() => {
-      if (!referenceStore) return undefined;
-      const refs = referenceStore.list();
-      if (!refs.length) return undefined;
-      const propose = assignment => {
-        try {
-          validateAssignment({
+      const references = (() => {
+        if (!referenceStore) return undefined;
+        const refs = referenceStore.list();
+        if (!refs.length) return undefined;
+        const propose = assignment => {
+          try {
+            validateAssignment({
+              refId: assignment.refId,
+              sceneId: assignment.sceneId,
+              slot: assignment.slot,
+              ...(assignment.frameIndex !== undefined ? { frameIndex: assignment.frameIndex } : {}),
+            }, { refs, scenes: [{ id: assignment.sceneId }], assignments: referenceAssignments });
+          } catch (error) {
+            return { ok: false, error: error.message };
+          }
+          const now = new Date().toISOString();
+          const existing = referenceAssignments.find(item => sameTarget(item, assignment));
+          if (existing) {
+            if (existing.status !== 'confirmed') {
+              existing.status = 'proposed';
+              existing.reason = assignment.reason;
+              existing.proposedAt = now;
+              if (assignment.frameIndex === undefined) delete existing.frameIndex;
+              else existing.frameIndex = assignment.frameIndex;
+            }
+            try { syncReferenceAssignments(); } catch (error) { return { ok: false, error: error.message }; }
+            return { ok: true, id: existing.id, status: existing.status };
+          }
+          const record = {
+            id: `as_${randomUUID().replaceAll('-', '').slice(0, 16)}`,
             refId: assignment.refId,
             sceneId: assignment.sceneId,
             slot: assignment.slot,
+            status: 'proposed',
+            reason: assignment.reason,
+            proposedAt: now,
             ...(assignment.frameIndex !== undefined ? { frameIndex: assignment.frameIndex } : {}),
-          }, { refs, scenes: [{ id: assignment.sceneId }], assignments: referenceAssignments });
-        } catch (error) {
-          return { ok: false, error: error.message };
-        }
-        const now = new Date().toISOString();
-        const existing = referenceAssignments.find(item => sameTarget(item, assignment));
-        if (existing) {
-          if (existing.status !== 'confirmed') {
-            existing.status = 'proposed';
-            existing.reason = assignment.reason;
-            existing.proposedAt = now;
-            if (assignment.frameIndex === undefined) delete existing.frameIndex;
-            else existing.frameIndex = assignment.frameIndex;
+          };
+          referenceAssignments.push(record);
+          try { syncReferenceAssignments(); } catch (error) {
+            referenceAssignments = referenceAssignments.filter(item => item !== record);
+            return { ok: false, error: error.message };
           }
-          try { syncReferenceAssignments(); } catch (error) { return { ok: false, error: error.message }; }
-          return { ok: true, id: existing.id, status: existing.status };
-        }
+          return { ok: true, id: record.id, status: 'proposed' };
+        };
+        const unassign = target => {
+          const matches = referenceAssignments.filter(item => sameTarget(item, target));
+          if (!matches.length) return { ok: false, error: 'no assignment to remove' };
+          if (matches.every(item => item.status !== 'confirmed')) {
+            referenceAssignments = referenceAssignments.filter(item => !matches.includes(item));
+            try { syncReferenceAssignments(); } catch (error) { return { ok: false, error: error.message }; }
+            return { ok: true, id: matches[0].id, status: 'proposed' };
+          }
+          const pending = referenceAssignments.find(item => item && item.action === 'unassign'
+            && item.status === 'proposed' && item.refId === target.refId
+            && item.sceneId === target.sceneId && item.slot === target.slot);
+          if (pending) return { ok: true, id: pending.id, status: 'proposed' };
+          const record = {
+            id: `as_${randomUUID().replaceAll('-', '').slice(0, 16)}`,
+            refId: target.refId, sceneId: target.sceneId, slot: target.slot,
+            status: 'proposed', action: 'unassign', reason: 'requested removal',
+            proposedAt: new Date().toISOString(),
+          };
+          referenceAssignments.push(record);
+          try { syncReferenceAssignments(); } catch (error) {
+            referenceAssignments = referenceAssignments.filter(item => item !== record);
+            return { ok: false, error: error.message };
+          }
+          return { ok: true, id: record.id, status: 'proposed' };
+        };
+        const manifest = buildManifest(refs, referenceAssignments);
+        return {
+          block: referenceManifestBlock(manifest),
+          manifest,
+          getRef: refId => referenceStore.get(refId),
+          propose,
+          unassign,
+          ask: () => ({ ok: true }),
+        };
+      })();
+
+      // Clips are opt-in too: no reviewable generated clips keeps the previous prompt/tools.
+      const clips = await buildClipContext(simCurrent, clipProposals, simDoc);
+
+      // Characters are opt-in: an empty library and cast keep the exact prompt/tools.
+      const libraryStore = charactersFor();
+      const library = libraryStore ? libraryStore.list() : [];
+      const sceneIds = simCurrent?.scenes?.map(scene => scene.id)
+        ?? (Array.isArray(rebased.plan?.scenes) ? rebased.plan.scenes.map(scene => scene.id) : []);
+      const recordCastProposal = proposal => {
         const record = {
-          id: `as_${randomUUID().replaceAll('-', '').slice(0, 16)}`,
-          refId: assignment.refId,
-          sceneId: assignment.sceneId,
-          slot: assignment.slot,
+          id: `cc_${randomUUID().replaceAll('-', '').slice(0, 16)}`,
           status: 'proposed',
-          reason: assignment.reason,
-          proposedAt: now,
-          ...(assignment.frameIndex !== undefined ? { frameIndex: assignment.frameIndex } : {}),
+          createdAt: new Date().toISOString(),
+          ...clone(proposal),
         };
-        referenceAssignments.push(record);
-        try { syncReferenceAssignments(); } catch (error) {
-          referenceAssignments = referenceAssignments.filter(item => item !== record);
-          return { ok: false, error: error.message };
-        }
-        return { ok: true, id: record.id, status: 'proposed' };
+        castProposals.push(record);
+        return { ok: true, proposalId: record.id, status: 'proposed' };
       };
-      const unassign = target => {
-        const matches = referenceAssignments.filter(item => sameTarget(item, target));
-        if (!matches.length) return { ok: false, error: 'no assignment to remove' };
-        if (matches.every(item => item.status !== 'confirmed')) {
-          referenceAssignments = referenceAssignments.filter(item => !matches.includes(item));
-          try { syncReferenceAssignments(); } catch (error) { return { ok: false, error: error.message }; }
-          return { ok: true, id: matches[0].id, status: 'proposed' };
-        }
-        const pending = referenceAssignments.find(item => item && item.action === 'unassign'
-          && item.status === 'proposed' && item.refId === target.refId
-          && item.sceneId === target.sceneId && item.slot === target.slot);
-        if (pending) return { ok: true, id: pending.id, status: 'proposed' };
-        const record = {
-          id: `as_${randomUUID().replaceAll('-', '').slice(0, 16)}`,
-          refId: target.refId, sceneId: target.sceneId, slot: target.slot,
-          status: 'proposed', action: 'unassign', reason: 'requested removal',
-          proposedAt: new Date().toISOString(),
+      let characters;
+      if (library.length || cast.length) {
+        const manifest = buildCastManifest(cast, { placements: castPlacements, latestRevisions: library });
+        characters = {
+          block: castManifestBlock(manifest),
+          manifest,
+          cast,
+          library,
+          sceneIds,
+          getCharacter: id => (libraryStore ? libraryStore.get(id) : null),
+          propose: recordCastProposal,
+          ask: () => ({ ok: true }),
         };
-        referenceAssignments.push(record);
-        try { syncReferenceAssignments(); } catch (error) {
-          referenceAssignments = referenceAssignments.filter(item => item !== record);
-          return { ok: false, error: error.message };
-        }
-        return { ok: true, id: record.id, status: 'proposed' };
-      };
-      const manifest = buildManifest(refs, referenceAssignments);
-      return {
-        block: referenceManifestBlock(manifest),
-        manifest,
-        getRef: refId => referenceStore.get(refId),
-        propose,
-        unassign,
-        ask: () => ({ ok: true }),
-      };
-    })();
+      }
 
-    // Clips are opt-in too: no reviewable generated clips keeps the previous prompt/tools.
-    const clips = await buildClipContext(current, clipProposals);
+      const config = providerSettings.resolve(input.provider, input.model);
+      const model = typeof modelFactory === 'function'
+        ? modelFactory({ id, config, input })
+        : createOpenAICompatibleModel(config);
+      const brand = input.brand ? prepareBrand(input.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : session.brand ?? null;
+      if (input.action === 'build' && !session.plan) fail(400, 'Write a draft before building');
 
-    // Characters are opt-in: an empty library and cast keep the exact prompt/tools.
-    const libraryStore = charactersFor();
-    const library = libraryStore ? libraryStore.list() : [];
-    const sceneIds = current?.scenes?.map(scene => scene.id)
-      ?? (Array.isArray(rebased.plan?.scenes) ? rebased.plan.scenes.map(scene => scene.id) : []);
-    const recordCastProposal = proposal => {
-      const record = {
-        id: `cc_${randomUUID().replaceAll('-', '').slice(0, 16)}`,
-        status: 'proposed',
-        createdAt: new Date().toISOString(),
-        ...clone(proposal),
-      };
-      castProposals.push(record);
-      return { ok: true, proposalId: record.id, status: 'proposed' };
-    };
-    let characters;
-    if (library.length || cast.length) {
-      const manifest = buildCastManifest(cast, { placements: castPlacements, latestRevisions: library });
-      characters = {
-        block: castManifestBlock(manifest),
-        manifest,
-        cast,
-        library,
-        sceneIds,
-        getCharacter: id => (libraryStore ? libraryStore.get(id) : null),
-        propose: recordCastProposal,
-        ask: () => ({ ok: true }),
-      };
-    }
-
-    const config = providerSettings.resolve(input.provider, input.model);
-    const model = createOpenAICompatibleModel(config);
-    const brand = input.brand ? prepareBrand(input.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : session.brand ?? null;
-    if (input.action === 'build' && !session.plan) fail(400, 'Write a draft before building');
-    active.add(id);
-    try {
-      let builtPackage;
+      let pendingBuild = null;
+      const predictedRevision = () => (simCurrent ? simCurrent.revision + 1 : ((pendingBuild?.revision ?? 1)));
       const user = { role: 'user', content: input.message.trim() };
       const signal = AbortSignal.timeout(120000);
       const build = async plan => {
@@ -720,20 +963,23 @@ export function createProjectChat({
           placements: castPlacements,
           files: characterFilesForBuild(libraryStore, cast),
         } : null;
-        const candidate = await buildChatProject({ plan, previous: current, previousPlan: rebased.previousPlan ?? session.plan, brand, runtimeDir, signal, ...(referenceStore ? { references: referenceStore } : {}), ...(castBuild ? { characters: castBuild } : {}) });
+        const candidate = await buildChatProject({ plan, previous: simCurrent, previousPlan: rebased.previousPlan ?? session.plan, brand, runtimeDir, signal, ...(referenceStore ? { references: referenceStore } : {}), ...(castBuild ? { characters: castBuild } : {}) });
         signal.throwIfAborted();
-        // Save with the revision captured before the model ran; intervening edits conflict.
-        try {
-          builtPackage = current ? store.save(current.id, candidate, current.revision) : store.write(candidate);
-        } catch (error) {
-          if (error.currentRevision !== undefined) fail(409, 'The project was edited while the agent was working. Reload before retrying.');
-          throw error;
-        }
-        return { packageId: builtPackage.id, revision: builtPackage.revision, execution: {
-          scenes: builtPackage.scenes.length, narration: 'script only', audioSynthesized: false, mp4Exported: false,
-          visualDirections: 'notes, not executable custom animation',
-          assets: Object.values(builtPackage.assets ?? {}).reduce((counts, asset) => { const key = `${asset.kind}:${asset.status}`; counts[key] = (counts[key] ?? 0) + 1; return counts; }, {}),
-        } };
+        // The store validates on write; validate the candidate here so an invalid
+        // package fails inside the turn instead of after the model reports success.
+        const validation = validatePackage(candidate);
+        if (!validation.valid) throw new InvalidPackageError(validation.errors);
+        pendingBuild = candidate;
+        const revision = predictedRevision();
+        return {
+          packageId: candidate.id,
+          revision,
+          execution: {
+            scenes: candidate.scenes.length, narration: 'script only', audioSynthesized: false, mp4Exported: false,
+            visualDirections: 'notes, not executable custom animation',
+            assets: Object.values(candidate.assets ?? {}).reduce((counts, asset) => { const key = `${asset.kind}:${asset.status}`; counts[key] = (counts[key] ?? 0) + 1; return counts; }, {}),
+          },
+        };
       };
       // The explicit UI action applies the reviewed draft without another creative generation.
       const result = input.action === 'build' ? await (async () => {
@@ -744,20 +990,21 @@ export function createProjectChat({
         mode: input.mode, messages: [...session.messages, user], plan: rebased.plan,
         brandContext: brand?.kit,
         palette: brandTheme(brand?.kit ?? {}).palette,
-        projectPalette: current?.theme?.palette,
+        projectPalette: simCurrent?.theme?.palette,
         references,
         clips,
         characters,
-        projectContext: current ? {
-          id: current.id, revision: current.revision, title: current.title, format: current.format,
-          theme: current.theme, manuallyEditedSinceLastBuild: current.revision !== session.projectRevision,
-          scenes: current.scenes.map(scene => ({ id: scene.id, layout: scene.layout, copy: scene.copy, narration: scene.narration, visual: scene.notes, locked: scene.locked, seconds: scene.preferredFrames / current.format.fps, motion: scene.motion, transitionOut: scene.transitionOut, foreground: scene.foreground })),
+        projectContext: simCurrent ? {
+          id: simCurrent.id, revision: simCurrent.revision, title: simCurrent.title, format: simCurrent.format,
+          theme: simCurrent.theme, manuallyEditedSinceLastBuild: simCurrent.revision !== session.projectRevision,
+          scenes: simCurrent.scenes.map(scene => ({ id: scene.id, layout: scene.layout, copy: scene.copy, narration: scene.narration, visual: scene.notes, locked: scene.locked, seconds: scene.preferredFrames / simCurrent.format.fps, motion: scene.motion, transitionOut: scene.transitionOut, foreground: scene.foreground })),
         } : null,
         build,
       });
       const draftChanged = JSON.stringify(result.plan) !== JSON.stringify(rebased.plan);
-      session = {
-        ...session, revision: session.revision + 1,
+      const finalPackage = pendingBuild ?? (packageChanged ? simCurrent : null);
+      const nextSession = {
+        ...session, revision: baseRevision + 1,
         messages: [...session.messages, user, { role: 'assistant', content: providerSettings.redact(result.reply) }],
         plan: result.plan, phase: result.built ? 'built' : draftChanged && result.plan ? 'draft' : session.phase,
         provider: input.provider, model: config.model,
@@ -769,12 +1016,113 @@ export function createProjectChat({
         ...(cast.length || Array.isArray(session.cast) ? { cast } : {}),
         ...(castPlacements.length || Array.isArray(session.castPlacements) ? { castPlacements } : {}),
         ...(castProposals.length || Array.isArray(session.castProposals) ? { castProposals } : {}),
-        ...(builtPackage ? { projectId: builtPackage.id, projectRevision: builtPackage.revision, previousPlan: result.plan } : {}),
+        ...(pendingBuild ? { projectId: pendingBuild.id, projectRevision: predictedRevision(), previousPlan: result.plan } : {}),
       };
-      write(session);
-      appendFileSync(join(dir, `${id}.turns.jsonl`), `${JSON.stringify({ turnId: input.turnId, revision: session.revision, provider: input.provider, model: config.model, ...session.trace })}\n`, { mode: 0o600 });
-      return response(session, result.built);
+
+      // Phase C: a short, fully synchronous commit. Every effect after the intent
+      // is recorded is either proven by the intent or rolled back on error.
+      const takesOps = [...selectOps, ...verdictOps];
+      const hasPackageEffect = Boolean(finalPackage);
+      if (!hasPackageEffect && !takesOps.length) {
+        withLock(id, () => {
+          const currentSession = read(id);
+          const currentRevision = currentSession ? currentSession.revision : 0;
+          if (currentRevision !== baseRevision) {
+            fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision });
+          }
+          write(nextSession);
+          appendJournal(id, nextSession, result.built);
+        });
+        return response(nextSession, result.built);
+      }
+      withLock(id, () => {
+        const currentSession = read(id);
+        const currentRevision = currentSession ? currentSession.revision : 0;
+        if (currentRevision !== baseRevision) {
+          fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision });
+        }
+        const projectId = finalPackage ? (finalPackage.id ?? pendingBuild?.id ?? null) : null;
+        let intent = {
+          type: 'chat.intent/v1',
+          conversationId: id,
+          turnId: input.turnId ?? null,
+          baseRevision,
+          revision: baseRevision + 1,
+          createdAt: new Date().toISOString(),
+          package: projectId ? { projectId, expectedRevision: capturedPackageRevision } : null,
+          takesOps,
+        };
+        writeIntent(intent);
+        const hookContext = { store, projectId, expectedRevision: capturedPackageRevision, package: finalPackage, session: nextSession };
+        // A throwing test seam models a crash: the intent must survive it.
+        if (typeof hooks?.beforePackageSave === 'function') hooks.beforePackageSave(hookContext);
+        let packageWritten = false;
+        let writtenPackage = null;
+        try {
+          if (hasPackageEffect) {
+            if (projectId && capturedPackageRevision !== null) {
+              try {
+                writtenPackage = store.save(projectId, finalPackage, capturedPackageRevision);
+              } catch (error) {
+                if (error.currentRevision !== undefined) {
+                  fail(409, 'The project was edited while the agent was working. Reload before retrying.', { currentRevision: error.currentRevision });
+                }
+                throw error;
+              }
+            } else {
+              writtenPackage = store.write(finalPackage);
+            }
+            packageWritten = true;
+          }
+          // The intent becomes complete as soon as the package effect is proven,
+          // before any secondary side effect. Recovery can then roll it forward.
+          intent = {
+            ...intent,
+            ...(hasPackageEffect ? {
+              package: {
+                ...intent.package,
+                afterRevision: writtenPackage.revision,
+                hash: packageHash(writtenPackage),
+              },
+            } : {}),
+            session: nextSession,
+          };
+          writeIntent(intent);
+          // Takes are side effects of the package commit: apply them after the
+          // single package write and record them for idempotent recovery.
+          for (const op of takesOps) {
+            if (op.op === 'select') {
+              takes.setSelected(op.packageId, op.assetId, op.takeId);
+              publishEvent(events, {
+                type: 'clip.take.selected', packageId: op.packageId, clipId: op.clipId,
+                assetId: op.assetId, takeId: op.takeId,
+              });
+            } else if (op.op === 'verdict') {
+              takes.setVerdict(op.packageId, op.assetId, op.takeId, op.verdict, op.reason);
+              publishEvent(events, {
+                type: 'clip.verdict', packageId: op.packageId, clipId: op.clipId,
+                assetId: op.assetId, takeId: op.takeId, verdict: op.verdict,
+                ...(typeof op.reason === 'string' ? { note: op.reason } : {}),
+              });
+            }
+            const proposal = clipProposals.find(item => item?.id === op.proposalId);
+            if (proposal && writtenPackage) proposal.revision = writtenPackage.revision;
+          }
+          if (typeof hooks?.beforeSnapshotWrite === 'function') hooks.beforeSnapshotWrite({ id, store, projectId, package: writtenPackage, session: nextSession });
+          writeCas(nextSession, baseRevision);
+          appendJournal(id, nextSession, result.built);
+          deleteIntent(id);
+        } catch (error) {
+          // Before the package write there is no effect to preserve: dropping the
+          // intent keeps a handled 409/400 from becoming a permanent recovery
+          // conflict. After it, the intent is complete and recovery rolls forward.
+          if (!packageWritten) deleteIntent(id);
+          throw error;
+        }
+      });
+      return response(nextSession, result.built);
     } finally { active.delete(id); }
   }
+
   return { get, send };
 }
