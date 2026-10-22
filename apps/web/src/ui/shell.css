@@ -6,6 +6,15 @@
    right inspector for run/activity/assets), docked timeline at bottom, status bar strip.
    Built exclusively from tokens.css and components.css contracts. */
 
+/* DN17: viewport-fixed overlays (the review drawer) align to the shell bars.
+   These are the same expressions the grid rows use, so the top bar and status
+   bar stay the single source of truth instead of an overlay guessing a px
+   offset. */
+:root {
+  --topbar-height: calc(var(--space-5) * 2);
+  --statusbar-height: calc(var(--space-5) + var(--space-2));
+}
+
 html,
 body {
   height: 100%;
@@ -41,10 +50,10 @@ html body #app {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows:
-    calc(var(--space-5) * 2)
+    var(--topbar-height)
     minmax(0, 1fr)
     auto
-    calc(var(--space-5) + var(--space-2));
+    var(--statusbar-height);
   grid-template-areas:
     'topbar'
     'workspace'
@@ -88,9 +97,9 @@ html body #app #topbar {
   align-items: center;
   flex-wrap: nowrap;
   gap: var(--space-2);
-  height: calc(var(--space-5) * 2);
-  min-height: calc(var(--space-5) * 2);
-  max-height: calc(var(--space-5) * 2);
+  height: var(--topbar-height);
+  min-height: var(--topbar-height);
+  max-height: var(--topbar-height);
   padding: 0 var(--space-3);
   background: var(--bg-1);
   border: 0;
@@ -509,9 +518,9 @@ html body #app #statusbar {
   align-items: center;
   flex-wrap: nowrap;
   gap: var(--space-2);
-  height: calc(var(--space-5) + var(--space-2));
-  min-height: calc(var(--space-5) + var(--space-2));
-  max-height: calc(var(--space-5) + var(--space-2));
+  height: var(--statusbar-height);
+  min-height: var(--statusbar-height);
+  max-height: var(--statusbar-height);
   padding: 0 var(--space-3);
   background: var(--bg-1);
   color: var(--text-2);

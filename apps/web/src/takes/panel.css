@@ -822,9 +822,13 @@
 
 .review-drawer {
   position: fixed;
-  top: 0;
+  /* DN17: start below the top bar and stop above the status bar so Run
+     settings, Render, Export and the approval pill stay visible and
+     clickable while the drawer is open. The offsets come from shell.css,
+     which sizes both bars from the same variables. */
+  top: var(--topbar-height, calc(var(--space-5) * 2));
   right: 0;
-  bottom: 0;
+  bottom: var(--statusbar-height, calc(var(--space-5) + var(--space-2)));
   z-index: 220;
   display: flex;
   flex-direction: column;
@@ -1188,7 +1192,7 @@
     top: auto;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: var(--statusbar-height, calc(var(--space-5) + var(--space-2)));
     width: auto;
     max-height: 70vh;
     border-left: 0;
