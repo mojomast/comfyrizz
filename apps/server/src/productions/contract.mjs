@@ -15,7 +15,18 @@
 // authorize a decision; `validateCommandEnvelope` rejects those fields and
 // `validateRecordedCommand` validates the attribution the server added.
 
+import { validateIterationPolicy } from './iteration.mjs';
+
 export const PRODUCTION_SCHEMA = 'comfyrizz.production/v1';
+
+// IL02: iteration failures are a closed set of codes. `iteration.set` is the
+// only way to establish a level; a paid plan without one is
+// ITERATION_LEVEL_REQUIRED, a policy beyond the D4 limits is
+// ITERATION_EXCEEDED, and a mid-production change cannot touch a shot that is
+// rendered or in flight (ITERATION_SHOT_LOCKED).
+export const ITERATION_LEVEL_REQUIRED = 'ITERATION_LEVEL_REQUIRED';
+export const ITERATION_EXCEEDED = 'ITERATION_EXCEEDED';
+export const ITERATION_SHOT_LOCKED = 'ITERATION_SHOT_LOCKED';
 
 // Spec 4.1: a production's phase is derived from its artifacts and events, so
 // it is never stored. `intent` is the only durable production-level status.
@@ -128,6 +139,7 @@ export const EVENTS = Object.freeze([
   'plan.proposed',
   'plan.approved',
   'plan.rejected',
+  'iteration.set',
   'decision.requested',
   'decision.resolved',
   'stage.entered',
@@ -160,6 +172,7 @@ export const COMMANDS = Object.freeze([
   'plan.propose',
   'plan.approve',
   'plan.reject',
+  'iteration.set',
   'decision.resolve',
   'stage.advance',
   'artifact.attach',
@@ -702,6 +715,59 @@ function creativeVerdict(errors, doc, path) {
   if (doc.note !== undefined) requireText(errors, doc.note, joinPath(path, 'note'), { max: 4000 });
 }
 
+// --- Iteration.set payload (IL02) ------------------------------------------
+
+const ITERATION_SET_KEYS = new Set(['policy', 'scope']);
+const ITERATION_SCOPE_KEYS = new Set(['shotIds']);
+
+// The policy validator names dotted fields (`policy.stages.video.takes`).
+// Keep that name intact as one JSON-pointer token so a shot id containing a
+// dot is never split into a different path.
+function iterationPolicyPath(base, field) {
+  if (typeof field !== 'string' || field === '' || field === 'policy') return base;
+  const token = field.startsWith('policy.') ? field.slice('policy.'.length) : field;
+  return joinPath(base, token);
+}
+
+function iterationSetPayload(errors, value, path) {
+  for (const key of Object.keys(value)) {
+    if (!ITERATION_SET_KEYS.has(key)) {
+      push(errors, joinPath(path, key), 'UNKNOWN_FIELD', `${joinPath(path, key)} is not a recognized field`);
+    }
+  }
+
+  const policyPath = joinPath(path, 'policy');
+  if (!Object.hasOwn(value, 'policy')) {
+    push(errors, policyPath, 'INVALID_OBJECT', `${policyPath} is required`);
+  } else if (!isPlainObject(value.policy)) {
+    push(errors, policyPath, 'INVALID_OBJECT', `${policyPath} must be an object`);
+  } else {
+    try {
+      validateIterationPolicy(value.policy);
+    } catch (error) {
+      const code = error && typeof error.code === 'string' ? error.code : 'ITERATION_POLICY_INVALID';
+      const field = error && typeof error.field === 'string' ? error.field : '';
+      const message = error && typeof error.message === 'string' ? error.message : 'policy is invalid';
+      push(errors, iterationPolicyPath(policyPath, field), code, message);
+    }
+  }
+
+  if (!Object.hasOwn(value, 'scope')) return;
+  const scopePath = joinPath(path, 'scope');
+  if (!requireObject(errors, value.scope, scopePath, 'scope')) return;
+  for (const key of Object.keys(value.scope)) {
+    if (!ITERATION_SCOPE_KEYS.has(key)) {
+      push(errors, joinPath(scopePath, key), 'UNKNOWN_FIELD', `${joinPath(scopePath, key)} is not a recognized field`);
+    }
+  }
+  const shotIdsPath = joinPath(scopePath, 'shotIds');
+  if (!Object.hasOwn(value.scope, 'shotIds')) {
+    push(errors, shotIdsPath, 'INVALID_ARRAY', `${shotIdsPath} must be an array`);
+    return;
+  }
+  requireUniqueIds(errors, value.scope.shotIds, shotIdsPath);
+}
+
 // --- Event (spec 6.5/6.6) --------------------------------------------------
 
 function event(errors, doc, path) {
@@ -711,7 +777,9 @@ function event(errors, doc, path) {
   requireIntegerAtLeast(errors, doc.sequence, 1, joinPath(path, 'sequence'), 'INVALID_SEQUENCE');
   requireEnum(errors, doc.type, EVENTS, joinPath(path, 'type'), 'UNKNOWN_EVENT_TYPE');
   requireTimestamp(errors, doc.at, joinPath(path, 'at'));
-  requireObject(errors, doc.data, joinPath(path, 'data'), 'event data');
+  if (requireObject(errors, doc.data, joinPath(path, 'data'), 'event data') && doc.type === 'iteration.set') {
+    iterationSetPayload(errors, doc.data, joinPath(path, 'data'));
+  }
   if (doc.commandId !== undefined) optionalId(errors, doc.commandId, joinPath(path, 'commandId'), 'command id');
   if (doc.userEventId !== undefined) optionalId(errors, doc.userEventId, joinPath(path, 'userEventId'), 'user event id');
 }
@@ -733,7 +801,11 @@ function commandFields(errors, doc, path, { allowProductionIdForCreate }) {
     }
   }
   validateExpectedRevisions(errors, doc.expected, joinPath(path, 'expected'));
-  requireObject(errors, doc.payload, joinPath(path, 'payload'), 'command payload');
+  if (requireObject(errors, doc.payload, joinPath(path, 'payload'), 'command payload')
+    && kindOk
+    && doc.kind === 'iteration.set') {
+    iterationSetPayload(errors, doc.payload, joinPath(path, 'payload'));
+  }
   if (doc.idempotencyKey !== undefined) {
     requireId(errors, doc.idempotencyKey, joinPath(path, 'idempotencyKey'), { label: 'idempotency key' });
   }
