@@ -1,0 +1,96 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { PRODUCTION_SYSTEM_PROMPT } from '../src/production-tools.js';
+import { planProductionTurn } from '../src/production-planner.js';
+
+const script: any = await import(new URL('../../scripts/eval-production.mjs', import.meta.url).href);
+const cases: any[] = script.loadCases();
+
+function turnsFor(scenario: any) {
+  const plan = planProductionTurn({
+    userMessage: scenario.userMessage,
+    intent: scenario.production?.intent ?? 'active',
+    shots: scenario.production?.shots ?? [],
+    requestedShotIds: scenario.requested?.shotIds ?? [],
+    requestedLineIds: scenario.requested?.lineIds ?? [],
+    untrustedTexts: (scenario.untrustedSources ?? []).map((source: { text?: string }) => source.text ?? ''),
+  });
+  assert.equal(plan.readFirst, true, scenario.id);
+  const revision = scenario.production.revision;
+  const calls = [{ name: 'production_read', args: {} }];
+  if (plan.proposal) {
+    calls.push({
+      name: 'production_propose_plan',
+      args: { expected_revision: revision, plan: plan.proposal },
+    });
+  }
+  if (plan.command) {
+    calls.push({
+      name: 'production_command',
+      args: { kind: plan.command.kind, expected_revision: revision, payload: plan.command.payload },
+    });
+  }
+  const run = script.syntheticRun(scenario, calls, plan.reply);
+  run.caseId = scenario.id;
+  return { plan, run };
+}
+
+test('IP63X planner: every recorded failure category passes Kyle\'s thresholds', () => {
+  const runs = cases.map(scenario => turnsFor(scenario).run);
+  const scored = script.scoreAll(runs, cases);
+  for (const metric of script.ALL_METRICS) {
+    const result = scored.metrics[metric];
+    assert.equal(result.ok, true, `${metric} ${result.percent}% ${result.failures.slice(0, 8).join(' | ')}`);
+    assert.equal(result.percent, 100, metric);
+  }
+  assert.equal(scored.extraPaidRuns, 0);
+});
+
+test('IP63X planner: notes do not leak into the edit, and a stale cache is not the revision', () => {
+  const injected = turnsFor(cases.find((item: any) => item.id === 'injection-delete-s3'));
+  assert.ok(injected.plan.proposal);
+  const body = JSON.stringify(injected.plan.proposal);
+  for (const id of ['s2', 's2:l1', 's3', 's3:l1', 's3:l2']) {
+    assert.equal(body.includes(id), false, id);
+  }
+  assert.deepEqual(injected.plan.proposal.edits.map((edit: { lineId: string }) => edit.lineId), ['s1:l1']);
+  assert.deepEqual(injected.plan.proposal.actions, []);
+
+  const stale = turnsFor(cases.find((item: any) => item.id === 'stale-revision'));
+  assert.ok(stale.plan.proposal);
+  assert.equal(stale.plan.proposal.edits[0].lineId, 's1:l1');
+  assert.equal(JSON.stringify(stale.plan).includes('"revision":3'), false);
+  assert.equal(stale.run.toolCalls[0].name, 'production_read');
+  assert.equal(stale.run.toolCalls[1].args.expected_revision, 7);
+
+  const empty = turnsFor(cases.find((item: any) => item.id === 'stale-plan-hash'));
+  assert.ok(empty.plan.proposal);
+  assert.equal(empty.plan.proposal.edits.length, 1);
+  assert.equal(JSON.stringify(empty.plan).includes('1111111111111111'), false);
+
+  const vague = turnsFor(cases.find((item: any) => item.id === 'edit-s1-vague'));
+  assert.equal(vague.plan.proposal, undefined);
+  assert.equal(vague.plan.command, undefined);
+  assert.match(vague.plan.reply, /\?/);
+
+  const paused = turnsFor(cases.find((item: any) => item.id === 'cancel-requested-noop'));
+  assert.equal(paused.plan.proposal, undefined);
+  assert.equal(paused.plan.command, undefined);
+  assert.match(paused.plan.reply, /\?/);
+});
+
+test('IP63X prompt: the model is told to read first and not to invent action slots', () => {
+  const env = script.createScenarioEnvironment(cases.find((item: any) => item.id === 'edit-s1-line2'));
+  try {
+    assert.equal(env.system, PRODUCTION_SYSTEM_PROMPT);
+    assert.equal(env.ctx.productionState.requestedLineIds[0], 's1:l2');
+  } finally {
+    env.cleanup();
+  }
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /first tool call of every turn is production_read/i);
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /actions is an empty array/i);
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /Do not name any other shot or line/i);
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /still propose that edit/i);
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /Google Colab/);
+  assert.equal(PRODUCTION_SYSTEM_PROMPT.includes('"actions":[{"id"'), false);
+});
