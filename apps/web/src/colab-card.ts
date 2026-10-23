@@ -26,6 +26,20 @@ export interface ColabStatus {
 const esc = (value: unknown): string =>
   String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] as string);
 
+/** Read-only spend cap. The editable cap lives on the Generate tab. */
+export function renderSpendCap(cap: number | null): string {
+  if (typeof cap !== 'number' || !Number.isFinite(cap)) return '';
+  return '<p data-spend-cap>Spend cap ' + cap + ' Google Colab units</p>';
+}
+
+function displayedSpendCap(): number | null {
+  if (typeof document === 'undefined') return null;
+  const input = document.getElementById('budget') as HTMLInputElement | null;
+  if (!input) return null;
+  const value = Number(input.value);
+  return Number.isFinite(value) ? value : null;
+}
+
 /** The one line the card leads with. Four states, and "installed but signed out" is its own. */
 export function colabStatusLine(status: ColabStatus | null, error: string | null = null): string {
   if (error) return `Could not ask the Google Colab CLI: ${error}`;
@@ -39,7 +53,7 @@ export function colabStatusLine(status: ColabStatus | null, error: string | null
   return `Installed${status.version ? ` (${status.version})` : ''}, but it did not report an account.`;
 }
 
-export function colabCardHtml(status: ColabStatus | null, error: string | null = null, lines: string[] = []): string {
+export function colabCardHtml(status: ColabStatus | null, error: string | null = null, lines: string[] = [], cap: number | null = null): string {
   const install = status?.install;
   const installBlock =
     status && !status.installed && install
@@ -67,6 +81,7 @@ export function colabCardHtml(status: ColabStatus | null, error: string | null =
   return `<div class="colab-card">
     <div class="colab-head"><b>Google Colab</b><span id="colab-status">${esc(colabStatusLine(status, error))}</span>
       <button type="button" id="colab-recheck" class="btn btn-secondary btn-sm">Test connection</button></div>
+    ${renderSpendCap(cap)}
     ${installBlock}
     ${signInBlock}
     ${tokenBlock}
@@ -327,7 +342,7 @@ export function mountSettingsCard(host: HTMLElement, request: (input: string, in
   const widgets = setupStatusbar(host);
 
   const render = async (lines: string[] = []): Promise<void> => {
-    host.innerHTML = colabCardHtml(null, null, lines);
+    host.innerHTML = colabCardHtml(null, null, lines, displayedSpendCap());
     let status: ColabStatus | null = null;
     let error: string | null = null;
     try {
@@ -336,7 +351,7 @@ export function mountSettingsCard(host: HTMLElement, request: (input: string, in
     } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
-    host.innerHTML = colabCardHtml(status, error, lines);
+    host.innerHTML = colabCardHtml(status, error, lines, displayedSpendCap());
     host.querySelector('#colab-recheck')?.addEventListener('click', () => void render(lines));
     host.querySelector('#colab-copy')?.addEventListener('click', (event) => {
       const command = (event.currentTarget as HTMLElement).dataset.command ?? '';
