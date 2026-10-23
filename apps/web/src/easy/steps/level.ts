@@ -1,6 +1,7 @@
 import { COPY, fill } from '../copy.ts';
 import { escapeHtml } from '../components.ts';
 import { summaryForLevel } from '../level-copy.ts';
+import { mountEasyLevelPicker } from '../level-picker.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, Level, StepFacts } from '../types.ts';
 
 export const LEVEL_SLOT = 'iteration-level-picker';
@@ -56,17 +57,20 @@ export function renderLevel(state: EasyState, options: RenderLevelOptions = {}):
 }
 
 function mountPicker(slot: HTMLElement, ctx: EasyStepContext): { destroy?: () => void } | null {
-  const mount = ctx.il?.mountLevelPicker;
-  if (typeof mount !== 'function') return null;
   slot.innerHTML = '';
   const state = ctx.store.get();
-  return mount(slot, {
+  const options = {
     value: levelForState(state),
     compute: state.compute,
     onChange(level: Level) {
       ctx.store.patch({ level, levelTouched: true });
     },
-  }) ?? null;
+    onOpenEditor() { ctx.host.openEditor(); },
+  };
+  if (typeof ctx.il?.mountLevelPicker === 'function') {
+    return ctx.il.mountLevelPicker(slot, options) ?? null;
+  }
+  return mountEasyLevelPicker(slot, options);
 }
 
 export const step: EasyStepModule = {
