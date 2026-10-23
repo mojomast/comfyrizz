@@ -2514,6 +2514,9 @@ function init(opened: OpenedProject): void {
   renderBrandKit();
 
   const modeControl = mountModeToggle();
+  document.getElementById('editor-back-to-studio')?.addEventListener('click', () => {
+    modeControl?.setMode('easy');
+  });
   if (modeControl) {
     const renderSplit = document.getElementById('render-split-button');
     if (renderSplit?.parentElement) renderSplit.after(modeControl.element);
