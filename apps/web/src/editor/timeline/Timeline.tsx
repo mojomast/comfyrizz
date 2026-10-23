@@ -9,7 +9,19 @@ import { nextSceneId, type Command } from '../commands.ts';
 import type { EditorExtras, EditorStore } from '../store.ts';
 import type { ClipSummary } from '../../takes/api.ts';
 import { clampTrim, mediaRangeCommand, trimBounds, trimFloorMessage } from './bounds.ts';
-import { clipChips, clipKeyboardAction, type ClipChip } from './clip-state.ts';
+import {
+  clipChips,
+  clipKeyboardAction,
+  chipThumbRequest,
+  createLazyThumbs,
+  filmstripLayout,
+  type ClipChip,
+  type CreateLazyThumbsOptions,
+  type FilmstripCell,
+  type LazyThumbs,
+} from './clip-state.ts';
+import type { ThumbsClient, ThumbResult } from '../../thumbs/client.ts';
+import { renderThumb } from '../../thumbs/thumb.ts';
 import {
   captionBlocks,
   fitZoom,
@@ -42,9 +54,53 @@ export interface SceneTimelineProps {
   onClipSelect?: (chip: ClipChip) => void;
   onClipCycle?: (chip: ClipChip, delta: -1 | 1) => void;
   onClipApprove?: (chip: ClipChip) => void;
+  /** Open the asset viewer for a chip. Without it, Enter does nothing. */
+  onClipOpen?: (chip: ClipChip) => void;
+  /** Thumbnail client; omit to render no thumbnail hosts at all. */
+  thumbs?: ThumbsClient;
+  /** Undefined is auto: filmstrip for clips when the chip is wide enough. */
+  thumbMode?: 'filmstrip' | 'head' | 'off';
 }
 
 type OriginScene = { id: string; from: number; durationInFrames: number };
+
+type TimelineThumbKind = 'poster' | 'filmstrip' | 'waveform';
+
+interface ThumbHostMeta {
+  ref: string;
+  request: { kind: TimelineThumbKind };
+  alt: string;
+}
+
+function thumbFailureReason(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : 'thumbnail-load-failed';
+}
+
+function renderFilmstrip(
+  host: HTMLElement,
+  result: Extract<ThumbResult, { status: 'ready' }>,
+  cells: readonly FilmstripCell[],
+  cellWidth: number,
+): void {
+  const doc = host.ownerDocument;
+  if (!doc) return;
+  host.replaceChildren(...cells.map((cell, index) => {
+    const span = doc.createElement('span');
+    span.className = 'tl-clip-strip-cell';
+    span.setAttribute('aria-hidden', 'true');
+    span.setAttribute('data-cell', String(index));
+    span.style.width = `${cellWidth}px`;
+    span.style.backgroundImage = `url("${result.ticketUrl}")`;
+    span.style.backgroundPosition = cell.backgroundPosition;
+    span.style.backgroundSize = cell.backgroundSize;
+    span.style.backgroundRepeat = 'no-repeat';
+    return span;
+  }));
+  host.setAttribute('data-thumb-state', 'ready');
+  host.setAttribute('data-thumb-kind', 'filmstrip');
+  host.removeAttribute('data-thumb-reason');
+  host.removeAttribute('aria-busy');
+}
 
 export function SceneTimeline({
   store,
@@ -55,6 +111,9 @@ export function SceneTimeline({
   onClipSelect,
   onClipCycle,
   onClipApprove,
+  onClipOpen,
+  thumbs,
+  thumbMode,
 }: SceneTimelineProps) {
   const [state, setState] = useState(() => store.getState());
   const [message, setMessage] = useState('');
@@ -117,6 +176,132 @@ export function SceneTimeline({
   const chips = clipChips(compiled, clips ?? []);
   const activeClipId = focusedClipId !== undefined ? focusedClipId : localFocusedClip;
   const focusedChip = chips.find(chip => chip.clipId === activeClipId) ?? null;
+
+  const packageId = typeof doc.package.id === 'string' ? doc.package.id : '';
+  const thumbsRef = useRef(thumbs);
+  thumbsRef.current = thumbs;
+  const thumbModeRef = useRef(thumbMode);
+  thumbModeRef.current = thumbMode;
+  const packageIdRef = useRef(packageId);
+  packageIdRef.current = packageId;
+  const mountedRef = useRef(true);
+  const lazyThumbsRef = useRef<LazyThumbs | null>(null);
+  const thumbHostsRef = useRef(new Map<HTMLElement, ThumbHostMeta>());
+
+  const observeThumbHost = (el: HTMLElement, meta: ThumbHostMeta): void => {
+    for (const host of thumbHostsRef.current.keys()) {
+      if (typeof host.isConnected === 'boolean' && !host.isConnected) thumbHostsRef.current.delete(host);
+    }
+    const existing = thumbHostsRef.current.get(el);
+    if (existing && existing.ref === meta.ref && existing.request.kind === meta.request.kind) {
+      // Keep the same record so an in-flight load still owns this host.
+      existing.alt = meta.alt;
+      return;
+    }
+    thumbHostsRef.current.set(el, meta);
+    lazyThumbsRef.current?.observe(el, meta.request);
+  };
+
+  const registerChipThumb = (el: HTMLSpanElement | null, chip: ClipChip): void => {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const chipPixelWidth = Math.max(1, Math.round(rect.width));
+    const request = chipThumbRequest(chip, { mode: thumbModeRef.current, chipPixelWidth });
+    if (!request) return;
+    observeThumbHost(el, {
+      ref: chip.assetId,
+      request,
+      alt: `Thumbnail for ${chip.ariaLabel}`,
+    });
+  };
+
+  const registerMusicThumb = (el: HTMLSpanElement | null, ref: string): void => {
+    if (!el) return;
+    observeThumbHost(el, {
+      ref,
+      request: { kind: 'waveform' },
+      alt: `Waveform for ${ref}`,
+    });
+  };
+
+  const loadHostThumb = async (el: HTMLElement, request: { kind: TimelineThumbKind } | null): Promise<void> => {
+    const meta = thumbHostsRef.current.get(el);
+    const client = thumbsRef.current;
+    const currentPackageId = packageIdRef.current;
+    if (!meta || !client || !currentPackageId || !request) return;
+    const alive = () => mountedRef.current && thumbHostsRef.current.get(el) === meta;
+    const options = (kind: TimelineThumbKind) => {
+      const rect = el.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      return {
+        alt: meta.alt,
+        width: width > 0 ? width : 160,
+        height: height > 0 ? height : 90,
+        kind,
+      };
+    };
+
+    try {
+      const result = await client.load({ packageId: currentPackageId, ref: meta.ref, kind: request.kind });
+      if (!alive()) return;
+      if (request.kind !== 'filmstrip') {
+        renderThumb(el, result, options(request.kind));
+        return;
+      }
+
+      const rect = el.getBoundingClientRect();
+      const chipPixelWidth = Math.max(1, Math.round(rect.width));
+      const chipPixelHeight = Math.max(1, Math.round(rect.height));
+      const cells = result.status === 'ready'
+        ? filmstripLayout(result, { chipPixelWidth, chipPixelHeight })
+        : [];
+
+      if ((thumbModeRef.current ?? 'auto') === 'auto' && cells.length < 3) {
+        const poster = await client.load({ packageId: currentPackageId, ref: meta.ref, kind: 'poster' });
+        if (!alive()) return;
+        renderThumb(el, poster, options('poster'));
+        return;
+      }
+
+      if (result.status !== 'ready' || cells.length === 0) {
+        renderThumb(el, result, options('filmstrip'));
+        return;
+      }
+
+      const tile = result.tiles?.[0];
+      const cellWidth = tile && tile.h > 0
+        ? Math.max(1, tile.w * chipPixelHeight / tile.h)
+        : chipPixelWidth / cells.length;
+      renderFilmstrip(el, result, cells, cellWidth);
+    } catch (error) {
+      if (!alive()) return;
+      renderThumb(el, { status: 'failed', reason: thumbFailureReason(error) }, options(request.kind));
+    }
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const observerFactory = (typeof window !== 'undefined' && typeof window.IntersectionObserver === 'function'
+      ? ((callback: (entries: unknown[]) => void) => new window.IntersectionObserver(entries => callback(entries)))
+      : null) as unknown as CreateLazyThumbsOptions['observerFactory'];
+    const lazy = createLazyThumbs({
+      observerFactory,
+      load: (el, request) => {
+        if (!el || typeof el !== 'object') return;
+        const kind = (request as { kind?: unknown } | null)?.kind;
+        if (kind !== 'poster' && kind !== 'filmstrip' && kind !== 'waveform') return;
+        void loadHostThumb(el as HTMLElement, { kind });
+      },
+    });
+    lazyThumbsRef.current = lazy;
+    for (const [el, meta] of thumbHostsRef.current) lazy.observe(el, meta.request);
+    return () => {
+      mountedRef.current = false;
+      lazy.disconnect();
+      lazyThumbsRef.current = null;
+    };
+  }, []);
 
   const writeSession = (patch: { selectedSceneIds?: string[]; playheadFrame?: number; zoom?: number }) => {
     store.setSession(patch);
@@ -241,6 +426,13 @@ export function SceneTimeline({
     const target = event.target as HTMLElement;
     const typing = target.matches('input, textarea, select') || target.isContentEditable;
     if (focusedChip) {
+      if (event.key === 'Enter' && onClipOpen && !typing) {
+        event.preventDefault();
+        setLocalFocusedClip(focusedChip.clipId);
+        onClipOpen(focusedChip);
+        setAnnouncement(`Open ${focusedChip.ariaLabel}`);
+        return;
+      }
       const clipAction = clipKeyboardAction({
         key: event.key,
         meta: event.metaKey,
@@ -361,6 +553,7 @@ export function SceneTimeline({
   const duration = compiled.durationInFrames;
   const canvasWidth = Math.max(duration, session.playheadFrame) * zoom + 48;
   const musicAsset = (doc.package.audio as { music?: { asset?: string } } | undefined)?.music?.asset ?? null;
+  const showThumbs = Boolean(thumbs) && thumbMode !== 'off';
   const chipsByScene = new Map<string, ClipChip[]>();
   for (const chip of chips) {
     const list = chipsByScene.get(chip.sceneId);
@@ -776,7 +969,20 @@ export function SceneTimeline({
                                 setLocalFocusedClip(chip.clipId);
                                 onClipSelect?.(chip);
                               }}
+                              onDoubleClick={event => {
+                                event.stopPropagation();
+                                setLocalFocusedClip(chip.clipId);
+                                onClipOpen?.(chip);
+                              }}
                             >
+                              {showThumbs ? (
+                                <span
+                                  className="tl-clip-thumb"
+                                  data-testid="clip-thumb"
+                                  aria-hidden="true"
+                                  ref={el => registerChipThumb(el, chip)}
+                                />
+                              ) : null}
                               <span className="tl-clip-badge">{chip.badge}</span>
                               <span className="tl-clip-slot">{chip.slotLabel}</span>
                               {chip.takeCounter ? <span className="tl-clip-take">{chip.takeCounter}</span> : null}
@@ -816,7 +1022,17 @@ export function SceneTimeline({
             {lanes.map(lane => (
               <div key={lane.name} className="tl-lane" role="listbox" aria-label={`${lane.name} (read only)`} aria-readonly="true">
                 {lane.blocks.length === 0 ? <span className="tl-block readonly" role="option" aria-selected="false" style={{ left: 0, width: 120 }}>None</span> : lane.blocks.map(block => (
-                  <span key={block.key} className="tl-block readonly" role="option" aria-selected="false" title={block.title} data-testid={lane.name === 'Captions' ? 'caption' : undefined} data-scene-id={block.sceneId || undefined} data-from={block.from} data-to={block.to} style={{ left: block.from * zoom, width: Math.max(8, (block.to - block.from) * zoom) }}>{block.label}</span>
+                  <span key={block.key} className="tl-block readonly" role="option" aria-selected="false" title={block.title} data-testid={lane.name === 'Captions' ? 'caption' : undefined} data-scene-id={block.sceneId || undefined} data-from={block.from} data-to={block.to} style={{ left: block.from * zoom, width: Math.max(8, (block.to - block.from) * zoom) }}>
+                    {lane.name === 'Music' && showThumbs && musicAsset ? (
+                      <span
+                        className="tl-music-thumb"
+                        data-testid="music-thumb"
+                        aria-hidden="true"
+                        ref={el => registerMusicThumb(el, musicAsset)}
+                      />
+                    ) : null}
+                    {block.label}
+                  </span>
                 ))}
               </div>
             ))}
