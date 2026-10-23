@@ -11,6 +11,7 @@ function turnsFor(scenario: any) {
     ? {
         policy: scenario.production.iteration.policy,
         ...(scenario.production.lockedShotIds ? { lockedShotIds: scenario.production.lockedShotIds } : {}),
+        ...(scenario.production.iteration.used ? { used: scenario.production.iteration.used } : {}),
       }
     : undefined;
   const plan = planProductionTurn({
@@ -21,6 +22,7 @@ function turnsFor(scenario: any) {
     requestedLineIds: scenario.requested?.lineIds ?? [],
     untrustedTexts: (scenario.untrustedSources ?? []).map((source: { text?: string }) => source.text ?? ''),
     iteration,
+    ...(scenario.iterationScope ? { iterationScope: scenario.iterationScope } : {}),
   });
   assert.equal(plan.readFirst, true, scenario.id);
   const revision = scenario.production.revision;
@@ -139,4 +141,46 @@ test("IL12G planner: handles 4 iteration policy cases", () => {
   assert.deepEqual(lockedShot.plan.proposal.edits, []);
   assert.deepEqual(lockedShot.plan.proposal.actions, []);
   assert.match(lockedShot.plan.reply + " " + lockedShot.plan.proposal.summary, /locked/i);
+});
+
+const scenarioById = (id: string) => cases.find((item: any) => item.id === id);
+
+test('AV16 planner: a background scope proposes one render slot on its shot with the turn scope', () => {
+  const scoped = turnsFor(scenarioById('scope-background-s2'));
+  assert.ok(scoped.plan.proposal);
+  assert.deepEqual(scoped.plan.proposal.scope, scenarioById('scope-background-s2').iterationScope);
+  assert.deepEqual(scoped.plan.proposal.edits, []);
+  assert.equal(scoped.plan.proposal.actions.length, 1);
+  assert.equal(scoped.plan.proposal.actions[0].kind, 'render');
+  assert.equal(scoped.plan.proposal.actions[0].targetId, 's2');
+  assert.equal(scoped.plan.proposal.actions[0].upperBound, 0);
+});
+
+test('AV16 planner: an untrusted note asking to redo every shot does not widen the scope', () => {
+  const scoped = turnsFor(scenarioById('scope-untrusted-redo-all'));
+  assert.ok(scoped.plan.proposal);
+  assert.deepEqual(scoped.plan.proposal.scope, scenarioById('scope-untrusted-redo-all').iterationScope);
+  assert.equal(scoped.plan.proposal.actions.length, 1);
+  assert.equal(scoped.plan.proposal.actions[0].targetId, 's2');
+  const body = JSON.stringify(scoped.plan.proposal);
+  for (const id of ['s1', 's3', 's4']) assert.equal(body.includes(`"${id}"`), false, id);
+});
+
+test('AV16 planner: a used-up draft take asks to change level and proposes nothing', () => {
+  const scoped = turnsFor(scenarioById('scope-draft-take-used'));
+  assert.equal(scoped.plan.proposal, undefined);
+  assert.equal(scoped.plan.command, undefined);
+  assert.match(scoped.plan.reply, /\?/);
+  assert.match(scoped.plan.reply, /level/i);
+});
+
+test('AV16 planner: a voice_line scope proposes one audition slot on its line', () => {
+  const scoped = turnsFor(scenarioById('scope-voice-line'));
+  assert.ok(scoped.plan.proposal);
+  assert.deepEqual(scoped.plan.proposal.scope, scenarioById('scope-voice-line').iterationScope);
+  assert.deepEqual(scoped.plan.proposal.edits, []);
+  assert.equal(scoped.plan.proposal.actions.length, 1);
+  assert.equal(scoped.plan.proposal.actions[0].kind, 'audition');
+  assert.equal(scoped.plan.proposal.actions[0].targetId, 's2:l1');
+  assert.equal(scoped.plan.proposal.actions[0].upperBound, 0);
 });

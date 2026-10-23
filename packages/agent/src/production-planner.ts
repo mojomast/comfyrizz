@@ -56,6 +56,23 @@ export interface ProductionReadSnapshot {
   shotIds?: string[];
 }
 
+/** The comfyrizz.iteration-scope/v1 object carried by an element-scoped turn. */
+export interface IterationScopeInput {
+  target?: {
+    packageId?: string;
+    clipId?: string;
+    takeId?: string;
+    assetId?: string;
+    shotId?: string;
+  };
+  element?: string;
+  elementRef?: { lineId?: string };
+  region?: { x: number; y: number; w: number; h: number };
+  time?: { at?: number; in?: number; out?: number };
+  note?: string;
+  preserve?: string[];
+}
+
 export interface ProductionTurnInput {
   userMessage: string;
   intent?: string;
@@ -67,13 +84,16 @@ export interface ProductionTurnInput {
   iteration?: {
     policy: any;
     lockedShotIds?: string[];
+    used?: Record<string, Record<string, number>>;
   };
+  /** The viewer's element scope for this turn, or absent for an unscoped turn. */
+  iterationScope?: IterationScopeInput;
 }
 
 
 export interface ProductionActionSlot {
   id: string;
-  kind: "render";
+  kind: "render" | "audition";
   targetId: string;
   upperBound: number;
 }
@@ -100,11 +120,11 @@ function parseRequestedTakes(message: string): number | undefined {
   return undefined;
 }
 
-function effectiveVideoLimit(policy: any, shotId: string): number {
+function effectiveStageLimit(policy: any, shotId: string, stage: string): number {
   const override = policy?.shotOverrides?.[shotId];
-  const videoStage = override?.stages?.video ?? policy?.stages?.video;
-  const takes = typeof videoStage?.takes === "number" ? videoStage.takes : 1;
-  const rounds = typeof videoStage?.rounds === "number" ? videoStage.rounds : 1;
+  const stagePolicy = override?.stages?.[stage] ?? policy?.stages?.[stage];
+  const takes = typeof stagePolicy?.takes === "number" ? stagePolicy.takes : 1;
+  const rounds = typeof stagePolicy?.rounds === "number" ? stagePolicy.rounds : 1;
   return takes * rounds;
 }
 
@@ -118,13 +138,9 @@ export interface ProductionTurnPlan {
   readFirst: true;
   reply: string;
   proposal?: {
+    scope?: IterationScopeInput;
     edits: ProductionEdit[];
-    actions: Array<{
-      id: string;
-      kind: "render";
-      targetId: string;
-      upperBound: number;
-    }> | [];
+    actions: ProductionActionSlot[] | [];
     summary: string;
   };
   command?: {
@@ -317,6 +333,58 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
     };
   }
 
+  if (input.iterationScope) {
+    const scope = input.iterationScope;
+    const target = scope.target ?? {};
+    const audioScope = scope.element === 'voice_line' || scope.element === 'audio';
+    const lineId = audioScope && typeof scope.elementRef?.lineId === 'string'
+      ? scope.elementRef.lineId
+      : undefined;
+    const targetShotId = typeof target.shotId === 'string'
+      ? target.shotId
+      : lineId !== undefined ? shotOf(lineId) : undefined;
+
+    if (targetShotId === undefined) {
+      return {
+        readFirst: true,
+        reply: 'Which shot is this iteration request for?',
+      };
+    }
+
+    const stage = audioScope ? 'voice' : 'video';
+    const policy = input.iteration?.policy;
+    if (policy) {
+      const limit = effectiveStageLimit(policy, targetShotId, stage);
+      const used = input.iteration?.used?.[targetShotId]?.[stage];
+      const usedCount = typeof used === 'number' && Number.isFinite(used) ? used : 0;
+      if (usedCount >= limit) {
+        return {
+          readFirst: true,
+          reply: `The current iteration level (${policy.level ?? 'draft'}) allows no further ${stage} take for ${targetShotId}. Would you like to change the iteration level?`,
+        };
+      }
+    }
+
+    const actionTarget = audioScope ? lineId ?? targetShotId : targetShotId;
+    return {
+      readFirst: true,
+      reply: audioScope
+        ? `Proposed one audition for ${actionTarget}. Nothing has been dispatched.`
+        : `Proposed one ${scope.element ?? 'iteration'} slot for ${targetShotId}. Nothing has been dispatched.`,
+      proposal: {
+        scope: JSON.parse(JSON.stringify(scope)),
+        edits: [],
+        actions: [{
+          id: 'a1',
+          kind: audioScope ? 'audition' : 'render',
+          targetId: actionTarget,
+          upperBound: 0,
+        }],
+        summary: input.userMessage.trim(),
+      },
+    };
+  }
+
   if (input.iteration?.policy) {
     const policy = input.iteration.policy;
     const isCost = isCostQuestion(input.userMessage);
@@ -339,7 +407,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
           : "";
         let totalCapacity = 0;
         for (const shot of unlockedShots) {
-          totalCapacity += effectiveVideoLimit(policy, shot);
+          totalCapacity += effectiveStageLimit(policy, shot, 'video');
         }
 
         if (requestedTakes > totalCapacity) {
@@ -358,7 +426,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
         while (allocated < requestedTakes && unlockedShots.length > 0) {
           const shot = unlockedShots[idx % unlockedShots.length];
           const count = shotCounts.get(shot) ?? 0;
-          const limit = effectiveVideoLimit(policy, shot);
+          const limit = effectiveStageLimit(policy, shot, 'video');
           if (count < limit) {
             shotCounts.set(shot, count + 1);
             actions.push({
@@ -401,7 +469,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
           };
         }
 
-        const limit = effectiveVideoLimit(policy, shotId);
+        const limit = effectiveStageLimit(policy, shotId, 'video');
         if (requestedTakes > limit) {
           return {
             readFirst: true,
