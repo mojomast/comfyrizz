@@ -8,6 +8,7 @@
  */
 import type { CompiledTimeline as Timeline } from '../../../../../packages/planner/dist/src/browser.js';
 import type { ClipState, ClipSummary } from '../../takes/api.ts';
+import type { ThumbResult, ThumbTile } from '../../thumbs/client.ts';
 
 export interface ClipStyle {
   /** Short text inside the chip. */
@@ -238,4 +239,128 @@ export function clipKeyboardAction(input: ClipKeyInput): ClipKeyAction | null {
   if (input.key === ']') return { type: 'next-take' };
   if ((input.key === 'a' || input.key === 'A') && !input.meta && !input.ctrl && !input.alt) return { type: 'approve' };
   return null;
+}
+
+export type ThumbMode = 'filmstrip' | 'head' | 'off';
+
+export interface ChipThumbRequestOptions {
+  mode?: ThumbMode | 'auto' | null | undefined;
+  chipPixelWidth?: number;
+}
+
+export function chipThumbRequest(
+  chip: { kind: ClipSummary['kind'] },
+  options: ChipThumbRequestOptions = {},
+): { kind: 'poster' | 'filmstrip' } | null {
+  const mode = options.mode ?? undefined;
+  if (mode === 'off') return null;
+  const auto = mode === undefined || mode === null || mode === 'auto';
+  if (chip.kind === 'still') return { kind: 'poster' };
+  if (mode === 'filmstrip' || auto) return { kind: 'filmstrip' };
+  return { kind: 'poster' };
+}
+
+export interface FilmstripCell {
+  tile: ThumbTile;
+  backgroundPosition: string;
+  backgroundSize: string;
+}
+
+export function filmstripLayout(
+  result: ThumbResult,
+  options: { chipPixelWidth: number; chipPixelHeight: number },
+): FilmstripCell[] {
+  if (result.status !== 'ready' || !Array.isArray(result.tiles) || result.tiles.length === 0) return [];
+  const tile0 = result.tiles[0] as ThumbTile;
+  if (!tile0 || !Number.isFinite(tile0.w) || !Number.isFinite(tile0.h) || tile0.w <= 0 || tile0.h <= 0) return [];
+  const displayedTileWidth = tile0.w * options.chipPixelHeight / tile0.h;
+  if (!Number.isFinite(displayedTileWidth) || displayedTileWidth <= 0) return [];
+  const count = Math.floor(options.chipPixelWidth / displayedTileWidth);
+  if (!Number.isFinite(count) || count <= 0) return [];
+
+  const tiles = result.tiles as ThumbTile[];
+  const lastIndex = tiles.length - 1;
+  const sampled: ThumbTile[] = [];
+  if (count === 1) {
+    sampled.push(tiles[0]);
+  } else {
+    for (let i = 0; i < count; i += 1) {
+      const idx = Math.round((i * lastIndex) / (count - 1));
+      const clamped = Math.min(lastIndex, Math.max(0, idx));
+      sampled.push(tiles[clamped]);
+    }
+  }
+
+  const scale = options.chipPixelHeight / tile0.h;
+  return sampled.map((tile) => ({
+    tile,
+    backgroundPosition: `-${tile.x * scale}px -${tile.y * scale}px`,
+    backgroundSize: `${result.width * scale}px ${result.height * scale}px`,
+  }));
+}
+
+export interface LazyThumbs {
+  observe(el: unknown, request: unknown): void;
+  disconnect(): void;
+}
+
+export interface CreateLazyThumbsOptions {
+  observerFactory: (callback: (entries: unknown[]) => void) => {
+    observe?: (el: unknown) => void;
+    unobserve?: (el: unknown) => void;
+    disconnect?: () => void;
+  } | null;
+  load: (el: unknown, request: unknown) => unknown;
+}
+
+export function createLazyThumbs(options: CreateLazyThumbsOptions): LazyThumbs {
+  const loaded = new Set<unknown>();
+  const pending = new Map<unknown, unknown>();
+  let disconnected = false;
+  let observer: ReturnType<CreateLazyThumbsOptions['observerFactory']> = null;
+
+  const handleEntries = (entries: unknown[]) => {
+    if (disconnected) return;
+    const list = Array.isArray(entries) ? entries : [];
+    for (const entry of list) {
+      if (!entry || typeof entry !== 'object') continue;
+      const record = entry as { isIntersecting?: boolean; target?: unknown };
+      if (!record.isIntersecting) continue;
+      const el = record.target;
+      if (el === undefined || loaded.has(el)) continue;
+      if (!pending.has(el)) continue;
+      if (disconnected) return;
+      loaded.add(el);
+      const request = pending.get(el);
+      try {
+        options.load(el, request);
+      } catch {
+        // ignore
+      }
+      if (observer && typeof observer.unobserve === 'function') observer.unobserve(el);
+    }
+  };
+
+  try {
+    observer = typeof options.observerFactory === 'function'
+      ? options.observerFactory(handleEntries)
+      : null;
+  } catch {
+    observer = null;
+  }
+
+  return {
+    observe(el: unknown, request: unknown) {
+      if (disconnected) return;
+      if (loaded.has(el)) return;
+      pending.set(el, request);
+      // Without an observer nothing loads lazily (the caller passes no factory when IntersectionObserver is missing).
+      if (observer && typeof observer.observe === 'function') observer.observe(el);
+    },
+    disconnect() {
+      disconnected = true;
+      pending.clear();
+      if (observer && typeof observer.disconnect === 'function') observer.disconnect();
+    },
+  };
 }
