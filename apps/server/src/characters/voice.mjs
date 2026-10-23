@@ -511,6 +511,10 @@ export function supportsNativeVoice(model) {
   return model?.capabilities?.supportsNativeVoice === true;
 }
 
+export function supportsPromptVoice(model) {
+  return model?.capabilities?.promptVoice === true;
+}
+
 function nativeVoiceCatalogue(model) {
   const entries = model?.capabilities?.nativeVoices;
   const catalogue = new Map();
@@ -596,13 +600,68 @@ function resolveKokoroSpeakingVoice(options) {
 export function resolveSpeakingVoice(options = {}) {
   const raw = objectInput(options, 'options');
   for (const key of Object.keys(raw)) {
-    if (!['model', 'voice', 'nativeVoice', 'language'].includes(key)) {
+    if (!['model', 'voice', 'nativeVoice', 'language', 'characterId', 'h3VoiceMode'].includes(key)) {
       fail('VOICE_UNKNOWN_FIELD', key, `unknown speaking voice option ${key}`);
     }
   }
-  const resolved = supportsNativeVoice(raw.model)
-    ? resolveNativeSpeakingVoice(raw.model, raw)
-    : resolveKokoroSpeakingVoice(raw);
+  if (raw.characterId !== undefined && (typeof raw.characterId !== 'string' || raw.characterId.trim() === '')) {
+    fail('VOICE_CHARACTER_ID_REQUIRED', 'characterId', 'characterId is required and must be a non-empty string');
+  }
+  if (raw.h3VoiceMode !== undefined && raw.h3VoiceMode !== null) {
+    validateH3Mode(raw.h3VoiceMode);
+  }
+
+  const voiceObj = raw.voice && typeof raw.voice === 'object' && !Array.isArray(raw.voice)
+    ? raw.voice
+    : null;
+  if (voiceObj && voiceObj.h3Mode !== undefined) {
+    validateH3Mode(voiceObj.h3Mode);
+  }
+  if (voiceObj && voiceObj.seed !== undefined) {
+    validateVoiceSeed(voiceObj.seed);
+  }
+
+  const kokoroOptions = {
+    model: raw.model,
+    voice: raw.voice,
+    nativeVoice: raw.nativeVoice,
+    language: raw.language,
+  };
+
+  if (supportsNativeVoice(raw.model)) {
+    const resolved = resolveNativeSpeakingVoice(raw.model, raw);
+    return deepFreeze({ voicePath: resolved.voicePath, voice: resolved.voice, language: resolved.language });
+  }
+
+  const voiceH3Mode = voiceObj ? voiceObj.h3Mode : undefined;
+  const effectiveMode = raw.h3VoiceMode !== undefined && raw.h3VoiceMode !== null
+    ? raw.h3VoiceMode
+    : (voiceH3Mode !== undefined ? voiceH3Mode : 'clip');
+
+  if (supportsPromptVoice(raw.model) && effectiveMode === 'prompt') {
+    if (raw.characterId === undefined) {
+      fail('VOICE_CHARACTER_ID_REQUIRED', 'characterId', 'characterId is required when the prompt voice path is taken');
+    }
+    const rawDescription = voiceObj ? voiceObj.voiceDescription : undefined;
+    if (typeof rawDescription !== 'string' || rawDescription.trim() === '') {
+      fail('PLAN_H3_NO_VOICE_DESCRIPTION', 'voiceDescription', 'prompt voice path requires a voice description');
+    }
+    const description = validateVoiceDescription(rawDescription);
+    let seed;
+    if (voiceObj && voiceObj.seed !== undefined) {
+      seed = validateVoiceSeed(voiceObj.seed);
+    } else {
+      seed = createHash('sha256').update(raw.characterId + description).digest().readUInt32BE(0);
+    }
+    const kokoroResolved = resolveKokoroSpeakingVoice(kokoroOptions);
+    return deepFreeze({
+      voicePath: 'prompt',
+      voice: { description, seed },
+      language: kokoroResolved.language,
+    });
+  }
+
+  const resolved = resolveKokoroSpeakingVoice(kokoroOptions);
   return deepFreeze({ voicePath: resolved.voicePath, voice: resolved.voice, language: resolved.language });
 }
 
