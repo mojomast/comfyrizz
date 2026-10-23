@@ -20,6 +20,7 @@ import type {
   ExpressionItem,
   WardrobeItem,
 } from './api.ts';
+import { readVoiceModeState, renderVoiceMode } from './voice-mode.ts';
 
 export const EDITOR_SECTIONS = Object.freeze([
   { id: 'identity', title: 'Identity' },
@@ -1290,6 +1291,14 @@ function auditionFor(state: CharacterEditorState): AuditionState {
   return { disabled: false, reason: '', label: 'Audition' };
 }
 
+/** VX11 voice-mode card; only for a saved character (it needs an id). */
+function renderVoiceModeCard(state: RenderableState): string {
+  const character = state.character;
+  if (!character || typeof character.id !== 'string' || character.id === '') return '';
+  const voice = { ...(character.voice as unknown as Record<string, unknown> | undefined ?? {}), ...(state.draft.voice as unknown as Record<string, unknown>) };
+  return renderVoiceMode(readVoiceModeState({ character: { id: character.id, voice } }));
+}
+
 function renderVoice(state: RenderableState): string {
   const voice = state.draft.voice;
   const availability = auditionFor(state);
@@ -1326,6 +1335,7 @@ function renderVoice(state: RenderableState): string {
       <span class="chr-hint" data-audition-reason role="status">${escapeHtml(availability.reason || state.audition.message)}</span>
       ${state.audition.url ? `<audio controls src="${escapeHtml(state.audition.url)}"></audio>` : ''}
     </div>
+    ${renderVoiceModeCard(state)}
   </details>`;
 }
 
