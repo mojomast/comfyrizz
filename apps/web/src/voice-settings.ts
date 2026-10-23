@@ -214,11 +214,8 @@ function render() {
     <details class="form-group voice-group voice-production" data-group="production"${groupOpen('production', false) ? ' open' : ''}>
       <summary>Generate narrated video</summary>
       <div class="form-group-body">
-        <div class="voice-grid field-grid">
-          <label class="field">Final render<select data-render-location class="field-control">${option('local', 'This machine', renderLocation)}${option('colab', 'Google Colab VM', renderLocation)}</select></label>
-        </div>
-        <div class="voice-actions toolbar"><button type="button" data-save class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>Save voice settings</button><button type="button" data-plan class="btn btn-secondary btn-sm" ${busy || active() ? 'disabled' : ''}>Check generation plan</button>${plan?.value.ready ? `<button type="button" data-start class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>${plan.value.requiresApproval ? 'Approve ceiling & generate' : 'Generate video'}</button>` : ''}${active() ? '<button type="button" data-cancel class="btn btn-danger btn-sm">Cancel generation</button>' : ''}</div>
-        <p class="hint field-hint">Uses the full voice → measured timing → media → render → verification → editable export pipeline. ${renderLocation === 'colab' ? 'Google Colab VM renders the MP4 and checks the mix after generation, then stops. If that fails, this machine renders instead.' : 'The final MP4 is rendered on this machine.'} Existing Render/Export actions reuse existing audio. Generate here to synthesize the selected voice.</p>
+        <div class="voice-actions toolbar"><button type="button" data-save class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>Save voice settings</button><button type="button" data-plan class="btn btn-secondary btn-sm" ${busy || active() ? 'disabled' : ''}>Check generation plan</button>${active() ? '<button type="button" data-cancel class="btn btn-danger btn-sm">Cancel generation</button>' : ''}</div>
+        <p class="hint field-hint">${renderLocation === 'colab' ? 'Google Colab makes the final video, then stops. If that fails, this machine makes it instead.' : 'The final video is made on this machine.'}</p>
         <div data-voice-status role="status" aria-live="polite">${esc(message)}</div>
         <div data-run-progress>${runProgress()}</div>
         <div class="voice-actions toolbar">${(run?.result?.files ?? []).map(f => `<button type="button" data-file="${esc(f.url)}" data-name="${esc(f.name)}" class="btn btn-secondary btn-sm">Download ${esc(f.name)}</button>`).join('')}</div>
@@ -227,13 +224,11 @@ function render() {
     <details class="form-group voice-group" data-group="advanced" data-adv${groupOpen('advanced', false) ? ' open' : ''}>
       <summary>Advanced</summary>
       <div class="form-group-body voice-grid field-grid">
-        <label class="field" data-adv>Visual generation<select data-backend class="field-control">${option('cpu', 'CPU · ready/local visuals', backend)}${option('colab', 'Google Colab GPU', backend)}${option('byo-comfyui', 'My ComfyUI', backend)}</select></label>
         ${mode !== 'kokoro' ? `<label class="field" data-adv>Qwen runtime<select data-runtime class="field-control">${option('colab', 'Managed Google Colab GPU', runtime)}${option('local', 'Locally installed Qwen', runtime)}</select></label>` : ''}
-        ${backend === 'colab' || (mode !== 'kokoro' && runtime === 'colab') ? `<label class="field" data-adv>Total compute-unit ceiling<input data-budget class="field-control" type="number" min="0.5" step="0.5" value="${budget}"></label>${mode !== 'kokoro' && runtime === 'colab' ? `<label class="field" data-adv>Qwen allocation ceiling<input data-narration-units class="field-control" type="number" min="0.5" max="4" step="0.5" value="${narrationUnits}"></label>` : ''}` : ''}
         ${backend === 'byo-comfyui' ? `<label class="field" data-adv>ComfyUI URL<input data-comfyui class="field-control" value="${esc(comfyuiUrl)}" placeholder="http://127.0.0.1:8188"></label>` : ''}
       </div>
     </details>
-    <p class="hint field-hint voice-footnote">${mode === 'kokoro' ? 'Voice, speed and context affect synthesis. Paragraph mode preserves measured take length; sentence/word timing uses the existing estimated alignment.' : mode === 'custom' ? 'CustomVoice supports delivery instructions. A scene’s delivery direction overrides the default. Qwen runs strictly: no silent voice fallback.' : 'VoiceDesign creates the reference once; Base reuses it across scenes. Delivery direction shapes the reference, not individual Base-clone scenes.'} <a href="/tts-expression/index.html" target="_blank" rel="noopener">Hear the comparisons</a></p>
+    <p class="hint field-hint voice-footnote">${mode === 'kokoro' ? 'Voice, speed and context affect synthesis. Paragraph mode preserves measured take length; sentence/word timing uses the existing estimated alignment.' : mode === 'custom' ? 'CustomVoice supports delivery instructions. A scene’s delivery direction overrides the default.' : 'VoiceDesign creates the reference once; Base reuses it across scenes. Delivery direction shapes the reference, not individual Base-clone scenes.'}</p>
   </section>`;
   host.querySelectorAll<HTMLDetailsElement>('details[data-group]').forEach(details => {
     const key = details.dataset.group!;
@@ -278,10 +273,7 @@ function render() {
     plan = null;
   }, 'input');
   bind('[data-backend]', e => { backend = e.value; plan = null; render(); });
-  bind('[data-render-location]', e => { renderLocation = writeRenderLocation(e.value); plan = null; render(); });
   bind('[data-runtime]', e => { runtime = e.value; plan = null; render(); });
-  bind('[data-budget]', e => { budget = Number(e.value); plan = null; render(); });
-  bind('[data-narration-units]', e => { narrationUnits = Number(e.value); plan = null; render(); });
   bind('[data-comfyui]', e => { comfyuiUrl = e.value; plan = null; });
   host.querySelector('[data-save]')?.addEventListener('click', () => perform(async () => {
     await saveNow();
