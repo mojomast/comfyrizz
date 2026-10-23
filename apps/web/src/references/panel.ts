@@ -6,6 +6,8 @@
  * only touches the DOM when a browser host is supplied.
  */
 
+import { confirmDialog } from '../easy/dialog.ts';
+
 export const ROLES = [
   'style',
   'subject',
@@ -533,8 +535,6 @@ export function renderReferenceCard(
     : '';
   const roleOptions = ROLES.map(value =>
     `<option value="${value}"${value === role ? ' selected' : ''}>${escapeHtml(ROLE_LABELS[value])}</option>`).join('');
-  const roleChips = ROLES.map(value =>
-    `<button type="button" class="chip ref-role-chip${value === role ? ' is-active' : ''}" data-role-chip="${value}" data-ref-id="${id}" role="radio" aria-checked="${value === role}">${escapeHtml(ROLE_LABELS[value])}</button>`).join('');
   return `<article class="ref-card panel" data-ref-id="${id}">
     <div class="ref-thumb${video ? ' ref-thumb-video' : ''}">${media}${duration}</div>
     <div class="ref-body">
@@ -548,9 +548,6 @@ export function renderReferenceCard(
         <div class="ref-role-label-row">
           <label class="field-label" for="${id}-role">Role</label>
           <select id="${id}-role" class="field-control ref-role-select" data-role-ref="${id}">${roleOptions}</select>
-        </div>
-        <div class="ref-role-chips" role="radiogroup" aria-label="Role for ${escapeHtml(label)}">
-          ${roleChips}
         </div>
       </div>
       <label class="field ref-field">Usage note
@@ -731,10 +728,12 @@ export class ReferencePanelController {
 
   constructor(options: ControllerOptions) {
     this.api = options.api;
-    this.confirm = options.confirm ?? ((message: string) => {
-      const scope = typeof globalThis === 'object' ? globalThis as { confirm?: (text: string) => boolean } : undefined;
-      return typeof scope?.confirm === 'function' ? scope.confirm(message) : false;
-    });
+    this.confirm = options.confirm ?? (async (message: string) => confirmDialog({
+      title: 'Delete reference',
+      text: message,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel',
+    }));
     this.onChange = options.onChange;
     this.randomId = options.randomId ?? (() => Math.random().toString(36).slice(2, 10));
     this.state = emptyState();
@@ -1739,13 +1738,10 @@ function hasFiles(event: DragEvent): boolean {
 export function mountReferencePanel(el: HTMLElement, options: MountOptions): ReferencePanelHandle {
   ensureStyles();
   const prefix = options.idPrefix ?? `reference-panel-${++panelSequence}`;
-  const view = el.ownerDocument?.defaultView as (Window & { confirm?: (message: string) => boolean }) | null;
-  const confirm = options.confirm ?? ((message: string) =>
-    typeof view?.confirm === 'function' ? view.confirm(message) : false);
   const controller = new ReferencePanelController({
     api: options.api,
     onChange: options.onChange,
-    confirm,
+    confirm: options.confirm,
   });
   const renderOptions: RenderOptions = {
     thumbUrl: ref => {
@@ -1833,7 +1829,7 @@ export function mountReferencePanel(el: HTMLElement, options: MountOptions): Ref
   const onClick = (event: Event) => {
     const target = event.target as HTMLElement | null;
     if (!target || typeof target.closest !== 'function') return;
-    const action = target.closest<HTMLElement>('[data-ref-pick], [data-delete-ref], [data-dismiss-pending], [data-question-ref], [data-role-chip]');
+    const action = target.closest<HTMLElement>('[data-ref-pick], [data-delete-ref], [data-dismiss-pending], [data-question-ref]');
     if (!action || !el.contains(action)) return;
     if (action.hasAttribute('data-ref-pick')) {
       input?.click();
@@ -1848,14 +1844,6 @@ export function mountReferencePanel(el: HTMLElement, options: MountOptions): Ref
     if (pendingKey) {
       controller.dismissPending(pendingKey);
       return;
-    }
-    const roleChip = action.getAttribute('data-role-chip');
-    if (roleChip) {
-      const refId = action.getAttribute('data-ref-id');
-      if (refId) {
-        void controller.setRole(refId, roleChip);
-        return;
-      }
     }
     const questionId = action.getAttribute('data-question-ref');
     if (questionId) {

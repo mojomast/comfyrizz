@@ -3,6 +3,7 @@
 // @ts-nocheck
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   ACCEPT_ATTRIBUTE,
   LIMITS,
@@ -362,6 +363,35 @@ test('the controller refuses more than 24 references per conversation', async ()
   assert.equal(results[0]?.code, 'TOO_MANY');
   assert.equal(controller.getState().pending[0]?.status, 'error');
   assert.deepEqual(fake.calls.uploads, []);
+});
+
+test('each reference has one role select and no role chip buttons', () => {
+  const html = renderReferencePanel({
+    references: [
+      reference('ref_a', { role: 'style' }),
+      reference('ref_b', { role: 'product' }),
+    ],
+    assignments: [],
+    pending: [],
+    questions: {},
+    message: '',
+    messageError: false,
+    loading: false,
+  });
+
+  assert.equal(html.match(/data-role-chip/g)?.length ?? 0, 0, 'no role chip buttons render');
+  assert.equal(html.match(/data-role-ref=/g)?.length, 2, 'one role select per reference');
+  assert.equal(html.match(/<select /g)?.length, 2, 'the role select is kept');
+});
+
+test('panel.ts has no native confirm call', () => {
+  const source = readFileSync(new URL('./panel.ts', import.meta.url), 'utf8');
+  assert.ok(!/\bglobalThis\.confirm\b/.test(source), 'no globalThis.confirm');
+  assert.ok(!/\bview\??\.confirm\b/.test(source), 'no view.confirm');
+  assert.ok(!/\bscope\??\.confirm\b/.test(source), 'no scope.confirm');
+
+  const withoutControllerCall = source.replace(/\bthis\.confirm\s*\(/g, '');
+  assert.ok(!/\bconfirm\s*\(/.test(withoutControllerCall), 'no bare confirm() outside this.confirm()');
 });
 
 test('role changes patch only the reference that changed', async () => {
