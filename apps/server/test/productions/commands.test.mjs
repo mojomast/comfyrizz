@@ -275,10 +275,11 @@ test('an agent cannot approve, reject, select takes or override a gate', (t) => 
     const envelope = commandEnvelope(kind, created.productionId, {
       commandId: `cmd_agent_${kind.replaceAll('.', '_')}`,
       idempotencyKey: `key_agent_${kind.replaceAll('.', '_')}`,
+      ...(kind === 'budget.set_ceiling' ? { payload: { ceiling: 1 } } : {}),
     });
     assertCommandError(
       () => handler.execute(envelope, { actor: 'agent', userEventId: `ue_agent_${kind}` }),
-      'AGENT_CANNOT_APPROVE',
+      kind === 'budget.set_ceiling' ? 'AGENT_CANNOT_SET_CEILING' : 'AGENT_CANNOT_APPROVE',
       403,
     );
   }

@@ -28,6 +28,7 @@ import { Readable, Writable } from 'node:stream';
 import { createApp } from '../src/app.mjs';
 import { PackageStore } from '../src/store.mjs';
 import { createRenderRoutes, DELIVERY_ROUTE_PATHS } from '../src/routes/render.mjs';
+import { CPU_GENERATORS, finalGate } from '../src/takes/gate.mjs';
 
 const TOKEN = 'final-gate-token-0123456789abcdef';
 const FIXTURE_PATH = new URL('../../../packages/schema/fixtures/valid/variants.json', import.meta.url);
@@ -316,3 +317,53 @@ function fakeResponse() {
   };
   return response;
 }
+
+function cpuPackage(generators) {
+  const assets = {};
+  const clips = [];
+  generators.forEach((generator, index) => {
+    const assetId = `a_${index}`;
+    assets[assetId] = { gen: { generator, inputs: { prompt: `card ${index}` } } };
+    clips.push({ clipId: `s1:${assetId}`, assetId });
+  });
+  return { pkg: { assets }, clips };
+}
+
+test('UR31: four llm-svg assets with no takes are approved', () => {
+  assert.equal(CPU_GENERATORS.has('llm-svg'), true);
+  const { pkg, clips } = cpuPackage(['llm-svg', 'llm-svg', 'llm-svg', 'llm-svg']);
+  const gate = finalGate(pkg, null, clips);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.autoApproved, 4);
+  assert.equal(gate.approved, 4);
+  assert.equal(gate.total, 4);
+  assert.deepEqual(gate.blocking, []);
+});
+
+test('UR31: a flux3-klein asset with no takes still blocks', () => {
+  const { pkg, clips } = cpuPackage(['flux3-klein']);
+  const gate = finalGate(pkg, null, clips);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.autoApproved, 0);
+  assert.equal(gate.approved, 0);
+  assert.deepEqual(gate.blocking, [{ clipId: 's1:a_0', state: 'planned' }]);
+});
+
+test('UR31: an llm-svg asset with a rejected take still blocks', () => {
+  const gen = { generator: 'llm-svg', inputs: { prompt: 'a title card' } };
+  const pkg = { assets: { a_svg: { gen } } };
+  const take = {
+    takeId: 'tk_rejected01',
+    n: 1,
+    gen,
+    verdict: 'rejected',
+    createdAt: '2026-10-20T12:00:00.000Z',
+  };
+  const gate = finalGate(pkg, {
+    schema: 'comfyrizz.takes/v1',
+    clips: { a_svg: { selected: take.takeId, takes: [take] } },
+  }, [{ clipId: 's1:a_svg', assetId: 'a_svg' }]);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.autoApproved, 0);
+  assert.deepEqual(gate.blocking, [{ clipId: 's1:a_svg', state: 'rejected' }]);
+});

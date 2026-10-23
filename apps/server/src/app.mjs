@@ -48,6 +48,8 @@ import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/t
 import { animationOptions } from './animation-options.mjs';
 import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
 import { createRenderRoutes } from './routes/render.mjs';
+import { createConversationRoutes } from './routes/conversations.mjs';
+import { createPackageRoutes } from './routes/packages.mjs';
 import { createProductionStore } from './productions/store.mjs';
 import { createCommandHandler } from './productions/commands.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
@@ -837,6 +839,13 @@ export function createApp({
       actor: 'user',
       userEventId: `ue_${randomUUID()}`,
     }),
+    ledgerFor: (production) => createBudgetLedger({
+      runtimeDir,
+      ledgerId: production.budgetLedgerId,
+    }),
+    readPackage: (packageId) => {
+      try { return store.read(packageId); } catch { return null; }
+    },
   });
 
   const renderRoutes = createRenderRoutes({
@@ -1638,6 +1647,8 @@ export function createApp({
       }
     }
 
+    if (await createConversationRoutes({ rootDir: runtimeDir }).handle(request, response, url)) return;
+    if (await createPackageRoutes({ packagesDir: store.dir }).handle(request, response, url)) return;
     if (await iterationRoutes.handle(request, response, url)) return;
     if (await productionRoutes.handle(request, response, url)) return;
     if (await takeRoutes.handle(request, response, url)) return;

@@ -5,6 +5,11 @@
 import { listClips } from './clips.mjs';
 import { deriveClipState } from './model.mjs';
 
+// Generators that run without a GPU. `rg "generator: '" packages/agent/src`
+// finds `llm-svg` (CPU) and `flux3-klein` (GPU). Kokoro is a voice engine, not
+// a generator string in that tree, so it is not in this set.
+export const CPU_GENERATORS = new Set(['llm-svg']);
+
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -12,22 +17,35 @@ function isObject(value) {
 /**
  * Evaluate every reviewable clip against its selected take.
  *
+ * A CPU clip with zero takes is approved without a review (`autoApproved`).
+ * A CPU clip that has takes, and every GPU clip, is judged by `deriveClipState`.
+ *
  * @param {object} pkg package document
  * @param {object|null} takeDoc `comfyrizz.takes/v1` sidecar
  * @param {Array<{clipId: string, assetId: string}>} [clips] clips from TR03;
  *   derived from the package when omitted
- * @returns {{ok: boolean, approved: number, total: number, blocking: Array<{clipId: string, state: string}>}}
+ * @returns {{ok: boolean, approved: number, total: number, blocking: Array<{clipId: string, state: string}>, autoApproved: number}}
  */
 export function finalGate(pkg, takeDoc, clips) {
   const list = Array.isArray(clips) ? clips : listClips(isObject(pkg) ? pkg : {});
   const blocking = [];
   let approved = 0;
+  let autoApproved = 0;
 
   for (const clip of list) {
     if (!isObject(clip) || typeof clip.clipId !== 'string') continue;
     const assetId = typeof clip.assetId === 'string' ? clip.assetId : null;
     const entry = assetId && isObject(takeDoc?.clips?.[assetId]) ? takeDoc.clips[assetId] : null;
     const asset = assetId && isObject(pkg?.assets?.[assetId]) ? pkg.assets[assetId] : null;
+    const takes = Array.isArray(entry?.takes) ? entry.takes : [];
+    const generator = isObject(asset?.gen) && typeof asset.gen.generator === 'string'
+      ? asset.gen.generator
+      : null;
+    if (generator && CPU_GENERATORS.has(generator) && takes.length === 0) {
+      approved += 1;
+      autoApproved += 1;
+      continue;
+    }
     const state = deriveClipState({
       clip: isObject(asset) ? asset : clip,
       takes: isObject(entry) ? entry : { selected: null, takes: [] },
@@ -37,7 +55,7 @@ export function finalGate(pkg, takeDoc, clips) {
     else blocking.push({ clipId: clip.clipId, state });
   }
 
-  return { ok: blocking.length === 0, approved, total: list.length, blocking };
+  return { ok: blocking.length === 0, approved, total: list.length, blocking, autoApproved };
 }
 
 export default finalGate;
