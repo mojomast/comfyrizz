@@ -80,6 +80,11 @@
   width: 100%;
 }
 
+.viewer-image:not([width]):not([height]) {
+  width: min(100%, 960px);
+  aspect-ratio: 16 / 9;
+}
+
 .viewer-audio {
   display: none;
 }
@@ -133,7 +138,7 @@
   bottom: 68px;
   width: 192px;
   height: 108px;
-  border: 1px solid rgb(255 255 255 / 28%);
+  border: 1px solid rgb(255 255 255 / 48%);
   border-radius: 8px;
   background-color: #05070b;
   background-repeat: no-repeat;

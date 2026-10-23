@@ -450,6 +450,12 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
         const image = document.createElement('img');
         image.className = 'viewer-image';
         image.alt = item.title ?? item.id;
+        const width = typeof item.width === 'number' && Number.isFinite(item.width) ? Math.round(item.width) : 0;
+        const height = typeof item.height === 'number' && Number.isFinite(item.height) ? Math.round(item.height) : 0;
+        if (width > 0 && height > 0) {
+          image.setAttribute('width', String(width));
+          image.setAttribute('height', String(height));
+        }
         if (item.src !== undefined) image.src = item.src;
         imageElement = image;
         mediaHost.appendChild(image);

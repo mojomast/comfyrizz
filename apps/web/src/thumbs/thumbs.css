@@ -26,13 +26,13 @@
 [data-thumb-state='pending'] {
   color: var(--info);
   background: var(--info-bg);
-  border-color: var(--info-border);
+  border-color: var(--info);
 }
 
 [data-thumb-state='failed'] {
   color: var(--danger);
   background: var(--danger-bg);
-  border-color: var(--danger-border);
+  border-color: var(--danger);
 }
 
 [data-thumb-state='none'] {
