@@ -15,12 +15,17 @@
 // override, derives `custom`. The declared `level` is still validated as one of
 // the four exact names, so a friendly alias can never become a second spelling
 // of a level.
+//
+// `hero` is a video-only pick. It asks on the shots the production marks as
+// heroes and picks automatically elsewhere; the resolution lives in
+// isHeroShot/pickForShot, never in a second implementation. Voice owns
+// `linesPerVoice`, the number of local Kokoro audition lines per voice sample.
 
 export const ITERATION_POLICY_SCHEMA = 'comfyrizz.iteration-policy/v1';
 
 export const ITERATION_LEVELS = Object.freeze(['draft', 'balanced', 'director', 'custom']);
 export const ITERATION_STAGES = Object.freeze(['script', 'voice', 'keyframe', 'video']);
-export const ITERATION_PICKS = Object.freeze(['auto', 'ask']);
+export const ITERATION_PICKS = Object.freeze(['auto', 'ask', 'hero']);
 export const ITERATION_REVIEW_DEPTHS = Object.freeze(['light', 'standard', 'deep']);
 
 // D4: the per-round, per-round-count and per-asset take limits. The same
@@ -29,10 +34,11 @@ export const MAX_TAKES_PER_ROUND = 4;
 export const MAX_ROUNDS = 3;
 export const MAX_TAKES_PER_ASSET = 12;
 export const MAX_AUDITIONS = 4;
+export const MAX_LINES_PER_VOICE = 3;
 
 const ROOT_KEYS = new Set(['level', 'stages', 'reviewDepth', 'shotOverrides']);
 const REQUIRED_ROOT_KEYS = Object.freeze(['level', 'stages', 'reviewDepth']);
-const STAGE_KEYS = new Set(['takes', 'rounds', 'auditions', 'pick']);
+const STAGE_KEYS = new Set(['takes', 'rounds', 'auditions', 'pick', 'linesPerVoice']);
 const REQUIRED_STAGE_KEYS = Object.freeze(['takes', 'rounds', 'auditions', 'pick']);
 const OVERRIDE_KEYS = new Set(['stages']);
 const STAGE_NAMES = new Set(ITERATION_STAGES);
@@ -74,6 +80,10 @@ function stage(takes, rounds, auditions, pick) {
   return Object.freeze({ takes, rounds, auditions, pick });
 }
 
+function voiceStage(takes, rounds, auditions, pick, linesPerVoice) {
+  return Object.freeze({ takes, rounds, auditions, pick, linesPerVoice });
+}
+
 function preset(level, stages, reviewDepth) {
   return deepFreeze({
     level,
@@ -87,24 +97,26 @@ function preset(level, stages, reviewDepth) {
 // hero is a video take, not a separate level or a second policy shape.
 // Balanced's script is one draft plus a user-driven revision on request, so
 // the revision is not a pre-generated take. Director offers two alternatives.
+// Director's voice auditions read two lines each; every other voice stage
+// reads one line per audition.
 export const ITERATION_PRESETS = Object.freeze({
   draft: preset('draft', {
     script: stage(1, 1, 0, 'auto'),
-    voice: stage(1, 1, 0, 'auto'),
+    voice: voiceStage(1, 1, 0, 'auto', 1),
     keyframe: stage(1, 1, 0, 'auto'),
     video: stage(1, 1, 0, 'auto'),
   }, 'light'),
 
   balanced: preset('balanced', {
     script: stage(1, 1, 0, 'auto'),
-    voice: stage(1, 1, 2, 'auto'),
+    voice: voiceStage(1, 1, 2, 'auto', 1),
     keyframe: stage(1, 1, 2, 'auto'),
-    video: stage(2, 1, 0, 'ask'),
+    video: stage(2, 1, 0, 'hero'),
   }, 'standard'),
 
   director: preset('director', {
     script: stage(2, 1, 0, 'ask'),
-    voice: stage(1, 1, 3, 'ask'),
+    voice: voiceStage(1, 1, 3, 'ask', 2),
     keyframe: stage(1, 1, 3, 'ask'),
     video: stage(3, 2, 0, 'ask'),
   }, 'deep'),
@@ -143,9 +155,12 @@ function integerField(value, field, min, max) {
   return value;
 }
 
-function pickValue(value, field) {
+function pickValue(value, field, name) {
   if (!ITERATION_PICKS.includes(value)) {
     fail('ITERATION_POLICY_INVALID', field, `${field} must be one of ${ITERATION_PICKS.join(', ')}`);
+  }
+  if (value === 'hero' && name !== 'video') {
+    fail('ITERATION_POLICY_INVALID', field, `${field} may be hero only on the video stage`);
   }
   return value;
 }
@@ -163,9 +178,28 @@ function assertAuditionStage(name, path) {
   }
 }
 
+function assertStageKeys(record, path, name, complete) {
+  assertClosed(record, STAGE_KEYS, path);
+  if (name === 'voice') {
+    if (complete && !Object.hasOwn(record, 'linesPerVoice')) {
+      fail('ITERATION_POLICY_INVALID', `${path}.linesPerVoice`, `${path}.linesPerVoice is required`);
+    }
+  } else if (Object.hasOwn(record, 'linesPerVoice')) {
+    fail(
+      'ITERATION_POLICY_INVALID',
+      `${path}.linesPerVoice`,
+      `${path}.linesPerVoice is not a recognized field`,
+    );
+  }
+}
+
+function linesPerVoiceValue(value, field) {
+  return integerField(value, field, 1, MAX_LINES_PER_VOICE);
+}
+
 function normalizedStage(raw, path, name) {
   const record = requireRecord(raw, path);
-  assertClosed(record, STAGE_KEYS, path);
+  assertStageKeys(record, path, name, true);
   for (const key of REQUIRED_STAGE_KEYS) {
     if (!Object.hasOwn(record, key)) fail('ITERATION_POLICY_INVALID', `${path}.${key}`, `${path}.${key} is required`);
   }
@@ -174,7 +208,7 @@ function normalizedStage(raw, path, name) {
   const rounds = integerField(record.rounds, `${path}.rounds`, 1, MAX_ROUNDS);
   const auditions = integerField(record.auditions, `${path}.auditions`, 0, MAX_AUDITIONS);
   if (auditions !== 0) assertAuditionStage(name, path);
-  const pick = pickValue(record.pick, `${path}.pick`);
+  const pick = pickValue(record.pick, `${path}.pick`, name);
 
   if (takes * rounds > MAX_TAKES_PER_ASSET) {
     fail(
@@ -184,12 +218,16 @@ function normalizedStage(raw, path, name) {
     );
   }
 
-  return { takes, rounds, auditions, pick };
+  const out = { takes, rounds, auditions, pick };
+  if (name === 'voice') {
+    out.linesPerVoice = linesPerVoiceValue(record.linesPerVoice, `${path}.linesPerVoice`);
+  }
+  return out;
 }
 
 function normalizedOverrideStage(raw, path, name) {
   const record = requireRecord(raw, path);
-  assertClosed(record, STAGE_KEYS, path);
+  assertStageKeys(record, path, name, false);
 
   const out = {};
   if (Object.hasOwn(record, 'takes')) {
@@ -203,7 +241,10 @@ function normalizedOverrideStage(raw, path, name) {
     if (out.auditions !== 0) assertAuditionStage(name, path);
   }
   if (Object.hasOwn(record, 'pick')) {
-    out.pick = pickValue(record.pick, `${path}.pick`);
+    out.pick = pickValue(record.pick, `${path}.pick`, name);
+  }
+  if (Object.hasOwn(record, 'linesPerVoice')) {
+    out.linesPerVoice = linesPerVoiceValue(record.linesPerVoice, `${path}.linesPerVoice`);
   }
   if (out.takes !== undefined && out.rounds !== undefined && out.takes * out.rounds > MAX_TAKES_PER_ASSET) {
     fail(
@@ -284,6 +325,7 @@ function sameStages(left, right) {
     for (const field of REQUIRED_STAGE_KEYS) {
       if (left[name][field] !== right[name][field]) return false;
     }
+    if (name === 'voice' && left.voice.linesPerVoice !== right.voice.linesPerVoice) return false;
   }
   return true;
 }
@@ -360,4 +402,53 @@ export function effectivePolicyForShot(raw, shotId) {
     stages,
     reviewDepth: policy.reviewDepth,
   });
+}
+
+/**
+ * Decide whether one shot is a hero shot in the ordered production shot list.
+ *
+ * A flagged production has exactly its `hero === true` shots. An unflagged
+ * production makes its first and last shot the heroes, and a one-shot
+ * production makes that shot the hero. The shot list uses package scene ids.
+ * An unknown shot or a malformed list is a TypeError, never a silent false.
+ *
+ * @param {string} shotId
+ * @param {Array<{id: string, hero?: boolean}>} shots
+ * @returns {boolean}
+ */
+export function isHeroShot(shotId, shots) {
+  if (typeof shotId !== 'string') throw new TypeError('shotId must be a string');
+  if (!Array.isArray(shots)) throw new TypeError('shots must be an array');
+  for (const shot of shots) {
+    if (!isPlainObject(shot) || typeof shot.id !== 'string') {
+      throw new TypeError('each shot must be an object with a string id');
+    }
+  }
+
+  if (!shots.some((shot) => shot.id === shotId)) throw new TypeError(`unknown shot ${shotId}`);
+
+  const flagged = shots.filter((shot) => shot.hero === true).map((shot) => shot.id);
+  if (flagged.length !== 0) return flagged.includes(shotId);
+  return shotId === shots[0].id || shotId === shots[shots.length - 1].id;
+}
+
+/**
+ * Resolve the effective pick for one stage of one shot. `hero` becomes `ask`
+ * on a hero shot and `auto` elsewhere; explicit `auto` and `ask` are returned
+ * unchanged. Only the video stage can declare `hero`, so every other stage
+ * already yields an explicit pick.
+ *
+ * @param {unknown} raw
+ * @param {string} stageName
+ * @param {string} shotId
+ * @param {Array<{id: string, hero?: boolean}>} shots
+ * @returns {'auto'|'ask'}
+ */
+export function pickForShot(raw, stageName, shotId, shots) {
+  if (!STAGE_NAMES.has(stageName)) {
+    throw new TypeError(`stageName must be one of ${ITERATION_STAGES.join(', ')}`);
+  }
+  const pick = effectivePolicyForShot(raw, shotId).stages[stageName].pick;
+  if (pick !== 'hero') return pick;
+  return isHeroShot(shotId, shots) ? 'ask' : 'auto';
 }
