@@ -335,3 +335,56 @@ test('IP63F regression: the compliant edit and CLI guard stay intact', () => {
   assert.equal(result.status, 1);
   assert.match(result.stdout, /NOT RECORDED/);
 });
+
+test('IP63 record scoring keeps the single live execution', async () => {
+  const env = script.createScenarioEnvironment(scenario('render-request'));
+  const turns = {
+    toolCalls: [
+      { name: 'production_read', args: { production_id: env.productionId } },
+      {
+        name: 'production_command',
+        args: {
+          production_id: env.productionId,
+          kind: 'render.request',
+          expected_revision: env.initialRevision,
+          payload: { shotId: 's1', backend: 'google-colab', upperBound: 2 },
+        },
+      },
+    ],
+    finalText: 'Recorded a Google Colab render request for s1.',
+  };
+  try {
+    const driven = await script.executeTurns(env, turns);
+    assert.equal(driven.error, undefined, String(driven.error));
+    const before = env.attempts.length;
+    const live = script.runFromLiveEnvironment(env, turns, { caseId: 'render-request', runIndex: 0 });
+    assert.equal(env.attempts.length, before, 'scoring the live turn must not execute the tools again');
+    assert.equal(live.attempts.filter((attempt: { kind: string }) => attempt.kind === 'render.request').length, 1);
+
+    const replayEnv = script.createScenarioEnvironment(scenario('render-request'));
+    try {
+      const replay = await script.executeTurns(replayEnv, turns);
+      assert.equal(replay.error, undefined, String(replay.error));
+      replay.caseId = 'render-request';
+      replay.runIndex = 0;
+      const liveMetrics = script.scoreRun(live, scenario('render-request'));
+      const replayMetrics = script.scoreRun(replay, scenario('render-request'));
+      for (const key of script.ALL_METRICS) {
+        assert.equal(liveMetrics[key].ok, replayMetrics[key].ok, `${key}: ${liveMetrics[key].detail} / ${replayMetrics[key].detail}`);
+        assert.equal(liveMetrics[key].spend ?? null, replayMetrics[key].spend ?? null, key);
+      }
+      assert.equal(liveMetrics.budget.spend, 2);
+    } finally {
+      replayEnv.cleanup();
+    }
+
+    env.ctx.productionState = undefined;
+    const doubled = await script.executeTurns(env, turns);
+    assert.equal(doubled.attempts.filter((attempt: { kind: string }) => attempt.kind === 'render.request').length, 2);
+    assert.equal(script.scoreRun(doubled, scenario('render-request')).stalePlanRevision.ok, false);
+    assert.equal(live.attempts.filter((attempt: { kind: string }) => attempt.kind === 'render.request').length, 1);
+    assert.equal(script.scoreRun(live, scenario('render-request')).stalePlanRevision.ok, true);
+  } finally {
+    env.cleanup();
+  }
+});
