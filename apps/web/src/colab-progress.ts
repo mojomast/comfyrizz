@@ -2,6 +2,7 @@
 // per-node progress, render frames), from /api/colab/progress. Rendering is a pure function of the
 // snapshot so it can be tested as a string; the mount polls inside a scrollable drawer.
 import { readRunSnapshot, runIsActive, runProgressSummary, type RunSnapshot } from './run-progress.ts';
+import { getPrefs } from './ui/prefs.ts';
 
 export interface ColabGauge {
   job: string;
@@ -153,7 +154,11 @@ export function mountColabProgress(host: HTMLElement, request: (input: string, i
   let timer: ReturnType<typeof setTimeout> | undefined;
   const tick = async (): Promise<void> => {
     let live = 0;
-    const snapshot = readRunSnapshot(request).then(run => ({ run, error: null as string | null })).catch(error => ({ run: null, error: String(error.message ?? error) }));
+    // Studio work stays on this computer. The run snapshot is a /api/run read,
+    // so the editor gauge waits until the editor is the open shell.
+    const snapshot = getPrefs().mode === 'easy'
+      ? Promise.resolve({ run: null, error: null as string | null })
+      : readRunSnapshot(request).then(run => ({ run, error: null as string | null })).catch(error => ({ run: null, error: String(error.message ?? error) }));
     try {
       const response = await request('/api/colab/progress');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);

@@ -149,6 +149,12 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       return;
     }
     if (store.get().compute === 'cpu') await runCpuFromStudio();
+    try {
+      facts = await resumeFacts({ api, host, state: store.get() });
+    } catch {
+      /* resumeFacts already keeps failed reads false */
+    }
+    if (shellReady) showStep(currentStep);
   }
 
   function makeCtx(): EasyStepContext {
@@ -190,7 +196,9 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     const heading = mod?.heading ?? COPY.steps[step];
     const intro = mod?.intro ?? '';
     const bodyHtml = mod ? mod.render(state, facts) : `<p>${escapeHtml(COPY.shell.comingSoon)}</p>`;
-    shell.setVideoName(typeof loaded?.title === 'string' && loaded.title ? loaded.title : COPY.shell.untitled);
+    const livePackage = host.getPackage();
+    const liveTitle = typeof livePackage?.title === 'string' && livePackage.title ? livePackage.title : '';
+    shell.setVideoName(liveTitle || (typeof loaded?.title === 'string' && loaded.title ? loaded.title : COPY.shell.untitled));
     shell.setStep({ id: step, heading, intro, bodyHtml });
     shell.setBack(stepIndex(step) > 0);
     const ctx = makeCtx();
@@ -215,7 +223,11 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
   }
 
   function go(step: StepId): void {
-    const url = nextUrl(search(), step);
+    const params = new URLSearchParams(search().replace(/^\?/, ''));
+    const packageId = store.get().packageId;
+    if (typeof packageId === 'string' && packageId) params.set('package', packageId);
+    const query = params.toString();
+    const url = nextUrl(query ? `?${query}` : '', step);
     view?.history?.pushState({}, '', url);
     showStep(step);
   }
@@ -304,6 +316,18 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     }
   }
 
+  const stopStore = store.subscribe(() => {
+    const stepperHost = root.querySelector<HTMLElement>('[data-easy-stepper]');
+    if (!shellReady || !stepperHost) return;
+    stopStepper();
+    stepperHost.innerHTML = renderStepper({
+      current: currentStep,
+      state: store.get(),
+      facts,
+      needsUpdate: planNeedsUpdate(store.get()),
+    });
+    stopStepper = mountStepper(stepperHost, { onSelect: (next) => go(next) });
+  });
   const stopMode = subscribeMode((mode) => applyShell(mode));
   view?.addEventListener('popstate', onPopState);
   showLoading();
@@ -314,6 +338,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
   });
 
   return () => {
+    stopStore();
     stopMode();
     view?.removeEventListener('popstate', onPopState);
     stopStep();

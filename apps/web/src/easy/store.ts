@@ -267,7 +267,13 @@ export function createEasyStore(options: { storage?: any; key: string }): EasySt
       timer = null;
     }
     try {
-      storage?.setItem?.(key, JSON.stringify(state));
+      const payload = JSON.stringify(state);
+      storage?.setItem?.(key, payload);
+      // A reload with ?package= reads the package key. Keep that copy current
+      // when this store was opened as a new video.
+      if (state.packageId && storageKey(state.packageId) !== key) {
+        storage?.setItem?.(storageKey(state.packageId), payload);
+      }
     } catch {
       // ignore
     }
@@ -347,6 +353,9 @@ export function createEasyStore(options: { storage?: any; key: string }): EasySt
   function flush(): void {
     writeNow();
   }
+
+  const page = globalThis as { addEventListener?: (type: string, listener: () => void) => void };
+  if (typeof page.addEventListener === 'function') page.addEventListener('pagehide', flush);
 
   return { get, patch, replace, reset, subscribe, flush };
 }

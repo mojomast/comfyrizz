@@ -14,6 +14,7 @@ import { readIteration, setIteration } from './productions/client';
 import { mountIterationLevel, type IterationLevelMount } from './productions/cards/iteration-advanced';
 import { mountEasyStudio } from './easy/mount.ts';
 import { approveAndGenerate } from './easy/approve-generate.ts';
+import { studioClipGate } from './easy/cpu-path.ts';
 import { createEasyApi } from './easy/api.ts';
 import { defaultEasyState } from './easy/store.ts';
 import { ideaPrompt } from './easy/idea-prompt.ts';
@@ -1873,6 +1874,9 @@ function renderSpendCard(): void {
 }
 
 async function refreshSpend(): Promise<void> {
+  // Easy never starts a run. The spend meter lives in the editor, so polling
+  // /api/run here would be a paid-status call during the studio flow.
+  if (getPrefs().mode === 'easy') return;
   try {
     const response = await apiFetch('/api/run');
     if (!response.ok) return;
@@ -2539,6 +2543,7 @@ function init(opened: OpenedProject): void {
   });
   window.addEventListener(MODE_CHANGE_EVENT, () => {
     void iterationLevelMount?.refresh();
+    if (getPrefs().mode !== 'easy') void refreshSpend();
   });
   void iterationLevelMount.refresh();
   mountSettingsDialog(document.body);
@@ -2651,7 +2656,7 @@ function init(opened: OpenedProject): void {
   if (easyRoot) mountEasyStudio(easyRoot, {
     apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
     hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: () => renderExportBlob(),
-    clipGate: () => clipStore.gate(), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
+    clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
     openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
     openEditor: () => { setMode('advanced'); }, playerElement: () => $('player'),
   });

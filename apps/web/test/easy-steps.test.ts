@@ -73,6 +73,23 @@ test('rule 6: otherwise export', () => {
   assert.equal(deriveStep(s, facts), 'export');
 });
 
+test('reachable review stays open when an approved plan needs an update', () => {
+  const s = state({ ideaText: completeIdea, planStatus: 'stale' });
+  const facts = { hasPackage: true, planApproved: true, actionsActive: false, allShotsKept: true, exportCurrent: false };
+  assert.equal(deriveStep(s, facts), 'plan');
+  assert.equal(reachable('review', s, facts), true);
+  assert.equal(lockReason('review', s, facts), null);
+  assert.equal(reachable('export', s, facts), false);
+});
+
+test('reachable review stays open after this computer finishes', () => {
+  const s = state({ ideaText: completeIdea, planStatus: 'ready' });
+  s.generate.status = 'done';
+  const facts = { hasPackage: true, planApproved: false, actionsActive: false, allShotsKept: true, exportCurrent: false };
+  assert.equal(reachable('review', s, facts), true);
+  assert.equal(reachable('export', s, facts), false);
+});
+
 test('reachable review false before approval', () => {
   const s = state({ ideaText: completeIdea, planStatus: 'ready' });
   const facts = { hasPackage: true, planApproved: false, actionsActive: false, allShotsKept: false, exportCurrent: false };
