@@ -50,7 +50,20 @@ import { createTakesApi, type ClipSummary, type TakesResponse } from './takes/ap
 import { createClipStore, mountRenderBar, withRenderOverride, type RenderBarHandle, type RenderGateSummary } from './takes/render-bar.ts';
 import { previewPackage, type PreviewClip } from './takes/preview-takes.ts';
 import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
+import type { ClipChip } from './editor/timeline/clip-state.ts';
 import { openInitialProject, type OpenedProject } from './default-project.ts';
+import { assetRowHtml, hydrateAssetThumbs, type AssetThumbsHandle } from './assets/asset-row.ts';
+import { createThumbsClient, type ThumbsClient, type ThumbResult } from './thumbs/client.ts';
+import { mountAssetViewer } from './viewer/asset-viewer.ts';
+import {
+  mountIteratePanel,
+  type IteratePanelAsset,
+  type IteratePanelHandle,
+  type IterationScope,
+  type IterationTarget,
+} from './viewer/iterate-panel.ts';
+import type { ViewerItem } from './viewer/model.ts';
+import { toPromptHint } from '../../server/src/productions/iteration-scope.mjs';
 import type { InlineAsset } from '../../renderer/src/components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -269,6 +282,359 @@ let previewAb: { takeId: string; clipId: string; assetId: string } | null = null
 let scriptPanel: ScriptAudioPanelHandle | null = null;
 let renderBar: RenderBarHandle | null = null;
 let clipsRequest = 0;
+
+type ReadyThumb = Extract<ThumbResult, { status: 'ready' }>;
+type ViewerMountOptions = Parameters<typeof mountAssetViewer>[0];
+type ViewerHandle = ReturnType<typeof mountAssetViewer>;
+type ViewerMedia = NonNullable<ViewerMountOptions['media']>;
+type ViewerCompare = ViewerMountOptions['compare'];
+type ViewerIteratePayload = Parameters<NonNullable<ViewerMountOptions['onIterate']>>[0];
+type TimelineHooks = Parameters<typeof mountSceneTimeline>[2] & {
+  thumbs?: ThumbsClient;
+  onClipOpen?: (chip: ClipChip) => void;
+};
+type RenderBarOptions = Parameters<typeof mountRenderBar>[1] & {
+  thumbsClient?: ThumbsClient;
+  onOpenViewer?: (target: { clipId: string; takeId: string }) => void;
+};
+
+const thumbsClient = createThumbsClient({ fetch: apiFetch });
+const thumbCache = new Map<string, ReadyThumb>();
+const assetThumbsClient: ThumbsClient = {
+  async load(request, signal) {
+    const result = await thumbsClient.load(request, signal);
+    if (result.status === 'ready') rememberThumb(request, result);
+    return result;
+  },
+  retry(ref) {
+    thumbsClient.retry(ref);
+  },
+};
+let assetThumbsHandle: AssetThumbsHandle | null = null;
+let activeViewer: ViewerHandle | null = null;
+let iteratePanel: IteratePanelHandle | null = null;
+let pendingIterationScope: { scope: IterationScope; note: string; at: number } | null = null;
+let clipViewerToken = 0;
+
+function thumbKey(packageId: string, ref: string, kind: string): string {
+  return `${packageId}\u0000${ref}\u0000${kind}`;
+}
+
+function rememberThumb(request: { packageId: string; ref: string; kind: string }, result: ReadyThumb): void {
+  const key = thumbKey(request.packageId, request.ref, request.kind);
+  thumbCache.delete(key);
+  thumbCache.set(key, result);
+  if (thumbCache.size > 200) {
+    const oldest = thumbCache.keys().next().value;
+    if (oldest !== undefined) thumbCache.delete(oldest);
+  }
+}
+
+function cachedThumb(packageId: string, ref: string, kind: string): ReadyThumb | undefined {
+  return thumbCache.get(thumbKey(packageId, ref, kind));
+}
+
+function viewerKindOf(assetKind: string | undefined, clipKind?: ClipSummary['kind']): ViewerItem['kind'] {
+  if (assetKind === 'audio') return 'audio';
+  if (assetKind === 'video') return 'video';
+  if (assetKind === 'image' || assetKind === 'svg') return 'image';
+  if (assetKind === 'text') return 'text';
+  if (clipKind === 'plate' || clipKind === 'presenter') return 'video';
+  if (clipKind === 'still') return 'image';
+  return 'text';
+}
+
+function filteredAssetEntries(): Array<[string, Asset]> {
+  return Object.entries(withTakePreview(pkg).assets ?? {}).filter(([, asset]) =>
+    (railState.assetType === 'all' || assetTypeOf(asset) === railState.assetType)
+    && (railState.assetLicence === 'all' || assetLicenceOf(asset) === railState.assetLicence));
+}
+
+function viewerItemForAsset(id: string, asset: Asset, packageId: string): ViewerItem {
+  const kind = viewerKindOf(asset.kind);
+  const frames = asset.media?.frames;
+  const fps = asset.media?.fps;
+  const duration = asset.media?.durationSeconds
+    ?? (typeof frames === 'number' && typeof fps === 'number' && fps > 0 ? frames / fps : undefined);
+  const poster = kind === 'image' ? cachedThumb(packageId, id, 'poster') : undefined;
+  const item: ViewerItem = { id, kind, title: id };
+  if (poster) item.src = poster.ticketUrl;
+  if (typeof duration === 'number' && Number.isFinite(duration)) item.duration = duration;
+  if (typeof fps === 'number' && Number.isFinite(fps)) item.fps = fps;
+  if (typeof asset.media?.width === 'number') item.width = asset.media.width;
+  if (typeof asset.media?.height === 'number') item.height = asset.media.height;
+  return item;
+}
+
+function viewerMediaForAssets(entries: Array<[string, Asset]>, packageId: string): ViewerMedia {
+  const media: ViewerMedia = {};
+  for (const [id, asset] of entries) {
+    if (viewerKindOf(asset.kind) !== 'video') continue;
+    const poster = cachedThumb(packageId, id, 'poster');
+    if (poster) media[id] = { posterUrl: poster.ticketUrl };
+  }
+  return media;
+}
+
+function compareForAsset(assetId: string): ViewerCompare {
+  const clips = clipStore.all();
+  const clip = clips.find(item => item.assetId === assetId);
+  if (!clip || clip.sceneId === '') return undefined;
+  return {
+    packageId: String(pkg.id ?? ''),
+    shotId: clip.sceneId,
+    clipId: clip.clipId,
+    api: takesApi,
+    takes: [],
+    ...(clip.selected ? { selected: clip.selected } : {}),
+    shots: clips.filter(item => item.sceneId !== '').map(item => ({ shotId: item.sceneId, clipId: item.clipId })),
+  };
+}
+
+function showViewer(
+  items: readonly ViewerItem[],
+  index: number,
+  opener: HTMLElement,
+  compare?: ViewerCompare,
+  media?: ViewerMedia,
+): void {
+  activeViewer?.destroy();
+  activeViewer = null;
+  iteratePanel?.destroy();
+  iteratePanel = null;
+  let handle: ViewerHandle | null = null;
+  handle = mountAssetViewer({
+    document,
+    host: document.body,
+    items,
+    index,
+    opener,
+    ...(compare ? { compare } : {}),
+    ...(media ? { media } : {}),
+    onClose: () => {
+      iteratePanel?.destroy();
+      iteratePanel = null;
+      if (activeViewer === handle) activeViewer = null;
+    },
+    onIterate: payload => {
+      if (handle) showIteratePanel(payload, handle);
+    },
+  });
+  activeViewer = handle;
+}
+
+function openAssetListViewer(entries: Array<[string, Asset]>, index: number, opener: HTMLElement): void {
+  const packageId = String(pkg.id ?? '');
+  const items = entries.map(([id, asset]) => viewerItemForAsset(id, asset, packageId));
+  const assetId = entries[index]?.[0];
+  const compare = assetId ? compareForAsset(assetId) : undefined;
+  showViewer(items, index, opener, compare, viewerMediaForAssets(entries, packageId));
+}
+
+function clipSummaryFromChip(chip: ClipChip): ClipSummary {
+  return {
+    clipId: chip.clipId,
+    sceneId: chip.sceneId,
+    assetId: chip.assetId,
+    slot: chip.slot,
+    kind: chip.kind,
+    from: chip.from,
+    durationInFrames: chip.durationInFrames,
+    state: chip.state,
+    selected: null,
+    selectedN: chip.selectedN,
+    takeCount: chip.takeCount,
+    newTakes: chip.newTakes,
+    lastJob: null,
+    queued: false,
+  };
+}
+
+function findTimelineChip(clipId: string): HTMLElement | null {
+  const host = document.getElementById('scene-timeline');
+  if (!host) return null;
+  return Array.from(host.querySelectorAll<HTMLElement>('[data-clip-id]'))
+    .find(element => element.dataset.clipId === clipId) ?? null;
+}
+
+function openClipChip(chip: ClipChip, opener?: HTMLElement | null): void {
+  const clip = clipStore.get(chip.clipId) ?? clipSummaryFromChip(chip);
+  void openClipViewer(clip, opener ?? findTimelineChip(chip.clipId) ?? document.body);
+}
+
+function openClipById(clipId: string, opener: HTMLElement): void {
+  const clip = clipStore.get(clipId);
+  if (!clip) return;
+  void openClipViewer(clip, opener);
+}
+
+async function openClipViewer(clip: ClipSummary, opener: HTMLElement, takeId?: string): Promise<void> {
+  const token = ++clipViewerToken;
+  const packageId = String(pkg.id ?? '');
+  const data = await ensureTakeInfo(clip.clipId);
+  if (token !== clipViewerToken) return;
+  const resolvedTakeId = takeId ?? clip.selected ?? data?.selected
+    ?? data?.takes.find(take => !take.purged)?.takeId ?? null;
+  const take = resolvedTakeId
+    ? data?.takes.find(candidate => candidate.takeId === resolvedTakeId && !candidate.purged) ?? null
+    : null;
+  const src = take ? await ensureTakeUrl(clip.clipId, take.takeId) : null;
+  if (token !== clipViewerToken) return;
+
+  const asset = pkg.assets?.[clip.assetId];
+  const kind = viewerKindOf(asset?.kind, clip.kind);
+  const fps = take?.media.fps ?? asset?.media?.fps;
+  const frames = take?.media.frames ?? asset?.media?.frames;
+  const duration = take?.media.durationInSeconds ?? asset?.media?.durationSeconds
+    ?? (typeof frames === 'number' && typeof fps === 'number' && fps > 0 ? frames / fps : undefined);
+  const itemId = take?.takeId ?? clip.assetId;
+  const item: ViewerItem = { id: itemId, kind, title: clip.clipId };
+  if (src) item.src = src;
+  if (typeof duration === 'number' && Number.isFinite(duration)) item.duration = duration;
+  if (typeof fps === 'number' && Number.isFinite(fps)) item.fps = fps;
+
+  const media: ViewerMedia = {};
+  const poster = cachedThumb(packageId, clip.assetId, 'poster');
+  if (poster) media[itemId] = { posterUrl: poster.ticketUrl };
+  if (take && packageId) {
+    const ref = `${clip.clipId}:${take.takeId}`;
+    if (kind === 'video') {
+      void thumbsClient.load({ packageId, ref, kind: 'filmstrip' })
+        .then(result => {
+          if (result.status !== 'ready' || token !== clipViewerToken) return;
+          media[itemId] = { ...(media[itemId] ?? {}), filmstrip: result };
+        })
+        .catch(() => undefined);
+    } else if (kind === 'audio') {
+      void thumbsClient.load({ packageId, ref, kind: 'waveform' })
+        .then(result => {
+          if (result.status !== 'ready' || token !== clipViewerToken) return;
+          media[itemId] = { ...(media[itemId] ?? {}), ...(result.peaks ? { peaks: result.peaks } : {}) };
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  const clips = clipStore.all();
+  const compare: ViewerCompare = clip.sceneId === '' ? undefined : {
+    packageId,
+    shotId: clip.sceneId,
+    clipId: clip.clipId,
+    api: takesApi,
+    takes: data?.takes ?? [],
+    ...(resolvedTakeId ? { selected: resolvedTakeId } : {}),
+    shots: clips.filter(item => item.sceneId !== '').map(item => ({ shotId: item.sceneId, clipId: item.clipId })),
+  };
+  showViewer([item], 0, opener, compare, media);
+}
+
+function iterateTargetFrom(target: ViewerIteratePayload['target']): IterationTarget {
+  const result: IterationTarget = { packageId: target.packageId ?? String(pkg.id ?? '') };
+  if (target.clipId) result.clipId = target.clipId;
+  if (target.assetId) result.assetId = target.assetId;
+  if (target.shotId) result.shotId = target.shotId;
+  return result;
+}
+
+function iteratePanelAsset(target: IterationTarget): IteratePanelAsset {
+  const scenes = (pkg.scenes ?? []).filter(scene => !target.shotId || scene.id === target.shotId);
+  const characters = (pkg.cast ?? []).map(member => ({
+    characterId: member.id,
+    ...(member.name ? { name: member.name } : {}),
+  }));
+  const voiceLines = scenes
+    .filter(scene => typeof scene.narration === 'string' && scene.narration.trim() !== '')
+    .map(scene => ({ lineId: scene.id, text: scene.narration as string }));
+  return { characters, voiceLines };
+}
+
+function showIteratePanel(payload: ViewerIteratePayload, viewer: ViewerHandle): void {
+  iteratePanel?.destroy();
+  const host = document.createElement('div');
+  host.className = 'iterate-panel-host';
+  host.setAttribute('data-iterate-host', '');
+  viewer.element.appendChild(host);
+  const target = iterateTargetFrom(payload.target);
+  iteratePanel = mountIteratePanel({
+    document,
+    host,
+    asset: iteratePanelAsset(target),
+    target,
+    viewer: viewer.state,
+    productionId: lookupBoundProductionId() ?? '',
+    apiFetch,
+    onSubmit: scope => submitIteration(scope),
+  });
+}
+
+function submitIteration(scope: IterationScope): void {
+  const bound = lookupBoundProductionId();
+  if (bound) {
+    pendingIterationScope = { scope, note: scope.note, at: Date.now() };
+    void projectChat.send(scope.note, 'plan');
+  } else {
+    const prompt = document.getElementById('prompt') as HTMLTextAreaElement | null;
+    if (!prompt) return;
+    prompt.value = `${scope.note}\n\n${toPromptHint(scope)}`;
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    prompt.focus();
+  }
+}
+
+function chatApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const pending = pendingIterationScope;
+  if (
+    pending
+    && typeof input === 'string'
+    && input === '/api/agent/chat'
+    && (init.method ?? '').toUpperCase() === 'POST'
+    && typeof init.body === 'string'
+  ) {
+    pendingIterationScope = null;
+    try {
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      if (body.message === pending.note) {
+        return apiFetch(input, { ...init, body: JSON.stringify({ ...body, iterationScope: pending.scope }) });
+      }
+    } catch {
+      return apiFetch(input, init);
+    }
+  }
+  if (pending && Date.now() - pending.at > 60_000) pendingIterationScope = null;
+  return apiFetch(input, init);
+}
+
+function findReviewOpenButton(clipId: string): HTMLButtonElement | null {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-review-open-viewer]'))
+    .find(button => button.dataset.reviewClip === clipId
+      || button.closest<HTMLElement>('[data-review-clip]')?.dataset.reviewClip === clipId) ?? null;
+}
+
+function onReviewViewerClick(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const button = target.closest<HTMLButtonElement>('button[data-review-open-viewer]');
+  if (!button || button.disabled) return;
+  const clipId = button.dataset.reviewClip
+    || button.closest<HTMLElement>('[data-review-clip]')?.dataset.reviewClip
+    || '';
+  if (!clipId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const clip = clipStore.get(clipId);
+  if (clip) void openClipViewer(clip, button, button.dataset.reviewTake || undefined);
+}
+
+function onTimelineClipActivate(event: Event): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const chip = target.closest<HTMLElement>('[data-clip-id]');
+  const clipId = chip?.dataset.clipId;
+  if (!chip || !clipId) return;
+  if (event instanceof KeyboardEvent && (event.key !== 'Enter' || event.defaultPrevented)) return;
+  event.preventDefault();
+  openClipById(clipId, chip);
+}
 
 /** The package with the selected (or A/B) take files swapped for media-ticket URLs. */
 function withTakePreview(nextPkg: PackageV1): PackageV1 {
@@ -846,10 +1212,6 @@ function renderPalette(): void {
   });
 }
 
-function assetIcon(asset: { kind?: string }): string {
-  return asset.kind === 'svg' ? '◇' : asset.kind === 'vector-anim' ? '◈' : asset.kind === 'audio' ? '♪' : '▣';
-}
-
 const COMFY_WORKFLOW_GENERATORS = new Set(['flux3-klein', 'ltx25', 'ltx25-a2v']);
 
 /** Generated stills and plates. SVG and narration are not Comfy graphs. */
@@ -1034,15 +1396,16 @@ function initRail(): void {
 function renderAssets(): void {
   initRail();
   const host = $('assets');
+  assetThumbsHandle?.disconnect();
+  assetThumbsHandle = null;
+
   const entries = Object.entries(withTakePreview(pkg).assets ?? {});
   const types = Array.from(new Set(entries.map(([, asset]) => assetTypeOf(asset)))).sort();
   const licences = Array.from(new Set(entries.map(([, asset]) => assetLicenceOf(asset)))).sort();
   railState.assetType = fillRailSelect($<HTMLSelectElement>('asset-type-filter'), types, 'All types', railState.assetType);
   railState.assetLicence = fillRailSelect($<HTMLSelectElement>('asset-licence-filter'), licences, 'All licences', railState.assetLicence);
 
-  const filtered = entries.filter(([, asset]) =>
-    (railState.assetType === 'all' || assetTypeOf(asset) === railState.assetType)
-    && (railState.assetLicence === 'all' || assetLicenceOf(asset) === railState.assetLicence));
+  const filtered = filteredAssetEntries();
   const pageCount = Math.max(1, Math.ceil(filtered.length / ASSET_PAGE_SIZE));
   railState.assetPage = Math.min(Math.max(0, railState.assetPage), pageCount - 1);
   const start = railState.assetPage * ASSET_PAGE_SIZE;
@@ -1067,21 +1430,22 @@ function renderAssets(): void {
     renderGpuQueue();
     return;
   }
-  // At most ASSET_PAGE_SIZE rows exist in the DOM at once; the rest are a
-  // window over the same entries, so a 48-asset package never grows the rail.
   host.innerHTML = windowEntries
-    .map(([id, asset]) => {
-      const origin = asset.origin === 'generated' ? asset.gen?.generator ?? 'generated' : asset.origin;
-      const pending = asset.status === 'pending';
-      // PR #19: a pending package asset whose local preview already streamed in reads "preview ready".
-      const previewReady = !pending && pkg.assets?.[id]?.status === 'pending';
-      const tone = pending ? 'warn' : previewReady ? 'info' : 'ok';
-      const statusText = pending ? 'pending gpu' : previewReady ? 'preview ready' : (asset.license?.id ?? asset.status);
-      const chip = `<span class="badge badge-${tone} chip${pending ? ' warn' : ''}" data-tone="${tone}">${esc(statusText)}</span>`;
-      const timeInfo = asset.media?.frames ? `<time class="job-time hint tabular-nums mono">${asset.media.frames}f</time>` : '';
-      return `<div class="asset job-row rail-row${pending ? ' pending' : ''}" data-asset-id="${esc(id)}"><div class="thumb">${pending ? '◌' : assetIcon(asset)}</div><div class="asset-copy job-content"><div class="job-head"><b class="job-name">${esc(id)}</b>${chip}${timeInfo}</div><span class="job-progress hint">${esc(asset.kind)} · ${esc(origin)}${asset.gen?.workflow ? ` · ${esc(asset.gen.workflow)}` : ''}</span></div>${workflowControls(id, asset)}</div>`;
-    })
+    .map(([id, asset]) => assetRowHtml(id, asset, { pkg }))
     .join('');
+
+  const packageId = String(pkg.id ?? '');
+  if (packageId) {
+    assetThumbsHandle = hydrateAssetThumbs(host, assetThumbsClient, {
+      packageId,
+      observerFactory: typeof IntersectionObserver === 'undefined'
+        ? null
+        : callback => new IntersectionObserver(entries => callback(entries.map(entry => ({
+          target: entry.target,
+          isIntersecting: entry.isIntersecting,
+        })))),
+    });
+  }
   renderGpuQueue();
 }
 
@@ -2311,7 +2675,7 @@ function init(opened: OpenedProject): void {
     });
   }
   if (timelineHost) {
-    editorApi = mountSceneTimeline(timelineHost, editorStore, {
+    const timelineHooks: TimelineHooks = {
       onDocument(next, compiled) {
         pkg = next;
         timeline = compiled;
@@ -2328,7 +2692,12 @@ function init(opened: OpenedProject): void {
         player?.toggle();
       },
       clips: clipStore,
-    });
+      thumbs: assetThumbsClient,
+      onClipOpen: chip => openClipChip(chip),
+    };
+    editorApi = mountSceneTimeline(timelineHost, editorStore, timelineHooks);
+    timelineHost.addEventListener('dblclick', onTimelineClipActivate);
+    timelineHost.addEventListener('keydown', onTimelineClipActivate, true);
   }
   let boundPlayer: PlayerRef | null = null;
   mountPreview($('player'), withTakePreview(pkg), timeline, ref => {
@@ -2361,13 +2730,26 @@ function init(opened: OpenedProject): void {
   });
 
   $('assets').addEventListener('click', event => {
-    const button = (event.target as HTMLElement).closest('button[data-asset-action="workflow"]');
+    const target = event.target as HTMLElement;
+    const open = target.closest<HTMLButtonElement>('button[data-asset-open]');
+    if (open && !open.disabled) {
+      event.preventDefault();
+      const assetId = open.closest<HTMLElement>('[data-asset-id]')?.dataset.assetId;
+      if (!assetId) return;
+      const entries = filteredAssetEntries();
+      const index = entries.findIndex(([entryId]) => entryId === assetId);
+      if (index < 0) return;
+      openAssetListViewer(entries, index, open);
+      return;
+    }
+    const button = target.closest('button[data-asset-action="workflow"]');
     if (!(button instanceof HTMLButtonElement) || button.disabled) return;
     const assetId = button.dataset.assetId;
     if (!assetId) return;
     const format = button.dataset.workflowFormat === 'readme' ? 'readme' : 'api';
     void downloadWorkflow(assetId, format, button.dataset.workflowVariant);
   });
+  document.addEventListener('click', onReviewViewerClick, true);
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   const renderButton = $('render');
@@ -2419,7 +2801,13 @@ function init(opened: OpenedProject): void {
       }
     },
     onOpenTakes: clipId => { selectClipForReview(clipId); },
-  });
+    thumbsClient: assetThumbsClient,
+    onOpenViewer: target => {
+      const clip = clipStore.get(target.clipId);
+      if (!clip) return;
+      void openClipViewer(clip, findReviewOpenButton(target.clipId) ?? renderBarHost, target.takeId);
+    },
+  } as RenderBarOptions);
   renderButton.addEventListener('click', () => void beginExport());
   const renderLocation = $<HTMLSelectElement>('render-location');
   if (renderLocation) {
@@ -2697,7 +3085,7 @@ function init(opened: OpenedProject): void {
   }
 
   projectChat = mountProjectChat({
-    apiFetch,
+    apiFetch: chatApiFetch,
     ...(opened.source === 'requested' ? {
       initialConversationId: opened.chatId,
       restoreSaved: false,
