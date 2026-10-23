@@ -101,6 +101,21 @@ test('BR03: focus ring >= 3:1 against its surface', () => {
   }
 });
 
+test('BR03: focus ring >= 3:1 against both neighbours', () => {
+  const ring = color('--focus-ring-color');
+  const pairs = [
+    ['--bg-0', 'page behind the control'],
+    ['--bg-1', 'secondary and ghost fill'],
+    ['--bg-2', 'card and chip fill'],
+    ['--accent', 'primary fill'],
+  ];
+  for (const [token, label] of pairs) {
+    const ratio = contrast(ring, color(token));
+    console.log(`focus-ring beside ${token} (${label}): ${ratio.toFixed(2)}:1`);
+    assert.ok(ratio >= 3, `focus-ring beside ${token} is ${ratio.toFixed(2)}:1 (< 3)`);
+  }
+});
+
 test('BR03: violet is not used as body text on ink', () => {
   assert.notEqual(color('--text-1').toLowerCase(), color('--brand-violet').toLowerCase());
   assert.notEqual(color('--text-2').toLowerCase(), color('--brand-violet').toLowerCase());

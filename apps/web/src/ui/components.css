@@ -1661,3 +1661,130 @@ textarea.field-control {
 html[data-mode="easy"] [data-adv] {
   display: none !important;
 }
+
+/* Shared studio pieces used by both shells: banner, card, chip, text button. */
+
+.easy-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
+}
+
+.easy-banner-info {
+  background: var(--info-bg);
+  border-color: var(--info-border);
+  color: var(--info);
+}
+
+.easy-banner-warn {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn);
+}
+
+.easy-banner-danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.easy-banner-success {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok);
+}
+
+.easy-banner-text {
+  margin: 0;
+}
+
+.easy-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.easy-choice-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  cursor: pointer;
+}
+
+.easy-choice-card:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.easy-choice-card:has(.easy-choice-input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.easy-choice-card.easy-is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.easy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-height-sm);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  cursor: pointer;
+}
+
+.easy-chip:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-3);
+}
+
+.easy-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text-1);
+}
+
+.easy-chip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.easy-button-link {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-color: var(--bg-1);
+  background: var(--bg-1);
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.easy-button-link:hover {
+  background: var(--bg-1);
+  color: var(--text-1);
+}

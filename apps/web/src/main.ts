@@ -2557,6 +2557,7 @@ function init(opened: OpenedProject): void {
   const timelineHost = document.getElementById('scene-timeline');
   const scriptHost = document.getElementById('script-audio-panel');
   if (scriptHost) {
+    scriptHost.dataset.showSaveStatus = 'false';
     scriptPanel = mountScriptAudioPanel(scriptHost, editorStore);
     scriptPanel.mountTakes({
       api: takesApi,
@@ -2626,6 +2627,7 @@ function init(opened: OpenedProject): void {
       clips: clipStore,
       thumbs: assetThumbsClient,
       onClipOpen: chip => openClipChip(chip),
+      showSaveStatus: false,
     };
     editorApi = mountSceneTimeline(timelineHost, editorStore, timelineHooks);
     timelineHost.addEventListener('dblclick', onTimelineClipActivate);
