@@ -53,7 +53,7 @@
 
       <main class="shell-main" data-region="workspace">
         <section id="chat-pane" class="pane panel shell-left" data-region="left" aria-label="Chat and references">
-          <div class="pane-head panel-header"><b>Chat</b><span class="hint">brief → local agent → package</span></div>
+          <div class="pane-head panel-header"><b>Chat</b><span class="hint">Your conversation</span></div>
           <div id="messages"></div>
           <div id="project-plan-panel" hidden></div>
           <form id="composer">
@@ -71,7 +71,7 @@
         </section>
 
         <section id="work-pane" class="pane panel shell-center" data-region="center" aria-label="Preview">
-          <div class="pane-head panel-header"><b>Preview</b><span id="draft" class="hint">compiled timeline</span></div>
+          <div class="pane-head panel-header"><b>Preview</b><span id="draft" class="hint">Preview</span></div>
           <div id="player" aria-label="Remotion preview"></div>
           <div id="transport" class="toolbar shell-transport">
             <button id="play" class="btn btn-secondary btn-sm">Play</button>
@@ -98,7 +98,7 @@
           </div>
 
           <section id="rail-panel-run" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-run" tabindex="0" data-rail-panel="run">
-            <div class="pane-head panel-header"><b>Run</b><span class="hint">backend lifecycle</span></div>
+            <div class="pane-head panel-header"><b>Run</b><span class="hint">Run status</span></div>
             <div id="run-filters" class="rail-filters" role="group" aria-label="Filter run events">
               <button type="button" id="run-filter-all" class="btn btn-secondary btn-sm rail-filter" data-run-filter="all" aria-pressed="true">All</button>
               <button type="button" id="run-filter-errors" class="btn btn-secondary btn-sm rail-filter" data-run-filter="errors" aria-pressed="false">Errors</button>
@@ -120,7 +120,7 @@
           </section>
 
           <section id="rail-panel-assets" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-assets" tabindex="0" data-rail-panel="assets" hidden>
-            <div class="pane-head panel-header"><b>Assets</b><span class="hint">generated-first</span></div>
+            <div class="pane-head panel-header"><b>Assets</b><span class="hint">Newest first</span></div>
             <div id="asset-filters" class="rail-filters" role="group" aria-label="Filter assets">
               <label class="rail-filter-field" for="asset-type-filter">Type
                 <select id="asset-type-filter" aria-label="Filter assets by type">
