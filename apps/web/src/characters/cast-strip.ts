@@ -10,6 +10,9 @@ import type {
 
 export const MAX_CAST = 8;
 
+export const CAST_LOAD_ERROR_HEADLINE = "Couldn't load the characters for this video. Try again.";
+const CAST_RETRY_LABEL = 'Try again';
+
 export const CAST_ROLE_LABELS: Record<CharacterRole, string> = {
   presenter: 'Presenter',
   narrator: 'Narrator',
@@ -54,6 +57,7 @@ export type CastStripState = {
   busy: boolean;
   message: string;
   messageError: boolean;
+  loadError?: string;
   diffCastId: string | null;
 };
 
@@ -379,6 +383,7 @@ export class CastStripController {
       busy: false,
       message: '',
       messageError: false,
+      loadError: '',
       diffCastId: null,
     };
   }
@@ -397,6 +402,7 @@ export class CastStripController {
       busy: this.state.busy,
       message: this.state.message,
       messageError: this.state.messageError,
+      loadError: this.state.loadError ?? '',
       diffCastId: this.state.diffCastId,
     };
   }
@@ -451,6 +457,11 @@ export class CastStripController {
 
   async load(): Promise<CastStripState> {
     if (this.state.loading) return this.snapshot();
+    if (this.state.loadError) {
+      this.state.loadError = '';
+      this.state.message = '';
+      this.state.messageError = false;
+    }
     this.state.loading = true;
     this.notify('busy');
     try {
@@ -471,14 +482,17 @@ export class CastStripController {
       }
       this.state.message = '';
       this.state.messageError = false;
+      this.state.loadError = '';
     } catch (error) {
       if (error instanceof CharacterApiError && error.code === 'NOT_FOUND') {
         this.state.cast = [];
         this.state.message = '';
         this.state.messageError = false;
+        this.state.loadError = '';
       } else {
-        this.state.message = `Could not load the cast: ${messageOf(error)}`;
+        this.state.message = CAST_LOAD_ERROR_HEADLINE;
         this.state.messageError = true;
+        this.state.loadError = `Could not load the cast: ${messageOf(error)}`;
       }
     } finally {
       this.state.loading = false;
@@ -805,6 +819,17 @@ export function renderCastDiff(state: CastStripState, options: RenderCastStripOp
   </div>`;
 }
 
+function renderCastLoadError(raw: string): string {
+  return `<div class="cast-load-error" data-cast-load-error role="alert">
+      <p class="cast-load-error-headline">${CAST_LOAD_ERROR_HEADLINE}</p>
+      <button type="button" class="btn btn-secondary btn-sm" data-cast-retry>${escapeHtml(CAST_RETRY_LABEL)}</button>
+      <details class="cast-load-error-details">
+        <summary>Details</summary>
+        <p>${escapeHtml(raw)}</p>
+      </details>
+    </div>`;
+}
+
 export function renderCastStrip(state: CastStripState, options: RenderCastStripOptions = {}): string {
   const prefix = options.idPrefix ?? 'cast-strip';
   const titleId = `${prefix}-title`;
@@ -817,10 +842,14 @@ export function renderCastStrip(state: CastStripState, options: RenderCastStripO
   )).join('');
   const count = state.cast.length;
   const countLabel = `${count} cast member${count === 1 ? '' : 's'}`;
-  const body = state.loading && count === 0
-    ? '<p class="cast-empty" data-cast-loading>Loading cast…</p>'
-    : count === 0
-      ? `<div class="empty-state cast-empty" data-cast-empty>
+  const loadError = state.loadError
+    || (state.messageError && count === 0 ? state.message : '');
+  const body = count === 0
+    ? loadError
+      ? ''
+      : state.loading
+        ? '<p class="cast-empty" data-cast-loading>Loading cast…</p>'
+        : `<div class="empty-state cast-empty" data-cast-empty>
           <span class="empty-state-icon" aria-hidden="true">👤</span>
           <h3 class="empty-state-title">No characters in this project yet</h3>
           <p class="empty-state-line">Add one from the Characters tab, then use @handle in chat.</p>
@@ -828,14 +857,17 @@ export function renderCastStrip(state: CastStripState, options: RenderCastStripO
             <button type="button" class="btn btn-primary btn-sm" data-cast-open-characters>Create character</button>
           </div>
         </div>`
-      : `<ol class="cast-chips" data-cast-chips aria-label="Project cast">${chips}</ol>`;
+    : `<ol class="cast-chips" data-cast-chips aria-label="Project cast">${chips}</ol>`;
   const statusClass = state.messageError ? 'cast-status is-error' : 'cast-status';
+  const status = loadError
+    ? ''
+    : `<p class="${statusClass}" data-cast-status role="status" aria-live="polite">${escapeHtml(state.message)}</p>`;
   return `<section class="cast-strip panel" data-cast-strip aria-labelledby="${escapeHtml(titleId)}"${busy ? ' aria-busy="true"' : ''}>
     <header class="cast-strip-head panel-header">
       <h2 id="${escapeHtml(titleId)}">Cast <span class="cast-count badge" data-cast-count aria-label="${escapeHtml(countLabel)}">${count}</span></h2>
       <p class="cast-hint">Type @handle in chat. The agent only proposes placements; you confirm them.</p>
     </header>
-    <p class="${statusClass}" data-cast-status role="status" aria-live="polite">${escapeHtml(state.message)}</p>
+    ${loadError ? renderCastLoadError(loadError) : status}
     ${body}
     ${renderCastDiff(state, { ...options, busy })}
   </section>`;
@@ -864,7 +896,7 @@ export function mountCastStrip(el: HTMLElement, options: MountCastStripOptions):
     const target = event.target as HTMLElement | null;
     if (!target || typeof target.closest !== 'function') return;
     const action = target.closest<HTMLElement>(
-      '[data-cast-diff],[data-cast-update],[data-cast-detach],[data-cast-attach],[data-cast-remove],[data-cast-presenter],[data-cast-narrator],[data-cast-diff-update],[data-cast-diff-cancel],[data-cast-diff-close],[data-cast-open-characters]',
+      '[data-cast-diff],[data-cast-update],[data-cast-detach],[data-cast-attach],[data-cast-remove],[data-cast-presenter],[data-cast-narrator],[data-cast-diff-update],[data-cast-diff-cancel],[data-cast-diff-close],[data-cast-open-characters],[data-cast-retry]',
     );
     if (!action || !el.contains(action)) return;
 
@@ -872,6 +904,7 @@ export function mountCastStrip(el: HTMLElement, options: MountCastStripOptions):
       el.dispatchEvent(new CustomEvent('cast:open-characters', { bubbles: true }));
       return;
     }
+    if (action.hasAttribute('data-cast-retry')) { void controller.load(); return; }
     const diffId = action.getAttribute('data-cast-diff');
     if (diffId) { controller.openDiff(diffId); return; }
     const updateId = action.getAttribute('data-cast-update');

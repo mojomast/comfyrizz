@@ -192,6 +192,30 @@ test('an empty project renders the add-from-library hint', () => {
   assert.match(html, /@handle/);
 });
 
+test('a load error shows a friendly headline, the raw message in Details and Try again', async () => {
+  const controller = new CastStripController({
+    api: {
+      async listCast() {
+        throw new Error('the server said the cast is missing');
+      },
+      async list() {
+        return [];
+      },
+    },
+    chatId: 'chat_abcdefgh',
+  });
+
+  const state = await controller.load();
+  const html = renderCastStrip(state);
+
+  assert.match(html, /Couldn't load the characters for this video\. Try again\./);
+  const details = html.match(/<details[\s\S]*?<\/details>/);
+  assert.ok(details, 'expected the raw error inside a details disclosure');
+  assert.match(details[0], /the server said the cast is missing/);
+  assert.match(html, /data-cast-retry[^>]*>Try again</);
+  assert.equal(state.messageError, true);
+});
+
 test('update available compares the pinned revision with the library revision', () => {
   const pip = character();
   const latest = character({ revision: 3, name: 'Pip v3' });
