@@ -5,6 +5,7 @@ import { createEasyStore, storageKey } from './store.ts';
 import { mountShell, renderShell } from './shell.ts';
 import { STEPS, stepIndex } from './steps.ts';
 import { initialRoute, nextUrl } from './router.ts';
+import { loadHomeVideos, renderHomeScreen } from './home.ts';
 import { mountStepper, renderStepper } from './stepper.ts';
 import { adoptPlayer, releasePlayer } from './preview-slot.ts';
 import { STEP_MODULES } from './steps/index.ts';
@@ -52,6 +53,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
   let stopStep: () => void = () => {};
   let stopStepper: () => void = () => {};
   let shellReady = false;
+  let homeTicket = 0;
   let primaryAction: () => void = () => host.openEditor();
   let facts: StepFacts = {
     hasPackage: false,
@@ -149,6 +151,22 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     showStep(step);
   }
 
+  function showHomeScreen(): void {
+    homeTicket += 1;
+    const ticket = homeTicket;
+    shellReady = false;
+    shell?.destroy();
+    shell = null;
+    stopStep();
+    stopStepper();
+    releasePlayer();
+    root.innerHTML = renderHomeScreen([]);
+    void loadHomeVideos((input) => host.apiFetch(input)).then((videos) => {
+      if (ticket !== homeTicket) return;
+      root.innerHTML = renderHomeScreen(videos);
+    });
+  }
+
   async function onPopState(): Promise<void> {
     showLoading();
     await loadFacts();
@@ -158,10 +176,21 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       return;
     }
     if (getMode() !== 'easy') setMode('easy');
-    showStep(route.step);
+    if (route.home) {
+      showHomeScreen();
+      return;
+    }
+    if (!shellReady) ensureShell();
+    else showStep(route.step);
   }
 
   function ensureShell(): void {
+    const route = initialRoute(search(), store.get(), factsFor());
+    if (route.home) {
+      showHomeScreen();
+      return;
+    }
+    homeTicket += 1;
     if (shellReady) {
       showStep(currentStep);
       return;
@@ -181,7 +210,6 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       onOpenEditor: () => host.openEditor(),
     });
     shellReady = true;
-    const route = initialRoute(search(), store.get(), factsFor());
     showStep(route.step);
   }
 

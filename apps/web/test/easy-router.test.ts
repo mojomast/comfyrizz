@@ -32,14 +32,24 @@ test('view=editor opens the editor', () => {
   assert.deepEqual({ view: route.view }, { view: 'editor' });
 });
 
-test('a new user with no state starts on idea', () => {
-  const route = initialRoute('', null, {
-    hasPackage: false,
-    planApproved: false,
-    actionsActive: false,
-    allShotsKept: false,
-    exportCurrent: false,
-  });
-  assert.equal(route.step, 'idea');
+const fresh = {
+  hasPackage: false,
+  planApproved: false,
+  actionsActive: false,
+  allShotsKept: false,
+  exportCurrent: false,
+};
+
+test('a bare visit opens the home screen, not a step', () => {
+  const route = initialRoute('', null, fresh);
+  assert.equal(route.home, true);
   assert.equal(route.view, 'easy');
+});
+
+test('New video and a saved video leave home', () => {
+  const idea = initialRoute('?step=idea', null, fresh);
+  assert.equal(idea.home, false);
+  assert.equal(idea.step, 'idea');
+  const saved = initialRoute('?package=pkg_newer', defaultEasyState(), fresh);
+  assert.equal(saved.home, false);
 });

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 async function openEditor(page: import('@playwright/test').Page): Promise<void> {
-  await page.goto('/');
+  await page.goto('/?step=idea');
   await page.getByRole('button', { name: 'Open in editor' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-mode', 'advanced');
   await expect(page.locator('#topbar')).toBeVisible();

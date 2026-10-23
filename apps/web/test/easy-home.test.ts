@@ -3,7 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { DEFAULT_PACKAGE_ID } from '../src/default-project.ts';
-import { homeVideos, renderHome } from '../src/easy/home.ts';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { homeVideos, renderHome, renderHomeScreen } from '../src/easy/home.ts';
 
 const fixture = [
   { id: 'pkg_newer', title: 'Newer cut', durationS: 45, aspect: '16:9', updatedAt: '2026-10-20T15:30:00.000Z', thumbnail: null },
@@ -29,6 +31,17 @@ test('an empty library shows the empty state and New video', () => {
   assert.match(html, /href="\?step=idea"/);
   assert.match(html, /New video/);
   assert.doesNotMatch(html, /easy-home-grid/);
+});
+
+test('the start screen is the home section', () => {
+  const html = renderHomeScreen(homeVideos([], []));
+  assert.match(html, /data-easy-home-screen/);
+  assert.match(html, /data-easy-home/);
+  assert.match(html, /No videos yet\. Start your first one\./);
+  assert.match(html, /New video/);
+  const mount = readFileSync(fileURLToPath(new URL('../src/easy/mount.ts', import.meta.url)), 'utf8');
+  assert.match(mount, /renderHomeScreen/);
+  assert.match(mount, /route\.home/);
 });
 
 test('a stored list is used when the library response is empty', () => {
