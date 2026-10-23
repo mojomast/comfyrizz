@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   ACTIVITY_PHASES,
@@ -185,4 +186,13 @@ test('unknown events are ignored and inputs are not mutated', () => {
   assert.equal(rows.length, 1);
   assert.equal(JSON.stringify(events), snapshot);
   assert.equal(activityRows(null).length, 0);
+});
+
+test('source says Google Colab, never bare Colab, in string literals (UR68)', () => {
+  const src = readFileSync(new URL('../src/demo/activity-panel.mjs', import.meta.url), 'utf8');
+  const noComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const literals = [...noComments.matchAll(/(['"`])((?:\\.|(?!\1).)*)\1/g)].map(m => m[2]);
+  for (const literal of literals) {
+    assert.doesNotMatch(literal, /(?<!Google )Colab/, `bare Colab in literal: ${literal}`);
+  }
 });
