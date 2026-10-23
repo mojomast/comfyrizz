@@ -1,0 +1,541 @@
+import { createHash } from 'node:crypto';
+import type { ToolDef } from './types.js';
+
+export const AGENT_COMMAND_KINDS = [
+  'plan.propose',
+  'stage.advance',
+  'artifact.attach',
+  'take.request',
+  'render.request',
+  'production.pause',
+] as const;
+
+export type AgentCommandKind = (typeof AGENT_COMMAND_KINDS)[number];
+
+export const APPROVAL_COMMANDS = [
+  'plan.approve',
+  'plan.reject',
+  'take.select',
+  'clip.approve',
+  'clip.reject',
+  'gate.override',
+  'budget.reserve',
+  'delivery.accept',
+] as const;
+
+export const SPEND_COMMANDS = [
+  'budget.reserve',
+  'budget.settle',
+  'action.dispatch',
+  'action.retry',
+] as const;
+
+export const DECISION_COMMANDS = [
+  'decision.resolve',
+  'cast.decide',
+  'take.select',
+  'clip.approve',
+  'clip.reject',
+  'gate.override',
+  'delivery.accept',
+] as const;
+
+export const FORBIDDEN_AGENT_COMMANDS = [
+  'production.create',
+  'production.resume',
+  'production.archive',
+  'production.cancel',
+  'plan.approve',
+  'plan.reject',
+  'decision.resolve',
+  'cast.decide',
+  'take.select',
+  'clip.approve',
+  'clip.reject',
+  'gate.override',
+  'budget.reserve',
+  'budget.settle',
+  'action.dispatch',
+  'action.retry',
+  'action.cancel',
+  'delivery.accept',
+] as const;
+
+const AGENT_COMMAND_SET = new Set<string>(AGENT_COMMAND_KINDS);
+const FORBIDDEN_AGENT_COMMAND_SET = new Set<string>(FORBIDDEN_AGENT_COMMANDS);
+const CLIENT_IDENTITY_KEYS = [
+  'actor',
+  'userEventId',
+  'user_event_id',
+  'commandId',
+  'command_id',
+  'idempotencyKey',
+  'idempotency_key',
+];
+
+const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
+
+export interface ProductionToolCapabilities {
+  read?: boolean;
+  proposePlan?: boolean;
+  commands?: boolean;
+  allowedCommands?: readonly AgentCommandKind[];
+}
+
+export interface ProductionReadState {
+  production?: Record<string, unknown>;
+  revision?: number;
+  lastSequence?: number;
+  [key: string]: unknown;
+}
+
+export interface ProductionCommandEnvelope {
+  commandId: string;
+  idempotencyKey: string;
+  productionId: string;
+  kind: AgentCommandKind;
+  expected: { productionRevision: number };
+  payload: Record<string, unknown>;
+}
+
+export interface ProductionCommandAttribution {
+  actor: 'agent';
+  userEventId: string;
+}
+
+export type ProductionCommandDispatch = (
+  envelope: ProductionCommandEnvelope,
+  attribution: ProductionCommandAttribution,
+) => unknown | Promise<unknown>;
+
+export interface ProductionToolContext {
+  productionId?: string;
+  userEventId?: string;
+  turnId?: string;
+  read?: (productionId: string) => ProductionReadState | null | undefined | Promise<ProductionReadState | null | undefined>;
+  command?: ProductionCommandDispatch;
+  capabilities?: ProductionToolCapabilities;
+}
+
+export interface ProductionToolCall {
+  id?: string;
+  name: string;
+  args?: unknown;
+}
+
+export interface ProductionToolResult {
+  ok: boolean;
+  status?: 'read' | 'proposed' | 'issued';
+  error?: string;
+  code?: string;
+  production?: Record<string, unknown>;
+  revision?: number;
+  lastSequence?: number;
+  command?: ProductionCommandEnvelope;
+  result?: unknown;
+  applied?: false;
+  message?: string;
+  [key: string]: unknown;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function errorResult(message: string, code?: string): ProductionToolResult {
+  return code === undefined ? { ok: false, error: message } : { ok: false, error: message, code };
+}
+
+function objectSchema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
+  const schema: Record<string, unknown> = {
+    type: 'object',
+    properties,
+    additionalProperties: false,
+  };
+  if (required.length) schema.required = required;
+  return schema;
+}
+
+const productionIdParam = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 256,
+  description: 'Production id. The server context supplies it when omitted.',
+};
+
+const expectedRevisionParam = {
+  type: 'integer',
+  minimum: 0,
+  description: 'The exact revision returned by production_read. Never guess it and never reuse an older revision.',
+};
+
+const planParam = {
+  type: 'object',
+  properties: {},
+  additionalProperties: true,
+  description: 'The action plan to propose. The server computes its hash; nothing is approved or dispatched.',
+};
+
+const payloadParam = {
+  type: 'object',
+  properties: {},
+  additionalProperties: true,
+  description: 'Command payload. It never carries an actor or a user-event id.',
+};
+
+export const PRODUCTION_TOOLS: ToolDef[] = [
+  {
+    name: 'production_read',
+    description:
+      'Read the production snapshot from the server. Use the revision it returns as expected_revision on the next mutation; never invent one.',
+    parameters: objectSchema({
+      production_id: productionIdParam,
+    }),
+  },
+  {
+    name: 'production_propose_plan',
+    description:
+      'Propose an action plan for the user to review and approve. This records a proposal only: it never approves, reserves spend or dispatches work.',
+    parameters: objectSchema({
+      production_id: productionIdParam,
+      plan: planParam,
+      expected_revision: expectedRevisionParam,
+    }, ['plan', 'expected_revision']),
+  },
+  {
+    name: 'production_command',
+    description:
+      `Issue one non-approval production command (${AGENT_COMMAND_KINDS.join(', ')}). Approval, spend, decision, lifecycle and action-cancel commands are refused.`,
+    parameters: objectSchema({
+      production_id: productionIdParam,
+      kind: {
+        type: 'string',
+        enum: [...AGENT_COMMAND_KINDS],
+        description: 'A non-approval command kind. Pause is a safety stop only.',
+      },
+      payload: payloadParam,
+      expected_revision: expectedRevisionParam,
+    }, ['kind', 'expected_revision']),
+  },
+];
+
+export const PRODUCTION_TOOL_NAMES = PRODUCTION_TOOLS.map(tool => tool.name);
+
+const TOOL_NAME_SET = new Set(PRODUCTION_TOOL_NAMES);
+
+export function isProductionToolName(name: unknown): name is string {
+  return typeof name === 'string' && TOOL_NAME_SET.has(name);
+}
+
+export const PRODUCTION_RULES = `Production agent rules (apply only when the conversation has an iterative production):
+1. Read first: call production_read before every mutation and use the revision it returned as expected_revision. A missing or guessed revision is refused; never fall back to 0 or to an older read.
+2. Propose, never approve: production_propose_plan records a proposal. Only the user may approve or reject a plan, resolve a decision, select a take, accept a delivery, override a gate or record a creative verdict. The agent cannot approve its own proposal.
+3. No spend: the agent may not reserve, settle, dispatch or retry paid work, and it may not change a budget ceiling. Use production_command only for the allowed non-approval kinds.
+4. Respect user intent: resume, cancel and archive are user decisions. Never attempt to undo a user's pause, cancellation or archive.
+5. Pause is a safety stop only. Use production.pause when work must stop now; state why in the reply.
+6. Cite the user message: every command is attributed by the server to the agent and the originating user event. Never supply an actor, user-event id, command id or idempotency key in tool arguments.
+7. Do not describe a command as applied until the command result confirms it. If a command fails, report the error and the current revision instead of retrying with a fabricated value.
+8. Paid inference, including Google Colab, runs only through the coordinator after the user has approved the scoped plan. The agent's tools never call a backend directly.`;
+
+function resolveProductionId(args: Record<string, unknown>, ctx: ProductionToolContext): { value?: string; error?: string } {
+  const raw = args.production_id === undefined || args.production_id === null ? ctx.productionId : args.production_id;
+  if (raw === undefined || raw === null || raw === '') return { error: 'production_id is required' };
+  if (typeof raw !== 'string' || raw.length > 256 || !ID_RE.test(raw)) {
+    return { error: 'production_id must be a non-empty identifier without path separators' };
+  }
+  return { value: raw };
+}
+
+function readExpectedRevision(args: Record<string, unknown>): { value?: number; error?: string } {
+  const raw = args.expected_revision;
+  if (raw === undefined || raw === null) {
+    return { error: 'expected_revision is required; call production_read and cite the revision it returned' };
+  }
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) {
+    return { error: 'expected_revision must be a non-negative integer from production_read' };
+  }
+  return { value: raw };
+}
+
+function readArgs(call: ProductionToolCall): { value?: Record<string, unknown>; error?: string } {
+  if (call.args === undefined || call.args === null) return { value: {} };
+  if (!isPlainObject(call.args)) return { error: 'tool arguments must be an object' };
+  return { value: call.args };
+}
+
+function clientIdentityKey(args: Record<string, unknown>): string | undefined {
+  return CLIENT_IDENTITY_KEYS.find(key => Object.prototype.hasOwnProperty.call(args, key));
+}
+
+function effectiveAllowedCommands(ctx: ProductionToolContext): AgentCommandKind[] {
+  const requested = ctx.capabilities?.allowedCommands;
+  if (requested === undefined) return [...AGENT_COMMAND_KINDS];
+  return requested.filter((kind): kind is AgentCommandKind => AGENT_COMMAND_SET.has(kind));
+}
+
+function commandToolFor(allowed: readonly AgentCommandKind[]): ToolDef {
+  const base = PRODUCTION_TOOLS.find(tool => tool.name === 'production_command')!;
+  const parameters = base.parameters as { properties: Record<string, unknown> };
+  return {
+    ...base,
+    parameters: {
+      ...base.parameters,
+      properties: {
+        ...parameters.properties,
+        kind: {
+          ...(parameters.properties.kind as Record<string, unknown>),
+          enum: [...allowed],
+        },
+      },
+    },
+  };
+}
+
+export function productionToolsFor(ctx: ProductionToolContext | null | undefined): ToolDef[] {
+  if (!ctx) return [];
+  const tools: ToolDef[] = [];
+  if (ctx.capabilities?.read !== false && typeof ctx.read === 'function') {
+    tools.push(PRODUCTION_TOOLS.find(tool => tool.name === 'production_read')!);
+  }
+  if (ctx.capabilities?.proposePlan !== false && typeof ctx.command === 'function') {
+    tools.push(PRODUCTION_TOOLS.find(tool => tool.name === 'production_propose_plan')!);
+  }
+  const allowed = effectiveAllowedCommands(ctx);
+  if (ctx.capabilities?.commands !== false && typeof ctx.command === 'function' && allowed.length > 0) {
+    tools.push(commandToolFor(allowed));
+  }
+  return tools;
+}
+
+function resolveSnapshot(value: unknown): {
+  production?: Record<string, unknown>;
+  revision?: number;
+  lastSequence?: number;
+  error?: string;
+} {
+  if (!isPlainObject(value)) return { error: 'unknown production' };
+  const nested = value.production;
+  const production = isPlainObject(nested) ? nested : value;
+  const topRevision = value.revision;
+  const revision = Number.isSafeInteger(topRevision) && (topRevision as number) >= 0
+    ? topRevision as number
+    : (Number.isSafeInteger(production.revision) && (production.revision as number) >= 0
+      ? production.revision as number
+      : undefined);
+  if (revision === undefined) {
+    return { error: 'the production revision is unavailable; call production_read again' };
+  }
+  const topSequence = value.lastSequence;
+  const lastSequence = Number.isSafeInteger(topSequence) && (topSequence as number) >= 0
+    ? topSequence as number
+    : (Number.isSafeInteger(production.lastSequence) && (production.lastSequence as number) >= 0
+      ? production.lastSequence as number
+      : undefined);
+  return { production, revision, lastSequence };
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    const json = JSON.stringify(value);
+    return json === undefined ? 'null' : json;
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(entry => (entry === undefined ? 'null' : canonicalJson(entry))).join(',')}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).filter(key => record[key] !== undefined).sort();
+  return `{${keys.map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+}
+
+function commandIds(
+  ctx: ProductionToolContext,
+  productionId: string,
+  kind: AgentCommandKind,
+  revision: number,
+  payload: Record<string, unknown>,
+): { commandId: string; idempotencyKey: string } {
+  const scope = ctx.turnId ?? ctx.userEventId ?? '';
+  const digest = createHash('sha256')
+    .update(canonicalJson({
+      productionId,
+      kind,
+      expected: { productionRevision: revision },
+      payload,
+      userEventId: ctx.userEventId,
+      turnId: scope,
+    }))
+    .digest('hex');
+  return {
+    commandId: `cmd_${digest.slice(0, 24)}`,
+    idempotencyKey: `key_${digest.slice(24, 56)}`,
+  };
+}
+
+async function dispatchCommand(
+  ctx: ProductionToolContext,
+  options: {
+    productionId: string;
+    kind: AgentCommandKind;
+    revision: number;
+    payload: Record<string, unknown>;
+  },
+): Promise<ProductionToolResult & { envelope: ProductionCommandEnvelope }> {
+  const ids = commandIds(ctx, options.productionId, options.kind, options.revision, options.payload);
+  const envelope: ProductionCommandEnvelope = {
+    commandId: ids.commandId,
+    idempotencyKey: ids.idempotencyKey,
+    productionId: options.productionId,
+    kind: options.kind,
+    expected: { productionRevision: options.revision },
+    payload: options.payload,
+  };
+
+  if (typeof ctx.command !== 'function') {
+    return { ...errorResult('production commands are not available'), envelope };
+  }
+  if (typeof ctx.userEventId !== 'string' || !ID_RE.test(ctx.userEventId)) {
+    return { ...errorResult('the server must supply the originating user event'), envelope };
+  }
+
+  let result: unknown;
+  try {
+    result = await ctx.command(envelope, { actor: 'agent', userEventId: ctx.userEventId });
+  } catch (error) {
+    const code = isPlainObject(error) && typeof error.code === 'string' ? error.code : undefined;
+    return { ...errorResult('the production command could not be recorded', code), envelope };
+  }
+  return { ok: true, result, envelope };
+}
+
+async function readProduction(args: Record<string, unknown>, ctx: ProductionToolContext): Promise<ProductionToolResult> {
+  if (ctx.capabilities?.read === false) return errorResult('production reads are disabled for this agent');
+  const read = ctx.read;
+  if (typeof read !== 'function') return errorResult('production read is not available');
+  const productionId = resolveProductionId(args, ctx);
+  if (productionId.error) return errorResult(productionId.error);
+
+  let state: ProductionReadState | null | undefined;
+  try {
+    state = await read(productionId.value!);
+  } catch {
+    return errorResult('the production could not be read');
+  }
+  if (state === null || state === undefined) return errorResult(`unknown production: ${productionId.value!}`);
+
+  const snapshot = resolveSnapshot(state);
+  if (snapshot.error) return errorResult(snapshot.error);
+
+  const result: ProductionToolResult = {
+    ok: true,
+    status: 'read',
+    production: snapshot.production,
+    revision: snapshot.revision,
+  };
+  if (snapshot.lastSequence !== undefined) result.lastSequence = snapshot.lastSequence;
+  return result;
+}
+
+async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolContext): Promise<ProductionToolResult> {
+  if (ctx.capabilities?.proposePlan === false) return errorResult('plan proposals are disabled for this agent');
+  if (typeof ctx.command !== 'function') return errorResult('production commands are not available');
+
+  const forged = clientIdentityKey(args);
+  if (forged) return errorResult(`${forged} is server-supplied and cannot be provided in tool arguments`);
+  const candidate = args.plan;
+  if (!isPlainObject(candidate)) return errorResult('plan must be an object');
+  const plan = candidate;
+
+  const productionId = resolveProductionId(args, ctx);
+  if (productionId.error) return errorResult(productionId.error);
+  const revision = readExpectedRevision(args);
+  if (revision.error) return errorResult(revision.error);
+
+  const dispatched = await dispatchCommand(ctx, {
+    productionId: productionId.value!,
+    kind: 'plan.propose',
+    revision: revision.value!,
+    payload: cloneJson(plan),
+  });
+  if (!dispatched.ok) return dispatched;
+
+  const planId = typeof plan.planId === 'string' ? plan.planId : 'the plan';
+  return {
+    ok: true,
+    status: 'proposed',
+    applied: false,
+    command: dispatched.envelope,
+    result: dispatched.result,
+    message: `Proposed ${planId}. Waiting for the user to approve it; nothing has been approved or dispatched.`,
+  };
+}
+
+async function issueCommand(args: Record<string, unknown>, ctx: ProductionToolContext): Promise<ProductionToolResult> {
+  if (ctx.capabilities?.commands === false) return errorResult('production commands are disabled for this agent');
+  if (typeof ctx.command !== 'function') return errorResult('production commands are not available');
+
+  const forged = clientIdentityKey(args);
+  if (forged) return errorResult(`${forged} is server-supplied and cannot be provided in tool arguments`);
+
+  const kind = args.kind;
+  if (typeof kind !== 'string' || kind.trim() === '') return errorResult('kind is required');
+  if (FORBIDDEN_AGENT_COMMAND_SET.has(kind)) {
+    return errorResult(`the agent may not issue ${kind}; it is a user decision or a spend action`);
+  }
+  if (!AGENT_COMMAND_SET.has(kind)) return errorResult(`unknown agent command kind: ${kind}`);
+  if (!effectiveAllowedCommands(ctx).includes(kind as AgentCommandKind)) {
+    return errorResult(`the agent is not permitted to issue ${kind}`);
+  }
+
+  const productionId = resolveProductionId(args, ctx);
+  if (productionId.error) return errorResult(productionId.error);
+  const revision = readExpectedRevision(args);
+  if (revision.error) return errorResult(revision.error);
+
+  let payload: Record<string, unknown> = {};
+  const payloadValue = args.payload;
+  if (payloadValue !== undefined && payloadValue !== null) {
+    if (!isPlainObject(payloadValue)) return errorResult('payload must be an object');
+    payload = cloneJson(payloadValue);
+  }
+
+  const dispatched = await dispatchCommand(ctx, {
+    productionId: productionId.value!,
+    kind: kind as AgentCommandKind,
+    revision: revision.value!,
+    payload,
+  });
+  if (!dispatched.ok) return dispatched;
+
+  return {
+    ok: true,
+    status: 'issued',
+    command: dispatched.envelope,
+    result: dispatched.result,
+  };
+}
+
+export async function runProductionTool(
+  call: ProductionToolCall,
+  ctx: ProductionToolContext = {},
+): Promise<ProductionToolResult> {
+  if (!call || typeof call.name !== 'string' || !isProductionToolName(call.name)) {
+    return errorResult(`unknown production tool: ${String(call?.name ?? '')}`);
+  }
+  const args = readArgs(call);
+  if (args.error) return errorResult(args.error);
+
+  switch (call.name) {
+    case 'production_read':
+      return readProduction(args.value!, ctx);
+    case 'production_propose_plan':
+      return proposePlan(args.value!, ctx);
+    case 'production_command':
+      return issueCommand(args.value!, ctx);
+    default:
+      return errorResult(`unknown production tool: ${call.name}`);
+  }
+}
