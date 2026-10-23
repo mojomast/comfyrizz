@@ -150,6 +150,7 @@ test('the keyboard map focuses 1-4, plays and pauses all, keeps on Enter, moves 
   const { options } = controllerOptions({
     fake,
     options: {
+      clipId: 'c1',
       takes: [take(1), take(2)],
       shots,
       onClose: () => closed.push(true),
@@ -181,6 +182,7 @@ test('the keyboard map focuses 1-4, plays and pauses all, keeps on Enter, moves 
   assert.equal(await controller.handleKey('Enter'), true);
   assert.equal(fake.calls.select.length, 1);
   assert.equal(fake.calls.select[0].takeId, 'tk_111111111111');
+  assert.equal(fake.calls.select[0].clipId, 'c1');
 
   assert.equal(await controller.handleKey('Escape'), true);
   assert.equal(closed.length, 1);
@@ -344,7 +346,7 @@ test('a shots entry without its own clipId is dropped and never used as a clip i
   assert.equal(fake.calls.select.every(call => call.clipId !== 's9:x'), true);
 });
 
-test('a shots entry that contradicts the caller shot/clip pair is dropped; Keep selects on the caller clip', async () => {
+test('the caller shot/clip pair wins: a sibling clip of the same shot stays, a clip filed under another shot is dropped', async () => {
   const fake = fakeApi();
   const { options } = controllerOptions({
     fake,
@@ -361,7 +363,7 @@ test('a shots entry that contradicts the caller shot/clip pair is dropped; Keep 
 
   assert.deepEqual(
     controller.state.shots.map(shot => [shot.shotId, shot.clipId]),
-    [[SHOT_ID, CLIP_ID], ['s2:a_plate2', 's2:a_plate2']],
+    [[SHOT_ID, CLIP_ID], [SHOT_ID, 'c_other'], ['s2:a_plate2', 's2:a_plate2']],
   );
   assert.equal(controller.state.shotId, SHOT_ID);
   assert.equal(controller.state.clipId, CLIP_ID);

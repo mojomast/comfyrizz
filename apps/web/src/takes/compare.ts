@@ -129,10 +129,11 @@ function clampPosition(value: unknown): number {
 
 /**
  * A shot entry is only usable when it carries both ids itself. A missing clip
- * id is never filled from the shot id; that entry is dropped instead. An entry
- * that shares only one id with the caller's shot (same shotId with another
- * clipId, or the reverse) contradicts it and is dropped too: the caller's
- * explicit shotId + clipId pair is the one the compare view opens on.
+ * id is never filled from the shot id; that entry is dropped instead. A shot
+ * (package scene) may hold several clips, so another clipId under the caller's
+ * shotId is a sibling and stays; an entry that puts the caller's clipId under
+ * another shotId contradicts it and is dropped. The caller's exact shotId +
+ * clipId pair is the one the compare view opens on.
  */
 function normalizeShots(
   shots: readonly CompareShot[] | null | undefined,
@@ -142,7 +143,7 @@ function normalizeShots(
   for (const shot of Array.isArray(shots) ? shots : []) {
     if (!shot || typeof shot.shotId !== 'string' || !shot.shotId) continue;
     if (typeof shot.clipId !== 'string' || !shot.clipId) continue;
-    if ((shot.shotId === fallback.shotId) !== (shot.clipId === fallback.clipId)) continue;
+    if (shot.clipId === fallback.clipId && shot.shotId !== fallback.shotId) continue;
     list.push({
       shotId: shot.shotId,
       clipId: shot.clipId,
