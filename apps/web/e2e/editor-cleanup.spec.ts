@@ -1,0 +1,31 @@
+import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const source = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+
+function loadSummary(): (ok: boolean, notes: number) => string {
+  const match = source.match(/export function qaPanelSummary\(ok: boolean, notes: number\): string \{[\s\S]*?\n\}/);
+  if (!match) throw new Error('qaPanelSummary missing from main.ts');
+  const body = match[0]
+    .replace(/^export /, '')
+    .replace(/: boolean/g, '')
+    .replace(/: number/g, '')
+    .replace(/: string/g, '');
+  return new Function(`${body}\nreturn qaPanelSummary;`)();
+}
+
+test('frame quality check wording matches after a fixture render', async ({ page }) => {
+  const summary = loadSummary();
+  const passed = summary(true, 4);
+  const problems = summary(false, 1);
+  expect(passed).toBe('Quality check passed · 4 notes');
+  expect(problems).toBe('Quality check found problems · 1 notes');
+  expect(source).toContain('qaPanelSummary(qaState.ok, qaState.findings.length)');
+  expect(source).not.toContain('QA pass');
+
+  await page.setContent(`<div id="qa-panel"><span class="chip qa-ok">${passed}</span></div>`);
+  await expect(page.locator('#qa-panel')).toHaveText('Quality check passed · 4 notes');
+  await page.setContent(`<div id="qa-panel"><span class="chip qa-bad">${problems}</span></div>`);
+  await expect(page.locator('#qa-panel')).toHaveText('Quality check found problems · 1 notes');
+});

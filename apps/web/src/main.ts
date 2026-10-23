@@ -1259,6 +1259,13 @@ function renderRunPanel(): void {
   if (video) video.addEventListener('click', () => void downloadRunVideo());
 }
 
+/** Wording for the frame quality-check badge. Notes are the finding count. */
+export function qaPanelSummary(ok: boolean, notes: number): string {
+  const count = Number.isFinite(notes) ? Math.max(0, Math.trunc(notes)) : 0;
+  const label = ok ? 'Quality check passed · ' : 'Quality check found problems · ';
+  return label + count + ' notes';
+}
+
 /** MS4: the frame-QA gate badge and contact sheet for the most recent render. */
 function renderQaPanel(): void {
   const host = $<HTMLElement>('qa-panel');
@@ -1268,8 +1275,8 @@ function renderQaPanel(): void {
     return;
   }
   host.hidden = false;
-  const errors = qaState.findings.filter(item => item.severity === 'error').length;
-  const badge = qaState.ok ? '<span class="chip qa-ok">QA pass</span>' : `<span class="chip qa-bad">QA ${errors} error${errors === 1 ? '' : 's'}</span>`;
+  const summary = qaPanelSummary(qaState.ok, qaState.findings.length);
+  const tone = qaState.ok ? 'qa-ok' : 'qa-bad';
   const rows = qaState.findings
     .slice(0, 5)
     .map(item => `<div class="event"><b>${esc(item.severity)}</b> ${esc(item.code)}${item.sceneId ? ` · ${esc(item.sceneId)}` : ''} — ${esc(item.message)}</div>`)
@@ -1280,7 +1287,7 @@ function renderQaPanel(): void {
       ? `<img class="qa-sheet" src="${esc(qaSheetUrl)}" alt="contact sheet" />`
       : '<div class="hint" data-qa-sheet-loading>Loading contact sheet…</div>'
     : '';
-  host.innerHTML = `<div class="pane-head"><b>Frame QA</b>${badge}<span class="hint">${qaState.findings.length} finding${qaState.findings.length === 1 ? '' : 's'}</span></div>${sheet}${rows || '<div class="event">No findings — layout, contrast and motion checks cleared.</div>'}${more}`;
+  host.innerHTML = `<div class="pane-head"><b>Frame QA</b><span class="chip ${tone}">${esc(summary)}</span></div>${sheet}${rows || '<div class="event">No notes — layout, contrast and motion checks cleared.</div>'}${more}`;
 }
 
 /** Fetch the sheet through the authenticated API and keep only the newest response. */
