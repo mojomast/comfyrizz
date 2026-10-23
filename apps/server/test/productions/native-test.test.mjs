@@ -1,10 +1,11 @@
 // IP48: a native speaking test shot and its transcript findings.
 //
 // The builder never talks to a backend. It produces a planned IP20 action slot
-// whose speaking voice is resolved by the canonical voice module, so a
-// native-capable model speaks with its own built-in preset and every other
-// model falls back to Kokoro. The transcript review is technical evidence
-// only: a mismatch is a finding, and the take always stays unreviewed.
+// whose speaking voice is resolved by the canonical voice module. A model that
+// declares no native voice is refused outright: a "native test shot" cannot be
+// planned on Kokoro, because Kokoro voices are auditioned for free. The
+// transcript review is technical evidence only: a mismatch is a finding, and
+// the take always stays unreviewed.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,6 +48,15 @@ function code(expected) {
     assert.equal(error.code, expected, error.message);
     return true;
   };
+}
+
+function refusal(run) {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return assert.fail('expected the builder to refuse');
 }
 
 test('a native-capable model plans one test-shot slot with its declared voice', () => {
@@ -92,44 +102,66 @@ test('the builder never calls a backend and never approves or dispatches', () =>
   assert.equal(action.autoDispatch, false);
 });
 
-test('a model without the native capability falls back to Kokoro and records it', () => {
-  const action = buildNativeTestAction(actionInput({
+test('a model without the native capability is refused and never plans a paid Kokoro shot', () => {
+  const error = refusal(() => buildNativeTestAction(actionInput({
     model: CPU_MODEL,
     voice: { engine: 'kokoro', voice: 'af_heart' },
-  }));
-  assert.equal(action.voicePath, 'kokoro');
-  assert.equal(action.voice, 'af_heart');
-  assert.equal(action.language, 'en-us');
-  assert.equal(action.state, 'planned');
+  })));
+
+  assert.equal(error.code, 'NATIVE_VOICE_UNSUPPORTED');
+  assert.equal(error.field, 'model');
+  assert.equal(error.ok, false);
+  assert.match(error.message, /native voice/i);
+  assert.match(error.message, /Kokoro/);
+  assert.match(error.message, /audition/i);
+  assert.deepEqual(error.alternative, {
+    kind: 'kokoro_audition',
+    route: 'POST /api/characters/:id/audition',
+    paid: false,
+  });
+  assert.equal(Object.isFrozen(error.alternative), true);
 });
 
-test('a model name is never a capability: MiniMax without the flag still uses Kokoro', () => {
-  const action = buildNativeTestAction(actionInput({
+test('a model name is never a capability: MiniMax without the flag is refused, not planned on Kokoro', () => {
+  const error = refusal(() => buildNativeTestAction(actionInput({
     model: { id: 'MiniMax', capabilities: { supportsNativeVoice: false } },
     voice: { engine: 'kokoro', voice: 'bf_emma' },
     line: { text: 'Morning! Let us grind.', language: 'en-gb' },
-  }));
-  assert.equal(action.voicePath, 'kokoro');
-  assert.equal(action.voice, 'bf_emma');
-  assert.equal(action.language, 'en-gb');
+  })));
+  assert.equal(error.code, 'NATIVE_VOICE_UNSUPPORTED');
+  assert.equal(error.field, 'model');
+  assert.equal(error.alternative.kind, 'kokoro_audition');
+  assert.equal(error.alternative.paid, false);
 });
 
-test('a stale native request on a model without the capability is refused, never silently dropped', () => {
-  // Review fix-up: the named preset used to be discarded and Kokoro planned.
-  assert.throws(
-    () => buildNativeTestAction(actionInput({
-      model: CPU_MODEL,
-      nativeVoice: 'minimax-narrator',
-      voice: { engine: 'kokoro', voice: 'af_heart' },
-    })),
-    code('NATIVE_TEST_NATIVE_UNAVAILABLE'),
-  );
-  const action = buildNativeTestAction(actionInput({
+test('a named native voice on a model without the capability gets the same single refusal', () => {
+  for (const extra of [
+    { nativeVoice: 'minimax-narrator' },
+    { nativeVoice: 'minimax-narrator', voice: { engine: 'kokoro', voice: 'af_heart' } },
+  ]) {
+    const error = refusal(() => buildNativeTestAction(actionInput({ model: CPU_MODEL, ...extra })));
+    assert.equal(error.code, 'NATIVE_VOICE_UNSUPPORTED');
+    assert.equal(error.field, 'model');
+    assert.equal(Object.isFrozen(error.alternative), true);
+  }
+  assert.equal(nativeTest.NATIVE_TEST_NATIVE_UNAVAILABLE, undefined);
+});
+
+test('the capability check runs before voice resolution, so a bad Kokoro voice never masks it', () => {
+  const error = refusal(() => buildNativeTestAction(actionInput({
     model: CPU_MODEL,
+    voice: { engine: 'kokoro', voice: 'not-a-real-voice' },
+  })));
+  assert.equal(error.code, 'NATIVE_VOICE_UNSUPPORTED');
+  assert.equal(error.field, 'model');
+});
+
+test('a Kokoro voice request on a native-capable test shot is refused, not planned on Kokoro', () => {
+  const error = refusal(() => buildNativeTestAction(actionInput({
     voice: { engine: 'kokoro', voice: 'af_heart' },
-  }));
-  assert.equal(action.voicePath, 'kokoro');
-  assert.equal(action.voice, 'af_heart');
+  })));
+  assert.equal(error.code, 'VOICE_KOKORO_REQUIRED');
+  assert.equal(error.field, 'voice');
 });
 
 test('a native preset name is not invented and the canonical voice rules win', () => {
@@ -274,6 +306,11 @@ test('review never mutates its input and ignores no positional fallback', () => 
   const snapshot = structuredClone(input);
   reviewNativeTestTranscript(input);
   assert.deepEqual(input, snapshot);
+});
+
+test('the refusal code is exported and the old code is gone', () => {
+  assert.equal(nativeTest.NATIVE_VOICE_UNSUPPORTED, 'NATIVE_VOICE_UNSUPPORTED');
+  assert.equal(nativeTest.NATIVE_TEST_NATIVE_UNAVAILABLE, undefined);
 });
 
 test('the rejected aliases are not exported', () => {

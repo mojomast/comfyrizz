@@ -7,8 +7,10 @@
 //
 // The speaking voice is decided by IP44 in characters/voice.mjs. A model that
 // declares `capabilities.supportsNativeVoice` speaks with one of its declared
-// built-in presets; every other model falls back to Kokoro. A model name is
-// never evidence of a capability, and voice cloning is never accepted.
+// built-in presets. Every other model is refused: a "native test shot" cannot
+// be paid for on a model that has no native voice, because Kokoro voices are
+// auditioned for free. A model name is never evidence of a capability, and
+// voice cloning is never accepted.
 //
 // Transcript review is technical evidence, not a verdict. An ASR mismatch is a
 // finding; the take stays `unreviewed` until a user records a creative verdict.
@@ -17,6 +19,13 @@ import { resolveSpeakingVoice, supportsNativeVoice } from '../characters/voice.m
 
 export const NATIVE_TEST_SCHEMA = 'comfyrizz.native-test/v1';
 export const NATIVE_TEST_KIND = 'native_test_shot';
+export const NATIVE_VOICE_UNSUPPORTED = 'NATIVE_VOICE_UNSUPPORTED';
+
+const KOKORO_AUDITION_ALTERNATIVE = Object.freeze({
+  kind: 'kokoro_audition',
+  route: 'POST /api/characters/:id/audition',
+  paid: false,
+});
 
 export const NATIVE_TEST_FINDING_CODES = Object.freeze([
   'ASR_TRANSCRIPT_MISSING',
@@ -65,6 +74,16 @@ export class NativeTestError extends Error {
 
 function fail(code, field, message) {
   throw new NativeTestError(code, field, message);
+}
+
+function failNativeVoiceUnsupported() {
+  const error = new NativeTestError(
+    NATIVE_VOICE_UNSUPPORTED,
+    'model',
+    'the selected model has no native voice, so a native speaking test shot cannot be planned; Kokoro voices are auditioned free through the character audition route',
+  );
+  error.alternative = KOKORO_AUDITION_ALTERNATIVE;
+  throw error;
 }
 
 function isRecord(value) {
@@ -179,23 +198,24 @@ export function buildNativeTestAction(input, ...extra) {
   }
 
   const model = requireRecord(raw.model, 'model', 'NATIVE_TEST_MODEL');
-  // IP44 is the only capability source. A native preset is honoured only when
-  // the model declares native speech; otherwise the Kokoro fallback is used.
-  const nativeCapable = supportsNativeVoice(model);
   if (raw.voice !== undefined && isRecord(raw.voice)) refuseForbidden(raw.voice, 'voice');
-  if (!nativeCapable && raw.nativeVoice !== undefined) {
-    // Never drop a named preset silently: the caller asked for a native voice
-    // the selected model does not declare, so the plan must be re-made.
+
+  // IP44 is the only capability source. This refusal happens before any voice
+  // resolution, so a non-native model never plans a paid Kokoro test shot.
+  if (!supportsNativeVoice(model)) failNativeVoiceUnsupported();
+
+  // On a native-capable model the test shot speaks with the model's own voice.
+  // A Kokoro request is a plan for the free audition route, not this paid slot.
+  if (raw.voice !== undefined) {
     fail(
-      'NATIVE_TEST_NATIVE_UNAVAILABLE',
-      'nativeVoice',
-      'the selected model does not declare a native voice; remove nativeVoice to use the Kokoro fallback',
+      'VOICE_KOKORO_REQUIRED',
+      'voice',
+      'a native test shot speaks with the model native voice; Kokoro voices are auditioned free through the character audition route',
     );
   }
 
   const speaking = resolveSpeakingVoice({
     model,
-    ...(raw.voice !== undefined ? { voice: raw.voice } : {}),
     ...(raw.nativeVoice !== undefined ? { nativeVoice: raw.nativeVoice } : {}),
     ...(lineLanguage !== undefined ? { language: lineLanguage } : {}),
   });
@@ -215,7 +235,7 @@ export function buildNativeTestAction(input, ...extra) {
     approvalRequired: true,
     autoDispatch: false,
     line: outputLine,
-    voicePath: speaking.voicePath,
+    voicePath: 'native',
     voice: speaking.voice,
     language: speaking.language,
   });
