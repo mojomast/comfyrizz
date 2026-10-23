@@ -1,0 +1,54 @@
+.easy-voice-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.easy-voice-pick-label {
+  color: var(--text-2);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.easy-voice-pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.easy-voice-pick-select {
+  min-width: 0;
+  flex: 1 1 12rem;
+  min-height: 2.75rem;
+  padding-block: var(--space-1);
+  padding-inline: var(--space-3);
+  color: var(--text-1);
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-2);
+}
+
+.easy-voice-pick-select:focus-visible,
+.easy-voice-pick-play:focus-visible,
+.easy-voice-pick-compare:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.easy-voice-pick-play,
+.easy-voice-pick-compare {
+  min-height: 2.75rem;
+}
+
+.easy-voice-pick-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.easy-voice-pick-note:not([hidden]) {
+  display: block;
+}
