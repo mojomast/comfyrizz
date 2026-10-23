@@ -148,3 +148,10 @@ test('Ctrl+K opens a dialog named Commands', async ({ page }) => {
   await page.keyboard.press('Control+K');
   await expect(page.getByRole('dialog', { name: 'Commands' })).toBeVisible();
 });
+
+test('the status bar has one Google Colab control', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open in editor' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'advanced');
+  await expect(page.locator('#statusbar').getByRole('button', { name: /Google Colab/ })).toHaveCount(1);
+});
