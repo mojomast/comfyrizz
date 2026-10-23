@@ -842,6 +842,9 @@ export function createApp({
       runtimeDir,
       ledgerId: production.budgetLedgerId,
     }),
+    readPackage: (packageId) => {
+      try { return store.read(packageId); } catch { return null; }
+    },
   });
 
   const renderRoutes = createRenderRoutes({

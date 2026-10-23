@@ -14,9 +14,12 @@
 // originating user-event id. This module never reads either value from a
 // request header, query parameter or body, and never invents one.
 
+import { randomUUID } from 'node:crypto';
+
 import { ActionError } from '../productions/actions.mjs';
 import { CommandError } from '../productions/commands.mjs';
 import { ProductionLedgerError } from '../productions/ledger.mjs';
+import { planFromPackage } from '../productions/plan-from-package.mjs';
 import { ProductionStoreError } from '../productions/store.mjs';
 
 export const MAX_BODY_BYTES = 5 * 1024 * 1024;
@@ -26,7 +29,8 @@ export const MAX_BODY_BYTES = 5 * 1024 * 1024;
 // /api/productions/:id/events
 // /api/productions/:id/commands
 // /api/productions/:id/spend-cap
-export const PRODUCTION_ROUTE_PATTERN = /^\/api\/productions(?:\/([^/]+))?(?:\/(events|commands|spend-cap))?$/;
+// /api/productions/:id/easy-plan
+export const PRODUCTION_ROUTE_PATTERN = /^\/api\/productions(?:\/([^/]+))?(?:\/(events|commands|spend-cap|easy-plan))?$/;
 
 const ERROR_DETAIL_KEYS = Object.freeze([
   'errors',
@@ -253,7 +257,7 @@ export function createProductionRoutes(options = {}) {
   if (!isPlainObject(options)) {
     throw new TypeError('createProductionRoutes options must be an object');
   }
-  const { store, handler, actions = null, contextFor, ledgerFor = null } = options;
+  const { store, handler, actions = null, contextFor, ledgerFor = null, readPackage = null } = options;
   if (!store || typeof store.read !== 'function' || typeof store.readEvents !== 'function') {
     throw new TypeError('createProductionRoutes requires a production store');
   }
@@ -343,6 +347,87 @@ export function createProductionRoutes(options = {}) {
       expected: { productionRevision: body.expected.productionRevision },
       ceiling,
     };
+  }
+
+  function assertEasyPlanBody(body) {
+    if (!isPlainObject(body)) {
+      throw new RouteError('INVALID_JSON', 'the request body must be a JSON object', 400);
+    }
+    if (body.level !== 'draft' && body.level !== 'balanced' && body.level !== 'director') {
+      throw new RouteError('INVALID_LEVEL', 'level must be draft, balanced or director', 400);
+    }
+    if (body.compute !== 'cpu' && body.compute !== 'colab') {
+      throw new RouteError('INVALID_COMPUTE', 'compute must be cpu or colab', 400);
+    }
+    if (body.onlyShotIds !== undefined) {
+      if (!Array.isArray(body.onlyShotIds) || body.onlyShotIds.some((id) => typeof id !== 'string' || id === '')) {
+        throw new RouteError('INVALID_SHOTS', 'onlyShotIds must be a list of scene ids', 400);
+      }
+    }
+    if (body.chip !== undefined && (typeof body.chip !== 'string' || body.chip.length > 200)) {
+      throw new RouteError('INVALID_CHIP', 'chip must be a short string', 400);
+    }
+    return body;
+  }
+
+  async function handleEasyPlan(request, response, id) {
+    if (!actions || typeof actions.propose !== 'function') {
+      throw new RouteError('ACTIONS_UNAVAILABLE', 'action routes are not configured', 500);
+    }
+    if (typeof readPackage !== 'function') {
+      throw new RouteError('PACKAGE_STORE_UNAVAILABLE', 'the package store is not configured', 500);
+    }
+    const body = assertEasyPlanBody(await readJsonBody(request));
+    const production = store.read(id);
+    if (!production) throw new RouteError('NOT_FOUND', 'production does not exist', 404);
+    if (typeof production.packageId !== 'string' || production.packageId === '') {
+      throw new RouteError('PACKAGE_REQUIRED', 'the production has no package yet', 400);
+    }
+    let pkg;
+    try {
+      pkg = readPackage(production.packageId);
+    } catch (error) {
+      throw new RouteError('PACKAGE_REQUIRED', 'the production package could not be read', 400);
+    }
+    if (!pkg) throw new RouteError('NOT_FOUND', 'package does not exist', 404);
+
+    const described = planFromPackage({
+      pkg,
+      level: body.level,
+      compute: body.compute,
+      productionId: id,
+      revision: production.revision,
+      onlyShotIds: body.onlyShotIds,
+      chip: body.chip,
+    });
+    // Plan identity is server-owned. A client planId is ignored.
+    const planId = `plan_${randomUUID().replaceAll('-', '')}`;
+    const commandId = `cmd_easy_${randomUUID().replaceAll('-', '')}`;
+    const context = await commandContext(request);
+    const result = await actions.propose({
+      productionId: id,
+      body: {
+        commandId,
+        idempotencyKey: commandId,
+        expected: { productionRevision: production.revision },
+        payload: {
+          planId,
+          revision: 0,
+          reservationCeiling: described.reservationCeiling,
+          collectAndStopReserve: 0,
+          requiredDecisions: described.requiredDecisions,
+          actions: described.actions,
+        },
+      },
+      context,
+    });
+    const snapshot = store.read(id);
+    sendJson(response, result.duplicate ? 200 : 201, {
+      production: snapshot,
+      revision: snapshot?.revision ?? result.revision,
+      lastSequence: snapshot?.lastSequence ?? result.lastSequence,
+      plan: result.plan,
+    });
   }
 
   async function handleSpendCap(request, response, id) {
@@ -525,6 +610,14 @@ export function createProductionRoutes(options = {}) {
           throw new RouteError('METHOD_NOT_ALLOWED', 'method not allowed', 405);
         }
         await handleSpendCap(request, response, id);
+        return true;
+      }
+
+      if (action === 'easy-plan') {
+        if (method !== 'POST') {
+          throw new RouteError('METHOD_NOT_ALLOWED', 'method not allowed', 405);
+        }
+        await handleEasyPlan(request, response, id);
         return true;
       }
 
