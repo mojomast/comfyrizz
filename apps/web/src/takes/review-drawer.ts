@@ -360,6 +360,8 @@ export interface ReviewDrawerModelOptions {
   onPreview?: (clip: ClipSummary, takeId: string) => void;
   onSelectTake?: (clip: ClipSummary, takeId: string) => void | Promise<void>;
   onRejectTake?: (clip: ClipSummary, takeId: string) => void | Promise<void>;
+  /** Opens the IL19 side-by-side compare view for the active clip. */
+  onCompare?: (clip: ClipSummary) => void;
   /** Usually `?package=`; a getter keeps a re-opened project current. */
   packageId?: string | (() => string);
   onAnnounce?: (message: string) => void;
@@ -1221,6 +1223,7 @@ function drawerShell(model: ReviewDrawerModel): string {
     </div>
     <section class="review-cost-card panel" data-review-cost-card${model.costCard ? ` data-plan-hash="${escapeReviewHtml(model.costCard.planHash)}" data-plan-id="${escapeReviewHtml(model.costCard.planId)}" data-plan-revision="${escapeReviewHtml(model.costCard.proposalRevision)}" data-reservation-ceiling="${escapeReviewHtml(model.costCard.reservationCeiling)}"` : ' hidden'} aria-labelledby="review-cost-title">${reviewCostCardBody(model.costCard)}</section>
     <div class="review-footer">
+      <button type="button" class="btn btn-secondary btn-sm review-compare" data-review-compare aria-haspopup="dialog" aria-label="Compare takes for the active clip"${model.activeClip && Number(model.activeClip.takeCount) >= 2 ? '' : ' disabled'}>Compare</button>
       <button type="button" class="btn btn-secondary btn-sm review-approve-all" data-review-approve-all aria-keyshortcuts="Shift+A">Approve all visible</button>
       <div class="review-gate-actions" data-review-gate-actions></div>
     </div>
@@ -1324,6 +1327,14 @@ export function renderReviewDrawer(
 
 export const reviewDrawerHtml = renderReviewDrawer;
 export const renderReviewDrawerHtml = renderReviewDrawer;
+
+/**
+ * IL19: the compare event carries the real clip id only. A clip summary has no
+ * shot id field, so the clip id is never copied into a shot id.
+ */
+export function reviewCompareEventDetail(clip: ClipSummary): { clipId: string } {
+  return { clipId: clip.clipId };
+}
 
 function isEditableElement(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
@@ -1605,6 +1616,16 @@ export function mountReviewDrawer(
     const target = event.target as HTMLElement;
     const closeButton = target.closest('[data-review-close]');
     if (closeButton) { close(); return; }
+    if (target.closest('[data-review-compare]')) {
+      const clip = model.activeClip;
+      if (!clip) return;
+      if (options.onCompare) options.onCompare(clip);
+      else aside.dispatchEvent(new CustomEvent('compare:takes', {
+        bubbles: true,
+        detail: reviewCompareEventDetail(clip),
+      }));
+      return;
+    }
     const filter = target.closest<HTMLButtonElement>('[data-review-filter]');
     if (filter?.dataset.reviewFilter) {
       model.setFilter(filter.dataset.reviewFilter as ReviewFilter);

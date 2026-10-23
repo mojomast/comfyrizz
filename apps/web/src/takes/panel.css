@@ -1208,3 +1208,284 @@
     animation: none;
   }
 }
+
+/* ==========================================================================
+   IL19: compare takes
+   Two to four takes share one stage, one play state and one scrub position.
+   State is always text plus pattern/border, never colour alone.
+   ========================================================================== */
+
+.compare-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+  padding: var(--panel-padding);
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: var(--elevation-border-2);
+  border-radius: var(--radius-panel);
+}
+
+.compare-view[hidden] { display: none; }
+
+.compare-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-2);
+  border-bottom: var(--elevation-border-1);
+}
+
+.compare-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.compare-title {
+  margin: 0;
+  font-size: var(--font-size-15);
+  font-weight: var(--font-weight-600);
+}
+
+.compare-shot,
+.compare-current {
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+}
+
+.compare-shot code {
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-12);
+  overflow-wrap: anywhere;
+}
+
+.compare-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.compare-toolbar [aria-pressed="true"] {
+  color: var(--accent-fg, var(--text-1));
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.compare-stage {
+  position: relative;
+  min-width: 0;
+  padding: var(--space-2);
+  background: var(--bg-0);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+}
+
+.compare-takes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compare-take {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-1);
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  outline: none;
+}
+
+.compare-take:focus-visible,
+.compare-take.is-focused {
+  border-color: var(--focus-ring-color);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.compare-take.is-pinned {
+  border-style: dashed;
+  border-width: 2px;
+}
+
+.compare-take.is-kept {
+  border-style: double;
+  border-width: 3px;
+}
+
+.compare-media {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(45deg, var(--bg-2) 0 8px, var(--bg-1) 8px 16px);
+  border-radius: var(--radius-control);
+}
+
+.compare-media-frame {
+  width: 64%;
+  aspect-ratio: 16 / 9;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-control);
+}
+
+.compare-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.compare-take-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.compare-take-label {
+  min-width: 0;
+  color: var(--text-1);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-600);
+  overflow-wrap: anywhere;
+}
+
+.compare-take-flags,
+.compare-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compare-state-text {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  padding: 0 var(--space-2);
+  color: var(--text-1);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-600);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-pill);
+}
+
+.compare-take[data-compare-status="focused"] .compare-state-text[data-state="focused"],
+.compare-legend [data-compare-status="focused"] .compare-state-text {
+  border-style: solid;
+  border-width: 2px;
+}
+
+.compare-take[data-compare-status="kept"] .compare-state-text[data-state="kept"],
+.compare-legend [data-compare-status="kept"] .compare-state-text {
+  border-style: double;
+  border-width: 3px;
+}
+
+.compare-take[data-compare-status="pinned"] .compare-state-text[data-state="pinned"],
+.compare-legend [data-compare-status="pinned"] .compare-state-text {
+  border-style: dashed;
+  border-width: 2px;
+}
+
+.compare-legend {
+  gap: var(--space-2);
+}
+
+.compare-overlay {
+  position: absolute;
+  inset: var(--space-2);
+  pointer-events: none;
+  border-radius: var(--radius-control);
+}
+
+.compare-overlay-difference {
+  background:
+    repeating-linear-gradient(135deg, transparent 0 10px, rgba(255, 255, 255, 0.14) 10px 20px);
+  border: 1px solid var(--border-strong);
+  mix-blend-mode: difference;
+}
+
+.compare-overlay-safe-area {
+  inset: 10% 8%;
+  border: 2px dashed var(--warn);
+}
+
+.compare-scrub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.compare-scrub-field {
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+}
+
+.compare-scrub-input {
+  flex: 1 1 220px;
+  min-width: 120px;
+}
+
+.compare-time {
+  min-width: 48px;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  text-align: right;
+}
+
+.compare-live {
+  min-height: var(--target-min);
+  margin: 0;
+  color: var(--text-1);
+}
+
+.compare-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--font-size-12);
+}
+
+.compare-error[hidden] { display: none; }
+
+.compare-keys {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+}
+
+@media (min-width: 900px) {
+  .compare-takes { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compare-view,
+  .compare-view * {
+    transition: none;
+    animation: none;
+    scroll-behavior: auto;
+  }
+}
