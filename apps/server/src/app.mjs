@@ -52,6 +52,8 @@ import { createCommandHandler } from './productions/commands.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
 import { createActionCoordinator } from './productions/actions.mjs';
 import { createProductionRoutes } from './routes/productions.mjs';
+import { createPreferencesStore } from './productions/preferences.mjs';
+import { createIterationRoutes } from './productions/iteration-routes.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 // IP11: a completion save races with edits. Re-read the latest package and reapply the
@@ -423,6 +425,8 @@ export function createApp({
   // the /api/productions facade, so a bound package can only start from the
   // action slot that was dispatched for it.
   const productionStore = createProductionStore({ runtimeDir });
+  const preferencesStore = createPreferencesStore({ runtimeDir });
+  const iterationRoutes = createIterationRoutes({ store: productionStore, preferences: preferencesStore });
   // IP66: the chat adapter uses the same command handler as the production
   // facade. The handler is created here, before the chat, so a bound package's
   // turn can dispatch agent-attributed commands through the one command path.
@@ -1630,6 +1634,7 @@ export function createApp({
       }
     }
 
+    if (await iterationRoutes.handle(request, response, url)) return;
     if (await productionRoutes.handle(request, response, url)) return;
     if (await takeRoutes.handle(request, response, url)) return;
     if (await createCharacterRoutes({
