@@ -21,7 +21,11 @@
 
 import { createHash } from 'node:crypto';
 
-import { isTrustedPlan } from './actions.mjs';
+import {
+  decisionApproved,
+  isTrustedPlan,
+  REJECTING_OPTION_IDS,
+} from './actions.mjs';
 
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
 
@@ -163,38 +167,66 @@ function approvalState(events, plan) {
   return { approved, rejected };
 }
 
-function decisionFacts(events, production) {
-  const resolved = new Set();
+function decisionIdOf(required) {
+  if (typeof required === 'string') return required;
+  if (!isPlainObject(required)) return null;
+  if (typeof required.decisionId === 'string') return required.decisionId;
+  if (typeof required.id === 'string') return required.id;
+  return null;
+}
+
+function latestResolution(events, decisionId) {
+  let latest = null;
   for (const event of events) {
     if (event.type !== 'decision.resolved' || !isPlainObject(event.data)) continue;
-    const decisionId = event.data.decisionId ?? event.data.id;
-    if (typeof decisionId === 'string') resolved.add(decisionId);
+    const eventDecisionId = event.data.decisionId ?? event.data.id;
+    if (eventDecisionId !== decisionId) continue;
+    latest = event;
   }
+  return latest;
+}
+
+// True only when the latest resolution is an explicit refusal. A resolution
+// that merely names the wrong option, or no option at all, remains a decision
+// the user still has to make.
+function decisionRejected(events, production, required) {
+  const decisionId = decisionIdOf(required);
+  if (!decisionId) return false;
   const pending = new Set(
     Array.isArray(production.pendingDecisionIds) ? production.pendingDecisionIds : [],
   );
-  return { resolved, pending };
+  if (pending.has(decisionId)) return false;
+  const event = latestResolution(events, decisionId);
+  if (!event) return false;
+  if (event.data.status === 'rejected') return true;
+  const optionId = event.data.optionId;
+  return typeof optionId === 'string' && REJECTING_OPTION_IDS.includes(optionId);
 }
 
-function unmetDecisions(plan, facts) {
+function unmetDecisions(events, production, plan) {
   const unmet = [];
+  let rejected = false;
   for (const required of Array.isArray(plan.requiredDecisions) ? plan.requiredDecisions : []) {
     if (typeof required === 'string') {
-      if (!facts.resolved.has(required) || facts.pending.has(required)) unmet.push(required);
+      if (!decisionApproved(events, production, required)) {
+        unmet.push(required);
+        if (decisionRejected(events, production, required)) rejected = true;
+      }
       continue;
     }
     if (!isPlainObject(required)) continue;
-    const decisionId = typeof required.decisionId === 'string'
-      ? required.decisionId
-      : (typeof required.id === 'string' ? required.id : null);
+    const decisionId = decisionIdOf(required);
     if (decisionId) {
-      if (!facts.resolved.has(decisionId) || facts.pending.has(decisionId)) unmet.push(decisionId);
+      if (!decisionApproved(events, production, required)) {
+        unmet.push(decisionId);
+        if (decisionRejected(events, production, required)) rejected = true;
+      }
       continue;
     }
     if (required.kind === 'action_spend') continue;
     if (typeof required.kind === 'string') unmet.push(`kind:${required.kind}`);
   }
-  return unmet;
+  return { unmet, rejected };
 }
 
 function slotFacts(events, production, plan) {
@@ -282,10 +314,12 @@ export function deriveNextStep({ production, events: rawEvents } = {}) {
   if (authority.rejected) return step('blocked', 'plan_rejected', base);
   if (!authority.approved) return step('awaiting_approval', 'plan_not_approved', base);
 
-  const facts = decisionFacts(events, production);
-  const unmet = unmetDecisions(plan, facts);
-  if (unmet.length > 0) {
-    return step('await_decision', 'decisions_pending', { ...base, decisionIds: unmet });
+  const decisions = unmetDecisions(events, production, plan);
+  if (decisions.unmet.length > 0) {
+    if (decisions.rejected) {
+      return step('blocked', 'decision_rejected', { ...base, decisionIds: decisions.unmet });
+    }
+    return step('await_decision', 'decisions_pending', { ...base, decisionIds: decisions.unmet });
   }
 
   const slots = slotFacts(events, production, plan);

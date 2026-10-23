@@ -341,7 +341,11 @@ test('a required decision is reported before any slot is admitted', (t) => {
     production: { ...productionWithDecision, pendingDecisionIds: [] },
     events: [{
       type: 'decision.resolved',
-      data: { decisionId: 'dec_cast', resolution: { actor: 'user', userEventId: 'ue_server' } },
+      data: {
+        decisionId: 'dec_cast',
+        optionId: 'approve',
+        resolution: { actor: 'user', userEventId: 'ue_server', optionId: 'approve' },
+      },
     }],
   });
 

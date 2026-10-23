@@ -44,6 +44,23 @@ const SLOT_IGNORED = new Set([
   'maximumChargeExposure',
 ]);
 
+/**
+ * Choices that never satisfy a required decision unless the requirement
+ * explicitly names the same option. Lower case and exact: option spellings are
+ * a closed vocabulary, not aliases.
+ */
+export const REJECTING_OPTION_IDS = Object.freeze([
+  'reject',
+  'rejected',
+  'cancel',
+  'cancelled',
+  'decline',
+  'declined',
+  'deny',
+  'denied',
+  'no',
+]);
+
 export class ActionError extends Error {
   constructor(code, message, status = 400, details) {
     super(message);
@@ -349,25 +366,65 @@ function approvalState(events, plan) {
   return { approved, rejected };
 }
 
-function decisionsSatisfied(events, production, plan) {
-  const resolved = new Set();
+function decisionIdOf(required) {
+  if (typeof required === 'string') return required;
+  if (!isPlainObject(required)) return null;
+  if (typeof required.decisionId === 'string') return required.decisionId;
+  if (typeof required.id === 'string') return required.id;
+  return null;
+}
+
+function latestResolution(events, decisionId) {
+  let latest = null;
   for (const event of events) {
     if (event.type !== 'decision.resolved' || !isPlainObject(event.data)) continue;
-    const decisionId = event.data.decisionId ?? event.data.id;
-    if (typeof decisionId === 'string') resolved.add(decisionId);
+    const eventDecisionId = event.data.decisionId ?? event.data.id;
+    if (eventDecisionId !== decisionId) continue;
+    latest = event;
   }
-  const pending = new Set(Array.isArray(production.pendingDecisionIds) ? production.pendingDecisionIds : []);
+  return latest;
+}
+
+/**
+ * A required decision is met only when the latest `decision.resolved` event for
+ * its id carries an approving choice. A later rejection supersedes an earlier
+ * approval, a resolution without an option is not an approval, and a decision
+ * still listed on the production snapshot is open. Requirements may name the
+ * exact `optionId`, an `approveOptionIds` allow-list, or rely on the default
+ * rule that refuses the closed rejecting vocabulary.
+ */
+export function decisionApproved(events, production, required) {
+  const decisionId = decisionIdOf(required);
+  if (!decisionId) return false;
+  const pending = new Set(
+    Array.isArray(production?.pendingDecisionIds) ? production.pendingDecisionIds : [],
+  );
+  if (pending.has(decisionId)) return false;
+  if (!Array.isArray(events)) return false;
+  const event = latestResolution(events, decisionId);
+  if (!event) return false;
+  const data = event.data;
+  if (data.status === 'rejected') return false;
+  if (typeof data.optionId !== 'string' || data.optionId.length === 0) return false;
+  if (isPlainObject(required)) {
+    if (typeof required.optionId === 'string') return data.optionId === required.optionId;
+    if (Array.isArray(required.approveOptionIds)) {
+      return required.approveOptionIds.includes(data.optionId);
+    }
+  }
+  return !REJECTING_OPTION_IDS.includes(data.optionId);
+}
+
+function decisionsSatisfied(events, production, plan) {
   for (const required of plan.requiredDecisions ?? []) {
     if (typeof required === 'string') {
-      if (!resolved.has(required) || pending.has(required)) return false;
+      if (!decisionApproved(events, production, required)) return false;
       continue;
     }
     if (!isPlainObject(required)) return false;
-    const decisionId = typeof required.decisionId === 'string'
-      ? required.decisionId
-      : (typeof required.id === 'string' ? required.id : null);
+    const decisionId = decisionIdOf(required);
     if (decisionId) {
-      if (!resolved.has(decisionId) || pending.has(decisionId)) return false;
+      if (!decisionApproved(events, production, required)) return false;
       continue;
     }
     if (required.kind === 'action_spend') continue;
