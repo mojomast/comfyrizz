@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 8129a2769f766a5eb4b17962ef6427af83c117876b202ce7299d7243642bd4c6
+// Schema sha256: 8b7068f63227ec8d86aa124efe1fda38ed12b90477c7f603d666e84a426704e9
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -868,6 +868,17 @@ export interface FastH3Direction {
   camera: string;
   soundscape: string;
   characterCount: number;
+  /**
+   * Optional prompt voice on FastH3 direction. Prompt mode gives MiniMax H3 a text voice description
+   * instead of a voice clip (no-clip mode); clip mode is the default behaviour and equals an absent
+   * voice; the description is fictional-only, never a real person (validated server side in
+   * characters/voice.mjs).
+   */
+  voice?: {
+    mode: "clip" | "prompt";
+    description?: string;
+    seed?: number;
+    };
   slotSeconds?: number;
   reactionSeconds?: number;
   dialogue?: {

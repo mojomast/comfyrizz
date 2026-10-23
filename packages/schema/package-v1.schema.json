@@ -1950,6 +1950,20 @@
         "camera": {"type": "string", "minLength": 1, "maxLength": 2000},
         "soundscape": {"type": "string", "minLength": 1, "maxLength": 2000},
         "characterCount": {"type": "integer", "minimum": 0, "maximum": 100},
+        "voice": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional prompt voice on FastH3 direction. Prompt mode gives MiniMax H3 a text voice description instead of a voice clip (no-clip mode); clip mode is the default behaviour and equals an absent voice; the description is fictional-only, never a real person (validated server side in characters/voice.mjs).",
+          "required": ["mode"],
+          "properties": {
+            "mode": {"type": "string", "enum": ["clip", "prompt"]},
+            "description": {"type": "string", "minLength": 1, "maxLength": 300},
+            "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+          },
+          "if": {"properties": {"mode": {"const": "prompt"}}, "required": ["mode"]},
+          "then": {"properties": {"description": {}, "seed": {}}, "required": ["description", "seed"]},
+          "else": {"not": {"anyOf": [{"required": ["description"]}, {"required": ["seed"]}]}}
+        },
         "slotSeconds": {"type": "number", "exclusiveMinimum": 0.2, "maximum": 16},
         "reactionSeconds": {"type": "number", "minimum": 0, "maximum": 15},
         "dialogue": {
