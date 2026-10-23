@@ -323,16 +323,8 @@ export class AuditionPanelController {
     };
   }
 
-  snapshot(): AuditionPanelState {
-    return this.getState();
-  }
-
   render(): string {
     return renderAuditionPanel(this.getState());
-  }
-
-  toHTML(): string {
-    return this.render();
   }
 
   notify(): void {
@@ -506,7 +498,9 @@ export class AuditionPanelController {
       return this.getState();
     }
     if (row.busy) return this.getState();
-    if (!row.engine && !row.voice) {
+    if (row.engine !== 'kokoro' || !row.voice) {
+      // Q4: the speaking fallback is Kokoro only; a Qwen3-TTS or voiceless
+      // candidate is never saved as the character's voice.
       this.error = 'This candidate has no Kokoro voice to save.';
       this.notify();
       return this.getState();
@@ -539,6 +533,10 @@ export class AuditionPanelController {
         { voice },
         { revision: this.revision, ...(this.options.signal ? { signal: this.options.signal } : {}) },
       );
+      // One voice per character: the previously selected row goes back to pending.
+      for (const other of this.rows) {
+        if (other !== row && other.decision === 'selected') other.decision = 'pending';
+      }
       row.decision = 'selected';
       row.reason = '';
       this.selectedId = row.candidateId;

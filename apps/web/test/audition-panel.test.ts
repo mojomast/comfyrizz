@@ -481,7 +481,7 @@ test('update sends the CAS revision header and stays backwards compatible', asyn
   await api.update('chr_0123456789abcdef', { voice: { engine: 'kokoro', voice: 'af_bella' } }, { revision: 4 });
   const headers = calls[0].init.headers;
   assert.equal(headers['if-match'], '4');
-  assert.equal(headers['x-character-revision'], '4');
+  assert.equal(headers['x-character-revision'], undefined, 'one CAS header, no alias');
 
   await api.update('chr_0123456789abcdef', { summary: 'plain' });
   assert.equal(calls[1].init.headers['if-match'], undefined);
@@ -538,4 +538,36 @@ test('renderAuditionPanel accepts controller state without a DOM', () => {
   assert.match(html, /Bella/);
   assert.match(html, /data-candidate-id="b"/);
   assert.equal(panel instanceof AuditionPanelController, true);
+});
+
+test('IP46 review fix-up: one selected row, Kokoro only, and the voice path is never sniffed from a URL', async () => {
+  const saved = [];
+  const api = { update: async (id, patch) => { saved.push(patch); return character({ revision: 5 }); } };
+  const panel = createAuditionPanel({
+    api,
+    character: character(),
+    candidates: [
+      { candidateId: 'a', engine: 'kokoro', voice: 'af_heart' },
+      { candidateId: 'b', engine: 'kokoro', voice: 'af_bella' },
+      { candidateId: 'q', engine: 'qwen3-tts', voice: 'Ryan' },
+    ],
+  });
+  await panel.select({ candidateId: 'a' });
+  const state = await panel.select({ candidateId: 'b' });
+  assert.deepEqual(state.rows.map(row => [row.candidateId, row.decision]), [['a', 'pending'], ['b', 'selected'], ['q', 'pending']]);
+  const qwen = await panel.select({ candidateId: 'q' });
+  assert.equal(saved.length, 2, 'a Qwen3-TTS candidate is never saved');
+  assert.equal(qwen.selectedId, 'b');
+  assert.match(qwen.error, /Kokoro/);
+  assert.equal(panel.snapshot, undefined);
+  assert.equal(panel.toHTML, undefined);
+
+  const sniffed = createCharacterApi({
+    apiFetch: async () => new Response(JSON.stringify({ ok: true, url: '/api/media/abc', file: 'x.wav' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  });
+  const outcome = await sniffed.requestAudition({ characterId: 'chr_0123456789abcdef' });
+  assert.equal(outcome.voicePath, 'unknown');
 });

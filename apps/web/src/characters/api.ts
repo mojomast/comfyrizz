@@ -338,17 +338,10 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function serverVoicePath(
-  record: Record<string, unknown>,
-  status: number,
-  ok: boolean,
-): AuditionVoicePath {
+function serverVoicePath(record: Record<string, unknown>): AuditionVoicePath {
   if (record.voicePath === 'native' || record.voicePath === 'kokoro') return record.voicePath;
   if (record.code === 'AUDITION_NATIVE_VOICE') return 'native';
-  if (ok && status >= 200 && status < 300
-    && (typeof record.file === 'string' || typeof record.url === 'string')) {
-    return 'kokoro';
-  }
+  // Never inferred from a URL or file: the server names the path it used.
   return 'unknown';
 }
 
@@ -370,7 +363,7 @@ function normalizeAuditionResponse(
     status,
     code,
     message,
-    voicePath: serverVoicePath(body, status, ok),
+    voicePath: serverVoicePath(body),
   };
   const target = outcome as unknown as Record<string, unknown>;
   for (const field of [
@@ -445,7 +438,6 @@ export function createCharacterApi(options: { apiFetch: CharacterApiFetch }) {
       init.headers = {
         ...(init.headers as Record<string, string>),
         'if-match': String(revision),
-        'x-character-revision': String(revision),
       };
     }
     const response = await apiFetch(characterPath(id), init);
