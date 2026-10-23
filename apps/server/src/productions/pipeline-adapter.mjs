@@ -435,6 +435,21 @@ export function createPipelineAdapter(options = {}) {
         run: clone(run),
       };
     }
+    if (action.state === 'dispatching') {
+      // Review fix-up: a dispatch intent with no run yet may be an in-flight
+      // controller.start. Claiming 'cancelled' here would let that run proceed
+      // unattended; record the request and let admit cancel the run it gets.
+      const requested = applyActionState(productionId, action, 'cancel_requested', {}, 'cancel_during_dispatch');
+      return {
+        cancelled: true,
+        started: false,
+        changed: requested.changed,
+        status: 'cancel_requested',
+        actionState: requested.action.state,
+        action: requested.action,
+        run: null,
+      };
+    }
     const applied = applyActionState(productionId, action, 'cancelled', {}, 'cancelled_before_start');
     return {
       cancelled: true,
@@ -448,6 +463,20 @@ export function createPipelineAdapter(options = {}) {
   }
 
   /**
+   * Review fix-up: controller.start awaits, so the action may have changed
+   * meanwhile (a cancel request). The run is journaled against the fresh
+   * durable action; a cancel request cancels the run that was just started.
+   * Returns null when the action is still the dispatching copy we wrote.
+   */
+  function journalStartedRun(productionId, current, run, reason) {
+    const fresh = readAction(productionId, current.id) ?? current;
+    if (fresh.state === current.state && (fresh.runId ?? null) === (current.runId ?? null)) return null;
+    if (fresh.state === 'cancel_requested') controller.cancel(run.runId);
+    const applied = applyActionState(productionId, fresh, fresh.state, { runId: run.runId }, `${reason}:${fresh.state}`);
+    return applied;
+  }
+
+  /**
    * Admit one action into the pipeline.
    *
    * Order is the safety property: a deterministic dispatching attempt is
@@ -455,7 +484,22 @@ export function createPipelineAdapter(options = {}) {
    * already attributed to the action. Paused or archived productions write
    * nothing.
    */
-  async function admit({ productionId, actionId, pkg, input, sourceDir } = {}) {
+  // Review fix-up: admit/observe for one action run one at a time in this
+  // process. Without it a second admit during an in-flight start saw
+  // 'dispatching' with no run yet, journaled submission_unknown, and the first
+  // admit then overwrote it with running (an illegal transition).
+  const actionLocks = new Map();
+  function serialized(args, fn) {
+    const key = `${args?.productionId}\u0000${args?.actionId}`;
+    const previous = actionLocks.get(key) ?? Promise.resolve();
+    const result = previous.then(() => fn(args));
+    const tail = result.then(() => {}, () => {});
+    actionLocks.set(key, tail);
+    tail.then(() => { if (actionLocks.get(key) === tail) actionLocks.delete(key); });
+    return result;
+  }
+
+  async function admitOnce({ productionId, actionId, pkg, input, sourceDir } = {}) {
     requireIdentifier(productionId, 'productionId');
     requireIdentifier(actionId, 'actionId');
     const production = store.read(productionId);
@@ -585,7 +629,7 @@ export function createPipelineAdapter(options = {}) {
     } catch (error) {
       const found = runForAction(productionId, actionId, current);
       if (found) {
-        const applied = applyActionState(
+        const applied = journalStartedRun(productionId, current, found, 'adopt_after_error') ?? applyActionState(
           productionId,
           current,
           'running',
@@ -649,7 +693,7 @@ export function createPipelineAdapter(options = {}) {
       );
     }
 
-    const running = applyActionState(
+    const running = journalStartedRun(productionId, current, startedRun, 'started') ?? applyActionState(
       productionId,
       current,
       'running',
@@ -673,7 +717,7 @@ export function createPipelineAdapter(options = {}) {
    * written at most once, so a polling caller or a replay cannot append the
    * same transition repeatedly.
    */
-  async function observe({ productionId, actionId, run } = {}) {
+  async function observeOnce({ productionId, actionId, run } = {}) {
     requireIdentifier(productionId, 'productionId');
     requireIdentifier(actionId, 'actionId');
     const production = store.read(productionId);
@@ -712,8 +756,8 @@ export function createPipelineAdapter(options = {}) {
   }
 
   return Object.freeze({
-    admit,
-    observe,
+    admit: (args = {}) => serialized(args, admitOnce),
+    observe: (args = {}) => serialized(args, observeOnce),
     cancel: ({ productionId, actionId } = {}) => {
       requireIdentifier(productionId, 'productionId');
       requireIdentifier(actionId, 'actionId');

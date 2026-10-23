@@ -550,3 +550,54 @@ function readdirOrEmpty(path) {
     return [];
   }
 }
+
+function slowController() {
+  const controller = fakeController();
+  const start = controller.start;
+  let release;
+  controller.gate = new Promise((resolve) => { release = resolve; });
+  controller.release = () => release();
+  controller.start = async (...args) => {
+    await controller.gate;
+    return start(...args);
+  };
+  return controller;
+}
+
+test('review fix-up: a second admit during an in-flight start waits, adopts and never journals submission_unknown', async (t) => {
+  const { store } = seed(t);
+  const controller = slowController();
+  const adapter = createPipelineAdapter({ store, controller });
+  const args = { productionId: PRODUCTION_ID, actionId: ACTION_ID, pkg: PACKAGE, input: INPUT, sourceDir: '.' };
+  const first = adapter.admit(args);
+  const second = adapter.admit(args);
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(controller.starts.length, 1);
+  assert.equal(a.started, true);
+  assert.equal(b.started, false);
+  assert.equal(b.duplicate, true);
+  assert.deepEqual(actionEvents(store, 'submission_unknown'), []);
+  assert.equal(currentAction(store).state, 'running');
+  assert.equal(currentAction(store).runId, 'pipe_fake_1');
+});
+
+test('review fix-up: a cancel during an in-flight start cancels the run it produced', async (t) => {
+  const { store } = seed(t);
+  const controller = slowController();
+  const adapter = createPipelineAdapter({ store, controller });
+  const pending = adapter.admit({ productionId: PRODUCTION_ID, actionId: ACTION_ID, pkg: PACKAGE, input: INPUT, sourceDir: '.' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(currentAction(store).state, 'dispatching');
+  const cancelled = adapter.cancel({ productionId: PRODUCTION_ID, actionId: ACTION_ID });
+  assert.equal(cancelled.status, 'cancel_requested', 'an in-flight dispatch is never claimed cancelled');
+  controller.release();
+  await pending;
+  assert.equal(controller.starts.length, 1);
+  assert.deepEqual(controller.cancellations, ['pipe_fake_1']);
+  const action = currentAction(store);
+  assert.equal(action.state, 'cancel_requested');
+  assert.equal(action.runId, 'pipe_fake_1');
+  assert.deepEqual(actionEvents(store, 'running'), []);
+});
