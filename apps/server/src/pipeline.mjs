@@ -9,7 +9,7 @@ import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
 import { planPipeline } from './pipeline-contract.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
-// PO-4: reconciliation stops Colab runtimes one at a time; without a deadline a CLI that never answers
+// PO-4: reconciliation stops Google Colab runtimes one at a time; without a deadline a CLI that never answers
 // leaves the run permanently blocking every new pipeline, with no way to cancel it.
 const RECONCILE_TIMEOUT_MS = 360000;
 // PO-4 review: after a reconcile timeout the worker is asked to stop, and it may be mid-teardown. A
@@ -254,7 +254,7 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     // RL10c: a finished, failed or cancelled run gives the shared slot back.
     if (TERMINAL.has(record.status)) releaseSlot(record.runId);
   }
-  async function start(pkg, input, sourceDir) {
+  async function start(pkg, input, sourceDir, options = {}) {
     if (starting || active() || isBusy()) {
       // RL10c: the run that already owns the machine is named, so the caller knows who holds it.
       const holder = slotHolder();
@@ -264,6 +264,14 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     if (unresolved) return { status: 409, error: 'runtime shutdown needs reconciliation', runId: unresolved.runId, action: `/api/pipeline/${unresolved.runId}/reconcile` };
     starting = true;
     const runId = `pipe_${randomUUID().replaceAll('-', '')}`;
+    // IP22: a production action owns the run that was dispatched for it. The
+    // origin is recorded before the worker is launched, so a restart can
+    // attribute the interrupted run back to the same approved slot instead of
+    // submitting a second paid run.
+    const origin = options?.origin && typeof options.origin.productionId === 'string'
+      && typeof options.origin.actionId === 'string'
+      ? { productionId: options.origin.productionId, actionId: options.origin.actionId }
+      : null;
     let live = false;
     try {
       // RL10c: the shared slot decides admission before the plan is even looked at, so a machine
@@ -277,7 +285,7 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
       mkdirSync(workDir, { recursive: true });
       await stageInputs(pkg, sourceDir, workDir);
       writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg, null, 2));
-      const record = { version: 1, runId, packageId: pkg.id, baseRevision: pkg.revision, inputHash: plan.inputHash, planHash: plan.planHash, status: 'running', sequence: 0, startedAt: new Date().toISOString(), updatedAt: null, finishedAt: null, currentStage: null, stages: plan.stages, budget: plan.budget, runtimes: {}, tasks: {}, warnings: [], error: null, result: null, reconcile: null };
+      const record = { version: 1, runId, packageId: pkg.id, baseRevision: pkg.revision, origin, inputHash: plan.inputHash, planHash: plan.planHash, status: 'running', sequence: 0, startedAt: new Date().toISOString(), updatedAt: null, finishedAt: null, currentStage: null, stages: plan.stages, budget: plan.budget, runtimes: {}, tasks: {}, warnings: [], error: null, result: null, reconcile: null };
       records.set(runId, record);
       const spec = join(runDir, 'spec.json');
       writeFileSync(spec, JSON.stringify({ runId, runDir, workDir, plan }), { mode: 0o600 });
@@ -374,9 +382,28 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     }
     return { status: 202, run: publicRecord(record) };
   }
+  /**
+   * IP22: the newest run dispatched for one production action. Attribution is
+   * the persisted `origin` only; a run without it belongs to the legacy
+   * package path and is never adopted by an action.
+   */
+  function forAction(productionId, actionId) {
+    if (typeof productionId !== 'string' || productionId === ''
+      || typeof actionId !== 'string' || actionId === '') return null;
+    let found = null;
+    for (const record of records.values()) {
+      if (record.origin?.productionId !== productionId || record.origin?.actionId !== actionId) continue;
+      if (!found) { found = record; continue; }
+      const left = `${record.startedAt ?? ''}\u0000${record.runId}`;
+      const right = `${found.startedAt ?? ''}\u0000${found.runId}`;
+      if (left > right) found = record;
+    }
+    return publicRecord(found);
+  }
   return {
     plan: (pkg, input) => planPipeline(pkg, input, { env }), start, cancel, reconcile,
     get: runId => publicRecord(records.get(runId)),
+    forAction,
     list: () => [...records.values()].map(publicRecord),
     active: () => starting || Boolean(active()),
     directory: runId => records.has(runId) ? join(dir, runId) : null,
