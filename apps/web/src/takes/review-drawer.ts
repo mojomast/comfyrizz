@@ -23,6 +23,7 @@ import {
   type TakesResponse,
 } from './api.ts';
 import { approveSharedAsset, approvedPillLabel, summarizeGate } from './render-bar.ts';
+import { createThumbsClient, type ThumbsClient } from '../thumbs/client.ts';
 
 export const REVIEW_FILTERS = ['needs', 'stale', 'approved', 'failed'] as const;
 
@@ -201,6 +202,8 @@ export interface ReviewThumbApi {
 export interface ReviewThumbCacheOptions {
   packageId: string | (() => string);
   api: ReviewThumbApi;
+  /** The thumbs client that turns a video take's poster key into a ticket. */
+  thumbsClient?: ThumbsClient | null;
 }
 
 const EMPTY_THUMB_RESULT: ReviewThumbResult = REVIEW_THUMB_FALLBACK;
@@ -214,6 +217,7 @@ const EMPTY_THUMB_RESULT: ReviewThumbResult = REVIEW_THUMB_FALLBACK;
 export class ReviewThumbCache {
   private readonly packageIdSource: string | (() => string);
   private readonly api: ReviewThumbApi;
+  private readonly thumbsClient: ThumbsClient | null;
   private readonly results = new Map<string, ReviewThumbResult>();
   private readonly pending = new Map<string, Promise<ReviewThumbResult>>();
   private readonly ticketUrls = new Map<string, string>();
@@ -221,6 +225,7 @@ export class ReviewThumbCache {
   constructor(options: ReviewThumbCacheOptions) {
     this.packageIdSource = options.packageId;
     this.api = options.api;
+    this.thumbsClient = options.thumbsClient ?? null;
   }
 
   get size(): number {
@@ -284,10 +289,25 @@ export class ReviewThumbCache {
     if (!take) return EMPTY_THUMB_RESULT;
 
     if (!takeLooksLikeImage(take)) {
-      const poster = takePosterMediaUrl(take);
-      return poster
-        ? { takeId: take.takeId, url: poster, source: 'poster' }
-        : EMPTY_THUMB_RESULT;
+      const posterRef = takePosterMediaUrl(take);
+      if (!posterRef) return EMPTY_THUMB_RESULT;
+      if (isMediaTicketUrl(posterRef)) {
+        return { takeId: take.takeId, url: posterRef.trim(), source: 'poster' };
+      }
+      if (!this.thumbsClient) return EMPTY_THUMB_RESULT;
+      try {
+        const poster = await this.thumbsClient.load({
+          packageId,
+          ref: posterRef,
+          kind: 'poster',
+        });
+        if (poster.status !== 'ready' || !isMediaTicketUrl(poster.ticketUrl)) {
+          return EMPTY_THUMB_RESULT;
+        }
+        return { takeId: take.takeId, url: poster.ticketUrl.trim(), source: 'poster' };
+      } catch {
+        return EMPTY_THUMB_RESULT;
+      }
     }
 
     const ticketKey = this.ticketKey(packageId, take.takeId);
@@ -337,6 +357,12 @@ export type ReviewActionResult = boolean | void | ReviewActionFailure;
 
 export type ReviewClipAction = (clip: ClipSummary) => ReviewActionResult | Promise<ReviewActionResult>;
 
+/** The exact clip and take a review row opens in the asset viewer. */
+export interface ReviewViewerTarget {
+  clipId: string;
+  takeId: string;
+}
+
 export interface ReviewDrawerModelOptions {
   clips?: readonly ClipSummary[];
   gate?: ReviewGateLike | null;
@@ -351,6 +377,8 @@ export interface ReviewDrawerModelOptions {
   onRedo?: ReviewClipAction;
   onSelect?: (clipId: string) => void;
   onOpenTakes?: (clipId: string) => void;
+  /** Opens the viewer at one take; opening never selects, approves or spends. */
+  onOpenViewer?: (target: ReviewViewerTarget) => void;
   /** IP31: production command binding for Redo, select and reject. */
   production?: ProductionReviewApi | null;
   /** An already-proposed plan card to render immediately. */
@@ -380,6 +408,8 @@ export interface ReviewDrawerMountOptions extends ReviewDrawerModelOptions {
   id?: string;
   /** The takes client for row thumbnails. Defaults to the shell's `apiFetch`. */
   takesApi?: ReviewThumbApi | null;
+  /** The poster client for video takes. Defaults to the shell's `apiFetch`. */
+  thumbsClient?: ThumbsClient | null;
   /** Usually `?package=`; a getter keeps a re-opened project current. */
   packageId?: string | (() => string);
   onOpenChange?: (open: boolean) => void;
@@ -591,6 +621,8 @@ export function renderReviewRows(
     const shared = row.sharedSceneCount > 1
       ? `<span class="badge review-shared" data-tone="info" data-review-shared="${row.sharedSceneCount}" title="${escapeReviewHtml(`${row.assetId} is used by ${row.sharedSceneCount} scenes`)}">shared · ${row.sharedSceneCount} scenes</span>`
       : '';
+    const takeId = textOf(row.clip.selected);
+    const viewer = `<button type="button" class="btn btn-ghost btn-sm review-open-viewer" data-review-open-viewer data-review-take="${escapeReviewHtml(takeId)}" aria-label="${escapeReviewHtml(`Open ${row.clipId} in viewer`)}"${takeId ? '' : ' disabled'}>Open in viewer</button>`;
     return `<div class="review-row" id="${rowId(index)}" role="option" tabindex="${active ? '0' : '-1'}" aria-selected="${active ? 'true' : 'false'}" data-review-clip="${escapeReviewHtml(row.clipId)}" data-review-status="${row.group}" data-tone="${row.tone}"${blocking} title="${escapeReviewHtml(row.title)}">
       <span class="review-thumb" aria-hidden="true" data-review-thumb><span data-review-thumb-fallback>${escapeReviewHtml(row.kind)}</span></span>
       <span class="review-row-main">
@@ -601,6 +633,7 @@ export function renderReviewRows(
         </span>
       </span>
       ${shared}
+      ${viewer}
       <span class="review-status review-status-${row.group} badge badge-${row.tone}" data-status="${row.group}">${escapeReviewHtml(row.statusLabel)}</span>
     </div>`;
   }).join('');
@@ -751,6 +784,16 @@ export class ReviewDrawerModel {
     this.activeId = clipId;
     this.notify();
     if (focus) this.options.onSelect?.(clipId);
+  }
+
+  /** Opening the viewer only navigates; it never selects or writes a take. */
+  openViewer(clipId = this.activeId, takeId?: string): boolean {
+    const clip = this.clips.find(item => item.clipId === clipId);
+    if (!clip) return false;
+    const resolved = textOf(takeId) || this.selectedTakeId(clip);
+    if (!resolved || !this.options.onOpenViewer) return false;
+    this.options.onOpenViewer({ clipId: clip.clipId, takeId: resolved });
+    return true;
   }
 
   moveActive(delta: number): boolean {
@@ -1387,11 +1430,15 @@ export function mountReviewDrawer(
   let destroyed = false;
   let thumbToken = 0;
 
+  const thumbsClient = options.thumbsClient === null
+    ? null
+    : options.thumbsClient ?? createThumbsClient({ fetch: apiFetch });
   const thumbs = options.takesApi === null
     ? null
     : new ReviewThumbCache({
         packageId: options.packageId ?? currentReviewPackageId,
         api: options.takesApi ?? createTakesApi({ apiFetch }),
+        thumbsClient,
       });
 
   function syncRowHeight(): void {
@@ -1476,6 +1523,12 @@ export function mountReviewDrawer(
     });
     thumb.setAttribute('data-has-thumb', 'true');
     if (result.takeId) thumb.setAttribute('data-thumb-take', result.takeId);
+    const open = thumb.closest<HTMLElement>('[data-review-clip]')
+      ?.querySelector<HTMLButtonElement>('[data-review-open-viewer]');
+    if (open && result.takeId) {
+      open.dataset.reviewTake = result.takeId;
+      open.disabled = false;
+    }
     thumb.appendChild(img);
   }
 
@@ -1632,6 +1685,16 @@ export function mountReviewDrawer(
       focusActive();
       return;
     }
+    const viewer = target.closest<HTMLButtonElement>('[data-review-open-viewer]');
+    if (viewer) {
+      if (viewer.disabled) return;
+      const clipId = viewer.dataset.reviewClip
+        || viewer.closest<HTMLElement>('[data-review-clip]')?.dataset.reviewClip
+        || '';
+      const takeId = viewer.dataset.reviewTake || '';
+      if (clipId) model.openViewer(clipId, takeId || undefined);
+      return;
+    }
     const row = target.closest<HTMLElement>('[data-review-clip]');
     if (row?.dataset.reviewClip) {
       model.setActive(row.dataset.reviewClip);
@@ -1678,6 +1741,7 @@ export function mountReviewDrawer(
       close();
       return;
     }
+    if (event.target instanceof Element && event.target.closest('[data-review-open-viewer]')) return;
     if (isEditableElement(event.target)) return;
     const key = event.key.toLowerCase();
     if (!['j', 'k', 'a', 'd', 'arrowup', 'arrowdown', 'enter'].includes(key)) return;
