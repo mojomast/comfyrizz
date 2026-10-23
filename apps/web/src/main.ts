@@ -15,6 +15,7 @@ import { createEasyApi } from './easy/api.ts';
 import { defaultEasyState } from './easy/store.ts';
 import type { EasyState } from './easy/types.ts';
 import { mountInspectorGenerate } from './editor/inspector/generate.ts';
+import { mountProductionTab } from './editor/inspector/production.ts';
 import { mountSettingsDialog } from './settings/dialog.ts';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
@@ -267,6 +268,7 @@ const takeUrlCache = new Map<string, string>();
 let previewClipMap: Record<string, PreviewClip> = {};
 let previewAb: { takeId: string; clipId: string; assetId: string } | null = null;
 let scriptPanel: ScriptAudioPanelHandle | null = null;
+let productionTab: ReturnType<typeof mountProductionTab> | null = null;
 let renderBar: RenderBarHandle | null = null;
 let clipsRequest = 0;
 
@@ -347,6 +349,55 @@ async function hydrateTakePreview(clips: readonly ClipSummary[], request: number
   renderAssets();
 }
 
+function mountProductionInspector(root: HTMLElement): void {
+  const tablist = root.querySelector<HTMLElement>('[data-testid="inspector-tabs"]');
+  if (!tablist || tablist.querySelector('#sa-tab-production')) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.id = 'sa-tab-production';
+  button.className = 'tab';
+  button.setAttribute('role', 'tab');
+  button.setAttribute('aria-controls', 'sa-section-production');
+  button.setAttribute('aria-selected', 'false');
+  button.tabIndex = -1;
+  button.dataset.inspectorTab = 'production';
+  button.textContent = 'Production';
+  tablist.append(button);
+
+  const panel = document.createElement('div');
+  panel.id = 'sa-section-production';
+  panel.className = 'tab-panel';
+  panel.setAttribute('role', 'tabpanel');
+  panel.setAttribute('aria-labelledby', 'sa-tab-production');
+  panel.dataset.inspectorPanel = 'production';
+  panel.hidden = true;
+  root.append(panel);
+
+  const host = document.createElement('div');
+  panel.append(host);
+  const productionId = lookupBoundProductionId();
+  if (productionId) {
+    productionTab = mountProductionTab(host, {
+      productionId,
+      clips: clipStore.all(),
+      fetchImpl: (url, init) => apiFetch(url, init ?? {}),
+    });
+  } else {
+    host.innerHTML = '<section class="production-tab" data-production-tab aria-label="Production"><p class="hint">No production yet.</p></section>';
+  }
+
+  button.addEventListener('click', () => {
+    tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]').forEach((tab) => {
+      const selected = tab === button;
+      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.tabIndex = selected ? 0 : -1;
+    });
+    root.querySelectorAll<HTMLElement>('[data-inspector-panel]').forEach((section) => {
+      section.hidden = section !== panel;
+    });
+  });
+}
+
 /** Refresh the shared clips map from the take routes (called on load and clip.* SSE). */
 async function refreshClips(): Promise<void> {
   if (!token) return;
@@ -361,6 +412,7 @@ async function refreshClips(): Promise<void> {
     }
     clipStore.replace(result.clips, { packageId, revision: result.revision });
     scriptPanel?.setClips(result.clips);
+    productionTab?.setClips(result.clips);
     renderBar?.update();
     await hydrateTakePreview(result.clips, request);
   } catch (error) {
@@ -905,19 +957,19 @@ async function downloadWorkflow(assetId: string, format: 'api' | 'readme', varia
 }
 
 /**
- * DN05: the right rail is one APG tablist (Run / Activity / Assets / GPU queue).
+ * DN05: the right rail is one APG tablist (Activity / Files / Jobs).
  * Filters and windows only change what is rendered; the data model and the
  * package stay untouched, so switching tabs never clears an input.
  */
-type RailTab = 'run' | 'activity' | 'assets' | 'gpu';
+type RailTab = 'activity' | 'assets' | 'gpu';
 type RunFilter = 'all' | 'errors' | 'phases';
-const RAIL_TABS: readonly RailTab[] = ['run', 'activity', 'assets', 'gpu'];
+const RAIL_TABS: readonly RailTab[] = ['activity', 'assets', 'gpu'];
 const RUN_FILTERS: readonly RunFilter[] = ['all', 'errors', 'phases'];
 const ASSET_PAGE_SIZE = 30;
 const ACTIVITY_PAGE_SIZE = 50;
 const railState = {
   bound: false,
-  tab: 'run' as RailTab,
+  tab: 'activity' as RailTab,
   runFilter: 'all' as RunFilter,
   assetType: 'all',
   assetLicence: 'all',
@@ -2309,6 +2361,7 @@ function init(opened: OpenedProject): void {
       }),
       onApprove: () => { void approveFromGenerateTab(); },
     });
+    mountProductionInspector(scriptHost);
   }
   if (timelineHost) {
     editorApi = mountSceneTimeline(timelineHost, editorStore, {
