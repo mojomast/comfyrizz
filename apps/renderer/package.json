@@ -16,7 +16,7 @@
     "render:package": "node scripts/render-package-example.mjs",
     "render:showcase": "node scripts/render-showcase.mjs",
     "render:recipes": "node scripts/render-recipes.mjs",
-    "pretest": "pnpm --filter @comfyrizz/planner build && pnpm --filter @comfyrizz/vector build",
+    "pretest": "pnpm --filter @comfyrizz/planner build && pnpm --filter @comfyrizz/vector build && pnpm --filter @comfyrizz/agent build",
     "test": "node --test test/*.test.mjs",
     "render:narrated": "node scripts/render-narrated.mjs",
     "layout:check": "node --test test/layout.test.mjs"
