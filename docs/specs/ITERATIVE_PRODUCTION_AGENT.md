@@ -259,3 +259,31 @@ Phase P0 removes hazards before any paid autonomy:
 
 Only after P0 may the coordinator dispatch paid work. Before P0 the agent may
 propose plans and nothing else.
+
+## 12. Iteration levels
+
+A production stores one iteration policy (`comfyrizz.iteration-policy/v1`) as an
+`iteration.set` event. The level is `draft`, `balanced`, `director`, or
+`custom`. Presets are frozen. Any edit, including a per-shot override, derives
+`custom`. The user guide is [ITERATION_LEVELS.md](../ITERATION_LEVELS.md).
+
+- **Choice before spend.** `plan.approve` for a plan with a paid slot returns
+  `409 ITERATION_LEVEL_REQUIRED` until `iteration.set` exists. A paid slot has
+  `upperBound > 0`, except `kind: audition` with `engine: kokoro`. Choosing a
+  level writes only `iteration.set`. It never sends `plan.approve` and never
+  carries an actor from the client.
+- **Estimates stay advisory.** `estimateIteration` returns low, expected, and
+  high ranges. Copy says "estimate; other sessions may be running", and an
+  unmeasured rate says "unmeasured estimate". The plan's `reservationCeiling`
+  remains the binding number. No cap does not block. The UI names the service
+  Google Colab in full.
+- **The agent obeys the level.** `production_read` exposes the effective policy
+  per shot. A proposal past the policy's takes, rounds, or auditions is
+  `ITERATION_EXCEEDED`. `iteration.set` is in `FORBIDDEN_AGENT_COMMANDS`.
+- **Auto-pick is not spend.** When the user set a stage to `auto`, a landed
+  take may be selected with actor `system` and reason `iteration:auto-pick`.
+  That path never resolves `final_delivery` or `action_spend`.
+- **Mid-production change.** A later `iteration.set` applies only to shots that
+  are not rendered and not in flight. A locked shot returns
+  `ITERATION_SHOT_LOCKED` and keeps its current stages. An already proposed
+  plan is not mutated; the plan card shows "level changed — re-propose".
