@@ -76,3 +76,19 @@ test('there is no Express button and Skip questions is a labelled checkbox', asy
   await expect(skip).toHaveCount(1);
   await expect(skip).not.toBeChecked();
 });
+
+test('presenter quick chips and Regenerate media are gone, and scene chip ids stay', async () => {
+  expect(source).not.toContain('WEB_PRESENTER_PRESETS');
+  expect(source).not.toContain('Intro/outro');
+  expect(source).not.toContain('data-presenter-preset');
+  expect(source).not.toContain('>Regenerate media</button>');
+  expect(source).toContain('>Try again</button>');
+  expect(source).toContain("id: 'warmer'");
+  expect(source).toContain("id: 'calmer-motion'");
+  expect(source).toContain("id: 'more-depth'");
+  expect(source).toContain("id: 'less-busy'");
+  expect(source).toContain("label: 'Warmer'");
+  expect(source).toContain("label: 'Calmer'");
+  expect(source).toContain("label: 'More detail'");
+  expect(source).toContain("label: 'Simpler'");
+});

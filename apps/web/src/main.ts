@@ -1044,19 +1044,17 @@ function markDirty(reason: string): void {
   updatePreview(pkg, timeline, generatedAssets);
 }
 
-/** C-pres: the storyboard's presenter toolbar (coverage + quick presets + placement + label). */
+/** C-pres: the storyboard's presenter toolbar (coverage + placement + label). */
 function presenterBar(): string {
   const presenter = (pkg.presenter ?? {}) as { enabled?: boolean; scenes?: unknown; placement?: string; label?: string };
   const coverage = presenter.enabled !== true ? 'none' : presenter.scenes === 'all' ? 'all' : 'bookends';
   const placement = presenter.placement ?? 'pip-br';
   const labelOn = presenter.label !== '';
   const coverageButtons = WEB_PRESENTER_COVERAGES.map(option => `<button type="button" data-presenter-coverage="${option.id}" class="${option.id === coverage ? 'selected' : ''}" title="${esc(option.hint)}">${esc(option.label)}</button>`).join('');
-  const presetButtons = WEB_PRESENTER_PRESETS.map(option => `<button type="button" data-presenter-preset="${option.id}" class="preset-small" title="Rewrite every scene's presenter value">${esc(option.label)}</button>`).join('');
   const placementOptions = WEB_PRESENTER_PLACEMENTS.map(value => `<option value="${value}"${value === placement ? ' selected' : ''}>${esc(value)}</option>`).join('');
   return `<div class="presenter-bar">
     <span class="label">AI presenter</span>
     <div class="presenter-chips">${coverageButtons}</div>
-    <span class="hint">quick:</span><div class="presenter-chips">${presetButtons}</div>
     <label>Placement <select data-presenter-placement>${placementOptions}</select></label>
     <label class="toggle"><input type="checkbox" data-presenter-label${labelOn ? ' checked' : ''} /> “AI presenter” label</label>
     <span class="hint">${presenter.enabled === true ? `on · ${coverage}` : 'off by default'}</span>
@@ -1105,7 +1103,7 @@ function renderStoryboard(): void {
           <option value="split"${scene.presenter === 'split' ? ' selected' : ''}>split (hero only)</option>
         </select>
         <div class="scene-actions">
-          <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Regenerate media</button>
+          <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Try again</button>
         </div>
         <div class="scene-chips">${WEB_SCENE_CHIPS.map(chip => `<button type="button" data-scene-action="chip" data-chip="${esc(chip.id)}" data-scene="${esc(scene.id)}" title="${esc(chip.hint)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${esc(chip.label)}</button>`).join('')}</div>
         ${sceneState.rendering === scene.id && sceneState.log.length > 0 ? `<div class="scene-log">${sceneState.log.slice(-2).map(line => `<div>${esc(line)}</div>`).join('')}</div>` : ''}
@@ -1162,9 +1160,6 @@ function renderStoryboard(): void {
   });
   host.querySelectorAll<HTMLButtonElement>('button[data-presenter-coverage]').forEach(button => {
     button.addEventListener('click', () => void applyPresenterFlow({ coverage: button.dataset.presenterCoverage }, `coverage ${button.dataset.presenterCoverage}`));
-  });
-  host.querySelectorAll<HTMLButtonElement>('button[data-presenter-preset]').forEach(button => {
-    button.addEventListener('click', () => void applyPresenterFlow({ preset: button.dataset.presenterPreset }, `preset ${button.dataset.presenterPreset}`));
   });
   const placement = host.querySelector<HTMLSelectElement>('select[data-presenter-placement]');
   placement?.addEventListener('change', () => void applyPresenterFlow({ placement: placement.value }, `placement ${placement.value}`));
@@ -2182,20 +2177,15 @@ const WEB_ASPECTS = ['16:9', '9:16', '1:1'];
 // R2 step 5: the per-scene fixed edit chips (kept in sync with packages/agent SCENE_CHIPS).
 const WEB_SCENE_CHIPS: { id: string; label: string; hint: string }[] = [
   { id: 'warmer', label: 'Warmer', hint: 'Warm this scene’s palette' },
-  { id: 'calmer-motion', label: 'Calmer motion', hint: 'Soften entrances to a fade' },
-  { id: 'more-depth', label: 'More depth', hint: 'Parallax + z on the overlay' },
-  { id: 'less-busy', label: 'Less busy', hint: 'Trim bullets and overlays' },
+  { id: 'calmer-motion', label: 'Calmer', hint: 'Soften entrances to a fade' },
+  { id: 'more-depth', label: 'More detail', hint: 'Parallax + z on the overlay' },
+  { id: 'less-busy', label: 'Simpler', hint: 'Trim bullets and overlays' },
 ];
 // C-pres: the presenter controls, kept in sync with packages/agent presenter.ts.
 const WEB_PRESENTER_COVERAGES: { id: string; label: string; hint: string }[] = [
   { id: 'none', label: 'None', hint: 'Off by default — most videos have none' },
   { id: 'bookends', label: 'Intro + outro', hint: 'Show the presenter on the first and last scene' },
   { id: 'all', label: 'All scenes', hint: 'Show the presenter on every scene' },
-];
-const WEB_PRESENTER_PRESETS: { id: string; label: string }[] = [
-  { id: 'intro-outro', label: 'Intro/outro' },
-  { id: 'all', label: 'All scenes' },
-  { id: 'none', label: 'None' },
 ];
 const WEB_PRESENTER_PLACEMENTS = ['pip-br', 'pip-bl', 'pip-bc', 'split-left'];
 
