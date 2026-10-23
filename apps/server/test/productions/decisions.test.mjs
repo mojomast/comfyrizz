@@ -358,3 +358,40 @@ test('the old alias exports do not exist', () => {
     assert.equal(decisions[name], undefined, `${name} must not be exported`);
   }
 });
+
+// Review fix-up (box 23:35): a negative reply must never select an
+// affirmative option, and option polarity is never a substring guess.
+test('a bare negative on a single approve option asks instead of approving', () => {
+  const record = decision({ options: [option('approve', 'Approve generation')] });
+  for (const text of ['no', 'nope', 'reject', 'not now', 'cancel']) {
+    const outcome = resolveDecision(input(record, userMessage({ text })));
+    assertClarification(outcome, 'MISSING_OPTION');
+  }
+});
+
+test('"Disapprove" is not an affirmative option', () => {
+  const record = decision({ options: [option('keep', 'Disapprove and keep current'), option('use', 'Use new take')] });
+  assertClarification(resolveDecision(input(record, userMessage({ text: 'yes' }))), 'MISSING_OPTION');
+});
+
+test('a bare yes never selects a lone reject option', () => {
+  const record = decision({ options: [option('reject', 'Reject the take')] });
+  assertClarification(resolveDecision(input(record, userMessage({ text: 'yes' }))), 'MISSING_OPTION');
+});
+
+test('a lookup that returns a different message than the cited id is refused', () => {
+  const record = decision();
+  const calls = [];
+  const resolver = createDecisionResolver({
+    lookupUserMessage: () => userMessage({ id: 'ue_other' }),
+    execute: (command) => calls.push(command),
+  });
+  assertDecisionError(() => resolver.resolve({
+    messageId: 'ue_1',
+    decisions: [record],
+    displayed: displayed(record),
+    productionId: PRODUCTION,
+    expected: { productionRevision: 3 },
+  }), 'NOT_A_USER_MESSAGE', 403);
+  assert.equal(calls.length, 0);
+});

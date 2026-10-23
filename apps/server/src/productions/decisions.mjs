@@ -138,6 +138,18 @@ function clarifyOutcome(code, decision, question, proposalHash) {
   };
 }
 
+const AFFIRMATIVE_OPTION_WORDS = Object.freeze(new Set(['approve', 'accept', 'yes']));
+const NEGATIVE_OPTION_WORDS = Object.freeze(new Set(['reject', 'decline', 'no']));
+
+function optionPolarity(option) {
+  const keys = optionKeys(option).filter((key) => key !== '');
+  const first = (key) => key.split(' ')[0];
+  const affirmative = keys.some((key) => AFFIRMATIVE.has(key) || AFFIRMATIVE_OPTION_WORDS.has(first(key)));
+  const negative = keys.some((key) => NEGATIVE.has(key) || NEGATIVE_OPTION_WORDS.has(first(key)));
+  if (affirmative === negative) return null;
+  return affirmative ? 'affirmative' : 'negative';
+}
+
 function selectOption(decision, reply) {
   const options = Array.isArray(decision.options)
     ? decision.options.filter(isPlainObject)
@@ -158,23 +170,21 @@ function selectOption(decision, reply) {
     return { error: 'UNKNOWN_OPTION' };
   }
 
+  // An option is affirmative or negative only by its whole id/label or its
+  // first word, never by a substring ("Disapprove" is not an approval). A bare
+  // negative never falls back to the only option: "no" must not select it.
   if (AFFIRMATIVE.has(reply)) {
-    const matches = options.filter((option) => optionKeys(option).some((key) => (
-      AFFIRMATIVE.has(key) || key.includes('approve') || key.includes('accept')
-    )));
+    const matches = options.filter((option) => optionPolarity(option) === 'affirmative');
     if (matches.length === 1) return { option: matches[0] };
     if (matches.length > 1) return { error: 'AMBIGUOUS_OPTION' };
-    if (options.length === 1) return { option: options[0] };
+    if (options.length === 1 && optionPolarity(options[0]) !== 'negative') return { option: options[0] };
     return { error: 'MISSING_OPTION' };
   }
 
   if (NEGATIVE.has(reply)) {
-    const matches = options.filter((option) => optionKeys(option).some((key) => (
-      NEGATIVE.has(key) || key.includes('reject') || key.includes('decline')
-    )));
+    const matches = options.filter((option) => optionPolarity(option) === 'negative');
     if (matches.length === 1) return { option: matches[0] };
     if (matches.length > 1) return { error: 'AMBIGUOUS_OPTION' };
-    if (options.length === 1) return { option: options[0] };
     return { error: 'MISSING_OPTION' };
   }
 
@@ -384,7 +394,7 @@ export function createDecisionResolver(options = {}) {
       }
 
       const record = lookupUserMessage(messageId);
-      if (!isPlainObject(record) || record.role !== 'user' || !isIdentifier(record.id)) {
+      if (!isPlainObject(record) || record.role !== 'user' || record.id !== messageId) {
         throw new DecisionError(
           'NOT_A_USER_MESSAGE',
           'a decision must cite a durable user message',
