@@ -288,6 +288,19 @@ test('a slot scope that targets another shot than the slot is refused', async (t
   assertMismatch(response);
 });
 
+test('a scoped slot without a shot or clip target is refused', async (t) => {
+  const { routes, store } = setup(t);
+  const created = await createProduction(routes);
+  const id = created.productionId;
+  const untargeted = slot('act_1', 2, { scope: scope() });
+  delete untargeted.targetId;
+
+  const response = await propose(routes, id, planPayload({ scope: scope(), actions: [untargeted] }));
+
+  assertMismatch(response);
+  assert.equal(store.readEvents(id).some((event) => event.type === 'plan.proposed'), false);
+});
+
 test('a clip slot scope matches a clip target', async (t) => {
   const { routes } = setup(t);
   const created = await createProduction(routes);

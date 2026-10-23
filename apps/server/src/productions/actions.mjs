@@ -221,7 +221,8 @@ function slotTargetIds(slot) {
 function scopeMatchesSlotTarget(scope, slot) {
   const target = scope.target;
   const ids = slotTargetIds(slot);
-  if (ids.size === 0) return true;
+  // A scoped slot must name the shot or clip it works on (fail closed).
+  if (ids.size === 0) return false;
   if (target.shotId === undefined && target.clipId === undefined) return false;
   if (target.shotId !== undefined && !ids.has(target.shotId)) return false;
   if (target.clipId !== undefined && !ids.has(target.clipId)) return false;
