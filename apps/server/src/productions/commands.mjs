@@ -68,6 +68,7 @@ const EVENT_TYPES = Object.freeze({
   'plan.approve': 'plan.approved',
   'plan.reject': 'plan.rejected',
   'iteration.set': 'iteration.set',
+  'voice_mode.set': 'voice_mode.set',
   'decision.resolve': 'decision.resolved',
   'stage.advance': 'stage.entered',
   'artifact.attach': 'artifact.attached',
@@ -435,6 +436,9 @@ function applyCommand(production, kind, payload) {
     case 'delivery.accept':
       if (typeof payload?.deliveryId === 'string') next.latestDeliveryId = payload.deliveryId;
       break;
+    case 'voice_mode.set':
+      next.h3VoiceMode = payload?.h3VoiceMode;
+      break;
     default:
       break;
   }
@@ -698,6 +702,18 @@ export function createCommandHandler(options = {}) {
       throw new CommandError(
         'ITERATION_USER_ONLY',
         'only the user may set the iteration policy',
+        403,
+        { kind, actor: recorded.actor },
+      );
+    }
+
+    // VX14: choosing a voice mode is a user decision. It starts nothing,
+    // reserves nothing and touches no plan or action. Neither the agent nor
+    // the system may change it.
+    if (kind === 'voice_mode.set' && recorded.actor !== 'user') {
+      throw new CommandError(
+        'VOICE_MODE_USER_ONLY',
+        'only the user may set the voice mode',
         403,
         { kind, actor: recorded.actor },
       );

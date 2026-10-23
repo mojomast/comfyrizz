@@ -140,6 +140,7 @@ export const EVENTS = Object.freeze([
   'plan.approved',
   'plan.rejected',
   'iteration.set',
+  'voice_mode.set',
   'decision.requested',
   'decision.resolved',
   'stage.entered',
@@ -173,6 +174,7 @@ export const COMMANDS = Object.freeze([
   'plan.approve',
   'plan.reject',
   'iteration.set',
+  'voice_mode.set',
   'decision.resolve',
   'stage.advance',
   'artifact.attach',
@@ -774,6 +776,25 @@ function iterationSetPayload(errors, value, path) {
   requireUniqueIds(errors, value.scope.shotIds, shotIdsPath);
 }
 
+const VOICE_MODE_SET_KEYS = new Set(['h3VoiceMode']);
+
+function voiceModeSetPayload(errors, value, path) {
+  for (const key of Object.keys(value)) {
+    if (!VOICE_MODE_SET_KEYS.has(key)) {
+      push(errors, joinPath(path, key), 'UNKNOWN_FIELD', `${joinPath(path, key)} is not a recognized field`);
+    }
+  }
+  const modePath = joinPath(path, 'h3VoiceMode');
+  if (!Object.hasOwn(value, 'h3VoiceMode')) {
+    push(errors, modePath, 'INVALID_H3_VOICE_MODE', `${modePath} is required`);
+    return;
+  }
+  const mode = value.h3VoiceMode;
+  if (mode !== null && mode !== 'clip' && mode !== 'prompt') {
+    push(errors, modePath, 'INVALID_H3_VOICE_MODE', `${modePath} must be one of: clip, prompt, null`);
+  }
+}
+
 // --- Event (spec 6.5/6.6) --------------------------------------------------
 
 function event(errors, doc, path) {
@@ -783,8 +804,12 @@ function event(errors, doc, path) {
   requireIntegerAtLeast(errors, doc.sequence, 1, joinPath(path, 'sequence'), 'INVALID_SEQUENCE');
   requireEnum(errors, doc.type, EVENTS, joinPath(path, 'type'), 'UNKNOWN_EVENT_TYPE');
   requireTimestamp(errors, doc.at, joinPath(path, 'at'));
-  if (requireObject(errors, doc.data, joinPath(path, 'data'), 'event data') && doc.type === 'iteration.set') {
-    iterationSetPayload(errors, doc.data, joinPath(path, 'data'));
+  if (requireObject(errors, doc.data, joinPath(path, 'data'), 'event data')) {
+    if (doc.type === 'iteration.set') {
+      iterationSetPayload(errors, doc.data, joinPath(path, 'data'));
+    } else if (doc.type === 'voice_mode.set') {
+      voiceModeSetPayload(errors, doc.data, joinPath(path, 'data'));
+    }
   }
   if (doc.commandId !== undefined) optionalId(errors, doc.commandId, joinPath(path, 'commandId'), 'command id');
   if (doc.userEventId !== undefined) optionalId(errors, doc.userEventId, joinPath(path, 'userEventId'), 'user event id');
@@ -808,9 +833,12 @@ function commandFields(errors, doc, path, { allowProductionIdForCreate }) {
   }
   validateExpectedRevisions(errors, doc.expected, joinPath(path, 'expected'));
   if (requireObject(errors, doc.payload, joinPath(path, 'payload'), 'command payload')
-    && kindOk
-    && doc.kind === 'iteration.set') {
-    iterationSetPayload(errors, doc.payload, joinPath(path, 'payload'));
+    && kindOk) {
+    if (doc.kind === 'iteration.set') {
+      iterationSetPayload(errors, doc.payload, joinPath(path, 'payload'));
+    } else if (doc.kind === 'voice_mode.set') {
+      voiceModeSetPayload(errors, doc.payload, joinPath(path, 'payload'));
+    }
   }
   if (doc.idempotencyKey !== undefined) {
     requireId(errors, doc.idempotencyKey, joinPath(path, 'idempotencyKey'), { label: 'idempotency key' });
