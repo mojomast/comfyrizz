@@ -1,0 +1,168 @@
+.easy-compute {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.easy-compute-legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+}
+
+.easy-compute-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18ch, 1fr));
+  gap: var(--space-2);
+}
+
+.easy-compute-option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.easy-compute-card {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  cursor: pointer;
+}
+
+.easy-compute-card:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.easy-compute-card:has(.easy-compute-input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.easy-compute-card.easy-is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.easy-compute-input {
+  position: absolute;
+  width: var(--space-1);
+  height: var(--space-1);
+  opacity: 0;
+}
+
+.easy-compute-title {
+  color: var(--text-1);
+  font-size: var(--font-size-15);
+  font-weight: var(--font-weight-600);
+}
+
+.easy-compute-body {
+  color: var(--text-2);
+}
+
+.easy-compute-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-12);
+}
+
+.easy-compute-connect {
+  min-height: var(--control-height-sm);
+}
+
+.easy-compute-cap {
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.easy-compute-cap-legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+}
+
+.easy-compute-cap-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+}
+
+.easy-compute-cap-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.easy-compute-cap-input {
+  width: 10ch;
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+}
+
+.easy-compute-cap-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.easy-compute-cap-input[aria-invalid="true"] {
+  border-color: var(--danger-border);
+}
+
+.easy-compute-cap-suffix {
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+}
+
+.easy-compute-so-far {
+  margin: var(--space-1) 0 0;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-12);
+}
+
+.easy-compute-error {
+  margin: var(--space-1) 0 0;
+  color: var(--danger);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-12);
+}
+
+.easy-compute-colab-host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
