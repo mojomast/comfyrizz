@@ -34,6 +34,126 @@ export type CastProposal = {
   lastError?: string;
 };
 
+/**
+ * IP39: a chat proposal Accept/Reject is one structured `decision.resolve`
+ * command, not a pre-filled chat message and not an LLM turn. Both the
+ * reference-placement and character-placement cards use this vocabulary.
+ */
+export const PROPOSAL_DECISION_COMMAND_KIND = 'decision.resolve' as const;
+
+export type ProposalKind = 'reference' | 'cast';
+export type ProposalDecisionAction = 'accept' | 'reject';
+export type ProposalDecisionOption = 'approve' | 'reject';
+
+const PROPOSAL_DECISION_OPTIONS: Record<ProposalDecisionAction, ProposalDecisionOption> = {
+  accept: 'approve',
+  reject: 'reject',
+};
+
+/** The single option id a structured proposal click resolves. */
+export function proposalDecisionOption(action: ProposalDecisionAction): ProposalDecisionOption {
+  if (action !== 'accept' && action !== 'reject') {
+    throw new TypeError('proposal action must be accept or reject');
+  }
+  return PROPOSAL_DECISION_OPTIONS[action];
+}
+
+export type ProposalDecisionCommand = {
+  commandId: string;
+  idempotencyKey: string;
+  kind: typeof PROPOSAL_DECISION_COMMAND_KIND;
+  productionId: string;
+  expected: { productionRevision: number };
+  payload: {
+    /** IP37's decision record uses this name. */
+    decisionId: string;
+    /** The display id on the proposal card, kept for an auditable event. */
+    proposalId: string;
+    optionId: ProposalDecisionOption;
+    proposalHash?: string;
+  };
+};
+
+export type ProposalDecisionCommandInput = {
+  productionId: string;
+  revision: number;
+  proposalId: string;
+  action: ProposalDecisionAction;
+  proposalHash?: string | null;
+  commandId?: string;
+};
+
+let proposalCommandCounter = 0;
+
+function defaultProposalCommandId(action: ProposalDecisionAction): string {
+  const cryptoValue = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (cryptoValue && typeof cryptoValue.randomUUID === 'function') {
+    return `proposal_${action}_${cryptoValue.randomUUID().replace(/-/g, '')}`;
+  }
+  proposalCommandCounter += 1;
+  return `proposal_${action}_${proposalCommandCounter.toString(36)}`;
+}
+
+function requiredCommandText(value: unknown, label: string): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) throw new TypeError(`${label} is required`);
+  return text;
+}
+
+/**
+ * The production command path. A binding that does not inject `sendCommand`
+ * may POST the returned envelope here through its own `apiFetch`.
+ */
+export function proposalCommandPath(productionId: string): string {
+  const id = requiredCommandText(productionId, 'production id');
+  return `/api/productions/${encodeURIComponent(id)}/commands`;
+}
+
+/**
+ * Build the canonical command for one explicit proposal decision. Server-owned
+ * attribution (actor and userEventId) is deliberately absent: the production
+ * facade adds it from the request context.
+ */
+export function buildProposalDecisionCommand(input: ProposalDecisionCommandInput): ProposalDecisionCommand {
+  if (!input || typeof input !== 'object') throw new TypeError('proposal command input is required');
+  const productionId = requiredCommandText(input.productionId, 'production id');
+  const proposalId = requiredCommandText(input.proposalId, 'proposal id');
+  if (!Number.isSafeInteger(input.revision) || input.revision < 0) {
+    throw new TypeError('proposal command revision must be a non-negative integer');
+  }
+  const optionId = proposalDecisionOption(input.action);
+  const commandId = input.commandId === undefined
+    ? defaultProposalCommandId(input.action)
+    : requiredCommandText(input.commandId, 'command id');
+  const hash = typeof input.proposalHash === 'string' ? input.proposalHash.trim() : '';
+  return {
+    commandId,
+    idempotencyKey: commandId,
+    kind: PROPOSAL_DECISION_COMMAND_KIND,
+    productionId,
+    expected: { productionRevision: input.revision },
+    payload: {
+      decisionId: proposalId,
+      proposalId,
+      optionId,
+      ...(hash ? { proposalHash: hash } : {}),
+    },
+  };
+}
+
+export type ProposalCommandBinding = {
+  productionId: string | (() => string | null | undefined);
+  /** Compare-and-swap revision the next command expects. */
+  baseRevision: number | (() => number | null | undefined);
+  /** Injected transport. Takes precedence over `apiFetch`. */
+  sendCommand?: (command: ProposalDecisionCommand) => Promise<unknown> | unknown;
+  /** Fallback transport; the command is POSTed to `proposalCommandPath`. */
+  apiFetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  /** Optional displayed-proposal hash. It must come from the server record. */
+  proposalHash?: (proposalId: string, kind: ProposalKind) => string | null | undefined;
+  commandId?: (action: ProposalDecisionAction, proposalId: string, kind: ProposalKind) => string;
+};
+
 export type ProjectCastEntry = {
   castId: string;
   characterId: string;
@@ -383,6 +503,12 @@ export function mountProjectChat(options: {
   expectedPackageId?: string;
   brand?: () => unknown;
   referenceLabel?: (refId: string) => string | undefined;
+  /**
+   * IP39: production binding for proposal Accept/Reject. When present, both
+   * actions send `decision.resolve` and never write the composer or call the
+   * legacy `onChange*` host hooks.
+   */
+  proposalCommands?: ProposalCommandBinding;
   onReferencesChanged?: () => void | Promise<void>;
   onChangeAssignment?: (assignmentId: string) => void;
   characterLabel?: (characterId: string) => string | undefined;
@@ -539,31 +665,25 @@ export function mountProjectChat(options: {
     panel.querySelectorAll<HTMLElement>('[data-confirm-assignment]').forEach(button => {
       button.addEventListener('click', () => {
         const id = button.getAttribute('data-confirm-assignment');
-        if (id) void confirmAssignments([id]);
+        if (id) void decideProposal('reference', id, 'accept');
       });
     });
     panel.querySelectorAll<HTMLElement>('[data-change-assignment]').forEach(button => {
       button.addEventListener('click', () => {
         const id = button.getAttribute('data-change-assignment');
-        if (!id || busy) return;
-        if (options.onChangeAssignment) options.onChangeAssignment(id);
-        else void send('Change the proposed reference placement.', 'plan');
+        if (id) void decideProposal('reference', id, 'reject');
       });
     });
     panel.querySelectorAll<HTMLElement>('[data-confirm-cast]').forEach(button => {
       button.addEventListener('click', () => {
         const id = button.getAttribute('data-confirm-cast');
-        if (id) void confirmCastProposals([id]);
+        if (id) void decideProposal('cast', id, 'accept');
       });
     });
     panel.querySelectorAll<HTMLElement>('[data-change-cast]').forEach(button => {
       button.addEventListener('click', () => {
         const id = button.getAttribute('data-change-cast');
-        if (!id || busy) return;
-        const proposal = proposedCastProposals().find(item => item.id === id);
-        if (options.onChangeCastProposal && proposal) options.onChangeCastProposal(proposal);
-        else if (options.onChangeCast && proposal) options.onChangeCast(proposal);
-        else void send('Change the proposed character placement.', 'plan');
+        if (id) void decideProposal('cast', id, 'reject');
       });
     });
     panel.querySelectorAll<HTMLElement>('[data-remove-context-chip]').forEach(button => {
@@ -647,6 +767,143 @@ export function mountProjectChat(options: {
     const unique = [...new Set(ids)].filter(Boolean);
     if (unique.length === 0) return Promise.resolve();
     return send(unique.length === 1 ? 'Confirm the proposed character placement.' : 'Confirm the proposed character placements.', 'plan', undefined, undefined, unique);
+  }
+
+  /**
+   * IP39: a legacy chat without a production binding may still confirm through
+   * its old chat turn. Reject has no such fallback: it must never become a
+   * composer prefill (A07), so the caller gets one explicit error instead.
+   */
+  function legacyProposalAccept(kind: ProposalKind, proposalId: string): Promise<boolean> {
+    if (kind === 'reference') void confirmAssignments([proposalId]);
+    else void confirmCastProposals([proposalId]);
+    return Promise.resolve(true);
+  }
+
+  function currentProposalId(binding: ProposalCommandBinding): string {
+    const value = typeof binding.productionId === 'function'
+      ? binding.productionId()
+      : binding.productionId;
+    return requiredCommandText(value, 'production id');
+  }
+
+  function currentProposalRevision(binding: ProposalCommandBinding): number {
+    const value = typeof binding.baseRevision === 'function'
+      ? binding.baseRevision()
+      : binding.baseRevision;
+    if (!Number.isSafeInteger(value) || (value as number) < 0) {
+      throw new TypeError('proposal command base revision must be a non-negative integer');
+    }
+    return value as number;
+  }
+
+  async function transmitProposalCommand(
+    binding: ProposalCommandBinding,
+    command: ProposalDecisionCommand,
+  ): Promise<unknown> {
+    if (typeof binding.sendCommand === 'function') return await binding.sendCommand(command);
+    if (typeof binding.apiFetch !== 'function') {
+      throw new Error('proposal commands need a sendCommand or apiFetch transport');
+    }
+    const response = await binding.apiFetch(proposalCommandPath(command.productionId), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify(command),
+    });
+    if (!response) throw new Error('the production command returned no response');
+    if (typeof response.ok === 'boolean' && !response.ok) {
+      const body = await response.json().catch(() => null) as { error?: unknown; message?: unknown } | null;
+      const message = typeof body?.error === 'string'
+        ? body.error
+        : typeof body?.message === 'string'
+          ? body.message
+          : `HTTP ${response.status}`;
+      throw new Error(message);
+    }
+    if (typeof response.json === 'function') return await response.json().catch(() => null);
+    return response;
+  }
+
+  function markProposalDecided(kind: ProposalKind, proposalId: string, action: ProposalDecisionAction): void {
+    if (!conversation) return;
+    const status = action === 'accept' ? 'confirmed' : 'rejected';
+    if (kind === 'reference') {
+      conversation.referenceAssignments = (conversation.referenceAssignments ?? []).map(assignment =>
+        assignment && assignment.id === proposalId ? { ...assignment, status } : assignment);
+      return;
+    }
+    conversation.castProposals = (conversation.castProposals ?? []).map(proposal =>
+      proposal && proposal.id === proposalId ? { ...proposal, status } : proposal);
+  }
+
+  /**
+   * Resolve one proposal with exactly one command. The proposal must still be
+   * pending locally, the host owns the production id and base revision, and a
+   * failed command leaves the card in place for a retry.
+   */
+  async function decideProposal(
+    kind: ProposalKind,
+    proposalId: string,
+    action: ProposalDecisionAction,
+  ): Promise<boolean> {
+    const id = trimText(proposalId);
+    if (!id || busy || (kind !== 'reference' && kind !== 'cast')
+      || (action !== 'accept' && action !== 'reject')) return false;
+    await loaded;
+    if (busy) return false;
+    const binding = options.proposalCommands;
+    if (!binding) {
+      if (action === 'accept') return await legacyProposalAccept(kind, id);
+      errorText = 'Rejecting a proposal needs a production command binding.';
+      options.log(`Could not reject proposal ${id}: no production command binding`);
+      render();
+      return false;
+    }
+
+    const pending = kind === 'reference'
+      ? proposedAssignments().some(assignment => assignment.id === id)
+      : proposedCastProposals().some(proposal => proposal.id === id);
+    if (!pending) return false;
+
+    let command: ProposalDecisionCommand;
+    try {
+      const proposalHash = binding.proposalHash?.(id, kind);
+      const commandId = binding.commandId?.(action, id, kind);
+      command = buildProposalDecisionCommand({
+        productionId: currentProposalId(binding),
+        revision: currentProposalRevision(binding),
+        proposalId: id,
+        action,
+        ...(typeof proposalHash === 'string' && proposalHash.trim() ? { proposalHash: proposalHash.trim() } : {}),
+        ...(typeof commandId === 'string' && commandId.trim() ? { commandId: commandId.trim() } : {}),
+      });
+    } catch (error) {
+      errorText = `Could not ${action} proposal: ${(error as Error).message}`;
+      options.log(`Could not ${action} proposal ${id}: ${(error as Error).message}`);
+      render();
+      return false;
+    }
+
+    busy = true;
+    errorText = '';
+    render();
+    try {
+      await transmitProposalCommand(binding, command);
+      markProposalDecided(kind, id, action);
+      options.log(action === 'accept' ? `Accepted proposal ${id}` : `Rejected proposal ${id}`);
+      if (kind === 'reference') void options.onReferencesChanged?.();
+      else {
+        try { void options.onCastChanged?.(conversation?.cast ?? []); } catch { /* optional observer */ }
+      }
+      return true;
+    } catch (error) {
+      errorText = `Could not ${action} proposal: ${(error as Error).message}`;
+      options.log(`Could not ${action} proposal ${id}: ${(error as Error).message}`);
+      return false;
+    } finally {
+      busy = false;
+      render();
+    }
   }
 
   async function send(text: string, mode: 'plan' | 'express', action?: 'build', confirm?: string[], confirmCast?: string[]): Promise<void> {
@@ -792,6 +1049,9 @@ export function mountProjectChat(options: {
     confirmCastProposals,
     confirmCastProposal: confirmCastProposals,
     confirmCast: confirmCastProposals,
+    decideProposal,
+    acceptProposal: (kind: ProposalKind, proposalId: string) => decideProposal(kind, proposalId, 'accept'),
+    rejectProposal: (kind: ProposalKind, proposalId: string) => decideProposal(kind, proposalId, 'reject'),
     refreshTurnContext: () => { if (!busy) render(); },
     dismissTurnContextChip: (idOrKind: string) => { if (!busy) dismissTurnContextChip(idOrKind); },
     get turnContextChips() { return turnContextChips(); },
