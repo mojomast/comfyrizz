@@ -2,8 +2,13 @@ import './style.css';
 import './project-chat.css';
 import './characters/characters.css';
 import './ui/look-picker.css';
+import './productions/cards/iteration-card.css';
+import './productions/cards/iteration-advanced.css';
 import { initShellLayout } from './ui/splitter';
-import { mountModeToggle, type ModeController } from './ui/mode';
+import { MODE_CHANGE_EVENT, mountModeToggle, type ModeController } from './ui/mode';
+import { getPrefs } from './ui/prefs';
+import { readIteration, setIteration } from './productions/client';
+import { mountIterationLevel, type IterationLevelMount } from './productions/cards/iteration-advanced';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { readRunSnapshot } from './run-progress.ts';
@@ -243,6 +248,7 @@ let generatedAssets: Record<string, InlineAsset> | undefined;
 let pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }> = [];
 let agentSettings: ReturnType<typeof mountAgentSettings>;
 let projectChat: ReturnType<typeof mountProjectChat>;
+let iterationLevelMount: IterationLevelMount | null = null;
 let charactersTab: ReturnType<typeof mountCharactersTab> | null = null;
 let referencePanel: ReturnType<typeof mountReferencePanel> | null = null;
 
@@ -1469,10 +1475,35 @@ setInterval(() => {
   void refreshClips().finally(() => { refreshingLiveClips = false; });
 }, 10000);
 
+function lookupBoundProductionId(): string | null {
+  try {
+    const query = new URLSearchParams(globalThis.location?.search ?? '').get('production');
+    if (query && query.trim() !== '') return query.trim();
+  } catch {
+    /* location is unavailable outside the browser */
+  }
+  try {
+    const raw = globalThis.localStorage?.getItem(`comfyrizz.easy.${pkg.id}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { productionId?: unknown };
+    if (typeof parsed.productionId === 'string' && parsed.productionId.trim() !== '') {
+      return parsed.productionId.trim();
+    }
+  } catch {
+    /* an unbound project has no saved production */
+  }
+  return null;
+}
+
 async function runOnBackend(approved = false): Promise<void> {
   const backendId = $<HTMLSelectElement>('backend').value;
   if (backendId === 'cpu') {
     logActivity('CPU is not a GPU backend; use Export MP4 for the CPU slice');
+    return;
+  }
+  if (iterationLevelMount?.blocksPaidGeneration()) {
+    iterationLevelMount.reveal();
+    logActivity('Choose Draft, Balanced, Director or Custom before a paid generation. Choosing a level is not spend approval.');
     return;
   }
   const budgetUnits = Number($<HTMLInputElement>('budget').value) || 0;
@@ -1500,6 +1531,9 @@ async function runOnBackend(approved = false): Promise<void> {
     const result = (await response.json().catch(() => ({}))) as Record<string, any>;
     if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
     if (result.approvalRequired) {
+      if (typeof result.productionId === 'string' && result.productionId !== '') {
+        iterationLevelMount?.noteBound(result.productionId);
+      }
       runState.spend = { planHash: result.planHash, backendId, estimate: result.estimate ?? {}, budget: result.budget ?? {}, jobs: result.jobs ?? 0 };
       renderSpendCard();
       logActivity(`Spend approval needed: ${result.budget?.message ?? 'approve the plan to start the VM'}`);
@@ -2213,6 +2247,25 @@ function init(opened: OpenedProject): void {
     if (renderSplit?.parentElement) renderSplit.after(modeControl.element);
     else document.getElementById('topbar')?.append(modeControl.element);
   }
+  const iterationHost = document.createElement('section');
+  iterationHost.id = 'iteration-level-host';
+  iterationHost.className = 'iteration-level-host';
+  iterationHost.hidden = true;
+  iterationHost.setAttribute('aria-label', 'Iteration level');
+  document.getElementById('composer')?.before(iterationHost);
+  iterationLevelMount = mountIterationLevel({
+    host: iterationHost,
+    getMode: () => getPrefs().mode,
+    getProductionId: lookupBoundProductionId,
+    read: (productionId) => readIteration(productionId, { apiFetch }),
+    set: (productionId, input, revision) => setIteration(productionId, input, revision, { apiFetch }),
+    onActivity: logActivity,
+    onOpenAdvanced: () => modeControl?.setMode('advanced'),
+  });
+  window.addEventListener(MODE_CHANGE_EVENT, () => {
+    void iterationLevelMount?.refresh();
+  });
+  void iterationLevelMount.refresh();
   mountEasyActions(modeControl);
   editorStore.subscribe(() => renderModeSummary());
 

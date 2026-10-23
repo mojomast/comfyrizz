@@ -1,0 +1,99 @@
+/* IL16: Advanced iteration grid. Text uses the same token pairs as the Easy cards. */
+
+.iteration-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
+  padding: var(--panel-padding);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+}
+
+.iteration-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--gap);
+}
+
+.iteration-stage,
+.iteration-review {
+  margin: 0;
+  padding: var(--space-2);
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+}
+
+.iteration-field,
+.iteration-depth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-1);
+}
+
+.iteration-field-note,
+.iteration-shots-empty,
+.iteration-advanced-note {
+  color: var(--text-2);
+}
+
+.iteration-field input,
+.iteration-field select {
+  min-height: var(--control-height);
+  color: var(--text-1);
+  background: var(--bg-0);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  font: inherit;
+}
+
+.iteration-shots {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--text-1);
+  background: var(--bg-1);
+}
+
+.iteration-shots th,
+.iteration-shots td {
+  padding: var(--space-1);
+  border-bottom: var(--elevation-border-1);
+  text-align: left;
+  vertical-align: top;
+}
+
+.iteration-shots caption {
+  text-align: left;
+  color: var(--text-1);
+  font-weight: var(--font-weight-600);
+}
+
+.iteration-lock-reason {
+  color: var(--text-1);
+  background: var(--warn-bg);
+  border: var(--elevation-border-1);
+  border-style: dashed;
+  padding: var(--space-1);
+}
+
+.iteration-advanced button:focus-visible,
+.iteration-advanced input:focus-visible,
+.iteration-advanced select:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iteration-advanced,
+  .iteration-advanced * {
+    transition: none;
+    animation: none;
+  }
+}

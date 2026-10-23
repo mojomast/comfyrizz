@@ -8,7 +8,15 @@
 // The reservation ceiling is the only cost the card shows. It is labelled as
 // the server's upper bound, not a client estimate. Approval cites the plan id,
 // plan hash and proposal revision together; a stale card never builds an
-// approval command. This module performs no network calls.
+// approval command. A paid plan with no iteration level hides Approve and
+// shows the level picker. Choosing that level is not spend approval. This
+// module performs no network calls.
+
+import {
+  readIterationCard,
+  renderIterationCard,
+} from './iteration-card.ts';
+import type { IterationRead } from '../client.ts';
 
 export const PLAN_CARD_SCHEMA = 'comfyrizz.plan-card/v1';
 export const PLAN_CARD_KIND = 'plan';
@@ -63,6 +71,10 @@ export interface PlanCard {
   approved: boolean;
   rejected: boolean;
   canApprove: boolean;
+  /** Paid plan, and the production has no iteration level yet. */
+  iterationRequired: boolean;
+  /** An iteration.set landed after this plan was proposed. */
+  iterationLevelChanged: boolean;
 }
 
 export interface PlanCardReadOptions {
@@ -70,6 +82,10 @@ export interface PlanCardReadOptions {
   loading?: boolean;
   stale?: boolean;
   error?: unknown;
+  /** The server refused plan.approve with ITERATION_LEVEL_REQUIRED. */
+  iterationRequired?: boolean;
+  /** Force the "level changed — re-propose" stale state. */
+  iterationLevelChanged?: boolean;
 }
 
 export interface PlanApproveContext {
@@ -97,7 +113,8 @@ export type PlanApproveErrorCode =
   | 'NOT_READY'
   | 'STALE_VIEW'
   | 'INVALID_CONTEXT'
-  | 'REVISION_MISMATCH';
+  | 'REVISION_MISMATCH'
+  | 'ITERATION_LEVEL_REQUIRED';
 
 export interface PlanApproveSuccess {
   ok: true;
@@ -121,6 +138,8 @@ export interface PlanCommandClient {
 
 export interface PlanCardRenderOptions {
   disabled?: boolean;
+  /** When the level is required, the Easy picker renders inside the plan card. */
+  iterationRead?: IterationRead | null;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -172,6 +191,8 @@ function baseCard(productionId: string | null, status: PlanCardStatus): PlanCard
     approved: false,
     rejected: false,
     canApprove: false,
+    iterationRequired: false,
+    iterationLevelChanged: false,
   };
 }
 
@@ -187,7 +208,10 @@ function finalizeCard(card: PlanCard): PlanCard {
     ...card,
     status,
     state: status,
-    canApprove: status === 'ready' && card.approval !== 'approved',
+    canApprove: status === 'ready'
+      && card.approval !== 'approved'
+      && card.iterationRequired !== true
+      && card.iterationLevelChanged !== true,
   };
 }
 
@@ -224,6 +248,42 @@ function readError(options: PlanCardReadOptions): { present: boolean; message: s
 interface LatestPlanEvent {
   found: boolean;
   data: Record<string, unknown> | null;
+  sequence: number | null;
+}
+
+function isPaidAction(action: PlanCardAction): boolean {
+  if (!(typeof action.upperBound === 'number' && action.upperBound > 0)) return false;
+  if (action.kind === 'audition' && action.engine === 'kokoro') return false;
+  return true;
+}
+
+function productionDeclaresIteration(production: Record<string, unknown>): boolean {
+  return Object.prototype.hasOwnProperty.call(production, 'iteration');
+}
+
+function policyFromProduction(production: Record<string, unknown>): boolean {
+  return isPlainObject(production.iteration)
+    && isPlainObject((production.iteration as Record<string, unknown>).policy);
+}
+
+function iterationFollowsPlan(events: readonly unknown[]): boolean {
+  let planIndex = -1;
+  let setIndex = -1;
+  let planSequence: number | null = null;
+  let setSequence: number | null = null;
+  events.forEach((event, index) => {
+    if (!isPlainObject(event)) return;
+    if (event.type === PLAN_PROPOSED_EVENT) {
+      planIndex = index;
+      planSequence = nonNegativeInteger(event.sequence);
+    } else if (event.type === 'iteration.set') {
+      setIndex = index;
+      setSequence = nonNegativeInteger(event.sequence);
+    }
+  });
+  if (planIndex < 0 || setIndex < 0) return false;
+  if (planSequence !== null && setSequence !== null) return setSequence > planSequence;
+  return setIndex > planIndex;
 }
 
 /**
@@ -233,12 +293,14 @@ interface LatestPlanEvent {
 function latestPlanEvent(events: readonly unknown[]): LatestPlanEvent {
   let found = false;
   let data: Record<string, unknown> | null = null;
+  let sequence: number | null = null;
   for (const event of events) {
     if (!isPlainObject(event) || event.type !== PLAN_PROPOSED_EVENT) continue;
     found = true;
     data = isPlainObject(event.data) ? event.data : null;
+    sequence = nonNegativeInteger(event.sequence);
   }
-  return { found, data };
+  return { found, data, sequence };
 }
 
 interface PlanRecord {
@@ -374,8 +436,9 @@ export function readPlanCard(
   const revision = nonNegativeInteger(input.revision)
     ?? nonNegativeInteger(production.revision)
     ?? 0;
-  const stale = input.stale === true || input.gap === true || options.stale === true;
   const events = Array.isArray(input.events) ? input.events : [];
+  const levelChangedByJournal = iterationFollowsPlan(events);
+  const stale = input.stale === true || input.gap === true || options.stale === true || levelChangedByJournal || options.iterationLevelChanged === true;
   const latest = latestPlanEvent(events);
 
   if (!latest.found) {
@@ -389,10 +452,22 @@ export function readPlanCard(
 
   const plan = parsed.plan;
   const approval = approvalState(plan, events);
+  const paid = plan.actions.some(isPaidAction);
+  const gateActive = options.iterationRequired === true
+    || options.iterationLevelChanged === true
+    || productionDeclaresIteration(production)
+    || events.some((event) => isPlainObject(event) && event.type === 'iteration.set');
+  const hasPolicy = policyFromProduction(production)
+    || events.some((event) => isPlainObject(event) && event.type === 'iteration.set');
+  const iterationLevelChanged = paid && (options.iterationLevelChanged === true || levelChangedByJournal);
+  const iterationRequired = paid && !iterationLevelChanged && (
+    options.iterationRequired === true
+    || (gateActive && !hasPolicy)
+  );
   return finalizeCard({
     ...baseCard(productionId, 'ready'),
     revision,
-    stale,
+    stale: stale || iterationLevelChanged,
     planId: plan.id,
     planHash: plan.planHash,
     proposalRevision: plan.revision,
@@ -404,6 +479,8 @@ export function readPlanCard(
     approval,
     approved: approval === 'approved',
     rejected: approval === 'rejected',
+    iterationRequired,
+    iterationLevelChanged,
   });
 }
 
@@ -468,6 +545,15 @@ export function approvePlan(
   }
   if (card.status === 'loading' || card.status === 'error' || card.planId === null) {
     return failure('NOT_READY', 'Wait for a proposed plan before approving spend.');
+  }
+  if (card.iterationRequired === true) {
+    return failure(
+      'ITERATION_LEVEL_REQUIRED',
+      'Choose Draft, Balanced, Director or Custom before approving this spend. Choosing a level is not spend approval.',
+    );
+  }
+  if (card.iterationLevelChanged === true) {
+    return failure('STALE_VIEW', 'level changed — re-propose');
   }
   if (card.status === 'stale' || card.stale) {
     return failure('STALE_VIEW', 'This card is behind the event journal. Refresh before approving spend.');
@@ -598,6 +684,8 @@ export function renderPlanCard(card: PlanCard, options: PlanCardRenderOptions = 
     `data-revision="${card.revision}"`,
     `data-plan-approval="${card.approval}"`,
     `data-can-approve="${approvable ? 'true' : 'false'}"`,
+    `data-iteration-required="${card.iterationRequired ? 'true' : 'false'}"`,
+    `data-iteration-level-changed="${card.iterationLevelChanged ? 'true' : 'false'}"`,
     card.planId !== null ? `data-plan-id="${escapeHtml(card.planId)}"` : '',
     card.planHash !== null ? `data-plan-hash="${escapeHtml(card.planHash)}"` : '',
     card.proposalRevision !== null ? `data-plan-revision="${card.proposalRevision}"` : '',
@@ -634,15 +722,28 @@ export function renderPlanCard(card: PlanCard, options: PlanCardRenderOptions = 
     </section>`;
   }
 
-  const notices = stale
-    ? '<p class="plan-card-stale" role="status">This card is behind the event journal. Refresh before approving spend.</p>'
-    : '';
+  const notices = card.iterationLevelChanged
+    ? '<p class="plan-card-stale" role="status" data-iteration-stale>level changed — re-propose</p>'
+    : stale
+      ? '<p class="plan-card-stale" role="status">This card is behind the event journal. Refresh before approving spend.</p>'
+      : '';
   const approvalNotice = card.approval === 'approved'
     ? '<p class="plan-card-approved" role="status">This exact plan is approved.</p>'
     : card.approval === 'rejected'
       ? '<p class="plan-card-rejected" role="status">This exact plan was rejected.</p>'
       : '';
   const disabled = approvable ? '' : ' disabled';
+  const iterationSlot = card.iterationRequired
+    ? `<div data-il-slot="iteration-level-picker" data-iteration-required="true">
+        <p class="plan-card-iteration" data-plan-iteration>Choose Draft, Balanced, Director or Custom before approving this spend. Choosing a level is not spend approval.</p>
+        ${options.iterationRead ? renderIterationCard(readIterationCard(options.iterationRead, { productionId: card.productionId })) : ''}
+      </div>`
+    : '';
+  const approveButton = card.iterationRequired || card.iterationLevelChanged
+    ? ''
+    : `<div class="plan-card-buttons">
+      <button type="button" class="btn btn-primary" data-plan-approve aria-label="Approve plan: this exact plan and its spend upper bound"${disabled}>Approve plan</button>
+    </div>`;
   const actions = card.actions.length === 0
     ? '<p class="plan-card-actions-empty" role="status">The plan has no action slots.</p>'
     : `<ul class="plan-card-actions" data-plan-actions>${card.actions.map(renderAction).join('')}</ul>`;
@@ -659,8 +760,7 @@ export function renderPlanCard(card: PlanCard, options: PlanCardRenderOptions = 
     <p class="plan-card-impact" data-plan-impact>${escapeHtml(planImpactSummary(card))}</p>
     <p class="plan-card-decisions" data-plan-required-decisions>${card.requiredDecisions.length} required decision${card.requiredDecisions.length === 1 ? '' : 's'}</p>
     ${actions}
-    <div class="plan-card-buttons">
-      <button type="button" class="btn btn-primary" data-plan-approve aria-label="Approve plan: this exact plan and its spend upper bound"${disabled}>Approve plan</button>
-    </div>
+    ${iterationSlot}
+    ${approveButton}
   </section>`;
 }
