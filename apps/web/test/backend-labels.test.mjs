@@ -1,12 +1,13 @@
 // P-fix5: the backend picker must describe the backends the server actually
 // runs. The old labels ended in `· fake` from the pre-integration demo, which
-// made real BYO ComfyUI / Google Colab runs look like stubs.
+// made real My ComfyUI / Google Colab runs look like stubs. The picker lives
+// in the settings dialog.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const html = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8');
+const html = readFileSync(fileURLToPath(new URL('../src/settings/sections.ts', import.meta.url)), 'utf8');
 
 function optionValues(id) {
   const select = new RegExp(`<select id="${id}">([\\s\\S]*?)</select>`).exec(html);
@@ -25,7 +26,6 @@ test('P-fix5: the backend picker labels the real backends, not fakes', () => {
     assert.doesNotMatch(option.label, /\bstub\b/i, `${option.value} must not be labelled a stub`);
   }
   const byLabel = Object.fromEntries(backends.map(option => [option.value, option.label]));
-  // These mirror the spend line in src/main.ts, which names the backend the run used.
-  assert.equal(byLabel['byo-comfyui'], 'BYO ComfyUI');
-  assert.equal(byLabel.colab, 'Google Colab G4');
+  assert.equal(byLabel['byo-comfyui'], 'My ComfyUI');
+  assert.equal(byLabel.colab, 'Google Colab');
 });

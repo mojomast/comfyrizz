@@ -81,11 +81,24 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     sendCommand(id: any, envelope: any) {
       return request('POST', `/api/productions/${encodeURIComponent(id)}/commands`, envelope);
     },
-    proposeEasyPlan(id: any, { level, compute }: { level: any; compute: any }) {
-      return request('POST', `/api/productions/${encodeURIComponent(id)}/easy-plan`, { level, compute });
+    proposeEasyPlan(id: any, body: { level: any; compute: any; onlyShotIds?: string[]; chip?: string }) {
+      const payload: { level: any; compute: any; onlyShotIds?: string[]; chip?: string } = {
+        level: body.level,
+        compute: body.compute,
+      };
+      if (body.onlyShotIds !== undefined) payload.onlyShotIds = body.onlyShotIds;
+      if (body.chip !== undefined) payload.chip = body.chip;
+      return request('POST', `/api/productions/${encodeURIComponent(id)}/easy-plan`, payload);
     },
-    setSpendCap(id: any, { ceiling, expected }: { ceiling: any; expected: any }) {
-      return request('POST', `/api/productions/${encodeURIComponent(id)}/spend-cap`, { ceiling, expected });
+    setSpendCap(id: any, body: { ceiling: any; expected?: { productionRevision?: number }; commandId?: string; idempotencyKey?: string }) {
+      const commandId = typeof body.commandId === 'string' && body.commandId.trim() !== '' ? body.commandId : crypto.randomUUID();
+      const idempotencyKey = typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim() !== '' ? body.idempotencyKey : commandId;
+      return request('POST', `/api/productions/${encodeURIComponent(id)}/spend-cap`, {
+        commandId,
+        idempotencyKey,
+        ceiling: body.ceiling,
+        expected: { productionRevision: body.expected?.productionRevision },
+      });
     },
     dispatchAction(id: any, body: any) {
       return request('POST', `/api/productions/${encodeURIComponent(id)}/actions`, body);
