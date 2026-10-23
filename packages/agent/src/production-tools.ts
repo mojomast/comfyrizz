@@ -3,6 +3,7 @@ import {
   actionSlotViolation,
   commandShapeViolation,
   elementScopeViolation,
+  iterationSlotViolation,
   planShapeViolation,
   scopeViolations,
   PRODUCTION_TURN_PROCEDURE,
@@ -302,7 +303,7 @@ export const PRODUCTION_TOOLS: ToolDef[] = [
   {
     name: 'production_command',
     description:
-      `Issue one non-approval production command (${AGENT_COMMAND_KINDS.join(', ')}). Approval, spend, decision, lifecycle and action-cancel commands are refused. A paid Google Colab render the user asked for uses kind render.request and payload shotId, backend "google-colab", and upperBound at or under the cap they stated. A text edit does not use this tool.`,
+      `Issue one non-approval production command (${AGENT_COMMAND_KINDS.join(', ')}). Approval, spend, decision, lifecycle and action-cancel commands are refused. A paid Google Colab render the user asked for uses kind render.request only when production_read returned no iteration policy, with payload shotId, backend "google-colab", and upperBound at or under the cap they stated. When an iteration policy is present, a take or a render is a plan slot, not this command. A text edit does not use this tool.`,
     parameters: objectSchema({
       production_id: productionIdParam,
       kind: {
@@ -534,10 +535,25 @@ function rememberRead(ctx: ProductionToolContext, productionId: string, snapshot
   const shotIds = Array.isArray(production.shotIds)
     ? production.shotIds.filter((id): id is string => typeof id === 'string' && id !== '')
     : undefined;
+  const iterationRaw = isPlainObject(production.iteration) ? production.iteration : undefined;
+  const policy = iterationRaw && isPlainObject(iterationRaw.policy) ? iterationRaw.policy : undefined;
+  const used = iterationRaw && isPlainObject(iterationRaw.used)
+    ? iterationRaw.used as Record<string, Record<string, number>>
+    : undefined;
+  const lockedShotIds = Array.isArray(production.lockedShotIds)
+    ? production.lockedShotIds.filter((id): id is string => typeof id === 'string' && id !== '')
+    : undefined;
   memory.set(productionId, {
     revision: snapshot.revision,
     intent: typeof production.intent === 'string' ? production.intent : undefined,
     shotIds,
+    ...(policy || lockedShotIds || used ? {
+      iteration: {
+        ...(policy ? { policy } : {}),
+        ...(used ? { used } : {}),
+        ...(lockedShotIds ? { lockedShotIds } : {}),
+      },
+    } : {}),
   });
 }
 
@@ -626,10 +642,16 @@ function iterationProjection(production: Record<string, unknown>): Record<string
       reviewDepth: policy.reviewDepth,
     };
   }
+  const used = isPlainObject(raw.used) ? cloneJson(raw.used) : undefined;
+  const lockedShotIds = Array.isArray(production.lockedShotIds)
+    ? production.lockedShotIds.filter((id): id is string => typeof id === 'string' && id !== '')
+    : undefined;
   return {
     level,
     policy: cloneJson(policy),
     perShot,
+    ...(used ? { used } : {}),
+    ...(lockedShotIds && lockedShotIds.length ? { lockedShotIds } : {}),
   };
 }
 
@@ -738,6 +760,8 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
   delete checkPayload.scope;
   const refused = enforceProductionState(ctx, productionId.value!, revision.value!, checkPayload);
   if (refused) return refused;
+  const iterationProblem = iterationSlotViolation(payload, rememberedRead(ctx, productionId.value!)?.iteration);
+  if (iterationProblem) return errorResult(iterationProblem);
 
 
   const dispatched = await dispatchCommand(ctx, {

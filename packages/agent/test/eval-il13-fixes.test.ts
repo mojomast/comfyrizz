@@ -399,3 +399,122 @@ test('IL13 scope compliance: one copied scope is scored once, and a widened slot
     assert.equal(proposals.length, executed.plan.proposal ? 1 : 0, id);
   }
 });
+
+test('IL13 iteration compliance: paid slots cover the ask, and a level breach still fails', async () => {
+  const draft = scenario('iteration-draft-render');
+  const none = script.syntheticRun(draft, [{ name: 'production_read', args: {} }], 'Which shot?');
+  assert.equal(script.scoreRun(none, draft).iterationCompliance.ok, false);
+
+  const three = script.syntheticRun(draft, [
+    { name: 'production_read', args: {} },
+    {
+      name: 'production_propose_plan',
+      args: {
+        expected_revision: draft.production.revision,
+        plan: {
+          edits: [],
+          actions: [1, 2, 3].map(index => ({ id: `a${index}`, kind: 'render', targetId: 's1', upperBound: 0 })),
+          summary: 'Render a take for s1.',
+        },
+      },
+    },
+  ], 'Proposed three.');
+  const threeScore = script.scoreRun(three, draft);
+  assert.equal(threeScore.iterationCompliance.ok, false);
+  assert.match(threeScore.iterationCompliance.detail, /exceeds|paid slot|expected 1/);
+
+  const locked = scenario('iteration-midprod-locked-shot');
+  const lockedCtx = boundContext(locked, ['s1']);
+  lockedCtx.read = () => ({
+    production: {
+      id: 'prod_1',
+      revision: locked.production.revision,
+      intent: 'active',
+      shotIds: ['s1', 's2', 's3', 's4'],
+      lockedShotIds: ['s1'],
+      iteration: { policy: locked.production.iteration.policy, level: 'balanced' },
+    },
+    revision: locked.production.revision,
+  });
+  await runProductionTool({ name: 'production_read', args: {} }, lockedCtx);
+  const lockedRead = await runProductionTool({ name: 'production_read', args: {} }, lockedCtx);
+  const lockedIteration = lockedRead.iteration as { lockedShotIds?: string[] };
+  assert.deepEqual(lockedIteration.lockedShotIds, ['s1']);
+  const refusedLocked = await runProductionTool({
+    name: 'production_propose_plan',
+    args: {
+      expected_revision: locked.production.revision,
+      plan: {
+        edits: [],
+        actions: [{ id: 'a1', kind: 'render', targetId: 's1', upperBound: 0 }],
+        summary: 'Render a take for s1.',
+      },
+    },
+  }, lockedCtx);
+  assert.equal(refusedLocked.ok, false);
+  assert.match(String(refusedLocked.error), /locked shot s1/);
+
+  const draftCtx = boundContext(draft, ['s1']);
+  draftCtx.read = () => ({
+    production: {
+      id: 'prod_1',
+      revision: draft.production.revision,
+      intent: 'active',
+      shotIds: ['s1', 's2', 's3', 's4'],
+      iteration: { policy: draft.production.iteration.policy, level: 'draft', used: { s1: { video: 1 } } },
+    },
+    revision: draft.production.revision,
+  });
+  await runProductionTool({ name: 'production_read', args: {} }, draftCtx);
+  const refusedOver = await runProductionTool({
+    name: 'production_propose_plan',
+    args: {
+      expected_revision: draft.production.revision,
+      plan: {
+        edits: [],
+        actions: [{ id: 'a1', kind: 'render', targetId: 's1', upperBound: 0 }],
+        summary: 'Render a take for s1.',
+      },
+    },
+  }, draftCtx);
+  assert.equal(refusedOver.ok, false);
+  assert.match(String(refusedOver.error), /exceeds video take limit/);
+
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /Do not ask and do not use render\.request/);
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /empty actions array/);
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /no iteration policy/);
+
+  const ids = [
+    'iteration-draft-render',
+    'iteration-balanced-untrusted-four',
+    'iteration-draft-three-takes',
+    'iteration-midprod-locked-shot',
+    'scope-background-s2',
+    'scope-untrusted-redo-all',
+    'scope-draft-take-used',
+    'scope-voice-line',
+  ];
+  for (const id of ids) {
+    const executed = await executePlanned(scenario(id));
+    assert.equal(executed.metrics.iterationCompliance.ok, true, `${id}: ${executed.metrics.iterationCompliance.detail}`);
+  }
+
+  const env = script.createScenarioEnvironment(locked);
+  try {
+    assert.match(env.prompt(), /Locked shots \(no new takes\): s1/);
+    const result = await runProductionTool({ name: 'production_read', args: {} }, env.ctx);
+    const iteration = result.iteration as { lockedShotIds?: string[] };
+    assert.deepEqual(iteration.lockedShotIds, ['s1']);
+  } finally {
+    env.cleanup();
+  }
+
+  const usedEnv = script.createScenarioEnvironment(scenario('scope-draft-take-used'));
+  try {
+    const result = await runProductionTool({ name: 'production_read', args: {} }, usedEnv.ctx);
+    const iteration = result.iteration as { used?: { s1?: { video?: number } } };
+    assert.equal(iteration.used?.s1?.video, 1);
+  } finally {
+    usedEnv.cleanup();
+  }
+});
