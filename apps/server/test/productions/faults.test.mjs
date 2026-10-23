@@ -24,6 +24,7 @@ import test from 'node:test';
 
 import { createApp } from '../../src/app.mjs';
 import { createProviderSettings } from '../../src/provider-settings.mjs';
+import { createRunController } from '../../src/run.mjs';
 import { createActionCoordinator } from '../../src/productions/actions.mjs';
 import { createCommandHandler } from '../../src/productions/commands.mjs';
 import {
@@ -944,8 +945,79 @@ test('a production-bound chat correction returns approval_required and starts no
 });
 
 // IP24 follow-up: the legacy /api/run path consumes a queued action to
-// `running` before the backend work, but nothing journals the action's
-// completion when that run ends. A restart therefore still sees a non-terminal
-// action and the coordinator waits forever. The gap is open, so this is a todo
-// rather than an assertion that the broken behaviour is correct.
-test.todo('IP24 follow-up: a completed legacy /api/run must journal action completion; today it stays running across a restart');
+// `running` before the backend work. A completed run must journal the action's
+// terminal state, so a restart over the same journal never leaves the
+// coordinator waiting on an action that is still `running`.
+test('a completed legacy /api/run journals action completion across a restart', async (t) => {
+  const ctx = coordinatorWorld(t, [slot('act_1')]);
+  const dispatched = ctx.coordinator.continue(ctx.productionId, { force: true, maxSteps: 1 });
+  assert.equal(dispatched.executed, 1);
+
+  const makeBackend = () => ({
+    id: 'colab',
+    async describe() {
+      return { label: 'Google Colab G4', costVisibility: 'account-estimate' };
+    },
+    async runPackage(_pkg, opts = {}) {
+      const jobsDoc = { jobs: [{ id: 'j1' }] };
+      const estimate = { gpuMinutes: 0, overheadMinutes: 0, ratePerHour: 8.9 };
+      if (opts.dryRun) return { jobsDoc, estimate, teardown: null };
+      return {
+        ok: true,
+        jobsDoc,
+        estimate,
+        manifest: { complete: true, counts: { succeeded: 1 } },
+        counts: { succeeded: 1 },
+        applied: [],
+        teardown: { state: 'stopped' },
+        spend: { units: 1.5 },
+      };
+    },
+    async teardown() {
+      return { state: 'stopped', evidence: 'fake teardown' };
+    },
+  });
+
+  const runLedger = (target) => ctx.ledgers.resolve(ctx.store.read(target.productionId));
+  const controller = createRunController({
+    runtimeDir: ctx.runtimeDir,
+    backendFactory: async () => makeBackend(),
+    productionStore: ctx.store,
+    ledgerFor: runLedger,
+    isBusy: () => false,
+  });
+
+  const started = await controller.start({
+    backendId: 'colab',
+    pkg: { id: 'pkg_ip62', productionId: ctx.productionId, assets: {}, scenes: [] },
+    budgetUnits: 1000,
+    authority: {
+      productionId: ctx.productionId,
+      planId: 'plan_ip62',
+      planHash: ctx.planHash,
+      actionId: 'act_1',
+    },
+    expected: { productionRevision: ctx.store.read(ctx.productionId).revision },
+  });
+  assert.equal(started.status, 'starting');
+  const done = await controller.wait(started.runId);
+  assert.equal(done.status, 'done');
+
+  const restartedStore = createProductionStore({ runtimeDir: ctx.runtimeDir, clock: () => new Date(AT) });
+  const restartedLedgers = ledgerFor(ctx.runtimeDir);
+  const restarted = createRunController({
+    runtimeDir: ctx.runtimeDir,
+    backendFactory: async () => { throw new Error('a recovery must not start a backend'); },
+    productionStore: restartedStore,
+    ledgerFor: (target) => restartedLedgers.resolve(restartedStore.read(target.productionId)),
+    isBusy: () => false,
+  });
+
+  let action = null;
+  for (const event of restartedStore.readEvents(ctx.productionId)) {
+    if (event.type === 'action.state_changed' && event.data?.id === 'act_1') action = event.data;
+  }
+  assert.equal(action.state, 'completed');
+  assert.equal(action.runId, started.runId);
+  assert.equal(restarted.runs.size, 0, 'recovery does not fabricate an in-memory run');
+});

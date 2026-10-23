@@ -66,6 +66,41 @@ function fakeBackend({ gpuMinutes = 60, resultSpend = null } = {}) {
   return { backend, state };
 }
 
+function failingBackend() {
+  const jobsDoc = { jobs: [{ id: 'j1' }] };
+  const estimate = { gpuMinutes: 60, overheadMinutes: 5, ratePerHour: 8.9 };
+  return {
+    id: 'colab',
+    async describe() {
+      return { label: 'Google Colab G4', costVisibility: 'account-estimate' };
+    },
+    async runPackage(_pkg, opts = {}) {
+      if (opts.dryRun) return { jobsDoc, estimate, teardown: null };
+      opts.onEvent?.({ v: 1, event: 'run_phase', phase: 'allocating' });
+      const error = new Error('job blew up');
+      error.code = 'JOB_FAILED';
+      error.spend = { units: 4.5 };
+      error.runPackage = {
+        jobsDoc,
+        estimate,
+        up: { state: 'created' },
+        teardown: { state: 'stopped' },
+        spend: { units: 4.5 },
+        manifest: null,
+        counts: null,
+      };
+      throw error;
+    },
+    async teardown() {
+      return { state: 'stopped', evidence: 'fake teardown' };
+    },
+  };
+}
+
+function settleEntries(ledger, reservationId) {
+  return ledger.entries().filter((entry) => entry.kind === 'settle' && entry.reservationId === reservationId);
+}
+
 function makeProduction(t, { upperBound = 30, packageId = null } = {}) {
   productionSeq += 1;
   const suffix = String(productionSeq);
@@ -244,6 +279,128 @@ test('IP24: a bound start consumes the queued action and uses the single slot ho
   assert.equal(done.settled.units, 25, 'the ledger records the real usage, not a capped estimate');
   assert.equal(ctx.ledger.status().spent, 25);
   assert.deepEqual(holds(ctx.ledger), []);
+});
+
+test('IP24L: a completed bound run journals action completion and settles the slot once', async t => {
+  const ctx = makeProduction(t, { upperBound: 30 });
+  const { backend, state } = fakeBackend({ resultSpend: 25 });
+  state.gate = Promise.resolve();
+  const controller = controllerFor(ctx, backend);
+
+  const started = await controller.start({
+    backendId: 'colab',
+    pkg: boundPackage(ctx.productionId),
+    budgetUnits: 1000,
+    authority: authorityFor(ctx),
+    expected: { productionRevision: ctx.store.read(ctx.productionId).revision },
+  });
+  const done = await controller.wait(started.runId);
+  assert.equal(done.status, 'done');
+
+  const action = actionFrom(ctx.store, ctx.productionId);
+  assert.equal(action.state, 'completed');
+  assert.equal(action.runId, started.runId);
+  assert.equal(action.lastError, null);
+  assert.deepEqual(holds(ctx.ledger), []);
+
+  const settlements = settleEntries(ctx.ledger, ctx.action.reservationId);
+  assert.equal(settlements.length, 1, 'the IP20 slot is settled exactly once');
+  assert.equal(settlements[0].charged, 25, 'the ledger records the real usage, never the slot cap');
+
+  await controller.wait(started.runId);
+  assert.equal(settleEntries(ctx.ledger, ctx.action.reservationId).length, 1, 'a second wait does not settle again');
+});
+
+test('IP24L: a failed bound run journals the failure with lastError', async t => {
+  const ctx = makeProduction(t, { upperBound: 30 });
+  const controller = controllerFor(ctx, failingBackend());
+
+  const started = await controller.start({
+    backendId: 'colab',
+    pkg: boundPackage(ctx.productionId),
+    budgetUnits: 1000,
+    authority: authorityFor(ctx),
+    expected: { productionRevision: ctx.store.read(ctx.productionId).revision },
+  });
+  const done = await controller.wait(started.runId);
+  assert.equal(done.status, 'failed');
+
+  const action = actionFrom(ctx.store, ctx.productionId);
+  assert.equal(action.state, 'failed');
+  assert.equal(action.runId, started.runId);
+  assert.equal(action.lastError.code, 'JOB_FAILED');
+  assert.match(action.lastError.message, /job blew up/);
+
+  const settlements = settleEntries(ctx.ledger, ctx.action.reservationId);
+  assert.equal(settlements.length, 1);
+  assert.equal(settlements[0].charged, 4.5);
+  assert.deepEqual(holds(ctx.ledger), []);
+});
+
+test('IP24L: a restart after the run ends but before the journal completes the action once', async t => {
+  const ctx = makeProduction(t, { upperBound: 30 });
+  const { backend, state } = fakeBackend({ resultSpend: 25 });
+  state.gate = Promise.resolve();
+  const crashingStore = {
+    ...ctx.store,
+    commit(productionId, input) {
+      if (typeof input?.commandId === 'string' && input.commandId.startsWith('run-end:')) {
+        const error = new Error('injected crash before the end journal write');
+        error.code = 'ECRASH';
+        throw error;
+      }
+      return ctx.store.commit(productionId, input);
+    },
+  };
+  const controller = createRunController({
+    runtimeDir: ctx.runtimeDir,
+    backendFactory: async () => backend,
+    productionStore: crashingStore,
+    ledgerFor: ctx.ledgerFor,
+    isBusy: () => false,
+  });
+
+  const started = await controller.start({
+    backendId: 'colab',
+    pkg: boundPackage(ctx.productionId),
+    budgetUnits: 1000,
+    authority: authorityFor(ctx),
+    expected: { productionRevision: ctx.store.read(ctx.productionId).revision },
+  });
+  const done = await controller.wait(started.runId);
+  assert.equal(done.status, 'done');
+  assert.equal(actionFrom(ctx.store, ctx.productionId).state, 'running', 'the journal never wrote the end');
+  assert.equal(settleEntries(ctx.ledger, ctx.action.reservationId).length, 1, 'the ledger settled before the crash');
+  assert.deepEqual(holds(ctx.ledger), []);
+
+  const restartedStore = createProductionStore({ runtimeDir: ctx.runtimeDir });
+  const restartedLedger = createBudgetLedger({
+    runtimeDir: ctx.runtimeDir,
+    ledgerId: restartedStore.read(ctx.productionId).budgetLedgerId,
+  });
+  createRunController({
+    runtimeDir: ctx.runtimeDir,
+    backendFactory: async () => { throw new Error('a recovery must not start a backend'); },
+    productionStore: restartedStore,
+    ledgerFor: ({ productionId }) => (productionId === ctx.productionId ? restartedLedger : null),
+    isBusy: () => false,
+  });
+
+  const recovered = actionFrom(restartedStore, ctx.productionId);
+  assert.equal(recovered.state, 'completed');
+  assert.equal(recovered.runId, started.runId);
+  assert.equal(settleEntries(restartedLedger, ctx.action.reservationId).length, 1, 'recovery does not settle twice');
+  assert.deepEqual(holds(restartedLedger), []);
+
+  createRunController({
+    runtimeDir: ctx.runtimeDir,
+    backendFactory: async () => { throw new Error('a recovery must not start a backend'); },
+    productionStore: createProductionStore({ runtimeDir: ctx.runtimeDir }),
+    ledgerFor: ({ productionId }) => (productionId === ctx.productionId ? restartedLedger : null),
+    isBusy: () => false,
+  });
+  assert.equal(settleEntries(restartedLedger, ctx.action.reservationId).length, 1, 'a second restart is a no-op');
+  assert.equal(actionFrom(restartedStore, ctx.productionId).state, 'completed');
 });
 
 test('IP24: an estimate above the slot is refused before consumption', async t => {

@@ -8,7 +8,7 @@
 // `backend.runPackage`; this controller only owns the spend gate, the plan hash, the
 // one-run lock and the record. It never branches on the provider.
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PER_HOUR, DEFAULT_GPU } from '../../../packages/backends/src/budget.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
@@ -184,6 +184,19 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+// IP24L: a legacy run that consumed a production action journals its own
+// outcome. The run record on disk is the proof a restart uses to distinguish a
+// finished run (journal its real result) from an unknown submission.
+const RUN_RECORD_SCHEMA = 'comfyrizz.run-record/v1';
+const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const SUBMISSION_UNKNOWN = Object.freeze({
+  state: 'submission_unknown',
+  lastError: Object.freeze({
+    code: 'SUBMISSION_UNKNOWN',
+    message: 'the run is no longer in this process and its record is not finished; reconcile before starting it again',
+  }),
+});
+
 /** Latest durable record of one action, following its state events. */
 function durableAction(events, planHash, actionId) {
   let action = null;
@@ -356,6 +369,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       state: 'running',
       runId,
       lastError: null,
+      boundRunner: 'legacy-run',
     };
     const commandId = `run-start:${verdict.planHash}:${verdict.actionId}`;
     try {
@@ -429,6 +443,231 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     return createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId });
   }
 
+  function runRecordPath(runId) {
+    if (typeof runId !== 'string' || !RUN_ID_RE.test(runId)) return null;
+    return join(runsDir, runId, 'state.json');
+  }
+
+  /** Persist the outcome a restart needs: no record means an unknown submission. */
+  function persistRunRecord(record) {
+    const path = runRecordPath(record?.runId);
+    if (!path) return;
+    const payload = {
+      schema: RUN_RECORD_SCHEMA,
+      runId: record.runId,
+      backendId: record.backendId ?? null,
+      productionId: record.productionId ?? null,
+      actionId: record.actionId ?? null,
+      planHash: record.planHash ?? null,
+      actionPlanHash: record.actionPlanHash ?? null,
+      reservationId: record.reservationId ?? null,
+      status: record.status ?? null,
+      startedAt: record.startedAt ?? null,
+      finishedAt: record.finishedAt ?? null,
+      finished: record.finished === true,
+      error: typeof record.error === 'string' ? record.error : null,
+      errorCode: typeof record.errorCode === 'string' ? record.errorCode : null,
+      settlement: record.settled ?? null,
+      revision: record.revision ?? null,
+      render: record.render ?? null,
+      teardown: record.teardown ?? null,
+      counts: record.counts ?? null,
+      manifest: record.manifest ?? null,
+    };
+    mkdirSync(dirname(path), { recursive: true });
+    const temp = `${path}.${process.pid}.tmp`;
+    try {
+      writeFileSync(temp, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+      renameSync(temp, path);
+    } catch (error) {
+      try { rmSync(temp, { force: true }); } catch { void error; }
+      throw error;
+    }
+  }
+
+  function readRunRecord(runId) {
+    const path = runRecordPath(runId);
+    if (!path) return null;
+    try {
+      const record = JSON.parse(readFileSync(path, 'utf8'));
+      return isPlainObject(record) && record.runId === runId ? record : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function boundEndTarget(record) {
+    if (record.status === 'done' || record.status === 'idle') {
+      return { state: 'completed', lastError: null };
+    }
+    const code = typeof record.errorCode === 'string' && record.errorCode !== ''
+      ? record.errorCode
+      : record.status === 'stop_unconfirmed' ? 'TEARDOWN_UNCONFIRMED' : 'RUN_FAILED';
+    const message = typeof record.error === 'string' && record.error !== ''
+      ? record.error
+      : record.status === 'stop_unconfirmed'
+        ? 'the Google Colab session could not be confirmed stopped'
+        : `the run ended with status ${JSON.stringify(record.status)}`;
+    return { state: 'failed', lastError: { code, message } };
+  }
+
+  /**
+   * Commit the run's terminal fact against the action it consumed. The action
+   * fact is independent of other production edits, so a REVISION_CONFLICT
+   * re-reads the current revision and retries a bounded number of times. A
+   * duplicate command is a no-op (the store returns its first commit).
+   */
+  function commitBoundEnd(record, target, commandPrefix = 'run-end') {
+    const productionId = record.productionId;
+    const planHash = record.actionPlanHash ?? record.planHash;
+    const actionId = record.actionId;
+    if (!productionStore || !productionId || !planHash || !actionId) return false;
+    const commandId = `${commandPrefix}:${planHash}:${actionId}`;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const production = productionStore.read(productionId);
+      if (!production) return false;
+      let current;
+      try {
+        current = durableAction(productionStore.readEvents(productionId), planHash, actionId);
+      } catch {
+        return false;
+      }
+      if (!current) return false;
+      if (current.runId && record.runId && current.runId !== record.runId) return false;
+      if (current.state === target.state) {
+        if (target.state !== 'failed') return true;
+        if (current.lastError?.code === target.lastError?.code) return true;
+      }
+      if (current.state !== 'running') return false;
+      const action = {
+        ...current,
+        state: target.state,
+        runId: record.runId,
+        lastError: target.lastError ?? null,
+      };
+      try {
+        productionStore.commit(productionId, {
+          commandId,
+          idempotencyKey: commandId,
+          baseRevision: production.revision,
+          events: [{ type: 'action.state_changed', data: action }],
+        });
+        return true;
+      } catch (error) {
+        if (error?.code === 'REVISION_CONFLICT') continue;
+        if (error?.code === 'IDEMPOTENCY_CONFLICT' || error?.code === 'DUPLICATE_EVENT') return false;
+        throw error;
+      }
+    }
+    return false;
+  }
+
+  function recoveryLedgerFor(production) {
+    if (!production) return null;
+    if (ledgerFor) {
+      const ledger = ledgerFor({ productionId: production.id, packageId: production.packageId ?? null });
+      if (ledger) return ledger;
+    }
+    if (typeof production.budgetLedgerId !== 'string' || production.budgetLedgerId === '') return null;
+    return createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId });
+  }
+
+  function settleRecordedRun(record, ledger) {
+    if (!ledger || !record?.reservationId || !isPlainObject(record.settlement)) return;
+    try {
+      ledger.settle({
+        reservationId: record.reservationId,
+        ...ledgerSettlementFor(record.settlement),
+      });
+    } catch (error) {
+      if (error?.code === 'RESERVATION_NOT_OPEN') return;
+      throw error;
+    }
+  }
+
+  /**
+   * A crash between the run record and the journal (or the ledger) is repaired
+   * here. Only a `running` action is recovered; a finished run record names its
+   * real outcome, and anything without one is `submission_unknown` so it is
+   * never started again.
+   */
+  function recoverBoundActions() {
+    if (!productionStore || typeof productionStore.list !== 'function') return;
+    let productions;
+    try {
+      productions = productionStore.list();
+    } catch {
+      return;
+    }
+    for (const production of productions) {
+      let events;
+      try {
+        events = productionStore.readEvents(production.id);
+      } catch {
+        continue;
+      }
+      const actions = new Map();
+      for (const event of events) {
+        if (event.type !== 'action.state_changed' || !isPlainObject(event.data)) continue;
+        const data = event.data;
+        if (typeof data.id !== 'string') continue;
+        const previous = actions.get(data.id);
+        actions.set(data.id, previous ? { ...previous, ...data } : { ...data });
+      }
+      let ledger;
+      let ledgerResolved = false;
+      for (const action of actions.values()) {
+        if (action.state !== 'running') continue;
+        const runId = typeof action.runId === 'string' && action.runId !== '' ? action.runId : null;
+        // Only this controller's runs are repaired here. A pipeline action's
+        // run record lives elsewhere and must not be mistaken for an unknown
+        // legacy submission.
+        const legacyRun = action.boundRunner === 'legacy-run'
+          || (runId !== null && runId.startsWith('run_'));
+        if (!legacyRun) continue;
+        const record = runId ? readRunRecord(runId) : null;
+        const planHash = typeof action.planHash === 'string' && action.planHash !== ''
+          ? action.planHash
+          : record?.actionPlanHash ?? record?.planHash ?? null;
+        if (!record || record.finished !== true) {
+          if (!planHash) continue;
+          try {
+            commitBoundEnd({
+              productionId: production.id,
+              actionId: action.id,
+              actionPlanHash: planHash,
+              runId,
+            }, SUBMISSION_UNKNOWN, 'run-unknown');
+          } catch { /* the next controller start retries */ }
+          continue;
+        }
+        if (!ledgerResolved) {
+          ledgerResolved = true;
+          try {
+            ledger = recoveryLedgerFor(production);
+          } catch {
+            ledger = null;
+          }
+        }
+        try {
+          settleRecordedRun(record, ledger);
+        } catch { /* the next controller start retries */ }
+        const endRecord = {
+          productionId: production.id,
+          actionId: action.id,
+          actionPlanHash: planHash,
+          planHash: record.planHash ?? planHash,
+          runId: record.runId,
+          status: record.status,
+          error: record.error,
+          errorCode: record.errorCode,
+        };
+        try {
+          commitBoundEnd(endRecord, boundEndTarget(endRecord));
+        } catch { /* the next controller start retries */ }
+      }
+    }
+  }
 
   /** Settle a run's spend exactly once; the ledger survives retries and double waits. */
   function settle(record, units, kind) {
@@ -676,6 +915,9 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         // No backend instance exists, so no compute can have been billed for this run.
         record.status = 'failed';
         record.error = error.message;
+        if (record.productionId) {
+          record.errorCode = typeof error?.code === 'string' ? error.code : 'BACKEND_ERROR';
+        }
         emit({ v: 1, event: 'error', message: error.message, teardown: null });
         publish({ type: 'run.failed', runId: record.runId, backendId, message: error.message, teardown: null });
         outcome = { kind: 'not_allocated', units: 0 };
@@ -714,6 +956,10 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           // Media succeeded, but the end-to-end request has not produced a video. The media was
           // still generated and billed, so this settles like a completed media run.
           record.renderError = error.message;
+          if (record.productionId) {
+            record.error = error.message;
+            record.errorCode = 'RENDER_FAILED';
+          }
           record.status = 'failed';
           emit({ v: 1, event: 'render_failed', message: error.message });
           publish({ type: 'run.failed', runId: record.runId, backendId, phase: 'render', message: error.message, teardown: record.teardown, counts: record.counts });
@@ -725,6 +971,11 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       record.status = finalStatus;
       if (!complete) {
         const unfinished = record.counts?.failed ?? record.counts?.pending ?? record.manifest?.counts?.failed ?? 0;
+        const unfinishedMessage = `the run did not complete (${unfinished} job(s) unfinished)`;
+        if (record.productionId) {
+          record.error = unfinishedMessage;
+          record.errorCode = 'RUN_INCOMPLETE';
+        }
         const actual = readSpend(instance, [result.spend, result.usage]);
         outcome = actual !== null
           ? { kind: 'actual', units: actual }
@@ -733,7 +984,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           type: 'run.failed',
           runId: record.runId,
           backendId,
-          message: `the run did not complete (${unfinished} job(s) unfinished)`,
+          message: unfinishedMessage,
           teardown: record.teardown,
           counts: record.counts,
           applied: record.applied,
@@ -762,6 +1013,9 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       const partial = error.runPackage ?? null;
       record.status = 'failed';
       record.error = error.message;
+      if (record.productionId) {
+        record.errorCode = typeof error?.code === 'string' ? error.code : 'RUN_FAILED';
+      }
       record.teardown = partial?.teardown ?? record.teardown;
       record.manifest = partial?.manifest ?? record.manifest;
       record.counts = partial?.counts ?? record.counts;
@@ -787,7 +1041,22 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           : { kind: 'completed', units: incrementOf(record) };
       }
       const settled = settle(record, outcome.units, outcome.kind);
+      // IP24L: a production-bound run additionally settles the IP20 slot and
+      // journals the action outcome. The run record is written first, so a
+      // crash between the ledger and the journal is repaired from disk by the
+      // next controller start.
+      const bound = Boolean(productionStore && record.productionId && record.actionId);
+      if (bound) {
+        record.finished = true;
+        record.finishedAt = new Date().toISOString();
+        persistRunRecord(record);
+      }
       if (ledger) settleLedgerRun(ledger, reservationId ?? `run:${record.runId}`, settled);
+      if (bound) {
+        try {
+          commitBoundEnd(record, boundEndTarget(record));
+        } catch { /* the next controller start repairs the journal */ }
+      }
     }
   }
 
@@ -859,6 +1128,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           mode: runMode,
           corrections: runCorrections,
           productionId: verdict.productionId,
+          actionId: verdict.actionId,
+          actionPlanHash: verdict.planHash,
           reservationId: verdict.reservationId,
           startedAt: new Date().toISOString(),
           signal: new AbortController().signal,
@@ -1018,6 +1289,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     await record.done;
     return get(runId);
   }
+
+  recoverBoundActions();
 
   return { estimate, approve, start, get, status, wait, runs, _reset: () => { approvals.clear(); spentEstimate = 0; runs.clear(); activeRunId = null; admissionPending = false; } };
 }
