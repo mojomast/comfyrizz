@@ -6,6 +6,7 @@ import './productions/cards/iteration-card.css';
 import './productions/cards/iteration-advanced.css';
 import { initShellLayout } from './ui/splitter';
 import { mountPalette } from './ui/palette.ts';
+import { toast } from './ui/toast.ts';
 import { registerCommand } from './editor/commands.ts';
 import { MODE_CHANGE_EVENT, mountModeToggle, setMode } from './ui/mode';
 import { getPrefs } from './ui/prefs';
@@ -1826,6 +1827,7 @@ async function exportBundle(): Promise<void> {
   } catch (error) {
     exportState.label = `export failed: ${(error as Error).message}`;
     logActivity(`Export bundle failed: ${(error as Error).message}`);
+    toast({ tone: 'danger', text: `Export failed. ${(error as Error).message}` });
   } finally {
     exportState.running = false;
     renderExportPanel();
@@ -2196,6 +2198,7 @@ async function exportMp4(overrideReason?: string): Promise<void> {
     state.dirty = false;
     $('draft').textContent = 'exported MP4 · timeline recompiled by the server';
     logActivity('Export finished: H.264 MP4 downloaded');
+    toast({ tone: 'ok', text: 'Export finished.' });
   } catch (error) {
     const blocked = error as RenderExportError;
     if (overrideReason === undefined && blocked.code === 'RENDER_GATE_BLOCKED') {
@@ -2209,6 +2212,7 @@ async function exportMp4(overrideReason?: string): Promise<void> {
     }
     label.textContent = `export failed: ${(error as Error).message}`;
     logActivity(`Export failed: ${(error as Error).message}`);
+    toast({ tone: 'danger', text: `Export failed. ${(error as Error).message}` });
   } finally {
     if (button.dataset.exporting === 'true') delete button.dataset.exporting;
     syncExportButton();
@@ -2880,6 +2884,7 @@ function init(opened: OpenedProject): void {
       }
       if (exportState.refused.length === 0 && Array.isArray(data.excluded)) exportState.refused = data.excluded;
       renderExportPanel();
+      toast({ tone: 'ok', text: 'Export finished.' });
     });
     stream.addEventListener('export.failed', event => {
       const data = JSON.parse((event as MessageEvent).data) as { message: string };
@@ -2887,6 +2892,7 @@ function init(opened: OpenedProject): void {
       exportState.label = `export failed: ${data.message}`;
       renderExportPanel();
       logActivity(`Export bundle failed: ${data.message}`);
+      toast({ tone: 'danger', text: `Export failed. ${data.message}` });
     });
     stream.addEventListener('run.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { runId: string; backendId: string };
@@ -2938,6 +2944,7 @@ function init(opened: OpenedProject): void {
     stream.addEventListener('run.refused', event => {
       const data = JSON.parse((event as MessageEvent).data) as { budget?: { message?: string } };
       logActivity(`Server refused the run: ${data.budget?.message ?? 'budget too small'}`);
+      toast({ tone: 'danger', text: `Run refused. ${data.budget?.message ?? 'The budget is too small.'}` });
     });
     // C11: the per-scene re-render's progress lines arrive over SSE; the card for the scene
     // being rebuilt shows the last two.
