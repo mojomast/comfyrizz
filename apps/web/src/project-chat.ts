@@ -58,10 +58,235 @@ export type ChatProject = {
 type ChatReply = {
   conversation: Conversation; reply: string; built: boolean; project?: ChatProject;
 };
-type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[] };
+type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[]; turnContext?: TurnContextChip[] };
 
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const STORAGE_KEY = 'comfyrizz.project-chat';
+
+/**
+ * IP36: the explicit context attached to one chat turn.
+ *
+ * Chips are built only from the object the host passes in. There is
+ * deliberately no module-level "last selected" clip: an empty or missing
+ * context produces no chips rather than borrowing an earlier selection.
+ */
+export type TurnContextChipKind = 'clip' | 'candidate' | 'time' | 'tab' | 'revisions';
+
+export type TurnContextChip = {
+  id: string;
+  kind: TurnContextChipKind;
+  label: string;
+  value: string;
+  removable?: boolean;
+};
+
+export type TurnContextInput = {
+  clip?: string | {
+    clipId?: string | null; id?: string | null; sceneId?: string | null; assetId?: string | null;
+  } | null;
+  clipId?: string | null;
+  sceneId?: string | null;
+  assetId?: string | null;
+  candidate?: string | {
+    takeId?: string | null; id?: string | null; takeN?: number | null; n?: number | null;
+    clipId?: string | null; assetId?: string | null; label?: string | null;
+  } | null;
+  time?: number | { frame?: number | null; fps?: number | null; seconds?: number | null } | null;
+  tab?: string | { id?: string | null; label?: string | null } | null;
+  revisions?: {
+    conversation?: number | null; package?: number | null;
+    conversationRevision?: number | null; packageRevision?: number | null;
+  } | null;
+  conversationRevision?: number | null;
+  packageRevision?: number | null;
+};
+
+const trimText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+const finiteNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+const revisionNumber = (value: unknown): number | null => {
+  const number = finiteNumber(value);
+  return number !== null && Number.isSafeInteger(number) && number >= 0 ? number : null;
+};
+
+/** `00:07` under an hour, `1:02:03` above it. Invalid or negative time is omitted. */
+export function formatTurnContextTime(value: TurnContextInput['time']): string | null {
+  let seconds: number | null = null;
+  if (typeof value === 'number') {
+    seconds = finiteNumber(value);
+  } else if (value && typeof value === 'object') {
+    const explicit = finiteNumber(value.seconds);
+    if (explicit !== null) seconds = explicit;
+    else {
+      const frame = finiteNumber(value.frame);
+      const fps = finiteNumber(value.fps);
+      if (frame !== null && fps !== null && fps > 0) seconds = frame / fps;
+    }
+  }
+  if (seconds === null || seconds < 0) return null;
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remainder = total % 60;
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(remainder)}` : `${pad(minutes)}:${pad(remainder)}`;
+}
+
+type ClipContext = { clipId: string; sceneId: string; assetId: string };
+type CandidateContext = { takeId: string; takeN: number | null; label: string };
+type TabContext = { id: string; value: string };
+type RevisionsContext = { id: string; value: string };
+
+function readClipContext(input: TurnContextInput): ClipContext | null {
+  const source = input.clip;
+  let clipId = trimText(input.clipId);
+  let sceneId = trimText(input.sceneId);
+  let assetId = trimText(input.assetId);
+  if (typeof source === 'string') {
+    clipId = trimText(source) || clipId;
+  } else if (source && typeof source === 'object') {
+    clipId = trimText(source.clipId) || trimText(source.id) || clipId;
+    sceneId = trimText(source.sceneId) || sceneId;
+    assetId = trimText(source.assetId) || assetId;
+  }
+  return clipId ? { clipId, sceneId, assetId } : null;
+}
+
+function readCandidateContext(input: TurnContextInput): CandidateContext | null {
+  const source = input.candidate;
+  let takeId = '';
+  let takeN: number | null = null;
+  let label = '';
+  if (typeof source === 'string') {
+    takeId = trimText(source);
+  } else if (source && typeof source === 'object') {
+    takeId = trimText(source.takeId) || trimText(source.id);
+    takeN = revisionNumber(source.takeN ?? source.n);
+    label = trimText(source.label);
+  }
+  if (!takeId && takeN === null && !label) return null;
+  return { takeId, takeN, label };
+}
+
+function titleCaseTab(value: string): string {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function readTabContext(input: TurnContextInput): TabContext | null {
+  const source = input.tab;
+  const id = typeof source === 'string'
+    ? trimText(source)
+    : source && typeof source === 'object'
+      ? trimText(source.id) || trimText(source.label)
+      : '';
+  if (!id) return null;
+  const explicit = source && typeof source === 'object' ? trimText(source.label) : '';
+  return { id, value: explicit || titleCaseTab(id) };
+}
+
+function readRevisionsContext(input: TurnContextInput): RevisionsContext | null {
+  const source = input.revisions && typeof input.revisions === 'object' ? input.revisions : {};
+  const conversation = revisionNumber(
+    source.conversation ?? source.conversationRevision ?? input.conversationRevision,
+  );
+  const project = revisionNumber(
+    source.package ?? source.packageRevision ?? input.packageRevision,
+  );
+  const parts: string[] = [];
+  if (conversation !== null) parts.push(`chat r${conversation}`);
+  if (project !== null) parts.push(`project r${project}`);
+  if (parts.length === 0) return null;
+  const id = conversation !== null && project !== null
+    ? `revisions:${conversation}:${project}`
+    : conversation !== null
+      ? `revisions:chat:${conversation}`
+      : `revisions:project:${project}`;
+  return { id, value: parts.join(' · ') };
+}
+
+/** Build the chips for one turn from explicit context only. */
+export function buildTurnContextChips(input?: TurnContextInput | null): TurnContextChip[] {
+  const source: TurnContextInput = input && typeof input === 'object' ? input : {};
+  const chips: TurnContextChip[] = [];
+  const seen = new Set<string>();
+  const add = (chip: TurnContextChip) => {
+    if (seen.has(chip.id)) return;
+    seen.add(chip.id);
+    chips.push(chip);
+  };
+
+  const clip = readClipContext(source);
+  if (clip) {
+    add({
+      id: `clip:${clip.clipId}`,
+      kind: 'clip',
+      label: 'Clip',
+      value: clip.sceneId ? `${clip.sceneId} · ${clip.clipId}` : clip.clipId,
+    });
+  }
+
+  const candidate = readCandidateContext(source);
+  if (candidate) {
+    const identity = candidate.takeId || (candidate.takeN !== null ? `take-${candidate.takeN}` : 'candidate');
+    add({
+      id: `candidate:${identity}`,
+      kind: 'candidate',
+      label: 'Candidate',
+      value: candidate.label
+        || (candidate.takeN !== null ? `Take ${candidate.takeN}` : candidate.takeId),
+    });
+  }
+
+  if (source.time !== undefined && source.time !== null) {
+    const formatted = formatTurnContextTime(source.time);
+    if (formatted) {
+      const key = typeof source.time === 'number'
+        ? String(source.time)
+        : source.time.seconds !== undefined && finiteNumber(source.time.seconds) !== null
+          ? String(source.time.seconds)
+          : `${source.time.frame}:${source.time.fps}`;
+      add({ id: `time:${key}`, kind: 'time', label: 'Time', value: formatted });
+    }
+  }
+
+  const tab = readTabContext(source);
+  if (tab) add({ id: `tab:${tab.id}`, kind: 'tab', label: 'Tab', value: tab.value });
+
+  const revisions = readRevisionsContext(source);
+  if (revisions) add({ id: revisions.id, kind: 'revisions', label: 'Revisions', value: revisions.value });
+
+  return chips;
+}
+
+/** Remove one chip by id (or every chip of a kind) without mutating the list. */
+export function removeTurnContextChip(
+  chips: readonly TurnContextChip[] | null | undefined,
+  idOrKind: string,
+): TurnContextChip[] {
+  const list = Array.isArray(chips) ? [...chips] : [];
+  const target = trimText(idOrKind);
+  if (!target) return list;
+  return list.filter(chip => chip?.id !== target && chip?.kind !== target);
+}
+
+/** Render the removable turn-context chip row. No chips renders nothing. */
+export function renderTurnContextChips(chips: readonly TurnContextChip[] | null | undefined): string {
+  const list = (Array.isArray(chips) ? chips : [])
+    .filter((chip): chip is TurnContextChip => Boolean(chip && chip.id && chip.kind));
+  if (list.length === 0) return '';
+  const rows = list.map(chip => {
+    const label = esc(chip.label);
+    const remove = chip.removable === false
+      ? ''
+      : `<button type="button" class="turn-context-remove" data-remove-context-chip="${esc(chip.id)}" data-remove-context-kind="${esc(chip.kind)}" aria-label="Remove ${label} context" title="Remove ${label} context">×</button>`;
+    return `<span class="chip turn-context-chip" data-context-chip="${esc(chip.kind)}" data-context-chip-id="${esc(chip.id)}"><span class="turn-context-kind">${label}</span> <span class="turn-context-value">${esc(chip.value)}</span>${remove}</span>`;
+  }).join('');
+  return `<div class="turn-context" data-turn-context role="group" aria-label="Turn context"><span class="turn-context-label">Context</span><div class="turn-context-chips">${rows}</div></div>`;
+}
 
 export const SUGGESTED_PROMPTS = [
   '30-second product launch',
@@ -140,6 +365,10 @@ export function mountProjectChat(options: {
   applyProject: (project: ChatProject, built: boolean) => void;
   provider: () => Promise<{ provider: string; model: string }>;
   log: (message: string) => void;
+  /** Explicit context for the next turn. Called when the panel renders and again at send. */
+  getTurnContext?: () => TurnContextInput | null;
+  /** Alias for getTurnContext. */
+  turnContext?: () => TurnContextInput | null;
   initialConversationId?: string;
   restoreSaved?: boolean;
   expectedPackageId?: string;
@@ -163,6 +392,42 @@ export function mountProjectChat(options: {
   let pending: TurnRequest | null = null;
   let errorText = '';
   let conflict = false;
+  const dismissedContextChipIds = new Set<string>();
+  const readTurnContext = options.getTurnContext ?? options.turnContext;
+
+  /**
+   * A turn's context is explicit. The only value added here is the local
+   * conversation/package revision, which is not a selection and cannot stand
+   * in for a missing clip. Nothing reads a global "last selected" clip.
+   */
+  function turnContextInput(): TurnContextInput {
+    let explicit: TurnContextInput | null = null;
+    try {
+      explicit = readTurnContext ? readTurnContext() : null;
+    } catch {
+      explicit = null;
+    }
+    const source: TurnContextInput = explicit && typeof explicit === 'object' ? explicit : {};
+    const revisions = source.revisions ?? {
+      conversation: conversation?.revision,
+      package: conversation?.projectRevision,
+    };
+    return { ...source, revisions };
+  }
+
+  function turnContextChips(): TurnContextChip[] {
+    return buildTurnContextChips(turnContextInput())
+      .filter(chip => !dismissedContextChipIds.has(chip.id));
+  }
+
+  function dismissTurnContextChip(idOrKind: string): void {
+    const target = trimText(idOrKind);
+    if (!target) return;
+    for (const chip of turnContextChips()) {
+      if (chip.id === target || chip.kind === target) dismissedContextChipIds.add(chip.id);
+    }
+    render();
+  }
 
   function proposedAssignments(): ReferenceAssignment[] {
     return (conversation?.referenceAssignments ?? []).filter(
@@ -200,9 +465,10 @@ export function mountProjectChat(options: {
 
   function render(): void {
     const plan = conversation?.plan;
+    const contextHtml = renderTurnContextChips(turnContextChips());
     if (!plan) {
       panel.hidden = false;
-      panel.innerHTML = `${errorText ? `<p role="alert">${esc(errorText)}</p>` : '<p class="hint chat-welcome">Chat with the agent to develop your video.</p>'}${renderSuggestedPrompts()}${proposalsHtml()}${castProposalsHtml()}<div class="project-plan-actions"><button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}</div>`;
+      panel.innerHTML = `${contextHtml}${errorText ? `<p role="alert">${esc(errorText)}</p>` : '<p class="hint chat-welcome">Chat with the agent to develop your video.</p>'}${renderSuggestedPrompts()}${proposalsHtml()}${castProposalsHtml()}<div class="project-plan-actions"><button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}</div>`;
       bindActions();
       return;
     }
@@ -210,6 +476,7 @@ export function mountProjectChat(options: {
     const built = conversation?.phase === 'built';
     panel.hidden = false;
     panel.innerHTML = `
+      ${contextHtml}
       <div class="project-plan-head">
         <div><b>${esc(plan.title)}</b><span class="hint">${plan.scenes.length} scenes · ${seconds.toFixed(0)}s · ${esc(plan.aspect)} · ${esc(plan.stylePreset)}</span></div>
         <span class="plan-state badge ${built ? 'badge-ok' : ''}">${built ? '✓ in project' : 'draft'}</span>
@@ -284,6 +551,13 @@ export function mountProjectChat(options: {
         else void send('Change the proposed character placement.', 'plan');
       });
     });
+    panel.querySelectorAll<HTMLElement>('[data-remove-context-chip]').forEach(button => {
+      button.addEventListener('click', () => {
+        if (busy) return;
+        const id = button.getAttribute('data-remove-context-chip');
+        if (id) dismissTurnContextChip(id);
+      });
+    });
     panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy; });
   }
 
@@ -301,6 +575,7 @@ export function mountProjectChat(options: {
     conversationId = null;
     conversation = null;
     pending = null; errorText = ''; conflict = false;
+    dismissedContextChipIds.clear();
     localStorage.removeItem(STORAGE_KEY);
     options.replace([]);
     render();
@@ -325,6 +600,7 @@ export function mountProjectChat(options: {
       }
       conversation = reply.conversation;
       pending = null; errorText = ''; conflict = false;
+      dismissedContextChipIds.clear();
       options.replace(reply.conversation.messages);
       if (reply.project) options.applyProject(reply.project, reply.conversation.phase === 'built');
       try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
@@ -359,6 +635,7 @@ export function mountProjectChat(options: {
     if (busy || !text.trim()) return;
     busy = true;
     await loaded;
+    const turnContext = turnContextChips();
     options.append('user', text.trim());
     try {
       const provider = await options.provider();
@@ -366,7 +643,8 @@ export function mountProjectChat(options: {
         provider: provider.provider, model: provider.model,
         ...(conversation ? { baseRevision: conversation.revision } : {}), ...(action ? { action } : {}),
         ...(confirm?.length ? { confirmAssignments: confirm } : {}),
-        ...(confirmCast?.length ? { confirmCastProposals: confirmCast } : {}) };
+        ...(confirmCast?.length ? { confirmCastProposals: confirmCast } : {}),
+        ...(turnContext.length ? { turnContext } : {}) };
       await perform(pending);
     } catch (error) {
       errorText = (error as Error).message;
@@ -399,6 +677,7 @@ export function mountProjectChat(options: {
       options.log(`Video conversation failed: ${(error as Error).message}`);
     } finally {
       busy = false;
+      dismissedContextChipIds.clear();
       options.setBusy(false);
       render();
     }
@@ -413,6 +692,9 @@ export function mountProjectChat(options: {
     confirmCastProposals,
     confirmCastProposal: confirmCastProposals,
     confirmCast: confirmCastProposals,
+    refreshTurnContext: () => { if (!busy) render(); },
+    dismissTurnContextChip: (idOrKind: string) => { if (!busy) dismissTurnContextChip(idOrKind); },
+    get turnContextChips() { return turnContextChips(); },
     get conversation() { return conversation; },
     get castProposals() { return conversation?.castProposals ?? []; },
     get conversationId() { return conversationId; },
