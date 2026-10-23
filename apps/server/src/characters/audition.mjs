@@ -373,6 +373,85 @@ function isWaveBytes(value) {
   return hasFormat && hasData;
 }
 
+/** Read one PCM/float sample from a wave body, normalised to [-1, 1]. */
+function readSample(buffer, offset, format, bits) {
+  if (format === 3) {
+    if (bits === 32) return buffer.readFloatLE(offset);
+    if (bits === 64) return buffer.readDoubleLE(offset);
+    return null;
+  }
+  if (format !== 1) return null;
+  if (bits === 8) return (buffer.readUInt8(offset) - 128) / 128;
+  if (bits === 16) return buffer.readInt16LE(offset) / 32768;
+  if (bits === 24) {
+    let sample = buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
+    if (sample & 0x800000) sample |= 0xff000000;
+    return sample / 8388608;
+  }
+  if (bits === 32) return buffer.readInt32LE(offset) / 2147483648;
+  return null;
+}
+
+/**
+ * IL20: measured RMS of the wave's existing samples in dBFS, or null when the
+ * bytes are not readable PCM/float audio. The wave is never modified.
+ */
+export function wavRmsDbfs(value) {
+  const buffer = toBuffer(value);
+  if (!buffer || buffer.length < 44) return null;
+  if (buffer.toString('latin1', 0, 4) !== 'RIFF') return null;
+  if (buffer.toString('latin1', 8, 12) !== 'WAVE') return null;
+
+  let format = null;
+  let dataOffset = -1;
+  let dataSize = 0;
+  let offset = 12;
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString('latin1', offset, offset + 4);
+    const size = buffer.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (size > buffer.length - body) return null;
+    if (id === 'fmt ' && size >= 16) {
+      format = {
+        codec: buffer.readUInt16LE(body),
+        channels: buffer.readUInt16LE(body + 2),
+        blockAlign: buffer.readUInt16LE(body + 12),
+        bits: buffer.readUInt16LE(body + 14),
+      };
+      if (format.codec === 0xfffe && size >= 26) format.codec = buffer.readUInt16LE(body + 24);
+    } else if (id === 'data') {
+      dataOffset = body;
+      dataSize = size;
+    }
+    offset = body + size + (size % 2);
+  }
+
+  if (!format || dataOffset < 0 || dataSize === 0) return null;
+  if (!Number.isInteger(format.bits) || ![8, 16, 24, 32, 64].includes(format.bits)) return null;
+  if (format.channels < 1) return null;
+  const bytesPerSample = format.bits / 8;
+  const stride = format.blockAlign >= format.channels * bytesPerSample
+    ? format.blockAlign
+    : format.channels * bytesPerSample;
+  const frames = Math.floor(dataSize / stride);
+  if (frames < 1) return null;
+
+  let sum = 0;
+  let count = 0;
+  for (let frame = 0; frame < frames; frame += 1) {
+    for (let channel = 0; channel < format.channels; channel += 1) {
+      const sample = readSample(buffer, dataOffset + frame * stride + channel * bytesPerSample, format.codec, format.bits);
+      if (sample === null || !Number.isFinite(sample)) return null;
+      sum += sample * sample;
+      count += 1;
+    }
+  }
+  if (count === 0) return null;
+  const rms = Math.sqrt(sum / count);
+  if (!(rms > 0)) return null;
+  return Math.round(20 * Math.log10(rms) * 100) / 100;
+}
+
 function resolveAuditionRequest(characterOrVoice, lineOrOptions, maybeOptions, baseOptions) {
   let callOptions = {};
   if (typeof lineOrOptions === 'string') callOptions = { line: lineOrOptions };
@@ -538,6 +617,14 @@ export function createAuditionCache(options = {}) {
   const inflight = new Map();
   let tempSequence = 0;
 
+  function cachedRms(target) {
+    try {
+      return wavRmsDbfs(api.readFileSync(target));
+    } catch {
+      return null;
+    }
+  }
+
   function writeBytes(target, bytes) {
     const dir = dirname(target);
     api.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -679,6 +766,7 @@ export function createAuditionCache(options = {}) {
       engine,
       contentType: 'audio/wav',
       size: bytes.length,
+      rmsDbfs: wavRmsDbfs(bytes),
       cached: false,
       ...(isPlainObject(result) && Number.isFinite(result.usageUnits) ? { usageUnits: result.usageUnits } : {}),
       ...(isPlainObject(result) && typeof result.started === 'boolean' ? { started: result.started } : {}),
@@ -702,6 +790,7 @@ export function createAuditionCache(options = {}) {
         engine: voice.engine,
         contentType: 'audio/wav',
         size: api.sizeOf(target),
+        rmsDbfs: cachedRms(target),
         cached: true,
       });
     }
@@ -718,6 +807,7 @@ export function createAuditionCache(options = {}) {
         engine: voice.engine,
         contentType: 'audio/wav',
         size: api.sizeOf(target),
+        rmsDbfs: cachedRms(target),
         cached: true,
       });
     }

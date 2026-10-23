@@ -27,6 +27,11 @@ export const NATIVE_VOICE_MESSAGE =
 
 export const REJECT_UNAVAILABLE_HINT = 'Saving rejections is not available yet';
 
+/** IL20: every A/B playback is matched to this RMS, in dBFS. */
+export const AB_TARGET_RMS_DBFS = -20;
+/** IL20: never boost or cut more than this much when matching loudness. */
+export const AB_MAX_GAIN_DB = 12;
+
 const DEFAULT_AUDITION_LINE = 'Hello! This is what I sound like.';
 const MAX_ERROR_CHARS = 400;
 
@@ -41,6 +46,8 @@ export interface AuditionCandidate {
   /** Server-provided speaking path. Never inferred from a model name. */
   voicePath?: AuditionVoicePath;
   sampleLine?: string;
+  /** IL20: server-reported RMS of the candidate's audition, in dBFS. */
+  rmsDbfs?: number;
   /** A persisted decision read back from the server when the panel reloads. */
   decision?: AuditionDecision;
   reason?: string;
@@ -72,7 +79,18 @@ export interface AuditionAudioHandle {
   removeEventListener?(type: 'ended', listener: () => void): void;
 }
 
-export type AuditionAudioFactory = (url: string) => AuditionAudioHandle | null;
+/** IL20: the linear gain the factory applies to its audio graph. */
+export interface AuditionAudioOptions {
+  gain: number;
+  gainDb: number;
+  candidateId: string;
+  blind: boolean;
+}
+
+export type AuditionAudioFactory = (
+  url: string,
+  options?: AuditionAudioOptions,
+) => AuditionAudioHandle | null;
 
 export interface AuditionPanelOptions {
   api: AuditionPanelApi;
@@ -97,6 +115,10 @@ export interface AuditionRow {
   busy: boolean;
   playing: boolean;
   message: string;
+  /** IL20: measured RMS of the last audition, in dBFS, or null when unknown. */
+  rmsDbfs: number | null;
+  /** IL20: linear gain matched to the target RMS. */
+  gain: number;
 }
 
 export interface AuditionPanelState {
@@ -113,6 +135,10 @@ export interface AuditionPanelState {
   message: string;
   rejectEnabled: boolean;
   rejectHint: string;
+  abEnabled: boolean;
+  abBlind: boolean;
+  abRevealed: boolean;
+  abActive: 'a' | 'b' | null;
 }
 
 export type AuditionPanelListener = (state: AuditionPanelState) => void;
@@ -169,6 +195,20 @@ function errorMessage(error: unknown): string {
   return value ? value.slice(0, MAX_ERROR_CHARS) : 'The audition action failed.';
 }
 
+function rmsValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function gainFor(rmsDbfs: number | null): { gain: number; gainDb: number } {
+  if (rmsDbfs === null) return { gain: 1, gainDb: 0 };
+  const gainDb = Math.max(
+    -AB_MAX_GAIN_DB,
+    Math.min(AB_MAX_GAIN_DB, AB_TARGET_RMS_DBFS - rmsDbfs),
+  );
+  const rounded = Math.round(gainDb * 100) / 100;
+  return { gain: Math.round(10 ** (rounded / 20) * 1000) / 1000, gainDb: rounded };
+}
+
 function rowFor(candidate: AuditionCandidate, fallbackLine: string): AuditionRow {
   const voicePath: AuditionVoicePath =
     candidate.voicePath === 'native' || candidate.voicePath === 'kokoro'
@@ -191,6 +231,8 @@ function rowFor(candidate: AuditionCandidate, fallbackLine: string): AuditionRow
     busy: false,
     playing: false,
     message: voicePath === 'native' ? NATIVE_VOICE_MESSAGE : '',
+    rmsDbfs: rmsValue(candidate.rmsDbfs),
+    gain: gainFor(rmsValue(candidate.rmsDbfs)).gain,
   };
 }
 
@@ -202,9 +244,15 @@ function decisionLabel(decision: AuditionDecision): string {
 
 export function renderAuditionPanel(state: AuditionPanelState): string {
   const rows = Array.isArray(state?.rows) ? state.rows : [];
-  const body = rows.map(row => {
+  const abEnabled = state?.abEnabled === true;
+  const blind = abEnabled && state?.abBlind === true && state?.abRevealed !== true;
+  const body = rows.map((row, index) => {
     const candidateId = escapeHtml(row.candidateId);
-    const label = escapeHtml(row.label);
+    const slot = abEnabled && index < 2 ? (index === 0 ? 'a' : 'b') : '';
+    const label = escapeHtml(blind && slot ? `Voice ${slot.toUpperCase()}` : row.label);
+    const voiceLine = blind && slot
+      ? ''
+      : `${escapeHtml(row.engine || 'voice')}${row.voice ? ` · ${escapeHtml(row.voice)}` : ''}${row.language ? ` · ${escapeHtml(row.language)}` : ''}`;
     const busy = row.busy ? ' aria-busy="true"' : '';
     const disabled = row.busy ? ' disabled' : '';
     const native = row.voicePath === 'native';
@@ -212,22 +260,34 @@ export function renderAuditionPanel(state: AuditionPanelState): string {
       ? `<span class="chr-audition-native" data-native-voice>${escapeHtml('audition it in a generated take')}</span>`
       : `<button type="button" class="chr-btn chr-audition-action" data-action="audition-play" data-candidate-id="${candidateId}" data-focus-ring="visible" aria-label="Play ${label}"${disabled}>${row.playing ? 'Playing…' : 'Play'}</button>`;
     const selectLabel = row.decision === 'selected' ? 'Selected' : 'Select';
-    return `<article class="chr-audition-row" role="listitem" data-audition-row data-candidate-id="${candidateId}" data-decision="${escapeHtml(row.decision)}" data-voice-path="${escapeHtml(row.voicePath)}"${busy}>
+    const selectAria = blind && slot ? `Select Voice ${slot.toUpperCase()}` : `Select ${label} voice`;
+    const rejectAria = blind && slot ? `Reject Voice ${slot.toUpperCase()}` : `Reject ${label} voice`;
+    return `<article class="chr-audition-row" role="listitem" data-audition-row data-candidate-id="${candidateId}" data-decision="${escapeHtml(row.decision)}" data-voice-path="${escapeHtml(row.voicePath)}"${slot ? ` data-ab-slot="${slot}"` : ''}${busy}>
       <div class="chr-audition-name">${label}</div>
-      <div class="chr-audition-voice">${escapeHtml(row.engine || 'voice')}${row.voice ? ` · ${escapeHtml(row.voice)}` : ''}${row.language ? ` · ${escapeHtml(row.language)}` : ''}</div>
+      <div class="chr-audition-voice">${voiceLine}</div>
       <div class="chr-audition-controls">
         ${play}
-        <button type="button" class="chr-btn chr-audition-action" data-action="audition-select" data-candidate-id="${candidateId}" data-focus-ring="visible" aria-label="Select ${label} voice" aria-pressed="${row.decision === 'selected' ? 'true' : 'false'}"${disabled}>${selectLabel}</button>
+        <button type="button" class="chr-btn chr-audition-action" data-action="audition-select" data-candidate-id="${candidateId}" data-focus-ring="visible" aria-label="${selectAria}" aria-pressed="${row.decision === 'selected' ? 'true' : 'false'}"${disabled}>${selectLabel}</button>
         <label class="chr-audition-reason-label">Reason
           <input type="text" class="chr-audition-reason" data-role="audition-reason" data-candidate-id="${candidateId}" value="${escapeHtml(row.reason)}" aria-label="Rejection reason for ${label}"${disabled}>
         </label>
-        <button type="button" class="chr-btn chr-audition-action" data-action="audition-reject" data-candidate-id="${candidateId}" data-focus-ring="visible" aria-label="Reject ${label} voice"${!state.rejectEnabled || row.busy ? ' disabled' : ''}>Reject</button>
+        <button type="button" class="chr-btn chr-audition-action" data-action="audition-reject" data-candidate-id="${candidateId}" data-focus-ring="visible" aria-label="${rejectAria}"${!state.rejectEnabled || row.busy ? ' disabled' : ''}>Reject</button>
       </div>
       <span class="chr-audition-decision" data-role="audition-decision">${escapeHtml(decisionLabel(row.decision))}</span>
       ${row.message ? `<span class="chr-hint" data-role="audition-message" role="status">${escapeHtml(row.message)}</span>` : ''}
       ${row.reason && row.decision === 'rejected' ? `<span class="chr-hint" data-role="audition-reason-text">${escapeHtml(row.reason)}</span>` : ''}
     </article>`;
   }).join('');
+
+  const abToolbar = rows.length < 2
+    ? ''
+    : `<div class="chr-audition-ab" data-role="audition-ab" data-ab-enabled="${abEnabled ? 'true' : 'false'}" data-ab-blind="${blind ? 'true' : 'false'}">
+      <button type="button" class="chr-btn chr-audition-action" data-action="audition-ab-toggle" data-focus-ring="visible" aria-pressed="${abEnabled ? 'true' : 'false'}">${abEnabled ? 'A/B on' : 'A/B compare'}</button>
+      ${abEnabled ? `<button type="button" class="chr-btn chr-audition-action" data-action="audition-ab-blind" data-focus-ring="visible" aria-pressed="${blind ? 'true' : 'false'}">Blind</button>
+      <button type="button" class="chr-btn chr-audition-action" data-action="audition-ab-next" data-focus-ring="visible" aria-label="Play the next A/B voice">Play A/B</button>
+      <button type="button" class="chr-btn chr-audition-action" data-action="audition-ab-keep" data-focus-ring="visible" aria-label="Keep the active A/B voice">Keep</button>
+      <span class="chr-hint" data-role="audition-ab-keys">${state.abActive ? `Last played: ${state.abActive.toUpperCase()}. ` : ''}Press A or B to play, Enter to keep.</span>` : ''}
+    </div>`;
 
   const hint = state.rejectEnabled
     ? ''
@@ -240,6 +300,7 @@ export function renderAuditionPanel(state: AuditionPanelState): string {
     : '';
 
   return `<section class="chr-audition-panel" data-audition-panel aria-label="Voice auditions">
+    ${abToolbar}
     <div class="chr-audition-rows" role="list">${body}</div>
     ${hint}
     ${error}
@@ -261,6 +322,10 @@ export class AuditionPanelController {
   error: string;
   message: string;
   rejectEnabled: boolean;
+  abEnabled: boolean;
+  abBlind: boolean;
+  abRevealed: boolean;
+  abActive: 'a' | 'b' | null;
   listeners: Set<AuditionPanelListener>;
   audioFactory?: AuditionAudioFactory;
   playback: Playback | null;
@@ -294,6 +359,10 @@ export class AuditionPanelController {
     this.error = '';
     this.message = '';
     this.rejectEnabled = typeof options.api.recordAuditionDecision === 'function';
+    this.abEnabled = false;
+    this.abBlind = false;
+    this.abRevealed = false;
+    this.abActive = null;
     this.listeners = new Set();
     this.audioFactory = options.audio;
     this.playback = null;
@@ -320,6 +389,10 @@ export class AuditionPanelController {
       message: this.message,
       rejectEnabled: this.rejectEnabled,
       rejectHint: REJECT_UNAVAILABLE_HINT,
+      abEnabled: this.abEnabled,
+      abBlind: this.abBlind,
+      abRevealed: this.abRevealed,
+      abActive: this.abActive,
     };
   }
 
@@ -348,6 +421,112 @@ export class AuditionPanelController {
     return this.rows.find(item => item.candidateId === id) ?? null;
   }
 
+  private abRows(): { a: AuditionRow; b: AuditionRow } | null {
+    if (this.rows.length < 2) return null;
+    return { a: this.rows[0], b: this.rows[1] };
+  }
+
+  private rowForSlot(slot: 'a' | 'b'): AuditionRow | null {
+    const pair = this.abRows();
+    if (!pair) return null;
+    return slot === 'a' ? pair.a : pair.b;
+  }
+
+  private slotOf(row: AuditionRow): 'a' | 'b' | null {
+    if (!this.abEnabled) return null;
+    const pair = this.abRows();
+    if (!pair) return null;
+    if (pair.a === row) return 'a';
+    if (pair.b === row) return 'b';
+    return null;
+  }
+
+  private applyReportedRms(row: AuditionRow, outcome: unknown): void {
+    const record = isRecord(outcome) ? outcome : {};
+    const rmsDbfs = rmsValue(record.rmsDbfs);
+    if (rmsDbfs === null) return;
+    row.rmsDbfs = rmsDbfs;
+    row.gain = gainFor(rmsDbfs).gain;
+  }
+
+  setAbMode(enabled: boolean): AuditionPanelState {
+    if (enabled) {
+      const pair = this.abRows();
+      if (!pair) {
+        this.abEnabled = false;
+        this.error = 'A/B needs two voices to compare.';
+        this.notify();
+        return this.getState();
+      }
+      if (pair.a.line !== pair.b.line) {
+        this.abEnabled = false;
+        this.error = 'A/B needs two voices on the same line.';
+        this.notify();
+        return this.getState();
+      }
+    }
+    this.abEnabled = enabled === true;
+    this.abActive = null;
+    if (this.abEnabled) this.abRevealed = false;
+    this.error = '';
+    this.notify();
+    return this.getState();
+  }
+
+  setBlindMode(enabled: boolean): AuditionPanelState {
+    this.abBlind = enabled === true;
+    this.abRevealed = false;
+    this.notify();
+    return this.getState();
+  }
+
+  async playAbSlot(slot: 'a' | 'b'): Promise<AuditionPanelState> {
+    if (!this.abEnabled) {
+      this.error = 'Turn on A/B compare first.';
+      this.notify();
+      return this.getState();
+    }
+    const row = this.rowForSlot(slot);
+    if (!row) {
+      this.error = 'A/B needs two voices to compare.';
+      this.notify();
+      return this.getState();
+    }
+    return this.play({ candidateId: row.candidateId });
+  }
+
+  async compareNext(): Promise<AuditionPanelState> {
+    if (!this.abEnabled) {
+      this.error = 'Turn on A/B compare first.';
+      this.notify();
+      return this.getState();
+    }
+    return this.playAbSlot(this.abActive === 'a' ? 'b' : 'a');
+  }
+
+  async keep(): Promise<AuditionPanelState> {
+    if (!this.abEnabled) {
+      this.error = 'Turn on A/B compare first.';
+      this.notify();
+      return this.getState();
+    }
+    const slot = this.abActive;
+    if (!slot) {
+      this.error = 'Play A or B before keeping.';
+      this.notify();
+      return this.getState();
+    }
+    const row = this.rowForSlot(slot);
+    if (!row) {
+      this.error = 'A/B needs two voices to compare.';
+      this.notify();
+      return this.getState();
+    }
+    this.stopPlayback(false);
+    this.abRevealed = true;
+    return this.select({ candidateId: row.candidateId });
+  }
+
   private stopPlayback(clearState: boolean): void {
     if (this.playback) {
       try { this.playback.handle.removeEventListener?.('ended', this.playback.ended); } catch { /* optional */ }
@@ -371,10 +550,20 @@ export class AuditionPanelController {
     this.stopPlayback(false);
     this.playingId = row.candidateId;
     row.playing = true;
+    const slot = this.slotOf(row);
+    if (slot) this.abActive = slot;
     if (!this.audioFactory) return;
+    const match = gainFor(row.rmsDbfs);
+    row.gain = match.gain;
+    const options: AuditionAudioOptions = {
+      gain: match.gain,
+      gainDb: match.gainDb,
+      candidateId: row.candidateId,
+      blind: this.abBlind && !this.abRevealed,
+    };
     let handle: AuditionAudioHandle | null = null;
     try {
-      handle = this.audioFactory(url);
+      handle = this.audioFactory(url, options);
     } catch {
       handle = null;
     }
@@ -461,6 +650,7 @@ export class AuditionPanelController {
         return this.getState();
       }
       row.voicePath = 'kokoro';
+      this.applyReportedRms(row, outcome);
       if (!outcome.url) {
         row.message = 'The audition is ready but has no playable URL.';
         this.error = row.message;
@@ -666,6 +856,22 @@ export function mountAuditionPanel(
     const target = actionElement(event);
     if (!target) return;
     const action = actionName(target);
+    if (action === 'audition-ab-toggle') {
+      controller.setAbMode(!controller.getState().abEnabled);
+      return;
+    }
+    if (action === 'audition-ab-blind') {
+      controller.setBlindMode(!controller.getState().abBlind);
+      return;
+    }
+    if (action === 'audition-ab-next') {
+      void controller.compareNext();
+      return;
+    }
+    if (action === 'audition-ab-keep') {
+      void controller.keep();
+      return;
+    }
     const id = candidateId(target);
     if (!id) return;
     if (action === 'audition-play') {
@@ -682,10 +888,30 @@ export function mountAuditionPanel(
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
     const target = actionElement(event);
+    const eventTarget = event.target as unknown as { tagName?: string } | null;
+    const tag = String(eventTarget?.tagName ?? '').toUpperCase();
+    const editable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    if (!editable && controller.getState().abEnabled) {
+      const key = event.key.toLowerCase();
+      if (key === 'a') {
+        event.preventDefault();
+        void controller.playAbSlot('a');
+        return;
+      }
+      if (key === 'b') {
+        event.preventDefault();
+        void controller.playAbSlot('b');
+        return;
+      }
+      if (event.key === 'Enter' && tag !== 'BUTTON') {
+        event.preventDefault();
+        void controller.keep();
+        return;
+      }
+    }
+    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
     if (!target) return;
-    const tag = String((target as unknown as { tagName?: string }).tagName ?? '').toUpperCase();
     if (tag === 'BUTTON') return;
     event.preventDefault();
     onClick(event);
