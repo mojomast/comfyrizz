@@ -464,3 +464,29 @@ test('legacy builder aliases are not exported', async () => {
     assert.equal(module[name], undefined, `${name} alias is removed`);
   }
 });
+
+// Review fix-up (box 23:35): one publish shape and one absent-hash form.
+test('publish takes exactly one input object naming its production', (t) => {
+  const runtimeDir = tempRuntime(t);
+  const store = makeStore(t, runtimeDir);
+  assert.equal(errorCode(() => store.publish('prod_ip55', makeInput())), 'INVALID_DELIVERY');
+  const input = makeInput();
+  delete input.productionId;
+  assert.notEqual(errorCode(() => store.publish(input)), null);
+  assert.equal(fs.existsSync(join(runtimeDir, 'productions')), false);
+});
+
+test('an absent layer hash is exactly { sha256: null, reason } and the reason is pinned', (t) => {
+  const store = makeStore(t);
+  const base = makeInput();
+  assert.equal(errorCode(() => store.publish({ ...base, hashes: { ...base.hashes, nativeAudio: null } })), 'INVALID_HASHES');
+  assert.equal(errorCode(() => store.publish({ ...base, hashes: { ...base.hashes, nativeAudio: { sha256: null } } })), 'DELIVERY_PIN_REQUIRED');
+  assert.equal(errorCode(() => store.publish({
+    ...base,
+    hashes: { ...base.hashes, nativeAudio: null },
+    hashReasons: { nativeAudio: 'no native audio' },
+  })), 'INVALID_HASHES');
+  const result = store.publish({ ...base, hashes: { ...base.hashes, nativeAudio: { sha256: null, reason: 'no native audio in this cut' } } });
+  assert.equal(result.manifest.hashes.nativeAudio, null);
+  assert.equal(result.manifest.hashReasons.nativeAudio, 'no native audio in this cut');
+});

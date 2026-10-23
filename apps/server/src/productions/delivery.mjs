@@ -247,45 +247,25 @@ function normalizeSelections(value) {
   });
 }
 
-function hashReason(value, key, input) {
-  if (isPlainObject(value) && typeof value.reason === 'string' && value.reason.trim() !== '') return value.reason.trim();
-  const container = isPlainObject(value) && isPlainObject(value.reasons) ? value.reasons : null;
-  if (container && typeof container[key] === 'string' && container[key].trim() !== '') return container[key].trim();
-  for (const reasons of [input.hashReasons, isPlainObject(input.hashes) ? input.hashes.reasons : null, isPlainObject(input.hashes) ? input.hashes.reason : null]) {
-    if (isPlainObject(reasons) && typeof reasons[key] === 'string' && reasons[key].trim() !== '') return reasons[key].trim();
-  }
-  return null;
-}
-
-function normalizeHashes(value, input) {
+// A pinned hash is exactly a sha256 hex digest, or { sha256: null, reason }
+// when that layer does not exist for this delivery. There is no other form.
+function normalizeHashes(value) {
   if (!isPlainObject(value)) fail('DELIVERY_PIN_REQUIRED', 'hashes are required');
   const hashes = {};
   const reasons = {};
   for (const key of HASH_KEYS) {
     if (!(key in value)) fail('DELIVERY_PIN_REQUIRED', `hashes.${key} is required`);
     const raw = value[key];
-    if (raw === null) {
-      const reason = hashReason(raw, key, input);
-      if (reason === null) fail('DELIVERY_PIN_REQUIRED', `hashes.${key} is null without a reason`);
-      hashes[key] = null;
-      reasons[key] = reason;
-      continue;
-    }
     if (isPlainObject(raw)) {
-      if (raw.sha256 === null) {
-        const reason = hashReason(raw, key, input);
-        if (reason === null) fail('DELIVERY_PIN_REQUIRED', `hashes.${key} is null without a reason`);
-        hashes[key] = null;
-        reasons[key] = reason;
-      } else {
-        const digest = normalizeDigest(raw.sha256);
-        if (digest === null) fail('INVALID_HASHES', `hashes.${key}.sha256 must be a sha256 hex digest`);
-        hashes[key] = digest;
+      if (raw.sha256 !== null || typeof raw.reason !== 'string' || raw.reason.trim() === '') {
+        fail('DELIVERY_PIN_REQUIRED', `hashes.${key} must be a sha256 hex digest or { sha256: null, reason }`);
       }
+      hashes[key] = null;
+      reasons[key] = raw.reason.trim();
       continue;
     }
-    const digest = normalizeDigest(raw);
-    if (digest === null) fail('INVALID_HASHES', `hashes.${key} must be a sha256 hex digest or null with a reason`);
+    const digest = typeof raw === 'string' ? normalizeDigest(raw) : null;
+    if (digest === null) fail('INVALID_HASHES', `hashes.${key} must be a sha256 hex digest or { sha256: null, reason }`);
     hashes[key] = digest;
   }
   return { hashes, reasons };
@@ -683,7 +663,6 @@ export function createDeliveryStore(options = {}) {
   }
   const runtimeDir = resolve(options.runtimeDir);
   const clock = options.clock;
-  const defaultProductionId = options.productionId;
   let tempSequence = 0;
 
   function pathsFor(productionId) {
@@ -694,10 +673,8 @@ export function createDeliveryStore(options = {}) {
     if (!insideOrEqual(root, deliveriesDir)) fail('PATH_ESCAPE', 'delivery path escapes the runtime directory');
     return {
       root,
-      dir: productionDir,
       productionDir,
       deliveriesDir,
-      deliveries: deliveriesDir,
       lock: join(deliveriesDir, '.lock'),
       versionDir: (version) => join(deliveriesDir, `v${versionNumber(version)}`),
       manifest: (version) => join(deliveriesDir, `v${versionNumber(version)}`, 'manifest.json'),
@@ -790,18 +767,10 @@ export function createDeliveryStore(options = {}) {
     };
   }
 
-  function publish(productionIdOrInput, maybeInput) {
-    let input;
-    let productionId;
-    if (typeof productionIdOrInput === 'string') {
-      productionId = productionIdOrInput;
-      input = maybeInput;
-    } else {
-      input = productionIdOrInput;
-      productionId = isPlainObject(input) ? input.productionId : undefined;
-    }
-    if (productionId === undefined) productionId = defaultProductionId;
-    if (!isPlainObject(input)) input = {};
+  // One call shape: publish(input). The production is exactly input.productionId.
+  function publish(input) {
+    if (!isPlainObject(input)) fail('INVALID_DELIVERY', 'publish takes one delivery input object');
+    let productionId = input.productionId;
     assertNoTransient(input);
 
     let idempotencyKey = null;
@@ -811,7 +780,7 @@ export function createDeliveryStore(options = {}) {
 
     const pins = normalizePins(input.pins);
     const selections = normalizeSelections(input.selections);
-    const normalizedHashes = normalizeHashes(input.hashes, input);
+    const normalizedHashes = normalizeHashes(input.hashes);
     const provenance = normalizeProvenance(input.provenance);
     const reviews = normalizeReviews(input.reviews);
     const output = normalizeOutput(input.output);
