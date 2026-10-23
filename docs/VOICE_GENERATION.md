@@ -10,7 +10,7 @@ The storyboard now has a **Voice & narration** panel. Choose a preset or customi
 
 Ten quick presets include the four tested Michael sentence/context/pace/blend configurations, Heart, Bella, Ryan curious/thoughtful, Aiden, and the conversational designed female narrator. The preset definitions are shared in `packages/tts/voices.mjs`.
 
-Kokoro is local CPU inference. Qwen can use managed Colab or configured local TTS/ASR environments. The UI selects strict Qwen execution, so a missing runtime does not silently substitute another voice. Numeric speed is a Kokoro control; Qwen requires `speed: 1` and uses natural-language delivery for pacing.
+Kokoro is local CPU inference. Qwen can use managed Google Colab or configured local TTS/ASR environments. The UI selects strict Qwen execution, so a missing runtime does not silently substitute another voice. Numeric speed is a Kokoro control; Qwen requires `speed: 1` and uses natural-language delivery for pacing.
 
 The **Generate narrated video** action synthesizes the chosen voice and remeasures the timeline. Existing Render/Export actions reuse existing audio. Generated runs remain isolated revision-bound cuts; use their downloads rather than treating their asset paths as edits to the original project.
 
@@ -60,7 +60,7 @@ Paragraph Kokoro synthesis preserves the measured whole-take duration and rebuil
 - Save narration and optional CustomVoice direction as `scene.narration` / `scene.narration_style`.
 - Plan/start through the [pipeline API](PIPELINE_OBSERVABILITY.md). The plan binds voice settings, narration, package revision and compute ceilings.
 - Generated asset provenance uses the actual Qwen model (`CustomVoice` or `Base`), not a hardcoded Base attribution.
-- The Colab worker downloads only the selected TTS family plus the ASR/aligner models, with pinned revisions. QA-only jobs still skip all TTS models.
+- The Google Colab worker downloads only the selected TTS family plus the ASR/aligner models, with pinned revisions. QA-only jobs still skip all TTS models.
 
 The small `apps/web/src/voice-settings.ts` panel is an integration for the current shell. The other frontend agents can use the same catalogue and package fields in the redesigned editor. Existing agent/provider settings and conversational project merging remain in place.
 

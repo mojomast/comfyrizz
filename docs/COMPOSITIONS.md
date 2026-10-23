@@ -279,12 +279,12 @@ The [machine-readable evidence](research/composition-implementation-20261020.jso
 records versions, frames, archive/video hashes and evidence limits. Raw evidence is
 retained outside the repository under
 `~/comfyrizz-gpu-tests/composition-implementation-20261020/`.
-All renders used local CPU resources and spent **zero Colab credits**.
+All renders used local CPU resources and spent **zero Google Colab credits**.
 
 ## Google Colab remote render
 
 The opt-in Google Colab final render (`renderLocation: 'colab'`) prepares composition
-scenes on the held Colab VM before assembling the final movie. The host sends the
+scenes on the held Google Colab VM before assembling the final movie. The host sends the
 validated generic or package-scoped manifest, referenced inputs, bundled fonts,
 and source code. Host `node_modules` and planner/vector `dist` files are excluded.
 
@@ -315,7 +315,7 @@ recompiles source hashes, verifies artifact bytes and probes each clip before
 reuse. Export packages those verified VM-built resources and MIT notices without
 running HyperFrames again. Source or timing edits invalidate portable reuse.
 
-The existing session policy remains: remote rendering uses the Colab VM held after
+The existing session policy remains: remote rendering uses the Google Colab VM held after
 media generation. It does not allocate a new VM for a composition-only project
 with no generated-media jobs. A real remote failure collects available media and
 stops the VM before attempting the configured local fallback; that fallback needs
@@ -325,14 +325,14 @@ forces a local fallback.
 ### Bootstrap verification
 
 The [source-only bootstrap probe](research/hyperframes-colab-build-20261020.json)
-ran the actual Colab Python bootstrap and remote renderer in an isolated local
+ran the actual Google Colab Python bootstrap and remote renderer in an isolated local
 directory. It installed npm dependencies, built planner/vector, downloaded the
 browser, installed pinned HyperFrames and produced the three-scene **480-frame /
 16-second** example. The production entry point requires no demo fixtures.
 The host adapter then accepted the results/media ZIPs and exported a complete
 editable archive with HyperFrames environment variables removed. This validates
-the dependency and return-resource path; a live Colab allocation and fresh-image
-apt installation were not exercised. No Colab credits were spent.
+the dependency and return-resource path; a live Google Colab allocation and fresh-image
+apt installation were not exercised. No Google Colab credits were spent.
 
 A subsequent [live Google Colab CPU probe](research/hyperframes-colab-live-20261020.json)
 passed the same source-only path: Node 22.20.0 download, npm installs, planner/vector
@@ -344,7 +344,7 @@ This live probe used the silent three-component fixture; Dipsy's separate GPU
 generation attempts were rejected for unavailable G4 capacity.
 
 The later [full Dipsy comparison](research/dipsy-cpu-comparison-20261020.json)
-rendered all 4,011 frames on both Colab CPU and the local host. It also verified
+rendered all 4,011 frames on both Google Colab CPU and the local host. It also verified
 the linked-media staging fix: public assets are copied as file bytes before
 Remotion bundles them, so generated clips linked from the VM's media directory
 remain available to the final compositor.
