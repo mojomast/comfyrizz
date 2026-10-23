@@ -4,6 +4,16 @@
 }
 
 .agent-settings {
+  display: none;
+}
+
+.agent-settings[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.agent-settings {
   width: min(calc(var(--space-6) * 26 + var(--space-5)), calc(100vw - var(--space-6)));
   max-height: calc(100vh - var(--space-6) - var(--space-2));
   overflow: auto;
