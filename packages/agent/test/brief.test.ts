@@ -45,15 +45,15 @@ test('extractBrief: vertical French explainer with an explicit look and avoid li
 
 test('missingQuestions: priority order, cap of three, answered fields skipped', () => {
   const questions = missingQuestions(extractBrief(RICH));
-  // The rich prompt answered key_message/audience/length/cta; only look + data remain.
-  assert.deepEqual(questions.map(question => question.id), ['look', 'data']);
+  // The rich prompt answered key_message/audience/length/cta; only look remains (no data mention).
+  assert.deepEqual(questions.map(question => question.id), ['look']);
   assert.ok(questions.every(question => question.chips.length > 0));
 
   const bare = missingQuestions(extractBrief('Make a video about our app.'));
   assert.deepEqual(bare.map(question => question.id), ['audience', 'length', 'look']);
   assert.equal(bare.length, 3, 'never asks more than three');
 
-  const bank = missingQuestions({}, QUESTION_BANK.length);
+  const bank = missingQuestions({ source_prompt: 'revenue grew 40%' }, QUESTION_BANK.length);
   assert.deepEqual(bank.map(question => question.id), QUESTION_BANK.map(question => question.id));
 });
 
@@ -210,4 +210,19 @@ test('buildOutline: a presenter adds an opt-in note', () => {
   assert.ok(on.notes.some(note => /Presenter: intro and outro/.test(note)));
   const off = buildOutline(completeBrief(extractBrief(RICH)));
   assert.ok(!off.notes.some(note => /Presenter/.test(note)));
+});
+
+
+test('UR12: bakery prompt asks no data question, numeric prompt does', () => {
+  const none = missingQuestions(extractBrief('A 30 second video for my bakery announcing a sourdough subscription'));
+  assert.ok(!none.some(question => question.id === 'data'));
+  const some = missingQuestions(extractBrief('A 30 second video for my bakery announcing a sourdough subscription … revenue grew 40%'));
+  assert.ok(some.some(question => question.id === 'data'));
+});
+
+test('UR12: cta chips do not include star the repo', () => {
+  const cta = QUESTION_BANK.find(question => question.id === 'cta');
+  assert.ok(cta);
+  assert.ok(!cta.chips.includes('star the repo'));
+  assert.deepEqual(cta.chips, ['visit the website', 'sign up', 'get in touch', 'none']);
 });
