@@ -15,6 +15,7 @@
 import { createReadStream, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import { buildVariants } from '../variant.mjs';
 import { runFrameQa } from '../qa.mjs';
 import { sceneAssetIds } from '../scene.mjs';
@@ -37,6 +38,68 @@ export const DELIVERY_ROUTE_PATHS = Object.freeze([
 ]);
 
 const DELIVERY_ROUTE_SET = new Set(DELIVERY_ROUTE_PATHS);
+
+/**
+ * `renderPackage` renders with `spawnSync`, which freezes this process until
+ * Remotion exits. Other local calls (opening a project, the studio boot) then
+ * sit unanswered. The real renderer runs on a worker; test doubles stay inline.
+ */
+function renderBlocksEventLoop(renderFn) {
+  return typeof renderFn === 'function' && renderFn.name === 'renderPackage';
+}
+
+function renderPackageOffThread(packagePath, outputPath, options = {}) {
+  const { onLog, ...rest } = options;
+  let settled = false;
+  let worker = null;
+  let rejectPromise = () => {};
+  const promise = new Promise((resolve, reject) => {
+    rejectPromise = reject;
+    worker = new Worker(new URL('./render-task.mjs', import.meta.url), {
+      workerData: { packagePath, outputPath, options: rest },
+    });
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    const succeed = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    worker.on('message', (message) => {
+      if (!message || typeof message !== 'object') return;
+      if (message.type === 'log') {
+        try { onLog?.(message.line); } catch { /* a log sink must not fail the render */ }
+        return;
+      }
+      if (message.type === 'done') succeed(message.result);
+      if (message.type === 'error') fail(new Error(message.message || 'render failed'));
+    });
+    worker.on('error', fail);
+    worker.on('exit', (code) => {
+      if (!settled && code !== 0) fail(new Error(`render worker exited ${code}`));
+    });
+  });
+  return {
+    promise,
+    cancel() {
+      if (settled) return;
+      settled = true;
+      worker?.terminate().catch(() => {});
+      rejectPromise(new Error('render cancelled'));
+    },
+  };
+}
+
+function startRender(renderFn, packagePath, outputPath, options) {
+  if (renderBlocksEventLoop(renderFn)) return renderPackageOffThread(packagePath, outputPath, options);
+  return {
+    promise: Promise.resolve().then(() => renderFn(packagePath, outputPath, options)),
+    cancel() {},
+  };
+}
 
 export function createRenderRoutes(options = {}) {
   const {
@@ -482,11 +545,15 @@ export function createRenderRoutes(options = {}) {
       if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
 
       events.publish({ type: 'render.started', renderId, packageId: pkg.id, revision });
+      const job = startRender(render, packagePath, output, {
+        onLog: line => events.publish({ type: 'render.log', renderId, line }),
+        ...(body.mixAudio === false ? { mixAudio: false } : {}),
+      });
+      const cancelIfGone = () => job.cancel();
+      response.on('close', cancelIfGone);
       try {
-        const result = await render(packagePath, output, {
-          onLog: line => events.publish({ type: 'render.log', renderId, line }),
-          ...(body.mixAudio === false ? { mixAudio: false } : {}),
-        });
+        const result = await job.promise;
+        response.removeListener('close', cancelIfGone);
         events.publish({
           type: 'render.finished',
           renderId,
@@ -520,6 +587,8 @@ export function createRenderRoutes(options = {}) {
         });
         createReadStream(result.output).pipe(response);
       } catch (error) {
+        response.removeListener('close', cancelIfGone);
+        if (response.writableEnded || response.destroyed || error?.message === 'render cancelled') return;
         events.publish({ type: 'render.failed', renderId, packageId: pkg.id, message: error.message });
         sendJson(response, 500, { error: error.message, renderId });
       }
