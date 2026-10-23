@@ -267,6 +267,7 @@ test('IP24: a bound start consumes the queued action and uses the single slot ho
   assert.equal(started.status, 'starting');
 
   await state.entered;
+  assert.deepEqual(actionStates(ctx.store, ctx.productionId), ['queued', 'dispatching', 'running'], 'the action walks every step before running');
   const running = actionFrom(ctx.store, ctx.productionId);
   assert.equal(running.state, 'running');
   assert.equal(running.runId, started.runId);

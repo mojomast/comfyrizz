@@ -195,15 +195,31 @@ const END_PATHS = Object.freeze({
   submission_unknown: Object.freeze(['submission_unknown']),
 });
 
-function endPath(target) {
+function endPath(target, from = 'running') {
   const path = END_PATHS[target];
   if (!path) return null;
-  let from = 'running';
-  for (const next of path) {
-    if (!canTransition(from, next)) return null;
-    from = next;
+  let cursor = from;
+  const steps = [];
+  // IP24D: a fast run may finish before the action left `dispatching`. The
+  // completion walk still has to pass through `running`; failure and unknown
+  // submissions go straight to their own legal edge.
+  if (cursor === 'dispatching' && target === 'completed') {
+    if (!canTransition(cursor, 'running')) return null;
+    steps.push('running');
+    cursor = 'running';
   }
-  return path;
+  if (cursor !== 'running') {
+    if (path.length !== 1) return null;
+    if (!canTransition(cursor, path[0])) return null;
+    steps.push(path[0]);
+    return steps;
+  }
+  for (const next of path) {
+    if (!canTransition(cursor, next)) return null;
+    steps.push(next);
+    cursor = next;
+  }
+  return steps;
 }
 
 // IP24L: a legacy run that consumed a production action journals its own
@@ -388,7 +404,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   function consumeBoundAction(verdict, runId, expectedRevision, userEventId) {
     const action = {
       ...verdict.action,
-      state: 'running',
+      state: 'dispatching',
       runId,
       lastError: null,
       boundRunner: 'legacy-run',
@@ -418,28 +434,97 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     }
   }
 
-  /** A post-consumption failure is durable too: never leave the slot running with no run. */
-  function failBoundAction(verdict, runId, error) {
-    const current = productionStore.read(verdict.productionId);
-    if (!current) return;
-    const action = {
-      ...verdict.action,
-      state: 'failed',
-      runId,
-      lastError: {
-        code: typeof error?.code === 'string' ? error.code : 'RUN_PREPARE_FAILED',
-        message: typeof error?.message === 'string' && error.message !== '' ? error.message : 'the run could not be prepared',
-      },
-    };
-    const commandId = `run-fail:${verdict.planHash}:${verdict.actionId}`;
-    try {
-      productionStore.commit(verdict.productionId, {
-        commandId,
-        idempotencyKey: commandId,
-        baseRevision: current.revision,
-        events: [{ type: 'action.state_changed', data: action }],
-      });
-    } catch { /* the original failure is the client-visible result */ }
+  /**
+   * IP24D: the backend instance now exists, so the action may claim `running`.
+   * The edge is checked against the contract and retried on a revision
+   * conflict with the same bounded style as the end commit.
+   */
+  function commitBoundRunning(record) {
+    const productionId = record?.productionId;
+    const planHash = record?.actionPlanHash ?? record?.planHash;
+    const actionId = record?.actionId;
+    if (!productionStore || !productionId || !planHash || !actionId) return false;
+    const commandId = `run-running:${planHash}:${actionId}`;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const production = productionStore.read(productionId);
+      if (!production) return false;
+      let current;
+      try {
+        current = durableAction(productionStore.readEvents(productionId), planHash, actionId);
+      } catch {
+        return false;
+      }
+      if (!current) return false;
+      if (current.runId && record.runId && current.runId !== record.runId) return false;
+      if (current.state === 'running') return true;
+      if (!canTransition(current.state, 'running')) return false;
+      try {
+        productionStore.commit(productionId, {
+          commandId,
+          idempotencyKey: commandId,
+          baseRevision: production.revision,
+          events: [{
+            type: 'action.state_changed',
+            data: { ...current, state: 'running', runId: record.runId, lastError: null },
+          }],
+        });
+        return true;
+      } catch (error) {
+        if (error?.code === 'REVISION_CONFLICT') continue;
+        if (error?.code === 'IDEMPOTENCY_CONFLICT' || error?.code === 'DUPLICATE_EVENT') return false;
+        throw error;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * A post-consumption failure is durable too: never leave the slot dispatching
+   * (or running) with no run. The edge is read from the action's current state,
+   * so only a legal transition is written.
+   */
+  function failBoundAction(source, runId, error) {
+    const productionId = source?.productionId;
+    const planHash = source?.actionPlanHash ?? source?.planHash;
+    const actionId = source?.actionId;
+    if (!productionStore || !productionId || !planHash || !actionId) return;
+    const commandId = `run-fail:${planHash}:${actionId}`;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const production = productionStore.read(productionId);
+      if (!production) return;
+      let current;
+      try {
+        current = durableAction(productionStore.readEvents(productionId), planHash, actionId);
+      } catch {
+        return;
+      }
+      if (!current) return;
+      if (current.state === 'failed') return;
+      if (!canTransition(current.state, 'failed')) return;
+      try {
+        productionStore.commit(productionId, {
+          commandId,
+          idempotencyKey: commandId,
+          baseRevision: production.revision,
+          events: [{
+            type: 'action.state_changed',
+            data: {
+              ...current,
+              state: 'failed',
+              runId,
+              lastError: {
+                code: typeof error?.code === 'string' ? error.code : 'RUN_PREPARE_FAILED',
+                message: typeof error?.message === 'string' && error.message !== '' ? error.message : 'the run could not be prepared',
+              },
+            },
+          }],
+        });
+        return;
+      } catch (commitError) {
+        if (commitError?.code === 'REVISION_CONFLICT') continue;
+        return; /* the original failure is the client-visible result */
+      }
+    }
   }
 
   function closeBoundReservation(ledger, reservationId, reason) {
@@ -560,8 +645,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         if (target.state !== 'failed') return true;
         if (current.lastError?.code === target.lastError?.code) return true;
       }
-      if (current.state !== 'running') return false;
-      const path = endPath(target.state);
+      if (current.state !== 'running' && current.state !== 'dispatching') return false;
+      const path = endPath(target.state, current.state);
       if (!path) return false;
       const stepEvents = path.map((state) => ({
         type: 'action.state_changed',
@@ -644,7 +729,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       let ledger;
       let ledgerResolved = false;
       for (const action of actions.values()) {
-        if (action.state !== 'running') continue;
+        if (action.state !== 'running' && action.state !== 'dispatching') continue;
         const runId = typeof action.runId === 'string' && action.runId !== '' ? action.runId : null;
         // Only this controller's runs are repaired here. A pipeline action's
         // run record lives elsewhere and must not be mistaken for an unknown
@@ -656,7 +741,12 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         const planHash = typeof action.planHash === 'string' && action.planHash !== ''
           ? action.planHash
           : record?.actionPlanHash ?? record?.planHash ?? null;
-        if (!record || record.finished !== true) {
+        // IP24D: a dispatching action never reached a backend. Unless its run
+        // record proves the run really started and finished, it is an unknown
+        // submission and its reservation stays open.
+        const neverReachedRunning = action.state === 'dispatching'
+          && (!record || record.finished !== true || record.status === 'starting' || !record.status);
+        if (neverReachedRunning || !record || record.finished !== true) {
           if (!planHash) continue;
           try {
             commitBoundEnd({
@@ -945,11 +1035,16 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         if (record.productionId) {
           record.errorCode = typeof error?.code === 'string' ? error.code : 'BACKEND_ERROR';
         }
+        failBoundAction(record, record.runId, error);
         emit({ v: 1, event: 'error', message: error.message, teardown: null });
         publish({ type: 'run.failed', runId: record.runId, backendId, message: error.message, teardown: null });
         outcome = { kind: 'not_allocated', units: 0 };
         return;
       }
+      // IP24D: only now does a backend instance exist, so the action may leave
+      // `dispatching`. This is checked against the contract and retried on a
+      // revision conflict.
+      commitBoundRunning(record);
       record.status = 'running';
       // H8's runPackage does plan -> estimate -> up -> health -> run -> collect -> apply -> teardown.
       const result = await instance.runPackage(pkg, {
