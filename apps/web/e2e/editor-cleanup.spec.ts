@@ -108,3 +108,16 @@ test('exactly one Saved in the top bar and status bar, and ctx stays in Diagnost
   expect(opened).toMatch(/\bctx\b/);
   expect(opened).toMatch(/open weights/);
 });
+
+test('with the timeline visible, one Play button is visible', async ({ page }) => {
+  const html = indexHtml.replace(
+    '<div id="scene-timeline"></div>',
+    '<div id="scene-timeline"><button type="button">Play</button></div>',
+  );
+  await page.setContent(html);
+  await expect(page.locator('#timeline-dock')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toHaveCount(1);
+  await expect(page.locator('#play')).toBeHidden();
+  await expect(page.locator('#scrub')).toBeHidden();
+  await expect(page.locator('#time')).toBeHidden();
+});

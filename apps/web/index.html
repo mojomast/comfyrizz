@@ -12,6 +12,13 @@
     <link rel="stylesheet" href="/src/ui/components.css" />
     <link rel="stylesheet" href="/src/ui/shell.css" />
     <link rel="stylesheet" href="/src/ui/topbar.css" />
+    <style>
+      #app:not([data-shell-timeline='off']) #play,
+      #app:not([data-shell-timeline='off']) #scrub,
+      #app:not([data-shell-timeline='off']) #time {
+        display: none;
+      }
+    </style>
     <title>Comfyrizz — CPU motion graphics</title>
   </head>
   <body>
