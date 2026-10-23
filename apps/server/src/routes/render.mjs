@@ -22,6 +22,22 @@ import { packageTimeline, timingChangeReason } from '../edit.mjs';
 import { measuredOptionsFromDir } from '../compile-package.mjs';
 import { loadCompositionManifest } from '../../../../packages/compositions/src/index.mjs';
 
+/**
+ * IP54: the one table of final-delivery callers owned by this module. A route
+ * outside this list is not a delivery route; a route added here must go through
+ * `admitRender`, which is the only path from these handlers to a renderer or
+ * exporter. The full production pipeline is the fifth caller and is gated in
+ * app.mjs with the same readiness function.
+ */
+export const DELIVERY_ROUTE_PATHS = Object.freeze([
+  '/api/export',
+  '/api/render',
+  '/api/scene/render',
+  '/api/render/edited',
+]);
+
+const DELIVERY_ROUTE_SET = new Set(DELIVERY_ROUTE_PATHS);
+
 export function createRenderRoutes(options = {}) {
   const {
     store,
@@ -305,7 +321,7 @@ export function createRenderRoutes(options = {}) {
     };
   }
 
-  async function handleExport(request, response) {
+  async function handleExport(request, response, pathname = '/api/export') {
     // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
     // this export with the holder instead of a second job on the same budget.
     // RL06: take the shared slot before the body is read, so a slow request cannot let a
@@ -340,7 +356,7 @@ export function createRenderRoutes(options = {}) {
           admission = await admitRender({
             pkg,
             body,
-            pathname: '/api/export',
+            pathname,
             revision,
             binding,
             details: body.variants && typeof body.variants === 'object' ? { variants: true } : {},
@@ -516,7 +532,7 @@ export function createRenderRoutes(options = {}) {
   // C11: re-render just one scene. The renderer's incremental renderer reuses every cached
   // segment whose key did not change (A6), then re-stitches and muxes; the response is the
   // full-length MP4.
-  async function handleSceneRender(request, response) {
+  async function handleSceneRender(request, response, pathname = '/api/scene/render') {
     // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
     // this scene render with the holder instead of a second job on the same budget.
     // RL06: the shared slot is taken before the body is read, so a scene render cannot
@@ -547,7 +563,7 @@ export function createRenderRoutes(options = {}) {
         admission = await admitRender({
           pkg: target.pkg,
           body,
-          pathname: '/api/scene/render',
+          pathname,
           revision: target.revision,
           binding,
           details: { sceneId: body.sceneId },
@@ -608,7 +624,7 @@ export function createRenderRoutes(options = {}) {
   // C13: an agent edit only re-renders the scenes whose compiled segment changed. The new
   // package is diffed against the last rendered timeline; a scene-local change goes through
   // the A6 incremental cache, a timing change falls back to a full render with a reason.
-  async function handleEditedRender(request, response) {
+  async function handleEditedRender(request, response, pathname = '/api/render/edited') {
     // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
     // this edited render with the holder instead of a second job on the same budget.
     // RL06: an edited render shares the scene render slot, taken before the body is read.
@@ -638,7 +654,7 @@ export function createRenderRoutes(options = {}) {
         admission = await admitRender({
           pkg: target.pkg,
           body,
-          pathname: '/api/render/edited',
+          pathname,
           revision: target.revision,
           binding,
           details: { edited: true },
@@ -740,21 +756,24 @@ export function createRenderRoutes(options = {}) {
       return false;
     }
     if (typeof pathname !== 'string') return false;
+    if (!DELIVERY_ROUTE_SET.has(pathname) || request.method !== 'POST') return false;
 
-    if (pathname === '/api/export' && request.method === 'POST') {
-      await handleExport(request, response);
+    // Every delivery caller is dispatched from the one table above and every
+    // handler below admits through `admitRender` before any side effect.
+    if (pathname === '/api/export') {
+      await handleExport(request, response, pathname);
       return true;
     }
-    if (pathname === '/api/render' && request.method === 'POST') {
+    if (pathname === '/api/render') {
       await handleRender(request, response, pathname);
       return true;
     }
-    if (pathname === '/api/scene/render' && request.method === 'POST') {
-      await handleSceneRender(request, response);
+    if (pathname === '/api/scene/render') {
+      await handleSceneRender(request, response, pathname);
       return true;
     }
-    if (pathname === '/api/render/edited' && request.method === 'POST') {
-      await handleEditedRender(request, response);
+    if (pathname === '/api/render/edited') {
+      await handleEditedRender(request, response, pathname);
       return true;
     }
     return false;

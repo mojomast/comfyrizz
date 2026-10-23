@@ -1,0 +1,318 @@
+// IP54: one final-delivery gate across every render/export caller.
+//
+// The server can deliver a final file through five callers: /api/export,
+// /api/render, /api/scene/render, /api/render/edited and the full production
+// pipeline (/api/pipeline). Each one must consult the same readiness before it
+// starts any renderer, exporter or paid pipeline, and each one must report the
+// same RENDER_GATE_BLOCKED shape with the path it came from.
+//
+// Local only: the renderer and scene renderer are stubs. No network, no Google Colab
+// session, no real render.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
+import { dirname, join } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { Readable, Writable } from 'node:stream';
+
+import { createApp } from '../src/app.mjs';
+import { PackageStore } from '../src/store.mjs';
+import { createRenderRoutes, DELIVERY_ROUTE_PATHS } from '../src/routes/render.mjs';
+
+const TOKEN = 'final-gate-token-0123456789abcdef';
+const FIXTURE_PATH = new URL('../../../packages/schema/fixtures/valid/variants.json', import.meta.url);
+const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
+const ASSET_ID = 'a_plate1';
+const CLIP_ID = `s1:${ASSET_ID}`;
+const REASON = 'owner reviewed every cut by hand';
+const DELIVERY_CALLERS = Object.freeze([
+  '/api/export',
+  '/api/render',
+  '/api/scene/render',
+  '/api/render/edited',
+  '/api/pipeline',
+]);
+
+const clone = value => JSON.parse(JSON.stringify(value));
+
+function fixturePackage() {
+  const pkg = clone(fixture);
+  // A one-scene package must not carry a transition out; this test is about the
+  // delivery gate rather than the timeline transition rule.
+  if (Array.isArray(pkg.scenes) && pkg.scenes.length === 1) delete pkg.scenes[0].transitionOut;
+  return pkg;
+}
+
+function seedPackage(app, pkg) {
+  const dir = dirname(app.store.path(pkg.id));
+  for (const asset of Object.values(pkg.assets ?? {})) {
+    const files = [asset?.file, ...Object.values(asset?.variants ?? {}).map(variant => variant?.file)]
+      .filter(file => typeof file === 'string' && file);
+    for (const relative of files) {
+      const file = join(dir, relative);
+      mkdirSync(dirname(file), { recursive: true });
+      const bytes = Buffer.from(`fixture ${relative}`);
+      if (!existsSync(file)) writeFileSync(file, bytes);
+      if (relative === asset.file) asset.sha256 = createHash('sha256').update(bytes).digest('hex');
+      const variant = Object.values(asset?.variants ?? {}).find(item => item?.file === relative);
+      if (variant) variant.sha256 = createHash('sha256').update(bytes).digest('hex');
+    }
+  }
+  app.store.seed(pkg);
+  return dir;
+}
+
+function addUnreviewedTake(app, pkg, sourceDir) {
+  const source = join(sourceDir, 'final-gate-source.mp4');
+  writeFileSync(source, 'final gate take bytes');
+  return app.takeStore.addTake(pkg.id, ASSET_ID, {
+    srcPath: source,
+    media: clone(pkg.assets[ASSET_ID].media),
+    gen: clone(pkg.assets[ASSET_ID].gen),
+    runId: 'run_final_gate',
+  });
+}
+
+function renderCounters() {
+  const renderCalls = [];
+  const sceneCalls = [];
+  return {
+    renderCalls,
+    sceneCalls,
+    render: async (packagePath, output) => {
+      renderCalls.push({ packagePath, output });
+      writeFileSync(output, 'unexpected final render');
+      return { output, bytes: 22, frames: 1, hash: 'final-gate-render' };
+    },
+    renderScene: async (packagePath, output) => {
+      sceneCalls.push({ packagePath, output });
+      writeFileSync(output, 'unexpected scene render');
+      return {
+        output,
+        bytes: 21,
+        frames: 1,
+        timelineHash: 'final-gate-scene',
+        rendered: [],
+        reused: [],
+        segments: [],
+      };
+    },
+  };
+}
+
+async function withServer(app, fn) {
+  const server = createServer(app.handler);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const request = (path, body) => fetch(base + path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { origin: base, 'x-comfyrizz-token': TOKEN, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  try {
+    return await fn({ base, request });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+test('IP54: the delivery table names every non-pipeline render/export caller', () => {
+  assert.deepEqual(
+    [...DELIVERY_ROUTE_PATHS].sort(),
+    ['/api/export', '/api/render', '/api/render/edited', '/api/scene/render'].sort(),
+  );
+  assert.equal(DELIVERY_ROUTE_PATHS.length, new Set(DELIVERY_ROUTE_PATHS).size, 'each caller appears once');
+});
+
+test('IP54: every delivery caller uses the one final gate and starts no work while blocked', async (t) => {
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'comfyrizz-ip54-'));
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+
+  const counters = renderCounters();
+  const app = createApp({
+    token: TOKEN,
+    runtimeDir,
+    render: counters.render,
+    renderScene: counters.renderScene,
+  });
+  t.after(() => app.close());
+
+  const pkg = fixturePackage();
+  const dir = seedPackage(app, pkg);
+  const take = addUnreviewedTake(app, pkg, dir);
+  assert.ok(take?.takeId, 'the take landed as an unreviewed candidate');
+
+  await withServer(app, async ({ request }) => {
+    const bodies = {
+      '/api/export': { packageId: pkg.id, baseRevision: pkg.revision },
+      '/api/render': { packageId: pkg.id, baseRevision: pkg.revision },
+      '/api/scene/render': { packageId: pkg.id, baseRevision: pkg.revision, sceneId: 's1' },
+      '/api/render/edited': { packageId: pkg.id, baseRevision: pkg.revision },
+      '/api/pipeline': { packageId: pkg.id, baseRevision: pkg.revision, backendId: 'cpu' },
+    };
+
+    for (const path of DELIVERY_CALLERS) {
+      const response = await request(path, bodies[path]);
+      assert.equal(response.status, 409, `${path}: ${await response.clone().text()}`);
+      const payload = await response.json();
+      assert.equal(payload.code, 'RENDER_GATE_BLOCKED', `${path} names the shared gate refusal`);
+      assert.equal(payload.approved, 0, `${path} reports the shared approved count`);
+      assert.equal(payload.total, 1, `${path} reports the shared clip total`);
+      assert.deepEqual(payload.blocking, [{ clipId: CLIP_ID, state: 'review' }], `${path} reports the shared blockers`);
+    }
+
+    assert.equal(counters.renderCalls.length, 0, 'no final renderer was reached');
+    assert.equal(counters.sceneCalls.length, 0, 'no scene renderer was reached');
+    assert.equal(app.pipelines.list().length, 0, 'no pipeline was admitted');
+
+    const blockedPaths = app.events.entries
+      .filter(entry => entry.type === 'render.gate.blocked')
+      .map(entry => entry.path);
+    assert.deepEqual(
+      [...blockedPaths].sort(),
+      [...DELIVERY_CALLERS].sort(),
+      'each caller journals the path it came from',
+    );
+    for (const entry of app.events.entries.filter(event => event.type === 'render.gate.blocked')) {
+      assert.equal(entry.packageId, pkg.id);
+      assert.equal(entry.blocking.length, 1);
+    }
+  });
+});
+
+test('IP54: a written override opens every enumerated route through the same gate', async (t) => {
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'comfyrizz-ip54-override-'));
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+
+  const store = new PackageStore(join(runtimeDir, 'packages'));
+  mkdirSync(join(runtimeDir, 'renders'), { recursive: true });
+  const pkg = fixturePackage();
+  store.seed(pkg);
+  const events = { entries: [], publish(event) { this.entries.push(event); } };
+  const gates = [];
+  const calls = [];
+  const exporter = async args => {
+    calls.push({ kind: 'export', args });
+    return { dir: join(runtimeDir, 'export'), files: [], social: [], frames: 1, captions: 0, complete: true, excluded: [] };
+  };
+  exporter.variants = async args => {
+    calls.push({ kind: 'export-variants', args });
+    return { dir: join(runtimeDir, 'export'), manifestPath: 'manifest.json', manifest: { variants: [] } };
+  };
+  const routes = createRenderRoutes({
+    store,
+    events,
+    exporter,
+    render: async (_packagePath, output) => {
+      calls.push({ kind: 'render' });
+      writeFileSync(output, 'final gate override render');
+      return { output, bytes: 27, frames: 1, hash: 'override-render' };
+    },
+    renderScene: async (_packagePath, output) => {
+      calls.push({ kind: 'scene' });
+      writeFileSync(output, 'final gate override scene');
+      return {
+        output,
+        bytes: 26,
+        frames: 1,
+        timelineHash: 'override-scene',
+        rendered: [],
+        reused: [],
+        segments: [],
+      };
+    },
+    qa: { record() {} },
+    rendersDir: join(runtimeDir, 'renders'),
+    sceneCacheDir: id => join(runtimeDir, 'scene-cache', id),
+    operations: { tryAcquire: () => ({ busy: false, release() {} }) },
+    requireReadiness: true,
+    renderGate: (target, body, pathname) => {
+      gates.push(pathname);
+      if (typeof body?.override?.reason === 'string') return null;
+      return {
+        status: 409,
+        body: {
+          error: '1 of 1 clip(s) still need approval',
+          code: 'RENDER_GATE_BLOCKED',
+          approved: 0,
+          total: 1,
+          blocking: [{ clipId: CLIP_ID, state: 'review' }],
+        },
+      };
+    },
+    draftRenderTarget: () => {
+      throw new Error('drafts are not part of this test');
+    },
+    resolveRenderTarget: body => ({ pkg, packagePath: store.path(pkg.id), revision: pkg.revision, ...(body.sceneId ? { sceneId: body.sceneId } : {}) }),
+    sendJson: (response, status, value) => {
+      const body = JSON.stringify(value);
+      response.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+      response.end(body);
+    },
+    readJson: async request => {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    },
+  });
+
+  const bodies = {
+    '/api/export': { packageId: pkg.id, baseRevision: pkg.revision, override: { reason: REASON } },
+    '/api/render': { packageId: pkg.id, baseRevision: pkg.revision, override: { reason: REASON } },
+    '/api/scene/render': { packageId: pkg.id, baseRevision: pkg.revision, sceneId: 's1', override: { reason: REASON } },
+    '/api/render/edited': { packageId: pkg.id, baseRevision: pkg.revision, override: { reason: REASON } },
+  };
+
+  for (const path of DELIVERY_ROUTE_PATHS) {
+    const response = fakeResponse();
+    const handled = await routes.handle(fakeRequest(bodies[path]), response, new URL(`http://127.0.0.1${path}`));
+    assert.equal(handled, true, `${path} is handled by the delivery route table`);
+    if (!response.writableFinished) await new Promise(resolve => response.once('finish', resolve));
+    assert.equal(response.out.status, 200, `${path}: ${response.out.body}`);
+  }
+
+  assert.deepEqual(gates, [...DELIVERY_ROUTE_PATHS], 'each caller evaluated the shared gate once');
+  assert.equal(calls.filter(call => call.kind === 'export').length, 1);
+  assert.equal(calls.filter(call => call.kind === 'render').length, 1);
+  assert.equal(calls.filter(call => call.kind === 'scene').length, 2, 'scene and edited render both reach the scene renderer');
+});
+
+function fakeRequest(body) {
+  const stream = Readable.from(body === undefined ? [] : [JSON.stringify(body)]);
+  stream.method = 'POST';
+  return stream;
+}
+
+function fakeResponse() {
+  const out = { status: null, headers: null, body: null, chunks: [], finished: false };
+  const response = new Writable({
+    write(chunk, _encoding, callback) {
+      out.chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      callback();
+    },
+    final(callback) {
+      out.body = Buffer.concat(out.chunks).toString('utf8');
+      out.finished = true;
+      callback();
+    },
+  });
+  response.out = out;
+  response.headersSent = false;
+  response.writeHead = (status, headers = {}) => {
+    out.status = status;
+    out.headers = headers;
+    response.headersSent = true;
+    return response;
+  };
+  return response;
+}

@@ -463,8 +463,11 @@ export function createApp({
     return doc;
   }
 
+  // IP54: the single final-delivery gate. Every render/export caller — the four
+  // route handlers and the full pipeline below — admits through this one
+  // function, so the clip rule and the override journal cannot drift per route.
   // Returns null when the render may proceed, or {status, body} when it must not.
-  function renderGate(pkg, body, pathname) {
+  function finalDeliveryGate(pkg, body, pathname) {
     const gate = finalGate(pkg, takeDocFor(pkg.id), gateClips(pkg));
     if (gate.ok) return null;
 
@@ -748,7 +751,15 @@ export function createApp({
     rendersDir,
     sceneCacheDir,
     operations,
-    renderGate,
+    renderGate: finalDeliveryGate,
+    runtimeDir,
+    reviewStarted: pkg => {
+      try {
+        return takeStore.read(pkg.id) != null;
+      } catch {
+        return true;
+      }
+    },
     draftRenderTarget,
     resolveRenderTarget,
     sendJson,
@@ -922,7 +933,7 @@ export function createApp({
       if (!pkg) return sendJson(response, 404, { error: 'package not found' });
       if (body.baseRevision !== pkg.revision) return sendJson(response, 409, { error: 'revision conflict', currentRevision: pkg.revision });
       if (!url.pathname.endsWith('/plan')) {
-        const gate = renderGate(pkg, body, url.pathname);
+        const gate = finalDeliveryGate(pkg, body, url.pathname);
         if (gate) return sendJson(response, gate.status, gate.body);
       }
       try {
