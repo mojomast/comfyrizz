@@ -432,3 +432,50 @@ html body #app #statusbar .btn {
   font-size: var(--font-size-12);
   font-variant-numeric: var(--font-numeric-tabular);
 }
+
+html body #app #topbar #save-status[data-state='saved'] {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+html body #app #topbar #save-status[data-state='offline'],
+html body #app #topbar #save-status[data-state='conflict'],
+html body #app #topbar #save-status[data-state='rejected'] {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+html body #app #statusbar .diagnostics {
+  position: relative;
+}
+
+html body #app #statusbar .diagnostics > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  padding: 0 var(--space-2);
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-1);
+}
+
+html body #app #statusbar .diagnostics > summary::-webkit-details-marker {
+  display: none;
+}
+
+html body #app #statusbar .diagnostics-panel {
+  position: fixed;
+  right: var(--space-3);
+  bottom: calc(var(--statusbar-height) + var(--space-2));
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: calc(var(--space-6) * 6);
+  padding: var(--space-2);
+  background: var(--bg-2);
+  border: var(--elevation-border-2);
+  border-radius: var(--radius-panel);
+}

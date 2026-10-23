@@ -92,3 +92,19 @@ test('presenter quick chips and Regenerate media are gone, and scene chip ids st
   expect(source).toContain("label: 'More detail'");
   expect(source).toContain("label: 'Simpler'");
 });
+
+test('exactly one Saved in the top bar and status bar, and ctx stays in Diagnostics', async ({ page }) => {
+  expect(source).toContain("const PALETTE_LABELS = ['Background', 'Accent', 'Text', 'Highlight']");
+  expect(source).not.toContain('Palette ${');
+  expect(indexHtml).toContain('>Colours<');
+  expect(indexHtml).not.toContain('>Theme<');
+  await page.setContent(indexHtml);
+  const saved = page.locator('#topbar, #statusbar').getByText('Saved', { exact: true });
+  await expect(saved).toHaveCount(1);
+  const closed = await page.locator('#statusbar').evaluate(el => (el as HTMLElement).innerText);
+  expect(closed).not.toMatch(/\bctx\b/);
+  await page.locator('#diagnostics > summary').click();
+  const opened = await page.locator('#statusbar').evaluate(el => (el as HTMLElement).innerText);
+  expect(opened).toMatch(/\bctx\b/);
+  expect(opened).toMatch(/open weights/);
+});

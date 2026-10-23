@@ -1173,13 +1173,15 @@ function renderStoryboard(): void {
   });
 }
 
+const PALETTE_LABELS = ['Background', 'Accent', 'Text', 'Highlight'];
+
 function renderPalette(): void {
   const host = $('palette');
   const theme = pkg.theme;
   if (!theme) return;
   const colors = (theme.palette ??= ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee']);
   host.innerHTML = colors
-    .map((color, index) => `<label>Palette ${index + 1}<input type="color" data-color="${index}" value="${esc(color)}" /></label>`)
+    .map((color, index) => `<label>${esc(PALETTE_LABELS[index] ?? `Colour ${index + 1}`)}<input type="color" data-color="${index}" value="${esc(color)}" /></label>`)
     .join('');
   host.querySelectorAll<HTMLInputElement>('input[data-color]').forEach(input => {
     input.addEventListener('input', () => {
