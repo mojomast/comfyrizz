@@ -10,6 +10,7 @@ import { adoptPlayer, releasePlayer } from './preview-slot.ts';
 import { STEP_MODULES } from './steps/index.ts';
 import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, StepId } from './types.ts';
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
+import { writePlan } from './plan-writer.ts';
 
 import './easy.css';
 
@@ -92,6 +93,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       go,
       rerender: () => showStep(currentStep),
       dialogs: {},
+      writePlan: () => writePlan(store.get(), { api, host, store }),
     };
   }
 
