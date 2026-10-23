@@ -12,6 +12,22 @@ export const CHARACTER_ROLES = [
 export type CharacterRole = (typeof CHARACTER_ROLES)[number];
 
 export const CHARACTER_VOICE_ENGINES = ['kokoro', 'qwen3-tts', 'none'] as const;
+export const CHARACTER_VOICE_PATHS = ['native', 'kokoro'] as const;
+export type CharacterVoicePath = (typeof CHARACTER_VOICE_PATHS)[number];
+
+/** The already-resolved output of the host's voice contract (voice.mjs resolveSpeakingVoice). */
+export interface CharacterSpeakingVoice {
+  voicePath: CharacterVoicePath;
+  voice: string;
+  language: string;
+}
+
+/** One built-in native preset declared by the selected model. Native ids are never files or URLs. */
+export interface CharacterNativeVoice {
+  id: string;
+  language?: string;
+}
+
 export const CHARACTER_VOICE_CHUNKING = ['sentence', 'paragraph'] as const;
 export const CHARACTER_QWEN_MODES = ['custom', 'design'] as const;
 export const CHARACTER_IMAGE_VIEWS = [
@@ -126,6 +142,8 @@ export interface CharacterDraft {
   summary: string;
   visual: { identityPrompt: string };
   voice?: CharacterVoice;
+  voicePath?: CharacterVoicePath;
+  nativeVoice?: string;
   bible?: CharacterBible;
 }
 
@@ -152,6 +170,8 @@ export type CharacterProposal =
       action: 'voice';
       castId: string;
       voice: CharacterVoice;
+      voicePath?: CharacterVoicePath;
+      nativeVoice?: string;
       reason: string;
     };
 
@@ -170,6 +190,14 @@ export interface CharacterToolContext {
   ) => CharacterRecord | undefined | null | Promise<CharacterRecord | undefined | null>;
   propose: (proposal: CharacterProposal) => CharacterProposeResult | Promise<CharacterProposeResult>;
   ask?: (question: string) => unknown | Promise<unknown>;
+  /**
+   * The host's already-resolved speaking voice. The agent never resolves model
+   * capabilities; it only validates a proposal against this record. When it is
+   * absent the tools behave exactly as they did before voice paths existed.
+   */
+  speakingVoice?: CharacterSpeakingVoice;
+  /** Built-in native presets declared by the selected model, for native validation. */
+  nativeVoices?: CharacterNativeVoice[];
 }
 
 export interface CharacterToolCall {
@@ -237,6 +265,13 @@ const questionParam = {
   description: 'One batched question about the cast. It is shown on the card and in the reply.',
 };
 
+const nativeVoiceParam = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 80,
+  description: 'One declared built-in native preset id for models with a native voice. Never a file or URL.',
+};
+
 const voiceSchema = {
   type: 'object',
   additionalProperties: false,
@@ -245,9 +280,15 @@ const voiceSchema = {
     engine: {
       type: 'string',
       enum: [...CHARACTER_VOICE_ENGINES],
-      description: 'kokoro, qwen3-tts, or none. One voice per video.',
+      description: 'kokoro, qwen3-tts, or none. One voice per video. Native speaking voices use the model preset, not this engine.',
     },
     voice: { type: 'string', minLength: 1, maxLength: 64 },
+    nativeVoice: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 80,
+      description: 'A declared built-in native preset id for models with a native voice. Never a file or URL.',
+    },
     speed: { type: 'number', minimum: 0.5, maximum: 1.5 },
     blend: {
       type: 'array',
@@ -386,7 +427,7 @@ export const CHARACTER_TOOLS: ToolDef[] = [
   {
     name: 'character_propose_draft',
     description:
-      'Propose a NEW fictional character for the user to review in the character editor. Nothing is saved to the library until the user confirms. v1 is fictional only: never draft a real person or a real-person likeness.',
+      'Propose a NEW fictional character for the user to review in the character editor. Nothing is saved to the library until the user confirms. v1 is fictional only: never draft a real person or a real-person likeness. The speaking voice is native when the model supports it, otherwise Kokoro, never a clone.',
     parameters: objectSchema(
       {
         name: { type: 'string', minLength: 1, maxLength: CHARACTER_NAME_MAX_CHARS },
@@ -399,6 +440,7 @@ export const CHARACTER_TOOLS: ToolDef[] = [
           description: 'Appearance prompt prepended to stills, e.g. "small round coffee bean, glossy brown".',
         },
         voice: voiceSchema,
+        nativeVoice: nativeVoiceParam,
         bible: bibleSchema,
       },
       ['name', 'role', 'summary', 'identity_prompt'],
@@ -407,11 +449,12 @@ export const CHARACTER_TOOLS: ToolDef[] = [
   {
     name: 'character_propose_voice',
     description:
-      'Record a proposed voice change for a cast member. One voice per video: ask when two characters compete for narrator or presenter. This never applies the voice; the user confirms. Unknown cast ids return an error.',
+      'Record a proposed voice change for a cast member. One voice per video: ask when two characters compete for narrator or presenter. This never applies the voice; the user confirms. Unknown cast ids return an error. The speaking voice is native when the model supports it, otherwise Kokoro, never a clone; a native preset id is never a file or URL.',
     parameters: objectSchema(
       {
         cast_id: { type: 'string', minLength: 1, maxLength: 80 },
         voice: voiceSchema,
+        nativeVoice: nativeVoiceParam,
         reason: reasonParam,
       },
       ['cast_id', 'voice', 'reason'],
@@ -460,7 +503,51 @@ export const CHARACTER_RULES = `Character agent rules (apply only when the proje
 6. Use @handle names in chat and scene text, and resolve a handle to its cast_id from character_list.
 7. Ask when two characters compete for the presenter or narrator role. One voice per video.
 8. Changing a cast member on an approved clip is a correction the user confirms through timeline review; never claim it was applied.
-9. Character images are upload-only. Never propose image generation, face-ID training, a voice clone or any paid provider.`;
+9. Character images are upload-only. Never propose image generation, face-ID training or any paid provider. Never clone a voice from a recording, file or URL: use the video model's built-in native preset when the model supports it, otherwise Kokoro, and only built-in preset voices or Kokoro voices.`;
+
+export interface CharacterCapabilityOptions {
+  /** The host's resolved speaking voice, or undefined for the unchanged rules/tools. */
+  speakingVoice?: CharacterSpeakingVoice | null;
+}
+
+type ResolvedVoicePath = { voicePath: CharacterVoicePath };
+
+function resolvedVoicePath(value: unknown): ResolvedVoicePath | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const voicePath = (value as { voicePath?: unknown }).voicePath;
+  return voicePath === 'native' || voicePath === 'kokoro' ? { voicePath } : undefined;
+}
+
+function speakingVoiceOf(ctx: CharacterToolContext | null | undefined): ResolvedVoicePath | undefined {
+  return resolvedVoicePath(ctx?.speakingVoice);
+}
+
+/** Rules that match the host's resolved voice path. Undefined keeps CHARACTER_RULES. */
+export function characterRulesFor(options: CharacterCapabilityOptions = {}): string {
+  const speaking = resolvedVoicePath(options?.speakingVoice);
+  if (!speaking) return CHARACTER_RULES;
+  const rule = speaking.voicePath === 'native'
+    ? '10. Speaking voice: this model has a built-in native voice. Propose a nativeVoice id from the declared native presets; never invent one, never use a file or URL, and never clone a voice.'
+    : '10. Speaking voice: this model speaks through Kokoro. Propose engine kokoro (or none for no voice); never propose a Qwen3-TTS voice and never clone a voice.';
+  return `${CHARACTER_RULES}\n${rule}`;
+}
+
+function withVoicePathDescription(description: string, speaking: ResolvedVoicePath): string {
+  return speaking.voicePath === 'native'
+    ? `${description} The resolved speaking voice is this model's built-in native preset: choose a nativeVoice id from the declared native presets; never a file or URL, never a clone.`
+    : `${description} The resolved speaking voice is Kokoro: engine must be kokoro (or none for no voice); never Qwen3-TTS, never a clone.`;
+}
+
+/** Tools whose descriptions match the host's resolved voice path. Undefined keeps CHARACTER_TOOLS. */
+export function characterToolsFor(options: CharacterCapabilityOptions = {}): ToolDef[] {
+  const speaking = resolvedVoicePath(options?.speakingVoice);
+  if (!speaking) return CHARACTER_TOOLS;
+  return CHARACTER_TOOLS.map(tool => (
+    tool.name === 'character_propose_voice' || tool.name === 'character_propose_draft'
+      ? { ...tool, description: withVoicePathDescription(tool.description, speaking) }
+      : tool
+  ));
+}
 
 type Read<T> = { value: T } | { error: string };
 
@@ -556,7 +643,7 @@ function readScenes(args: Record<string, unknown>, ctx: CharacterToolContext): R
 function readVoice(raw: unknown, key = 'voice'): Read<CharacterVoice> {
   if (!isPlainObject(raw)) return fail(`${key} must be an object`);
   const allowed = new Set([
-    'engine', 'voice', 'speed', 'blend', 'chunking', 'qwen_mode', 'delivery', 'persona',
+    'engine', 'voice', 'nativeVoice', 'speed', 'blend', 'chunking', 'qwen_mode', 'delivery', 'persona',
     'language', 'presetId', 'sampleLines',
   ]);
   const unknown = Object.keys(raw).find(name => !allowed.has(name));
@@ -625,6 +712,71 @@ function readVoice(raw: unknown, key = 'voice'): Read<CharacterVoice> {
     voice.sampleLines = lines.value;
   }
   return { value: voice };
+}
+
+/**
+ * Read an explicit native preset id from the tool args or the voice object.
+ * This is only an id: paths, URLs and unknown ids never become a native voice.
+ */
+function readNativeVoice(args: Record<string, unknown>, rawVoice: unknown): Read<string | undefined> {
+  const top = args.nativeVoice;
+  const nested = isPlainObject(rawVoice) ? rawVoice.nativeVoice : undefined;
+  if (top !== undefined && nested !== undefined && top !== nested) {
+    return fail('nativeVoice does not match voice.nativeVoice');
+  }
+  const raw = top !== undefined ? top : nested;
+  if (raw === undefined || raw === null) return { value: undefined };
+  if (typeof raw !== 'string') return fail('nativeVoice must be a string');
+  const value = raw.trim();
+  if (!value) return fail('nativeVoice is required');
+  if (value.length > 80) return fail('nativeVoice must be 80 characters or fewer');
+  if (/[\u0000-\u001f\u007f]/.test(value)) return fail('nativeVoice must not contain control characters');
+  return { value };
+}
+
+interface SpeakingChoice {
+  voicePath?: CharacterVoicePath;
+  nativeVoice?: string;
+}
+
+/**
+ * Validate a proposal against the host's resolved speaking voice. The agent
+ * never decides whether the model supports a native voice itself.
+ */
+function speakingChoiceFor(
+  voice: CharacterVoice,
+  nativeVoice: string | undefined,
+  ctx: CharacterToolContext,
+): Read<SpeakingChoice> {
+  const speaking = speakingVoiceOf(ctx);
+  if (!speaking) return { value: {} };
+
+  if (speaking.voicePath === 'native') {
+    if (!nativeVoice) {
+      return fail('VOICE_NATIVE_VOICE_REQUIRED: name one of the declared native voice presets');
+    }
+    const declared = Array.isArray(ctx.nativeVoices) ? ctx.nativeVoices : [];
+    const known = declared.some(entry => (
+      entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id === nativeVoice
+    ));
+    if (!known) {
+      return fail(`VOICE_NATIVE_VOICE_UNKNOWN: ${nativeVoice} is not a declared native voice preset`);
+    }
+    return { value: { voicePath: 'native', nativeVoice } };
+  }
+
+  if (voice.engine === 'qwen3-tts') {
+    return fail('VOICE_KOKORO_REQUIRED: this model speaks through Kokoro; use engine kokoro, or none for no voice');
+  }
+  if (voice.engine === 'none') return { value: {} };
+  return { value: { voicePath: 'kokoro' } };
+}
+
+function speakingChoiceFields(choice: SpeakingChoice): SpeakingChoice {
+  return {
+    ...(choice.voicePath ? { voicePath: choice.voicePath } : {}),
+    ...(choice.nativeVoice ? { nativeVoice: choice.nativeVoice } : {}),
+  };
 }
 
 function readBible(raw: unknown): Read<CharacterBible> {
@@ -1043,11 +1195,19 @@ async function proposeDraft(args: Record<string, unknown>, ctx: CharacterToolCon
   const identity = readText(args, 'identity_prompt', CHARACTER_IDENTITY_PROMPT_MAX_CHARS);
   if ('error' in identity) return errorResult(identity.error);
 
+  const nativeVoice = readNativeVoice(args, args.voice);
+  if ('error' in nativeVoice) return errorResult(nativeVoice.error);
   let voice: CharacterVoice | undefined;
   if (args.voice !== undefined && args.voice !== null) {
     const read = readVoice(args.voice);
     if ('error' in read) return errorResult(read.error);
     voice = read.value;
+  }
+  let choice: SpeakingChoice = {};
+  if (voice) {
+    const read = speakingChoiceFor(voice, nativeVoice.value, ctx);
+    if ('error' in read) return errorResult(read.error);
+    choice = read.value;
   }
   let bible: CharacterBible | undefined;
   if (args.bible !== undefined && args.bible !== null) {
@@ -1064,7 +1224,10 @@ async function proposeDraft(args: Record<string, unknown>, ctx: CharacterToolCon
     summary: summary.value,
     visual: { identityPrompt: identity.value },
   };
-  if (voice) draft.voice = voice;
+  if (voice) {
+    draft.voice = voice;
+    Object.assign(draft, speakingChoiceFields(choice));
+  }
   if (bible) draft.bible = bible;
 
   return recordProposal(
@@ -1083,6 +1246,10 @@ async function proposeVoice(args: Record<string, unknown>, ctx: CharacterToolCon
   if (args.voice === undefined || args.voice === null) return errorResult('voice is required');
   const voice = readVoice(args.voice);
   if ('error' in voice) return errorResult(voice.error);
+  const nativeVoice = readNativeVoice(args, args.voice);
+  if ('error' in nativeVoice) return errorResult(nativeVoice.error);
+  const choice = speakingChoiceFor(voice.value, nativeVoice.value, ctx);
+  if ('error' in choice) return errorResult(choice.error);
 
   const cast = findCast(ctx, castId.value);
   if (!cast) return errorResult(`unknown cast: ${castId.value}`);
@@ -1091,12 +1258,16 @@ async function proposeVoice(args: Record<string, unknown>, ctx: CharacterToolCon
     action: 'voice',
     castId: cast.castId,
     voice: voice.value,
+    ...speakingChoiceFields(choice.value),
     reason: reason.value,
   };
+  const label = choice.value.nativeVoice
+    ? `native ${choice.value.nativeVoice}`
+    : voiceLabel(voice.value);
   return recordProposal(
     proposal,
     ctx,
-    `Proposed voice ${voiceLabel(voice.value)} for ${cast.castId}. One voice per video; waiting for the user to confirm.`,
+    `Proposed voice ${label} for ${cast.castId}. One voice per video; waiting for the user to confirm.`,
   );
 }
 
@@ -1154,12 +1325,12 @@ export async function runCharacterTool(
       return proposeUncast(args, ctx);
     }
     case 'character_propose_draft': {
-      const unknown = rejectUnknownArgs(args, ['name', 'role', 'summary', 'identity_prompt', 'voice', 'bible']);
+      const unknown = rejectUnknownArgs(args, ['name', 'role', 'summary', 'identity_prompt', 'voice', 'nativeVoice', 'bible']);
       if (unknown) return errorResult(unknown);
       return proposeDraft(args, ctx);
     }
     case 'character_propose_voice': {
-      const unknown = rejectUnknownArgs(args, ['cast_id', 'voice', 'reason']);
+      const unknown = rejectUnknownArgs(args, ['cast_id', 'voice', 'nativeVoice', 'reason']);
       if (unknown) return errorResult(unknown);
       return proposeVoice(args, ctx);
     }
