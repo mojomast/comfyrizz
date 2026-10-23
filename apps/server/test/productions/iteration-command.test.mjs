@@ -300,7 +300,7 @@ test('a whole-production change after the first set leaves locked shots on their
   commitStateEvent(store, created.productionId, {
     id: 'act_take_1',
     state: 'queued',
-    targetId: 'shot_1',
+    shotId: 'shot_1',
   });
 
   const whole = handler.execute(setEnvelope(created.productionId, store.read(created.productionId).revision, {
@@ -315,6 +315,35 @@ test('a whole-production change after the first set leaves locked shots on their
   assert.deepEqual(effectivePolicyForShot(iteration.policy, 'shot_1').stages, policy('balanced').stages);
   assert.deepEqual(effectivePolicyForShot(iteration.policy, 'shot_2').stages, policy('director').stages);
   assert.equal(iteration.level, 'custom');
+});
+
+test('only the latest action state and the shotId key lock a shot', (t) => {
+  const runtimeDir = tempRuntime(t);
+  const { store, handler } = makeHandler(t, runtimeDir);
+  const created = createProduction(handler);
+  handler.execute(setEnvelope(created.productionId, created.revision), USER);
+
+  // queued then cancelled before it ran: nothing rendered, nothing in flight.
+  commitStateEvent(store, created.productionId, { id: 'act_cancelled', state: 'queued', shotId: 'shot_1' });
+  commitStateEvent(store, created.productionId, { id: 'act_cancelled', state: 'cancelled', shotId: 'shot_1' });
+  // a second spelling of the shot key is not read.
+  commitStateEvent(store, created.productionId, { id: 'act_other_key', state: 'running', targetId: 'shot_2' });
+  // an action id that happens to equal a shot id is not a shot id.
+  commitStateEvent(store, created.productionId, { id: 'shot_3', state: 'running' });
+
+  const scoped = handler.execute(setEnvelope(created.productionId, store.read(created.productionId).revision, {
+    commandId: 'cmd_iteration_latest',
+    idempotencyKey: 'key_iteration_latest',
+    payload: {
+      policy: policy('director'),
+      scope: { shotIds: ['shot_1', 'shot_2', 'shot_3'] },
+    },
+  }), USER);
+
+  assert.deepEqual(scoped.lockedShotIds, []);
+  for (const shotId of ['shot_1', 'shot_2', 'shot_3']) {
+    assert.deepEqual(effectivePolicyForShot(scoped.production.iteration.policy, shotId).stages, policy('director').stages);
+  }
 });
 
 test('a stale production revision is a conflict and writes nothing', (t) => {

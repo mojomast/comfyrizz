@@ -108,49 +108,30 @@ const LOCKED_ACTION_STATES = new Set([
   'cancel_requested',
 ]);
 
-function addShotId(into, value) {
-  if (typeof value === 'string' && value !== '') into.add(value);
+// One spelling: an action record or a take event names its shot with
+// `shotId` (the package scene id). No other key is read and no id is guessed.
+function shotIdOf(data) {
+  return typeof data.shotId === 'string' && data.shotId !== '' ? data.shotId : null;
 }
 
-function collectShotIds(into, value) {
-  if (Array.isArray(value)) {
-    for (const entry of value) addShotId(into, entry);
-    return;
-  }
-  addShotId(into, value);
-}
-
-function shotIdsFromActionData(data, productionShots) {
-  const ids = new Set();
-  for (const key of ['shotId', 'targetId']) addShotId(ids, data[key]);
-  for (const key of ['shotIds', 'targetIds']) collectShotIds(ids, data[key]);
-  for (const key of ['action', 'slot', 'request', 'payload']) {
-    const nested = data[key];
-    if (!isPlainObject(nested)) continue;
-    for (const nestedKey of ['shotId', 'targetId']) addShotId(ids, nested[nestedKey]);
-    for (const nestedKey of ['shotIds', 'targetIds']) collectShotIds(ids, nested[nestedKey]);
-  }
-  // An action id is not a shot id, but some adapters use the shot id as the
-  // action id. Only accept that spelling when the production really has it.
-  if (typeof data.id === 'string' && productionShots.has(data.id)) ids.add(data.id);
-  return ids;
-}
-
-function lockedShotsFor(production, events) {
-  const productionShots = new Set(Array.isArray(production.shotIds) ? production.shotIds : []);
+function lockedShotsFor(events) {
+  // An action locks its shot only while its LATEST state is in flight or
+  // completed; an action later cancelled or failed before rendering does not.
+  const latestByAction = new Map();
   const locked = new Set();
   for (const event of events) {
     if (!isPlainObject(event) || !isPlainObject(event.data)) continue;
     const data = event.data;
-    let locks = false;
     if (event.type === 'action.state_changed') {
-      locks = LOCKED_ACTION_STATES.has(data.state)
-        || (isPlainObject(data.action) && LOCKED_ACTION_STATES.has(data.action.state));
+      if (typeof data.id === 'string' && data.id !== '') latestByAction.set(data.id, data);
     } else if (event.type === 'take.requested' || event.type === 'take.landed') {
-      locks = true;
+      const shotId = shotIdOf(data);
+      if (shotId) locked.add(shotId);
     }
-    if (!locks) continue;
-    for (const shotId of shotIdsFromActionData(data, productionShots)) locked.add(shotId);
+  }
+  for (const action of latestByAction.values()) {
+    const shotId = shotIdOf(action);
+    if (shotId && LOCKED_ACTION_STATES.has(action.state)) locked.add(shotId);
   }
   return locked;
 }
@@ -201,7 +182,7 @@ function applyIterationSet(production, payload, events, at) {
     };
   }
 
-  const locked = lockedShotsFor(production, events);
+  const locked = lockedShotsFor(events);
   // A whole-production change covers its known shots plus any shot named by an
   // in-flight action, so a locked shot is never silently outside the change.
   const targets = scope ?? [...new Set([...productionShotIds, ...locked])];
