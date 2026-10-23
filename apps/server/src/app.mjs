@@ -28,6 +28,7 @@ import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
 import { TAKES_SCHEMA, shouldAutoSelect } from './takes/model.mjs';
 import { createTakeRoutes } from './takes/routes.mjs';
+import { createThumbRoutes } from './thumbs/routes.mjs';
 import { buildCorrection } from './takes/correction.mjs';
 import { listClips } from './takes/clips.mjs';
 import { finalGate } from './takes/gate.mjs';
@@ -777,6 +778,7 @@ export function createApp({
     mediaTickets,
     measuredFor: pkg => measuredOptionsFromDir(dirname(store.path(pkg.id))),
   });
+  const thumbRoutes = createThumbRoutes({ store, takeStore, runtimeDir, mediaTickets });
   const sceneCacheDir = (packageId) => join(runtimeDir, 'scene-cache', packageId);
 
   // RL11: the export and render routes live in src/routes/render.mjs. This is a pure
@@ -1000,6 +1002,8 @@ export function createApp({
       const minted = mediaTickets.mint(file);
       return sendJson(response, 200, { ticket: minted.ticket, expiresAt: minted.expiresAt, url: minted.url });
     }
+
+    if (await thumbRoutes.handle(request, response, url)) return;
 
     if (url.pathname === '/api/events' && request.method === 'GET') {
       const lastEventId = request.headers['last-event-id'] ?? url.searchParams.get('lastEventId');
