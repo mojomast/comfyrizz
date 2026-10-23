@@ -670,3 +670,68 @@ test('IP24: /api/run/approve refuses a plan that lives in a production journal',
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+// IP24L review fix-up: the end commit must follow spec 6.4 (no running ->
+// completed edge), and a running action whose run left no finished record is
+// submission_unknown after a restart, never completed and never restarted.
+function actionStates(store, productionId) {
+  return store.readEvents(productionId)
+    .filter((event) => event.type === 'action.state_changed')
+    .map((event) => event.data.state);
+}
+
+test('IP24L fix-up: a completed run walks running -> collecting -> verifying -> completed', async t => {
+  const { canTransition } = await import('../src/productions/contract.mjs');
+  const ctx = makeProduction(t, { upperBound: 30 });
+  const { backend, state } = fakeBackend({ resultSpend: 25 });
+  state.gate = Promise.resolve();
+  const controller = controllerFor(ctx, backend);
+  const started = await controller.start({
+    backendId: 'colab',
+    pkg: boundPackage(ctx.productionId),
+    budgetUnits: 1000,
+    authority: authorityFor(ctx),
+    expected: { productionRevision: ctx.store.read(ctx.productionId).revision },
+  });
+  await controller.wait(started.runId);
+  const states = actionStates(ctx.store, ctx.productionId);
+  const tail = states.slice(states.lastIndexOf('running'));
+  assert.deepEqual(tail, ['running', 'collecting', 'verifying', 'completed']);
+  for (let index = 1; index < tail.length; index += 1) {
+    assert.equal(canTransition(tail[index - 1], tail[index]), true, `${tail[index - 1]} -> ${tail[index]}`);
+  }
+});
+
+test('IP24L fix-up: a running action with no finished run record is submission_unknown after a restart', async t => {
+  const ctx = makeProduction(t, { upperBound: 30 });
+  const { backend, state } = fakeBackend({ resultSpend: 25 });
+  const controller = controllerFor(ctx, backend);
+  const started = await controller.start({
+    backendId: 'colab',
+    pkg: boundPackage(ctx.productionId),
+    budgetUnits: 1000,
+    authority: authorityFor(ctx),
+    expected: { productionRevision: ctx.store.read(ctx.productionId).revision },
+  });
+  await state.entered;
+  assert.equal(actionFrom(ctx.store, ctx.productionId).state, 'running');
+
+  let backendCalls = 0;
+  const restartedStore = createProductionStore({ runtimeDir: ctx.runtimeDir });
+  createRunController({
+    runtimeDir: ctx.runtimeDir,
+    backendFactory: async () => { backendCalls += 1; throw new Error('a recovery must not start a backend'); },
+    productionStore: restartedStore,
+    ledgerFor: ctx.ledgerFor,
+    isBusy: () => false,
+  });
+  const recovered = actionFrom(restartedStore, ctx.productionId);
+  assert.equal(recovered.state, 'submission_unknown');
+  assert.equal(recovered.runId, started.runId);
+  assert.equal(recovered.lastError.code, 'SUBMISSION_UNKNOWN');
+  assert.equal(backendCalls, 0);
+  assert.equal(settleEntries(ctx.ledger, ctx.action.reservationId).length, 0, 'an unknown submission keeps its reservation open');
+
+  state.release();
+  await controller.wait(started.runId);
+});

@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync
 import { dirname, join } from 'node:path';
 import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PER_HOUR, DEFAULT_GPU } from '../../../packages/backends/src/budget.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
+import { canTransition } from './productions/contract.mjs';
 
 /** Kept as the exported name earlier code and tests reference; the value is the shared default (PO-3). */
 export const G4_RATE_PER_HOUR = DEFAULT_RATE_PER_HOUR;
@@ -182,6 +183,27 @@ function clipJobFor(record, event) {
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+// IP24L review fix-up: spec 6.4 has no running -> completed edge; a finished
+// run walks running -> collecting -> verifying -> completed in one commit. Every
+// step is checked against the contract so the journal never records an illegal
+// transition.
+const END_PATHS = Object.freeze({
+  completed: Object.freeze(['collecting', 'verifying', 'completed']),
+  failed: Object.freeze(['failed']),
+  submission_unknown: Object.freeze(['submission_unknown']),
+});
+
+function endPath(target) {
+  const path = END_PATHS[target];
+  if (!path) return null;
+  let from = 'running';
+  for (const next of path) {
+    if (!canTransition(from, next)) return null;
+    from = next;
+  }
+  return path;
 }
 
 // IP24L: a legacy run that consumed a production action journals its own
@@ -539,18 +561,23 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         if (current.lastError?.code === target.lastError?.code) return true;
       }
       if (current.state !== 'running') return false;
-      const action = {
-        ...current,
-        state: target.state,
-        runId: record.runId,
-        lastError: target.lastError ?? null,
-      };
+      const path = endPath(target.state);
+      if (!path) return false;
+      const stepEvents = path.map((state) => ({
+        type: 'action.state_changed',
+        data: {
+          ...current,
+          state,
+          runId: record.runId,
+          lastError: state === target.state ? (target.lastError ?? null) : null,
+        },
+      }));
       try {
         productionStore.commit(productionId, {
           commandId,
           idempotencyKey: commandId,
           baseRevision: production.revision,
-          events: [{ type: 'action.state_changed', data: action }],
+          events: stepEvents,
         });
         return true;
       } catch (error) {
