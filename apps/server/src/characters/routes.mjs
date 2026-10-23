@@ -18,6 +18,7 @@ import {
 import { IMAGE_EXTENSIONS, createCharacterStore } from './store.mjs';
 import { CHAT_ID_PATTERN } from '../references/store.mjs';
 import { serveStaticFile } from '../static-file.mjs';
+import { withConversationLock } from '../conversation-lock.mjs';
 
 export const CHARACTER_ROUTE_PATTERN = /^\/api\/characters(?:\/(.*))?$/;
 export const CAST_ROUTE_PATTERN = /^\/api\/chat\/([^/]+)\/cast(?:\/(.*))?$/;
@@ -338,7 +339,23 @@ function fileSessionStore(dir, fs) {
     }
   }
 
-  return { read, write };
+  function mutate(chatId, apply) {
+    return withConversationLock(dir, chatId, () => {
+      const current = read(chatId);
+      if (!current) fail('NOT_FOUND', `conversation ${chatId} does not exist`, 404);
+      const outcome = apply(current);
+      if (!outcome || outcome.changed !== true) return outcome;
+      const next = {
+        ...current,
+        ...(outcome.sessionPatch ?? {}),
+        revision: (Number.isSafeInteger(current.revision) ? current.revision : 0) + 1,
+      };
+      write(chatId, next);
+      return { ...outcome, session: next };
+    });
+  }
+
+  return { read, write, mutate };
 }
 
 function resolveSessions(options) {
@@ -532,14 +549,22 @@ export function createCharacterRoutes(options = {}) {
     return session;
   }
 
-  async function writeSessionCast(chatId, session, cast) {
+  // File-backed sessions take the shared conversation lock and re-read inside
+  // it. Injected stores keep their caller-owned read/write contract.
+  async function mutateSession(chatId, apply) {
+    const store = sessionStore();
+    if (typeof store.mutate === 'function') return store.mutate(chatId, apply);
+    const session = await store.read(chatId);
+    if (!session) fail('NOT_FOUND', `conversation ${chatId} does not exist`, 404);
+    const outcome = await apply(session);
+    if (!outcome || outcome.changed !== true) return outcome;
     const next = {
       ...session,
-      cast: plainCast(cast),
+      ...(outcome.sessionPatch ?? {}),
       revision: (Number.isSafeInteger(session.revision) ? session.revision : 0) + 1,
     };
-    await sessionStore().write(chatId, next);
-    return next;
+    await store.write(chatId, next);
+    return { ...outcome, session: next };
   }
 
   function handleListCharacters(response) {
@@ -759,11 +784,15 @@ export function createCharacterRoutes(options = {}) {
     }
     const character = storeFor().get(characterId.trim());
     if (!character) fail('NOT_FOUND', `character ${characterId} does not exist`, 404);
-    const session = await readSession(chatId);
-    const current = Array.isArray(session.cast) ? session.cast : [];
-    const result = addToProject(current, character, castOptionsFromBody(body));
-    const entry = result.entry;
-    if (result.added !== true) {
+    const outcome = await mutateSession(chatId, session => {
+      const current = Array.isArray(session.cast) ? session.cast : [];
+      const result = addToProject(current, character, castOptionsFromBody(body));
+      const entry = result.entry;
+      if (result.added !== true) return { changed: false, result, entry };
+      return { changed: true, result, entry, sessionPatch: { cast: plainCast(result) } };
+    });
+    const { result, entry } = outcome;
+    if (!outcome.changed) {
       sendJson(response, 200, {
         cast: castForResponse(storeFor(), result),
         entry,
@@ -772,7 +801,6 @@ export function createCharacterRoutes(options = {}) {
       });
       return;
     }
-    const next = await writeSessionCast(chatId, session, result);
     publish(events, {
       type: 'character.cast.added',
       chatId,
@@ -780,7 +808,7 @@ export function createCharacterRoutes(options = {}) {
       characterId: entry.characterId,
       revision: entry.pinnedRevision,
       added: true,
-      sessionRevision: next.revision,
+      sessionRevision: outcome.session.revision,
     });
     sendJson(response, 201, {
       cast: castForResponse(storeFor(), result),
@@ -797,139 +825,148 @@ export function createCharacterRoutes(options = {}) {
         fail('CAST_UNKNOWN_FIELD', `unknown cast field ${key}`);
       }
     }
-    const session = await readSession(chatId);
-    let cast = Array.isArray(session.cast) ? session.cast : [];
-    if (!findCastEntry(cast, castId)) {
-      fail('NOT_FOUND', `cast member ${castId} does not exist`, 404);
-    }
-
-    let entry = null;
-    let type = 'character.cast.updated';
-    let changed = false;
-
-    const wantsUpdate = body.update === true
-      || body.refresh === true
-      || body.action === 'update'
-      || body.characterId !== undefined;
-    if (wantsUpdate) {
-      const current = findCastEntry(cast, castId);
-      const characterId = body.characterId === undefined
-        ? current.characterId
-        : String(body.characterId).trim();
-      if (characterId !== current.characterId) {
-        fail('INVALID_INPUT', 'characterId must match the cast entry');
+    const outcome = await mutateSession(chatId, session => {
+      let cast = Array.isArray(session.cast) ? session.cast : [];
+      if (!findCastEntry(cast, castId)) {
+        fail('NOT_FOUND', `cast member ${castId} does not exist`, 404);
       }
-      const character = storeFor().get(characterId);
-      if (!character) fail('NOT_FOUND', `character ${characterId} does not exist`, 404);
-      const result = updateCast(cast, castId, character);
-      cast = result;
-      entry = result.entry;
-      changed = changed || result.updated === true;
-      type = 'character.cast.updated';
-    }
 
-    const overrides = overridePatchFromBody(body);
-    if (overrides) {
-      const result = setCastOverrides(cast, castId, overrides, { replace: body.replace === true });
-      cast = result;
-      entry = result.entry;
-      changed = true;
-      type = 'character.cast.updated';
-    }
+      let entry = null;
+      let type = 'character.cast.updated';
+      let changed = false;
 
-    const detach = body.action === 'detach' || body.detached === true;
-    const attach = body.action === 'attach' || body.detached === false;
-    if (detach) {
-      const result = detachCast(cast, castId);
-      cast = result;
-      entry = result.entry;
-      changed = changed || result.changed === true;
-      type = 'character.cast.detached';
-    } else if (attach) {
-      const result = reattachCast(cast, castId);
-      cast = result;
-      entry = result.entry;
-      changed = changed || result.changed === true;
-      type = 'character.cast.attached';
-    }
+      const wantsUpdate = body.update === true
+        || body.refresh === true
+        || body.action === 'update'
+        || body.characterId !== undefined;
+      if (wantsUpdate) {
+        const current = findCastEntry(cast, castId);
+        const characterId = body.characterId === undefined
+          ? current.characterId
+          : String(body.characterId).trim();
+        if (characterId !== current.characterId) {
+          fail('INVALID_INPUT', 'characterId must match the cast entry');
+        }
+        const character = storeFor().get(characterId);
+        if (!character) fail('NOT_FOUND', `character ${characterId} does not exist`, 404);
+        const result = updateCast(cast, castId, character);
+        cast = result;
+        entry = result.entry;
+        changed = changed || result.updated === true;
+        type = 'character.cast.updated';
+      }
 
-    if (!entry) entry = findCastEntry(cast, castId);
-    if (!changed) {
+      const overrides = overridePatchFromBody(body);
+      if (overrides) {
+        const result = setCastOverrides(cast, castId, overrides, { replace: body.replace === true });
+        cast = result;
+        entry = result.entry;
+        changed = true;
+        type = 'character.cast.updated';
+      }
+
+      const detach = body.action === 'detach' || body.detached === true;
+      const attach = body.action === 'attach' || body.detached === false;
+      if (detach) {
+        const result = detachCast(cast, castId);
+        cast = result;
+        entry = result.entry;
+        changed = changed || result.changed === true;
+        type = 'character.cast.detached';
+      } else if (attach) {
+        const result = reattachCast(cast, castId);
+        cast = result;
+        entry = result.entry;
+        changed = changed || result.changed === true;
+        type = 'character.cast.attached';
+      }
+
+      if (!entry) entry = findCastEntry(cast, castId);
+      if (!changed) return { changed: false, cast, entry, type };
+      return { changed: true, cast, entry, type, sessionPatch: { cast: plainCast(cast) } };
+    });
+
+    const { cast, entry, type } = outcome;
+    if (!outcome.changed) {
       sendJson(response, 200, { cast: castForResponse(storeFor(), cast), entry, changed: false });
       return;
     }
 
-    const next = await writeSessionCast(chatId, session, cast);
     publish(events, {
       type,
       chatId,
       castId: entry.castId,
       characterId: entry.characterId,
       revision: entry.pinnedRevision,
-      sessionRevision: next.revision,
+      sessionRevision: outcome.session.revision,
     });
     sendJson(response, 200, { cast: castForResponse(storeFor(), cast), entry, changed: true });
   }
 
   async function handleCastAction(request, response, chatId, castId, action) {
     request.resume?.();
-    const session = await readSession(chatId);
-    let cast = Array.isArray(session.cast) ? session.cast : [];
-    if (!findCastEntry(cast, castId)) {
-      fail('NOT_FOUND', `cast member ${castId} does not exist`, 404);
-    }
+    const outcome = await mutateSession(chatId, session => {
+      let cast = Array.isArray(session.cast) ? session.cast : [];
+      if (!findCastEntry(cast, castId)) {
+        fail('NOT_FOUND', `cast member ${castId} does not exist`, 404);
+      }
 
-    let entry;
-    let type;
-    let changed;
-    if (action === 'update') {
-      const current = findCastEntry(cast, castId);
-      const character = storeFor().get(current.characterId);
-      if (!character) fail('NOT_FOUND', `character ${current.characterId} does not exist`, 404);
-      const result = updateCast(cast, castId, character);
-      cast = result;
-      entry = result.entry;
-      changed = result.updated === true;
-      type = 'character.cast.updated';
-    } else if (action === 'detach') {
-      const result = detachCast(cast, castId);
-      cast = result;
-      entry = result.entry;
-      changed = result.changed === true;
-      type = 'character.cast.detached';
-    } else {
-      const result = reattachCast(cast, castId);
-      cast = result;
-      entry = result.entry;
-      changed = result.changed === true;
-      type = 'character.cast.attached';
-    }
+      let entry;
+      let type;
+      let changed;
+      if (action === 'update') {
+        const current = findCastEntry(cast, castId);
+        const character = storeFor().get(current.characterId);
+        if (!character) fail('NOT_FOUND', `character ${current.characterId} does not exist`, 404);
+        const result = updateCast(cast, castId, character);
+        cast = result;
+        entry = result.entry;
+        changed = result.updated === true;
+        type = 'character.cast.updated';
+      } else if (action === 'detach') {
+        const result = detachCast(cast, castId);
+        cast = result;
+        entry = result.entry;
+        changed = result.changed === true;
+        type = 'character.cast.detached';
+      } else {
+        const result = reattachCast(cast, castId);
+        cast = result;
+        entry = result.entry;
+        changed = result.changed === true;
+        type = 'character.cast.attached';
+      }
 
-    if (changed) {
-      const next = await writeSessionCast(chatId, session, cast);
+      if (!changed) return { changed: false, cast, entry, type };
+      return { changed: true, cast, entry, type, sessionPatch: { cast: plainCast(cast) } };
+    });
+
+    if (outcome.changed) {
       publish(events, {
-        type,
+        type: outcome.type,
         chatId,
-        castId: entry.castId,
-        characterId: entry.characterId,
-        revision: entry.pinnedRevision,
-        sessionRevision: next.revision,
+        castId: outcome.entry.castId,
+        characterId: outcome.entry.characterId,
+        revision: outcome.entry.pinnedRevision,
+        sessionRevision: outcome.session.revision,
       });
     }
-    sendJson(response, 200, { cast: castForResponse(storeFor(), cast), entry, changed });
+    sendJson(response, 200, { cast: castForResponse(storeFor(), outcome.cast), entry: outcome.entry, changed: outcome.changed });
   }
 
   async function handleRemoveCast(response, chatId, castId) {
-    const session = await readSession(chatId);
-    const cast = Array.isArray(session.cast) ? session.cast : [];
-    const result = removeFromProject(cast, castId);
-    const next = await writeSessionCast(chatId, session, result);
+    const outcome = await mutateSession(chatId, session => {
+      const cast = Array.isArray(session.cast) ? session.cast : [];
+      const result = removeFromProject(cast, castId);
+      return { changed: true, result, entry: result.entry, sessionPatch: { cast: plainCast(result) } };
+    });
+    const result = outcome.result;
     publish(events, {
       type: 'character.cast.removed',
       chatId,
       castId: result.entry.castId,
       characterId: result.entry.characterId,
-      sessionRevision: next.revision,
+      sessionRevision: outcome.session.revision,
     });
     sendJson(response, 200, { cast: castForResponse(storeFor(), result), removed: result.entry.castId });
   }

@@ -1,6 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { withConversationLock } from './conversation-lock.mjs';
 import { runConversationTurn, brandTheme, CONVERSATION_PROMPT_VERSION, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
 import { createOpenAICompatibleModel } from '../../../packages/llm/dist/src/index.js';
 import { buildChatProject, chatProjectResponse } from './chat-project.mjs';
@@ -35,6 +37,38 @@ const sameTarget = (assignment, target) => Boolean(assignment && assignment.acti
   && assignment.refId === target.refId && assignment.sceneId === target.sceneId
   && assignment.slot === target.slot);
 const validId = id => typeof id === 'string' && /^chat_[A-Za-z0-9_-]{8,80}$/.test(id);
+
+const CAST_SESSION_FIELDS = ['cast', 'castPlacements', 'castProposals'];
+
+function sameExceptCastChanges(base, current) {
+  const keys = new Set([...Object.keys(base ?? {}), ...Object.keys(current ?? {})]);
+  for (const key of keys) {
+    if (key === 'revision' || CAST_SESSION_FIELDS.includes(key)) continue;
+    if (!isDeepStrictEqual(base?.[key], current?.[key])) return false;
+  }
+  return true;
+}
+
+// A cast route may advance the conversation while the model is running. That
+// revision is compatible with the turn as long as nothing outside the cast
+// fields moved: keep the newer cast, and only let the turn win a cast field the
+// snapshot did not also change.
+function mergeCastOnlyCommit(base, current, next) {
+  if (!base || !current) return null;
+  if (!CAST_SESSION_FIELDS.some(field => !isDeepStrictEqual(base[field], current[field]))) return null;
+  if (!sameExceptCastChanges(base, current)) return null;
+  const merged = { ...next };
+  for (const field of CAST_SESSION_FIELDS) {
+    if (!isDeepStrictEqual(next[field], base[field])) {
+      if (!isDeepStrictEqual(current[field], base[field])) return null;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(current, field)) merged[field] = current[field];
+    else delete merged[field];
+  }
+  merged.revision = (Number.isSafeInteger(current.revision) ? current.revision : 0) + 1;
+  return merged;
+}
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -210,7 +244,6 @@ export function createProjectChat({
   }
   const intentPath = id => join(dir, `${id}.commit.json`);
   const journalPath = id => join(dir, `${id}.turns.jsonl`);
-  const lockPath = id => join(dir, `${id}.lock`);
   const packageHash = pkg => createHash('sha256').update(JSON.stringify(pkg)).digest('hex');
 
   function readIntent(id) {
@@ -272,58 +305,8 @@ export function createProjectChat({
     return null;
   }
 
-  function pidAlive(pid) {
-    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-    try { process.kill(pid, 0); return true; } catch (error) { return error?.code === 'EPERM'; }
-  }
-  // Evicting a stale lock is a compare-and-rename: the file we renamed away
-  // must still be the exact file we judged stale, otherwise it is put back.
-  function evictLock(file, observed, nonce) {
-    const evicted = `${file}.evict-${nonce}`;
-    try { renameSync(file, evicted); } catch { return; }
-    let moved = null;
-    try { moved = readFileSync(evicted, 'utf8'); } catch { moved = null; }
-    if (moved !== observed) {
-      try { if (!existsSync(file)) renameSync(evicted, file); else unlinkSync(evicted); } catch { /* best effort */ }
-      return;
-    }
-    try { unlinkSync(evicted); } catch { /* best effort */ }
-  }
-  function acquireLock(id) {
-    const file = lockPath(id);
-    const nonce = randomUUID();
-    const deadline = Date.now() + 4000;
-    for (;;) {
-      try {
-        writeFileSync(file, JSON.stringify({ nonce, pid: process.pid, at: Date.now() }), { flag: 'wx', mode: 0o600 });
-        return nonce;
-      } catch (error) {
-        if (error?.code !== 'EEXIST') throw error;
-      }
-      let observed;
-      try { observed = readFileSync(file, 'utf8'); } catch (error) { if (error?.code === 'ENOENT') continue; throw error; }
-      let parsed = null;
-      try { parsed = JSON.parse(observed); } catch { parsed = null; }
-      let age = 0;
-      try { age = Date.now() - statSync(file).mtimeMs; } catch { age = 0; }
-      const stale = parsed
-        ? !pidAlive(parsed.pid) || age > 30 * 60 * 1000
-        : age > 5000;
-      if (stale) { evictLock(file, observed, nonce); continue; }
-      if (Date.now() > deadline) fail(409, 'This conversation is being updated. Try again.');
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-    }
-  }
-  function releaseLock(id, nonce) {
-    const file = lockPath(id);
-    let parsed = null;
-    try { parsed = JSON.parse(readFileSync(file, 'utf8')); } catch { return; }
-    if (parsed?.nonce !== nonce) return;
-    try { unlinkSync(file); } catch { /* best effort */ }
-  }
   function withLock(id, fn) {
-    const nonce = acquireLock(id);
-    try { return fn(); } finally { releaseLock(id, nonce); }
+    return withConversationLock(dir, id, fn);
   }
   function writeCas(session, expectedRevision) {
     const current = read(session.id);
@@ -1021,39 +1004,43 @@ export function createProjectChat({
 
       // Phase C: a short, fully synchronous commit. Every effect after the intent
       // is recorded is either proven by the intent or rolled back on error.
+      const commitFor = currentSession => {
+        const currentRevision = currentSession ? currentSession.revision : 0;
+        if (currentRevision === baseRevision) return { session: nextSession, baseRevision };
+        const merged = mergeCastOnlyCommit(session, currentSession, nextSession);
+        if (!merged) fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision });
+        return { session: merged, baseRevision: currentRevision };
+      };
+      let committedSession = nextSession;
       const takesOps = [...selectOps, ...verdictOps];
       const hasPackageEffect = Boolean(finalPackage);
       if (!hasPackageEffect && !takesOps.length) {
         withLock(id, () => {
-          const currentSession = read(id);
-          const currentRevision = currentSession ? currentSession.revision : 0;
-          if (currentRevision !== baseRevision) {
-            fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision });
-          }
-          write(nextSession);
-          appendJournal(id, nextSession, result.built);
+          const commit = commitFor(read(id));
+          committedSession = commit.session;
+          write(committedSession);
+          appendJournal(id, committedSession, result.built);
         });
-        return response(nextSession, result.built);
+        return response(committedSession, result.built);
       }
       withLock(id, () => {
-        const currentSession = read(id);
-        const currentRevision = currentSession ? currentSession.revision : 0;
-        if (currentRevision !== baseRevision) {
-          fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision });
-        }
+        const commit = commitFor(read(id));
+        const commitBaseRevision = commit.baseRevision;
+        const commitSession = commit.session;
+        committedSession = commitSession;
         const projectId = finalPackage ? (finalPackage.id ?? pendingBuild?.id ?? null) : null;
         let intent = {
           type: 'chat.intent/v1',
           conversationId: id,
           turnId: input.turnId ?? null,
-          baseRevision,
-          revision: baseRevision + 1,
+          baseRevision: commitBaseRevision,
+          revision: commitSession.revision,
           createdAt: new Date().toISOString(),
           package: projectId ? { projectId, expectedRevision: capturedPackageRevision } : null,
           takesOps,
         };
         writeIntent(intent);
-        const hookContext = { store, projectId, expectedRevision: capturedPackageRevision, package: finalPackage, session: nextSession };
+        const hookContext = { store, projectId, expectedRevision: capturedPackageRevision, package: finalPackage, session: commitSession };
         // A throwing test seam models a crash: the intent must survive it.
         if (typeof hooks?.beforePackageSave === 'function') hooks.beforePackageSave(hookContext);
         let packageWritten = false;
@@ -1085,7 +1072,7 @@ export function createProjectChat({
                 hash: packageHash(writtenPackage),
               },
             } : {}),
-            session: nextSession,
+            session: commitSession,
           };
           writeIntent(intent);
           // Takes are side effects of the package commit: apply them after the
@@ -1108,9 +1095,9 @@ export function createProjectChat({
             const proposal = clipProposals.find(item => item?.id === op.proposalId);
             if (proposal && writtenPackage) proposal.revision = writtenPackage.revision;
           }
-          if (typeof hooks?.beforeSnapshotWrite === 'function') hooks.beforeSnapshotWrite({ id, store, projectId, package: writtenPackage, session: nextSession });
-          writeCas(nextSession, baseRevision);
-          appendJournal(id, nextSession, result.built);
+          if (typeof hooks?.beforeSnapshotWrite === 'function') hooks.beforeSnapshotWrite({ id, store, projectId, package: writtenPackage, session: commitSession });
+          writeCas(commitSession, commitBaseRevision);
+          appendJournal(id, commitSession, result.built);
           deleteIntent(id);
         } catch (error) {
           // Before the package write there is no effect to preserve: dropping the
@@ -1120,7 +1107,7 @@ export function createProjectChat({
           throw error;
         }
       });
-      return response(nextSession, result.built);
+      return response(committedSession, result.built);
     } finally { active.delete(id); }
   }
 
