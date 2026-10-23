@@ -38,6 +38,7 @@ function renderStep(step: StepId, model: StepperModel, needsUpdate: Set<StepId>)
   if (isCurrent) attributes.push('aria-current="step"');
   if (locked) {
     attributes.push('aria-disabled="true"');
+    attributes.push('hidden');
     attributes.push(`title="${escapeHtml(reason)}"`);
   }
 

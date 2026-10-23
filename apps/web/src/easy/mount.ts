@@ -17,6 +17,7 @@ import { approveAndGenerate, retryShot } from './approve-generate.ts';
 import { runCpuGenerate } from './cpu-path.ts';
 import { levelForState } from './steps/level.ts';
 import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-advanced.ts';
+import { openDialog } from './dialog.ts';
 
 import './easy.css';
 
@@ -182,6 +183,16 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
         const message = await pending.approve();
         if (typeof message === 'string' && message) shell?.alert(message);
       },
+      openAsk: (prefill) => {
+        const note = typeof prefill === 'string' && prefill.trim() !== '' ? `<p>${escapeHtml(prefill)}</p>` : '';
+        const opener = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
+        void openDialog({
+          title: COPY.ask.title,
+          bodyHtml: `${note}<p>${escapeHtml(COPY.ask.noProvider)}</p>`,
+          actions: [{ label: COPY.ask.close, value: 'close', kind: 'secondary' }],
+          opener,
+        });
+      },
     };
   }
 
@@ -330,11 +341,16 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
   });
   const stopMode = subscribeMode((mode) => applyShell(mode));
   view?.addEventListener('popstate', onPopState);
-  showLoading();
+  // Show the studio before resume facts return. A busy server must not leave the editor in front.
+  applyShell(getMode());
   void loadFacts().then(() => {
     const boot = initialRoute(search(), store.get(), factsFor());
-    if (boot.view === 'editor' && getMode() !== 'advanced') setMode('advanced');
-    else applyShell(getMode());
+    if (boot.view === 'editor') {
+      if (getMode() !== 'advanced') setMode('advanced');
+      return;
+    }
+    if (getMode() !== 'easy') setMode('easy');
+    showStep(boot.step);
   });
 
   return () => {

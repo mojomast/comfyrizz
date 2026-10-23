@@ -258,12 +258,16 @@ function renderShots(state: EasyState, card: PlanCard, scenes: SceneView[]): str
       ? `<p class="easy-plan-makes">${escapeHtml(makes)}</p>`
       : '';
     return `<li class="easy-plan-shot" data-easy-plan-shot="${escapeHtml(scene.id)}">
-<p class="easy-plan-shot-head"><span class="easy-plan-shot-number">${escapeHtml(fill(COPY.plan.shot, { n: index + 1 }))}</span> <span class="easy-plan-shot-title">${escapeHtml(scene.headline)}</span></p>
+<details class="easy-plan-shot-details">
+<summary class="easy-plan-shot-head"><span class="easy-plan-shot-number">${escapeHtml(fill(COPY.plan.shot, { n: index + 1 }))}</span> <span class="easy-plan-shot-title">${escapeHtml(scene.headline)}</span></summary>
+<div class="easy-plan-shot-body">
 <label class="easy-plan-field" for="easy-plan-headline-${escapeHtml(scene.id)}">${escapeHtml(COPY.plan.onScreen)}</label>
 <input class="easy-plan-input" id="easy-plan-headline-${escapeHtml(scene.id)}" data-easy-plan-headline="${escapeHtml(scene.id)}" value="${escapeHtml(scene.headline)}" />
 <label class="easy-plan-field" for="easy-plan-narration-${escapeHtml(scene.id)}">${escapeHtml(COPY.plan.narration)}</label>
 <textarea class="easy-plan-input easy-plan-narration" id="easy-plan-narration-${escapeHtml(scene.id)}" data-easy-plan-narration="${escapeHtml(scene.id)}" rows="2">${escapeHtml(scene.narration)}</textarea>
 ${makesHtml}
+</div>
+</details>
 </li>`;
   }).join('');
   return `<section class="easy-plan-shots" aria-labelledby="easy-plan-shots-h">

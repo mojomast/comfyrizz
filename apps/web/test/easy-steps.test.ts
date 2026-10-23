@@ -82,6 +82,13 @@ test('reachable review stays open when an approved plan needs an update', () => 
   assert.equal(reachable('export', s, facts), false);
 });
 
+test('reachable generate stays open after this computer finishes', () => {
+  const s = state({ ideaText: completeIdea, planStatus: 'ready' });
+  s.generate.status = 'done';
+  const facts = { hasPackage: true, planApproved: false, actionsActive: false, allShotsKept: false, exportCurrent: false };
+  assert.equal(reachable('generate', s, facts), true);
+});
+
 test('reachable review stays open after this computer finishes', () => {
   const s = state({ ideaText: completeIdea, planStatus: 'ready' });
   s.generate.status = 'done';

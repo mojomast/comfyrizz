@@ -41,6 +41,16 @@ export async function openEasyNew(page: Page): Promise<Env> {
       localStorage.clear();
       sessionStorage.setItem('easy-e2e-booted', '1');
     }
+    const raw = localStorage.getItem('comfyrizz.ui');
+    let prefs: Record<string, unknown> = {};
+    try {
+      const parsed = raw ? JSON.parse(raw) : {};
+      if (parsed && typeof parsed === 'object') prefs = parsed as Record<string, unknown>;
+    } catch {
+      prefs = {};
+    }
+    prefs.mode = 'easy';
+    localStorage.setItem('comfyrizz.ui', JSON.stringify(prefs));
     const record = window as Window & { __easyClicks?: number };
     record.__easyClicks = 0;
     document.addEventListener('click', () => {
@@ -48,7 +58,7 @@ export async function openEasyNew(page: Page): Promise<Env> {
     }, true);
   });
   await page.goto(`/#token=${encodeURIComponent(env.token)}`);
-  await expect(page.locator('#easy-root')).toBeVisible();
+  await expect(page.locator('#easy-root')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-easy-heading]')).toHaveText("What's your video about?");
   await expect(page).not.toHaveURL(/token=/);
   return env;

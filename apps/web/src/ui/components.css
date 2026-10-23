@@ -140,7 +140,8 @@
 .btn[data-variant="primary"].is-hover:not(:disabled):not([aria-disabled="true"]):not(.is-disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
-  color: var(--accent-fg);
+  /* accent-hover is a light fill. Paper text on it is 1.9:1; ink is 9:1. */
+  color: var(--highlight-fg, var(--bg-0));
 }
 
 /* Variant: ghost */

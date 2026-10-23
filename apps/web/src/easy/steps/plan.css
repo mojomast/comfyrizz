@@ -51,12 +51,32 @@
   border-bottom: 0;
 }
 
+.easy-plan-shot-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .easy-plan-shot-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-2);
+  min-height: var(--target-min);
   margin: 0;
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.easy-plan-shot-head:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.easy-plan-shot-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .easy-plan-shot-number {
@@ -153,16 +173,37 @@
 }
 
 .easy-plan-option {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  margin-inline-end: var(--space-4);
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  margin-inline-end: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-1);
   color: var(--text-1);
+  cursor: pointer;
 }
 
+.easy-plan-option input {
+  position: absolute;
+  width: var(--space-1);
+  height: var(--space-1);
+  margin: 0;
+  opacity: 0;
+}
+
+.easy-plan-option:focus-within,
 .easy-plan-option input:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+.easy-plan-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--bg-2);
 }
 
 .easy-plan-loading {

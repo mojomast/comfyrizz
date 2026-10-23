@@ -30,8 +30,9 @@
 }
 
 .easy-level-editor a {
-  color: var(--accent);
+  color: var(--text-1);
   font-weight: var(--font-weight-600);
+  text-decoration: underline;
 }
 
 .easy-level-editor a:focus-visible {

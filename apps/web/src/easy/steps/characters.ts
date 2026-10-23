@@ -10,6 +10,7 @@ import {
   type CharacterApi,
 } from '../../characters/api.ts';
 import { openLibraryPicker } from '../dialogs/library-picker.ts';
+import { openQuickCharacter } from '../dialogs/quick-character.ts';
 import type {
   EasyCastMember,
   EasyState,
@@ -289,8 +290,13 @@ export const step: EasyStepModule = {
     async function createNew(opener: HTMLElement): Promise<void> {
       closeMenu();
       const make = ctx.dialogs?.quickCharacter;
-      if (typeof make !== 'function') return;
-      const member = await make({ opener });
+      const member = typeof make === 'function'
+        ? await make({ opener })
+        : await (async () => {
+          const chatId = await ensureChatId();
+          if (disposed || !chatId) return null;
+          return openQuickCharacter({ api: api(), chatId, opener });
+        })();
       if (disposed || !member) return;
       const cast = currentState().cast.slice();
       if (!cast.some((item) => item.castId === member.castId)) cast.push(member);
@@ -331,11 +337,11 @@ export const step: EasyStepModule = {
         return;
       }
       if (button.matches('[data-easy-add-library]')) {
-        await addFromLibrary(button);
+        await addFromLibrary(el.querySelector<HTMLElement>('[data-easy-add]') ?? button);
         return;
       }
       if (button.matches('[data-easy-add-create]')) {
-        await createNew(button);
+        await createNew(el.querySelector<HTMLElement>('[data-easy-add]') ?? button);
         return;
       }
       if (button.matches('[data-easy-cast-retry]')) {

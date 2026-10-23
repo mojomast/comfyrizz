@@ -100,7 +100,8 @@
 }
 
 .easy-export-links a {
-  color: var(--accent);
+  color: var(--text-1);
+  text-decoration: underline;
 }
 
 .easy-export-error {
