@@ -92,7 +92,8 @@ async function openEditor(page: Page, env: Env): Promise<void> {
 async function useAdvancedView(page: Page): Promise<void> {
   const root = page.locator('html');
   if (await root.getAttribute('data-mode') !== 'advanced') {
-    await page.locator('#ui-mode-advanced').click();
+    // The mode button sits in the editor, which Easy hides. The shortcut reaches it.
+    await page.keyboard.press('Control+Shift+A');
   }
   await expect(root).toHaveAttribute('data-mode', 'advanced');
   await expect(page.getByTestId('inspector-tabs')).toBeVisible();

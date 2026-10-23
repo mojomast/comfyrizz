@@ -192,7 +192,7 @@ test('new users start in Easy; the toggle persists mode and its default density'
   await page.keyboard.press('Control+Shift+A');
   await expect(root).toHaveAttribute('data-mode', 'advanced');
   await expect(root).toHaveAttribute('data-density', 'compact');
-  await expect(page.locator('#ui-mode-live')).toHaveText('Advanced view. All controls are visible.');
+  await expect(page.locator('#ui-mode-live')).toHaveText('Editor view. All controls are visible.');
   await expect(page.locator('#easy-root')).toBeHidden();
   await expectAdvancedShell(page);
   expect(await storedPrefs(page)).toMatchObject({ mode: 'advanced', density: 'compact' });
@@ -201,7 +201,7 @@ test('new users start in Easy; the toggle persists mode and its default density'
   await page.locator('#ui-mode-easy').click();
   await expect(root).toHaveAttribute('data-mode', 'easy');
   await expect(root).toHaveAttribute('data-density', 'comfortable');
-  await expect(page.locator('#ui-mode-live')).toHaveText('Easy view. Advanced controls are hidden.');
+  await expect(page.locator('#ui-mode-live')).toHaveText('Studio view.');
   await expectEasyShell(page);
   expect(await storedPrefs(page)).toMatchObject({ mode: 'easy', density: 'comfortable' });
 
@@ -375,14 +375,17 @@ test('the render gate hooks stay inside the drawer and flip when every clip is a
   await expect(bar).toHaveAttribute('data-gate-ok', 'false');
   await expect(pill).toHaveText(/0\/3 (?:clips )?approved/);
 
-  await pill.click();
+  // The count stays on the bar. The bar itself is hidden; R opens the drawer.
+  await page.keyboard.press('r');
   await expect(drawer).toBeVisible();
   await expect(drawer.locator('[data-render-blocker]')).toHaveCount(3);
   await expect(drawer.locator('[data-render-open-override]')).toBeVisible();
   await expect(drawer.locator('[data-render-run]')).toHaveCount(0);
 
-  page.once('dialog', dialog => { void dialog.accept(); });
   await page.keyboard.press('Shift+A');
+  const confirm = page.getByRole('dialog', { name: 'Approve visible shots' });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(bar).toHaveAttribute('data-gate-ok', 'true');
   await expect(drawer.locator('[data-render-blocker]')).toHaveCount(0);
   await expect(drawer.locator('[data-render-open-override]')).toHaveCount(0);

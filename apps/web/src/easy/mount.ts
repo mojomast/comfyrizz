@@ -349,7 +349,8 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       if (getMode() !== 'advanced') setMode('advanced');
       return;
     }
-    if (getMode() !== 'easy') setMode('easy');
+    // A saved editor session stays in the editor. Easy still resumes its step.
+    if (getMode() !== 'easy') return;
     showStep(boot.step);
   });
 
