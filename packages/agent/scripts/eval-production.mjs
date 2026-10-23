@@ -1211,9 +1211,10 @@ export function validateCassette(cassette, cases) {
 }
 
 async function runReplay(cases) {
+  const override = process.env.COMFYRIZZ_EVAL_CASSETTE;
   let cassette;
   try {
-    cassette = JSON.parse(readFileSync(CASSETTE_URL, 'utf8'));
+    cassette = JSON.parse(readFileSync(override ? resolve(override) : CASSETTE_URL, 'utf8'));
   } catch {
     cassette = null;
   }

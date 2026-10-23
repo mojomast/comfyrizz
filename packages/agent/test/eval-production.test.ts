@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptUrl = new URL('../../scripts/eval-production.mjs', import.meta.url);
@@ -201,10 +204,26 @@ test('IP63 scoring: an accepted paid Google Colab request above the cap fails bu
   assert.equal(script.scoreRun(under, scenario('render-request')).budget.ok, true);
 });
 
+function missingCassetteEnv(): { env: NodeJS.ProcessEnv; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'comfyrizz-eval-cassette-'));
+  return {
+    env: { ...process.env, COMFYRIZZ_EVAL_CASSETTE: join(dir, 'missing-cassette.json') },
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
 test('IP63 CLI: default mode prints NOT RECORDED and exits non-zero without a cassette', () => {
-  const result = spawnSync(process.execPath, [fileURLToPath(scriptUrl)], { encoding: 'utf8' });
-  assert.equal(result.status, 1);
-  assert.match(result.stdout, /NOT RECORDED/);
+  const missing = missingCassetteEnv();
+  try {
+    const result = spawnSync(process.execPath, [fileURLToPath(scriptUrl)], {
+      encoding: 'utf8',
+      env: missing.env,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /NOT RECORDED/);
+  } finally {
+    missing.cleanup();
+  }
 });
 
 test('IP63F scoring: action slots use the closed slot vocabulary, not command kinds', () => {
@@ -331,9 +350,25 @@ test('IP63F scoring: requiredDecisions follow the closed server contract', () =>
 test('IP63F regression: the compliant edit and CLI guard stay intact', () => {
   const metrics = script.scoreRun(runFor('edit-s1-line2', [read(), propose({ edits: [edit()], summary: 'land s1:l2 harder' })], 'Proposed.'), scenario('edit-s1-line2'));
   for (const key of script.ALL_METRICS) assert.equal(metrics[key].ok, true, `${key}: ${metrics[key].detail}`);
-  const result = spawnSync(process.execPath, [fileURLToPath(scriptUrl)], { encoding: 'utf8' });
-  assert.equal(result.status, 1);
-  assert.match(result.stdout, /NOT RECORDED/);
+  const missing = missingCassetteEnv();
+  try {
+    const result = spawnSync(process.execPath, [fileURLToPath(scriptUrl)], {
+      encoding: 'utf8',
+      env: missing.env,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /NOT RECORDED/);
+  } finally {
+    missing.cleanup();
+  }
+});
+
+test('IP63 CLI: the committed cassette replays and passes without an override', () => {
+  const env = { ...process.env };
+  delete env.COMFYRIZZ_EVAL_CASSETTE;
+  const result = spawnSync(process.execPath, [fileURLToPath(scriptUrl)], { encoding: 'utf8', env });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /RESULT PASS/);
 });
 
 test('IP63 record scoring keeps the single live execution', async () => {
