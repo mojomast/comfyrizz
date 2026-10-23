@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
   actionSlotViolation,
+  commandShapeViolation,
+  elementScopeViolation,
+  iterationSlotViolation,
+  planShapeViolation,
   scopeViolations,
   PRODUCTION_TURN_PROCEDURE,
   type ProductionAgentState,
@@ -129,7 +133,7 @@ export interface IterationScope {
     shotId?: string;
   };
   element: string;
-  elementRef?: string;
+  elementRef?: { lineId?: string; characterId?: string };
   region?: { x: number; y: number; w: number; h: number };
   time?: { at: number } | { in: number; out: number };
   note: string;
@@ -209,7 +213,7 @@ const productionIdParam = {
 const expectedRevisionParam = {
   type: 'integer',
   minimum: 0,
-  description: 'The exact revision returned by production_read. Never guess it and never reuse an older revision.',
+  description: 'The top-level revision from production_read. Never a number nested under iteration, never a plan revision, never a cached revision, and never 0 unless that read returned 0.',
 };
 
 const planEditParam = {
@@ -245,7 +249,7 @@ const planActionParam = {
 const planParam = {
   type: 'object',
   additionalProperties: false,
-  description: 'A proposal for the user to approve. A text edit is {"edits":[...],"actions":[],"summary":"..."} and names only the requested shot and line ids. The server computes the plan hash. Nothing is approved or dispatched.',
+  description: 'A proposal for the user to approve. A text edit is {"edits":[...],"actions":[],"summary":"..."} and names only the requested shot and line ids. Do not include revision or planHash; the server owns both. Nothing is approved or dispatched.',
   properties: {
     edits: { type: 'array', items: planEditParam },
     actions: {
@@ -261,10 +265,9 @@ const planParam = {
       type: 'object',
       properties: {},
       additionalProperties: true,
-      description: 'The tool fills it from the turn.',
+      description: 'Copy the iterationScope from production_read onto plan.scope, unchanged. Do not omit it. The tool fills it from the turn only when it was left out, and a different scope is refused.',
     },
     planId: { type: 'string' },
-    revision: { type: 'integer', minimum: 0 },
     reservationCeiling: { type: 'number', minimum: 0 },
     collectAndStopReserve: { type: 'number', minimum: 0 },
     requiredDecisions: { type: 'array' },
@@ -300,7 +303,7 @@ export const PRODUCTION_TOOLS: ToolDef[] = [
   {
     name: 'production_command',
     description:
-      `Issue one non-approval production command (${AGENT_COMMAND_KINDS.join(', ')}). Approval, spend, decision, lifecycle and action-cancel commands are refused. A paid Google Colab render the user asked for uses kind render.request and payload shotId, backend "google-colab", and upperBound at or under the cap they stated. A text edit does not use this tool.`,
+      `Issue one non-approval production command (${AGENT_COMMAND_KINDS.join(', ')}). Approval, spend, decision, lifecycle and action-cancel commands are refused. A paid Google Colab render the user asked for uses kind render.request only when production_read returned no iteration policy, with payload shotId, backend "google-colab", and upperBound at or under the cap they stated. When an iteration policy is present, a take or a render is a plan slot, not this command. A text edit does not use this tool.`,
     parameters: objectSchema({
       production_id: productionIdParam,
       kind: {
@@ -323,7 +326,7 @@ export function isProductionToolName(name: unknown): name is string {
 }
 
 export const PRODUCTION_RULES = `Production agent rules (apply only when the conversation has an iterative production):
-1. Read first, every turn: the first tool call is production_read, before any mutation and before any question. Use the revision it returned as expected_revision. A missing, guessed, cached, or older revision is refused; never fall back to 0 or to a note that says not to re-read.
+1. Read first, every turn: the first tool call is production_read, before any mutation and before any question. Use the top-level revision it returned as expected_revision. A missing, guessed, cached, or older revision is refused; never fall back to 0, to a number nested under iteration, or to a note that says not to re-read. Do not put revision or planHash on the plan.
 2. Propose, never approve: production_propose_plan records a proposal. Only the user may approve or reject a plan, resolve a decision, select a take, accept a delivery, override a gate or record a creative verdict. The agent cannot approve its own proposal.
 3. No spend: the agent may not reserve, settle, dispatch or retry paid work, and it may not change a budget ceiling. Use production_command only for the allowed non-approval kinds.
 4. Respect user intent: resume, cancel and archive are user decisions. If intent is paused, cancel_requested, or archived, read and stop. Ask one question that contains a question mark. Never attempt to undo a user's pause, cancellation or archive.
@@ -532,10 +535,25 @@ function rememberRead(ctx: ProductionToolContext, productionId: string, snapshot
   const shotIds = Array.isArray(production.shotIds)
     ? production.shotIds.filter((id): id is string => typeof id === 'string' && id !== '')
     : undefined;
+  const iterationRaw = isPlainObject(production.iteration) ? production.iteration : undefined;
+  const policy = iterationRaw && isPlainObject(iterationRaw.policy) ? iterationRaw.policy : undefined;
+  const used = iterationRaw && isPlainObject(iterationRaw.used)
+    ? iterationRaw.used as Record<string, Record<string, number>>
+    : undefined;
+  const lockedShotIds = Array.isArray(production.lockedShotIds)
+    ? production.lockedShotIds.filter((id): id is string => typeof id === 'string' && id !== '')
+    : undefined;
   memory.set(productionId, {
     revision: snapshot.revision,
     intent: typeof production.intent === 'string' ? production.intent : undefined,
     shotIds,
+    ...(policy || lockedShotIds || used ? {
+      iteration: {
+        ...(policy ? { policy } : {}),
+        ...(used ? { used } : {}),
+        ...(lockedShotIds ? { lockedShotIds } : {}),
+      },
+    } : {}),
   });
 }
 
@@ -596,6 +614,14 @@ function effectiveStagesForShot(
   return stages;
 }
 
+function presentProduction(production: Record<string, unknown>): Record<string, unknown> {
+  const copy = cloneJson(production);
+  // iteration.revision is the revision at which the policy was saved. It is not
+  // the current production revision, and citing it is a stale expected_revision.
+  if (isPlainObject(copy.iteration)) delete copy.iteration.revision;
+  return copy;
+}
+
 function iterationProjection(production: Record<string, unknown>): Record<string, unknown> | undefined {
   const raw = production.iteration;
   if (!isPlainObject(raw) || !isPlainObject(raw.policy)) return undefined;
@@ -616,10 +642,16 @@ function iterationProjection(production: Record<string, unknown>): Record<string
       reviewDepth: policy.reviewDepth,
     };
   }
+  const used = isPlainObject(raw.used) ? cloneJson(raw.used) : undefined;
+  const lockedShotIds = Array.isArray(production.lockedShotIds)
+    ? production.lockedShotIds.filter((id): id is string => typeof id === 'string' && id !== '')
+    : undefined;
   return {
     level,
     policy: cloneJson(policy),
     perShot,
+    ...(used ? { used } : {}),
+    ...(lockedShotIds && lockedShotIds.length ? { lockedShotIds } : {}),
   };
 }
 
@@ -644,7 +676,7 @@ async function readProduction(args: Record<string, unknown>, ctx: ProductionTool
   const result: ProductionToolResult = {
     ok: true,
     status: 'read',
-    production: snapshot.production,
+    production: presentProduction(snapshot.production ?? {}),
     revision: snapshot.revision,
   };
   if (snapshot.lastSequence !== undefined) result.lastSequence = snapshot.lastSequence;
@@ -664,6 +696,13 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
   const candidate = args.plan;
   if (!isPlainObject(candidate)) return errorResult('plan must be an object');
   const plan = candidate;
+  if (ctx.productionState && Object.prototype.hasOwnProperty.call(plan, 'revision')) {
+    return errorResult('plan.revision is server-owned; omit it. expected_revision is the top-level revision from production_read');
+  }
+  if (ctx.productionState) {
+    const shape = planShapeViolation(plan);
+    if (shape) return errorResult(shape);
+  }
   const serverKey = SERVER_PLAN_KEYS.find(key => Object.prototype.hasOwnProperty.call(plan, key));
   if (serverKey) return errorResult(`plan.${serverKey} is computed by the server and cannot be proposed`, 'SERVER_PLAN_IDENTITY');
 
@@ -684,6 +723,7 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
       }
     }
     const targetShotId = turnScope.target?.shotId;
+    if (!hasPlanScope) payload.scope = cloneJson(turnScope);
     if (typeof targetShotId === 'string' && targetShotId !== '') {
       const edits = Array.isArray(plan.edits) ? plan.edits : [];
       for (const edit of edits) {
@@ -709,19 +749,19 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
         }
       }
     }
-    payload.scope = cloneJson(turnScope);
-  } else {
-    if (hasPlanScope) {
-      return errorResult('plan.scope is not allowed in an unscoped turn');
-    }
-    delete payload.scope;
+  } else if (hasPlanScope) {
+    return errorResult('plan.scope is not allowed in an unscoped turn');
   }
 
-  const scopeForViolation = payload.scope;
-  delete payload.scope;
-  const refused = enforceProductionState(ctx, productionId.value!, revision.value!, payload);
-  if (scopeForViolation !== undefined) payload.scope = scopeForViolation;
+  const element = elementScopeViolation(payload, turnScope);
+  if (element) return errorResult(element);
+
+  const checkPayload = { ...payload };
+  delete checkPayload.scope;
+  const refused = enforceProductionState(ctx, productionId.value!, revision.value!, checkPayload);
   if (refused) return refused;
+  const iterationProblem = iterationSlotViolation(payload, rememberedRead(ctx, productionId.value!)?.iteration);
+  if (iterationProblem) return errorResult(iterationProblem);
 
 
   const dispatched = await dispatchCommand(ctx, {
@@ -771,6 +811,10 @@ async function issueCommand(args: Record<string, unknown>, ctx: ProductionToolCo
   if (payloadValue !== undefined && payloadValue !== null) {
     if (!isPlainObject(payloadValue)) return errorResult('payload must be an object');
     payload = cloneJson(payloadValue);
+  }
+  if (ctx.productionState) {
+    const shape = commandShapeViolation(kind, payload);
+    if (shape) return errorResult(shape);
   }
   const refused = enforceProductionState(ctx, productionId.value!, revision.value!, payload);
   if (refused) return refused;
