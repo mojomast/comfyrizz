@@ -1,10 +1,11 @@
 /**
  * Character editor drawer (CC11).
  *
- * Four sections: Identity, Look, Voice and Bible. The editor is a plain state
- * machine with an injected API, clock-free and side-effect free at import, so
- * the tests can drive it with a fake API and no DOM. Autosave happens on blur
- * through `saveField`/`blurField`, which patches only the field that changed.
+ * Six collapsible sections: Identity, Look, Wardrobe, Expressions, Voice and
+ * Bible. The editor is a plain state machine with an injected API, clock-free
+ * and side-effect free at import, so the tests can drive it with a fake API and
+ * no DOM. Autosave happens on blur through `saveField`/`blurField`, which
+ * patches only the field that changed.
  */
 
 import type {
@@ -19,6 +20,7 @@ import type {
   ExpressionItem,
   WardrobeItem,
 } from './api.ts';
+import { readVoiceModeState, renderVoiceMode } from './voice-mode.ts';
 
 export const EDITOR_SECTIONS = Object.freeze([
   { id: 'identity', title: 'Identity' },
@@ -1205,8 +1207,8 @@ function renderImageList(state: CharacterEditorState): string {
 
 function renderIdentity(state: CharacterEditorState): string {
   const draft = state.draft;
-  return `<section class="chr-section" data-section="identity" aria-labelledby="chr-identity-title">
-    <h3 id="chr-identity-title">Identity</h3>
+  return `<details class="chr-section" data-section="identity" open aria-labelledby="chr-identity-title">
+    <summary id="chr-identity-title" class="chr-section-summary">Identity</summary>
     <div class="chr-field-grid">
       <label class="chr-field">Name<input data-field="name" name="name" maxlength="80" autocomplete="off" value="${escapeHtml(draft.name)}"></label>
       <label class="chr-field">@handle<input data-field="handle" name="handle" maxlength="32" autocapitalize="off" spellcheck="false" value="${escapeHtml(draft.handle)}"></label>
@@ -1225,13 +1227,13 @@ function renderIdentity(state: CharacterEditorState): string {
       <button type="button" class="chr-btn chr-btn-primary" data-action="save"${state.fictional && !state.saving ? '' : ' disabled'}>${state.saving ? 'Saving…' : state.mode === 'create' ? 'Create character' : 'Save changes'}</button>
       <button type="button" class="chr-btn chr-btn-danger" data-action="delete"${state.character ? '' : ' disabled'}>Delete</button>
     </div>
-  </section>`;
+  </details>`;
 }
 
 function renderLook(state: CharacterEditorState): string {
   const visual = state.draft.visual;
-  return `<section class="chr-section" data-section="look" aria-labelledby="chr-look-title">
-    <h3 id="chr-look-title">Look</h3>
+  return `<details class="chr-section" data-section="look" aria-labelledby="chr-look-title">
+    <summary id="chr-look-title" class="chr-section-summary">Look</summary>
     <div class="chr-look-images" data-image-slots>${renderImageList(state)}</div>
     <div class="chr-upload-row">
       <label class="chr-file">Upload image<input type="file" data-upload-image accept="image/png,image/jpeg,image/webp"${state.character ? '' : ' disabled'}></label>
@@ -1244,19 +1246,27 @@ function renderLook(state: CharacterEditorState): string {
       <label class="chr-field">Locked seed<input data-field="visual.seed" type="number" step="1" value="${visual.seed ?? ''}" placeholder="none"></label>
       <label class="chr-field chr-field-wide">Palette<input data-field="visual.palette" value="${escapeHtml((visual.palette ?? []).join(', '))}" placeholder="#5b3a1e, #f4e9dc"></label>
     </div>
-    <div class="chr-subsection">
-      <h4>Wardrobe</h4>
-      ${(visual.wardrobe ?? []).length === 0
-        ? '<p class="chr-empty-small" data-no-wardrobe>No wardrobe items yet.</p>'
-        : `<ul class="chr-item-list">${(visual.wardrobe ?? []).map(item => `<li data-wardrobe-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.label)}${item.default ? ' · default' : ''}</span><span class="chr-hint">${escapeHtml(item.prompt)}</span></li>`).join('')}</ul>`}
-    </div>
-    <div class="chr-subsection">
-      <h4>Expressions</h4>
-      ${(visual.expressions ?? []).length === 0
-        ? '<p class="chr-empty-small" data-no-expressions>No expressions yet.</p>'
-        : `<ul class="chr-item-list">${(visual.expressions ?? []).map(item => `<li data-expression-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.label)}</span><span class="chr-hint">${escapeHtml(item.prompt)}</span></li>`).join('')}</ul>`}
-    </div>
-  </section>`;
+  </details>`;
+}
+
+function renderWardrobe(state: CharacterEditorState): string {
+  const wardrobe = state.draft.visual.wardrobe ?? [];
+  return `<details class="chr-section" aria-labelledby="chr-wardrobe-title">
+    <summary id="chr-wardrobe-title" class="chr-section-summary">Wardrobe</summary>
+    ${wardrobe.length === 0
+      ? '<p class="chr-empty-small" data-no-wardrobe>No wardrobe items yet.</p>'
+      : `<ul class="chr-item-list">${wardrobe.map(item => `<li data-wardrobe-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.label)}${item.default ? ' · default' : ''}</span><span class="chr-hint">${escapeHtml(item.prompt)}</span></li>`).join('')}</ul>`}
+  </details>`;
+}
+
+function renderExpressions(state: CharacterEditorState): string {
+  const expressions = state.draft.visual.expressions ?? [];
+  return `<details class="chr-section" aria-labelledby="chr-expressions-title">
+    <summary id="chr-expressions-title" class="chr-section-summary">Expressions</summary>
+    ${expressions.length === 0
+      ? '<p class="chr-empty-small" data-no-expressions>No expressions yet.</p>'
+      : `<ul class="chr-item-list">${expressions.map(item => `<li data-expression-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.label)}</span><span class="chr-hint">${escapeHtml(item.prompt)}</span></li>`).join('')}</ul>`}
+  </details>`;
 }
 
 type RenderableState = CharacterEditorState & {
@@ -1281,6 +1291,14 @@ function auditionFor(state: CharacterEditorState): AuditionState {
   return { disabled: false, reason: '', label: 'Audition' };
 }
 
+/** VX11 voice-mode card; only for a saved character (it needs an id). */
+function renderVoiceModeCard(state: RenderableState): string {
+  const character = state.character;
+  if (!character || typeof character.id !== 'string' || character.id === '') return '';
+  const voice = { ...(character.voice as unknown as Record<string, unknown> | undefined ?? {}), ...(state.draft.voice as unknown as Record<string, unknown>) };
+  return renderVoiceMode(readVoiceModeState({ character: { id: character.id, voice } }));
+}
+
 function renderVoice(state: RenderableState): string {
   const voice = state.draft.voice;
   const availability = auditionFor(state);
@@ -1289,8 +1307,8 @@ function renderVoice(state: RenderableState): string {
     : voice.engine === 'kokoro'
       ? state.voiceOptions.kokoroVoices
       : [];
-  return `<section class="chr-section" data-section="voice" aria-labelledby="chr-voice-title">
-    <h3 id="chr-voice-title">Voice</h3>
+  return `<details class="chr-section" data-section="voice" aria-labelledby="chr-voice-title">
+    <summary id="chr-voice-title" class="chr-section-summary">Voice</summary>
     <div class="chr-field-grid">
       <label class="chr-field">Preset<select data-voice-preset>${optionsHtml(
         state.voiceOptions.presets.map(preset => ({ id: preset.id, label: preset.label })),
@@ -1317,13 +1335,14 @@ function renderVoice(state: RenderableState): string {
       <span class="chr-hint" data-audition-reason role="status">${escapeHtml(availability.reason || state.audition.message)}</span>
       ${state.audition.url ? `<audio controls src="${escapeHtml(state.audition.url)}"></audio>` : ''}
     </div>
-  </section>`;
+    ${renderVoiceModeCard(state)}
+  </details>`;
 }
 
 function renderBible(state: CharacterEditorState): string {
   const bible = state.draft.bible;
-  return `<section class="chr-section" data-section="bible" aria-labelledby="chr-bible-title">
-    <h3 id="chr-bible-title">Bible</h3>
+  return `<details class="chr-section" data-section="bible" aria-labelledby="chr-bible-title">
+    <summary id="chr-bible-title" class="chr-section-summary">Bible</summary>
     <div class="chr-field-grid">
       <label class="chr-field chr-field-wide">Personality<textarea data-field="bible.personality" maxlength="600" rows="3">${escapeHtml(bible.personality)}</textarea></label>
       <label class="chr-field chr-field-wide">Speaking style<textarea data-field="bible.speakingStyle" maxlength="300" rows="2">${escapeHtml(bible.speakingStyle)}</textarea></label>
@@ -1333,7 +1352,7 @@ function renderBible(state: CharacterEditorState): string {
       <label class="chr-field">Don't<textarea data-field="bible.dont" data-list rows="3" placeholder="One per line">${escapeHtml(listText(bible.dont))}</textarea></label>
       <label class="chr-field chr-field-wide">Notes<textarea data-field="bible.notes" maxlength="1000" rows="4">${escapeHtml(bible.notes)}</textarea></label>
     </div>
-  </section>`;
+  </details>`;
 }
 
 export type EditorRenderOptions = {
@@ -1398,6 +1417,8 @@ export function renderCharacterEditor(
     <div class="chr-drawer-body">
       ${renderIdentity(value)}
       ${renderLook(value)}
+      ${renderWardrobe(value)}
+      ${renderExpressions(value)}
       ${renderVoice(value)}
       ${renderBible(value)}
     </div>

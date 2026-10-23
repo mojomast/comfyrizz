@@ -1,0 +1,151 @@
+@import '../ui/tokens.css';
+
+/* ASSET-VIEWER AV06: thumbnail states.
+   Built from tokens.css only. Every state carries text or a glyph plus text,
+   so colour is never the only signal. The host sets data-thumb-state. */
+
+[data-thumb-state] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-sm);
+}
+
+[data-thumb-state='ready'] {
+  color: var(--text-1);
+  background: var(--bg-1);
+}
+
+[data-thumb-state='pending'] {
+  color: var(--info);
+  background: var(--info-bg);
+  border-color: var(--info-border);
+}
+
+[data-thumb-state='failed'] {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+[data-thumb-state='none'] {
+  color: var(--text-2);
+  background: var(--bg-2);
+}
+
+.thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: var(--space-2);
+  text-align: center;
+  line-height: var(--line-height-tight);
+}
+
+.thumb-glyph {
+  font-size: var(--font-size-18);
+  line-height: var(--line-height-tight);
+}
+
+.thumb-label {
+  color: var(--text-1);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+}
+
+[data-thumb-state='failed'] .thumb-label {
+  color: var(--danger);
+}
+
+.thumb-reason {
+  color: var(--text-3);
+  font-size: var(--font-size-12);
+  line-height: var(--line-height-base);
+}
+
+[data-thumb-state='failed'] .thumb-reason {
+  color: var(--danger);
+}
+
+.thumb-retry {
+  min-height: var(--target-min);
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-500);
+  background: var(--bg-3);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.thumb-retry:hover {
+  border-color: var(--border-strong);
+}
+
+.thumb-retry:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.thumb-retry:disabled {
+  color: var(--text-3);
+  cursor: default;
+  border-color: var(--border-subtle);
+}
+
+.thumb-waveform {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--info);
+  background: var(--bg-1);
+}
+
+.thumb-waveform-wave {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+[data-thumb-state='pending'] .thumb-glyph {
+  animation: thumb-pulse var(--motion-200) var(--ease-standard) infinite alternate;
+}
+
+@keyframes thumb-pulse {
+  from {
+    opacity: 0.55;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-thumb-state='pending'] .thumb-glyph {
+    animation: none;
+  }
+}

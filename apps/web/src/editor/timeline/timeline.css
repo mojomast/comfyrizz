@@ -1,5 +1,6 @@
 @import '../../ui/tokens.css';
 @import '../../ui/components.css';
+@import '../../thumbs/thumbs.css';
 
 /* UO12: Timeline panel restyle (PLAN section 5).
    Calm, dense, ComfyUI-like dark pro tool: borders over shadows, single indigo accent. */
@@ -499,6 +500,61 @@
 @keyframes tl-clip-progress {
   from { transform: translateX(0); opacity: 0.45; }
   to { transform: translateX(150%); opacity: 1; }
+}
+
+/* ASSET-VIEWER AV08G: lazy chip thumbnails sit behind the chip copy, so a
+   thumbnail arriving never changes the chip's size or the track layout. */
+.tl-clip-thumb {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--bg-2);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.tl-clip-thumb[data-thumb-state="failed"],
+.tl-clip-thumb[data-thumb-state="none"] {
+  opacity: 0.9;
+}
+
+.tl-clip-thumb[data-thumb-kind="filmstrip"] {
+  display: flex;
+  align-items: stretch;
+}
+
+.tl-clip-strip-cell {
+  display: block;
+  flex: 0 0 auto;
+  height: 100%;
+  background-color: var(--bg-2);
+}
+
+.tl-clip-badge,
+.tl-clip-slot,
+.tl-clip-take {
+  position: relative;
+  z-index: 1;
+}
+
+.tl-clip-progress {
+  z-index: 1;
+}
+
+.tl-music-thumb {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: calc(var(--space-5) * 2);
+  height: var(--space-4);
+  margin-right: var(--space-1);
+  overflow: hidden;
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  pointer-events: none;
 }
 
 /* ==========================================================================

@@ -4,6 +4,8 @@
  * brief can become a valid comfyrizz.package/v1 document without a GPU.
  */
 
+import { draftKeyMessages, extractBrief, mentionsNumbers } from './brief.js';
+
 export const PACKAGE_SCHEMA = 'https://comfyrizz.example/schema/package-v1.json';
 export const DEFAULT_PALETTE = ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'];
 
@@ -45,6 +47,12 @@ export function defaultCpuDatasets(): Record<string, unknown> {
 /** Five readable scenes plus an outro; every layout is exercised on CPU. */
 export function defaultCpuScenes(brief: string): CpuScene[] {
   const title = titleFor(brief);
+  const draft = extractBrief(brief);
+  const messages = draftKeyMessages(brief, 2);
+  const messageAt = (index: number): string => messages[index] ?? messages[0] ?? title;
+  const hasNumbers = mentionsNumbers(draft);
+  const chartHeadline = messageAt(0);
+  const closingHeadline = draft.cta ?? 'Thanks for watching';
   return [
     {
       id: 's_title',
@@ -62,7 +70,7 @@ export function defaultCpuScenes(brief: string): CpuScene[] {
       variant: 'split',
       preferredFrames: 240,
       copy: {
-        headline: 'Generated-first assets',
+        headline: messageAt(0),
         sub: 'Icons, diagrams and patterns are SVG written as code.',
         body: 'The agent sanitizes and render-checks every SVG on CPU, repairs it at most twice, then hands the vector straight to Remotion.',
       },
@@ -74,30 +82,41 @@ export function defaultCpuScenes(brief: string): CpuScene[] {
       id: 's_stat',
       layout: 'stat',
       preferredFrames: 180,
-      copy: { headline: 'CPU time for this slice', sub: 'Measured locally, no GPU and no network.', body: '6 min' },
+      copy: { headline: messageAt(1), sub: 'Measured locally, no GPU and no network.', body: '6 min' },
       data: { dataset: 'd_minutes', display: 'number' },
       background: { procedural: { pattern: 'gradient', seed: 5 } },
       foreground: [],
       transitionOut: { type: 'fade', frames: 15 },
     },
-    {
-      id: 's_chart',
-      layout: 'chart',
-      variant: 'bar',
-      preferredFrames: 240,
-      copy: { headline: 'Where the example minutes went', sub: 'Shorter is better.', footnote: 'Example data, invented for this demo.' },
-      data: { dataset: 'd_minutes', display: 'bar' },
-      background: { procedural: { pattern: 'grain', seed: 17 } },
-      foreground: [],
-      transitionOut: { type: 'fade', frames: 15 },
-    },
+    hasNumbers
+      ? {
+          id: 's_chart',
+          layout: 'chart',
+          variant: 'bar',
+          preferredFrames: 240,
+          copy: { headline: chartHeadline, sub: 'Shorter is better.', footnote: 'Example data, invented for this demo.' },
+          data: { dataset: 'd_minutes', display: 'bar' },
+          background: { procedural: { pattern: 'grain', seed: 17 } },
+          foreground: [],
+          transitionOut: { type: 'fade', frames: 15 },
+        }
+      : {
+          id: 's_chart',
+          layout: 'hero',
+          variant: 'split',
+          preferredFrames: 240,
+          copy: { headline: chartHeadline },
+          background: { procedural: { pattern: 'grain', seed: 17 } },
+          foreground: [],
+          transitionOut: { type: 'fade', frames: 15 },
+        },
     {
       id: 's_list',
       layout: 'list',
       variant: 'bullets',
       preferredFrames: 210,
       copy: {
-        headline: 'What the CPU slice does',
+        headline: messageAt(1),
         items: [
           'Routes icons, diagrams and patterns to SVG',
           'Sanitizes and render-checks every vector',
@@ -114,7 +133,7 @@ export function defaultCpuScenes(brief: string): CpuScene[] {
       layout: 'title',
       variant: 'outro',
       preferredFrames: 150,
-      copy: { headline: 'Ready to render', sub: 'Local, deterministic and free.', cta: 'github.example/comfyrizz' },
+      copy: { headline: closingHeadline, sub: 'Local, deterministic and free.', cta: 'github.example/comfyrizz' },
       background: { procedural: { pattern: 'mesh', seed: 23, palette: DEFAULT_PALETTE.slice(0, 3) } },
       foreground: [],
     },

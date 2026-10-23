@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "generator": "fasth3-omni",
+  "kind": "plate",
+  "files": ["image", "reference"],
+  "map": {
+    "image": ["5", "image"],
+    "reference": ["6", "image"],
+    "prompt": ["8", "prompt"],
+    "width": ["8", "width"],
+    "height": ["8", "height"],
+    "frames": ["8", "length"],
+    "fps": ["19", "fps"],
+    "seed": ["13", "noise_seed"]
+  },
+  "note": "Two-image, no-clip Omni ref2v graph for prompt-voice shots: the optional LoadAudio input (node 7) and its ref_audios link are removed, node ids are otherwise unchanged, and no audio source file is consumed. Copied from fasth3_omni_ref2va.api.json, adapted from Comfy-Org/workflow_templates d0e41fe5423f93db5b5872cf273d7b1af8aa68bc/templates/video_fasth3_ominiref_r2v.json; recipe rechecked against 1524172f454aff9c87b7e5ebc143af95542bf8f0 on 2026-10-21. 8-step Euler/simple, BasicGuider CFG=1, VSA keep=10%, video/audio shifts=12/3. Generated audio is still decoded through the audio VAE and retained in the MP4. Uses ComfyUI d52a7a5ef60b36062f7c3c69bd774f4c98b56eb0. image is Picture 1, reference is Picture 2; references are not fixed first frames. The no-clip path assumes the optional R2V audio input is genuinely optional; that assumption is held from VX01 and has not been graph-loaded on the pinned ComfyUI revision. See docs/FASTH3_OMNI_DIRECTION.md for reference roles, checkpoint-specific settings and unresolved attention compatibility guidance."
+}

@@ -24,7 +24,23 @@ import { createHash } from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
+import { validateIterationPolicy } from './iteration.mjs';
+
 export const PREFERENCES_SCHEMA = 'comfyrizz.preferences/v1';
+
+// IL09: some preference keys carry a structured value with its own contract.
+// The hook is keyed by the preference key only; a key without a validator keeps
+// the existing JSON-value behaviour. A validator either returns the normalized
+// value that is stored or throws its own contract error, so an invalid policy is
+// never persisted.
+const VALUE_VALIDATORS = Object.freeze({
+  'iteration.policy': validateIterationPolicy,
+});
+
+// PLAN IL09: an iteration level is a project default or a user default only.
+const KEY_SCOPES = Object.freeze({
+  'iteration.policy': Object.freeze(['user', 'project']),
+});
 
 const SCOPES = new Set(['user', 'project', 'character', 'language']);
 const SCOPES_BY_RANK = Object.freeze({ user: 1, project: 2, language: 3, character: 4 });
@@ -276,6 +292,11 @@ function normalizeValue(input) {
   return clone(input.value);
 }
 
+function validateKeyedValue(key, value) {
+  const validator = VALUE_VALIDATORS[key];
+  return validator ? clone(validator(value)) : value;
+}
+
 function normalizeId(input) {
   if (!hasValue(input, 'id') || input.id === null || typeof input.id !== 'string'
     || input.id.trim() === '') {
@@ -502,7 +523,10 @@ export function createPreferencesStore(options = {}) {
     const reason = normalizeReason(input, actor);
     const { scope, scopeId } = normalizeScope(input);
     const key = normalizeKey(input);
-    const value = normalizeValue(input);
+    if (KEY_SCOPES[key] && !KEY_SCOPES[key].includes(scope)) {
+      fail('INVALID_SCOPE', `${key} can only be saved at ${KEY_SCOPES[key].join(' or ')} scope`);
+    }
+    const value = validateKeyedValue(key, normalizeValue(input));
 
     const hash = requestHash('set', {
       scope, scopeId, key, value, actor, userEventId, reason,
@@ -547,16 +571,18 @@ export function createPreferencesStore(options = {}) {
     const command = normalizeCommand(input);
     const reason = normalizeReason(input, actor);
     const id = normalizeId(input);
-    const value = normalizeValue(input);
+    const rawValue = normalizeValue(input);
+
+    const state = readState();
+    const existing = findRecord(state, id);
+    if (!existing) fail('NOT_FOUND', 'preference does not exist', 404);
+    const value = validateKeyedValue(existing.key, rawValue);
 
     const hash = requestHash('correct', {
       id, value, actor, userEventId, reason,
     });
-    const state = readState();
     const prior = findCommand(state, command.commandId, command.idempotencyKey);
     if (prior) return replay(prior, hash);
-    const existing = findRecord(state, id);
-    if (!existing) fail('NOT_FOUND', 'preference does not exist', 404);
     if (existing.status === 'revoked') {
       fail('PREFERENCE_REVOKED', 'a revoked preference cannot be corrected', 409);
     }

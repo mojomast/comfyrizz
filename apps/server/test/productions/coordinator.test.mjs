@@ -27,6 +27,7 @@ import {
   deriveNextStep,
 } from '../../src/productions/coordinator.mjs';
 import { createBudgetLedger } from '../../src/productions/ledger.mjs';
+import { ITERATION_PRESETS } from '../../src/productions/iteration.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
 
 const AT = '2026-10-22T12:00:00.000Z';
@@ -102,7 +103,21 @@ function propose(ctx, productionId, actions, overrides = {}) {
   return response;
 }
 
+function setIterationLevel(ctx, productionId) {
+  const production = ctx.store.read(productionId);
+  if (production.iteration) return production;
+  return ctx.handler.execute({
+    commandId: `cmd_iteration_${production.revision}`,
+    idempotencyKey: `key_iteration_${production.revision}`,
+    kind: 'iteration.set',
+    productionId,
+    expected: { productionRevision: production.revision },
+    payload: { policy: structuredClone(ITERATION_PRESETS.balanced) },
+  }, USER).production;
+}
+
 function approve(ctx, productionId, plan) {
+  setIterationLevel(ctx, productionId);
   const production = ctx.store.read(productionId);
   return ctx.handler.execute({
     commandId: `cmd_approve_${plan.planHash.slice(0, 8)}`,

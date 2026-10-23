@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 0d3dace4eee24b4637401a085080049b9cc726642c6dc65cf54ca372a4e39b69
+// Schema sha256: 9955e1847b7b9bc9d0a9cfaea77fb753bab1016a1e0b4aa8e077598a3a9094a1
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -697,6 +697,13 @@ export interface ForegroundItem {
 export interface Scene {
   id: SceneId;
   layout: "title" | "hero" | "stat" | "chart" | "list" | "split" | "compare" | "code";
+  /**
+   * Marks this shot as a hero shot for iteration: Balanced video pick 'hero' asks the user on hero
+   * shots. When no scene in the production is flagged, the first and last shots are the heroes
+   * (resolved in apps/server/src/productions/iteration.mjs, not here). Unrelated to layout 'hero'
+   * and motion.emphasis 'hero'.
+   */
+  hero?: boolean;
   variant?: "centered" | "outro" | "full-bleed" | "split" | "bar" | "bullets" | "quote";
   preferredFrames?: number;
   copy?: Copy;
@@ -861,6 +868,17 @@ export interface FastH3Direction {
   camera: string;
   soundscape: string;
   characterCount: number;
+  /**
+   * Optional prompt voice on FastH3 direction. Prompt mode gives MiniMax H3 a text voice description
+   * instead of a voice clip (no-clip mode); clip mode is the default behaviour and equals an absent
+   * voice; the description is fictional-only, never a real person (validated server side in
+   * characters/voice.mjs).
+   */
+  voice?: {
+    mode: "clip" | "prompt";
+    description?: string;
+    seed?: number;
+    };
   slotSeconds?: number;
   reactionSeconds?: number;
   dialogue?: {
@@ -962,6 +980,7 @@ export interface Asset {
   redistributable?: boolean;
   gen?: Gen;
   notes?: string;
+  voicePath?: "prompt";
   /**
    * CAST1: this still depicts the cast member. The planner appends that member's ref_asset to the
    * Klein reference-edit inputs.

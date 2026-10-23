@@ -15,7 +15,18 @@
 // authorize a decision; `validateCommandEnvelope` rejects those fields and
 // `validateRecordedCommand` validates the attribution the server added.
 
+import { validateIterationPolicy } from './iteration.mjs';
+
 export const PRODUCTION_SCHEMA = 'comfyrizz.production/v1';
+
+// IL02: iteration failures are a closed set of codes. `iteration.set` is the
+// only way to establish a level; a paid plan without one is
+// ITERATION_LEVEL_REQUIRED, a policy beyond the D4 limits is
+// ITERATION_EXCEEDED, and a mid-production change cannot touch a shot that is
+// rendered or in flight (ITERATION_SHOT_LOCKED).
+export const ITERATION_LEVEL_REQUIRED = 'ITERATION_LEVEL_REQUIRED';
+export const ITERATION_EXCEEDED = 'ITERATION_EXCEEDED';
+export const ITERATION_SHOT_LOCKED = 'ITERATION_SHOT_LOCKED';
 
 // Spec 4.1: a production's phase is derived from its artifacts and events, so
 // it is never stored. `intent` is the only durable production-level status.
@@ -128,6 +139,8 @@ export const EVENTS = Object.freeze([
   'plan.proposed',
   'plan.approved',
   'plan.rejected',
+  'iteration.set',
+  'voice_mode.set',
   'decision.requested',
   'decision.resolved',
   'stage.entered',
@@ -142,6 +155,7 @@ export const EVENTS = Object.freeze([
   'verdict.recorded',
   'action.planned',
   'action.state_changed',
+  'budget.ceiling_set',
   'budget.reserved',
   'budget.settled',
   'render.gate.blocked',
@@ -160,6 +174,8 @@ export const COMMANDS = Object.freeze([
   'plan.propose',
   'plan.approve',
   'plan.reject',
+  'iteration.set',
+  'voice_mode.set',
   'decision.resolve',
   'stage.advance',
   'artifact.attach',
@@ -170,6 +186,7 @@ export const COMMANDS = Object.freeze([
   'clip.reject',
   'render.request',
   'gate.override',
+  'budget.set_ceiling',
   'budget.reserve',
   'budget.settle',
   'action.dispatch',
@@ -702,6 +719,103 @@ function creativeVerdict(errors, doc, path) {
   if (doc.note !== undefined) requireText(errors, doc.note, joinPath(path, 'note'), { max: 4000 });
 }
 
+// --- Iteration.set payload (IL02) ------------------------------------------
+
+const ITERATION_SET_KEYS = new Set(['policy', 'scope']);
+const ITERATION_SCOPE_KEYS = new Set(['shotIds']);
+
+// The policy validator names dotted fields (`policy.stages.video.takes`).
+// Keep that name intact as one JSON-pointer token so a shot id containing a
+// dot is never split into a different path.
+function iterationPolicyPath(base, field) {
+  if (typeof field !== 'string' || field === '' || field === 'policy') return base;
+  const token = field.startsWith('policy.') ? field.slice('policy.'.length) : field;
+  return joinPath(base, token);
+}
+
+function iterationSetPayload(errors, value, path) {
+  for (const key of Object.keys(value)) {
+    if (!ITERATION_SET_KEYS.has(key)) {
+      push(errors, joinPath(path, key), 'UNKNOWN_FIELD', `${joinPath(path, key)} is not a recognized field`);
+    }
+  }
+
+  const policyPath = joinPath(path, 'policy');
+  if (!Object.hasOwn(value, 'policy')) {
+    push(errors, policyPath, 'INVALID_OBJECT', `${policyPath} is required`);
+  } else if (!isPlainObject(value.policy)) {
+    push(errors, policyPath, 'INVALID_OBJECT', `${policyPath} must be an object`);
+  } else {
+    try {
+      validateIterationPolicy(value.policy);
+    } catch (error) {
+      const code = error && typeof error.code === 'string' ? error.code : 'ITERATION_POLICY_INVALID';
+      const field = error && typeof error.field === 'string' ? error.field : '';
+      const message = error && typeof error.message === 'string' ? error.message : 'policy is invalid';
+      push(errors, iterationPolicyPath(policyPath, field), code, message);
+    }
+  }
+
+  if (!Object.hasOwn(value, 'scope')) return;
+  const scopePath = joinPath(path, 'scope');
+  if (!requireObject(errors, value.scope, scopePath, 'scope')) return;
+  for (const key of Object.keys(value.scope)) {
+    if (!ITERATION_SCOPE_KEYS.has(key)) {
+      push(errors, joinPath(scopePath, key), 'UNKNOWN_FIELD', `${joinPath(scopePath, key)} is not a recognized field`);
+    }
+  }
+  const shotIdsPath = joinPath(scopePath, 'shotIds');
+  if (!Object.hasOwn(value.scope, 'shotIds')) {
+    push(errors, shotIdsPath, 'INVALID_ARRAY', `${shotIdsPath} must be an array`);
+    return;
+  }
+  // An empty list would be a second spelling of "no scope" (the whole
+  // production); a scoped change names at least one shot, otherwise omit scope.
+  if (Array.isArray(value.scope.shotIds) && value.scope.shotIds.length === 0) {
+    push(errors, shotIdsPath, 'INVALID_ARRAY', `${shotIdsPath} must name at least one shot; omit scope for the whole production`);
+    return;
+  }
+  requireUniqueIds(errors, value.scope.shotIds, shotIdsPath);
+}
+
+const VOICE_MODE_SET_KEYS = new Set(['h3VoiceMode']);
+
+const CEILING_KEYS = new Set(['ceiling']);
+
+function ceilingPayload(errors, value, path) {
+  for (const key of Object.keys(value)) {
+    if (!CEILING_KEYS.has(key)) {
+      push(errors, joinPath(path, key), 'UNKNOWN_FIELD', `${joinPath(path, key)} is not a recognized field`);
+    }
+  }
+  const ceilingPath = joinPath(path, 'ceiling');
+  if (!Object.hasOwn(value, 'ceiling')) {
+    push(errors, ceilingPath, 'INVALID_CEILING', `${ceilingPath} is required`);
+    return;
+  }
+  const ceiling = value.ceiling;
+  if (ceiling !== null && (typeof ceiling !== 'number' || !Number.isFinite(ceiling) || ceiling < 0)) {
+    push(errors, ceilingPath, 'INVALID_CEILING', `${ceilingPath} must be null or a finite non-negative number`);
+  }
+}
+
+function voiceModeSetPayload(errors, value, path) {
+  for (const key of Object.keys(value)) {
+    if (!VOICE_MODE_SET_KEYS.has(key)) {
+      push(errors, joinPath(path, key), 'UNKNOWN_FIELD', `${joinPath(path, key)} is not a recognized field`);
+    }
+  }
+  const modePath = joinPath(path, 'h3VoiceMode');
+  if (!Object.hasOwn(value, 'h3VoiceMode')) {
+    push(errors, modePath, 'INVALID_H3_VOICE_MODE', `${modePath} is required`);
+    return;
+  }
+  const mode = value.h3VoiceMode;
+  if (mode !== null && mode !== 'clip' && mode !== 'prompt') {
+    push(errors, modePath, 'INVALID_H3_VOICE_MODE', `${modePath} must be one of: clip, prompt, null`);
+  }
+}
+
 // --- Event (spec 6.5/6.6) --------------------------------------------------
 
 function event(errors, doc, path) {
@@ -711,7 +825,15 @@ function event(errors, doc, path) {
   requireIntegerAtLeast(errors, doc.sequence, 1, joinPath(path, 'sequence'), 'INVALID_SEQUENCE');
   requireEnum(errors, doc.type, EVENTS, joinPath(path, 'type'), 'UNKNOWN_EVENT_TYPE');
   requireTimestamp(errors, doc.at, joinPath(path, 'at'));
-  requireObject(errors, doc.data, joinPath(path, 'data'), 'event data');
+  if (requireObject(errors, doc.data, joinPath(path, 'data'), 'event data')) {
+    if (doc.type === 'iteration.set') {
+      iterationSetPayload(errors, doc.data, joinPath(path, 'data'));
+    } else if (doc.type === 'voice_mode.set') {
+      voiceModeSetPayload(errors, doc.data, joinPath(path, 'data'));
+    } else if (doc.type === 'budget.ceiling_set') {
+      ceilingPayload(errors, doc.data, joinPath(path, 'data'));
+    }
+  }
   if (doc.commandId !== undefined) optionalId(errors, doc.commandId, joinPath(path, 'commandId'), 'command id');
   if (doc.userEventId !== undefined) optionalId(errors, doc.userEventId, joinPath(path, 'userEventId'), 'user event id');
 }
@@ -733,7 +855,16 @@ function commandFields(errors, doc, path, { allowProductionIdForCreate }) {
     }
   }
   validateExpectedRevisions(errors, doc.expected, joinPath(path, 'expected'));
-  requireObject(errors, doc.payload, joinPath(path, 'payload'), 'command payload');
+  if (requireObject(errors, doc.payload, joinPath(path, 'payload'), 'command payload')
+    && kindOk) {
+    if (doc.kind === 'iteration.set') {
+      iterationSetPayload(errors, doc.payload, joinPath(path, 'payload'));
+    } else if (doc.kind === 'voice_mode.set') {
+      voiceModeSetPayload(errors, doc.payload, joinPath(path, 'payload'));
+    } else if (doc.kind === 'budget.set_ceiling') {
+      ceilingPayload(errors, doc.payload, joinPath(path, 'payload'));
+    }
+  }
   if (doc.idempotencyKey !== undefined) {
     requireId(errors, doc.idempotencyKey, joinPath(path, 'idempotencyKey'), { label: 'idempotency key' });
   }

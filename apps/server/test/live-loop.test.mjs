@@ -149,7 +149,9 @@ test('live tool loop turns a recorded DeepSeek transcript into a valid package',
   assert.ok(propose, 'a successful storyboard.propose is required');
   assert.deepEqual(propose.result.package.scenes[0].copy, { headline: slice.package.scenes[0].copy.headline });
   // The messy role/title scenes were normalized to real layouts.
-  assert.deepEqual(slice.package.scenes.map(scene => scene.layout), ['title', 'hero', 'stat', 'chart', 'list', 'title']);
+  // UR12b: BRIEF mentions no numbers, so the offline planner turns s_chart into a text (hero) scene.
+  assert.deepEqual(slice.package.scenes.map(scene => scene.layout), ['title', 'hero', 'stat', 'hero', 'list', 'title']);
+  assert.deepEqual(slice.package.scenes.map(scene => scene.layout), defaultCpuScenes(BRIEF).map(scene => scene.layout));
   assert.equal(slice.package.scenes.some(scene => 'role' in scene || 'title' in scene), false);
 
   const validation = validatePackage(slice.package);

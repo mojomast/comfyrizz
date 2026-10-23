@@ -13,6 +13,7 @@ import { statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
 import { MODEL_LICENSES, MODEL_GENERATORS } from "../../schema/src/semantic.mjs";
+import { FASTH3_NOCLIP_WORKFLOW } from "./plan.mjs";
 
 const GENERATED_LICENSE = { id: "CC0-1.0" };
 
@@ -99,6 +100,11 @@ export function applyManifestToPackage(pkg, { manifest, jobsDoc, outDir, backend
     if (job?.workflow) provenance.workflow = job.workflow;
     if (job?.workflowSha256) provenance.workflow_sha256 = job.workflowSha256;
     if (job?.model) provenance.model = job.model; else if (asset.gen?.model) provenance.model = asset.gen.model;
+    // VX07: prompt mode executes the committed no-clip graph and generates the voice from the
+    // written description, so the ready plate records which voice path produced it. Clip mode is
+    // the default and keeps its shape: no voicePath, and the MP4's native audio stays present.
+    const promptVoice = job?.kind === "plate" && generator === "fasth3-omni" &&
+      (job.workflow === FASTH3_NOCLIP_WORKFLOW || asset.gen?.direction?.voice?.mode === "prompt");
 
     const next = {
       ...asset,
@@ -113,6 +119,7 @@ export function applyManifestToPackage(pkg, { manifest, jobsDoc, outDir, backend
       ...(modelLicense ? { model_license: modelLicense } : {}),
       gen: provenance,
       ...(mediaFor(job, job?.cutout ?? asset.cutout, output) ? { media: mediaFor(job, job?.cutout ?? asset.cutout, output) } : {}),
+      ...(promptVoice ? { voicePath: "prompt" } : {}),
     };
     if (asset.cutout === true || job?.cutout === true) next.cutout = true;
 

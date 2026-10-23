@@ -28,6 +28,7 @@ import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
 import { TAKES_SCHEMA, shouldAutoSelect } from './takes/model.mjs';
 import { createTakeRoutes } from './takes/routes.mjs';
+import { createThumbRoutes } from './thumbs/routes.mjs';
 import { buildCorrection } from './takes/correction.mjs';
 import { listClips } from './takes/clips.mjs';
 import { finalGate } from './takes/gate.mjs';
@@ -47,11 +48,15 @@ import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/t
 import { animationOptions } from './animation-options.mjs';
 import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
 import { createRenderRoutes } from './routes/render.mjs';
+import { createConversationRoutes } from './routes/conversations.mjs';
+import { createPackageRoutes } from './routes/packages.mjs';
 import { createProductionStore } from './productions/store.mjs';
 import { createCommandHandler } from './productions/commands.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
 import { createActionCoordinator } from './productions/actions.mjs';
 import { createProductionRoutes } from './routes/productions.mjs';
+import { createPreferencesStore } from './productions/preferences.mjs';
+import { createIterationRoutes } from './productions/iteration-routes.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 // IP11: a completion save races with edits. Re-read the latest package and reapply the
@@ -423,6 +428,8 @@ export function createApp({
   // the /api/productions facade, so a bound package can only start from the
   // action slot that was dispatched for it.
   const productionStore = createProductionStore({ runtimeDir });
+  const preferencesStore = createPreferencesStore({ runtimeDir });
+  const iterationRoutes = createIterationRoutes({ store: productionStore, preferences: preferencesStore });
   // IP66: the chat adapter uses the same command handler as the production
   // facade. The handler is created here, before the chat, so a bound package's
   // turn can dispatch agent-attributed commands through the one command path.
@@ -773,6 +780,7 @@ export function createApp({
     mediaTickets,
     measuredFor: pkg => measuredOptionsFromDir(dirname(store.path(pkg.id))),
   });
+  const thumbRoutes = createThumbRoutes({ store, takeStore, runtimeDir, mediaTickets });
   const sceneCacheDir = (packageId) => join(runtimeDir, 'scene-cache', packageId);
 
   // RL11: the export and render routes live in src/routes/render.mjs. This is a pure
@@ -831,6 +839,13 @@ export function createApp({
       actor: 'user',
       userEventId: `ue_${randomUUID()}`,
     }),
+    ledgerFor: (production) => createBudgetLedger({
+      runtimeDir,
+      ledgerId: production.budgetLedgerId,
+    }),
+    readPackage: (packageId) => {
+      try { return store.read(packageId); } catch { return null; }
+    },
   });
 
   const renderRoutes = createRenderRoutes({
@@ -996,6 +1011,8 @@ export function createApp({
       const minted = mediaTickets.mint(file);
       return sendJson(response, 200, { ticket: minted.ticket, expiresAt: minted.expiresAt, url: minted.url });
     }
+
+    if (await thumbRoutes.handle(request, response, url)) return;
 
     if (url.pathname === '/api/events' && request.method === 'GET') {
       const lastEventId = request.headers['last-event-id'] ?? url.searchParams.get('lastEventId');
@@ -1630,6 +1647,9 @@ export function createApp({
       }
     }
 
+    if (await createConversationRoutes({ rootDir: runtimeDir }).handle(request, response, url)) return;
+    if (await createPackageRoutes({ packagesDir: store.dir }).handle(request, response, url)) return;
+    if (await iterationRoutes.handle(request, response, url)) return;
     if (await productionRoutes.handle(request, response, url)) return;
     if (await takeRoutes.handle(request, response, url)) return;
     if (await createCharacterRoutes({

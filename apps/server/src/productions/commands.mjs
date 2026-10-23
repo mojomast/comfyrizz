@@ -20,12 +20,17 @@
 import { createHash } from 'node:crypto';
 
 import {
+  ITERATION_SHOT_LOCKED,
   PRODUCTION_SCHEMA,
   RECORDED_ACTORS,
   validateCommandEnvelope,
   validateProduction,
   validateRecordedCommand,
 } from './contract.mjs';
+import {
+  effectivePolicyForShot,
+  validateIterationPolicy,
+} from './iteration.mjs';
 import { ProductionStoreError } from './store.mjs';
 
 export class CommandError extends Error {
@@ -51,6 +56,7 @@ export const APPROVAL_COMMANDS = Object.freeze([
   'clip.reject',
   'gate.override',
   'budget.reserve',
+  'budget.set_ceiling',
   'delivery.accept',
 ]);
 
@@ -62,6 +68,8 @@ const EVENT_TYPES = Object.freeze({
   'plan.propose': 'plan.proposed',
   'plan.approve': 'plan.approved',
   'plan.reject': 'plan.rejected',
+  'iteration.set': 'iteration.set',
+  'voice_mode.set': 'voice_mode.set',
   'decision.resolve': 'decision.resolved',
   'stage.advance': 'stage.entered',
   'artifact.attach': 'artifact.attached',
@@ -74,6 +82,7 @@ const EVENT_TYPES = Object.freeze({
   'gate.override': 'review.observed',
   'budget.reserve': 'budget.reserved',
   'budget.settle': 'budget.settled',
+  'budget.set_ceiling': 'budget.ceiling_set',
   'action.dispatch': 'action.state_changed',
   'action.retry': 'action.state_changed',
   'action.cancel': 'action.state_changed',
@@ -86,6 +95,158 @@ function isPlainObject(value) {
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+// D6: a shot is locked once a render/take action is past planning. The states
+// are explicit because `queued..completed` is not a numeric range.
+const LOCKED_ACTION_STATES = new Set([
+  'queued',
+  'dispatching',
+  'running',
+  'collecting',
+  'verifying',
+  'completed',
+  'submission_unknown',
+  'reconciling',
+  'cancel_requested',
+]);
+
+// One spelling: an action record or a take event names its shot with
+// `shotId` (the package scene id). No other key is read and no id is guessed.
+function shotIdOf(data) {
+  return typeof data.shotId === 'string' && data.shotId !== '' ? data.shotId : null;
+}
+
+// IL08: exported read-only so the iteration read route lists exactly the shots this rule locks.
+export function lockedShotsFor(events) {
+  // An action locks its shot only while its LATEST state is in flight or
+  // completed; an action later cancelled or failed before rendering does not.
+  const latestByAction = new Map();
+  const locked = new Set();
+  for (const event of events) {
+    if (!isPlainObject(event) || !isPlainObject(event.data)) continue;
+    const data = event.data;
+    if (event.type === 'action.state_changed') {
+      if (typeof data.id === 'string' && data.id !== '') latestByAction.set(data.id, data);
+    } else if (event.type === 'take.requested' || event.type === 'take.landed') {
+      const shotId = shotIdOf(data);
+      if (shotId) locked.add(shotId);
+    }
+  }
+  for (const action of latestByAction.values()) {
+    const shotId = shotIdOf(action);
+    if (shotId && LOCKED_ACTION_STATES.has(action.state)) locked.add(shotId);
+  }
+  return locked;
+}
+
+function sameStages(left, right) {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
+function overrideForPolicy(policy, shotId) {
+  return { stages: clone(effectivePolicyForShot(policy, shotId).stages) };
+}
+
+/**
+ * Apply one iteration.set payload to the production projection (D6).
+ *
+ * The first set establishes the base policy. A scoped later change writes the
+ * requested policy's per-shot stages into shotOverrides. A later whole-
+ * production change moves the base policy and pins any locked shot to the
+ * stages it already had, so only shots that have not started change.
+ */
+function applyIterationSet(production, payload, events, at) {
+  const requestedPolicy = clone(validateIterationPolicy(payload.policy));
+  const scope = Array.isArray(payload?.scope?.shotIds) ? payload.scope.shotIds : null;
+  const productionShotIds = Array.isArray(production.shotIds) ? production.shotIds : [];
+  const previous = isPlainObject(production.iteration) && isPlainObject(production.iteration.policy)
+    ? clone(production.iteration.policy)
+    : null;
+
+  if (!previous) {
+    let base = requestedPolicy;
+    if (scope) {
+      const shotOverrides = { ...base.shotOverrides };
+      for (const shotId of scope) shotOverrides[shotId] = overrideForPolicy(base, shotId);
+      base = clone(validateIterationPolicy({ ...base, shotOverrides }));
+    }
+    return {
+      production: {
+        ...clone(production),
+        iteration: {
+          policy: base,
+          level: base.level,
+          setAt: at,
+          revision: production.revision + 1,
+        },
+      },
+      lockedShotIds: [],
+      requestedPolicy,
+    };
+  }
+
+  const locked = lockedShotsFor(events);
+  // A whole-production change covers its known shots plus any shot named by an
+  // in-flight action, so a locked shot is never silently outside the change.
+  const targets = scope ?? [...new Set([...productionShotIds, ...locked])];
+  const lockedShotIds = targets.filter((shotId) => locked.has(shotId));
+  const unlocked = targets.filter((shotId) => !locked.has(shotId));
+
+  // A change that can touch no shot is refused whole rather than recording a
+  // policy revision that applies nowhere.
+  if (targets.length > 0 && unlocked.length === 0) {
+    throw new CommandError(
+      ITERATION_SHOT_LOCKED,
+      'every shot in the change is locked',
+      409,
+      { lockedShotIds },
+    );
+  }
+
+  let base;
+  if (scope) {
+    const shotOverrides = { ...previous.shotOverrides };
+    for (const shotId of unlocked) shotOverrides[shotId] = overrideForPolicy(requestedPolicy, shotId);
+    base = clone(validateIterationPolicy({ ...previous, shotOverrides }));
+  } else {
+    const targetSet = new Set(targets);
+    const shotOverrides = {};
+    // Overrides for shots outside this production's shot list are not part of
+    // the change and stay as they were.
+    for (const [shotId, override] of Object.entries(previous.shotOverrides ?? {})) {
+      if (!targetSet.has(shotId)) shotOverrides[shotId] = clone(override);
+    }
+    // The requested policy's own overrides are part of the new base, except
+    // for a locked shot, whose old effective policy wins.
+    for (const [shotId, override] of Object.entries(requestedPolicy.shotOverrides ?? {})) {
+      if (!locked.has(shotId)) shotOverrides[shotId] = clone(override);
+    }
+
+    const candidate = { ...requestedPolicy, shotOverrides };
+    for (const shotId of lockedShotIds) {
+      const before = effectivePolicyForShot(previous, shotId);
+      const after = effectivePolicyForShot(candidate, shotId);
+      if (!sameStages(before.stages, after.stages)) {
+        shotOverrides[shotId] = { stages: clone(before.stages) };
+      }
+    }
+    base = clone(validateIterationPolicy({ ...requestedPolicy, shotOverrides }));
+  }
+
+  return {
+    production: {
+      ...clone(production),
+      iteration: {
+        policy: base,
+        level: base.level,
+        setAt: at,
+        revision: production.revision + 1,
+      },
+    },
+    lockedShotIds,
+    requestedPolicy,
+  };
 }
 
 function clockIso(clock) {
@@ -278,6 +439,11 @@ function applyCommand(production, kind, payload) {
     case 'delivery.accept':
       if (typeof payload?.deliveryId === 'string') next.latestDeliveryId = payload.deliveryId;
       break;
+    case 'voice_mode.set':
+      next.h3VoiceMode = payload?.h3VoiceMode;
+      break;
+    case 'budget.set_ceiling':
+      break;
     default:
       break;
   }
@@ -450,8 +616,26 @@ export function createCommandHandler(options = {}) {
       throw new CommandError('NOT_FOUND', 'production does not exist', 404);
     }
 
-    const next = applyCommand(current, recorded.kind, recorded.payload);
-    const event = buildEvent(recorded.kind, recorded.payload, recorded, next);
+    let next;
+    let eventPayload = recorded.payload;
+    let lockedShotIds = [];
+    if (recorded.kind === 'iteration.set') {
+      const applied = applyIterationSet(
+        current,
+        recorded.payload,
+        store.readEvents(productionId),
+        recorded.at,
+      );
+      next = applied.production;
+      lockedShotIds = applied.lockedShotIds;
+      eventPayload = {
+        policy: applied.requestedPolicy,
+        ...(recorded.payload?.scope === undefined ? {} : { scope: clone(recorded.payload.scope) }),
+      };
+    } else {
+      next = applyCommand(current, recorded.kind, recorded.payload);
+    }
+    const event = buildEvent(recorded.kind, eventPayload, recorded, next);
 
     let committed;
     try {
@@ -466,7 +650,9 @@ export function createCommandHandler(options = {}) {
     } catch (error) {
       throw mapStoreError(error);
     }
-    return newResult(productionId, recorded, committed);
+    const result = newResult(productionId, recorded, committed);
+    if (recorded.kind === 'iteration.set') result.lockedShotIds = lockedShotIds;
+    return result;
   }
 
   function execute(envelope, context) {
@@ -505,12 +691,47 @@ export function createCommandHandler(options = {}) {
     const at = clockIso(clock);
     const recorded = buildRecordedCommand(envelope, context, productionId, at);
 
+    // UR19: the spend cap is a user authorization. The agent may not send it,
+    // and the production projection does not change; the ledger records it.
+    if (kind === 'budget.set_ceiling' && recorded.actor !== 'user') {
+      throw new CommandError(
+        'AGENT_CANNOT_SET_CEILING',
+        'only the user may set or amend the spend ceiling',
+        403,
+        { kind, actor: recorded.actor },
+      );
+    }
+
     if (APPROVAL_COMMANDS.includes(kind) && recorded.actor === 'agent') {
       throw new CommandError(
         'AGENT_CANNOT_APPROVE',
         'the agent may propose but may not approve a human decision',
         403,
         { kind },
+      );
+    }
+
+    // IL03: choosing an iteration level is a user decision. It is still not a
+    // spend approval; it only bounds how much iteration a later plan may ask
+    // for. Neither the agent nor the system may set it.
+    if (kind === 'iteration.set' && recorded.actor !== 'user') {
+      throw new CommandError(
+        'ITERATION_USER_ONLY',
+        'only the user may set the iteration policy',
+        403,
+        { kind, actor: recorded.actor },
+      );
+    }
+
+    // VX14: choosing a voice mode is a user decision. It starts nothing,
+    // reserves nothing and touches no plan or action. Neither the agent nor
+    // the system may change it.
+    if (kind === 'voice_mode.set' && recorded.actor !== 'user') {
+      throw new CommandError(
+        'VOICE_MODE_USER_ONLY',
+        'only the user may set the voice mode',
+        403,
+        { kind, actor: recorded.actor },
       );
     }
 

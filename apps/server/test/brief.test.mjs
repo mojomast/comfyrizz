@@ -66,6 +66,12 @@ function request({ method = 'GET', path = '/', token = TOKEN, origin = `http://1
 
 const RICH = 'A 45 second launch video for developers, calm and confident, ending with a star-the-repo CTA.';
 
+test('UR12: bakery prompt returns no data question', async () => {
+  const response = await request({ method: 'POST', path: '/api/brief', body: { prompt: 'A 30 second video for my bakery announcing a sourdough subscription' } });
+  assert.equal(response.status, 200);
+  assert.ok(!response.json.questions.some(question => question.id === 'data'));
+});
+
 test('POST /api/brief is authenticated and requires a prompt', async () => {
   assert.equal((await request({ method: 'POST', path: '/api/brief', token: null, body: { prompt: 'hi' } })).status, 401);
   assert.equal((await request({ method: 'POST', path: '/api/brief', body: {} })).status, 400);
@@ -77,7 +83,7 @@ test('plan mode returns a draft plus at most three chip questions', async () => 
   assert.equal(response.status, 200);
   assert.equal(response.json.mode, 'plan');
   assert.equal(response.json.complete, false);
-  assert.deepEqual(response.json.questions.map(question => question.id), ['look', 'data']);
+  assert.deepEqual(response.json.questions.map(question => question.id), ['look']);
   for (const question of response.json.questions) {
     assert.ok(Array.isArray(question.chips) && question.chips.length > 0);
     assert.equal(typeof question.prompt, 'string');
@@ -125,7 +131,7 @@ test('Ask-more keeps the remaining questions instead of deciding', async () => {
     body: { prompt: 'Make a video about our app.', decisions: { audience: 'customers', length: '30 s social', look: 'clay', key_message: undefined }, askMore: true },
   });
   assert.equal(response.json.complete, false);
-  assert.deepEqual(response.json.questions.map(question => question.id), ['data', 'cta']);
+  assert.deepEqual(response.json.questions.map(question => question.id), ['cta']);
 });
 
 test('express mode skips the questions and returns a validated brief', async () => {

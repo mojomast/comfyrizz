@@ -163,6 +163,7 @@ test('TR09: finalGate counts approved clips and names every blocker', () => {
     approved: 0,
     total: 1,
     blocking: [{ clipId: CLIP_ID, state: 'planned' }],
+    autoApproved: 0,
   });
 
   const take = fakeTake(pkg, 'unreviewed');
@@ -173,7 +174,7 @@ test('TR09: finalGate counts approved clips and names every blocker', () => {
   assert.deepEqual(review.blocking, [{ clipId: CLIP_ID, state: 'review' }]);
 
   take.verdict = 'approved';
-  assert.deepEqual(finalGate(pkg, doc, clips), { ok: true, approved: 1, total: 1, blocking: [] });
+  assert.deepEqual(finalGate(pkg, doc, clips), { ok: true, approved: 1, total: 1, blocking: [], autoApproved: 0 });
 
   take.gen.inputs.prompt = 'a different prompt after the take landed';
   assert.deepEqual(finalGate(pkg, doc, clips).blocking, [{ clipId: CLIP_ID, state: 'stale' }]);

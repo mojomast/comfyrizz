@@ -17,7 +17,7 @@ export function mountAgentSettings(apiFetch: ApiFetch, log: (message: string) =>
   const status = document.getElementById('llm-status')!;
   const toolbarModels = document.getElementById('agent-model-options')!;
   const dialog = document.createElement('dialog');
-  dialog.className = 'agent-settings panel';
+  dialog.className = 'agent-settings';
   dialog.setAttribute('aria-labelledby', 'agent-settings-title');
   dialog.innerHTML = `
     <div class="agent-settings-head panel-header">

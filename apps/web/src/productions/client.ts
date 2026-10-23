@@ -114,6 +114,97 @@ export interface ProductionClientOptions {
   baseUrl?: string;
 }
 
+export type IterationLevel = 'draft' | 'balanced' | 'director' | 'custom';
+export type IterationStageName = 'script' | 'voice' | 'keyframe' | 'video';
+export type IterationPick = 'auto' | 'ask' | 'hero';
+export type IterationReviewDepth = 'light' | 'standard' | 'deep';
+export type IterationCapStatus = 'fits' | 'warn' | 'exceeds' | 'no_cap';
+
+export interface IterationStagePolicy {
+  takes: number;
+  rounds: number;
+  auditions: number;
+  pick: IterationPick;
+  linesPerVoice?: number;
+}
+
+export interface IterationShotOverride {
+  stages?: Partial<Record<IterationStageName, Partial<IterationStagePolicy>>>;
+}
+
+export interface IterationPolicy {
+  level: IterationLevel;
+  stages: Record<IterationStageName, IterationStagePolicy>;
+  reviewDepth: IterationReviewDepth;
+  shotOverrides: Record<string, IterationShotOverride>;
+}
+
+export interface IterationRange {
+  low: number;
+  expected: number;
+  high: number;
+}
+
+export interface IterationEstimate {
+  gpuMinutes: IterationRange;
+  units: IterationRange;
+  wallMinutes: IterationRange;
+  voiceSamples: number;
+  vsCap: {
+    ceiling: number | null;
+    fraction: number | null;
+    status: IterationCapStatus;
+  };
+  labels: string[];
+  money?: IterationRange;
+  suggestedLevel?: 'draft' | 'balanced' | 'director' | null;
+}
+
+export interface IterationRecommendation {
+  level: IterationLevel;
+  policy: IterationPolicy;
+  reasons: string[];
+}
+
+export interface IterationRead {
+  policy: IterationPolicy | null;
+  level: IterationLevel | null;
+  estimates: {
+    draft: IterationEstimate;
+    balanced: IterationEstimate;
+    director: IterationEstimate;
+    custom?: IterationEstimate;
+  };
+  recommendation: IterationRecommendation;
+  prefill: IterationPolicy | null;
+  lockedShotIds: string[];
+  revision: number;
+}
+
+export interface IterationRequestOptions {
+  apiFetch?: ProductionApiFetch;
+  baseUrl?: string;
+  signal?: AbortSignal;
+}
+
+export interface IterationSetInput {
+  policy: IterationPolicy;
+  scope?: { shotIds: string[] };
+}
+
+export interface IterationSetResult {
+  revision?: number;
+  lockedShotIds?: string[];
+  duplicate?: boolean;
+  [key: string]: unknown;
+}
+
+export type IterationDefaultScope = 'project' | 'user';
+
+export interface IterationDefaultOptions extends IterationRequestOptions {
+  projectId?: string;
+}
+
 export interface ProductionClient {
   readonly getState: () => ProductionState;
   readonly loadSnapshot: (options?: { signal?: AbortSignal }) => Promise<ProductionState>;
@@ -461,6 +552,266 @@ function errorCode(body: unknown): string {
     : 'HTTP_ERROR';
 }
 
+async function requestProductionJson(
+  apiFetch: ProductionApiFetch,
+  url: string,
+  init: RequestInit,
+): Promise<unknown> {
+  let response: unknown;
+  try {
+    response = await apiFetch(url, init);
+  } catch (error) {
+    throw new ProductionClientError('the production request could not be sent', {
+      url,
+      code: 'NETWORK_ERROR',
+      cause: error,
+    });
+  }
+
+  const status = readResponseStatus(response);
+  let body: unknown;
+  try {
+    body = await readResponseBody(response);
+  } catch (error) {
+    throw new ProductionClientError('the production response was not valid JSON', {
+      url,
+      status,
+      code: 'INVALID_RESPONSE',
+      cause: error,
+    });
+  }
+
+  if (!readResponseOk(response, status)) {
+    throw new ProductionClientError(errorMessage(body, status), {
+      url,
+      status,
+      code: errorCode(body),
+      body,
+    });
+  }
+  return body;
+}
+
+const ITERATION_LEVEL_NAMES: readonly IterationLevel[] = ['draft', 'balanced', 'director', 'custom'];
+const ITERATION_CAP_STATUSES: readonly IterationCapStatus[] = ['fits', 'warn', 'exceeds', 'no_cap'];
+
+function iterationOptions(value: IterationRequestOptions | ProductionApiFetch | undefined): IterationRequestOptions {
+  if (typeof value === 'function') return { apiFetch: value };
+  if (value === undefined) return {};
+  if (!isPlainObject(value)) throw new TypeError('iteration options must be an object');
+  return value as IterationRequestOptions;
+}
+
+function iterationFetch(options: IterationRequestOptions): ProductionApiFetch {
+  const apiFetch = typeof options.apiFetch === 'function'
+    ? options.apiFetch
+    : (globalThis.fetch as unknown as ProductionApiFetch);
+  if (typeof apiFetch !== 'function') {
+    throw new TypeError('the iteration request requires apiFetch or global fetch');
+  }
+  return apiFetch;
+}
+
+function iterationBaseUrl(options: IterationRequestOptions): string {
+  return typeof options.baseUrl === 'string' ? options.baseUrl.replace(/\/+$/, '') : '';
+}
+
+function requireProductionId(value: unknown): string {
+  if (typeof value !== 'string' || value === '') {
+    throw new TypeError('an iteration request requires a productionId');
+  }
+  return value;
+}
+
+function freshIterationId(prefix: string): string {
+  return `${prefix}_${globalThis.crypto.randomUUID()}`;
+}
+
+function isIterationRange(value: unknown): value is IterationRange {
+  return isPlainObject(value)
+    && typeof value.low === 'number' && Number.isFinite(value.low)
+    && typeof value.expected === 'number' && Number.isFinite(value.expected)
+    && typeof value.high === 'number' && Number.isFinite(value.high);
+}
+
+function isIterationEstimate(value: unknown): value is IterationEstimate {
+  if (!isPlainObject(value)) return false;
+  if (!isIterationRange(value.gpuMinutes)
+    || !isIterationRange(value.units)
+    || !isIterationRange(value.wallMinutes)) {
+    return false;
+  }
+  if (!Array.isArray(value.labels) || !value.labels.every((label) => typeof label === 'string')) {
+    return false;
+  }
+  if (!isPlainObject(value.vsCap)
+    || !ITERATION_CAP_STATUSES.includes(value.vsCap.status as IterationCapStatus)) {
+    return false;
+  }
+  if (value.money !== undefined && !isIterationRange(value.money)) return false;
+  if (value.suggestedLevel !== undefined && value.suggestedLevel !== null
+    && !['draft', 'balanced', 'director'].includes(value.suggestedLevel as string)) {
+    return false;
+  }
+  return true;
+}
+
+function invalidIterationResponse(url: string, body: unknown): ProductionClientError {
+  return new ProductionClientError('the iteration response was not valid', {
+    url,
+    status: 200,
+    code: 'INVALID_RESPONSE',
+    body,
+  });
+}
+
+function parseIterationRead(body: unknown, url: string): IterationRead {
+  if (!isPlainObject(body)
+    || (body.policy !== null && !isPlainObject(body.policy))
+    || (body.level !== null && !ITERATION_LEVEL_NAMES.includes(body.level as IterationLevel))
+    || !isPlainObject(body.estimates)
+    || !isPlainObject(body.recommendation)
+    || !ITERATION_LEVEL_NAMES.includes(body.recommendation.level as IterationLevel)
+    || !isPlainObject(body.recommendation.policy)
+    || !Array.isArray(body.recommendation.reasons)
+    || (body.prefill !== null && !isPlainObject(body.prefill))
+    || !Array.isArray(body.lockedShotIds)
+    || !body.lockedShotIds.every((shotId) => typeof shotId === 'string')
+    || !isSequence(body.revision)) {
+    throw invalidIterationResponse(url, body);
+  }
+
+  for (const level of ['draft', 'balanced', 'director'] as const) {
+    if (!isIterationEstimate(body.estimates[level])) throw invalidIterationResponse(url, body);
+  }
+  if (body.estimates.custom !== undefined && !isIterationEstimate(body.estimates.custom)) {
+    throw invalidIterationResponse(url, body);
+  }
+  return body as unknown as IterationRead;
+}
+
+export async function readIteration(
+  productionId: string,
+  requestOptions?: IterationRequestOptions | ProductionApiFetch,
+): Promise<IterationRead> {
+  const id = requireProductionId(productionId);
+  const options = iterationOptions(requestOptions);
+  const apiFetch = iterationFetch(options);
+  const url = `${iterationBaseUrl(options)}/api/productions/${encodeURIComponent(id)}/iteration`;
+  const body = await requestProductionJson(apiFetch, url, {
+    method: 'GET',
+    headers: { accept: 'application/json' },
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  return parseIterationRead(body, url);
+}
+
+export async function setIteration(
+  productionId: string,
+  input: IterationSetInput,
+  revision: number,
+  requestOptions?: IterationRequestOptions | ProductionApiFetch,
+): Promise<IterationSetResult> {
+  const id = requireProductionId(productionId);
+  if (!isPlainObject(input) || !isPlainObject(input.policy)) {
+    throw new TypeError('setIteration requires a policy object');
+  }
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new TypeError('the iteration revision must be a non-negative integer');
+  }
+
+  let scope: { shotIds: string[] } | undefined;
+  if (input.scope !== undefined) {
+    if (!isPlainObject(input.scope)
+      || !Array.isArray(input.scope.shotIds)
+      || input.scope.shotIds.length === 0
+      || !input.scope.shotIds.every((shotId) => typeof shotId === 'string' && shotId !== '')) {
+      throw new TypeError('iteration scope requires at least one shot id');
+    }
+    scope = { shotIds: [...input.scope.shotIds] };
+  }
+
+  const options = iterationOptions(requestOptions);
+  const apiFetch = iterationFetch(options);
+  const url = `${iterationBaseUrl(options)}/api/productions/${encodeURIComponent(id)}/commands`;
+  const envelope = {
+    commandId: freshIterationId('cmd_iteration_set'),
+    idempotencyKey: freshIterationId('idem_iteration_set'),
+    kind: 'iteration.set',
+    productionId: id,
+    expected: { productionRevision: revision },
+    payload: {
+      policy: input.policy,
+      ...(scope === undefined ? {} : { scope }),
+    },
+  };
+
+  const body = await requestProductionJson(apiFetch, url, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(envelope),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  if (!isPlainObject(body)) {
+    throw new ProductionClientError('the iteration.set response was not valid', {
+      url,
+      status: 200,
+      code: 'INVALID_RESPONSE',
+      body,
+    });
+  }
+  return body as unknown as IterationSetResult;
+}
+
+export async function saveIterationDefault(
+  scope: IterationDefaultScope,
+  policy: IterationPolicy,
+  requestOptions?: IterationDefaultOptions | ProductionApiFetch,
+): Promise<Record<string, unknown>> {
+  if (scope !== 'project' && scope !== 'user') {
+    throw new TypeError('the iteration default scope must be project or user');
+  }
+  if (!isPlainObject(policy)) {
+    throw new TypeError('saveIterationDefault requires a policy object');
+  }
+  const options = iterationOptions(requestOptions) as IterationDefaultOptions;
+  const projectId = typeof options.projectId === 'string' && options.projectId !== ''
+    ? options.projectId
+    : undefined;
+  const apiFetch = iterationFetch(options);
+  const url = `${iterationBaseUrl(options)}/api/preferences`;
+  const body = {
+    commandId: freshIterationId('cmd_iteration_default'),
+    idempotencyKey: freshIterationId('idem_iteration_default'),
+    scope,
+    ...(scope === 'project' && projectId !== undefined ? { scopeId: projectId } : {}),
+    key: 'iteration.policy',
+    value: policy,
+  };
+
+  const result = await requestProductionJson(apiFetch, url, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  if (!isPlainObject(result)) {
+    throw new ProductionClientError('the preference response was not valid', {
+      url,
+      status: 200,
+      code: 'INVALID_RESPONSE',
+      body: result,
+    });
+  }
+  return result;
+}
+
 /**
  * Create a client for one production.
  *
@@ -491,40 +842,8 @@ export function createProductionClient(options: ProductionClientOptions): Produc
   let state = createProductionState(productionId);
   let inFlightRefresh: Promise<ProductionState> | null = null;
 
-  async function request(url: string, init: RequestInit): Promise<unknown> {
-    let response: unknown;
-    try {
-      response = await apiFetch(url, init);
-    } catch (error) {
-      throw new ProductionClientError('the production request could not be sent', {
-        url,
-        code: 'NETWORK_ERROR',
-        cause: error,
-      });
-    }
-
-    const status = readResponseStatus(response);
-    let body: unknown;
-    try {
-      body = await readResponseBody(response);
-    } catch (error) {
-      throw new ProductionClientError('the production response was not valid JSON', {
-        url,
-        status,
-        code: 'INVALID_RESPONSE',
-        cause: error,
-      });
-    }
-
-    if (!readResponseOk(response, status)) {
-      throw new ProductionClientError(errorMessage(body, status), {
-        url,
-        status,
-        code: errorCode(body),
-        body,
-      });
-    }
-    return body;
+  function request(url: string, init: RequestInit): Promise<unknown> {
+    return requestProductionJson(apiFetch, url, init);
   }
 
   function commit(next: ProductionState): ProductionState {

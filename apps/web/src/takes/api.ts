@@ -307,22 +307,20 @@ export function takeLooksLikeImage(take: ClipTake | null | undefined): boolean {
   return true;
 }
 
-/** An existing poster/frame URL recorded on the take, if the server has one. */
+/**
+ * The take's recorded poster thumb key, if the server has one.
+ *
+ * The take doc records exactly one key (`media.posterKey`); its value is the
+ * thumbs ref for the poster. `media.poster` remains readable because the
+ * review drawer in this slice still consumes the older media-ticket form.
+ */
 export function takePosterMediaUrl(take: ClipTake | null | undefined): string | null {
   const media = take?.media;
-  if (isObject(media)) {
-    for (const key of ['poster', 'posterUrl', 'thumbnail', 'thumbnailUrl', 'thumb', 'thumbUrl']) {
-      const value = media[key];
-      if (isMediaTicketUrl(value)) return value.trim();
-    }
-  }
-  const record = take as unknown as Record<string, unknown> | null | undefined;
-  if (record) {
-    for (const key of ['poster', 'posterUrl', 'thumbnail', 'thumbnailUrl', 'thumbUrl']) {
-      const value = record[key];
-      if (isMediaTicketUrl(value)) return value.trim();
-    }
-  }
+  if (!isObject(media)) return null;
+  const posterKey = media.posterKey;
+  if (typeof posterKey === 'string' && posterKey.trim()) return posterKey.trim();
+  const poster = media.poster;
+  if (isMediaTicketUrl(poster)) return poster.trim();
   return null;
 }
 

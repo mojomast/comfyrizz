@@ -56,6 +56,23 @@ export interface ProductionReadSnapshot {
   shotIds?: string[];
 }
 
+/** The comfyrizz.iteration-scope/v1 object carried by an element-scoped turn. */
+export interface IterationScopeInput {
+  target?: {
+    packageId?: string;
+    clipId?: string;
+    takeId?: string;
+    assetId?: string;
+    shotId?: string;
+  };
+  element?: string;
+  elementRef?: { lineId?: string };
+  region?: { x: number; y: number; w: number; h: number };
+  time?: { at?: number; in?: number; out?: number };
+  note?: string;
+  preserve?: string[];
+}
+
 export interface ProductionTurnInput {
   userMessage: string;
   intent?: string;
@@ -64,6 +81,51 @@ export interface ProductionTurnInput {
   requestedLineIds?: string[];
   /** Data, never instructions. The planner does not copy these into a plan. */
   untrustedTexts?: string[];
+  iteration?: {
+    policy: any;
+    lockedShotIds?: string[];
+    used?: Record<string, Record<string, number>>;
+  };
+  /** The viewer's element scope for this turn, or absent for an unscoped turn. */
+  iterationScope?: IterationScopeInput;
+}
+
+
+export interface ProductionActionSlot {
+  id: string;
+  kind: "render" | "audition";
+  targetId: string;
+  upperBound: number;
+}
+
+function parseRequestedTakes(message: string): number | undefined {
+  const match = message.match(/\b(a|an|one|two|three|four|five|six|\d+)\s+takes?\b/i);
+  if (match) {
+    const raw = match[1].toLowerCase();
+    const map: Record<string, number> = {
+      a: 1,
+      an: 1,
+      one: 1,
+      two: 2,
+      three: 3,
+      four: 4,
+      five: 5,
+      six: 6,
+    };
+    return map[raw] ?? parseInt(raw, 10);
+  }
+  if (/\brender\b/i.test(message)) {
+    return 1;
+  }
+  return undefined;
+}
+
+function effectiveStageLimit(policy: any, shotId: string, stage: string): number {
+  const override = policy?.shotOverrides?.[shotId];
+  const stagePolicy = override?.stages?.[stage] ?? policy?.stages?.[stage];
+  const takes = typeof stagePolicy?.takes === "number" ? stagePolicy.takes : 1;
+  const rounds = typeof stagePolicy?.rounds === "number" ? stagePolicy.rounds : 1;
+  return takes * rounds;
 }
 
 export interface ProductionEdit {
@@ -76,8 +138,9 @@ export interface ProductionTurnPlan {
   readFirst: true;
   reply: string;
   proposal?: {
+    scope?: IterationScopeInput;
     edits: ProductionEdit[];
-    actions: [];
+    actions: ProductionActionSlot[] | [];
     summary: string;
   };
   command?: {
@@ -269,6 +332,171 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
       },
     };
   }
+
+  if (input.iterationScope) {
+    const scope = input.iterationScope;
+    const target = scope.target ?? {};
+    const audioScope = scope.element === 'voice_line' || scope.element === 'audio';
+    const lineId = audioScope && typeof scope.elementRef?.lineId === 'string'
+      ? scope.elementRef.lineId
+      : undefined;
+    const targetShotId = typeof target.shotId === 'string'
+      ? target.shotId
+      : lineId !== undefined ? shotOf(lineId) : undefined;
+
+    if (targetShotId === undefined) {
+      return {
+        readFirst: true,
+        reply: 'Which shot is this iteration request for?',
+      };
+    }
+
+    const stage = audioScope ? 'voice' : 'video';
+    const policy = input.iteration?.policy;
+    if (policy) {
+      const limit = effectiveStageLimit(policy, targetShotId, stage);
+      const used = input.iteration?.used?.[targetShotId]?.[stage];
+      const usedCount = typeof used === 'number' && Number.isFinite(used) ? used : 0;
+      if (usedCount >= limit) {
+        return {
+          readFirst: true,
+          reply: `The current iteration level (${policy.level ?? 'draft'}) allows no further ${stage} take for ${targetShotId}. Would you like to change the iteration level?`,
+        };
+      }
+    }
+
+    const actionTarget = audioScope ? lineId ?? targetShotId : targetShotId;
+    return {
+      readFirst: true,
+      reply: audioScope
+        ? `Proposed one audition for ${actionTarget}. Nothing has been dispatched.`
+        : `Proposed one ${scope.element ?? 'iteration'} slot for ${targetShotId}. Nothing has been dispatched.`,
+      proposal: {
+        scope: JSON.parse(JSON.stringify(scope)),
+        edits: [],
+        actions: [{
+          id: 'a1',
+          kind: audioScope ? 'audition' : 'render',
+          targetId: actionTarget,
+          upperBound: 0,
+        }],
+        summary: input.userMessage.trim(),
+      },
+    };
+  }
+
+  if (input.iteration?.policy) {
+    const policy = input.iteration.policy;
+    const isCost = isCostQuestion(input.userMessage);
+    const requestedTakes = parseRequestedTakes(input.userMessage);
+
+    if (!isCost && requestedTakes !== undefined) {
+      const isAcrossShots = /\bacross\s+(?:the\s+)?shots\b/i.test(input.userMessage);
+      const lockedShots = new Set(input.iteration.lockedShotIds ?? []);
+      const requestedShots = input.requestedShotIds && input.requestedShotIds.length > 0
+        ? input.requestedShotIds
+        : [...idMentions(input.userMessage)].filter(id => !id.includes(":"));
+      const allShots = (input.shots ?? []).map(s => s.id);
+      const targetShots = requestedShots.length > 0 ? requestedShots : allShots;
+
+      if (isAcrossShots) {
+        const unlockedShots = targetShots.filter(id => !lockedShots.has(id));
+        const skippedLocked = targetShots.filter(id => lockedShots.has(id));
+        const lockedNote = skippedLocked.length > 0
+          ? ` ${skippedLocked.join(", ")} ${skippedLocked.length === 1 ? "is" : "are"} locked, so no takes are planned there.`
+          : "";
+        let totalCapacity = 0;
+        for (const shot of unlockedShots) {
+          totalCapacity += effectiveStageLimit(policy, shot, 'video');
+        }
+
+        if (requestedTakes > totalCapacity) {
+          return {
+            readFirst: true,
+            reply: `The current iteration level (${policy.level ?? "draft"}) allows at most ${totalCapacity} takes across the shots, but ${requestedTakes} were requested.${lockedNote} Would you like to change the iteration level?`,
+          };
+        }
+
+        const actions: ProductionActionSlot[] = [];
+        const shotCounts = new Map<string, number>();
+        for (const shot of unlockedShots) shotCounts.set(shot, 0);
+
+        let allocated = 0;
+        let idx = 0;
+        while (allocated < requestedTakes && unlockedShots.length > 0) {
+          const shot = unlockedShots[idx % unlockedShots.length];
+          const count = shotCounts.get(shot) ?? 0;
+          const limit = effectiveStageLimit(policy, shot, 'video');
+          if (count < limit) {
+            shotCounts.set(shot, count + 1);
+            actions.push({
+              id: `a${allocated + 1}`,
+              kind: "render",
+              targetId: shot,
+              upperBound: 0,
+            });
+            allocated++;
+          }
+          idx++;
+        }
+
+        return {
+          readFirst: true,
+          reply: `Proposed a plan to add ${requestedTakes} takes across the shots.${lockedNote} Nothing has been dispatched.`,
+          proposal: {
+            edits: [],
+            actions,
+            summary: input.userMessage.trim(),
+          },
+        };
+      } else {
+        if (targetShots.length !== 1) {
+          return {
+            readFirst: true,
+            reply: "Which one shot should get the new take(s)?",
+          };
+        }
+        const shotId = targetShots[0];
+        if (lockedShots.has(shotId)) {
+          return {
+            readFirst: true,
+            reply: `Shot ${shotId} is locked, so no new takes can be rendered.`,
+            proposal: {
+              edits: [],
+              actions: [],
+              summary: `Shot ${shotId} is locked; no takes can be rendered.`,
+            },
+          };
+        }
+
+        const limit = effectiveStageLimit(policy, shotId, 'video');
+        if (requestedTakes > limit) {
+          return {
+            readFirst: true,
+            reply: `The current iteration level (${policy.level ?? "draft"}) allows at most ${limit} take(s) for ${shotId}, but ${requestedTakes} were requested. Would you like to change the iteration level?`,
+          };
+        }
+
+        const actions: ProductionActionSlot[] = Array.from({ length: requestedTakes }, (_, i) => ({
+          id: `a${i + 1}`,
+          kind: "render",
+          targetId: shotId,
+          upperBound: 0,
+        }));
+
+        return {
+          readFirst: true,
+          reply: `Proposed a plan to render ${requestedTakes === 1 ? "a take" : `${requestedTakes} takes`} for ${shotId}. Nothing has been dispatched.`,
+          proposal: {
+            edits: [],
+            actions,
+            summary: input.userMessage.trim(),
+          },
+        };
+      }
+    }
+  }
+
 
   if (isRenderRequest(input.userMessage)) {
     const shotId = input.requestedShotIds?.[0] ?? `s${input.userMessage.match(/\brender\s+s(\d+)\b/i)?.[1] ?? ''}`;

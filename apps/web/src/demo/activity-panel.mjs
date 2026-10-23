@@ -7,7 +7,7 @@
  *
  *   vm -> health -> jobs -> collected -> stopped
  *
- * Phase text comes from the run/Colab log line formats (see
+ * Phase text comes from the run/Google Colab log line formats (see
  * `pkgs/backends/src/run-package.mjs` and `colab-backend.mjs`) and from the
  * status events in `apps/server/src/run.mjs`. Brief, package and scene events
  * become their own rows but do not advance the compute stepper.
@@ -218,7 +218,7 @@ function describeRunPhase(event) {
     case 'planned':
       return `${countOf(event?.jobs) ?? '?'} job(s) planned`;
     case 'allocating':
-      return 'allocating a Colab session';
+      return 'allocating a Google Colab session';
     case 'up':
       return `VM up${event?.state ? `: ${event.state}` : ''}`;
     case 'bootstrapping':

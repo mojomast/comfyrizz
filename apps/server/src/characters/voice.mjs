@@ -28,6 +28,9 @@ export const MAX_LANGUAGE_CHARS = 16;
 export const MAX_DELIVERY_CHARS = 400;
 export const MAX_PERSONA_CHARS = 600;
 export const PACKAGE_MAX_PERSONA_CHARS = 400;
+export const MAX_VOICE_DESCRIPTION_CHARS = 300;
+export const H3_VOICE_MODES = Object.freeze(['clip', 'prompt']);
+export const MAX_VOICE_SEED = 4294967295;
 export const MIN_SPEED = 0.5;
 export const MAX_SPEED = 1.5;
 export const QWEN_SPEED = 1;
@@ -53,6 +56,9 @@ const INPUT_FIELDS = new Set([
   'qwen_mode',
   'delivery',
   'persona',
+  'voiceDescription',
+  'h3Mode',
+  'seed',
   'strict',
   'non_streaming',
   'presetId',
@@ -68,6 +74,81 @@ const BLEND_FIELDS = new Set(['voice', 'weight']);
 const KOKORO_BY_ID = new Map(KOKORO_VOICES.map((voice) => [voice.id, voice]));
 const QWEN_BY_LOWER = new Map(QWEN_SPEAKERS.map((speaker) => [speaker.toLowerCase(), speaker]));
 const PRESET_BY_ID = new Map(VOICE_PRESETS.map((preset) => [preset.id, preset]));
+
+export const REAL_PERSON_VOICE_DENYLIST = Object.freeze([
+  'adele',
+  'albert einstein',
+  'angelina jolie',
+  'anthony hopkins',
+  'ariana grande',
+  'audrey hepburn',
+  'barack obama',
+  'beyonce',
+  'bill gates',
+  'billie eilish',
+  'bob dylan',
+  'brad pitt',
+  'conan o brien',
+  'daniel craig',
+  'david attenborough',
+  'denzel washington',
+  'donald trump',
+  'drake',
+  'dwayne johnson',
+  'ellen degeneres',
+  'elon musk',
+  'elvis presley',
+  'emma watson',
+  'eminem',
+  'frank sinatra',
+  'freddie mercury',
+  'gordon ramsay',
+  'ian mckellen',
+  'idris elba',
+  'james earl jones',
+  'jeff bezos',
+  'jennifer lawrence',
+  'jimmy fallon',
+  'joe biden',
+  'joe rogan',
+  'john oliver',
+  'johnny cash',
+  'judi dench',
+  'justin bieber',
+  'kanye west',
+  'keanu reeves',
+  'kevin hart',
+  'kim kardashian',
+  'leonardo dicaprio',
+  'margaret thatcher',
+  'marilyn monroe',
+  'mark zuckerberg',
+  'martin luther king',
+  'meryl streep',
+  'michael jackson',
+  'morgan freeman',
+  'nelson mandela',
+  'oprah',
+  'oprah winfrey',
+  'rihanna',
+  'ryan reynolds',
+  'sam altman',
+  'samuel l jackson',
+  'scarlett johansson',
+  'selena gomez',
+  'simon cowell',
+  'snoop dogg',
+  'stephen colbert',
+  'stephen fry',
+  'taylor swift',
+  'tom hanks',
+  'tom holland',
+  'trevor noah',
+  'viola davis',
+  'zendaya',
+]);
+
+const REAL_PERSON_VOICE_PATTERN = /\b(?:imitat\w*|impression\s+of|voice\s+of|sounds?\s+like)\b/i;
 
 export class VoiceValidationError extends Error {
   constructor(code, field, message) {
@@ -105,6 +186,50 @@ function textValue(value, field, { max, allowEmpty = false } = {}) {
     fail('VOICE_TEXT_TOO_LONG', field, `${field} must be at most ${max} characters`);
   }
   return text;
+}
+
+function voiceDescriptionValue(value) {
+  if (typeof value !== 'string') {
+    fail('VOICE_DESCRIPTION_INVALID', 'voiceDescription', 'voiceDescription must be a string');
+  }
+  const text = value.trim();
+  if (text.length === 0 || CONTROL_RE.test(text)) {
+    fail('VOICE_DESCRIPTION_INVALID', 'voiceDescription', 'voiceDescription must be non-empty text without control characters');
+  }
+  if (Array.from(text).length > MAX_VOICE_DESCRIPTION_CHARS) {
+    fail('VOICE_DESCRIPTION_TOO_LONG', 'voiceDescription', `voiceDescription must be at most ${MAX_VOICE_DESCRIPTION_CHARS} characters`);
+  }
+  if (namesRealPerson(text) || REAL_PERSON_VOICE_PATTERN.test(text)) {
+    fail('VOICE_DESCRIPTION_REAL_PERSON', 'voiceDescription', 'voiceDescription must not name or imitate a real person');
+  }
+  return text;
+}
+
+function normalizePersonText(value) {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function namesRealPerson(value) {
+  const text = ` ${normalizePersonText(value)} `;
+  return REAL_PERSON_VOICE_DENYLIST.some((name) => text.includes(` ${name} `));
+}
+
+function h3ModeValue(value) {
+  if (value !== 'clip' && value !== 'prompt') {
+    fail('VOICE_H3_MODE_INVALID', 'h3Mode', 'h3Mode must be clip or prompt');
+  }
+  return value;
+}
+
+function voiceSeedValue(value) {
+  if (!Number.isInteger(value) || value < 0 || value > MAX_VOICE_SEED) {
+    fail('VOICE_SEED_INVALID', 'seed', `seed must be an integer from 0 to ${MAX_VOICE_SEED} (uint32)`);
+  }
+  return value;
 }
 
 function numberValue(value, field, { min, max, exclusiveMin = false, code = 'VOICE_NUMBER_RANGE' } = {}) {
@@ -352,6 +477,12 @@ export function validateVoice(input = {}) {
     out = validateQwen(raw);
   }
 
+  if (rawInput.voiceDescription !== undefined) {
+    out.voiceDescription = voiceDescriptionValue(rawInput.voiceDescription);
+  }
+  if (rawInput.h3Mode !== undefined) out.h3Mode = h3ModeValue(rawInput.h3Mode);
+  if (rawInput.seed !== undefined) out.seed = voiceSeedValue(rawInput.seed);
+
   if (presetId !== undefined && engine !== 'none') out.presetId = presetId;
   if (rawInput.sampleLines !== undefined) out.sampleLines = validateSampleLines(rawInput.sampleLines);
   if (rawInput.audition !== undefined) out.audition = validateAudition(rawInput.audition);
@@ -369,12 +500,19 @@ export function checkVoice(input) {
   }
 }
 
+export const validateVoiceDescription = voiceDescriptionValue;
+export const validateH3Mode = h3ModeValue;
+export const validateVoiceSeed = voiceSeedValue;
 export const validateCharacterVoice = validateVoice;
 export const normalizeVoice = validateVoice;
 export const expandPreset = resolvePreset;
 
 export function supportsNativeVoice(model) {
   return model?.capabilities?.supportsNativeVoice === true;
+}
+
+export function supportsPromptVoice(model) {
+  return model?.capabilities?.promptVoice === true;
 }
 
 function nativeVoiceCatalogue(model) {
@@ -462,13 +600,68 @@ function resolveKokoroSpeakingVoice(options) {
 export function resolveSpeakingVoice(options = {}) {
   const raw = objectInput(options, 'options');
   for (const key of Object.keys(raw)) {
-    if (!['model', 'voice', 'nativeVoice', 'language'].includes(key)) {
+    if (!['model', 'voice', 'nativeVoice', 'language', 'characterId', 'h3VoiceMode'].includes(key)) {
       fail('VOICE_UNKNOWN_FIELD', key, `unknown speaking voice option ${key}`);
     }
   }
-  const resolved = supportsNativeVoice(raw.model)
-    ? resolveNativeSpeakingVoice(raw.model, raw)
-    : resolveKokoroSpeakingVoice(raw);
+  if (raw.characterId !== undefined && (typeof raw.characterId !== 'string' || raw.characterId.trim() === '')) {
+    fail('VOICE_CHARACTER_ID_REQUIRED', 'characterId', 'characterId is required and must be a non-empty string');
+  }
+  if (raw.h3VoiceMode !== undefined && raw.h3VoiceMode !== null) {
+    validateH3Mode(raw.h3VoiceMode);
+  }
+
+  const voiceObj = raw.voice && typeof raw.voice === 'object' && !Array.isArray(raw.voice)
+    ? raw.voice
+    : null;
+  if (voiceObj && voiceObj.h3Mode !== undefined) {
+    validateH3Mode(voiceObj.h3Mode);
+  }
+  if (voiceObj && voiceObj.seed !== undefined) {
+    validateVoiceSeed(voiceObj.seed);
+  }
+
+  const kokoroOptions = {
+    model: raw.model,
+    voice: raw.voice,
+    nativeVoice: raw.nativeVoice,
+    language: raw.language,
+  };
+
+  if (supportsNativeVoice(raw.model)) {
+    const resolved = resolveNativeSpeakingVoice(raw.model, raw);
+    return deepFreeze({ voicePath: resolved.voicePath, voice: resolved.voice, language: resolved.language });
+  }
+
+  const voiceH3Mode = voiceObj ? voiceObj.h3Mode : undefined;
+  const effectiveMode = raw.h3VoiceMode !== undefined && raw.h3VoiceMode !== null
+    ? raw.h3VoiceMode
+    : (voiceH3Mode !== undefined ? voiceH3Mode : 'clip');
+
+  if (supportsPromptVoice(raw.model) && effectiveMode === 'prompt') {
+    if (raw.characterId === undefined) {
+      fail('VOICE_CHARACTER_ID_REQUIRED', 'characterId', 'characterId is required when the prompt voice path is taken');
+    }
+    const rawDescription = voiceObj ? voiceObj.voiceDescription : undefined;
+    if (typeof rawDescription !== 'string' || rawDescription.trim() === '') {
+      fail('PLAN_H3_NO_VOICE_DESCRIPTION', 'voiceDescription', 'prompt voice path requires a voice description');
+    }
+    const description = validateVoiceDescription(rawDescription);
+    let seed;
+    if (voiceObj && voiceObj.seed !== undefined) {
+      seed = validateVoiceSeed(voiceObj.seed);
+    } else {
+      seed = createHash('sha256').update(raw.characterId + description).digest().readUInt32BE(0);
+    }
+    const kokoroResolved = resolveKokoroSpeakingVoice(kokoroOptions);
+    return deepFreeze({
+      voicePath: 'prompt',
+      voice: { description, seed },
+      language: kokoroResolved.language,
+    });
+  }
+
+  const resolved = resolveKokoroSpeakingVoice(kokoroOptions);
   return deepFreeze({ voicePath: resolved.voicePath, voice: resolved.voice, language: resolved.language });
 }
 
@@ -491,6 +684,10 @@ function packagePersona(persona) {
  */
 export function toPackageVoice(input = {}) {
   const voice = validateVoice(input);
+  // The package voice ($defs/voice and $defs/castVoice in package-v1) is a
+  // closed object: voiceDescription, h3Mode and seed are character-level H3
+  // settings and never enter the package voice. The prompt voice reaches the
+  // planner only through scene shot gen.direction.voice (VX02S/VX13).
   if (voice.engine === 'none') {
     return deepFreeze({ enabled: false, engine: 'none' });
   }
@@ -529,6 +726,7 @@ export function voiceHash(input = {}) {
   const effective = {};
   for (const key of Object.keys(voice)) {
     if (key === 'presetId' || key === 'sampleLines' || key === 'audition' || key === 'enabled') continue;
+    if (key === 'h3Mode' && voice[key] === 'clip') continue;
     effective[key] = voice[key];
   }
   return createHash('sha256')

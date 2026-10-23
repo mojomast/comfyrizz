@@ -136,7 +136,7 @@ export function renderCharactersTab(
     : value.message
       ? `<p class="chr-status" data-characters-status role="status" aria-live="polite">${escapeHtml(value.message)}</p>`
       : '<p class="chr-status" data-characters-status role="status" aria-live="polite"></p>';
-  const library = renderCharacterLibrary(value.library);
+  const library = renderCharacterLibrary(value.library, value.editor ? { emptyText: '' } : {});
   const editor = options.includeEditor !== false && value.editor
     ? renderCharacterEditor(value.editor)
     : '';
@@ -538,6 +538,11 @@ export function mountCharactersTab(
       editorHost.hidden = true;
       editorHost.innerHTML = '';
     }
+    try {
+      for (const el of Array.from(libraryHost.querySelectorAll('[data-empty], .empty-state'))) {
+        (el as HTMLElement).hidden = false;
+      }
+    } catch { /* ignore */ }
     controller.state.view = 'library';
     controller.state.selectedId = '';
     controller.notify();
@@ -549,6 +554,11 @@ export function mountCharactersTab(
     editorHost.hidden = false;
     controller.state.view = 'editor';
     controller.state.selectedId = character?.id ?? '';
+    try {
+      for (const el of Array.from(libraryHost.querySelectorAll('[data-empty], .empty-state'))) {
+        (el as HTMLElement).hidden = true;
+      }
+    } catch { /* ignore */ }
     editor = mountCharacterEditor(editorHost, {
       api: options.api as unknown as CharacterEditorApi,
       character,
@@ -715,17 +725,10 @@ export function mountCharactersTab(
     setOpen(!open);
   };
 
-  const onCastClick = (event: Event) => {
-    const target = (event as MouseEvent).target as HTMLElement | null;
-    if (target?.closest?.('[data-cast-open-characters]')) {
-      opener = target.closest<HTMLElement>('[data-cast-open-characters]') ?? tab ?? null;
-      setOpen(true);
-    }
-  };
-
   const onCastCustom = () => {
     opener = tab ?? null;
     setOpen(true);
+    openEditor(null);
   };
 
   root.addEventListener('click', onRootClick);
@@ -736,7 +739,6 @@ export function mountCharactersTab(
   }
   tab?.addEventListener('click', onTabClick);
   if (options.castStripHost) {
-    options.castStripHost.addEventListener('click', onCastClick);
     options.castStripHost.addEventListener('cast:open-characters', onCastCustom);
   }
 
@@ -770,7 +772,6 @@ export function mountCharactersTab(
       }
       tab?.removeEventListener('click', onTabClick);
       if (options.castStripHost) {
-        options.castStripHost.removeEventListener('click', onCastClick);
         options.castStripHost.removeEventListener('cast:open-characters', onCastCustom);
       }
       editor?.destroy();

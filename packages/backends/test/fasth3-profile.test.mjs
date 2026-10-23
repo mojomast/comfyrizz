@@ -28,3 +28,20 @@ test('pending FastH3 uses pinned H3 + Klein models; ordinary and ready-only proj
     assert.ok(fasth3JobMinutes({frames:141,fps:24}) > 1.2);
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
+
+test('VX12: option B (R2V without audio) keeps the required-node list; a pending prompt-mode job adds no MiniMaxH3ImageToVideo', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fasth3-profile-'));
+  const repo = fileURLToPath(new URL('../../../', import.meta.url));
+  const defaultLock = resolve(repo, 'colab/models.lock.json');
+  const opts = { packageDir: dir, scratchDir: dir, repo, defaultLock };
+  const set = assets => writeFileSync(join(dir, 'package.json'), JSON.stringify({ assets }));
+  try {
+    set({ a: { origin:'generated',status:'pending',gen:{generator:'fasth3-omni'} } });
+    const clip = JSON.parse(readFileSync(packageModelLock(opts))).requiredNodes;
+    set({ a: { origin:'generated',status:'pending',voicePath:'prompt',gen:{generator:'fasth3-omni',inputs:{image:'i',reference:'r'},direction:{voice:{description:'warm low voice',seed:7}}} } });
+    const prompt = JSON.parse(readFileSync(packageModelLock(opts))).requiredNodes;
+    assert.deepEqual(prompt, clip);
+    assert.ok(!prompt.includes('MiniMaxH3ImageToVideo'));
+    assert.ok(prompt.includes('MiniMaxH3ReferenceToVideo'));
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});

@@ -105,6 +105,7 @@ export interface BriefDraft {
   facts?: { claim: string; source: string }[];
   mode?: Brief['mode'];
   decided_by_agent?: string[];
+  source_prompt?: string;
 }
 
 export interface Question {
@@ -133,7 +134,7 @@ export const QUESTION_BANK: Question[] = [
     id: 'audience',
     field: 'audience.who',
     prompt: 'Who is this for?',
-    chips: ['developers', 'customers', 'investors', 'students', 'internal team'],
+    chips: ['customers', 'developers', 'investors', 'students', 'internal team'],
     decide: 'developers',
   },
   {
@@ -168,7 +169,7 @@ export const QUESTION_BANK: Question[] = [
     id: 'cta',
     field: 'cta',
     prompt: 'What should they do at the end?',
-    chips: ['star the repo', 'book a demo', 'sign up for the beta', 'none'],
+    chips: ['visit the website', 'sign up', 'get in touch', 'none'],
     decide: 'none',
   },
   {
@@ -257,6 +258,7 @@ export interface ExtractBriefOptions {
   /** Extra attachment text (notes, PDF/MD text, a pasted CSV header) appended for detection only. */
   attachments?: string;
   decidedByAgent?: string[];
+  sourcePrompt?: string;
 }
 
 /**
@@ -266,7 +268,7 @@ export interface ExtractBriefOptions {
  */
 export function extractBrief(prompt: string, options: ExtractBriefOptions = {}): BriefDraft {
   const text = `${prompt}\n${options.attachments ?? ''}`.trim();
-  const draft: BriefDraft = { mode: options.mode ?? 'plan', decided_by_agent: [...(options.decidedByAgent ?? [])] };
+  const draft: BriefDraft = { mode: options.mode ?? 'plan', decided_by_agent: [...(options.decidedByAgent ?? [])], source_prompt: options.sourcePrompt ?? prompt };
   const decided = draft.decided_by_agent as string[];
 
   const goal = detectGoal(text);
@@ -344,7 +346,7 @@ export function missingQuestions(draft: BriefDraft, max = 3, keyMessageOptions: 
       case 'length': return draft.length_s === undefined;
       case 'look': return !draft.style?.preset;
       case 'voice': return !draft.voice?.persona;
-      case 'data': return draft.facts === undefined;
+      case 'data': return draft.facts === undefined && mentionsNumbers(draft);
       case 'cta': return !draft.cta;
       case 'presenter': return draft.presenter === undefined;
       default: return false;
@@ -355,6 +357,13 @@ export function missingQuestions(draft: BriefDraft, max = 3, keyMessageOptions: 
       ? { ...question, chips: keyMessageOptions }
       : question,
   );
+}
+
+/** True when the draft's key message or original prompt mentions numbers/data. */
+export function mentionsNumbers(draft: BriefDraft): boolean {
+  const parts = [draft.key_message, draft.source_prompt].filter(Boolean).join(' ');
+  const stripped = parts.replace(/\b\d+(?:\.\d+)?\s*-?\s*(?:s|sec|secs|second|seconds|min|mins|minute|minutes)\b/gi, '');
+  return /\d|\b(numbers?|data|chart|graph|stats?|statistics|percent|metrics?|growth|revenue)\b|%/i.test(stripped);
 }
 
 export interface BriefDecisions {

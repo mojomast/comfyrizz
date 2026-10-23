@@ -127,6 +127,52 @@ in the pixels. If a flawed reference is used for a narrower diagnostic (such as
 offscreen speech), record that limitation and do not promote the result as an
 approved action or production take.
 
+## Optional no-clip voice mode (prompt voice)
+
+**Clip is the default.** Every character and production starts in `clip` mode:
+a local Kokoro (or other local TTS) render of the line is passed as `Audio 1`
+and H3 copies its timbre and words, exactly as described above. Nothing changes
+unless the user turns prompt mode on.
+
+**Prompt mode** (`voiceMode: "prompt"`) skips the clip. The character carries a
+short English `voiceDescription` (max 300 characters, no control characters,
+never naming or imitating a real person) and the planner uses the two-image
+`fasth3_omni_ref2v_noclip` graph: the same R2V graph without the optional
+`LoadAudio` input, so the identity references and the model lock are unchanged
+(no extra required nodes). Resolution order is: production `h3VoiceMode`
+override, then `character.voice.h3Mode`, then `clip`. Choosing a mode is never
+spend approval; dispatch keeps its existing approval gate.
+
+- Prompt mode without a description fails with `PLAN_H3_NO_VOICE_DESCRIPTION`;
+  it never silently falls back to clip. A stray audio input in prompt mode is
+  refused with `PLAN_H3_PROMPT_HAS_AUDIO`.
+- Duration is estimated at about 2.5 words per second and checked against the
+  editorial slot.
+- No paid TTS or voice providers are used; everything stays local and on
+  Google Colab.
+
+### Drift risk
+
+Without a clip, the timbre comes only from text plus noise, so **the voice can
+drift between shots**. The mitigations are:
+
+1. A fixed seed per character, derived from the character id and description
+   unless the user pins one, reused for every shot.
+2. The description is placed byte-for-byte in a fixed prompt section and is
+   never paraphrased.
+3. A short voice audition (one 2–3 s line) must be approved by the user before
+   prompt-mode shots dispatch (`VOICE_AUDITION_REQUIRED`). Editing the
+   description or seed makes the audition stale (`VOICE_AUDITION_STALE`) and
+   marks earlier takes stale; they are never deleted.
+4. Review emits a non-blocking `REVIEW_H3_VOICE_DRIFT` warning when a take
+   differs from the approved audition. It never blocks or approves a take;
+   without a local speaker embedding the check is a manual A/B.
+5. If a prompt-mode take fails review, the suggested fix is to switch that
+   character back to clip. This is a suggestion only, never automatic.
+
+Use prompt mode for one-off or minor characters; recurring leads should stay on
+clip.
+
 ## Sources
 
 1. [FastH3 Omni Comfy model card](https://huggingface.co/FastVideo/FastH3-Omni-Comfy)

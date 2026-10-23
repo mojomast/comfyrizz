@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { ROLES, makeCharacter, primaryImage } from './model.mjs';
 import { toPackageVoice } from './voice.mjs';
+import { applyH3VoiceDirection } from './h3-voice-direction.mjs';
 import {
   CAST_ID_RE,
   CastError,
@@ -530,7 +531,7 @@ export function applyCast(pkgInput, cast = [], placements = [], files = {}, opti
   if (!isObject(pkgInput)) fail('BUILD_INVALID_INPUT', 'pkg', 'pkg must be a package object');
   if (options === null || options === undefined) options = {};
   if (!isObject(options)) fail('BUILD_INVALID_INPUT', 'options', 'options must be an object');
-  const pkg = clone(pkgInput);
+  let pkg = clone(pkgInput);
   const normalized = normalizeCast(cast);
   const warnings = [];
   const ignored = [...normalized.ignored];
@@ -566,6 +567,7 @@ export function applyCast(pkgInput, cast = [], placements = [], files = {}, opti
       placements: [],
       ignored,
       warnings,
+      errors: [],
       changed: [],
     };
   }
@@ -635,7 +637,7 @@ export function applyCast(pkgInput, cast = [], placements = [], files = {}, opti
     uniquePush(placementsByScene.get(placement.sceneId), placement.castId);
   }
 
-  const scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
+  let scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
   for (const scene of scenes) {
     if (!isObject(scene)) continue;
     const ids = placementsByScene.get(scene.id);
@@ -693,6 +695,19 @@ export function applyCast(pkgInput, cast = [], placements = [], files = {}, opti
     }
   }
 
+  let voiceDirectionErrors = [];
+  if (options.model) {
+    const castCharacters = new Map(normalized.entries.map((entry) => [entry.castId, entry.snapshot]));
+    const directed = applyH3VoiceDirection(pkg, {
+      characters: castCharacters,
+      h3VoiceMode: options.h3VoiceMode,
+      model: options.model,
+    });
+    pkg = directed.pkg;
+    scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
+    voiceDirectionErrors = directed.errors;
+  }
+
   const characters = sidecar({
     pkg,
     entries: normalized.entries,
@@ -730,6 +745,7 @@ export function applyCast(pkgInput, cast = [], placements = [], files = {}, opti
     placements: applied,
     ignored,
     warnings,
+    errors: voiceDirectionErrors,
     changed,
   };
 }

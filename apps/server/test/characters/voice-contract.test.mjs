@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { KOKORO_VOICES } from '../../../../packages/tts/voices.mjs';
+import { createHash } from 'node:crypto';
 import * as voiceModule from '../../src/characters/voice.mjs';
 import {
   VOICE_LANGUAGES,
@@ -13,6 +14,7 @@ import {
   recordSpeakingVoice,
   resolveSpeakingVoice,
   supportsNativeVoice,
+  supportsPromptVoice,
 } from '../../src/characters/voice.mjs';
 import * as modelModule from '../../src/characters/model.mjs';
 import { makeCharacter } from '../../src/characters/model.mjs';
@@ -236,4 +238,176 @@ test('review fix-up: a declared native voice is never relabelled to another lang
     resolveSpeakingVoice({ model: NATIVE_MODEL, nativeVoice: 'minimax-no-language', language: 'en-gb' }),
     { voicePath: 'native', voice: 'minimax-no-language', language: 'en-gb' },
   );
+});
+
+const PROMPT_MODEL = Object.freeze({ capabilities: Object.freeze({ promptVoice: true }) });
+const PROMPT_VOICE = Object.freeze({
+  engine: 'kokoro',
+  voice: 'af_heart',
+  voiceDescription: 'Warm low narrator, unhurried.',
+  h3Mode: 'prompt',
+});
+
+function derivedSeed(characterId, description) {
+  return createHash('sha256').update(characterId + description).digest().readUInt32BE(0);
+}
+
+test('supportsPromptVoice reads exactly model.capabilities.promptVoice === true', () => {
+  assert.equal(supportsPromptVoice({ capabilities: { promptVoice: true } }), true);
+  assert.equal(supportsPromptVoice({ capabilities: { promptVoice: false } }), false);
+  assert.equal(supportsPromptVoice({ capabilities: { promptVoice: 'true' } }), false);
+  assert.equal(supportsPromptVoice({ capabilities: { promptVoice: 1 } }), false);
+  assert.equal(supportsPromptVoice({}), false);
+  assert.equal(supportsPromptVoice(undefined), false);
+  assert.equal(supportsPromptVoice(null), false);
+});
+
+test('prompt path derives seed from characterId + description', () => {
+  const resolved = resolveSpeakingVoice({
+    model: PROMPT_MODEL,
+    voice: PROMPT_VOICE,
+    characterId: 'char-42',
+    h3VoiceMode: 'prompt',
+  });
+  const expectedSeed = derivedSeed('char-42', PROMPT_VOICE.voiceDescription);
+  assert.deepEqual(resolved, {
+    voicePath: 'prompt',
+    voice: { description: PROMPT_VOICE.voiceDescription, seed: expectedSeed },
+    language: 'en-us',
+  });
+  assert.equal(Object.isFrozen(resolved), true);
+  assert.equal(Object.isFrozen(resolved.voice), true);
+});
+
+test('prompt path uses pinned voice.seed when present', () => {
+  const voice = { ...PROMPT_VOICE, seed: 7 };
+  const resolved = resolveSpeakingVoice({
+    model: PROMPT_MODEL,
+    voice,
+    characterId: 'char-42',
+    h3VoiceMode: 'prompt',
+  });
+  assert.equal(resolved.voicePath, 'prompt');
+  assert.deepEqual(resolved.voice, { description: voice.voiceDescription, seed: 7 });
+});
+
+test('h3VoiceMode prompt overrides voice.h3Mode clip', () => {
+  const voice = { ...PROMPT_VOICE, h3Mode: 'clip' };
+  const resolved = resolveSpeakingVoice({
+    model: PROMPT_MODEL,
+    voice,
+    characterId: 'char-42',
+    h3VoiceMode: 'prompt',
+  });
+  assert.equal(resolved.voicePath, 'prompt');
+});
+
+test('h3VoiceMode clip overrides voice.h3Mode prompt', () => {
+  const voice = { ...PROMPT_VOICE, h3Mode: 'prompt' };
+  const resolved = resolveSpeakingVoice({
+    model: PROMPT_MODEL,
+    voice,
+    characterId: 'char-42',
+    h3VoiceMode: 'clip',
+  });
+  assert.equal(resolved.voicePath, 'kokoro');
+  assert.equal(resolved.voice, 'af_heart');
+});
+
+test('h3VoiceMode null is no override', () => {
+  const voice = { ...PROMPT_VOICE, h3Mode: 'prompt' };
+  const resolved = resolveSpeakingVoice({
+    model: PROMPT_MODEL,
+    voice,
+    characterId: 'char-42',
+    h3VoiceMode: null,
+  });
+  assert.equal(resolved.voicePath, 'prompt');
+});
+
+test('invalid h3VoiceMode throws on a Kokoro-only model', () => {
+  throwsVoiceCode(
+    () => resolveSpeakingVoice({ model: CPU_MODEL, voice: { engine: 'kokoro', voice: 'af_heart' }, h3VoiceMode: 'bogus' }),
+    'VOICE_H3_MODE_INVALID',
+  );
+});
+
+test('invalid h3VoiceMode throws on a native model', () => {
+  throwsVoiceCode(
+    () => resolveSpeakingVoice({ model: NATIVE_MODEL, voice: { engine: 'kokoro', voice: 'af_heart' }, h3VoiceMode: 'bogus' }),
+    'VOICE_H3_MODE_INVALID',
+  );
+});
+
+test('prompt mode without description -> PLAN_H3_NO_VOICE_DESCRIPTION', () => {
+  const voice = { engine: 'kokoro', voice: 'af_heart', h3Mode: 'prompt' };
+  assert.throws(
+    () => resolveSpeakingVoice({ model: PROMPT_MODEL, voice, characterId: 'char-42', h3VoiceMode: 'prompt' }),
+    (error) => error.code === 'PLAN_H3_NO_VOICE_DESCRIPTION',
+  );
+});
+
+test('prompt path without characterId -> VOICE_CHARACTER_ID_REQUIRED', () => {
+  throwsVoiceCode(
+    () => resolveSpeakingVoice({ model: PROMPT_MODEL, voice: PROMPT_VOICE, h3VoiceMode: 'prompt' }),
+    'VOICE_CHARACTER_ID_REQUIRED',
+  );
+});
+
+test('native beats prompt', () => {
+  const BOTH_MODEL = Object.freeze({
+    capabilities: Object.freeze({
+      supportsNativeVoice: true,
+      nativeVoices: Object.freeze([Object.freeze({ id: 'minimax-narrator', language: 'en-us' })]),
+      defaultNativeVoice: 'minimax-narrator',
+      promptVoice: true,
+    }),
+  });
+  const voice = { ...PROMPT_VOICE, h3Mode: 'prompt' };
+  const resolved = resolveSpeakingVoice({
+    model: BOTH_MODEL,
+    voice,
+    characterId: 'char-42',
+    h3VoiceMode: 'prompt',
+  });
+  assert.equal(resolved.voicePath, 'native');
+});
+
+test('a non-prompt model in prompt mode takes the Kokoro path unchanged', () => {
+  const voice = { ...PROMPT_VOICE, h3Mode: 'prompt' };
+  const resolved = resolveSpeakingVoice({
+    model: CPU_MODEL,
+    voice,
+    characterId: 'char-42',
+    h3VoiceMode: 'prompt',
+  });
+  assert.deepEqual(resolved, { voicePath: 'kokoro', voice: 'af_heart', language: 'en-us' });
+});
+
+test('old keys like description, production and character are VOICE_UNKNOWN_FIELD', () => {
+  for (const key of ['description', 'production', 'character']) {
+    throwsVoiceCode(
+      () => resolveSpeakingVoice({ model: CPU_MODEL, voice: { engine: 'kokoro', voice: 'af_heart' }, [key]: 'x' }),
+      'VOICE_UNKNOWN_FIELD',
+    );
+  }
+});
+
+test('recordSpeakingVoice records the prompt path', () => {
+  const line = { takeId: 'take_1', text: 'Fresh is best.' };
+  const expectedSeed = derivedSeed('char-42', PROMPT_VOICE.voiceDescription);
+  const promptLine = recordSpeakingVoice(line, {
+    model: PROMPT_MODEL,
+    voice: PROMPT_VOICE,
+    characterId: 'char-42',
+    h3VoiceMode: 'prompt',
+  });
+  assert.deepEqual(promptLine, {
+    takeId: 'take_1',
+    text: 'Fresh is best.',
+    voicePath: 'prompt',
+    voice: { description: PROMPT_VOICE.voiceDescription, seed: expectedSeed },
+    language: 'en-us',
+  });
+  assert.equal(Object.isFrozen(promptLine), true);
 });

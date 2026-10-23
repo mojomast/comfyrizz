@@ -20,6 +20,7 @@ import { createTakeStore } from './takes/store.mjs';
 import { createCharacterStore } from './characters/store.mjs';
 import { addToProject, setCastOverrides } from './characters/cast.mjs';
 import { buildCastManifest, manifestBlock as castManifestBlock } from './characters/manifest.mjs';
+import { IterationScopeError, toPromptHint, validateIterationScope } from './productions/iteration-scope.mjs';
 
 function fail(status, message, extra) { throw Object.assign(new Error(message), { status }, extra); }
 const clone = value => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
@@ -98,6 +99,47 @@ function mergeCastOnlyCommit(base, current, next) {
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+// AV13: the viewer's element-scoped request is application data. Validation
+// happens before any turn starts, and the deterministic hint is the only part
+// that becomes a generation directive; the note stays in the user's text.
+function normalizedIterationScope(raw) {
+  if (raw === undefined) return null;
+  try {
+    return validateIterationScope(raw);
+  } catch (error) {
+    if (error instanceof IterationScopeError) {
+      fail(400, 'Invalid iteration scope', { code: 'INVALID_ITERATION_SCOPE', field: error.field });
+    }
+    throw error;
+  }
+}
+
+function iterationScopeBlock(scope) {
+  const payload = {
+    target: scope.target,
+    element: scope.element,
+    ...(scope.elementRef !== undefined ? { elementRef: scope.elementRef } : {}),
+    ...(scope.region !== undefined ? { region: scope.region } : {}),
+    ...(scope.time !== undefined ? { time: scope.time } : {}),
+    preserve: scope.preserve,
+    hint: toPromptHint(scope),
+  };
+  return `<iteration_scope>\n${JSON.stringify(payload)}\n</iteration_scope>`;
+}
+
+function iterationUserText(message, scope) {
+  const text = message.trim();
+  if (!scope || text.includes(scope.note)) return text;
+  return `${text}\n\nQuoted note: ${JSON.stringify(scope.note)}`;
+}
+
+function scopeTargetsClip(scope, proposal) {
+  const target = scope?.target ?? {};
+  if (typeof target.clipId === 'string') return target.clipId === proposal?.clipId;
+  if (typeof target.assetId === 'string') return target.assetId === proposal?.assetId;
+  return false;
 }
 
 function activeTakes(entry) {
@@ -578,6 +620,7 @@ export function createProjectChat({
             message: intent.request.message ?? null,
             action: intent.request.action ?? null,
             mode: intent.request.mode ?? null,
+            ...(intent.request.iterationScope ? { iterationScope: intent.request.iterationScope } : {}),
           }
           : null)
         : null;
@@ -789,6 +832,7 @@ export function createProjectChat({
     if (!validId(id)) fail(400, 'Invalid conversation ID');
     if (input.action !== undefined && input.action !== 'build') fail(400, 'Unknown conversation action');
     if (input.turnId !== undefined && (typeof input.turnId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(input.turnId))) fail(400, 'Invalid turn ID');
+    const iterationScope = normalizedIterationScope(input.iterationScope);
     if (input.rejectAssignments !== undefined && (!Array.isArray(input.rejectAssignments)
       || input.rejectAssignments.some(assignmentId => typeof assignmentId !== 'string' || !assignmentId || assignmentId.length > 80))) {
       fail(400, 'rejectAssignments must be a list of assignment IDs');
@@ -989,6 +1033,12 @@ export function createProjectChat({
                 });
               } else if (proposal.kind === 'correction') {
                 if (!simCurrent) throw new Error('no project to regenerate');
+                if (iterationScope && scopeTargetsClip(iterationScope, proposal)) {
+                  proposal.change = {
+                    ...(isPlainObject(proposal.change) ? proposal.change : {}),
+                    promptAppend: toPromptHint(iterationScope),
+                  };
+                }
                 corrections.push(proposal);
               }
             } catch (error) {
@@ -1238,7 +1288,14 @@ export function createProjectChat({
 
       let pendingBuild = null;
       const predictedRevision = () => (simCurrent ? simCurrent.revision + 1 : ((pendingBuild?.revision ?? 1)));
-      const user = { role: 'user', content: input.message.trim() };
+      const user = {
+        role: 'user',
+        content: iterationUserText(input.message, iterationScope),
+        ...(iterationScope ? { iterationScope } : {}),
+      };
+      const scopeMessage = iterationScope
+        ? { role: 'user', content: iterationScopeBlock(iterationScope) }
+        : null;
       const signal = AbortSignal.timeout(120000);
       const build = async plan => {
         const castBuild = cast.length ? {
@@ -1271,7 +1328,7 @@ export function createProjectChat({
         return { plan: rebased.plan, built: true, reply: `Built “${rebased.plan.title}” into the project. You can preview it or keep chatting to revise it. Narration is a script; audio, GPU generation and export are separate steps.`, trace: { promptVersion: CONVERSATION_PROMPT_VERSION, skills: [], steps: 0, repairs: 0, usage: { input: 0, output: 0 }, tools: [{ name: 'project_build', ok: true }], omittedMessages: 0, elapsedMs: 0, stop: 'explicit-build' } };
       })() : await runConversationTurn({
         model, sessionId: id, signal, skillsEnabled,
-        mode: input.mode, messages: [...session.messages, user], plan: rebased.plan,
+        mode: input.mode, messages: [...session.messages, ...(scopeMessage ? [scopeMessage] : []), user], plan: rebased.plan,
         brandContext: brand?.kit,
         palette: brandTheme(brand?.kit ?? {}).palette,
         projectPalette: simCurrent?.theme?.palette,
@@ -1344,6 +1401,7 @@ export function createProjectChat({
             message: input.message.trim(),
             action: input.action ?? null,
             mode: input.mode ?? null,
+            ...(iterationScope ? { iterationScope } : {}),
           },
           package: projectId ? {
             projectId,

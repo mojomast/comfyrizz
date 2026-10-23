@@ -1,0 +1,150 @@
+.stepper-list {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.stepper-list::-webkit-scrollbar {
+  display: none;
+}
+
+.stepper-item {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.stepper-step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--space-5);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.stepper-step:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+.stepper-step:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.stepper-step[aria-current="step"] {
+  border-color: var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-weight: var(--font-weight-600);
+}
+
+.stepper-step.is-done {
+  color: var(--text-2);
+}
+
+.stepper-step.is-locked {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.stepper-step.is-locked:hover {
+  background: transparent;
+  color: var(--text-3);
+}
+
+.stepper-step.is-needs-update {
+  color: var(--warn);
+}
+
+.stepper-mark {
+  color: var(--ok);
+  font-size: var(--font-size-13);
+}
+
+.stepper-dot {
+  color: var(--warn);
+  font-size: var(--font-size-13);
+  line-height: 1;
+}
+
+.stepper-compact {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--space-6);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.stepper-compact::after {
+  content: '▾';
+  color: var(--text-2);
+}
+
+.stepper-compact:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+@media (max-width: 639px) {
+  nav[aria-label="Steps"] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .stepper-compact {
+    display: flex;
+    order: -1;
+  }
+
+  .stepper-list {
+    display: none;
+  }
+
+  .stepper-open .stepper-list {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-1);
+    padding-block: var(--space-2);
+    overflow-x: visible;
+  }
+
+  .stepper-open .stepper-item {
+    flex: 1 1 auto;
+  }
+
+  .stepper-open .stepper-step {
+    width: 100%;
+    justify-content: flex-start;
+    border-radius: var(--radius-control);
+  }
+
+  .stepper-open .stepper-compact::after {
+    content: '▴';
+  }
+}

@@ -26,6 +26,7 @@ import { canTransition } from '../../src/productions/contract.mjs';
 import { createActionCoordinator } from '../../src/productions/actions.mjs';
 import { createCommandHandler } from '../../src/productions/commands.mjs';
 import { createBudgetLedger } from '../../src/productions/ledger.mjs';
+import { ITERATION_PRESETS } from '../../src/productions/iteration.mjs';
 import {
   ProductionStoreError,
   createProductionStore,
@@ -332,7 +333,11 @@ async function command(routes, productionId, kind, revision, payload, suffix) {
 
 async function approvePlan(routes, productionId, plan, suffix = 'approve') {
   const production = await call(routes, { method: 'GET', url: `/api/productions/${productionId}` });
-  const response = await command(routes, productionId, 'plan.approve', production.body.production.revision, {
+  const set = await command(routes, productionId, 'iteration.set', production.body.production.revision, {
+    policy: structuredClone(ITERATION_PRESETS.balanced),
+  }, `${suffix}_iteration`);
+  assert.equal(set.status, 200, set.raw);
+  const response = await command(routes, productionId, 'plan.approve', set.body.production.revision, {
     planId: plan.id,
     planHash: plan.planHash,
   }, suffix);

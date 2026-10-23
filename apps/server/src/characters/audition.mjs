@@ -23,7 +23,11 @@ import {
   VoiceValidationError,
   resolveSpeakingVoice,
   supportsNativeVoice,
+  supportsPromptVoice,
+  validateH3Mode,
   validateVoice,
+  validateVoiceDescription,
+  validateVoiceSeed,
   voiceHash as computeVoiceHash,
 } from './voice.mjs';
 import { canTransition } from '../productions/contract.mjs';
@@ -41,6 +45,21 @@ export const AUDITION_SYNTH_FAILED = 'AUDITION_SYNTH_FAILED';
 export const AUDITION_WRITE_FAILED = 'AUDITION_WRITE_FAILED';
 export const ACTION_CONSUMED = 'ACTION_CONSUMED';
 export const AUDITION_LEDGER_UNAVAILABLE = 'AUDITION_LEDGER_UNAVAILABLE';
+
+// VX08: a prompt-voice audition is a generated take, not a synthesized wave.
+// Its plan needs no audio file; only an explicit user approval binds the
+// seed+description hash that later prompt-mode dispatch checks.
+export const VOICE_AUDITION_SCHEMA = 'comfyrizz.voice-audition/v1';
+export const VOICE_AUDITION_KIND = 'prompt_voice_audition';
+export const VOICE_AUDITION_APPROVAL_KIND = 'prompt_voice_audition_approval';
+export const AUDITION_PROMPT_PLANNED = 'AUDITION_PROMPT_PLANNED';
+export const AUDITION_APPROVAL_USER_ONLY = 'AUDITION_APPROVAL_USER_ONLY';
+export const PROMPT_VOICE_AUDITION_REQUIRED = 'PROMPT_VOICE_AUDITION_REQUIRED';
+export const PROMPT_VOICE_AUDITION_STALE = 'PROMPT_VOICE_AUDITION_STALE';
+export const PROMPT_VOICE_UNSUPPORTED = 'PROMPT_VOICE_UNSUPPORTED';
+export const VOICE_CLONE_FORBIDDEN = 'VOICE_CLONE_FORBIDDEN';
+export const PROMPT_AUDITION_AUDIO_FORBIDDEN = 'PROMPT_AUDITION_AUDIO_FORBIDDEN';
+export const PROMPT_AUDITION_INVALID_DURATION = 'PROMPT_AUDITION_INVALID_DURATION';
 
 export const DEFAULT_AUDITION_LINE = 'Hello! This is what I sound like.';
 export const AUDITION_DIR = 'auditions';
@@ -71,6 +90,63 @@ export const PAID_VOICE_ENGINES = Object.freeze(['qwen3-tts']);
 
 const NATIVE_VOICE_MESSAGE = 'This model speaks with its built-in voice; audition it in a generated take';
 const ADMISSION_REQUIRED_MESSAGE = 'paid voice synthesis needs an admitted action';
+const PROMPT_AUDITION_MESSAGE = 'The prompt-mode voice audition is planned as a short generated take; approve it before dispatch';
+const PROMPT_AUDITION_HASH_VERSION = 'comfyrizz.prompt-voice-audition/v1';
+const PROMPT_AUDITION_MIN_SECONDS = 2;
+const PROMPT_AUDITION_MAX_SECONDS = 3;
+const PROMPT_AUDITION_DEFAULT_SECONDS = 2.5;
+const PROMPT_AUDITION_HASH_CHARS = 32;
+
+// One capability source for the hash/approval helpers. Planning still requires
+// the real model to declare prompt voice support.
+const PROMPT_CAPABILITY_MODEL = Object.freeze({
+  capabilities: Object.freeze({ promptVoice: true }),
+});
+
+// A voice-cloning payload never belongs to an audition or a test shot. The
+// list is shared with productions/native-test.mjs so there is one refusal set.
+export const VOICE_CLONE_FIELDS = Object.freeze([
+  'clone',
+  'clonePayload',
+  'cloneSample',
+  'cloneVoice',
+  'embedding',
+  'referenceAudio',
+  'referenceSample',
+  'referenceVoice',
+  'referenceWav',
+  'sample',
+  'sampleAudio',
+  'samples',
+  'speakerAudio',
+  'speakerEmbedding',
+  'speakerWav',
+  'voiceClone',
+  'voiceEmbedding',
+  'voiceSample',
+]);
+
+// Prompt mode has no audio input at all: the written voice replaces the clip.
+export const PROMPT_AUDIO_FIELDS = Object.freeze([
+  'audio',
+  'audioAsset',
+  'audioFile',
+  'voiceClip',
+  'voiceFile',
+]);
+
+const CLONE_FIELD_SET = new Set(VOICE_CLONE_FIELDS);
+const PROMPT_AUDIO_FIELD_SET = new Set(PROMPT_AUDIO_FIELDS);
+
+export class VoiceAuditionError extends Error {
+  constructor(code, field, message) {
+    super(message);
+    this.name = 'VoiceAuditionError';
+    this.code = code;
+    this.field = field;
+    this.ok = false;
+  }
+}
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -106,6 +182,273 @@ function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) deepFreeze(child);
   return Object.freeze(value);
+}
+
+/** The first voice-cloning key in one record, or null. Shared with test shots. */
+export function findVoiceCloningField(record, path = 'voice') {
+  if (!isPlainObject(record)) return null;
+  for (const key of Object.keys(record)) {
+    if (CLONE_FIELD_SET.has(key)) return { field: key, path: `${path}.${key}` };
+  }
+  return null;
+}
+
+/** The first prompt-mode audio key in one record, or null. Prompt takes use no clip. */
+export function findPromptAudioField(record, path = 'voice') {
+  if (!isPlainObject(record)) return null;
+  for (const key of Object.keys(record)) {
+    if (PROMPT_AUDIO_FIELD_SET.has(key)) return { field: key, path: `${path}.${key}` };
+  }
+  return null;
+}
+
+function hashPromptVoice(description, seed) {
+  return createHash('sha256')
+    .update(`${PROMPT_AUDITION_HASH_VERSION}\n${seed}\n${description}`)
+    .digest('hex')
+    .slice(0, PROMPT_AUDITION_HASH_CHARS);
+}
+
+function characterIdValue(value, field = 'characterId') {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 256
+    || /[\s/\\\u0000-\u001f]/u.test(value)) {
+    throw new VoiceAuditionError('AUDITION_INVALID_INPUT', field, `${field} must be a character id`);
+  }
+  return value;
+}
+
+function promptVoiceDuration(value) {
+  if (value === undefined) return PROMPT_AUDITION_DEFAULT_SECONDS;
+  if (typeof value !== 'number' || !Number.isFinite(value)
+    || value < PROMPT_AUDITION_MIN_SECONDS || value > PROMPT_AUDITION_MAX_SECONDS) {
+    throw new VoiceAuditionError(
+      PROMPT_AUDITION_INVALID_DURATION,
+      'durationSeconds',
+      `durationSeconds must be from ${PROMPT_AUDITION_MIN_SECONDS} to ${PROMPT_AUDITION_MAX_SECONDS}`,
+    );
+  }
+  return value;
+}
+
+function refusePromptPayloads(raw) {
+  for (const [record, path] of [
+    [raw, 'input'],
+    [raw.voice, 'voice'],
+    [raw.line, 'line'],
+  ]) {
+    const clone = findVoiceCloningField(record, path);
+    if (clone) {
+      throw new VoiceAuditionError(
+        VOICE_CLONE_FORBIDDEN,
+        clone.path,
+        `${clone.path} is a voice-cloning payload; only a written voice description may be used`,
+      );
+    }
+  }
+  for (const [record, path] of [
+    [raw, 'input'],
+    [raw.voice, 'voice'],
+    [raw.line, 'line'],
+  ]) {
+    const audio = findPromptAudioField(record, path);
+    if (audio) {
+      throw new VoiceAuditionError(
+        PROMPT_AUDITION_AUDIO_FORBIDDEN,
+        audio.path,
+        `${audio.path} is an audio input; prompt-mode takes are planned without an audio file`,
+      );
+    }
+  }
+}
+
+function resolvePromptRecord(characterId, voice) {
+  const id = characterIdValue(characterId);
+  if (!isPlainObject(voice)) {
+    throw new VoiceAuditionError(AUDITION_INVALID_VOICE, 'voice', 'a character voice record is required');
+  }
+  const speaking = resolveSpeakingVoice({
+    model: PROMPT_CAPABILITY_MODEL,
+    voice,
+    characterId: id,
+    h3VoiceMode: 'prompt',
+  });
+  if (speaking.voicePath !== 'prompt') {
+    throw new VoiceAuditionError(PROMPT_VOICE_UNSUPPORTED, 'voice', 'this is not a prompt voice');
+  }
+  return { characterId: id, speaking };
+}
+
+function resolvePromptSpeaking(input) {
+  if (!supportsPromptVoice(input.model)) {
+    throw new VoiceAuditionError(
+      PROMPT_VOICE_UNSUPPORTED,
+      'model',
+      'the selected model does not support prompt voice; an H3 prompt-mode audition cannot be planned',
+    );
+  }
+  const { characterId } = resolvePromptRecord(input.characterId, input.voice);
+  const speaking = resolveSpeakingVoice({
+    model: input.model,
+    voice: input.voice,
+    characterId,
+    h3VoiceMode: 'prompt',
+  });
+  if (speaking.voicePath !== 'prompt') {
+    throw new VoiceAuditionError(
+      PROMPT_VOICE_UNSUPPORTED,
+      'model',
+      'the selected model resolved a built-in native voice, not the prompt voice path',
+    );
+  }
+  return { characterId, speaking };
+}
+
+/**
+ * The seed+description identity of a prompt voice. Accepts either a character
+ * voice record plus characterId, or an already-resolved {description, seed}.
+ * The returned hash is the value recorded on voice.audition.voiceHash after a
+ * user approves the audition; editing either field changes it.
+ */
+export function promptVoiceHash(input = {}) {
+  if (!isPlainObject(input)) {
+    throw new VoiceAuditionError(AUDITION_INVALID_INPUT, 'input', 'promptVoiceHash needs an object');
+  }
+  const candidate = isPlainObject(input.voice) ? input.voice : input;
+  if (typeof candidate.description === 'string' && candidate.seed !== undefined) {
+    const description = validateVoiceDescription(candidate.description);
+    const seed = validateVoiceSeed(candidate.seed);
+    return hashPromptVoice(description, seed);
+  }
+  const voice = isPlainObject(input.voice) ? input.voice : input;
+  const { speaking } = resolvePromptRecord(input.characterId, voice);
+  return hashPromptVoice(speaking.voice.description, speaking.voice.seed);
+}
+
+/**
+ * Plan the short prompt-mode voice audition. It is a generated take of one
+ * line and carries no audio file, no approval and no dispatch authority.
+ */
+export function planPromptVoiceAudition(input = {}) {
+  if (!isPlainObject(input)) {
+    throw new VoiceAuditionError(AUDITION_INVALID_INPUT, 'input', 'planPromptVoiceAudition needs an object');
+  }
+  refusePromptPayloads(input);
+  const { characterId, speaking } = resolvePromptSpeaking(input);
+  const line = normalizeLine(input.line ?? input.text);
+  if (!line) {
+    throw new VoiceAuditionError(
+      AUDITION_INVALID_LINE,
+      'line',
+      `line must be 1 to ${MAX_SAMPLE_LINE_CHARS} characters`,
+    );
+  }
+  const durationSeconds = promptVoiceDuration(input.durationSeconds);
+  const voiceHash = hashPromptVoice(speaking.voice.description, speaking.voice.seed);
+
+  return deepFreeze({
+    schema: VOICE_AUDITION_SCHEMA,
+    kind: VOICE_AUDITION_KIND,
+    characterId,
+    state: 'planned',
+    voicePath: 'prompt',
+    voice: { description: speaking.voice.description, seed: speaking.voice.seed },
+    language: speaking.language,
+    line,
+    durationSeconds,
+    voiceHash,
+    approvalRequired: true,
+    requiresApproval: true,
+    approved: false,
+    autoDispatch: false,
+    requiresUserReview: true,
+  });
+}
+
+/**
+ * Record an explicit user approval. The returned `audition` is the merge
+ * fragment for the character's voice record: its voiceHash becomes
+ * voice.audition.voiceHash and its line is the auditioned line. There is no
+ * timestamp, id or user event here; the caller owns durable attribution.
+ */
+export function approvePromptVoiceAudition(input = {}) {
+  if (!isPlainObject(input)) {
+    throw new VoiceAuditionError(AUDITION_INVALID_INPUT, 'input', 'approvePromptVoiceAudition needs an object');
+  }
+  if (input.approvedBy !== 'user') {
+    throw new VoiceAuditionError(
+      AUDITION_APPROVAL_USER_ONLY,
+      'approvedBy',
+      'only the user may approve a voice audition',
+    );
+  }
+  refusePromptPayloads(input);
+  const { characterId, speaking } = resolvePromptRecord(input.characterId, input.voice);
+  const line = normalizeLine(input.line ?? input.text);
+  if (!line) {
+    throw new VoiceAuditionError(
+      AUDITION_INVALID_LINE,
+      'line',
+      `line must be 1 to ${MAX_SAMPLE_LINE_CHARS} characters`,
+    );
+  }
+  const voiceHash = hashPromptVoice(speaking.voice.description, speaking.voice.seed);
+  return deepFreeze({
+    schema: VOICE_AUDITION_SCHEMA,
+    kind: VOICE_AUDITION_APPROVAL_KIND,
+    characterId,
+    approved: true,
+    approvedBy: 'user',
+    voiceHash,
+    description: speaking.voice.description,
+    seed: speaking.voice.seed,
+    line,
+    audition: { voiceHash, line },
+  });
+}
+
+/**
+ * Compare the current seed+description identity with an approval. `approved`
+ * means the exact identity is still pinned; a description or seed edit makes
+ * it `stale`. A different line does not change the voice identity.
+ */
+export function promptVoiceAuditionStatus(input = {}) {
+  if (!isPlainObject(input)) {
+    throw new VoiceAuditionError(AUDITION_INVALID_INPUT, 'input', 'promptVoiceAuditionStatus needs an object');
+  }
+  const characterId = characterIdValue(input.characterId);
+  const currentVoiceHash = promptVoiceHash({ characterId, voice: input.voice });
+  const rawAudition = isPlainObject(input.audition)
+    ? input.audition
+    : isPlainObject(input.voice?.audition)
+      ? input.voice.audition
+      : null;
+  const record = isPlainObject(rawAudition?.audition) ? rawAudition.audition : rawAudition;
+  const approvedVoiceHash = typeof record?.voiceHash === 'string' ? record.voiceHash : null;
+  let state = 'missing';
+  if (approvedVoiceHash !== null) {
+    state = approvedVoiceHash === currentVoiceHash ? 'approved' : 'stale';
+  }
+  return deepFreeze({
+    schema: VOICE_AUDITION_SCHEMA,
+    state,
+    approved: state === 'approved',
+    stale: state === 'stale',
+    currentVoiceHash,
+    approvedVoiceHash,
+  });
+}
+
+/** The dispatch guard: prompt-mode work is refused until this exact voice is approved. */
+export function assertPromptVoiceAuditionApproved(input = {}) {
+  const status = promptVoiceAuditionStatus(input);
+  if (status.approved) return status;
+  throw new VoiceAuditionError(
+    status.state === 'stale' ? PROMPT_VOICE_AUDITION_STALE : PROMPT_VOICE_AUDITION_REQUIRED,
+    'audition.voiceHash',
+    status.state === 'stale'
+      ? 'the approved voice audition is stale; the description or seed changed'
+      : 'no approved voice audition exists for this prompt-mode voice',
+  );
 }
 
 /** Stable cache key for one (voiceHash, line) pair. */
@@ -373,6 +716,85 @@ function isWaveBytes(value) {
   return hasFormat && hasData;
 }
 
+/** Read one PCM/float sample from a wave body, normalised to [-1, 1]. */
+function readSample(buffer, offset, format, bits) {
+  if (format === 3) {
+    if (bits === 32) return buffer.readFloatLE(offset);
+    if (bits === 64) return buffer.readDoubleLE(offset);
+    return null;
+  }
+  if (format !== 1) return null;
+  if (bits === 8) return (buffer.readUInt8(offset) - 128) / 128;
+  if (bits === 16) return buffer.readInt16LE(offset) / 32768;
+  if (bits === 24) {
+    let sample = buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
+    if (sample & 0x800000) sample |= 0xff000000;
+    return sample / 8388608;
+  }
+  if (bits === 32) return buffer.readInt32LE(offset) / 2147483648;
+  return null;
+}
+
+/**
+ * IL20: measured RMS of the wave's existing samples in dBFS, or null when the
+ * bytes are not readable PCM/float audio. The wave is never modified.
+ */
+export function wavRmsDbfs(value) {
+  const buffer = toBuffer(value);
+  if (!buffer || buffer.length < 44) return null;
+  if (buffer.toString('latin1', 0, 4) !== 'RIFF') return null;
+  if (buffer.toString('latin1', 8, 12) !== 'WAVE') return null;
+
+  let format = null;
+  let dataOffset = -1;
+  let dataSize = 0;
+  let offset = 12;
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString('latin1', offset, offset + 4);
+    const size = buffer.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (size > buffer.length - body) return null;
+    if (id === 'fmt ' && size >= 16) {
+      format = {
+        codec: buffer.readUInt16LE(body),
+        channels: buffer.readUInt16LE(body + 2),
+        blockAlign: buffer.readUInt16LE(body + 12),
+        bits: buffer.readUInt16LE(body + 14),
+      };
+      if (format.codec === 0xfffe && size >= 26) format.codec = buffer.readUInt16LE(body + 24);
+    } else if (id === 'data') {
+      dataOffset = body;
+      dataSize = size;
+    }
+    offset = body + size + (size % 2);
+  }
+
+  if (!format || dataOffset < 0 || dataSize === 0) return null;
+  if (!Number.isInteger(format.bits) || ![8, 16, 24, 32, 64].includes(format.bits)) return null;
+  if (format.channels < 1) return null;
+  const bytesPerSample = format.bits / 8;
+  const stride = format.blockAlign >= format.channels * bytesPerSample
+    ? format.blockAlign
+    : format.channels * bytesPerSample;
+  const frames = Math.floor(dataSize / stride);
+  if (frames < 1) return null;
+
+  let sum = 0;
+  let count = 0;
+  for (let frame = 0; frame < frames; frame += 1) {
+    for (let channel = 0; channel < format.channels; channel += 1) {
+      const sample = readSample(buffer, dataOffset + frame * stride + channel * bytesPerSample, format.codec, format.bits);
+      if (sample === null || !Number.isFinite(sample)) return null;
+      sum += sample * sample;
+      count += 1;
+    }
+  }
+  if (count === 0) return null;
+  const rms = Math.sqrt(sum / count);
+  if (!(rms > 0)) return null;
+  return Math.round(20 * Math.log10(rms) * 100) / 100;
+}
+
 function resolveAuditionRequest(characterOrVoice, lineOrOptions, maybeOptions, baseOptions) {
   let callOptions = {};
   if (typeof lineOrOptions === 'string') callOptions = { line: lineOrOptions };
@@ -538,6 +960,14 @@ export function createAuditionCache(options = {}) {
   const inflight = new Map();
   let tempSequence = 0;
 
+  function cachedRms(target) {
+    try {
+      return wavRmsDbfs(api.readFileSync(target));
+    } catch {
+      return null;
+    }
+  }
+
   function writeBytes(target, bytes) {
     const dir = dirname(target);
     api.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -679,6 +1109,7 @@ export function createAuditionCache(options = {}) {
       engine,
       contentType: 'audio/wav',
       size: bytes.length,
+      rmsDbfs: wavRmsDbfs(bytes),
       cached: false,
       ...(isPlainObject(result) && Number.isFinite(result.usageUnits) ? { usageUnits: result.usageUnits } : {}),
       ...(isPlainObject(result) && typeof result.started === 'boolean' ? { started: result.started } : {}),
@@ -702,6 +1133,7 @@ export function createAuditionCache(options = {}) {
         engine: voice.engine,
         contentType: 'audio/wav',
         size: api.sizeOf(target),
+        rmsDbfs: cachedRms(target),
         cached: true,
       });
     }
@@ -718,6 +1150,7 @@ export function createAuditionCache(options = {}) {
         engine: voice.engine,
         contentType: 'audio/wav',
         size: api.sizeOf(target),
+        rmsDbfs: cachedRms(target),
         cached: true,
       });
     }
@@ -1155,6 +1588,15 @@ export function createAuditionWorker(options = {}) {
       return failure(AUDITION_INVALID_VOICE, 'a character or voice is required');
     }
 
+    const clone = findVoiceCloningField(input, 'input') ?? findVoiceCloningField(rawVoice, 'voice');
+    if (clone) {
+      return failure(
+        VOICE_CLONE_FORBIDDEN,
+        `${clone.path} is a voice-cloning payload; only a written voice description may be used`,
+        { field: clone.path },
+      );
+    }
+
     const model = input.model ?? defaultModel;
     const requestedLine = firstDefined(
       input.line,
@@ -1163,6 +1605,30 @@ export function createAuditionWorker(options = {}) {
       DEFAULT_AUDITION_LINE,
     );
     const line = normalizeLine(requestedLine);
+
+    let h3VoiceMode = input.h3VoiceMode !== undefined && input.h3VoiceMode !== null
+      ? input.h3VoiceMode
+      : (rawVoice?.h3Mode !== undefined ? rawVoice.h3Mode : 'clip');
+    try {
+      h3VoiceMode = validateH3Mode(h3VoiceMode);
+    } catch (error) {
+      return failure(
+        typeof error?.code === 'string' ? error.code : AUDITION_INVALID_VOICE,
+        error?.message ?? 'the voice mode is invalid',
+        { field: error?.field ?? 'h3Mode' },
+      );
+    }
+
+    if (supportsPromptVoice(model) && h3VoiceMode === 'prompt') {
+      const audio = findPromptAudioField(input, 'input') ?? findPromptAudioField(rawVoice, 'voice');
+      if (audio) {
+        return failure(
+          PROMPT_AUDITION_AUDIO_FORBIDDEN,
+          `${audio.path} is an audio input; a prompt-mode audition is planned without an audio file`,
+          { voicePath: 'prompt', field: audio.path },
+        );
+      }
+    }
 
     if (supportsNativeVoice(model)) {
       const speakingOptions = {
@@ -1186,6 +1652,35 @@ export function createAuditionWorker(options = {}) {
         language: speaking.language,
         ...(line ? { line } : {}),
       });
+    }
+
+    // VX08: prompt mode plans a short generated take, never a synthesized WAV.
+    // The plan is not an approval and cannot start or dispatch anything.
+    if (supportsPromptVoice(model) && h3VoiceMode === 'prompt') {
+      try {
+        const plan = planPromptVoiceAudition({
+          characterId: character?.id,
+          voice: rawVoice,
+          line: requestedLine,
+          model,
+          ...(input.durationSeconds !== undefined ? { durationSeconds: input.durationSeconds } : {}),
+        });
+        return Object.freeze({
+          ...plan,
+          ok: false,
+          code: AUDITION_PROMPT_PLANNED,
+          message: PROMPT_AUDITION_MESSAGE,
+        });
+      } catch (error) {
+        return failure(
+          typeof error?.code === 'string' ? error.code : AUDITION_INVALID_VOICE,
+          error?.message ?? 'the prompt voice audition could not be planned',
+          {
+            voicePath: 'prompt',
+            ...(typeof error?.field === 'string' ? { field: error.field } : {}),
+          },
+        );
+      }
     }
 
     let voice;
