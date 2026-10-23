@@ -896,13 +896,16 @@ export class ReviewDrawerModel {
   }
 
   /**
-   * IP31: with a production binding, Redo proposes a plan and shows its cost.
-   * It deliberately does not queue the clip or send a spend command.
+   * IP31F: with a production binding, Redo proposes an IP20 action plan and
+   * shows the server's cost card. It deliberately does not queue the clip or
+   * send a spend command.
    */
   private async proposeRedo(clip: ClipSummary): Promise<boolean> {
     const production = this.options.production;
     if (!production) return false;
     this.busy = true;
+    this.costCard = null;
+    this.costError = '';
     try {
       const card = await production.proposeRedo(this.proposedRedoInput(clip));
       this.costCard = card;
@@ -913,6 +916,7 @@ export class ReviewDrawerModel {
       return true;
     } catch (error) {
       const message = this.messageOf(error);
+      this.costError = message || 'The plan proposal was invalid';
       this.setLive(message
         ? `Redo failed: ${message}`
         : `Could not propose a redo for ${shortClipId(clip.clipId)}`);
@@ -1215,7 +1219,7 @@ function drawerShell(model: ReviewDrawerModel): string {
     <div class="review-list-wrap">
       <div class="review-list" id="review-list" role="listbox" aria-label="Clips" aria-activedescendant="" data-review-list></div>
     </div>
-    <section class="review-cost-card panel" data-review-cost-card${model.costCard ? ` data-plan-hash="${escapeReviewHtml(model.costCard.planHash)}"` : ' hidden'} aria-labelledby="review-cost-title">${reviewCostCardBody(model.costCard)}</section>
+    <section class="review-cost-card panel" data-review-cost-card${model.costCard ? ` data-plan-hash="${escapeReviewHtml(model.costCard.planHash)}" data-plan-id="${escapeReviewHtml(model.costCard.planId)}" data-plan-revision="${escapeReviewHtml(model.costCard.proposalRevision)}" data-reservation-ceiling="${escapeReviewHtml(model.costCard.reservationCeiling)}"` : ' hidden'} aria-labelledby="review-cost-title">${reviewCostCardBody(model.costCard)}</section>
     <div class="review-footer">
       <button type="button" class="btn btn-secondary btn-sm review-approve-all" data-review-approve-all aria-keyshortcuts="Shift+A">Approve all visible</button>
       <div class="review-gate-actions" data-review-gate-actions></div>
@@ -1242,21 +1246,16 @@ function gateActions(model: ReviewDrawerModel): string {
 }
 
 function costBackendLabel(card: ReviewCostCard): string {
-  const backend = isObject(card.backend) ? card.backend : {};
-  const label = textOf(backend.label) || textOf(backend.name) || textOf(backend.id);
-  if (!label) return 'Google Colab';
-  return label.toLowerCase() === 'colab' ? 'Google Colab' : label;
+  const id = textOf(card.backendId).trim();
+  if (!id) return 'Backend chosen at dispatch';
+  const normalized = id.toLowerCase().replace(/[_-]+/g, ' ').trim();
+  return normalized === 'colab' || normalized === 'google colab' ? 'Google Colab' : id;
 }
 
 function costBudgetLabel(card: ReviewCostCard): string {
-  const budget = isObject(card.budget) ? card.budget : null;
-  if (!budget) return 'Budget checked at approval';
-  if (budget.allowed === false) return 'Budget does not allow this plan';
-  const required = numberOrNull(budget.required);
-  if (required !== null) return `${required} units reserved for this plan`;
-  const remaining = numberOrNull(budget.remaining);
-  if (remaining !== null) return `${remaining} units remaining`;
-  return 'Budget available';
+  const ceiling = numberOrNull(card.reservationCeiling);
+  if (ceiling === null) return 'Reservation ceiling pending';
+  return `${ceiling} unit${ceiling === 1 ? '' : 's'} reservation ceiling`;
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -1264,22 +1263,24 @@ function numberOrNull(value: unknown): number | null {
 }
 
 /**
- * The body of the pre-spend card. It renders only snapshot/proposal data and
- * never HTML supplied by a model.
+ * The body of the pre-spend card. It renders only the server's action plan and
+ * never HTML supplied by a model or client-computed estimate values.
  */
 export function reviewCostCardBody(card: ReviewCostCard | null | undefined): string {
   if (!card) return '';
   const estimate = reviewCostCardEstimateLabel(card);
   const plan = textOf(card.planHash);
+  const planId = textOf(card.planId);
   const shortPlan = plan.length > 14 ? `${plan.slice(0, 8)}…${plan.slice(-4)}` : plan;
+  const planRevision = Number.isSafeInteger(card.proposalRevision) ? card.proposalRevision : 0;
   return `<div class="review-cost-head">
       <h3 id="review-cost-title">Cost before you spend</h3>
       <span class="badge badge-warn" data-review-cost-backend>${escapeReviewHtml(costBackendLabel(card))}</span>
     </div>
     <p class="review-cost-lead" data-review-cost-estimate>${escapeReviewHtml(estimate)}</p>
     <dl class="review-cost-facts">
-      <div><dt>Budget</dt><dd data-review-cost-budget>${escapeReviewHtml(costBudgetLabel(card))}</dd></div>
-      <div><dt>Plan</dt><dd data-review-cost-plan title="${escapeReviewHtml(plan)}">${escapeReviewHtml(shortPlan)}</dd></div>
+      <div><dt>Reservation ceiling</dt><dd data-review-cost-budget>${escapeReviewHtml(costBudgetLabel(card))}</dd></div>
+      <div><dt>Plan</dt><dd data-review-cost-plan title="${escapeReviewHtml(plan)}" data-plan-id="${escapeReviewHtml(planId)}" data-plan-revision="${escapeReviewHtml(planRevision)}">${escapeReviewHtml(shortPlan)} · revision ${escapeReviewHtml(planRevision)}</dd></div>
     </dl>
     <p class="review-cost-error" data-review-cost-error role="alert"></p>
     <div class="review-cost-actions toolbar">
@@ -1290,7 +1291,7 @@ export function reviewCostCardBody(card: ReviewCostCard | null | undefined): str
 
 export function renderReviewCostCard(card: ReviewCostCard | null | undefined): string {
   if (!card) return '';
-  return `<section class="review-cost-card panel" data-review-cost-card data-plan-hash="${escapeReviewHtml(card.planHash)}" aria-labelledby="review-cost-title">${reviewCostCardBody(card)}</section>`;
+  return `<section class="review-cost-card panel" data-review-cost-card data-plan-hash="${escapeReviewHtml(card.planHash)}" data-plan-id="${escapeReviewHtml(card.planId)}" data-plan-revision="${escapeReviewHtml(card.proposalRevision)}" data-reservation-ceiling="${escapeReviewHtml(card.reservationCeiling)}" aria-labelledby="review-cost-title">${reviewCostCardBody(card)}</section>`;
 }
 
 function hydratedDrawerShell(model: ReviewDrawerModel): string {
@@ -1528,12 +1529,18 @@ export function mountReviewDrawer(
       if (model.costCard) {
         costCard.removeAttribute('hidden');
         costCard.dataset.planHash = model.costCard.planHash;
+        costCard.dataset.planId = model.costCard.planId;
+        costCard.dataset.planRevision = String(model.costCard.proposalRevision);
+        costCard.dataset.reservationCeiling = String(model.costCard.reservationCeiling);
         costCard.innerHTML = reviewCostCardBody(model.costCard);
         const error = costCard.querySelector<HTMLElement>('[data-review-cost-error]');
         if (error) error.textContent = model.costError;
       } else {
         costCard.setAttribute('hidden', '');
         costCard.removeAttribute('data-plan-hash');
+        costCard.removeAttribute('data-plan-id');
+        costCard.removeAttribute('data-plan-revision');
+        costCard.removeAttribute('data-reservation-ceiling');
         costCard.innerHTML = '';
       }
     }

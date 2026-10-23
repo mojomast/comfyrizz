@@ -461,20 +461,20 @@ function regenerateResult(response: Response, body: JsonObject, clipId: string):
   throw new TakesApiError('unexpected clip response', response.status || 502, 'INVALID_RESPONSE');
 }
 
-// --- IP31: production-bound review commands -------------------------------
+// --- IP31/IP31F: production-bound review commands -------------------------
 //
-// The review drawer may be bound to a production. In that mode Redo is a
-// `plan.propose` command, never a run: the drawer renders the returned cost
-// card and waits for an explicit approval before any spend command. Selection
-// and rejection are likewise explicit commands (`take.select`, `clip.reject`)
-// and are never side effects of previewing a take.
+// The review drawer may be bound to a production. In that mode Redo proposes
+// an IP20 action plan, never a run: the server computes the planHash and the
+// reservation ceiling, and the drawer renders that durable plan as the cost
+// card. The approval cites only the server-recorded planId, planHash and plan
+// revision. Selection and rejection are explicit commands (`take.select`,
+// `clip.reject`) and are never side effects of previewing a take.
 
 export interface ProductionTakeCommandInput {
   clipId: string;
   assetId?: string;
   takeId: string;
   note?: string;
-  [key: string]: unknown;
 }
 
 export interface ReviewRedoProposalInput {
@@ -485,34 +485,32 @@ export interface ReviewRedoProposalInput {
   correction?: ClipCorrection | null;
   diff?: CorrectionDiff[];
   backendId?: string;
-  budgetUnits?: number;
-  planHash?: string;
-  planId?: string;
-  estimate?: ClipEstimate | null;
-  budget?: JsonObject | null;
-  backend?: JsonObject | null;
-  jobs?: number | null;
+  /** The user's scoped upper bound for this one plan. The server echoes it. */
+  reservationCeiling?: number;
+  requiredDecisions?: unknown[];
   reason?: string;
-  [key: string]: unknown;
 }
 
 /**
- * The durable proposal the drawer shows before spending. `planHash` identifies
- * the exact immutable plan; `revision` is the production revision the proposal
- * committed, which the approval must cite.
+ * The durable action plan the drawer shows before spending. Every spend
+ * identity (`planId`, `planHash`, `proposalRevision`, `reservationCeiling`)
+ * comes from the server's IP20 action-plans response, never from the client.
  */
 export interface ReviewCostCard {
   productionId: string;
+  planId: string;
   planHash: string;
-  planId: string | null;
+  /** The plan revision the approval must cite. */
   proposalRevision: number;
+  /** The production revision after the proposal committed. */
   revision: number;
   clipId: string;
   assetId: string;
-  estimate: ClipEstimate | null;
-  budget: JsonObject | null;
-  backend: JsonObject | null;
-  jobs: number | null;
+  /** The server plan's reservation ceiling: an estimate and an upper bound. */
+  reservationCeiling: number;
+  backendId: string | null;
+  requiredDecisions: unknown[];
+  actions: JsonObject[];
   commandId: string;
   duplicate?: boolean;
 }
@@ -521,8 +519,8 @@ export interface ReviewPlanApproval {
   kind: 'approved';
   approved: true;
   productionId: string;
+  planId: string;
   planHash: string;
-  planId: string | null;
   proposalRevision: number;
   revision: number;
   commandId: string;
@@ -531,10 +529,7 @@ export interface ReviewPlanApproval {
 
 export interface ProductionReviewApi {
   proposeRedo(input: ReviewRedoProposalInput): Promise<ReviewCostCard>;
-  approvePlan(
-    card: ReviewCostCard | string,
-    options?: { clipId?: string; assetId?: string; planId?: string; proposalRevision?: number; reason?: string },
-  ): Promise<ReviewPlanApproval>;
+  approvePlan(card: ReviewCostCard): Promise<ReviewPlanApproval>;
   selectTake(input: ProductionTakeCommandInput): Promise<JsonObject>;
   rejectTake(input: ProductionTakeCommandInput): Promise<JsonObject>;
   approveTake(input: ProductionTakeCommandInput): Promise<JsonObject>;
@@ -545,13 +540,17 @@ export interface CreateProductionReviewApiOptions {
   productionId: string | (() => string);
   /** The production revision the next command expects (compare-and-swap). */
   revision: number | (() => number);
-  /** Injected in tests so command ids are deterministic. */
+  /** Injected in tests so command, plan and action ids are deterministic. */
   commandId?: (prefix: string) => string;
   packageRevision?: number | (() => number | null | undefined);
 }
 
 export function productionCommandPath(productionId: string): string {
   return `/api/productions/${encodeURIComponent(productionId)}/commands`;
+}
+
+export function productionActionPlansPath(productionId: string): string {
+  return `/api/productions/${encodeURIComponent(productionId)}/action-plans`;
 }
 
 let productionCommandCounter = 0;
@@ -569,42 +568,20 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function proposalEventData(body: JsonObject): JsonObject {
-  const events = Array.isArray(body.events) ? body.events : [];
-  for (const event of events) {
-    if (!isObject(event)) continue;
-    if (event.type === 'plan.proposed' && isObject(event.data)) return event.data;
-  }
-  return {};
+function nonNegativeAmount(value: unknown): number | null {
+  const amount = numberOrNull(value);
+  return amount !== null && amount >= 0 ? amount : null;
 }
 
-function firstObject(...values: unknown[]): JsonObject | null {
-  for (const value of values) {
-    if (isObject(value)) return value;
-  }
-  return null;
-}
-
-function firstNumber(...values: unknown[]): number | null {
-  for (const value of values) {
-    const number = numberOrNull(value);
-    if (number !== null) return number;
-  }
-  return null;
+function safeRevision(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 /** A short, human cost summary used by the card and its accessible label. */
 export function reviewCostCardEstimateLabel(card: ReviewCostCard | null | undefined): string {
-  const estimate = isObject(card?.estimate) ? card.estimate : {};
-  const gpu = numberOrNull(estimate.gpuMinutes);
-  const overhead = numberOrNull(estimate.overheadMinutes);
-  const parts: string[] = [];
-  if (gpu !== null) parts.push(`${gpu} GPU min`);
-  if (overhead !== null) parts.push(`${overhead} min overhead`);
-  if (parts.length > 0) return parts.join(' + ');
-  const jobs = numberOrNull(card?.jobs);
-  if (jobs !== null) return `${jobs} job${jobs === 1 ? '' : 's'}`;
-  return 'Cost to be confirmed';
+  const ceiling = nonNegativeAmount(card?.reservationCeiling);
+  if (ceiling === null) return 'Cost to be confirmed';
+  return `Estimated upper bound: ${ceiling} unit${ceiling === 1 ? '' : 's'}`;
 }
 
 export function createProductionReviewApi(options: CreateProductionReviewApiOptions): ProductionReviewApi {
@@ -675,64 +652,113 @@ export function createProductionReviewApi(options: CreateProductionReviewApiOpti
       if (!isObject(input) || typeof input.clipId !== 'string' || input.clipId === '') {
         throw new TakesApiError('clipId is required to propose a redo', 0, 'INVALID_ARGUMENT');
       }
-      const payload: JsonObject = { clipId: input.clipId };
-      for (const key of ['packageId', 'assetId', 'change', 'correction', 'diff', 'backendId', 'budgetUnits', 'planHash', 'planId', 'reason']) {
-        if (input[key] !== undefined) payload[key] = input[key];
-      }
-      if (input.estimate !== undefined) payload.estimate = input.estimate;
-      if (input.budget !== undefined) payload.budget = input.budget;
-      if (input.backend !== undefined) payload.backend = input.backend;
-      if (input.jobs !== undefined) payload.jobs = input.jobs;
+      const id = productionId();
+      const commandId = makeCommandId('plan_propose');
+      const planId = makeCommandId('plan');
+      const actionId = makeCommandId('action_redo');
+      const ceiling = nonNegativeAmount(input.reservationCeiling) ?? 0;
+      const action: JsonObject = {
+        id: actionId,
+        kind: 'take.redo',
+        targetId: input.clipId,
+        upperBound: ceiling,
+        ...(input.assetId ? { assetId: input.assetId } : {}),
+        ...(input.backendId ? { backendId: input.backendId } : {}),
+      };
+      const payload: JsonObject = {
+        planId,
+        revision: 0,
+        requiredDecisions: Array.isArray(input.requiredDecisions) ? input.requiredDecisions : [],
+        reservationCeiling: ceiling,
+        actions: [action],
+        ...(input.packageId ? { packageId: input.packageId } : {}),
+        ...(input.change ? { change: input.change } : {}),
+        ...(input.correction !== undefined && input.correction !== null ? { correction: input.correction } : {}),
+        ...(Array.isArray(input.diff) ? { diff: input.diff } : {}),
+        ...(input.backendId ? { backendId: input.backendId } : {}),
+        ...(input.reason ? { reason: input.reason } : {}),
+      };
 
-      const body = await sendCommand('plan.propose', payload);
-      const data = proposalEventData(body);
-      const planHash = textValue(body.planHash)
-        || textValue(data.planHash)
-        || textValue(data.planId)
-        || textValue(body.planId)
-        || textValue(input.planHash)
-        || textValue(input.planId)
-        || `plan_${String(body.commandId)}`;
-      const revisionValue = firstNumber(body.revision, data.revision, data.proposalRevision) ?? currentRevision();
+      const response = await apiFetch(productionActionPlansPath(id), {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          commandId,
+          idempotencyKey: commandId,
+          expected: { productionRevision: currentRevision() },
+          payload,
+        }),
+      });
+      const body = await jsonBody<JsonObject>(response);
+      if (typeof body.revision === 'number' && Number.isSafeInteger(body.revision) && body.revision >= 0) {
+        revision = body.revision;
+      }
+      const productionRevision = safeRevision(body.revision);
+      if (productionRevision === null) {
+        throw new TakesApiError('the plan proposal did not include the production revision', response.status, 'INVALID_RESPONSE');
+      }
+
+      // Spend identity is server-owned. Only the IP20 plan is read here; the
+      // request body and its estimate are never used as fallbacks.
+      const plan = isObject(body.plan) ? body.plan : null;
+      if (!plan) {
+        throw new TakesApiError('the plan proposal did not include a plan', response.status, 'INVALID_RESPONSE');
+      }
+      const serverPlanId = textValue(plan.id);
+      if (!serverPlanId) {
+        throw new TakesApiError('the plan proposal did not include a plan id', response.status, 'INVALID_RESPONSE');
+      }
+      const planHash = textValue(plan.planHash);
+      if (!planHash) {
+        throw new TakesApiError('the plan proposal did not include a plan hash', response.status, 'INVALID_RESPONSE');
+      }
+      const proposalRevision = safeRevision(plan.revision);
+      if (proposalRevision === null) {
+        throw new TakesApiError('the plan proposal did not include the plan revision', response.status, 'INVALID_RESPONSE');
+      }
+      const reservationCeiling = nonNegativeAmount(plan.reservationCeiling);
+      if (reservationCeiling === null) {
+        throw new TakesApiError('the plan proposal did not include a reservation ceiling', response.status, 'INVALID_RESPONSE');
+      }
+      const actions = Array.isArray(plan.actions) ? plan.actions.filter(isObject) : [];
       return {
-        productionId: textValue(body.productionId) || productionId(),
+        productionId: textValue(body.productionId) || id,
+        planId: serverPlanId,
         planHash,
-        planId: textValue(data.planId) || textValue(body.planId) || textValue(input.planId) || null,
-        proposalRevision: firstNumber(data.proposalRevision, body.revision, data.revision) ?? revisionValue,
-        revision: revisionValue,
-        clipId: textValue(data.clipId) || input.clipId,
-        assetId: textValue(data.assetId) || textValue(input.assetId),
-        estimate: firstObject(body.estimate, data.estimate, input.estimate) as ClipEstimate | null,
-        budget: firstObject(body.budget, data.budget, input.budget),
-        backend: firstObject(body.backend, data.backend, input.backend),
-        jobs: firstNumber(body.jobs, data.jobs, input.jobs),
-        commandId: String(body.commandId),
+        proposalRevision,
+        revision: productionRevision,
+        clipId: input.clipId,
+        assetId: input.assetId ?? '',
+        reservationCeiling,
+        backendId: textValue(plan.backendId) || null,
+        requiredDecisions: Array.isArray(plan.requiredDecisions) ? plan.requiredDecisions : [],
+        actions,
+        commandId: textValue(body.commandId) || commandId,
         ...(body.duplicate === true ? { duplicate: true } : {}),
       };
     },
 
-    async approvePlan(cardOrHash, approvalOptions = {}) {
-      const card = typeof cardOrHash === 'string' ? null : cardOrHash;
-      const planHash = typeof cardOrHash === 'string' ? cardOrHash : textValue(cardOrHash?.planHash);
-      if (!planHash) throw new TakesApiError('planHash is required to approve spend', 0, 'INVALID_ARGUMENT');
-      const planId = approvalOptions.planId ?? card?.planId ?? undefined;
-      const proposalRevision = approvalOptions.proposalRevision ?? card?.proposalRevision;
-      const payload: JsonObject = { planHash };
-      if (planId) payload.planId = planId;
-      if (proposalRevision !== undefined) payload.proposalRevision = proposalRevision;
-      if (approvalOptions.clipId ?? card?.clipId) payload.clipId = approvalOptions.clipId ?? card?.clipId;
-      if (approvalOptions.assetId ?? card?.assetId) payload.assetId = approvalOptions.assetId ?? card?.assetId;
-      if (approvalOptions.reason !== undefined) payload.reason = approvalOptions.reason;
+    async approvePlan(card) {
+      const planId = textValue(card?.planId).trim();
+      const planHash = textValue(card?.planHash).trim();
+      const proposalRevision = safeRevision(card?.proposalRevision);
+      if (!planId || !planHash || proposalRevision === null) {
+        throw new TakesApiError(
+          'planId, planHash and the plan revision are required to approve spend',
+          0,
+          'INVALID_ARGUMENT',
+        );
+      }
 
-      const body = await sendCommand('plan.approve', payload);
+      const body = await sendCommand('plan.approve', { planId, planHash, proposalRevision });
       return {
         kind: 'approved',
         approved: true,
-        productionId: textValue(body.productionId) || card?.productionId || productionId(),
+        productionId: textValue(body.productionId) || card.productionId || productionId(),
+        planId,
         planHash,
-        planId: planId ?? null,
-        proposalRevision: proposalRevision ?? currentRevision(),
-        revision: firstNumber(body.revision) ?? currentRevision(),
+        proposalRevision,
+        revision: safeRevision(body.revision) ?? currentRevision(),
         commandId: String(body.commandId),
         ...(body.duplicate === true ? { duplicate: true } : {}),
       };
