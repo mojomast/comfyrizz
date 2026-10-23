@@ -10,7 +10,8 @@ import type {
   ProductionWatchState,
   WatchProductionOptions,
 } from '../../easy/events.ts';
-import type { ProductionApiFetch } from '../../productions/client.ts';
+import { readIteration } from '../../productions/client.ts';
+import type { IterationRead, ProductionApiFetch } from '../../productions/client.ts';
 import {
   readPlanCard,
   renderPlanCard,
@@ -39,6 +40,8 @@ export interface ProductionTabRenderOptions {
   filter?: ReviewFilter;
   query?: string;
   sort?: ReviewSort;
+  /** The iteration read. Omitted or a null level means the choice is still required. */
+  iteration?: IterationRead | null;
 }
 
 export interface MountProductionTabOptions extends ProductionTabRenderOptions {
@@ -72,6 +75,11 @@ function progressInput(state: ProductionWatchState | null | undefined): readonly
   return [];
 }
 
+/** A paid plan cannot offer Approve until a Draft, Balanced, Director or Custom level is known. */
+export function iterationChoiceMissing(iteration: IterationRead | null | undefined): boolean {
+  return iteration == null || iteration.level == null;
+}
+
 function reviewList(
   clips: readonly ClipSummary[] | null | undefined,
   options: ProductionTabRenderOptions,
@@ -103,6 +111,7 @@ export function renderProductionTab(
   const planCard = readPlanCard(state, {
     productionId,
     stale: state?.stale === true,
+    ...(iterationChoiceMissing(options.iteration) ? { iterationRequired: true } : {}),
     ...errorOptions,
   });
   const scriptCard = readScriptCard(state, {
@@ -120,7 +129,7 @@ export function renderProductionTab(
 
   return `<section class="production-tab" data-production-tab aria-label="Production">
     ${notice}
-    ${renderPlanCard(planCard)}
+    ${renderPlanCard(planCard, { iterationRead: options.iteration ?? null })}
     ${renderScriptCard(scriptCard)}
     ${progress}
     <section class="production-tab-review" data-production-review-section aria-label="Review">
@@ -150,16 +159,37 @@ export function mountProductionTab(
 ): ProductionTabHandle {
   let latest: ProductionWatchState | null = null;
   let clips: readonly ClipSummary[] = options.clips ?? [];
+  let iteration: IterationRead | null | undefined;
+  let levelRequest = 0;
 
   const render = (state: ProductionWatchState | null): void => {
     latest = state;
     host.innerHTML = renderProductionTab(state, {
       ...options,
       clips,
+      iteration,
     });
   };
 
+  const loadIteration = (): void => {
+    const request = ++levelRequest;
+    const productionId = options.productionId;
+    if (productionId === '') return;
+    void readIteration(productionId, options.fetchImpl === undefined ? undefined : { apiFetch: options.fetchImpl })
+      .then((read) => {
+        if (request !== levelRequest) return;
+        iteration = read;
+        render(latest);
+      })
+      .catch(() => {
+        if (request !== levelRequest) return;
+        iteration = null;
+        render(latest);
+      });
+  };
+
   render(null);
+  loadIteration();
 
   const watchOptions: WatchProductionOptions = {
     productionId: options.productionId,
@@ -178,6 +208,7 @@ export function mountProductionTab(
       render(latest);
     },
     destroy() {
+      levelRequest += 1;
       stop();
       host.replaceChildren();
     },
