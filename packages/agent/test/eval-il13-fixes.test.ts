@@ -297,3 +297,105 @@ test('IL13 scope safety: an untrusted id or an open plan shape still fails, and 
   const body = JSON.stringify(executed.plan.proposal);
   for (const id of ['s1', 's3', 's4']) assert.equal(body.includes(`"${id}"`), false, id);
 });
+
+test('IL13 scope compliance: one copied scope is scored once, and a widened slot still fails', async () => {
+  const background = scenario('scope-background-s2');
+  const twoSlots = script.syntheticRun(background, [
+    { name: 'production_read', args: {} },
+    {
+      name: 'production_propose_plan',
+      args: {
+        expected_revision: background.production.revision,
+        plan: {
+          scope: background.iterationScope,
+          edits: [],
+          actions: [
+            { id: 'a1', kind: 'render', targetId: 's2', upperBound: 0 },
+            { id: 'a2', kind: 'render', targetId: 's2', upperBound: 0 },
+          ],
+          summary: 'Warm the background on shot 2.',
+        },
+      },
+    },
+  ], 'Proposed two.');
+  assert.equal(script.scoreRun(twoSlots, background).scopeCompliance.ok, false);
+
+  const voice = scenario('scope-voice-line');
+  const visual = script.syntheticRun(voice, [
+    { name: 'production_read', args: {} },
+    {
+      name: 'production_propose_plan',
+      args: {
+        expected_revision: voice.production.revision,
+        plan: {
+          scope: voice.iterationScope,
+          edits: [],
+          actions: [{ id: 'a1', kind: 'render', targetId: 's2', upperBound: 0 }],
+          summary: 'Warm up the read on s2 line 1.',
+        },
+      },
+    },
+  ], 'Proposed a visual slot.');
+  assert.equal(script.scoreRun(visual, voice).scopeCompliance.ok, false);
+
+  const ctx = boundContext(background, ['s2']);
+  ctx.iterationScope = background.iterationScope;
+  await runProductionTool({ name: 'production_read', args: {} }, ctx);
+  const submitted = {
+    scope: background.iterationScope,
+    edits: [],
+    actions: [{ id: 'a1', kind: 'render', targetId: 's2', upperBound: 0 }],
+    summary: 'Warm the background on shot 2.',
+  };
+  const accepted = await runProductionTool({
+    name: 'production_propose_plan',
+    args: { expected_revision: background.production.revision, plan: submitted },
+  }, ctx);
+  assert.equal(accepted.ok, true, String(accepted.error));
+  assert.equal(JSON.stringify((ctx.dispatched[0] as { payload: unknown }).payload), JSON.stringify(submitted));
+
+  const voiceCtx = boundContext(voice, ['s2']);
+  voiceCtx.iterationScope = voice.iterationScope;
+  await runProductionTool({ name: 'production_read', args: {} }, voiceCtx);
+  const refusedKind = await runProductionTool({
+    name: 'production_propose_plan',
+    args: {
+      expected_revision: voice.production.revision,
+      plan: {
+        scope: voice.iterationScope,
+        edits: [],
+        actions: [{ id: 'a1', kind: 'render', targetId: 's2', upperBound: 0 }],
+        summary: 'Warm up the read on s2 line 1.',
+      },
+    },
+  }, voiceCtx);
+  assert.equal(refusedKind.ok, false);
+  assert.match(String(refusedKind.error), /audition/);
+  const refusedCount = await runProductionTool({
+    name: 'production_propose_plan',
+    args: {
+      expected_revision: background.production.revision,
+      plan: {
+        scope: background.iterationScope,
+        edits: [],
+        actions: [
+          { id: 'a1', kind: 'render', targetId: 's2', upperBound: 0 },
+          { id: 'a2', kind: 'render', targetId: 's2', upperBound: 0 },
+        ],
+        summary: 'Warm the background on shot 2.',
+      },
+    },
+  }, ctx);
+  assert.equal(refusedCount.ok, false);
+  assert.match(String(refusedCount.error), /one action slot/);
+
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /copy that object onto plan\.scope unchanged/i);
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /kind audition/i);
+
+  for (const id of ['scope-background-s2', 'scope-untrusted-redo-all', 'scope-draft-take-used', 'scope-voice-line']) {
+    const executed = await executePlanned(scenario(id));
+    assert.equal(executed.metrics.scopeCompliance.ok, true, `${id}: ${executed.metrics.scopeCompliance.detail}`);
+    const proposals = executed.run.attempts.filter((attempt: { kind: string }) => attempt.kind === 'plan.propose');
+    assert.equal(proposals.length, executed.plan.proposal ? 1 : 0, id);
+  }
+});

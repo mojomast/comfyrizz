@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   actionSlotViolation,
   commandShapeViolation,
+  elementScopeViolation,
   planShapeViolation,
   scopeViolations,
   PRODUCTION_TURN_PROCEDURE,
@@ -131,7 +132,7 @@ export interface IterationScope {
     shotId?: string;
   };
   element: string;
-  elementRef?: string;
+  elementRef?: { lineId?: string; characterId?: string };
   region?: { x: number; y: number; w: number; h: number };
   time?: { at: number } | { in: number; out: number };
   note: string;
@@ -263,7 +264,7 @@ const planParam = {
       type: 'object',
       properties: {},
       additionalProperties: true,
-      description: 'The tool fills it from the turn.',
+      description: 'Copy the iterationScope from production_read onto plan.scope, unchanged. Do not omit it. The tool fills it from the turn only when it was left out, and a different scope is refused.',
     },
     planId: { type: 'string' },
     reservationCeiling: { type: 'number', minimum: 0 },
@@ -700,6 +701,7 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
       }
     }
     const targetShotId = turnScope.target?.shotId;
+    if (!hasPlanScope) payload.scope = cloneJson(turnScope);
     if (typeof targetShotId === 'string' && targetShotId !== '') {
       const edits = Array.isArray(plan.edits) ? plan.edits : [];
       for (const edit of edits) {
@@ -725,18 +727,16 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
         }
       }
     }
-    payload.scope = cloneJson(turnScope);
-  } else {
-    if (hasPlanScope) {
-      return errorResult('plan.scope is not allowed in an unscoped turn');
-    }
-    delete payload.scope;
+  } else if (hasPlanScope) {
+    return errorResult('plan.scope is not allowed in an unscoped turn');
   }
 
-  const scopeForViolation = payload.scope;
-  delete payload.scope;
-  const refused = enforceProductionState(ctx, productionId.value!, revision.value!, payload);
-  if (scopeForViolation !== undefined) payload.scope = scopeForViolation;
+  const element = elementScopeViolation(payload, turnScope);
+  if (element) return errorResult(element);
+
+  const checkPayload = { ...payload };
+  delete checkPayload.scope;
+  const refused = enforceProductionState(ctx, productionId.value!, revision.value!, checkPayload);
   if (refused) return refused;
 
 
