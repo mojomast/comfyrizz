@@ -3,7 +3,8 @@ import './project-chat.css';
 import './characters/characters.css';
 import './ui/look-picker.css';
 import { initShellLayout } from './ui/splitter';
-import { mountModeToggle, type ModeController } from './ui/mode';
+import { mountModeToggle, setMode, type ModeController } from './ui/mode';
+import { mountEasyStudio } from './easy/mount.ts';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { readRunSnapshot } from './run-progress.ts';
@@ -1715,6 +1716,31 @@ function applySceneRenderStatus(rendered: string[], reused: string[], full: bool
   renderStoryboard();
 }
 
+type RenderExportError = Error & { code?: string; gate?: RenderGateSummary };
+
+async function renderExportBlob(overrideReason?: string): Promise<{ blob: Blob; revision: number; renderId?: string }> {
+  let body: Record<string, unknown> = { package: pkg };
+  if (token) {
+    // C2: persist with a base revision, then render that exact revision.
+    const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }) });
+    const savedBody = await saved.json().catch(() => ({}));
+    if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
+    pkg.revision = savedBody.revision;
+    body = { packageId: pkg.id, baseRevision: savedBody.revision };
+    logActivity(`Saved revision ${savedBody.revision} before render`);
+  }
+  const requestBody = audioMixEnabled ? body : { ...body, mixAudio: false };
+  const response = await apiFetch('/api/render', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(withRenderOverride(requestBody, overrideReason)) });
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as { error?: string; code?: string; gate?: RenderGateSummary };
+    const error = new Error(errorBody.error ?? `HTTP ${response.status}`) as RenderExportError;
+    error.code = errorBody.code; error.gate = errorBody.gate; throw error;
+  }
+  const blob = await response.blob();
+  const renderId = response.headers.get('x-comfyrizz-render-id') ?? undefined;
+  return { blob, revision: Number(pkg.revision) || 0, ...(renderId ? { renderId } : {}) };
+}
+
 async function exportMp4(overrideReason?: string): Promise<void> {
   const button = $<HTMLButtonElement>('render');
   const label = $('render-state');
@@ -1722,41 +1748,7 @@ async function exportMp4(overrideReason?: string): Promise<void> {
   label.textContent = 'recompiling + rendering on CPU (~90 s)…';
   logActivity(overrideReason ? 'Export started with a written render-gate override' : 'Export started: recompile with A2, render with Remotion on CPU');
   try {
-    let body: Record<string, unknown> = { package: pkg };
-    if (token) {
-      // C2: persist with a base revision, then render that exact revision.
-      const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }),
-      });
-      const savedBody = await saved.json().catch(() => ({}));
-      if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
-      pkg.revision = savedBody.revision;
-      body = { packageId: pkg.id, baseRevision: savedBody.revision };
-      logActivity(`Saved revision ${savedBody.revision} before render`);
-    }
-    const requestBody = audioMixEnabled ? body : { ...body, mixAudio: false };
-    // The override dialog sends override.reason; a blocked render never gets one by default.
-    const response = await apiFetch('/api/render', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(withRenderOverride(requestBody, overrideReason)),
-    });
-    if (!response.ok) {
-      const errorBody = (await response.json().catch(() => ({}))) as { error?: string; code?: string; gate?: RenderGateSummary };
-      if (overrideReason === undefined && errorBody.code === 'RENDER_GATE_BLOCKED') {
-        void refreshClips();
-        const reason = await renderBar?.requestOverride(errorBody.gate ?? clipStore.gate());
-        if (reason) {
-          button.disabled = false;
-          await exportMp4(reason);
-          return;
-        }
-      }
-      throw new Error(errorBody.error ?? `HTTP ${response.status}`);
-    }
-    const blob = await response.blob();
+    const { blob } = await renderExportBlob(overrideReason);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -1768,6 +1760,12 @@ async function exportMp4(overrideReason?: string): Promise<void> {
     $('draft').textContent = 'exported MP4 · timeline recompiled by the server';
     logActivity('Export finished: H.264 MP4 downloaded');
   } catch (error) {
+    const blocked = error as RenderExportError;
+    if (overrideReason === undefined && blocked.code === 'RENDER_GATE_BLOCKED') {
+      void refreshClips();
+      const reason = await renderBar?.requestOverride(blocked.gate ?? clipStore.gate());
+      if (reason) { button.disabled = false; await exportMp4(reason); return; }
+    }
     label.textContent = `export failed: ${(error as Error).message}`;
     logActivity(`Export failed: ${(error as Error).message}`);
   } finally {
@@ -2148,6 +2146,25 @@ function adoptChatProject(project: ChatProject, built: boolean): void {
   }
 }
 
+function adoptBuiltPackage(body: any): void {
+  pkg = body.package as PackageV1;
+  timeline = body.timeline as Timeline;
+  adoptEditorPackage(pkg);
+  generatedAssets = (body.generatedAssets ?? {}) as Record<string, InlineAsset>;
+  pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu as typeof pendingGpu : [];
+  scrub.max = String(timeline.durationInFrames - 1);
+  renderStoryboard(); renderPalette(); renderAssets();
+  takeInfoCache.clear(); takeUrlCache.clear(); previewClipMap = {}; previewAb = null;
+  updatePreview(pkg, timeline, generatedAssets);
+  void refreshClips();
+}
+
+function seekToScene(sceneId: string): void {
+  const scene = timeline.scenes.find(item => item.id === sceneId);
+  if (!scene) return;
+  editorApi?.followFrame(scene.from); player?.seekTo(scene.from);
+}
+
 async function runBrief(brief: string): Promise<void> {
   const composer = $<HTMLButtonElement>('composer-send');
   if (composer) composer.disabled = true;
@@ -2164,21 +2181,7 @@ async function runBrief(brief: string): Promise<void> {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-    pkg = body.package as PackageV1;
-    timeline = body.timeline as Timeline;
-    adoptEditorPackage(pkg);
-    generatedAssets = body.generatedAssets as Record<string, InlineAsset>;
-    pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu : [];
-    scrub.max = String(timeline.durationInFrames - 1);
-    renderStoryboard();
-    renderPalette();
-    renderAssets();
-    takeInfoCache.clear();
-    takeUrlCache.clear();
-    previewClipMap = {};
-    previewAb = null;
-    updatePreview(pkg, timeline, generatedAssets);
-    void refreshClips();
+    adoptBuiltPackage(body);
     state.dirty = false;
     const agentLabel = body.fallback ? 'scripted fallback' : body.live ? `${body.provider} / ${body.model}` : 'scripted model';
     $('draft').textContent = `agent package · ${body.svgAssets.length} SVG assets · ${agentLabel}`;
@@ -2305,6 +2308,15 @@ function init(opened: OpenedProject): void {
     ref.addEventListener('pause', () => ($('play').textContent = 'Play'));
     onFrame();
     logActivity('Remotion Player ready: compiled timeline mounted');
+  });
+
+  const easyRoot = document.getElementById('easy-root');
+  if (easyRoot) mountEasyStudio(easyRoot, {
+    apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
+    hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: () => renderExportBlob(),
+    clipGate: () => clipStore.gate(), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
+    openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+    openEditor: () => { setMode('advanced'); }, playerElement: () => $('player'),
   });
 
   $('assets').addEventListener('click', event => {
