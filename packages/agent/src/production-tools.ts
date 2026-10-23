@@ -209,7 +209,7 @@ const productionIdParam = {
 const expectedRevisionParam = {
   type: 'integer',
   minimum: 0,
-  description: 'The exact revision returned by production_read. Never guess it and never reuse an older revision.',
+  description: 'The top-level revision from production_read. Never a number nested under iteration, never a plan revision, never a cached revision, and never 0 unless that read returned 0.',
 };
 
 const planEditParam = {
@@ -245,7 +245,7 @@ const planActionParam = {
 const planParam = {
   type: 'object',
   additionalProperties: false,
-  description: 'A proposal for the user to approve. A text edit is {"edits":[...],"actions":[],"summary":"..."} and names only the requested shot and line ids. The server computes the plan hash. Nothing is approved or dispatched.',
+  description: 'A proposal for the user to approve. A text edit is {"edits":[...],"actions":[],"summary":"..."} and names only the requested shot and line ids. Do not include revision or planHash; the server owns both. Nothing is approved or dispatched.',
   properties: {
     edits: { type: 'array', items: planEditParam },
     actions: {
@@ -264,7 +264,6 @@ const planParam = {
       description: 'The tool fills it from the turn.',
     },
     planId: { type: 'string' },
-    revision: { type: 'integer', minimum: 0 },
     reservationCeiling: { type: 'number', minimum: 0 },
     collectAndStopReserve: { type: 'number', minimum: 0 },
     requiredDecisions: { type: 'array' },
@@ -323,7 +322,7 @@ export function isProductionToolName(name: unknown): name is string {
 }
 
 export const PRODUCTION_RULES = `Production agent rules (apply only when the conversation has an iterative production):
-1. Read first, every turn: the first tool call is production_read, before any mutation and before any question. Use the revision it returned as expected_revision. A missing, guessed, cached, or older revision is refused; never fall back to 0 or to a note that says not to re-read.
+1. Read first, every turn: the first tool call is production_read, before any mutation and before any question. Use the top-level revision it returned as expected_revision. A missing, guessed, cached, or older revision is refused; never fall back to 0, to a number nested under iteration, or to a note that says not to re-read. Do not put revision or planHash on the plan.
 2. Propose, never approve: production_propose_plan records a proposal. Only the user may approve or reject a plan, resolve a decision, select a take, accept a delivery, override a gate or record a creative verdict. The agent cannot approve its own proposal.
 3. No spend: the agent may not reserve, settle, dispatch or retry paid work, and it may not change a budget ceiling. Use production_command only for the allowed non-approval kinds.
 4. Respect user intent: resume, cancel and archive are user decisions. If intent is paused, cancel_requested, or archived, read and stop. Ask one question that contains a question mark. Never attempt to undo a user's pause, cancellation or archive.
@@ -596,6 +595,14 @@ function effectiveStagesForShot(
   return stages;
 }
 
+function presentProduction(production: Record<string, unknown>): Record<string, unknown> {
+  const copy = cloneJson(production);
+  // iteration.revision is the revision at which the policy was saved. It is not
+  // the current production revision, and citing it is a stale expected_revision.
+  if (isPlainObject(copy.iteration)) delete copy.iteration.revision;
+  return copy;
+}
+
 function iterationProjection(production: Record<string, unknown>): Record<string, unknown> | undefined {
   const raw = production.iteration;
   if (!isPlainObject(raw) || !isPlainObject(raw.policy)) return undefined;
@@ -644,7 +651,7 @@ async function readProduction(args: Record<string, unknown>, ctx: ProductionTool
   const result: ProductionToolResult = {
     ok: true,
     status: 'read',
-    production: snapshot.production,
+    production: presentProduction(snapshot.production ?? {}),
     revision: snapshot.revision,
   };
   if (snapshot.lastSequence !== undefined) result.lastSequence = snapshot.lastSequence;
@@ -664,6 +671,9 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
   const candidate = args.plan;
   if (!isPlainObject(candidate)) return errorResult('plan must be an object');
   const plan = candidate;
+  if (ctx.productionState && Object.prototype.hasOwnProperty.call(plan, 'revision')) {
+    return errorResult('plan.revision is server-owned; omit it. expected_revision is the top-level revision from production_read');
+  }
   const serverKey = SERVER_PLAN_KEYS.find(key => Object.prototype.hasOwnProperty.call(plan, key));
   if (serverKey) return errorResult(`plan.${serverKey} is computed by the server and cannot be proposed`, 'SERVER_PLAN_IDENTITY');
 
