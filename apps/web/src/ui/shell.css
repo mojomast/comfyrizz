@@ -155,24 +155,6 @@ html body #app #topbar input {
   font-size: var(--font-size-12);
 }
 
-html body #app #topbar #llm,
-html body #app #topbar #backend {
-  max-width: calc(var(--space-6) * 4);
-}
-
-html body #app #topbar #render-location {
-  max-width: calc(var(--space-6) * 3 + var(--space-4));
-}
-
-html body #app #topbar #agent-model {
-  width: calc(var(--space-6) * 3);
-}
-
-html body #app #topbar #budget {
-  width: calc(var(--space-5) * 2 + var(--space-2));
-  font-variant-numeric: var(--font-numeric-tabular);
-}
-
 html body #app #topbar button {
   min-height: calc(var(--space-5) + var(--space-1));
   max-height: var(--space-6);
@@ -724,7 +706,7 @@ html body #app #statusbar #save-status[data-state='rejected'] {
    IP59: mobile tabs and sheets (< 68.75rem / 1100px)
 
    Easy is a deliberate filter, not a temporary narrow layout: it is never
-   forced to show the Advanced rail or the run-settings anchor at any width.
+   forced to show the Advanced rail at any width.
    Advanced gets the right rail back as a bottom sheet with full-width tabs.
    These rules are scoped to Advanced so they never outrank the Easy filter in
    topbar.css or the user's data-shell-right='off' choice in this file.

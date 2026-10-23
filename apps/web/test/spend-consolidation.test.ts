@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const voice = readFileSync(fileURLToPath(new URL('../src/voice-settings.ts', import.meta.url)), 'utf8');
 const card = readFileSync(fileURLToPath(new URL('../src/colab-card.ts', import.meta.url)), 'utf8');
-const html = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8');
+const settings = readFileSync(fileURLToPath(new URL('../src/settings/sections.ts', import.meta.url)), 'utf8');
 
 function renderSpendCap(source) {
   const match = source.match(/export function renderSpendCap\(cap: number \| null\): string \{[\s\S]*?\n\}/);
@@ -33,7 +33,7 @@ test('the Google Colab card render shows the cap as text', () => {
   assert.equal(render('nope'), '');
 });
 
-test('the Run settings budget is read-only until settings owns it', () => {
-  assert.match(html, /id="budget"[^>]*\breadonly\b/);
-  assert.match(html, /Set the spend cap in Generate/);
+test('the settings spend cap is read-only', () => {
+  assert.match(settings, /id="budget"[^>]*\breadonly\b/);
+  assert.match(settings, /Set the spend cap in Generate/);
 });

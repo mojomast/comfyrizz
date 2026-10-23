@@ -2427,45 +2427,11 @@ function init(opened: OpenedProject): void {
     renderLocation.addEventListener('change', () => writeRenderLocation(renderLocation.value));
   }
 
-  // UO06: Top bar header wiring (project name, Run settings popover, split-button menu)
+  // UO06: Top bar header wiring (project name, split-button menu). Run controls live in Settings.
   const projectNameEl = document.getElementById('project-name');
   if (projectNameEl && pkg.title) {
     projectNameEl.textContent = pkg.title;
   }
-
-  const runSettingsToggle = document.getElementById('run-settings-toggle');
-  const runSettingsPopover = document.getElementById('run-settings-popover');
-  const runSettingsClose = document.getElementById('run-settings-close');
-
-  function openRunSettings(): void {
-    if (!runSettingsPopover || !runSettingsToggle) return;
-    runSettingsPopover.hidden = false;
-    runSettingsToggle.setAttribute('aria-expanded', 'true');
-    const first = runSettingsPopover.querySelector<HTMLElement>('select, input, button');
-    first?.focus();
-  }
-
-  function closeRunSettings(returnFocus = true): void {
-    if (!runSettingsPopover || !runSettingsToggle || runSettingsPopover.hidden) return;
-    runSettingsPopover.hidden = true;
-    runSettingsToggle.setAttribute('aria-expanded', 'false');
-    if (returnFocus) runSettingsToggle.focus();
-  }
-
-  runSettingsToggle?.addEventListener('click', () => {
-    if (runSettingsPopover?.hidden) openRunSettings();
-    else closeRunSettings(true);
-  });
-
-  runSettingsClose?.addEventListener('click', () => closeRunSettings(true));
-
-  runSettingsPopover?.addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      closeRunSettings(true);
-    }
-  });
 
   const exportMenuToggle = document.getElementById('export-menu-toggle');
   const exportMenu = document.getElementById('export-menu');
@@ -2524,9 +2490,6 @@ function init(opened: OpenedProject): void {
 
   document.addEventListener('click', event => {
     const target = event.target as Node | null;
-    if (target && !runSettingsPopover?.contains(target) && !runSettingsToggle?.contains(target)) {
-      closeRunSettings(false);
-    }
     if (target && !exportMenu?.contains(target) && !exportMenuToggle?.contains(target)) {
       closeExportMenu(false);
     }

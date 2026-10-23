@@ -19,9 +19,40 @@ export function settingsSectionFromSearch(search: string): SettingsSectionId {
 function bodyFor(id: SettingsSectionId): string {
   switch (id) {
     case 'ai':
-      return '<div data-settings-agent></div>';
+      return [
+        '<div data-settings-agent></div>',
+        '<label class="field-label" for="llm">AI provider</label>',
+        '<select id="llm">',
+        '<option value="none">local · scripted model</option>',
+        '<option value="opencode-go">OpenCode Go</option>',
+        '<option value="custom">Custom · OpenAI-compatible</option>',
+        '<option value="openrouter">OpenRouter</option>',
+        '</select>',
+        '<label class="field-label" for="agent-model">Model</label>',
+        '<input id="agent-model" list="agent-model-options" placeholder="scripted" disabled maxlength="300" />',
+        '<datalist id="agent-model-options"></datalist>',
+        '<button type="button" id="agent-settings-open" class="btn btn-secondary btn-sm">Agent settings</button>',
+      ].join('');
     case 'colab':
-      return '<div data-settings-colab></div><label>Default spend cap for new videos<input data-default-cap type="number" min="0.5" max="500" step="0.5" value="15"></label><div data-settings-colab-history></div><label>Final MP4 location<select data-final-mp4><option value="local">This machine</option><option value="colab">Google Colab VM</option></select></label>';
+      return [
+        '<div data-settings-colab></div>',
+        '<label class="field-label" for="backend">Where generation runs</label>',
+        '<select id="backend">',
+        '<option value="cpu">CPU · no network</option>',
+        '<option value="byo-comfyui">My ComfyUI</option>',
+        '<option value="colab">Google Colab</option>',
+        '</select>',
+        '<label class="field-label" for="budget">Spend cap</label>',
+        '<input id="budget" type="number" min="0" step="0.5" value="15" readonly aria-readonly="true" title="Set the spend cap in Generate" />',
+        '<span class="field-hint">Set the spend cap in Generate</span>',
+        '<label>Default spend cap for new videos<input data-default-cap type="number" min="0.5" max="500" step="0.5" value="15"></label>',
+        '<div data-settings-colab-history></div>',
+        '<label class="field-label" for="render-location">Final MP4 location</label>',
+        '<select id="render-location" data-final-mp4 title="Where the final MP4 is assembled">',
+        '<option value="local">This machine</option>',
+        '<option value="colab">Google Colab VM</option>',
+        '</select>',
+      ].join('');
     case 'comfyui':
       return '<label>My ComfyUI address<input data-comfyui-url type="url" placeholder="http://127.0.0.1:8188"></label>';
     case 'appearance':
