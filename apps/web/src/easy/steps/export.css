@@ -1,0 +1,135 @@
+.easy-export-working,
+.easy-export-done,
+.easy-export-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 720px;
+}
+
+.easy-export-status {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.easy-export-heading {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--font-size-18);
+  line-height: var(--line-height-tight);
+}
+
+.easy-export-player {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.easy-export-player video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg-2);
+}
+
+.easy-export-meta {
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+}
+
+.easy-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.easy-export-actions .btn,
+.easy-export-error-actions .btn {
+  min-height: 44px;
+}
+
+.easy-export-qa {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.easy-export-qa summary {
+  cursor: pointer;
+}
+
+.easy-export-qa ul {
+  margin: var(--space-2) 0 0;
+  padding-inline-start: var(--space-5);
+}
+
+.easy-export-colab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--ok);
+}
+
+.easy-export-stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-control);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.easy-export-stale p {
+  margin: 0;
+}
+
+.easy-export-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.easy-export-links a {
+  color: var(--accent);
+}
+
+.easy-export-error {
+  padding: var(--space-4);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-panel);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.easy-export-error p {
+  margin: 0;
+}
+
+.easy-export-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.easy-is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .easy-export-actions,
+  .easy-export-links {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
