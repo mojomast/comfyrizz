@@ -18,6 +18,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { applyManifestToPackage, mediaFor } from '../../../../packages/jobs/src/apply.mjs';
+import { thumbKey } from '../thumbs/spec.mjs';
 import { MAX_RETRY_ATTEMPTS, genFingerprint, retryRecord } from './model.mjs';
 
 const SHA256_RE = /^[0-9a-f]{64}$/i;
@@ -250,7 +251,44 @@ function resolveRetrySource(outputDir, produced) {
  *   every take and restores the selection the clip had before this ingest
  * @returns {{takes: object[], selected: Record<string, string>, failed: object[]}}
  */
-export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, corrections = {}, runId = null, backend = null, retry = null, autoSelect = true } = {}) {
+
+function thumbSourceFor(asset, media, srcPath, sha256) {
+  const kind = asset?.kind === 'video' ? 'video'
+    : asset?.kind === 'audio' ? 'audio'
+    : asset?.kind === 'text' ? 'text'
+    : 'image';
+  const source = { file: srcPath, sha256: typeof sha256 === 'string' ? sha256.toLowerCase() : sha256, kind };
+  const durationSeconds = media?.durationSeconds ?? media?.durationSec ?? media?.duration;
+  if (typeof durationSeconds === 'number' && Number.isFinite(durationSeconds) && durationSeconds > 0) {
+    source.durationSec = durationSeconds;
+  }
+  return source;
+}
+
+function posterKeyFor(source) {
+  if (!source || typeof source.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(source.sha256)) return null;
+  if (source.kind !== 'image' && source.kind !== 'video') return null;
+  if (source.kind === 'video' && (typeof source.durationSec !== 'number' || !Number.isFinite(source.durationSec) || source.durationSec <= 0)) return null;
+  const params = source.kind === 'video' ? { durationSec: source.durationSec } : {};
+  try {
+    return thumbKey({ sourceSha256: source.sha256, kind: 'poster', params });
+  } catch {
+    return null;
+  }
+}
+
+function warmThumbs(thumbs, source) {
+  if (!thumbs || typeof thumbs.warm !== 'function') return;
+  try {
+    Promise.resolve(thumbs.warm(source, ['poster', 'filmstrip'])).catch((error) => {
+      console.error('thumbs.warm failed:', error?.message ?? error);
+    });
+  } catch (error) {
+    console.error('thumbs.warm failed:', error?.message ?? error);
+  }
+}
+
+export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, corrections = {}, runId = null, backend = null, retry = null, autoSelect = true, thumbs = null } = {}) {
   if (!isObject(pkg) || typeof pkg.id !== 'string' || pkg.id === '') {
     throw new TypeError('ingestRun needs a package with an id');
   }
@@ -317,6 +355,13 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
     const gen = genFor({ asset, job, entry, backend, updatedAt });
     const media = mediaFor(job, job?.cutout ?? asset.cutout, output) ?? {};
     const correction = isObject(corrections?.[assetId]) ? clone(corrections[assetId]) : undefined;
+
+    const thumbSource = thumbSourceFor(asset, media, srcPath, item.sha256 ?? output?.sha256);
+    if (thumbs && typeof thumbs.warm === 'function') {
+      const posterKey = posterKeyFor(thumbSource);
+      if (posterKey !== null) media.posterKey = posterKey;
+    }
+    warmThumbs(thumbs, thumbSource);
 
     if (!autoSelectEnabled && !previousSelection.has(assetId)) {
       const before = typeof store.read === 'function' ? store.read(pkgId) : null;
@@ -476,6 +521,14 @@ export async function ingestRunWithRetries(input = {}) {
         ? clone(produced.media)
         : (mediaFor(job, job?.cutout ?? asset.cutout, null) ?? {});
       const correction = isObject(corrections[assetId]) ? clone(corrections[assetId]) : undefined;
+
+      const retryThumbs = rest.thumbs ?? null;
+      const retrySource = thumbSourceFor(asset, media, srcPath, produced.sha256);
+      if (retryThumbs && typeof retryThumbs.warm === 'function') {
+        const retryPosterKey = posterKeyFor(retrySource);
+        if (retryPosterKey !== null) media.posterKey = retryPosterKey;
+      }
+      warmThumbs(retryThumbs, retrySource);
       const take = store.addTake(pkgId, assetId, {
         srcPath,
         sha256: produced.sha256,
