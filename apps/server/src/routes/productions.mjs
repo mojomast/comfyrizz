@@ -260,6 +260,17 @@ export function createProductionRoutes(options = {}) {
     if (envelope.kind === 'production.create') {
       throw new RouteError('INVALID_COMMAND', 'production.create is only accepted at /api/productions', 400);
     }
+    // IP20C: plan identity is authored only by the action-plans route, which
+    // runs buildStoredPlan. When the action routes are mounted, the generic
+    // command path must not become a second way to journal a plan.proposed
+    // event. A facade without action routes has no action-plans destination.
+    if (envelope.kind === 'plan.propose' && actions) {
+      throw new RouteError(
+        'USE_ACTION_PLANS',
+        'action plans must be proposed at /api/productions/:id/action-plans',
+        422,
+      );
+    }
     if (Object.prototype.hasOwnProperty.call(envelope, 'productionId')
       && envelope.productionId !== id) {
       throw new RouteError('PRODUCTION_ID_MISMATCH', 'productionId in the body must match the URL production id', 400);

@@ -21,6 +21,8 @@
 
 import { createHash } from 'node:crypto';
 
+import { isTrustedPlan } from './actions.mjs';
+
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
 
 const DEFAULT_MAX_STEPS = 8;
@@ -136,7 +138,7 @@ function latestProposedPlan(events) {
   for (const event of events) {
     if (event.type !== 'plan.proposed' || !isPlainObject(event.data)) continue;
     const plan = event.data;
-    if (!isIdentifier(plan.id) || typeof plan.planHash !== 'string' || plan.planHash === '') continue;
+    if (!isIdentifier(plan.id) || !isTrustedPlan(plan)) continue;
     latest = plan;
   }
   return latest;

@@ -94,6 +94,22 @@ export function computePlanHash(plan) {
   return createHash('sha256').update(canonicalJson(content)).digest('hex');
 }
 
+/**
+ * A plan.proposed event is trusted only when the journaled planHash is the
+ * server content hash of the journaled plan. This is the same check the
+ * action-plans route applies through buildStoredPlan; shared here so every
+ * reader (approval, dispatch, coordinator) agrees on plan provenance.
+ */
+export function isTrustedPlan(plan) {
+  if (!isPlainObject(plan)) return false;
+  if (typeof plan.planHash !== 'string' || plan.planHash === '') return false;
+  try {
+    return plan.planHash === computePlanHash(plan);
+  } catch {
+    return false;
+  }
+}
+
 function reservationIdFor(planHash, actionId) {
   const digest = createHash('sha256')
     .update(`${planHash}\0${actionId}`)
@@ -290,7 +306,7 @@ function proposedPlans(events) {
   const plans = [];
   for (const event of events) {
     if (event.type !== 'plan.proposed' || !isPlainObject(event.data)) continue;
-    if (typeof event.data.id !== 'string' || typeof event.data.planHash !== 'string') continue;
+    if (typeof event.data.id !== 'string' || !isTrustedPlan(event.data)) continue;
     plans.push(event.data);
   }
   return plans;
