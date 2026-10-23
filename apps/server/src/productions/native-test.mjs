@@ -15,11 +15,24 @@
 // Transcript review is technical evidence, not a verdict. An ASR mismatch is a
 // finding; the take stays `unreviewed` until a user records a creative verdict.
 
-import { resolveSpeakingVoice, supportsNativeVoice } from '../characters/voice.mjs';
+import {
+  resolveSpeakingVoice,
+  supportsNativeVoice,
+  supportsPromptVoice,
+  validateH3Mode,
+} from '../characters/voice.mjs';
+import {
+  findPromptAudioField,
+  findVoiceCloningField,
+  promptVoiceAuditionStatus,
+  promptVoiceHash,
+} from '../characters/audition.mjs';
 
 export const NATIVE_TEST_SCHEMA = 'comfyrizz.native-test/v1';
 export const NATIVE_TEST_KIND = 'native_test_shot';
 export const NATIVE_VOICE_UNSUPPORTED = 'NATIVE_VOICE_UNSUPPORTED';
+export const NATIVE_TEST_PROMPT_UNSUPPORTED = 'NATIVE_TEST_PROMPT_UNSUPPORTED';
+export const NATIVE_TEST_AUDIO_REQUIRED = 'NATIVE_TEST_AUDIO_REQUIRED';
 
 const KOKORO_AUDITION_ALTERNATIVE = Object.freeze({
   kind: 'kokoro_audition',
@@ -38,29 +51,6 @@ const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const TOKEN_RE = /[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu;
 const MAX_LINE_CHARS = 1000;
 const DEFAULT_BACKEND_ID = 'colab';
-
-// A voice-cloning payload never belongs on a test shot. Only a built-in native
-// preset or a Kokoro voice id may be named.
-const CLONE_FIELDS = new Set([
-  'clone',
-  'clonePayload',
-  'cloneSample',
-  'cloneVoice',
-  'embedding',
-  'referenceAudio',
-  'referenceSample',
-  'referenceVoice',
-  'referenceWav',
-  'sample',
-  'sampleAudio',
-  'samples',
-  'speakerAudio',
-  'speakerEmbedding',
-  'speakerWav',
-  'voiceClone',
-  'voiceEmbedding',
-  'voiceSample',
-]);
 
 export class NativeTestError extends Error {
   constructor(code, field, message) {
@@ -121,15 +111,49 @@ function upperBound(value) {
 }
 
 function refuseForbidden(record, path) {
-  for (const key of Object.keys(record)) {
-    if (CLONE_FIELDS.has(key)) {
-      fail(
-        'VOICE_CLONE_FORBIDDEN',
-        `${path}.${key}`,
-        `${path}.${key} is a voice-cloning payload; only built-in or Kokoro voices may be used`,
-      );
-    }
+  const clone = findVoiceCloningField(record, path);
+  if (clone) {
+    fail(
+      'VOICE_CLONE_FORBIDDEN',
+      clone.path,
+      `${clone.path} is a voice-cloning payload; only built-in or written voices may be used`,
+    );
   }
+}
+
+function refusePromptAudio(record, path, code) {
+  const audio = findPromptAudioField(record, path);
+  if (audio) {
+    fail(
+      code,
+      audio.path,
+      `${audio.path} is an audio input; a prompt-mode test shot is planned without an audio file`,
+    );
+  }
+}
+
+function promptDuration(value) {
+  if (value === undefined) return 2.5;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 2 || value > 3) {
+    fail('NATIVE_TEST_DURATION', 'durationSeconds', 'durationSeconds must be from 2 to 3');
+  }
+  return value;
+}
+
+function failPromptVoiceUnsupported() {
+  throw new NativeTestError(
+    NATIVE_TEST_PROMPT_UNSUPPORTED,
+    'model',
+    'the selected model does not declare prompt voice support, so an H3 prompt-mode test shot cannot be planned',
+  );
+}
+
+function failClipAudioRequired() {
+  throw new NativeTestError(
+    NATIVE_TEST_AUDIO_REQUIRED,
+    'audio',
+    'clip mode speaks from an audio clip; this builder plans prompt-mode or native-voice test shots, so no clip-mode slot was planned',
+  );
 }
 
 function languageText(value, field, code) {
@@ -162,6 +186,10 @@ function deepFreeze(value) {
  *   model: object,
  *   voice?: object|string,
  *   nativeVoice?: string,
+ *   characterId?: string,
+ *   h3VoiceMode?: 'clip'|'prompt',
+ *   durationSeconds?: number,
+ *   audition?: { voiceHash: string, line?: string },
  *   backendId?: string,
  * }} input
  */
@@ -198,7 +226,93 @@ export function buildNativeTestAction(input, ...extra) {
   }
 
   const model = requireRecord(raw.model, 'model', 'NATIVE_TEST_MODEL');
-  if (raw.voice !== undefined && isRecord(raw.voice)) refuseForbidden(raw.voice, 'voice');
+  const voiceRecord = raw.voice === undefined
+    ? undefined
+    : requireRecord(raw.voice, 'voice', 'NATIVE_TEST_VOICE');
+  if (voiceRecord) refuseForbidden(voiceRecord, 'voice');
+
+  // VX08: the mode comes from the production override, else the character
+  // voice record. An absent mode is the unchanged clip default.
+  const requestedMode = raw.h3VoiceMode !== undefined && raw.h3VoiceMode !== null
+    ? raw.h3VoiceMode
+    : voiceRecord?.h3Mode;
+  const h3VoiceMode = requestedMode === undefined || requestedMode === null
+    ? 'clip'
+    : validateH3Mode(requestedMode);
+
+  if (h3VoiceMode === 'prompt' && supportsPromptVoice(model) && !supportsNativeVoice(model)) {
+    const characterId = identifier(raw.characterId, 'characterId', 'NATIVE_TEST_CHARACTER_ID');
+    if (!voiceRecord) {
+      fail(
+        'NATIVE_TEST_VOICE',
+        'voice',
+        'prompt mode needs the character voice record with its description and seed',
+      );
+    }
+
+    // A prompt take is written direction, never an audio clip or a cloned
+    // sample. Refusing here keeps the planner from ever seeing one.
+    refusePromptAudio(raw, 'input', 'NATIVE_TEST_AUDIO_FORBIDDEN');
+    refusePromptAudio(voiceRecord, 'voice', 'NATIVE_TEST_AUDIO_FORBIDDEN');
+    refusePromptAudio(line, 'line', 'NATIVE_TEST_LINE_AUDIO');
+
+    const durationSeconds = promptDuration(raw.durationSeconds);
+    const speaking = resolveSpeakingVoice({
+      model,
+      voice: voiceRecord,
+      characterId,
+      h3VoiceMode: 'prompt',
+    });
+    if (speaking.voicePath !== 'prompt') failPromptVoiceUnsupported();
+
+    // The dialogue language may differ from the voice's language; only the
+    // written voice identity is pinned to the seed+description hash.
+    const outputLine = {
+      text: lineText,
+      language: lineLanguage ?? speaking.language,
+    };
+    if (delivery !== undefined) outputLine.delivery = delivery;
+    if (line.offscreen !== undefined) outputLine.offscreen = line.offscreen;
+
+    const voiceHash = promptVoiceHash({ voice: speaking.voice });
+    const auditionStatus = promptVoiceAuditionStatus({
+      characterId,
+      voice: voiceRecord,
+      ...(raw.audition !== undefined ? { audition: raw.audition } : {}),
+    });
+    const warnings = auditionStatus.approved
+      ? []
+      : [auditionStatus.state === 'stale'
+        ? 'PROMPT_VOICE_AUDITION_STALE'
+        : 'PROMPT_VOICE_AUDITION_REQUIRED'];
+
+    return deepFreeze({
+      schema: NATIVE_TEST_SCHEMA,
+      kind: NATIVE_TEST_KIND,
+      id: actionId,
+      shotId,
+      backendId,
+      upperBound: budget,
+      state: 'planned',
+      approvalRequired: true,
+      autoDispatch: false,
+      approved: false,
+      line: outputLine,
+      voicePath: 'prompt',
+      voice: speaking.voice,
+      language: speaking.language,
+      voiceHash,
+      durationSeconds,
+      warnings,
+    });
+  }
+
+  if (h3VoiceMode === 'prompt' && !supportsPromptVoice(model) && !supportsNativeVoice(model)) {
+    failPromptVoiceUnsupported();
+  }
+  if (h3VoiceMode === 'clip' && supportsPromptVoice(model) && !supportsNativeVoice(model)) {
+    failClipAudioRequired();
+  }
 
   // IP44 is the only capability source. This refusal happens before any voice
   // resolution, so a non-native model never plans a paid Kokoro test shot.
@@ -206,7 +320,9 @@ export function buildNativeTestAction(input, ...extra) {
 
   // On a native-capable model the test shot speaks with the model's own voice.
   // A Kokoro request is a plan for the free audition route, not this paid slot.
-  if (raw.voice !== undefined) {
+  // A character voice record is allowed only in prompt mode, where the
+  // canonical resolver's native-beats-prompt rule makes it informational.
+  if (raw.voice !== undefined && h3VoiceMode !== 'prompt') {
     fail(
       'VOICE_KOKORO_REQUIRED',
       'voice',
@@ -234,6 +350,7 @@ export function buildNativeTestAction(input, ...extra) {
     state: 'planned',
     approvalRequired: true,
     autoDispatch: false,
+    approved: false,
     line: outputLine,
     voicePath: 'native',
     voice: speaking.voice,

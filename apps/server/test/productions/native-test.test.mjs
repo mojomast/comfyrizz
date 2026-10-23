@@ -7,9 +7,16 @@
 // transcript review is technical evidence only: a mismatch is a finding, and
 // the take always stays unreviewed.
 
+// VX08: the same test shot and its audition in H3 prompt mode. A prompt-mode
+// take is a written voice description plus a pinned uint32 seed, so it plans
+// with no audio file. A user approval records the seed+description hash on
+// voice.audition.voiceHash; editing either field makes that approval stale.
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
+import * as audition from '../../src/characters/audition.mjs';
 import * as nativeTest from '../../src/productions/native-test.mjs';
 import {
   buildNativeTestAction,
@@ -32,6 +39,15 @@ const CPU_MODEL = Object.freeze({
   capabilities: Object.freeze({ supportsNativeVoice: false }),
 });
 
+const CHARACTER_ID = 'chr_0123456789abcdef';
+const DESCRIPTION = 'Low, warm narrator with a slow and deliberate delivery.';
+const OTHER_DESCRIPTION = 'Bright, quick narrator with a dry edge.';
+
+const H3_MODEL = Object.freeze({
+  id: 'fasth3-omni',
+  capabilities: Object.freeze({ promptVoice: true }),
+});
+
 function actionInput(overrides = {}) {
   return {
     actionId: 'act_native_test',
@@ -41,6 +57,35 @@ function actionInput(overrides = {}) {
     model: NATIVE_MODEL,
     ...overrides,
   };
+}
+
+function promptVoice(overrides = {}) {
+  return {
+    engine: 'kokoro',
+    voice: 'am_michael',
+    language: 'en-us',
+    voiceDescription: DESCRIPTION,
+    h3Mode: 'prompt',
+    ...overrides,
+  };
+}
+
+function promptActionInput(overrides = {}) {
+  return {
+    actionId: 'act_voice_audition',
+    shotId: 'shot_voice',
+    upperBound: 1.5,
+    line: { ...LINE },
+    model: H3_MODEL,
+    characterId: CHARACTER_ID,
+    voice: promptVoice(),
+    h3VoiceMode: 'prompt',
+    ...overrides,
+  };
+}
+
+function derivedSeed(characterId, description) {
+  return createHash('sha256').update(characterId + description).digest().readUInt32BE(0);
 }
 
 function code(expected) {
@@ -325,4 +370,383 @@ test('the rejected aliases are not exported', () => {
   ]) {
     assert.equal(nativeTest[name], undefined, name);
   }
+});
+
+test('a prompt-mode test shot plans one 2-3 s line with no audio file', () => {
+  const action = buildNativeTestAction(promptActionInput());
+
+  assert.equal(action.schema, 'comfyrizz.native-test/v1');
+  assert.equal(action.kind, 'native_test_shot');
+  assert.equal(action.id, 'act_voice_audition');
+  assert.equal(action.shotId, 'shot_voice');
+  assert.equal(action.state, 'planned');
+  assert.equal(action.approvalRequired, true);
+  assert.equal(action.autoDispatch, false);
+  assert.equal(action.approved, false);
+
+  assert.equal(action.voicePath, 'prompt');
+  assert.deepEqual(action.voice, {
+    description: DESCRIPTION,
+    seed: derivedSeed(CHARACTER_ID, DESCRIPTION),
+  });
+  assert.equal(action.language, 'en-us');
+  assert.equal(action.durationSeconds, 2.5);
+  assert.equal(action.line.text, LINE.text);
+  assert.equal(action.line.language, 'en-us');
+
+  assert.equal(action.file, undefined);
+  assert.equal(action.audio, undefined);
+  assert.equal(action.audioFile, undefined);
+  assert.equal(action.path, undefined);
+  assert.doesNotMatch(JSON.stringify(action), /\.wav/);
+
+  assert.ok(Array.isArray(action.warnings));
+  assert.ok(action.warnings.includes('PROMPT_VOICE_AUDITION_REQUIRED'));
+  assert.equal(Object.isFrozen(action), true);
+  assert.equal(Object.isFrozen(action.voice), true);
+});
+
+test('an explicit seed is pinned, and changing it changes the audition hash', () => {
+  const first = buildNativeTestAction(promptActionInput({
+    voice: promptVoice({ seed: 314159 }),
+  }));
+  const second = buildNativeTestAction(promptActionInput({
+    voice: promptVoice({ seed: 314160 }),
+  }));
+
+  assert.equal(first.voice.seed, 314159);
+  assert.equal(second.voice.seed, 314160);
+  assert.notEqual(first.voiceHash, second.voiceHash);
+  assert.equal(first.voiceHash, audition.promptVoiceHash({
+    characterId: CHARACTER_ID,
+    voice: promptVoice({ seed: 314159 }),
+  }));
+});
+
+test('the character voice h3Mode selects prompt mode when there is no override', () => {
+  const action = buildNativeTestAction(promptActionInput({ h3VoiceMode: undefined }));
+  assert.equal(action.voicePath, 'prompt');
+  assert.equal(action.voice.description, DESCRIPTION);
+});
+
+test('the production h3VoiceMode override selects prompt mode', () => {
+  const action = buildNativeTestAction(promptActionInput({
+    voice: promptVoice({ h3Mode: 'clip' }),
+    h3VoiceMode: 'prompt',
+  }));
+  assert.equal(action.voicePath, 'prompt');
+  assert.deepEqual(action.voice, {
+    description: DESCRIPTION,
+    seed: derivedSeed(CHARACTER_ID, DESCRIPTION),
+  });
+});
+
+test('the English voice description can speak a line in another language', () => {
+  const action = buildNativeTestAction(promptActionInput({
+    line: { text: 'Le toit est lourd.', language: 'fr-fr' },
+  }));
+  assert.equal(action.language, 'en-us');
+  assert.equal(action.line.language, 'fr-fr');
+  assert.equal(action.voice.description, DESCRIPTION);
+});
+
+test('clip mode on a prompt-only H3 model is refused instead of silently prompting', () => {
+  const error = refusal(() => buildNativeTestAction(promptActionInput({ h3VoiceMode: 'clip' })));
+  assert.equal(error.code, 'NATIVE_TEST_AUDIO_REQUIRED');
+  assert.equal(error.field, 'audio');
+});
+
+test('native wins over prompt on a model that declares both, as the voice contract says', () => {
+  const both = {
+    id: 'both',
+    capabilities: {
+      supportsNativeVoice: true,
+      promptVoice: true,
+      nativeVoices: [{ id: 'minimax-narrator', language: 'en-us' }],
+      defaultNativeVoice: 'minimax-narrator',
+    },
+  };
+  const action = buildNativeTestAction(promptActionInput({ model: both }));
+  assert.equal(action.voicePath, 'native');
+  assert.equal(action.voice, 'minimax-narrator');
+});
+
+test('a model without prompt voice support is refused for a prompt-mode plan', () => {
+  const error = refusal(() => buildNativeTestAction(promptActionInput({ model: CPU_MODEL })));
+  assert.equal(error.code, 'NATIVE_TEST_PROMPT_UNSUPPORTED');
+  assert.equal(error.field, 'model');
+});
+
+test('prompt mode requires the character id and description that pin the voice', () => {
+  assert.throws(
+    () => buildNativeTestAction(promptActionInput({ characterId: undefined })),
+    (error) => error.code === 'NATIVE_TEST_CHARACTER_ID',
+  );
+  assert.throws(
+    () => buildNativeTestAction(promptActionInput({ voice: promptVoice({ voiceDescription: undefined }) })),
+    (error) => error.code === 'PLAN_H3_NO_VOICE_DESCRIPTION',
+  );
+});
+
+test('an audio file is refused in prompt mode: the plan needs no clip', () => {
+  for (const patch of [
+    { audio: 'voice_ref' },
+    { audioFile: 'refs/voice.wav' },
+    { line: { ...LINE, audio: 'voice_ref' } },
+    { voice: promptVoice({ voiceClip: 'refs/voice.wav' }) },
+  ]) {
+    const error = refusal(() => buildNativeTestAction(promptActionInput(patch)));
+    assert.ok(
+      error.code === 'NATIVE_TEST_AUDIO_FORBIDDEN' || error.code === 'NATIVE_TEST_LINE_AUDIO',
+      `${error.code} should refuse the prompt-mode audio input`,
+    );
+  }
+});
+
+test('voice-cloning payloads are still refused by the prompt-mode test shot', () => {
+  for (const patch of [
+    { clone: { sample: 'x' } },
+    { voice: promptVoice({ referenceAudio: 'sample.wav' }) },
+    { voice: promptVoice({ embedding: [0.1, 0.2] }) },
+    { line: { ...LINE, referenceSample: 'sample.wav' } },
+  ]) {
+    assert.throws(
+      () => buildNativeTestAction(promptActionInput(patch)),
+      (error) => error.code === 'VOICE_CLONE_FORBIDDEN',
+    );
+  }
+});
+
+test('real-person descriptions are refused on the prompt voice path', () => {
+  for (const voiceDescription of [
+    'A calm storyteller inspired by Morgan Freeman.',
+    'Imitate a famous movie trailer announcer.',
+  ]) {
+    const error = refusal(() => buildNativeTestAction(promptActionInput({
+      voice: promptVoice({ voiceDescription }),
+    })));
+    assert.equal(error.code, 'VOICE_DESCRIPTION_REAL_PERSON');
+  }
+});
+
+test('ASR findings still apply to a prompt-mode take and never approve it', () => {
+  const action = buildNativeTestAction(promptActionInput());
+  const mismatch = reviewNativeTestTranscript({
+    line: action.line,
+    transcript: { text: 'Roof heavy. Bear expansive.', language: 'en-us' },
+  });
+  assert.equal(mismatch.approved, false);
+  assert.equal(mismatch.verdict, 'unreviewed');
+  assert.equal(mismatch.requiresUserReview, true);
+  assert.ok(mismatch.findings.some((finding) => finding.code === 'ASR_MISMATCH'));
+
+  const missing = reviewNativeTestTranscript({ line: action.line, transcript: null });
+  assert.ok(missing.findings.some((finding) => finding.code === 'ASR_TRANSCRIPT_MISSING'));
+
+  const clean = reviewNativeTestTranscript({
+    line: action.line,
+    transcript: { text: 'Roof heavy, bear expensive!', language: 'en-us' },
+  });
+  assert.deepEqual(clean.findings, []);
+  assert.equal(clean.approved, false);
+  assert.equal(clean.verdict, 'unreviewed');
+});
+
+test('the prompt audition plans without audio and without calling a synthesizer', async () => {
+  let synthCalls = 0;
+  const cache = {
+    async ensure() {
+      synthCalls += 1;
+      throw new Error('a prompt audition must not synthesize an audio file');
+    },
+    async supportsEngine() {
+      return true;
+    },
+  };
+  const worker = audition.createAuditionWorker({ cache, model: H3_MODEL });
+  const result = await worker.run({
+    character: { id: CHARACTER_ID, voice: promptVoice() },
+    voice: promptVoice(),
+    line: LINE.text,
+    model: H3_MODEL,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, audition.AUDITION_PROMPT_PLANNED);
+  assert.equal(result.voicePath, 'prompt');
+  assert.deepEqual(result.voice, {
+    description: DESCRIPTION,
+    seed: derivedSeed(CHARACTER_ID, DESCRIPTION),
+  });
+  assert.equal(result.line, LINE.text);
+  assert.ok(result.durationSeconds >= 2 && result.durationSeconds <= 3);
+  assert.equal(result.approved, false);
+  assert.equal(result.approvalRequired, true);
+  assert.equal(result.autoDispatch, false);
+  assert.equal(result.file, undefined);
+  assert.equal(result.path, undefined);
+  assert.equal(result.url, undefined);
+  assert.equal(synthCalls, 0);
+});
+
+test('a prompt audition is never auto-approved; only an explicit user approval records the hash', () => {
+  const plan = audition.planPromptVoiceAudition({
+    characterId: CHARACTER_ID,
+    voice: promptVoice(),
+    line: LINE.text,
+    model: H3_MODEL,
+  });
+  assert.equal(plan.state, 'planned');
+  assert.equal(plan.approved, false);
+  assert.equal(plan.approvalRequired, true);
+  assert.equal(plan.autoDispatch, false);
+  assert.equal(plan.file, undefined);
+
+  const agent = refusal(() => audition.approvePromptVoiceAudition({
+    characterId: CHARACTER_ID,
+    voice: promptVoice(),
+    line: LINE.text,
+    approvedBy: 'agent',
+  }));
+  assert.equal(agent.code, 'AUDITION_APPROVAL_USER_ONLY');
+
+  const approval = audition.approvePromptVoiceAudition({
+    characterId: CHARACTER_ID,
+    voice: promptVoice(),
+    line: LINE.text,
+    approvedBy: 'user',
+  });
+  assert.equal(approval.approved, true);
+  assert.equal(approval.approvedBy, 'user');
+  assert.equal(approval.voiceHash, plan.voiceHash);
+  assert.equal(approval.audition.voiceHash, plan.voiceHash);
+  assert.equal(approval.audition.line, LINE.text);
+  assert.equal(approval.file, undefined);
+});
+
+test('changing the description or the seed makes an approved audition stale', () => {
+  const voice = promptVoice();
+  const approval = audition.approvePromptVoiceAudition({
+    characterId: CHARACTER_ID,
+    voice,
+    line: LINE.text,
+    approvedBy: 'user',
+  });
+
+  const fresh = audition.promptVoiceAuditionStatus({
+    characterId: CHARACTER_ID,
+    voice,
+    audition: approval.audition,
+  });
+  assert.equal(fresh.state, 'approved');
+  assert.equal(fresh.approved, true);
+  assert.equal(fresh.stale, false);
+  assert.equal(fresh.currentVoiceHash, approval.voiceHash);
+
+  const descriptionChanged = audition.promptVoiceAuditionStatus({
+    characterId: CHARACTER_ID,
+    voice: promptVoice({ voiceDescription: OTHER_DESCRIPTION }),
+    audition: approval.audition,
+  });
+  assert.equal(descriptionChanged.state, 'stale');
+  assert.equal(descriptionChanged.stale, true);
+  assert.equal(descriptionChanged.approved, false);
+
+  const seedChanged = audition.promptVoiceAuditionStatus({
+    characterId: CHARACTER_ID,
+    voice: promptVoice({ seed: 7 }),
+    audition: approval.audition,
+  });
+  assert.equal(seedChanged.state, 'stale');
+  assert.equal(seedChanged.approved, false);
+
+  const lineChanged = audition.promptVoiceAuditionStatus({
+    characterId: CHARACTER_ID,
+    voice,
+    audition: { ...approval.audition, line: 'A different line.' },
+  });
+  assert.equal(lineChanged.state, 'approved', 'the line is not part of the voice identity hash');
+});
+
+test('an approved audition clears the plan warning; a later voice edit makes it stale', () => {
+  const voice = promptVoice();
+  const approval = audition.approvePromptVoiceAudition({
+    characterId: CHARACTER_ID,
+    voice,
+    line: LINE.text,
+    approvedBy: 'user',
+  });
+
+  const approved = buildNativeTestAction(promptActionInput({
+    voice,
+    audition: approval.audition,
+  }));
+  assert.deepEqual(approved.warnings, []);
+
+  const stale = buildNativeTestAction(promptActionInput({
+    voice: promptVoice({ voiceDescription: OTHER_DESCRIPTION }),
+    audition: approval.audition,
+  }));
+  assert.deepEqual(stale.warnings, ['PROMPT_VOICE_AUDITION_STALE']);
+});
+
+test('a missing approval is reported and blocks dispatch', () => {
+  const status = audition.promptVoiceAuditionStatus({
+    characterId: CHARACTER_ID,
+    voice: promptVoice(),
+  });
+  assert.equal(status.state, 'missing');
+  assert.equal(status.approved, false);
+  assert.equal(status.stale, false);
+
+  assert.throws(
+    () => audition.assertPromptVoiceAuditionApproved({
+      characterId: CHARACTER_ID,
+      voice: promptVoice(),
+    }),
+    (error) => error.code === 'PROMPT_VOICE_AUDITION_REQUIRED',
+  );
+
+  const approval = audition.approvePromptVoiceAudition({
+    characterId: CHARACTER_ID,
+    voice: promptVoice(),
+    line: LINE.text,
+    approvedBy: 'user',
+  });
+  assert.throws(
+    () => audition.assertPromptVoiceAuditionApproved({
+      characterId: CHARACTER_ID,
+      voice: promptVoice({ seed: 9 }),
+      audition: approval.audition,
+    }),
+    (error) => error.code === 'PROMPT_VOICE_AUDITION_STALE',
+  );
+});
+
+test('the prompt audition refuses cloning payloads and real-person descriptions', () => {
+  const clone = refusal(() => audition.planPromptVoiceAudition({
+    characterId: CHARACTER_ID,
+    voice: promptVoice({ referenceAudio: 'sample.wav' }),
+    line: LINE.text,
+    model: H3_MODEL,
+  }));
+  assert.equal(clone.code, 'VOICE_CLONE_FORBIDDEN');
+
+  const realPerson = refusal(() => audition.planPromptVoiceAudition({
+    characterId: CHARACTER_ID,
+    voice: promptVoice({ voiceDescription: 'Warm and playful, like Oprah.' }),
+    line: LINE.text,
+    model: H3_MODEL,
+  }));
+  assert.equal(realPerson.code, 'VOICE_DESCRIPTION_REAL_PERSON');
+});
+
+test('the prompt mode constants are exported and no renderer code is involved', () => {
+  assert.equal(audition.VOICE_AUDITION_SCHEMA, 'comfyrizz.voice-audition/v1');
+  assert.equal(audition.VOICE_AUDITION_KIND, 'prompt_voice_audition');
+  assert.equal(audition.AUDITION_PROMPT_PLANNED, 'AUDITION_PROMPT_PLANNED');
+  assert.equal(audition.PROMPT_VOICE_AUDITION_REQUIRED, 'PROMPT_VOICE_AUDITION_REQUIRED');
+  assert.equal(audition.PROMPT_VOICE_AUDITION_STALE, 'PROMPT_VOICE_AUDITION_STALE');
+  assert.equal(nativeTest.NATIVE_TEST_PROMPT_UNSUPPORTED, 'NATIVE_TEST_PROMPT_UNSUPPORTED');
+  assert.equal(nativeTest.NATIVE_TEST_AUDIO_REQUIRED, 'NATIVE_TEST_AUDIO_REQUIRED');
 });
