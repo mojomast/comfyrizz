@@ -13,7 +13,9 @@ import { mountEasyStudio } from './easy/mount.ts';
 import { approveAndGenerate } from './easy/approve-generate.ts';
 import { createEasyApi } from './easy/api.ts';
 import { defaultEasyState } from './easy/store.ts';
-import type { EasyState } from './easy/types.ts';
+import { ideaPrompt } from './easy/idea-prompt.ts';
+import { bindQuestions, renderQuestions } from './easy/steps/questions.ts';
+import type { EasyQuestion, EasyState } from './easy/types.ts';
 import { mountInspectorGenerate } from './editor/inspector/generate.ts';
 import { mountProductionTab } from './editor/inspector/production.ts';
 import { mountSettingsDialog } from './settings/dialog.ts';
@@ -2149,41 +2151,12 @@ async function exportMp4(overrideReason?: string): Promise<void> {
   }
 }
 
-function briefToPrompt(brief: Record<string, unknown>): string {
-  const audience = (brief.audience ?? {}) as { who?: string; language?: string };
-  const style = (brief.style ?? {}) as { preset?: string; palette?: string[] };
-  const voice = (brief.voice ?? {}) as { engine?: string; persona?: string };
-  const music = (brief.music ?? {}) as { enabled?: boolean; mood?: string };
-  const tone = Array.isArray(brief.tone) ? (brief.tone as string[]).join(', ') : '';
-  const mustInclude = Array.isArray(brief.must_include) ? (brief.must_include as string[]) : [];
-  const avoid = Array.isArray(brief.avoid) ? (brief.avoid as string[]) : [];
-  return [
-    String(brief.key_message ?? ''),
-    `Goal: ${brief.goal ?? 'launch'}.`,
-    `Audience: ${audience.who ?? 'developers'} (${audience.language ?? 'en'}).`,
-    brief.length_s ? `Length: about ${brief.length_s} seconds.` : '',
-    brief.aspect ? `Aspect: ${brief.aspect}.` : '',
-    tone ? `Tone: ${tone}.` : '',
-    style.preset ? `Look: ${style.preset}${style.palette?.length ? ` (palette ${style.palette.join(' ')})` : ''}.` : '',
-    voice.persona ? `Narration (${voice.engine ?? 'kokoro'}): ${voice.persona}.` : 'No narration.',
-    music.enabled ? `Music: ${music.mood ?? 'instrumental bed'}.` : 'No music.',
-    brief.presenter && brief.presenter !== 'none' ? `Presenter: ${brief.presenter === 'all' ? 'every scene' : 'intro and outro'} (opt-in).` : '',
-    brief.cta ? `End with: ${brief.cta}.` : '',
-    mustInclude.length ? `Must include: ${mustInclude.join(', ')}.` : '',
-    avoid.length ? `Avoid: ${avoid.join(', ')}.` : '',
-  ].filter(Boolean).join(' ');
-}
-
-const WEB_STYLE_PRESETS = ['clay', 'glass', 'editorial-flat', 'isometric-tech', 'paper-cut', 'cinematic-dark'];
-const WEB_ASPECTS = ['16:9', '9:16', '1:1'];
-// R2 step 5: the per-scene fixed edit chips (kept in sync with packages/agent SCENE_CHIPS).
 const WEB_SCENE_CHIPS: { id: string; label: string; hint: string }[] = [
   { id: 'warmer', label: 'Warmer', hint: 'Warm this scene’s palette' },
   { id: 'calmer-motion', label: 'Calmer', hint: 'Soften entrances to a fade' },
   { id: 'more-depth', label: 'More detail', hint: 'Parallax + z on the overlay' },
   { id: 'less-busy', label: 'Simpler', hint: 'Trim bullets and overlays' },
 ];
-// C-pres: the presenter controls, kept in sync with packages/agent presenter.ts.
 const WEB_PRESENTER_COVERAGES: { id: string; label: string; hint: string }[] = [
   { id: 'none', label: 'None', hint: 'Off by default — most videos have none' },
   { id: 'bookends', label: 'Intro + outro', hint: 'Show the presenter on the first and last scene' },
@@ -2191,112 +2164,59 @@ const WEB_PRESENTER_COVERAGES: { id: string; label: string; hint: string }[] = [
 ];
 const WEB_PRESENTER_PLACEMENTS = ['pip-br', 'pip-bl', 'pip-bc', 'split-left'];
 
-/** Read a dotted path (`audience.who`) out of the brief as a string. */
-function briefValue(brief: Record<string, unknown>, path: string): string {
-  let value: unknown = brief;
-  for (const part of path.split('.')) value = (value as Record<string, unknown> | undefined)?.[part];
-  if (value === undefined || value === null) return '';
-  return Array.isArray(value) ? value.join(', ') : String(value);
+/** Scripted builds send the idea through the same sentence order as Easy. */
+export function composerBuildBrief(text: string, questions: EasyQuestion[] = [], answers: Record<string, string> = {}): string {
+  const state = defaultEasyState();
+  state.idea.text = text;
+  state.questions = questions;
+  state.answers = answers;
+  return ideaPrompt(state);
 }
 
-/** Merge the Brief card's inputs back into a brief object (cleared fields become undefined). */
-function readBriefCard(): Record<string, unknown> {
-  const brief = structuredClone(briefState.brief ?? {});
-  for (const input of document.querySelectorAll<HTMLInputElement | HTMLSelectElement>('#brief-panel [data-brief-field]')) {
-    const path = input.getAttribute('data-brief-field') as string;
-    const parts = path.split('.');
-    let target: Record<string, unknown> = brief;
-    for (const part of parts.slice(0, -1)) {
-      target[part] = target[part] && typeof target[part] === 'object' ? target[part] : {};
-      target = target[part] as Record<string, unknown>;
-    }
-    const raw = input.value.trim();
-    target[parts[parts.length - 1]] = raw === '' ? undefined : path === 'length_s' ? Number(raw) : raw;
-  }
-  return brief;
+function easyQuestionsFrom(questions: BriefQuestion[]): EasyQuestion[] {
+  return questions.map(question => ({
+    id: question.id,
+    field: question.field,
+    prompt: question.prompt,
+    options: question.chips,
+    decide: question.decide,
+  }));
 }
 
-function renderBriefQuestions(panel: HTMLElement): void {
-  const questions = briefState.pending.map(question => {
-    const selected = briefState.choices[question.id];
-    const chips = question.chips.map(chip =>
-      `<button type="button" data-brief-q="${esc(question.id)}" data-brief-value="${esc(chip)}" class="${selected === chip ? 'selected' : ''}">${esc(chip)}</button>`,
-    ).join('');
-    return `<div class="brief-question"><span class="q">${esc(question.prompt)}</span><div class="brief-chips">${chips}<button type="button" class="decide ${selected === undefined ? 'selected' : ''}" data-brief-q="${esc(question.id)}" data-brief-decide="1">Decide for me</button></div></div>`;
-  }).join('');
-  panel.innerHTML = `<div class="brief-head">Plan mode · answer up to ${briefState.pending.length} question(s), or let the agent decide.</div>${questions}<div class="brief-actions"><span class="hint">${briefState.busy ? 'planning…' : 'Nothing is built until you confirm.'}</span><button type="button" id="brief-apply">Looks right</button></div>`;
-  panel.querySelectorAll<HTMLButtonElement>('[data-brief-q]').forEach(button => {
-    button.addEventListener('click', () => {
-      const id = button.getAttribute('data-brief-q') as string;
-      briefState.choices[id] = button.hasAttribute('data-brief-decide') ? undefined : (button.getAttribute('data-brief-value') as string);
-      renderBriefPanel();
-    });
-  });
-  $('brief-apply').addEventListener('click', () => void resolveBrief());
-}
-
-/** Step 4: the editable Brief card plus the script-first outline with estimated seconds. */
-function renderBriefCard(panel: HTMLElement): void {
-  const brief = briefState.brief ?? {};
-  const outline = briefState.outline;
-  const field = (path: string, label: string, type = 'text') =>
-    `<label>${esc(label)}<input data-brief-field="${path}" type="${type}" value="${esc(briefValue(brief, path))}" /></label>`;
-  const select = (path: string, label: string, options: string[]) => {
-    const current = briefValue(brief, path);
-    const opts = options.map(option => `<option value="${esc(option)}" ${option === current ? 'selected' : ''}>${esc(option)}</option>`).join('');
-    return `<label>${esc(label)}<select data-brief-field="${path}">${opts}</select></label>`;
-  };
-  // R2 step 5: the six looks as CPU/SVG thumbnails. A hidden select keeps the
-  // card's form-reading code unchanged; the grid is what the owner taps.
-  const currentPreset = briefValue(brief, 'style.preset');
-  const presetIds = briefState.presets.length ? briefState.presets.map(card => card.id) : WEB_STYLE_PRESETS;
-  const presetCards: PresetCard[] = briefState.presets.length
-    ? briefState.presets
-    : presetIds.map(id => ({ id, label: id, palette: [], font: '', attributes: '', thumbnail: '' }));
-  const presetPicker = `<div class="look-picker">${presetCards.map(card => `<button type="button" class="look-option ${card.id === currentPreset ? 'selected' : ''}" data-brief-preset="${esc(card.id)}" title="${esc(card.attributes)}"><span class="look-thumb">${card.thumbnail || '<span class="look-thumb-empty" aria-hidden="true"></span>'}</span><span class="look-caption"><span class="look-label">${esc(card.label)}</span><span class="look-check" aria-hidden="true"></span></span></button>`).join('')}<select data-brief-field="style.preset" hidden>${presetIds.map(id => `<option value="${esc(id)}" ${id === currentPreset ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></div>`;
-  // C-pres: the presenter chip (off by default). Writes brief.presenter; the build maps it to
-  // package.presenter coverage. Per-scene overrides stay on the storyboard.
-  const presenterOptions: [string, string][] = [['none', 'No presenter (default)'], ['bookends', 'Intro + outro'], ['all', 'All scenes']];
-  const currentPresenter = briefValue(brief, 'presenter') || 'none';
-  const presenterPicker = `<label>Presenter<select data-brief-field="presenter">${presenterOptions.map(([value, label]) => `<option value="${value}"${value === currentPresenter ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
-  const beats = (outline?.beats ?? []).map(beat =>
-    `<li class="${beat.placeholder ? 'placeholder' : ''}"><span class="role">${esc(beat.role)}</span><strong>${esc(beat.headline)}</strong><span class="narration">${esc(beat.narration)}</span><span class="secs">${beat.seconds.toFixed(1)} s</span></li>`,
-  ).join('');
-  const summary = outline
-    ? `≈ ${outline.estimatedSeconds.toFixed(1)} s on screen · target ${outline.targetSeconds} s · ${outline.fit}`
-    : 'outline unavailable';
-  const notes = (outline?.notes ?? []).map(note => `<li>${esc(note)}</li>`).join('');
-  panel.innerHTML = `<div class="brief-head">Brief · edit anything, then build.</div>
-    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${field('voice.persona', 'Narration')}${presenterPicker}${presetPicker}${brandCard()}</div>
-    <ol class="brief-outline">${beats}</ol>
-    <div class="brief-actions"><span class="hint">${esc(summary)}</span><button type="button" id="brief-refresh" ${briefState.busy ? 'disabled' : ''}>Update outline</button><button type="button" id="brief-build" ${briefState.busy ? 'disabled' : ''}>Build video</button></div>
-    ${notes ? `<ul class="brief-notes">${notes}</ul>` : ''}`;
-  const presetSelect = panel.querySelector<HTMLSelectElement>('select[data-brief-field="style.preset"]');
-  panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
-    button.addEventListener('click', () => {
-      const id = button.getAttribute('data-brief-preset') as string;
-      if (presetSelect) presetSelect.value = id;
-      panel.querySelectorAll('[data-brief-preset]').forEach(other => other.classList.toggle('selected', other === button));
-    });
-  });
-  presetSelect?.addEventListener('change', () => {
-    panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
-      button.classList.toggle('selected', button.getAttribute('data-brief-preset') === presetSelect.value);
-    });
-  });
-  panel.querySelectorAll<HTMLInputElement>('[data-brand-field]').forEach(input => {
+function bindBrandHost(host: HTMLElement): void {
+  host.querySelectorAll<HTMLInputElement>('[data-brand-field]').forEach(input => {
     input.addEventListener('input', () => {
       (brandState as unknown as Record<string, string>)[input.getAttribute('data-brand-field') as string] = input.value.trim();
     });
   });
-  const logoInput = panel.querySelector<HTMLInputElement>('#brand-logo');
+  const logoInput = host.querySelector<HTMLInputElement>('#brand-logo');
   logoInput?.addEventListener('change', () => void readLogoFile(logoInput));
-  $('brand-save')?.addEventListener('click', () => void saveBrand());
-  $('brief-refresh').addEventListener('click', () => void refreshBriefOutline());
-  $('brief-build').addEventListener('click', () => void buildFromCard());
+  host.querySelector('#brand-save')?.addEventListener('click', () => void saveBrand());
 }
 
-/** B1: the optional brand-kit section of the Brief card. */
+function renderBrandKit(): void {
+  const host = document.getElementById('brand-kit-host');
+  if (!host) return;
+  host.innerHTML = brandCard();
+  bindBrandHost(host);
+}
+
+function showQuestionBlock(): void {
+  document.getElementById('composer-questions')?.remove();
+  if (briefState.pending.length === 0) return;
+  const host = document.createElement('div');
+  host.id = 'composer-questions';
+  const questions = easyQuestionsFrom(briefState.pending);
+  host.innerHTML = renderQuestions(questions, briefState.choices as Record<string, string>);
+  $('messages').append(host);
+  bindQuestions(host, {
+    onChange: answers => {
+      briefState.choices = answers;
+    },
+  });
+}
+
+/** B1: the optional brand-kit section, kept behind the composer disclosure. */
 function brandCard(): string {
   const kit = brandState.kit;
   const swatches = Array.isArray(kit?.palette)
@@ -2305,9 +2225,7 @@ function brandCard(): string {
   const warnings = brandState.warnings.length
     ? `<ul class="brief-notes">${brandState.warnings.map(warning => `<li>${esc(warning.message)}</li>`).join('')}</ul>`
     : '';
-  return `<details class="brief-brand" ${kit ? 'open' : ''}>
-    <summary>Brand kit ${kit ? '· applied' : '· optional'}</summary>
-    <div class="brief-brand-grid">
+  return `<div class="brief-brand-grid">
       <label>Palette hexes<input data-brand-field="palette" value="${esc(brandState.palette)}" placeholder="#0d0f14, #6d8cff" /></label>
       <label>Font family<input data-brand-field="fontFamily" value="${esc(brandState.fontFamily)}" placeholder="Söhne" /></label>
       <label>Font file<input data-brand-field="fontFile" value="${esc(brandState.fontFile)}" placeholder="assets/brand/soehne.woff2" /></label>
@@ -2315,11 +2233,10 @@ function brandCard(): string {
       <label>Tone words<input data-brand-field="tone" value="${esc(brandState.tone)}" placeholder="bold, warm" /></label>
       <label>Logo (SVG/PNG)<input type="file" id="brand-logo" accept=".svg,.png,.jpg,.jpeg" /></label>
     </div>
-    <div class="brief-brand-actions"><button type="button" id="brand-save" ${brandState.busy ? 'disabled' : ''}>Save brand kit</button><span class="hint">${brandState.logoName ? `logo: ${esc(brandState.logoName)}` : 'Palette and font flow into the brief and every generated style block.'}</span></div>
-    ${swatches}${warnings}</details>`;
+    <div class="brief-brand-actions"><button type="button" id="brand-save" ${brandState.busy ? 'disabled' : ''}>Save brand kit</button><span class="hint">${brandState.logoName ? `logo: ${esc(brandState.logoName)}` : 'Palette and font flow into every generated style block.'}</span></div>
+    ${swatches}${warnings}`;
 }
 
-/** Stage an uploaded logo as base64 (the server writes the asset). */
 async function readLogoFile(input: HTMLInputElement): Promise<void> {
   const file = input.files?.[0];
   if (!file) return;
@@ -2334,10 +2251,9 @@ async function readLogoFile(input: HTMLInputElement): Promise<void> {
   brandState.logoDataBase64 = btoa(binary);
   brandState.logoAssetId = '';
   logActivity(`Brand logo staged: ${file.name}`);
-  renderBriefPanel();
+  renderBrandKit();
 }
 
-/** POST the loose kit to `/api/brand` to preview the normalised theme + warnings. */
 async function saveBrand(): Promise<void> {
   if (brandState.busy) return;
   const brand = brandPayload();
@@ -2346,7 +2262,7 @@ async function saveBrand(): Promise<void> {
     return;
   }
   brandState.busy = true;
-  renderBriefPanel();
+  renderBrandKit();
   try {
     const response = await apiFetch('/api/brand', {
       method: 'POST',
@@ -2363,19 +2279,7 @@ async function saveBrand(): Promise<void> {
     logActivity(`Brand kit failed: ${(error as Error).message}`);
   }
   brandState.busy = false;
-  renderBriefPanel();
-}
-
-function renderBriefPanel(): void {
-  const panel = $('brief-panel');
-  if (briefState.pending.length === 0 && !briefState.brief) {
-    panel.hidden = true;
-    panel.innerHTML = '';
-    return;
-  }
-  panel.hidden = false;
-  if (briefState.pending.length > 0) renderBriefQuestions(panel);
-  else renderBriefCard(panel);
+  renderBrandKit();
 }
 
 async function requestBrief(prompt: string, decisions?: Record<string, string | undefined>): Promise<BriefPlan> {
@@ -2389,43 +2293,6 @@ async function requestBrief(prompt: string, decisions?: Record<string, string | 
   return body as BriefPlan;
 }
 
-/** POST the edited card to `/api/brief/outline` and re-render with fresh beats. */
-async function refreshBriefOutline(): Promise<void> {
-  if (briefState.busy) return;
-  briefState.brief = readBriefCard();
-  briefState.busy = true;
-  renderBriefPanel();
-  try {
-    const response = await apiFetch('/api/brief/outline', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ brief: briefState.brief, ...(brandPayload() ? { brand: brandPayload() } : {}) }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-    briefState.brief = (body as BriefPlan).brief;
-    briefState.outline = (body as BriefPlan).outline ?? null;
-    if ((body as BriefPlan).presets?.length) briefState.presets = (body as BriefPlan).presets as PresetCard[];
-    logActivity(`Outline updated: ${briefState.outline?.beats.length ?? 0} beat(s), ≈ ${briefState.outline?.estimatedSeconds ?? 0} s`);
-  } catch (error) {
-    logActivity(`Outline refresh failed: ${(error as Error).message}`);
-  }
-  briefState.busy = false;
-  renderBriefPanel();
-}
-
-async function buildFromCard(): Promise<void> {
-  if (briefState.busy) return;
-  const brief = readBriefCard();
-  briefState.brief = brief;
-  briefState.pending = [];
-  logActivity('Plan mode: brief confirmed, building');
-  await runBrief(briefToPrompt(brief));
-  briefState.brief = null;
-  briefState.outline = null;
-  renderBriefPanel();
-}
-
 async function planBriefFlow(text: string): Promise<void> {
   briefState.busy = true;
   $('composer-hint').textContent = 'planning the brief…';
@@ -2433,47 +2300,44 @@ async function planBriefFlow(text: string): Promise<void> {
     const plan = await requestBrief(text);
     briefState.prompt = text;
     if (plan.presets?.length) briefState.presets = plan.presets;
-    if (plan.complete) {
+    if (plan.complete || plan.questions.length === 0) {
       briefState.pending = [];
-      briefState.brief = plan.brief;
-      briefState.outline = plan.outline ?? null;
-      renderBriefPanel();
+      document.getElementById('composer-questions')?.remove();
       logActivity('Plan mode: brief ready to review');
+      await runBrief(composerBuildBrief(text));
       return;
     }
     briefState.pending = plan.questions;
     briefState.choices = {};
     briefState.brief = null;
     briefState.outline = null;
-    renderBriefPanel();
+    showQuestionBlock();
     logActivity(`Plan mode: ${plan.questions.length} question(s) to confirm`);
   } catch (error) {
     logActivity(`Plan mode failed: ${(error as Error).message}`);
-    await runBrief(text);
+    await runBrief(composerBuildBrief(text));
   } finally {
     briefState.busy = false;
     $('composer-hint').textContent = 'Enter to send · keys stay on the server';
-    renderBriefPanel();
   }
 }
 
 async function resolveBrief(): Promise<void> {
   if (briefState.busy || briefState.pending.length === 0) return;
   briefState.busy = true;
-  renderBriefPanel();
   try {
-    const plan = await requestBrief(briefState.prompt, briefState.choices);
+    const questions = easyQuestionsFrom(briefState.pending);
+    const answers = briefState.choices as Record<string, string>;
+    await requestBrief(briefState.prompt, briefState.choices);
+    const text = briefState.prompt;
     briefState.pending = [];
-    briefState.brief = plan.brief;
-    briefState.outline = plan.outline ?? null;
-    if (plan.presets?.length) briefState.presets = plan.presets;
-    renderBriefPanel();
-    logActivity('Plan mode: brief ready to review');
+    document.getElementById('composer-questions')?.remove();
+    logActivity('Plan mode: brief confirmed, building');
+    await runBrief(composerBuildBrief(text, questions, answers));
   } catch (error) {
     logActivity(`Plan mode failed: ${(error as Error).message}`);
   }
   briefState.busy = false;
-  renderBriefPanel();
 }
 
 function appendChatMessage(role: 'user' | 'assistant', text: string): void {
@@ -2513,7 +2377,7 @@ function adoptChatProject(project: ChatProject, built: boolean): void {
     briefState.brief = null;
     briefState.pending = [];
     briefState.outline = null;
-    renderBriefPanel();
+    document.getElementById('composer-questions')?.remove();
   }
 }
 
@@ -2579,7 +2443,7 @@ function init(opened: OpenedProject): void {
   renderRunPanel();
   renderExportPanel();
   renderSpendCard();
-  renderBriefPanel();
+  renderBrandKit();
 
   const modeControl = mountModeToggle();
   if (modeControl) {
@@ -3197,7 +3061,7 @@ function init(opened: OpenedProject): void {
     renderMessages();
     $('messages').scrollTop = $('messages').scrollHeight;
     if (briefMode === 'plan' && token) void planBriefFlow(text);
-    else void runBrief(text);
+    else void runBrief(composerBuildBrief(text));
   });
 
   if (token) void refreshClips();

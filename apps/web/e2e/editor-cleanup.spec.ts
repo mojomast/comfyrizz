@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { defaultEasyState } from '../src/easy/store.ts';
+import { ideaPrompt } from '../src/easy/idea-prompt.ts';
 
 const source = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
 const indexHtml = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8');
@@ -120,4 +122,21 @@ test('with the timeline visible, one Play button is visible', async ({ page }) =
   await expect(page.locator('#play')).toBeHidden();
   await expect(page.locator('#scrub')).toBeHidden();
   await expect(page.locator('#time')).toBeHidden();
+});
+
+test('the composer has no brief card and the scripted build uses the idea words', async ({ page }) => {
+  expect(source).not.toContain('data-brief-card');
+  expect(source).not.toContain('function briefToPrompt');
+  expect(source).not.toContain('function renderBriefCard');
+  expect(source).not.toContain('function readBriefCard');
+  expect(source).not.toContain('function buildFromCard');
+  expect(source).toContain('runBrief(composerBuildBrief(text))');
+  expect(source).toContain('return ideaPrompt(state)');
+  expect(indexHtml).not.toContain('data-brief-card');
+  const state = defaultEasyState();
+  state.idea.text = 'Crumb & Co opens at dawn';
+  expect(ideaPrompt(state)).toContain('Crumb & Co opens at dawn');
+  await page.setContent(indexHtml);
+  await expect(page.locator('[data-brief-card]')).toHaveCount(0);
+  await expect(page.locator('#brand-kit > summary')).toHaveText('Brand kit');
 });
