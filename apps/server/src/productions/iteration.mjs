@@ -448,7 +448,10 @@ export function pickForShot(raw, stageName, shotId, shots) {
   if (!STAGE_NAMES.has(stageName)) {
     throw new TypeError(`stageName must be one of ${ITERATION_STAGES.join(', ')}`);
   }
+  // The shot list is checked for every stage and pick, so an unknown shot or a
+  // malformed list is always a TypeError, not only when the pick is 'hero'.
+  const hero = isHeroShot(shotId, shots);
   const pick = effectivePolicyForShot(raw, shotId).stages[stageName].pick;
   if (pick !== 'hero') return pick;
-  return isHeroShot(shotId, shots) ? 'ask' : 'auto';
+  return hero ? 'ask' : 'auto';
 }

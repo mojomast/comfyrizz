@@ -627,5 +627,9 @@ test('pickForShot reads a hero shot override and refuses malformed input', () =>
   assert.equal(pickForShot(overridden, 'video', 'shot_b', shots), 'auto');
 
   assert.throws(() => pickForShot(policy(), 'video', 'unknown', shots), TypeError);
+  assert.throws(() => pickForShot(ITERATION_PRESETS.director, 'video', 'unknown', shots), TypeError,
+    'an explicit ask pick still refuses an unknown shot');
+  assert.throws(() => pickForShot(ITERATION_PRESETS.draft, 'voice', 'shot_a', null), TypeError,
+    'an explicit auto pick still refuses a malformed shot list');
   assert.throws(() => pickForShot(policy(), 'audio', 'shot_a', shots), TypeError);
 });

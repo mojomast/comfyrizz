@@ -85,7 +85,7 @@ test('low is the first round, expected is every round, and high adds the margin 
     policy: policy({
       stages: {
         script: stage({ takes: 1, rounds: 1 }),
-        voice: stage({ takes: 1, rounds: 1 }),
+        voice: stage({ takes: 1, rounds: 1, linesPerVoice: 1 }),
         keyframe: stage({ takes: 1, rounds: 1, auditions: 2 }),
         video: stage({ takes: 2, rounds: 2 }),
       },
