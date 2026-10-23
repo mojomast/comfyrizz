@@ -84,6 +84,42 @@ export interface CharacterAudition {
   line?: string;
 }
 
+/** The speaking path is decided by the server audition response, never by the browser. */
+export type AuditionVoicePath = 'native' | 'kokoro' | 'unknown';
+
+export interface AuditionRequest {
+  characterId: string;
+  line?: string;
+  nativeVoice?: string;
+  language?: string;
+  signal?: AbortSignal;
+}
+
+export interface AuditionOutcome {
+  ok: boolean;
+  status: number;
+  code: string;
+  message: string;
+  voicePath: AuditionVoicePath;
+  voice?: string;
+  engine?: string;
+  language?: string;
+  line?: string;
+  file?: string;
+  filename?: string;
+  url?: string;
+  ticket?: string;
+  expiresAt?: string;
+  contentType?: string;
+  voiceHash?: string;
+  cached?: boolean;
+}
+
+export interface UpdateCharacterOptions extends RequestOptions {
+  /** CAS base. Sent as If-Match so a stale editor cannot overwrite a newer revision. */
+  revision?: number;
+}
+
 export interface CharacterVoice {
   engine: VoiceEngine;
   voice?: string;
@@ -296,6 +332,67 @@ async function blobBody(response: Response): Promise<Blob> {
   return await response.blob();
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function serverVoicePath(
+  record: Record<string, unknown>,
+  status: number,
+  ok: boolean,
+): AuditionVoicePath {
+  if (record.voicePath === 'native' || record.voicePath === 'kokoro') return record.voicePath;
+  if (record.code === 'AUDITION_NATIVE_VOICE') return 'native';
+  if (ok && status >= 200 && status < 300
+    && (typeof record.file === 'string' || typeof record.url === 'string')) {
+    return 'kokoro';
+  }
+  return 'unknown';
+}
+
+function normalizeAuditionResponse(
+  status: number,
+  body: Record<string, unknown>,
+): AuditionOutcome {
+  const ok = status >= 200 && status < 300 && body.ok !== false;
+  const code = typeof body.code === 'string' && body.code
+    ? body.code
+    : ok ? 'AUDITION_READY' : 'AUDITION_FAILED';
+  const message = typeof body.message === 'string' && body.message
+    ? body.message
+    : typeof body.error === 'string' && body.error
+      ? body.error
+      : ok ? '' : `HTTP ${status}`;
+  const outcome: AuditionOutcome = {
+    ok,
+    status,
+    code,
+    message,
+    voicePath: serverVoicePath(body, status, ok),
+  };
+  const target = outcome as unknown as Record<string, unknown>;
+  for (const field of [
+    'voice',
+    'engine',
+    'language',
+    'line',
+    'file',
+    'filename',
+    'url',
+    'ticket',
+    'expiresAt',
+    'contentType',
+    'voiceHash',
+  ]) {
+    const value = body[field];
+    if (typeof value === 'string' && value) target[field] = value;
+  }
+  if (typeof body.cached === 'boolean') outcome.cached = body.cached;
+  return outcome;
+}
+
 function signalInit(options?: RequestOptions): RequestInit {
   return options?.signal ? { signal: options.signal } : {};
 }
@@ -340,9 +437,18 @@ export function createCharacterApi(options: { apiFetch: CharacterApiFetch }) {
   async function update(
     id: string,
     patch: CharacterPatch,
-    updateOptions?: RequestOptions,
+    updateOptions?: UpdateCharacterOptions,
   ): Promise<Character> {
-    const response = await apiFetch(characterPath(id), jsonInit('PATCH', patch, updateOptions));
+    const { revision, ...requestOptions } = updateOptions ?? {};
+    const init = jsonInit('PATCH', patch, requestOptions);
+    if (Number.isSafeInteger(revision) && Number(revision) > 0) {
+      init.headers = {
+        ...(init.headers as Record<string, string>),
+        'if-match': String(revision),
+        'x-character-revision': String(revision),
+      };
+    }
+    const response = await apiFetch(characterPath(id), init);
     return await jsonBody<Character>(response);
   }
 
@@ -505,6 +611,51 @@ export function createCharacterApi(options: { apiFetch: CharacterApiFetch }) {
     return await jsonBody<RemoveCastResult>(response);
   }
 
+  /**
+   * One non-throwing audition call. The response is the only source of the
+   * speaking path: a 409 AUDITION_NATIVE_VOICE means native, a 200 with a wave
+   * means Kokoro, and anything else stays unknown.
+   */
+  async function requestAudition(request: AuditionRequest): Promise<AuditionOutcome> {
+    if (!request || typeof request.characterId !== 'string' || !request.characterId) {
+      return {
+        ok: false,
+        status: 0,
+        code: 'AUDITION_INVALID_REQUEST',
+        message: 'characterId is required for an audition',
+        voicePath: 'unknown',
+      };
+    }
+    const payload: Record<string, unknown> = {};
+    if (request.line !== undefined) payload.line = request.line;
+    if (request.nativeVoice !== undefined) payload.nativeVoice = request.nativeVoice;
+    if (request.language !== undefined) payload.language = request.language;
+    let response: Response;
+    try {
+      response = await apiFetch(
+        characterPath(request.characterId, '/audition'),
+        jsonInit('POST', payload, request.signal ? { signal: request.signal } : undefined),
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        status: 0,
+        code: 'AUDITION_REQUEST_FAILED',
+        message: error instanceof Error && error.message
+          ? error.message.slice(0, 400)
+          : 'the audition request failed',
+        voicePath: 'unknown',
+      };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      body = asRecord(await response.json());
+    } catch {
+      /* an empty or non-JSON audition response still carries its status */
+    }
+    return normalizeAuditionResponse(response.status, body);
+  }
+
   return Object.freeze({
     list,
     listCharacters: list,
@@ -543,6 +694,7 @@ export function createCharacterApi(options: { apiFetch: CharacterApiFetch }) {
     attachCast,
     removeCast,
     removeFromProject: removeCast,
+    requestAudition,
   });
 }
 
