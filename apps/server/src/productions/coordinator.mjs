@@ -38,6 +38,7 @@ import {
   ITERATION_STAGES,
   pickForShot,
 } from './iteration.mjs';
+import { promptVoiceGate } from './voice-gate.mjs';
 
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
 
@@ -141,6 +142,58 @@ function commandIdFor(productionId, planHash, actionId) {
 
 function continuationIdFor(productionId, eventId) {
   return `cont_${stableDigest('continuation', productionId, eventId).slice(0, 24)}`;
+}
+
+function sceneAssetIds(scene) {
+  const ids = [];
+  if (!isPlainObject(scene)) return ids;
+  const push = (value) => {
+    if (typeof value === 'string' && value !== '' && !ids.includes(value)) ids.push(value);
+  };
+  if (isPlainObject(scene.background)) push(scene.background.asset);
+  if (Array.isArray(scene.foreground)) {
+    for (const layer of scene.foreground) {
+      if (isPlainObject(layer)) push(layer.asset);
+    }
+  }
+  if (Array.isArray(scene.media)) {
+    for (const layer of scene.media) {
+      if (isPlainObject(layer)) push(layer.asset);
+    }
+  }
+  push(scene.narration_asset);
+  return ids;
+}
+
+// Every identifier an action can use to name the plate it works on. A scene id
+// is expanded through the package so `targetId: shot_1` also names that shot's
+// plate; an action with no asset identity is never matched by guesswork.
+function actionAssetIds(slot, pkg) {
+  const ids = new Set();
+  if (!isPlainObject(slot)) return ids;
+  const add = (value) => {
+    if (typeof value !== 'string' || value === '') return;
+    ids.add(value);
+    const separator = value.indexOf(':');
+    if (separator > 0) ids.add(value.slice(0, separator));
+  };
+  for (const key of ['assetId', 'targetId', 'shotId', 'clipId']) add(slot[key]);
+  if (Array.isArray(slot.assetIds)) {
+    for (const value of slot.assetIds) add(value);
+  }
+  if (Array.isArray(slot.assets)) {
+    for (const value of slot.assets) add(value);
+  }
+  if (isPlainObject(slot.scope) && isPlainObject(slot.scope.target)) {
+    for (const key of ['assetId', 'shotId', 'clipId']) add(slot.scope.target[key]);
+  }
+
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  for (const scene of scenes) {
+    if (!isPlainObject(scene) || typeof scene.id !== 'string' || !ids.has(scene.id)) continue;
+    for (const assetId of sceneAssetIds(scene)) ids.add(assetId);
+  }
+  return ids;
 }
 
 function orderedEvents(events) {
@@ -701,6 +754,17 @@ export function createProductionCoordinator(options = {}) {
   if (shots !== undefined && !Array.isArray(shots) && typeof shots !== 'function') {
     throw new TypeError('createProductionCoordinator shots must be an array or a function');
   }
+  const pkg = options.pkg;
+  if (pkg !== undefined && typeof pkg !== 'function' && !isPlainObject(pkg)) {
+    throw new TypeError('createProductionCoordinator pkg must be an object or a function');
+  }
+  const characters = options.characters;
+  if (characters !== undefined
+    && typeof characters !== 'function'
+    && !(characters instanceof Map)
+    && !isPlainObject(characters)) {
+    throw new TypeError('createProductionCoordinator characters must be a Map, object or function');
+  }
   const clock = options.clock;
   const defaultMaxSteps = normalizeMaxSteps(options.maxSteps, DEFAULT_MAX_STEPS);
 
@@ -739,6 +803,30 @@ export function createProductionCoordinator(options = {}) {
     return Array.isArray(production.shotIds)
       ? production.shotIds.map((shotId) => ({ id: shotId }))
       : [];
+  }
+
+  function packageFor(production) {
+    return typeof pkg === 'function' ? pkg(production) : pkg;
+  }
+
+  function charactersFor(production) {
+    return typeof characters === 'function' ? characters(production) : characters;
+  }
+
+  // VX15: a prompt-mode plate may be dispatched only when its character's
+  // audition still pins the exact current seed+description. The check runs
+  // before the action executor, so a refusal never reserves or holds budget.
+  function blockedAction(production, next) {
+    const currentPackage = packageFor(production);
+    if (!isPlainObject(currentPackage)) return null;
+    const gate = promptVoiceGate({
+      pkg: currentPackage,
+      characters: charactersFor(production),
+    });
+    if (gate.ok || gate.blocked.length === 0) return null;
+    const ids = actionAssetIds(next?.slot, currentPackage);
+    if (ids.size === 0) return null;
+    return gate.blocked.find((entry) => ids.has(entry.assetId)) ?? null;
   }
 
   function nextTakeSelection(productionId) {
@@ -1045,6 +1133,23 @@ export function createProductionCoordinator(options = {}) {
       };
     }
 
+    const voiceBlock = blockedAction(production, next);
+    if (voiceBlock) {
+      return {
+        status: 'blocked',
+        reason: voiceBlock.code,
+        admitted: false,
+        code: voiceBlock.code,
+        blocked: voiceBlock,
+        error: {
+          code: voiceBlock.code,
+          message: voiceBlock.code === 'VOICE_AUDITION_STALE'
+            ? 'the approved prompt voice audition is stale; approve it again before dispatch'
+            : 'the character prompt voice audition must be approved before this shot can dispatch',
+        },
+      };
+    }
+
     const commandId = next.commandId ?? commandIdFor(productionId, next.planHash, next.actionId);
     const body = {
       commandId,
@@ -1210,6 +1315,9 @@ export function createProductionCoordinator(options = {}) {
         productionId,
         status: 'blocked',
         reason: outcome.reason,
+        ...(outcome.admitted !== undefined ? { admitted: outcome.admitted } : {}),
+        ...(outcome.code !== undefined ? { code: outcome.code } : {}),
+        ...(outcome.blocked !== undefined ? { blocked: outcome.blocked } : {}),
         error: outcome.error,
         executed: executed.length,
         bounded: false,

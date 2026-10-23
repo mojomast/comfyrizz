@@ -22,6 +22,7 @@ import { ProductionLedgerError } from './ledger.mjs';
 import { ProductionStoreError } from './store.mjs';
 import { effectivePolicyForShot } from './iteration.mjs';
 import { IterationScopeError, validateIterationScope } from './iteration-scope.mjs';
+import { promptVoiceGate } from './voice-gate.mjs';
 
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
 
@@ -556,7 +557,7 @@ function actionRecord(events, actionId) {
   return action;
 }
 
-function proposeResult(productionId, plan, commit, command) {
+function proposeResult(productionId, plan, commit, command, warnings) {
   return {
     duplicate: commit.duplicate === true,
     committed: true,
@@ -566,6 +567,7 @@ function proposeResult(productionId, plan, commit, command) {
     planHash: plan.planHash,
     allocation: null,
     plan,
+    warnings: warnings ?? [],
     ...(command ? { command } : {}),
   };
 }
@@ -717,6 +719,17 @@ export function createActionCoordinator(options = {}) {
   if (typeof ledgerFor !== 'function') {
     throw new TypeError('createActionCoordinator requires ledgerFor(production)');
   }
+  const pkg = options.pkg;
+  if (pkg !== undefined && typeof pkg !== 'function' && !isPlainObject(pkg)) {
+    throw new TypeError('createActionCoordinator pkg must be an object or a function');
+  }
+  const characters = options.characters;
+  if (characters !== undefined
+    && typeof characters !== 'function'
+    && !(characters instanceof Map)
+    && !isPlainObject(characters)) {
+    throw new TypeError('createActionCoordinator characters must be a Map, object or function');
+  }
 
   if (!handler.__iterationGateWrapped) {
     const originalExecute = handler.execute.bind(handler);
@@ -758,6 +771,30 @@ export function createActionCoordinator(options = {}) {
     return store.findCommit(productionId, { commandId, idempotencyKey });
   }
 
+  function packageFor(production) {
+    return typeof pkg === 'function' ? pkg(production) : pkg;
+  }
+
+  function charactersFor(production) {
+    return typeof characters === 'function' ? characters(production) : characters;
+  }
+
+  // VX15: plan-time visibility only. A blocked prompt plate is reported as a
+  // warning; the plan is still stored, and dispatch is where it is refused.
+  function planWarnings(production) {
+    const currentPackage = packageFor(production);
+    if (!isPlainObject(currentPackage)) return [];
+    const gate = promptVoiceGate({
+      pkg: currentPackage,
+      characters: charactersFor(production),
+    });
+    return gate.blocked.map((entry) => ({
+      code: entry.code,
+      assetId: entry.assetId,
+      castId: entry.castId,
+    }));
+  }
+
   function propose({ productionId, body, context }) {
     const { commandId, idempotencyKey } = requireCommand(body);
     const prior = existingCommit(productionId, commandId, idempotencyKey);
@@ -783,6 +820,7 @@ export function createActionCoordinator(options = {}) {
         throw error;
       }
     }
+    const warnings = production ? planWarnings(production) : [];
 
     const envelope = {
       commandId,
@@ -800,7 +838,7 @@ export function createActionCoordinator(options = {}) {
       const events = store.readEvents(productionId);
       const planEvent = events.find((event) => (prior.eventIds ?? []).includes(event.id) && event.type === 'plan.proposed');
       const plan = planEvent?.data ?? stored;
-      return proposeResult(productionId, plan, { ...prior, duplicate: true }, null);
+      return proposeResult(productionId, plan, { ...prior, duplicate: true }, null, warnings);
     }
 
     const events = store.readEvents(productionId);
@@ -820,7 +858,7 @@ export function createActionCoordinator(options = {}) {
     }
     const planEvent = (result.events ?? []).find((event) => event.type === 'plan.proposed');
     const plan = planEvent?.data ?? stored;
-    return proposeResult(productionId, plan, result, result.command);
+    return proposeResult(productionId, plan, result, result.command, warnings);
   }
 
   function reserveSlot(ledger, { commandId, reservationId, upperBound, planHash, actionId }) {
