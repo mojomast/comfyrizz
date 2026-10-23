@@ -30,6 +30,7 @@ export const MAX_PERSONA_CHARS = 600;
 export const PACKAGE_MAX_PERSONA_CHARS = 400;
 export const MAX_VOICE_DESCRIPTION_CHARS = 300;
 export const H3_VOICE_MODES = Object.freeze(['clip', 'prompt']);
+export const MAX_VOICE_SEED = 4294967295;
 export const MIN_SPEED = 0.5;
 export const MAX_SPEED = 1.5;
 export const QWEN_SPEED = 1;
@@ -225,8 +226,8 @@ function h3ModeValue(value) {
 }
 
 function voiceSeedValue(value) {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    fail('VOICE_SEED_INVALID', 'seed', 'seed must be a non-negative safe integer');
+  if (!Number.isInteger(value) || value < 0 || value > MAX_VOICE_SEED) {
+    fail('VOICE_SEED_INVALID', 'seed', `seed must be an integer from 0 to ${MAX_VOICE_SEED} (uint32)`);
   }
   return value;
 }
@@ -624,25 +625,25 @@ function packagePersona(persona) {
  */
 export function toPackageVoice(input = {}) {
   const voice = validateVoice(input);
-  const out = voice.engine === 'none'
-    ? { enabled: false, engine: 'none' }
-    : { enabled: true, engine: voice.engine, voice: voice.voice };
-  if (voice.engine !== 'none') {
-    setIfPresent(out, voice, 'speed');
-    setIfPresent(out, voice, 'language');
-    if (voice.persona !== undefined) out.persona = packagePersona(voice.persona);
-    setIfPresent(out, voice, 'strict');
-    setIfPresent(out, voice, 'chunking');
-    if (voice.blend !== undefined) {
-      out.blend = voice.blend.map((part) => ({ voice: part.voice, weight: part.weight }));
-    }
-    setIfPresent(out, voice, 'qwen_mode');
-    setIfPresent(out, voice, 'delivery');
-    setIfPresent(out, voice, 'non_streaming');
+  // The package voice ($defs/voice and $defs/castVoice in package-v1) is a
+  // closed object: voiceDescription, h3Mode and seed are character-level H3
+  // settings and never enter the package voice. The prompt voice reaches the
+  // planner only through scene shot gen.direction.voice (VX02S/VX13).
+  if (voice.engine === 'none') {
+    return deepFreeze({ enabled: false, engine: 'none' });
   }
-  setIfPresent(out, voice, 'voiceDescription');
-  setIfPresent(out, voice, 'h3Mode');
-  setIfPresent(out, voice, 'seed');
+  const out = { enabled: true, engine: voice.engine, voice: voice.voice };
+  setIfPresent(out, voice, 'speed');
+  setIfPresent(out, voice, 'language');
+  if (voice.persona !== undefined) out.persona = packagePersona(voice.persona);
+  setIfPresent(out, voice, 'strict');
+  setIfPresent(out, voice, 'chunking');
+  if (voice.blend !== undefined) {
+    out.blend = voice.blend.map((part) => ({ voice: part.voice, weight: part.weight }));
+  }
+  setIfPresent(out, voice, 'qwen_mode');
+  setIfPresent(out, voice, 'delivery');
+  setIfPresent(out, voice, 'non_streaming');
   return deepFreeze(out);
 }
 
