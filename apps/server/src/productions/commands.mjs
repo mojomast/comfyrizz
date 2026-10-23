@@ -56,6 +56,7 @@ export const APPROVAL_COMMANDS = Object.freeze([
   'clip.reject',
   'gate.override',
   'budget.reserve',
+  'budget.set_ceiling',
   'delivery.accept',
 ]);
 
@@ -81,6 +82,7 @@ const EVENT_TYPES = Object.freeze({
   'gate.override': 'review.observed',
   'budget.reserve': 'budget.reserved',
   'budget.settle': 'budget.settled',
+  'budget.set_ceiling': 'budget.ceiling_set',
   'action.dispatch': 'action.state_changed',
   'action.retry': 'action.state_changed',
   'action.cancel': 'action.state_changed',
@@ -440,6 +442,8 @@ function applyCommand(production, kind, payload) {
     case 'voice_mode.set':
       next.h3VoiceMode = payload?.h3VoiceMode;
       break;
+    case 'budget.set_ceiling':
+      break;
     default:
       break;
   }
@@ -686,6 +690,17 @@ export function createCommandHandler(options = {}) {
 
     const at = clockIso(clock);
     const recorded = buildRecordedCommand(envelope, context, productionId, at);
+
+    // UR19: the spend cap is a user authorization. The agent may not send it,
+    // and the production projection does not change; the ledger records it.
+    if (kind === 'budget.set_ceiling' && recorded.actor !== 'user') {
+      throw new CommandError(
+        'AGENT_CANNOT_SET_CEILING',
+        'only the user may set or amend the spend ceiling',
+        403,
+        { kind, actor: recorded.actor },
+      );
+    }
 
     if (APPROVAL_COMMANDS.includes(kind) && recorded.actor === 'agent') {
       throw new CommandError(

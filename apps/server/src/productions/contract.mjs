@@ -155,6 +155,7 @@ export const EVENTS = Object.freeze([
   'verdict.recorded',
   'action.planned',
   'action.state_changed',
+  'budget.ceiling_set',
   'budget.reserved',
   'budget.settled',
   'render.gate.blocked',
@@ -185,6 +186,7 @@ export const COMMANDS = Object.freeze([
   'clip.reject',
   'render.request',
   'gate.override',
+  'budget.set_ceiling',
   'budget.reserve',
   'budget.settle',
   'action.dispatch',
@@ -778,6 +780,25 @@ function iterationSetPayload(errors, value, path) {
 
 const VOICE_MODE_SET_KEYS = new Set(['h3VoiceMode']);
 
+const CEILING_KEYS = new Set(['ceiling']);
+
+function ceilingPayload(errors, value, path) {
+  for (const key of Object.keys(value)) {
+    if (!CEILING_KEYS.has(key)) {
+      push(errors, joinPath(path, key), 'UNKNOWN_FIELD', `${joinPath(path, key)} is not a recognized field`);
+    }
+  }
+  const ceilingPath = joinPath(path, 'ceiling');
+  if (!Object.hasOwn(value, 'ceiling')) {
+    push(errors, ceilingPath, 'INVALID_CEILING', `${ceilingPath} is required`);
+    return;
+  }
+  const ceiling = value.ceiling;
+  if (ceiling !== null && (typeof ceiling !== 'number' || !Number.isFinite(ceiling) || ceiling < 0)) {
+    push(errors, ceilingPath, 'INVALID_CEILING', `${ceilingPath} must be null or a finite non-negative number`);
+  }
+}
+
 function voiceModeSetPayload(errors, value, path) {
   for (const key of Object.keys(value)) {
     if (!VOICE_MODE_SET_KEYS.has(key)) {
@@ -809,6 +830,8 @@ function event(errors, doc, path) {
       iterationSetPayload(errors, doc.data, joinPath(path, 'data'));
     } else if (doc.type === 'voice_mode.set') {
       voiceModeSetPayload(errors, doc.data, joinPath(path, 'data'));
+    } else if (doc.type === 'budget.ceiling_set') {
+      ceilingPayload(errors, doc.data, joinPath(path, 'data'));
     }
   }
   if (doc.commandId !== undefined) optionalId(errors, doc.commandId, joinPath(path, 'commandId'), 'command id');
@@ -838,6 +861,8 @@ function commandFields(errors, doc, path, { allowProductionIdForCreate }) {
       iterationSetPayload(errors, doc.payload, joinPath(path, 'payload'));
     } else if (doc.kind === 'voice_mode.set') {
       voiceModeSetPayload(errors, doc.payload, joinPath(path, 'payload'));
+    } else if (doc.kind === 'budget.set_ceiling') {
+      ceilingPayload(errors, doc.payload, joinPath(path, 'payload'));
     }
   }
   if (doc.idempotencyKey !== undefined) {

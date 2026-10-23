@@ -838,6 +838,10 @@ export function createApp({
       actor: 'user',
       userEventId: `ue_${randomUUID()}`,
     }),
+    ledgerFor: (production) => createBudgetLedger({
+      runtimeDir,
+      ledgerId: production.budgetLedgerId,
+    }),
   });
 
   const renderRoutes = createRenderRoutes({
