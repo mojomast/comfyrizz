@@ -1,0 +1,141 @@
+.easy-generate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.easy-generate-list,
+.easy-generate-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg-1);
+}
+
+.easy-generate-subhead {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--font-size-15);
+  font-weight: var(--font-weight-600);
+}
+
+.easy-generate-shots {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.easy-generate-shot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.easy-generate-shot:last-child {
+  border-bottom: 0;
+}
+
+.easy-generate-shot-icon {
+  width: var(--space-4);
+  color: var(--text-2);
+  font-size: var(--font-size-15);
+  text-align: center;
+}
+
+.easy-generate-shot-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-1);
+  font-weight: var(--font-weight-600);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.easy-generate-shot-status {
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  text-align: right;
+}
+
+.easy-generate-shot[data-status="failed"] .easy-generate-shot-status,
+.easy-generate-shot[data-status="stale"] .easy-generate-shot-status {
+  color: var(--warn);
+}
+
+.easy-generate-shot[data-status="review"] .easy-generate-shot-status,
+.easy-generate-shot[data-status="approved"] .easy-generate-shot-status {
+  color: var(--ok);
+}
+
+.easy-generate-retry {
+  grid-column: 2 / 4;
+  justify-self: start;
+  min-height: var(--space-5);
+}
+
+.easy-generate-count {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+}
+
+.easy-generate-preview {
+  align-items: stretch;
+}
+
+.easy-generate-player {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-2);
+}
+
+.easy-generate-placeholder {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-0);
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  text-align: center;
+}
+
+.easy-generate-cpu {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.easy-generate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.easy-generate-actions .btn {
+  min-height: var(--space-6);
+}
+
+.easy-colab-banner .easy-banner-text {
+  flex: 1 1 auto;
+}
+
+.easy-colab-banner .easy-banner-actions {
+  flex: 0 0 auto;
+}
