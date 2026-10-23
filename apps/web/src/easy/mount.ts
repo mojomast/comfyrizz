@@ -11,6 +11,7 @@ import { STEP_MODULES } from './steps/index.ts';
 import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, StepId } from './types.ts';
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
 import { writePlan } from './plan-writer.ts';
+import { resumeFacts } from './resume.ts';
 
 import './easy.css';
 
@@ -52,17 +53,29 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
   let stopStepper: () => void = () => {};
   let shellReady = false;
   let primaryAction: () => void = () => host.openEditor();
+  let facts: StepFacts = {
+    hasPackage: false,
+    planApproved: false,
+    actionsActive: false,
+    allShotsKept: false,
+    exportCurrent: false,
+  };
 
-  function factsFor(state: EasyState = store.get()): StepFacts {
-    const pkg = host.getPackage();
-    const hasPackage = Boolean(state.packageId) && Boolean(pkg) && pkg.id === state.packageId;
-    return {
-      hasPackage,
-      planApproved: false,
-      actionsActive: false,
-      allShotsKept: false,
-      exportCurrent: state.exported.revision !== null && pkg?.revision === state.exported.revision,
-    };
+  async function loadFacts(): Promise<StepFacts> {
+    facts = await resumeFacts({ api, host, state: store.get() });
+    return facts;
+  }
+
+  function factsFor(): StepFacts {
+    return facts;
+  }
+
+  function showLoading(): void {
+    if (shell) {
+      shell.setStatus(COPY.shell.loading);
+      return;
+    }
+    root.textContent = COPY.shell.loading;
   }
 
   function placePlayer(): void {
@@ -103,7 +116,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     stopStepper();
     currentStep = step;
     const state = store.get();
-    const facts = factsFor(state);
+    const facts = factsFor();
     const mod = modules[step];
     const heading = mod?.heading ?? COPY.steps[step];
     const intro = mod?.intro ?? '';
@@ -136,7 +149,9 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     showStep(step);
   }
 
-  function onPopState(): void {
+  async function onPopState(): Promise<void> {
+    showLoading();
+    await loadFacts();
     const route = initialRoute(search(), store.get(), factsFor());
     if (route.view === 'editor') {
       if (getMode() !== 'advanced') setMode('advanced');
@@ -194,9 +209,12 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
 
   const stopMode = subscribeMode((mode) => applyShell(mode));
   view?.addEventListener('popstate', onPopState);
-  const boot = initialRoute(search(), store.get(), factsFor());
-  if (boot.view === 'editor' && getMode() !== 'advanced') setMode('advanced');
-  else applyShell(getMode());
+  showLoading();
+  void loadFacts().then(() => {
+    const boot = initialRoute(search(), store.get(), factsFor());
+    if (boot.view === 'editor' && getMode() !== 'advanced') setMode('advanced');
+    else applyShell(getMode());
+  });
 
   return () => {
     stopMode();
