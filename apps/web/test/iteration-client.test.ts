@@ -266,3 +266,9 @@ test('saveIterationDefault refuses an unknown scope before fetching', async () =
   await assert.rejects(saveIterationDefault('character', policy('balanced'), { apiFetch }), TypeError);
   assert.equal(calls.length, 0);
 });
+
+test('saveIterationDefault refuses a project default without a project id before fetching', async () => {
+  const { calls, apiFetch } = spy(() => json({}));
+  await assert.rejects(saveIterationDefault('project', policy('balanced'), { apiFetch }), TypeError);
+  assert.equal(calls.length, 0);
+});

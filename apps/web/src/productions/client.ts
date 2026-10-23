@@ -781,13 +781,16 @@ export async function saveIterationDefault(
   const projectId = typeof options.projectId === 'string' && options.projectId !== ''
     ? options.projectId
     : undefined;
+  if (scope === 'project' && projectId === undefined) {
+    throw new TypeError('a project iteration default requires options.projectId');
+  }
   const apiFetch = iterationFetch(options);
   const url = `${iterationBaseUrl(options)}/api/preferences`;
   const body = {
     commandId: freshIterationId('cmd_iteration_default'),
     idempotencyKey: freshIterationId('idem_iteration_default'),
     scope,
-    ...(scope === 'project' && projectId !== undefined ? { scopeId: projectId } : {}),
+    ...(scope === 'project' ? { scopeId: projectId } : {}),
     key: 'iteration.policy',
     value: policy,
   };
