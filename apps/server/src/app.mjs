@@ -21,6 +21,8 @@ import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
 import { createCharacterRoutes } from './characters/routes.mjs';
+import { createCharacterStore } from './characters/store.mjs';
+import { castIdFor } from './characters/cast.mjs';
 import { createAuditionCache, createAuditionWorker } from './characters/audition.mjs';
 import { createKokoroSynth, probeKokoroRuntime } from './characters/kokoro-synth.mjs';
 import { ingestRun } from './takes/ingest.mjs';
@@ -54,6 +56,7 @@ import { createProductionStore } from './productions/store.mjs';
 import { createCommandHandler } from './productions/commands.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
 import { createActionCoordinator } from './productions/actions.mjs';
+import { createProductionCoordinator } from './productions/coordinator.mjs';
 import { createProductionRoutes } from './routes/productions.mjs';
 import { createPreferencesStore } from './productions/preferences.mjs';
 import { createIterationRoutes } from './productions/iteration-routes.mjs';
@@ -428,6 +431,7 @@ export function createApp({
   // the /api/productions facade, so a bound package can only start from the
   // action slot that was dispatched for it.
   const productionStore = createProductionStore({ runtimeDir });
+  const characterStore = createCharacterStore({ rootDir: runtimeDir });
   const preferencesStore = createPreferencesStore({ runtimeDir });
   const iterationRoutes = createIterationRoutes({ store: productionStore, preferences: preferencesStore });
   // IP66: the chat adapter uses the same command handler as the production
@@ -800,6 +804,73 @@ export function createApp({
     }),
   });
 
+  // VX15: the production's package is read-only here. The gate maps a plate to
+  // the scene that names it, then the scene's cast id to the character record
+  // whose approved prompt audition must still pin the current seed+description.
+  const packageForProduction = (production) => {
+    const packageId = production?.packageId;
+    if (typeof packageId !== 'string' || packageId === '') return null;
+    try {
+      return store.read(packageId);
+    } catch {
+      return null;
+    }
+  };
+
+  const conversationCastFor = (conversationId) => {
+    if (typeof conversationId !== 'string' || conversationId === '') return [];
+    try {
+      const session = JSON.parse(readFileSync(join(runtimeDir, 'conversations', `${conversationId}.json`), 'utf8'));
+      return Array.isArray(session?.cast) ? session.cast : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const charactersForProduction = (production) => {
+    const pkg = packageForProduction(production);
+    const characters = new Map();
+    const explicit = new Map();
+    for (const entry of conversationCastFor(production?.conversationId)) {
+      if (!entry || typeof entry.castId !== 'string' || typeof entry.characterId !== 'string') continue;
+      explicit.set(entry.castId, entry.characterId);
+    }
+    for (const entry of Array.isArray(pkg?.cast) ? pkg.cast : []) {
+      if (!entry || typeof entry.id !== 'string' || typeof entry.characterId !== 'string') continue;
+      if (!explicit.has(entry.id)) explicit.set(entry.id, entry.characterId);
+    }
+    for (const [castId, characterId] of explicit) {
+      let character = null;
+      try { character = characterStore.get(characterId); } catch { character = null; }
+      if (character) characters.set(castId, character);
+    }
+    let library = [];
+    try { library = characterStore.list(); } catch { library = []; }
+    for (const character of library) {
+      if (!character || typeof character.handle !== 'string') continue;
+      let castId;
+      try { castId = castIdFor(character.handle); } catch { continue; }
+      if (!characters.has(castId)) characters.set(castId, character);
+    }
+    return characters;
+  };
+
+  const productionCoordinator = createProductionCoordinator({
+    store: productionStore,
+    actions: productionActions,
+    handler: productionCommands,
+    pkg: packageForProduction,
+    characters: charactersForProduction,
+  });
+
+  // IP20 keeps propose/getAction; dispatch goes through the IP21 coordinator so
+  // VX15's prompt-voice gate runs before any reservation or hold.
+  const productionRouteActions = Object.freeze({
+    propose: (args) => productionActions.propose(args),
+    getAction: (args) => productionActions.getAction(args),
+    dispatch: (args) => productionCoordinator.dispatch(args),
+  });
+
   // IP45K: one free Kokoro path for the app's lifetime. The probe is lazy and
   // cached, so createApp stays synchronous and a box without kokoro_onnx keeps
   // answering 503. Paid auditions still need a named, approved IP20 slot.
@@ -834,7 +905,7 @@ export function createApp({
   const productionRoutes = createProductionRoutes({
     store: productionStore,
     handler: productionCommands,
-    actions: productionActions,
+    actions: productionRouteActions,
     contextFor: () => ({
       actor: 'user',
       userEventId: `ue_${randomUUID()}`,
@@ -1654,6 +1725,7 @@ export function createApp({
     if (await takeRoutes.handle(request, response, url)) return;
     if (await createCharacterRoutes({
       rootDir: runtimeDir,
+      store: characterStore,
       events,
       mediaTickets,
       audition: { worker: auditionWorker },
