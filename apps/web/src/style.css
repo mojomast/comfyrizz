@@ -853,3 +853,18 @@ main {
   content-visibility: auto;
   contain-intrinsic-size: auto var(--row-height);
 }
+
+/* IP59: Easy actions wrap instead of stretching the page at phone widths.
+   The bar stays a flex row; only its padding shrinks so Generate, Preview and
+   Advanced settings remain real, hit-testable controls at 390px. */
+@media (max-width: 47.5rem) {
+  #app .easy-actions {
+    width: 100%;
+    max-width: 100%;
+    padding-inline: var(--space-2);
+    box-sizing: border-box;
+  }
+  #app .easy-actions .btn {
+    min-width: 0;
+  }
+}
