@@ -511,6 +511,13 @@ test('the QA contact sheet uses a token-free blob URL', async ({ page }) => {
 });
 
 test('a failed scene re-render releases the card instead of staying stuck', async ({ page }) => {
+  await page.route('**/api/scene/chip', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ changed: true, summary: 'warmer' }),
+    });
+  });
   await page.route('**/api/scene/render', async route => {
     await route.fulfill({
       status: 500,
@@ -521,9 +528,9 @@ test('a failed scene re-render releases the card instead of staying stuck', asyn
   await openEditor(page, loadEnv());
 
   const card = page.locator('[data-scene-id="s_open"]');
-  await card.getByRole('button', { name: 'Re-render scene' }).click();
+  await expect(card.getByRole('button', { name: 'Re-render scene' })).toHaveCount(0);
+  const warmer = card.getByRole('button', { name: 'Warmer' });
+  await warmer.click();
   await expect(page.locator('#activity')).toContainText('Scene re-render failed: render exploded');
-  const released = page.locator('[data-scene-id="s_open"]').getByRole('button', { name: 'Re-render scene' });
-  await expect(released).toBeEnabled();
-  await expect(released).toHaveText('Re-render scene');
+  await expect(warmer).toBeEnabled();
 });

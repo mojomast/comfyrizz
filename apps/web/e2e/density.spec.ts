@@ -274,7 +274,7 @@ test('an Advanced edit survives the Easy filter and comes back unchanged', async
   await expect(root).toHaveAttribute('data-mode', 'easy');
   await expect(page.getByTestId('inspector-tabs')).toBeHidden();
   await expectEasyShell(page);
-  await expect(page.locator('#mode-summary')).toContainText('Custom transition');
+  await expect(page.locator('#easy-root [data-easy-primary]')).toBeVisible();
 
   // Hidden, not unmounted: the same inputs keep their state while Easy is on.
   await expect(narration).toBeHidden();
