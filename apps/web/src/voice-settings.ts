@@ -217,7 +217,7 @@ function render() {
         <div class="voice-grid field-grid">
           <label class="field">Final render<select data-render-location class="field-control">${option('local', 'This machine', renderLocation)}${option('colab', 'Google Colab VM', renderLocation)}</select></label>
         </div>
-        <div class="voice-actions toolbar"><button type="button" data-save class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>Save voice settings</button><button type="button" data-plan class="btn btn-secondary btn-sm" ${busy || active() ? 'disabled' : ''}>Check generation plan</button>${plan?.value.ready ? `<button type="button" data-start class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>${plan.value.requiresApproval ? 'Approve ceiling & generate' : 'Generate video'}</button>` : ''}${active() ? '<button type="button" data-cancel class="btn btn-danger btn-sm">Cancel generation</button>' : ''}</div>
+        <div class="voice-actions toolbar"><button type="button" data-save class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>Save voice settings</button><button type="button" data-plan class="btn btn-secondary btn-sm" ${busy || active() ? 'disabled' : ''}>Check generation plan</button>${active() ? '<button type="button" data-cancel class="btn btn-danger btn-sm">Cancel generation</button>' : ''}</div>
         <p class="hint field-hint">Uses the full voice → measured timing → media → render → verification → editable export pipeline. ${renderLocation === 'colab' ? 'Google Colab VM renders the MP4 and checks the mix after generation, then stops. If that fails, this machine renders instead.' : 'The final MP4 is rendered on this machine.'} Existing Render/Export actions reuse existing audio. Generate here to synthesize the selected voice.</p>
         <div data-voice-status role="status" aria-live="polite">${esc(message)}</div>
         <div data-run-progress>${runProgress()}</div>
@@ -227,7 +227,6 @@ function render() {
     <details class="form-group voice-group" data-group="advanced" data-adv${groupOpen('advanced', false) ? ' open' : ''}>
       <summary>Advanced</summary>
       <div class="form-group-body voice-grid field-grid">
-        <label class="field" data-adv>Visual generation<select data-backend class="field-control">${option('cpu', 'CPU · ready/local visuals', backend)}${option('colab', 'Google Colab GPU', backend)}${option('byo-comfyui', 'My ComfyUI', backend)}</select></label>
         ${mode !== 'kokoro' ? `<label class="field" data-adv>Qwen runtime<select data-runtime class="field-control">${option('colab', 'Managed Google Colab GPU', runtime)}${option('local', 'Locally installed Qwen', runtime)}</select></label>` : ''}
         ${backend === 'colab' || (mode !== 'kokoro' && runtime === 'colab') ? `<label class="field" data-adv>Total compute-unit ceiling<input data-budget class="field-control" type="number" min="0.5" step="0.5" value="${budget}"></label>${mode !== 'kokoro' && runtime === 'colab' ? `<label class="field" data-adv>Qwen allocation ceiling<input data-narration-units class="field-control" type="number" min="0.5" max="4" step="0.5" value="${narrationUnits}"></label>` : ''}` : ''}
         ${backend === 'byo-comfyui' ? `<label class="field" data-adv>ComfyUI URL<input data-comfyui class="field-control" value="${esc(comfyuiUrl)}" placeholder="http://127.0.0.1:8188"></label>` : ''}

@@ -10,6 +10,11 @@ import { getPrefs } from './ui/prefs';
 import { readIteration, setIteration } from './productions/client';
 import { mountIterationLevel, type IterationLevelMount } from './productions/cards/iteration-advanced';
 import { mountEasyStudio } from './easy/mount.ts';
+import { approveAndGenerate } from './easy/approve-generate.ts';
+import { createEasyApi } from './easy/api.ts';
+import { defaultEasyState } from './easy/store.ts';
+import type { EasyState } from './easy/types.ts';
+import { mountInspectorGenerate } from './editor/inspector/generate.ts';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { readRunSnapshot } from './run-progress.ts';
@@ -1438,12 +1443,10 @@ function renderSpendCard(): void {
       <b>Start ${esc(label)}?</b>
       <p>${esc(String(estimate.gpuMinutes ?? '?'))} GPU min + ${esc(String(estimate.overheadMinutes ?? 0))} min setup · ${esc(String(budget.required ?? '?'))} of ${esc(String(budget.budget ?? '?'))} units (estimate)</p>
       <p class="hint">${esc(budget.message ?? '')} Google Colab spend is an account-level estimate.</p>
-      <div class="spend-actions"><button id="spend-start" class="primary">Start</button><button id="spend-cancel">Cancel</button></div>
+      <div class="spend-actions"><button id="spend-cancel">Cancel</button></div>
     </div>`);
   }
   host.innerHTML = blocks.join('');
-  const start = $('spend-start');
-  if (start) start.addEventListener('click', () => void runOnBackend(true));
   const cancel = $('spend-cancel');
   if (cancel)
     cancel.addEventListener('click', () => {
@@ -1503,71 +1506,40 @@ function lookupBoundProductionId(): string | null {
   return null;
 }
 
-async function runOnBackend(approved = false): Promise<void> {
-  const backendId = $<HTMLSelectElement>('backend').value;
-  if (backendId === 'cpu') {
-    logActivity('CPU is not a GPU backend; use Export MP4 for the CPU slice');
-    return;
-  }
+async function approveFromGenerateTab(): Promise<void> {
   if (iterationLevelMount?.blocksPaidGeneration()) {
     iterationLevelMount.reveal();
     logActivity('Choose Draft, Balanced, Director or Custom before a paid generation. Choosing a level is not spend approval.');
     return;
   }
-  const budgetUnits = Number($<HTMLInputElement>('budget').value) || 0;
-  const button = $<HTMLButtonElement>('run-backend');
-  button.disabled = true;
-  try {
-    // C9: the run needs the package in the store (runPackage plans from it); persist the draft first.
-    let body: Record<string, unknown> = { backendId, packageId: pkg.id, budgetUnits, approved };
-    if (token) {
-      const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }),
-      });
-      const savedBody = await saved.json().catch(() => ({}));
-      if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
-      pkg.revision = savedBody.revision;
-      body = { backendId, packageId: pkg.id, baseRevision: savedBody.revision, budgetUnits, approved };
-    }
-    const response = await apiFetch('/api/run', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const result = (await response.json().catch(() => ({}))) as Record<string, any>;
-    if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
-    if (result.approvalRequired) {
-      if (typeof result.productionId === 'string' && result.productionId !== '') {
-        iterationLevelMount?.noteBound(result.productionId);
-      }
-      runState.spend = { planHash: result.planHash, backendId, estimate: result.estimate ?? {}, budget: result.budget ?? {}, jobs: result.jobs ?? 0 };
-      renderSpendCard();
-      logActivity(`Spend approval needed: ${result.budget?.message ?? 'approve the plan to start the VM'}`);
-      return;
-    }
-    if (result.refused) {
-      logActivity(`Run refused: ${result.budget?.message ?? 'budget too small'}`);
-      return;
-    }
-    runState.spend = null;
-    renderSpendCard();
-    // SSE may already have delivered run.started/events/finished for this runId while the
-    // POST was in flight; never clobber that with the stale response.
-    if (runState.active?.runId !== result.runId) {
-      runState.active = { runId: result.runId, backendId, status: result.status ?? 'starting' };
-      runState.events = [];
-      runState.render = null;
-      runState.teardown = null;
-    }
-    renderRunPanel();
-    logActivity(`Run ${result.runId} started on ${backendId}`);
-  } catch (error) {
-    logActivity(`Run request failed: ${(error as Error).message}`);
-  } finally {
-    button.disabled = false;
+  const backendValue = $<HTMLSelectElement>('backend')?.value ?? 'cpu';
+  const compute = backendValue === 'cpu' ? 'cpu' : 'colab';
+  const spendCap = Number($<HTMLInputElement>('budget')?.value) || 0;
+  const productionId = lookupBoundProductionId();
+  if (productionId) iterationLevelMount?.noteBound(productionId);
+  let snapshot: unknown = null;
+  if (productionId) {
+    const response = await apiFetch(`/api/productions/${encodeURIComponent(productionId)}`);
+    if (response.ok) snapshot = await response.json();
   }
+  const state: EasyState = {
+    ...defaultEasyState(),
+    packageId: pkg.id,
+    productionId,
+    compute,
+    spendCap,
+  };
+  const store = {
+    get: () => state,
+    patch(partial: Partial<EasyState>) {
+      if (partial.plan) state.plan = { ...state.plan, ...partial.plan };
+      if (partial.generate) state.generate = { ...state.generate, ...partial.generate };
+      return state;
+    },
+  };
+  const api = createEasyApi((input, init) => apiFetch(input, init));
+  const result = await approveAndGenerate(state, { api: api as never, store, snapshot });
+  if (typeof result === 'string' && result) logActivity(result);
 }
 
 // C11: persist the current draft with a base revision so the server plans/renders exactly what
@@ -2328,6 +2300,13 @@ function init(opened: OpenedProject): void {
       },
       subscribe: listener => editorStore.subscribe(listener),
     });
+    mountInspectorGenerate(scriptHost, {
+      model: () => ({
+        compute: $<HTMLSelectElement>('backend')?.value === 'cpu' ? 'cpu' : 'colab',
+        spendCap: Number($<HTMLInputElement>('budget')?.value) || 0,
+      }),
+      onApprove: () => { void approveFromGenerateTab(); },
+    });
   }
   if (timelineHost) {
     editorApi = mountSceneTimeline(timelineHost, editorStore, {
@@ -2550,7 +2529,6 @@ function init(opened: OpenedProject): void {
       closeExportMenu(false);
     }
   });
-  $('run-backend').addEventListener('click', () => void runOnBackend(false));
   $('render-changes').addEventListener('click', () => void renderChangedScenes());
   document.querySelectorAll<HTMLButtonElement>('.mode-toggle .mode').forEach(button => {
     button.addEventListener('click', () => {
@@ -2829,7 +2807,7 @@ function init(opened: OpenedProject): void {
     }
     setCharactersTabAttr(name, value);
   };
-  $('run-backend').before(charactersTabButton);
+  $('render-split-button').before(charactersTabButton);
 
   const charactersPane = document.createElement('section');
   charactersPane.id = 'characters-pane';

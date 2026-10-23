@@ -173,10 +173,10 @@ test('main.ts mounts the picker, swaps on the mode event, and gates paid generat
   assert.match(source, /MODE_CHANGE_EVENT/);
   assert.match(source, /blocksPaidGeneration\(/);
   assert.match(source, /lookupBoundProductionId/);
-  const runStart = source.indexOf('async function runOnBackend');
+  const runStart = source.indexOf('async function approveFromGenerateTab');
   const runEnd = source.indexOf('async function persistDraft');
   const run = source.slice(runStart, runEnd);
-  assert.ok(run.indexOf('blocksPaidGeneration') < run.indexOf('/api/run'), 'the level gate runs before a paid generation request');
+  assert.ok(run.indexOf('blocksPaidGeneration') < run.indexOf('approveAndGenerate'), 'the level gate runs before a paid generation request');
   assert.equal(run.includes('plan.approve'), false);
   assert.match(run, /Choosing a level is not spend approval/);
 });
