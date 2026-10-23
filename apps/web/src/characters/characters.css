@@ -709,6 +709,68 @@
   height: var(--space-6);
 }
 
+/* ------------------------------------------ VX11: character voice mode card */
+
+.chr-voice-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--elevation-border-1);
+}
+
+.chr-voice-mode-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.chr-voice-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chr-voice-mode-advanced {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
+}
+
+.chr-voice-mode-advanced > .chr-field-grid {
+  grid-column: 1 / -1;
+  gap: var(--space-2);
+}
+
+.chr-voice-mode-advanced > .chr-hint,
+.chr-voice-mode-advanced > .chr-subsection,
+.chr-voice-mode-advanced > .chr-status {
+  grid-column: 1 / -1;
+}
+
+.chr-voice-mode-advanced > .chr-subsection {
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: var(--elevation-border-1);
+}
+
+.chr-voice-mode-advanced > .chr-subsection h4 {
+  font-size: var(--font-size-12);
+}
+
+.chr-voice-mode [data-voice-mode-status] {
+  margin: 0;
+}
+
+.chr-voice-mode [data-voice-mode-audition-result] {
+  width: 100%;
+  height: var(--space-6);
+}
+
 /* ------------------------------------------------ IL20: A/B voice comparison */
 
 .chr-audition-panel,
@@ -1194,7 +1256,8 @@
 /* ------------------------------------------------------------------ Responsive */
 
 @media (max-width: 40rem) {
-  .chr-field-grid {
+  .chr-field-grid,
+  .chr-voice-mode-advanced {
     grid-template-columns: minmax(0, 1fr);
   }
 
