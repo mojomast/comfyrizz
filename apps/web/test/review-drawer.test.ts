@@ -15,6 +15,7 @@ import {
   currentReviewRowHeight,
   filterReviewClips,
   mountReviewDrawer,
+  renderReviewCostCard,
   renderReviewDrawer,
   renderReviewRows,
   renderReviewWindow,
@@ -30,7 +31,10 @@ import {
 import { approvedPillLabel, renderRenderBar, summarizeGate } from '../src/takes/render-bar.ts';
 import {
   activeReviewTake,
+  createProductionReviewApi,
   createTakesApi,
+  productionCommandPath,
+  reviewCostCardEstimateLabel,
   takeLooksLikeImage,
   takePosterMediaUrl,
 } from '../src/takes/api.ts';
@@ -1027,6 +1031,253 @@ test('a clip without a take keeps the kind text instead of an image', async () =
     const fallback = rows[1].querySelector('[data-review-thumb-fallback]');
     assert.equal(fallback.textContent, 'plate');
     assert.equal(rows[1].querySelector('.review-thumb').getAttribute('data-has-thumb'), null);
+
+    handle.destroy();
+  } finally {
+    restore();
+  }
+});
+
+// IP31: the review drawer is bound to a production. Redo is a plan proposal
+// that shows a cost card before any spend; preview never writes a selection;
+// selecting and rejecting are explicit production commands.
+
+const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
+const PLAN_HASH = 'c'.repeat(64);
+
+function costCard(overrides = {}) {
+  return {
+    productionId: PRODUCTION_ID,
+    planHash: PLAN_HASH,
+    planId: 'plan_1',
+    proposalRevision: 7,
+    revision: 7,
+    clipId: 'ep2_video_a01',
+    assetId: 'a_1',
+    estimate: { gpuMinutes: 2, overheadMinutes: 1 },
+    budget: { allowed: true, required: 3, remaining: 17 },
+    backend: { id: 'google_colab', label: 'Google Colab' },
+    jobs: 1,
+    commandId: 'cmd_propose_1',
+    ...overrides,
+  };
+}
+
+function fakeProductionApi(overrides = {}) {
+  const calls = [];
+  const api = {
+    calls,
+    async proposeRedo(input) {
+      calls.push({ method: 'proposeRedo', input });
+      return costCard({ clipId: input.clipId, assetId: input.assetId });
+    },
+    async approvePlan(card) {
+      calls.push({ method: 'approvePlan', card });
+      return { ...card, approved: true, revision: card.revision + 1, commandId: 'cmd_approve_1' };
+    },
+    async selectTake(input) {
+      calls.push({ method: 'selectTake', input });
+      return { productionId: PRODUCTION_ID, revision: 9 };
+    },
+    async rejectTake(input) {
+      calls.push({ method: 'rejectTake', input });
+      return { productionId: PRODUCTION_ID, revision: 9 };
+    },
+    async approveTake(input) {
+      calls.push({ method: 'approveTake', input });
+      return { productionId: PRODUCTION_ID, revision: 9 };
+    },
+    ...overrides,
+  };
+  return api;
+}
+
+function commandResponse(events = []) {
+  return jsonResponse({
+    duplicate: false,
+    committed: true,
+    productionId: PRODUCTION_ID,
+    revision: 8,
+    lastSequence: 8,
+    production: { id: PRODUCTION_ID, revision: 8, lastSequence: 8 },
+    events,
+  });
+}
+
+test('the production review client proposes a plan and never spends on the proposal', async () => {
+  const calls = [];
+  const api = createProductionReviewApi({
+    productionId: PRODUCTION_ID,
+    revision: 7,
+    commandId: prefix => `${prefix}_fixed`,
+    apiFetch: async (input, init = {}) => {
+      calls.push({ url: String(input), init, body: JSON.parse(String(init.body ?? '{}')) });
+      return commandResponse([{
+        id: 'evt_8',
+        productionId: PRODUCTION_ID,
+        sequence: 8,
+        type: 'plan.proposed',
+        data: {
+          planHash: PLAN_HASH,
+          planId: 'plan_1',
+          estimate: { gpuMinutes: 2, overheadMinutes: 1 },
+          budget: { allowed: true, required: 3 },
+          backend: { id: 'google_colab', label: 'Google Colab' },
+          jobs: 1,
+        },
+      }]);
+    },
+  });
+
+  const card = await api.proposeRedo({
+    packageId: 'pkg_1',
+    clipId: 'ep2_video_a01',
+    assetId: 'a_1',
+    change: { note: 'cleaner background' },
+    backendId: 'colab',
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, productionCommandPath(PRODUCTION_ID));
+  assert.equal(calls[0].body.kind, 'plan.propose');
+  assert.equal(calls[0].body.commandId, 'plan_propose_fixed');
+  assert.equal(calls[0].body.idempotencyKey, 'plan_propose_fixed');
+  assert.equal(calls[0].body.expected.productionRevision, 7);
+  assert.equal(calls[0].body.payload.clipId, 'ep2_video_a01');
+  assert.equal(calls[0].body.payload.change.note, 'cleaner background');
+  assert.equal(card.planHash, PLAN_HASH);
+  assert.equal(card.revision, 8);
+  assert.equal(card.proposalRevision, 8);
+  assert.deepEqual(card.estimate, { gpuMinutes: 2, overheadMinutes: 1 });
+  assert.deepEqual(card.backend, { id: 'google_colab', label: 'Google Colab' });
+  assert.equal(reviewCostCardEstimateLabel(card), '2 GPU min + 1 min overhead');
+  assert.notEqual(calls[0].body.kind, 'plan.approve');
+});
+
+test('the production review client sends explicit select and reject commands', async () => {
+  const sent = [];
+  const api = createProductionReviewApi({
+    productionId: PRODUCTION_ID,
+    revision: 11,
+    commandId: prefix => `${prefix}_fixed`,
+    apiFetch: async (_input, init = {}) => {
+      sent.push(JSON.parse(String(init.body ?? '{}')));
+      return commandResponse();
+    },
+  });
+
+  await api.selectTake({ clipId: 's1:a_1', assetId: 'a_1', takeId: 'tk_1' });
+  await api.rejectTake({ clipId: 's1:a_1', assetId: 'a_1', takeId: 'tk_1', note: 'logo hidden' });
+  await api.approveTake({ clipId: 's1:a_1', assetId: 'a_1', takeId: 'tk_1' });
+
+  assert.deepEqual(sent.map(body => body.kind), ['take.select', 'clip.reject', 'clip.approve']);
+  assert.deepEqual(sent[0].payload, { clipId: 's1:a_1', assetId: 'a_1', takeId: 'tk_1' });
+  assert.equal(sent[1].payload.note, 'logo hidden');
+  assert.equal(sent[0].expected.productionRevision, 11);
+});
+
+test('Redo on a production shows a cost card and leaves the clip in review', async () => {
+  const production = fakeProductionApi();
+  const model = createReviewDrawerModel({ clips: [clip(1)], production });
+
+  assert.equal(await model.redo('ep2_video_a01'), true);
+  assert.deepEqual(production.calls.map(call => call.method), ['proposeRedo']);
+  assert.equal(model.clips[0].state, 'review');
+  assert.equal(model.clips[0].queued, false);
+  assert.equal(model.costCard?.planHash, PLAN_HASH);
+  assert.match(model.liveMessage, /Review the cost before spending/);
+
+  const html = renderReviewCostCard(model.costCard);
+  assert.match(html, /data-review-cost-card/);
+  assert.match(html, /2 GPU min/);
+  assert.match(html, /Google Colab/);
+  assert.match(html, /data-review-cost-approve/);
+  assert.match(html, /data-review-cost-cancel/);
+});
+
+test('approving the cost card is the first command that allows spend', async () => {
+  const production = fakeProductionApi();
+  const model = createReviewDrawerModel({ clips: [clip(1)], production });
+  await model.redo('ep2_video_a01');
+
+  assert.equal(await model.approveCost(), true);
+  assert.deepEqual(production.calls.map(call => call.method), ['proposeRedo', 'approvePlan']);
+  assert.equal(model.costCard, null);
+  assert.equal(model.clips[0].state, 'queued');
+  assert.equal(model.clips[0].queued, true);
+  assert.match(model.liveMessage, /approved/i);
+});
+
+test('cancelling the cost card sends no spend command', async () => {
+  const production = fakeProductionApi();
+  const model = createReviewDrawerModel({ clips: [clip(1)], production });
+  await model.redo('ep2_video_a01');
+
+  model.cancelCost();
+  assert.equal(model.costCard, null);
+  assert.deepEqual(production.calls.map(call => call.method), ['proposeRedo']);
+  assert.equal(model.clips[0].state, 'review');
+  assert.match(model.liveMessage, /cancel/i);
+});
+
+test('preview never selects a take, while an explicit selection does', async () => {
+  const production = fakeProductionApi();
+  const previewed = [];
+  const model = createReviewDrawerModel({
+    clips: [clip(1)],
+    production,
+    onPreview: (item, takeId) => previewed.push({ clipId: item.clipId, takeId }),
+  });
+  const before = model.clips[0].selected;
+
+  assert.equal(await model.previewTake('tk_aaaaaaaaaaaa', 'ep2_video_a01'), true);
+  assert.deepEqual(previewed, [{ clipId: 'ep2_video_a01', takeId: 'tk_aaaaaaaaaaaa' }]);
+  assert.equal(model.previewTakeId, 'tk_aaaaaaaaaaaa');
+  assert.equal(model.clips[0].selected, before);
+  assert.deepEqual(production.calls, [], 'preview sends no production command');
+
+  assert.equal(await model.selectTake('tk_bbbbbbbbbbbb', 'ep2_video_a01'), true);
+  assert.deepEqual(production.calls.map(call => call.method), ['selectTake']);
+  assert.equal(production.calls[0].input.takeId, 'tk_bbbbbbbbbbbb');
+  assert.equal(model.clips[0].selected, 'tk_bbbbbbbbbbbb');
+});
+
+test('reject is an explicit clip.reject command and updates the row', async () => {
+  const production = fakeProductionApi();
+  const model = createReviewDrawerModel({ clips: [clip(1)], production });
+
+  assert.equal(await model.rejectTake('tk_aaaaaaaaaaaa', 'ep2_video_a01'), true);
+  assert.deepEqual(production.calls.map(call => call.method), ['rejectTake']);
+  assert.equal(production.calls[0].input.takeId, 'tk_aaaaaaaaaaaa');
+  assert.equal(model.clips[0].state, 'rejected');
+  assert.match(model.liveMessage, /rejected/i);
+});
+
+test('the mounted drawer shows the cost card before spend and only queues on approval', async () => {
+  const production = fakeProductionApi();
+  const { doc, restore } = installFakeDom();
+  try {
+    const host = doc.createElement('div');
+    const handle = mountReviewDrawer({ host, clips: [clip(1)], production });
+    handle.open();
+
+    const card = handle.element.querySelector('[data-review-cost-card]');
+    assert.ok(card);
+    assert.equal(card.getAttribute('hidden'), '');
+
+    await handle.model.redo('ep2_video_a01');
+    assert.equal(card.getAttribute('hidden'), null);
+    assert.match(card.innerHTML, /data-review-cost-approve/);
+    assert.match(card.innerHTML, /2 GPU min/);
+    assert.equal(handle.model.clips[0].state, 'review');
+
+    card.querySelector('[data-review-cost-approve]').dispatchEvent({ type: 'click', bubbles: true });
+    await flushThumbs();
+
+    assert.deepEqual(production.calls.map(call => call.method), ['proposeRedo', 'approvePlan']);
+    assert.equal(handle.model.costCard, null);
+    assert.equal(handle.model.clips[0].state, 'queued');
+    assert.equal(card.getAttribute('hidden'), '');
 
     handle.destroy();
   } finally {
