@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 
 import { canonicalJson, requestHashFor } from './commands.mjs';
 import { CommandError } from './commands.mjs';
-import { RECORDED_ACTORS, validateAction } from './contract.mjs';
+import { ITERATION_LEVEL_REQUIRED, RECORDED_ACTORS, validateAction } from './contract.mjs';
 import { ProductionLedgerError } from './ledger.mjs';
 import { ProductionStoreError } from './store.mjs';
 
@@ -93,6 +93,18 @@ function isIdentifier(value) {
 
 function isFiniteAmount(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function isPaidSlot(slot) {
+  if (!isPlainObject(slot)) return false;
+  if (!(typeof slot.upperBound === 'number' && slot.upperBound > 0)) return false;
+  if (slot.kind === 'audition' && slot.engine === 'kokoro') return false;
+  return true;
+}
+
+function planHasPaidSlot(plan) {
+  if (!isPlainObject(plan) || !Array.isArray(plan.actions)) return false;
+  return plan.actions.some(isPaidSlot);
 }
 
 /**
@@ -514,6 +526,42 @@ export function createActionCoordinator(options = {}) {
   }
   if (typeof ledgerFor !== 'function') {
     throw new TypeError('createActionCoordinator requires ledgerFor(production)');
+  }
+
+  if (!handler.__iterationGateWrapped) {
+    const originalExecute = handler.execute.bind(handler);
+    handler.execute = function (envelope, context) {
+      if (isPlainObject(envelope) && envelope.kind === 'plan.approve') {
+        const productionId = envelope.productionId;
+        if (typeof productionId === 'string') {
+          const production = store.read(productionId);
+          if (production) {
+            const events = store.readEvents(productionId);
+            const plans = proposedPlans(events);
+            const targetHash = isPlainObject(envelope.payload) ? envelope.payload.planHash : undefined;
+            const targetId = isPlainObject(envelope.payload) ? envelope.payload.planId : undefined;
+            let plan = null;
+            for (let i = plans.length - 1; i >= 0; i -= 1) {
+              const candidate = plans[i];
+              if (targetHash && candidate.planHash !== targetHash) continue;
+              if (targetId && candidate.id !== targetId) continue;
+              plan = candidate;
+              break;
+            }
+            if (plan && planHasPaidSlot(plan)) {
+              const policy = production.iteration && isPlainObject(production.iteration)
+                ? production.iteration.policy
+                : undefined;
+              if (!isPlainObject(policy)) {
+                throw new ActionError('ITERATION_LEVEL_REQUIRED', 'an iteration level must be set before approving a paid plan', 409);
+              }
+            }
+          }
+        }
+      }
+      return originalExecute(envelope, context);
+    };
+    handler.__iterationGateWrapped = true;
   }
 
   function existingCommit(productionId, commandId, idempotencyKey) {

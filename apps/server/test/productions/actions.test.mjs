@@ -23,6 +23,7 @@ import {
 import { createBudgetLedger, ledgerPaths } from '../../src/productions/ledger.mjs';
 import { ProductionLedgerError } from '../../src/productions/ledger.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
+import { ITERATION_PRESETS } from '../../src/productions/iteration.mjs';
 import { ProductionStoreError } from '../../src/productions/store.mjs';
 import {
   createProductionRoutes,
@@ -128,7 +129,7 @@ function envelope(commandId, payload, overrides = {}) {
   return {
     commandId,
     idempotencyKey: `key_${commandId}`,
-    expected: { productionRevision: overrides.productionRevision ?? 1 },
+    expected: { productionRevision: overrides.productionRevision ?? 2 },
     payload,
     ...overrides,
     payload,
@@ -148,6 +149,19 @@ async function createProduction(routes, overrides = {}) {
     },
   });
   assert.equal(response.status, 201, response.raw);
+  const level = await call(routes, {
+    method: 'POST',
+    url: `/api/productions/${response.body.productionId}/commands`,
+    body: {
+      commandId: `cmd_level_${response.body.productionId}`,
+      idempotencyKey: `key_level_${response.body.productionId}`,
+      kind: 'iteration.set',
+      productionId: response.body.productionId,
+      expected: { productionRevision: response.body.revision },
+      payload: { policy: structuredClone(ITERATION_PRESETS.balanced) },
+    },
+  });
+  assert.equal(level.status, 200, level.raw);
   return response.body;
 }
 
@@ -157,7 +171,7 @@ async function propose(routes, productionId, payload, overrides = {}) {
     url: `/api/productions/${productionId}/action-plans`,
     headers: overrides.headers,
     body: envelope(overrides.commandId ?? 'cmd_propose', payload, {
-      expected: { productionRevision: overrides.productionRevision ?? 1 },
+      expected: { productionRevision: overrides.productionRevision ?? 2 },
       ...(overrides.idempotencyKey ? { idempotencyKey: overrides.idempotencyKey } : {}),
     }),
   });
@@ -184,7 +198,7 @@ async function dispatch(routes, productionId, payload, overrides = {}) {
     url: `/api/productions/${productionId}/actions`,
     headers: overrides.headers,
     body: envelope(overrides.commandId ?? 'cmd_dispatch', payload, {
-      expected: { productionRevision: overrides.productionRevision ?? 1 },
+      expected: { productionRevision: overrides.productionRevision ?? 2 },
       ...(overrides.idempotencyKey ? { idempotencyKey: overrides.idempotencyKey } : {}),
     }),
   });
@@ -278,7 +292,7 @@ test('propose stores a server planHash, allocates nothing, and never reads actor
   assert.equal(replay.status, 200, replay.raw);
   assert.equal(replay.body.duplicate, true);
   assert.equal(replay.body.planHash, response.body.planHash);
-  assert.equal(store.read(id).revision, 2);
+  assert.equal(store.read(id).revision, 3);
 });
 
 test('a client planHash is rejected unless it is the server hash, and contentHash is dropped', async (t) => {
@@ -319,7 +333,7 @@ test('planId and commandId are required and are never invented', async (t) => {
   const missingCommand = await call(routes, {
     method: 'POST',
     url: `/api/productions/${id}/action-plans`,
-    body: { idempotencyKey: 'key_only', expected: { productionRevision: 1 }, payload: planPayload() },
+    body: { idempotencyKey: 'key_only', expected: { productionRevision: 2 }, payload: planPayload() },
   });
   assert.equal(missingCommand.status, 400);
   assert.equal(missingCommand.body.code, 'MISSING_COMMAND_ID');
@@ -327,7 +341,7 @@ test('planId and commandId are required and are never invented', async (t) => {
   const missingDispatchCommand = await call(routes, {
     method: 'POST',
     url: `/api/productions/${id}/actions`,
-    body: { expected: { productionRevision: 1 }, payload: { planId: 'plan_1', planRevision: 0, actionId: 'act_1' } },
+    body: { expected: { productionRevision: 2 }, payload: { planId: 'plan_1', planRevision: 0, actionId: 'act_1' } },
   });
   assert.equal(missingDispatchCommand.status, 400);
   assert.equal(missingDispatchCommand.body.code, 'MISSING_COMMAND_ID');
