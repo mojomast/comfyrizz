@@ -493,12 +493,8 @@ function renderSuggestedPrompts(): string {
   return `<div class="suggested-prompts" role="group" aria-label="Suggested prompts"><span class="suggested-prompts-label">Suggested prompts</span><div class="suggested-prompts-chips">${chips}</div></div>`;
 }
 
-export function mountProjectChat(options: {
+export type CreateProjectChatOptions = {
   apiFetch: ApiFetch;
-  root: HTMLElement;
-  append: (role: 'user' | 'assistant', text: string) => void;
-  replace: (messages: ChatMessage[]) => void;
-  setBusy: (busy: boolean, label?: string) => void;
   applyProject: (project: ChatProject, built: boolean) => void;
   provider: () => Promise<{ provider: string; model: string }>;
   log: (message: string) => void;
@@ -526,7 +522,20 @@ export function mountProjectChat(options: {
   onChangeCast?: (proposal: CastProposal) => void;
   onCastChanged?: (cast: ProjectCastEntry[]) => void | Promise<void>;
   onReset?: () => void | Promise<void>;
-}) {
+};
+
+type MountProjectChatOptions = CreateProjectChatOptions & {
+  root: HTMLElement;
+  append: (role: 'user' | 'assistant', text: string) => void;
+  replace: (messages: ChatMessage[]) => void;
+  setBusy: (busy: boolean, label?: string) => void;
+};
+
+type ProjectChatControllerOptions = MountProjectChatOptions & {
+  composer?: () => HTMLTextAreaElement | HTMLInputElement | null;
+};
+
+function mountProjectChatController(options: ProjectChatControllerOptions) {
   const panel = options.root;
   const id = options.initialConversationId ?? (options.restoreSaved === false ? null : localStorage.getItem(STORAGE_KEY));
   let conversationId: string | null = id && /^chat_[A-Za-z0-9_-]+$/.test(id) ? id : null;
@@ -660,9 +669,7 @@ export function mountProjectChat(options: {
       chip.addEventListener('click', () => {
         const text = chip.getAttribute('data-prompt') || chip.textContent?.trim() || '';
         if (!text) return;
-        const promptInput = (panel.querySelector('#prompt') ??
-          panel.ownerDocument?.getElementById('prompt') ??
-          (typeof document !== 'undefined' ? document.getElementById('prompt') : null)) as HTMLTextAreaElement | HTMLInputElement | null;
+        const promptInput = composerInput();
         if (promptInput) {
           promptInput.value = text;
           promptInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -805,6 +812,7 @@ export function mountProjectChat(options: {
   }
 
   function composerInput(): HTMLTextAreaElement | HTMLInputElement | null {
+    if (options.composer) return options.composer();
     return (panel.querySelector('#prompt') ??
       panel.ownerDocument?.getElementById('prompt') ??
       (typeof document !== 'undefined' ? document.getElementById('prompt') : null)) as HTMLTextAreaElement | HTMLInputElement | null;
@@ -1147,4 +1155,88 @@ export function mountProjectChat(options: {
     get castProposals() { return conversation?.castProposals ?? []; },
     get conversationId() { return conversationId; },
   };
+}
+
+export function mountProjectChat(options: MountProjectChatOptions) {
+  return mountProjectChatController(options);
+}
+
+let projectChatInstance = 0;
+
+export function createProjectChat(host: HTMLElement, options: CreateProjectChatOptions) {
+  projectChatInstance += 1;
+  const promptId = `project-chat-${projectChatInstance}-prompt`;
+  host.innerHTML = `<div class="project-chat-log" data-project-chat-log role="log" aria-live="polite" aria-label="Chat messages"></div>
+    <div data-project-chat-panel></div>
+    <form class="project-chat-composer" data-project-chat-form>
+      <label for="${promptId}">Message</label>
+      <textarea id="${promptId}" data-project-chat-input rows="3"></textarea>
+      <button type="submit" class="btn btn-primary" data-project-chat-send>Send</button>
+    </form>`;
+  const log = host.querySelector<HTMLElement>('[data-project-chat-log]');
+  const panel = host.querySelector<HTMLElement>('[data-project-chat-panel]');
+  const form = host.querySelector<HTMLFormElement>('[data-project-chat-form]');
+  const composer = host.querySelector<HTMLTextAreaElement>('[data-project-chat-input]');
+  const sendButton = host.querySelector<HTMLButtonElement>('[data-project-chat-send]');
+  if (!log || !panel || !form || !composer || !sendButton) {
+    host.innerHTML = '';
+    throw new Error('Could not create the project chat.');
+  }
+
+  const append = (role: 'user' | 'assistant', text: string): void => {
+    const message = log.ownerDocument.createElement('div');
+    message.className = `msg ${role}`;
+    message.setAttribute('data-message-role', role);
+    message.textContent = text;
+    log.appendChild(message);
+  };
+
+  const replace = (messages: ChatMessage[]): void => {
+    log.innerHTML = '';
+    for (const message of messages) append(message.role, message.content);
+  };
+
+  const setBusy = (busy: boolean): void => {
+    composer.disabled = busy;
+    sendButton.disabled = busy;
+    form.setAttribute('aria-busy', String(busy));
+  };
+
+  let destroyed = false;
+  const controller = mountProjectChatController({
+    ...options,
+    root: panel,
+    append,
+    replace,
+    setBusy,
+    composer: () => host.querySelector<HTMLTextAreaElement>('[data-project-chat-input]'),
+  });
+  const submit = (event: Event): void => {
+    event.preventDefault();
+    if (destroyed) return;
+    const text = composer.value.trim();
+    if (!text) return;
+    composer.value = '';
+    void controller.send(text, 'plan');
+  };
+  form.addEventListener('submit', submit);
+
+  return Object.assign(controller, {
+    element: host,
+    prefill(text: string): void {
+      if (destroyed) return;
+      composer.value = text;
+      composer.dispatchEvent(new Event('input', { bubbles: true }));
+      composer.focus();
+    },
+    destroy(): void {
+      if (destroyed) return;
+      destroyed = true;
+      form.removeEventListener('submit', submit);
+      form.innerHTML = '';
+      panel.innerHTML = '';
+      log.innerHTML = '';
+      host.innerHTML = '';
+    },
+  });
 }
