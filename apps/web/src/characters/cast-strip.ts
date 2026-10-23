@@ -842,8 +842,8 @@ export function renderCastStrip(state: CastStripState, options: RenderCastStripO
   )).join('');
   const count = state.cast.length;
   const countLabel = `${count} cast member${count === 1 ? '' : 's'}`;
-  const loadError = state.loadError
-    || (state.messageError && count === 0 ? state.message : '');
+  // Only a failed load gets the load-error block; any other error stays in the status line.
+  const loadError = state.loadError ?? '';
   const body = count === 0
     ? loadError
       ? ''

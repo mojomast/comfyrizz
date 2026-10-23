@@ -216,6 +216,17 @@ test('a load error shows a friendly headline, the raw message in Details and Try
   assert.equal(state.messageError, true);
 });
 
+test('a non-load error on an empty cast stays in the status line, not the load-error block', async () => {
+  const controller = new CastStripController({
+    api: { async listCast() { return []; }, async list() { return []; } },
+    chatId: 'chat_abcdefgh',
+  });
+  const state = { ...(await controller.load()), message: 'Could not attach Pip', messageError: true };
+  const html = renderCastStrip(state);
+  assert.doesNotMatch(html, /data-cast-load-error/);
+  assert.match(html, /data-cast-status[^>]*>Could not attach Pip</);
+});
+
 test('update available compares the pinned revision with the library revision', () => {
   const pip = character();
   const latest = character({ revision: 3, name: 'Pip v3' });
