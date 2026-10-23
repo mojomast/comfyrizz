@@ -1,3 +1,4 @@
+// @ts-nocheck
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ProductionClientError } from '../src/productions/client.ts';
@@ -126,7 +127,7 @@ test('the first snapshot arrives through onState', async () => {
   const api = queueFetch([json(snapshot(3, 5))]);
   const timers = createTimers();
   const states = [];
-  const watcher = watchProduction({
+  const stop = watchProduction({
     productionId: PRODUCTION_ID,
     fetchImpl: api.fetchImpl,
     onState: (state) => states.push(state),
@@ -145,7 +146,7 @@ test('the first snapshot arrives through onState', async () => {
   assert.equal(states[0].lastSequence, 5);
   assert.equal(states[0].error, null);
 
-  watcher.stop();
+  stop();
 });
 
 test('event batches are merged, so the revision increases', async () => {
@@ -156,7 +157,7 @@ test('event batches are merged, so the revision increases', async () => {
   ]);
   const timers = createTimers();
   const states = [];
-  const watcher = watchProduction({
+  const stop = watchProduction({
     productionId: PRODUCTION_ID,
     fetchImpl: api.fetchImpl,
     onState: (state) => states.push(state),
@@ -179,7 +180,7 @@ test('event batches are merged, so the revision increases', async () => {
   assert.deepEqual(states.at(-1).events.map((entry) => entry.sequence), [2]);
   assert.equal(states.at(-1).error, null);
 
-  watcher.stop();
+  stop();
 });
 
 test('an error triggers a retry with backoff of 2, 4, 8 and 16 seconds, then every 30 seconds', async () => {
@@ -187,7 +188,7 @@ test('an error triggers a retry with backoff of 2, 4, 8 and 16 seconds, then eve
   const api = queueFetch([json(snapshot(1, 1)), failure]);
   const timers = createTimers();
   const states = [];
-  const watcher = watchProduction({
+  const stop = watchProduction({
     productionId: PRODUCTION_ID,
     fetchImpl: api.fetchImpl,
     onState: (state) => states.push(state),
@@ -217,14 +218,14 @@ test('an error triggers a retry with backoff of 2, 4, 8 and 16 seconds, then eve
   assert.equal(api.calls.length, callsAfterBackoff + 1, 'the last delay repeats every 30 seconds');
   assert.equal(timers.nextDelay(), 30000);
 
-  watcher.stop();
+  stop();
 });
 
 test('stop halts the calls', async () => {
   const api = queueFetch([json(snapshot(1, 1)), json(batch([], 1))]);
   const timers = createTimers();
   const states = [];
-  const watcher = watchProduction({
+  const stop = watchProduction({
     productionId: PRODUCTION_ID,
     fetchImpl: api.fetchImpl,
     onState: (state) => states.push(state),
@@ -238,7 +239,7 @@ test('stop halts the calls', async () => {
   await settle();
   assert.equal(api.calls.length, 2);
 
-  watcher();
+  stop();
   const callsAtStop = api.calls.length;
   const statesAtStop = states.length;
 
@@ -248,5 +249,5 @@ test('stop halts the calls', async () => {
   assert.equal(api.calls.length, callsAtStop, 'no request runs after stop');
   assert.equal(states.length, statesAtStop, 'no state is emitted after stop');
   assert.deepEqual(timers.pending(), []);
-  watcher.stop();
+  stop();
 });

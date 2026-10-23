@@ -16,11 +16,6 @@ export interface ProductionWatchState extends ProductionState {
   error: ProductionClientError | null;
 }
 
-export interface ProductionWatchHandle {
-  (): void;
-  stop: () => void;
-}
-
 export interface WatchProductionOptions {
   productionId: string;
   fetchImpl?: ProductionApiFetch;
@@ -55,7 +50,8 @@ function documentHidden(): boolean {
   return Boolean(scope.document?.hidden);
 }
 
-export function watchProduction(options: WatchProductionOptions): ProductionWatchHandle {
+/** Starts watching; the returned function is `stop()`. */
+export function watchProduction(options: WatchProductionOptions): () => void {
   const client = createProductionClient({
     productionId: options.productionId,
     ...(options.fetchImpl === undefined ? {} : { apiFetch: options.fetchImpl }),
@@ -148,7 +144,5 @@ export function watchProduction(options: WatchProductionOptions): ProductionWatc
     }
   }
 
-  const handle = stop as ProductionWatchHandle;
-  handle.stop = stop;
-  return handle;
+  return stop;
 }
