@@ -268,8 +268,13 @@ test('a voice shot override is read from the effective policy per shot', () => {
     characters: 1,
   }));
 
-  assert.equal(base.voiceSamples, 4);
-  assert.equal(overridden.voiceSamples, 8);
+  // Once per character (not per shot), at the richest shot setting.
+  assert.equal(base.voiceSamples, 2);
+  assert.equal(overridden.voiceSamples, 6);
+
+  const tenShots = Array.from({ length: 10 }, (_, index) => presenter(10, `shot-${index + 1}`));
+  const director = estimateIteration(input({ policy: ITERATION_PRESETS.director, shots: tenShots, characters: 1 }));
+  assert.equal(director.voiceSamples, 6, 'ten shots do not multiply the per-character audition count');
   assert.deepEqual(overridden.gpuMinutes, base.gpuMinutes);
 });
 

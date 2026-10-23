@@ -102,16 +102,17 @@ function workMinutes(policy, shots, characters) {
       throw new TypeError('every shot must have a non-empty id');
     }
     const resolved = effectivePolicyForShot(policy, shot.id);
-    // IL06G: one character auditions `auditions` voices over
-    // `linesPerVoice` lines. Local Kokoro stays free under D1, so the count is
-    // reported without adding Google Colab minutes.
+    // IL06G: a character's voice is auditioned once per production, not once
+    // per shot: `auditions` voices over `linesPerVoice` lines, at the richest
+    // effective voice setting any shot asks for. Local Kokoro stays free under
+    // D1, so the count is reported without adding Google Colab minutes.
     const voice = resolved.stages.voice;
-    voiceSamples += voice.auditions * voice.linesPerVoice * characters;
+    voiceSamples = Math.max(voiceSamples, voice.auditions * voice.linesPerVoice);
     const minutes = shotMinutes(resolved.stages, shot);
     low += minutes.low;
     expected += minutes.expected;
   }
-  return { low, expected, voiceSamples };
+  return { low, expected, voiceSamples: voiceSamples * characters };
 }
 
 function capFor(ceiling, expectedUnits) {
