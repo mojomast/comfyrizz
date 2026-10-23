@@ -1,3 +1,4 @@
+import { CharacterApiError } from './api.ts';
 import type {
   CastEntry,
   CastMutation,
@@ -471,8 +472,14 @@ export class CastStripController {
       this.state.message = '';
       this.state.messageError = false;
     } catch (error) {
-      this.state.message = `Could not load the cast: ${messageOf(error)}`;
-      this.state.messageError = true;
+      if (error instanceof CharacterApiError && error.code === 'NOT_FOUND') {
+        this.state.cast = [];
+        this.state.message = '';
+        this.state.messageError = false;
+      } else {
+        this.state.message = `Could not load the cast: ${messageOf(error)}`;
+        this.state.messageError = true;
+      }
     } finally {
       this.state.loading = false;
       this.notify('all');
