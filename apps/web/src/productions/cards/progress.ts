@@ -484,3 +484,473 @@ export function createProgressAnnouncer(
 }
 
 export const createShotProgressAnnouncer = createProgressAnnouncer;
+
+// IP33: pause, resume and cancel controls, plus an honest teardown readout.
+//
+// These functions are a view of durable production records, not a second state
+// store. `production.intent` is the only durable production status and it is
+// exactly one of the four contract values. A journal event may override the
+// snapshot only when the event is newer than the snapshot it was read with.
+//
+// Teardown is never inferred from a status-shaped field. It comes from exactly
+// one explicit backend teardown record supplied as an option, and from a
+// pending action whose pipeline status is `shutdown_unconfirmed`. An
+// unconfirmed shutdown always wins over a stopped record.
+
+export const PROGRESS_INTENTS = Object.freeze([
+  'active',
+  'paused',
+  'cancel_requested',
+  'archived',
+] as const);
+
+export type ProgressIntent = (typeof PROGRESS_INTENTS)[number] | 'unknown';
+
+export const PROGRESS_INTENT_TEXT: Readonly<Record<ProgressIntent, string>> = Object.freeze({
+  active: 'Active',
+  paused: 'Paused',
+  cancel_requested: 'Cancelling',
+  archived: 'Archived',
+  unknown: 'Unknown',
+});
+
+export const PROGRESS_CONTROL_NAMES = Object.freeze(['pause', 'resume', 'cancel'] as const);
+export type ProgressControlName = (typeof PROGRESS_CONTROL_NAMES)[number];
+
+/** The one closed command vocabulary this card can produce. */
+export const PROGRESS_COMMANDS = Object.freeze({
+  pause: 'production.pause',
+  resume: 'production.resume',
+  cancel: 'production.cancel',
+} as const);
+
+export type ProgressCommandKind = (typeof PROGRESS_COMMANDS)[ProgressControlName];
+
+export type ProgressTeardownState = 'stopped' | 'not_owned' | 'shutdown_unconfirmed';
+
+export interface ProgressTeardown {
+  state: ProgressTeardownState;
+  evidence: string | null;
+  text: string;
+}
+
+export interface ProgressControlState {
+  enabled: boolean;
+  reason: string | null;
+}
+
+export interface ProgressControlsCard {
+  productionId: string | null;
+  revision: number | null;
+  intent: ProgressIntent;
+  intentText: string;
+  stale: boolean;
+  controls: Record<ProgressControlName, ProgressControlState>;
+  canPause: boolean;
+  canResume: boolean;
+  canCancel: boolean;
+  teardown: ProgressTeardown | null;
+  remainingWork: number;
+  collectedTakeIds: string[];
+}
+
+export interface ProgressControlsInput {
+  production?: unknown;
+  revision?: unknown;
+  lastSequence?: unknown;
+  events?: unknown;
+  pendingActions?: unknown;
+  collectedTakeIds?: unknown;
+  stale?: unknown;
+  gap?: unknown;
+}
+
+export interface ProgressControlsOptions {
+  /** The backend teardown record: {state, evidence?}. No other source is read. */
+  teardown?: unknown;
+}
+
+export interface ProgressControlContext {
+  commandId?: string;
+  idempotencyKey?: string;
+  baseRevision?: number;
+  /** The originating user event; attribution itself stays server-owned. */
+  userEventId?: string;
+}
+
+export interface ProgressControlCommand {
+  commandId: string;
+  idempotencyKey: string;
+  kind: ProgressCommandKind;
+  productionId: string;
+  expected: { productionRevision: number };
+  payload: Record<string, never>;
+}
+
+export type ProgressControlErrorCode =
+  | 'NOT_READY'
+  | 'STALE_VIEW'
+  | 'REVISION_MISMATCH'
+  | 'NOT_AVAILABLE'
+  | 'INVALID_CONTEXT';
+
+export interface ProgressControlSuccess {
+  ok: true;
+  command: ProgressControlCommand;
+  card: ProgressControlsCard;
+  /** Echo of the caller's user event; attribution is still server-owned. */
+  citation: string | null;
+}
+
+export interface ProgressControlFailure {
+  ok: false;
+  code: ProgressControlErrorCode;
+  error: string;
+}
+
+export type ProgressControlResult = ProgressControlSuccess | ProgressControlFailure;
+
+export interface ProgressControlClient {
+  sendCommand: (envelope: unknown) => Promise<unknown> | unknown;
+}
+
+const TERMINAL_ACTION_STATES = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+  'submission_unknown',
+]);
+
+const INTENT_EVENT_TYPES = new Set([
+  'production.intent_changed',
+  'production.cancelled',
+]);
+
+const TEARDOWN_TEXT: Readonly<Record<ProgressTeardownState, string>> = Object.freeze({
+  stopped: 'Compute teardown confirmed.',
+  not_owned: 'Compute was not owned by this production.',
+  shutdown_unconfirmed: 'Compute shutdown unconfirmed.',
+});
+
+const NOT_READY_REASON = 'Wait for the production snapshot before changing the production.';
+const STALE_REASON = 'This card is behind the event journal. Refresh before changing the production.';
+
+function nonNegativeInteger(value: unknown): number | null {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
+}
+
+function normalizeIntent(value: unknown): ProgressIntent {
+  const key = textOf(value).trim();
+  return (PROGRESS_INTENTS as readonly string[]).includes(key) ? key as ProgressIntent : 'unknown';
+}
+
+function normalizeTeardown(value: unknown): ProgressTeardown | null {
+  if (!isPlainObject(value)) return null;
+  const state = textOf(value.state).trim();
+  let normalized: ProgressTeardownState;
+  if (state === 'stopped') normalized = 'stopped';
+  else if (state === 'not_owned') normalized = 'not_owned';
+  else if (state === 'stop_unconfirmed' || state === 'shutdown_unconfirmed') normalized = 'shutdown_unconfirmed';
+  else return null;
+
+  const evidence = typeof value.evidence === 'string' && value.evidence.trim() !== ''
+    ? value.evidence
+    : null;
+  return { state: normalized, evidence, text: TEARDOWN_TEXT[normalized] };
+}
+
+function pendingShutdownUnconfirmed(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some(action => isPlainObject(action) && action.status === 'shutdown_unconfirmed');
+}
+
+function controlState(enabled: boolean, reason: string | null): ProgressControlState {
+  return { enabled, reason: enabled ? null : reason };
+}
+
+function disabledReason(
+  requested: ProgressControlName,
+  intent: ProgressIntent,
+  baseReason: string | null,
+): string | null {
+  if (baseReason !== null) return baseReason;
+  if (requested === 'pause') {
+    return intent === 'active' ? null : 'Only an active production can be paused.';
+  }
+  if (requested === 'resume') {
+    return intent === 'paused' ? null : 'Only a paused production can be resumed.';
+  }
+  if (intent === 'cancel_requested') return 'Cancellation is already requested.';
+  if (intent === 'archived') return 'An archived production cannot be cancelled.';
+  return null;
+}
+
+/**
+ * Read the controls from an IP28 production state. The snapshot's intent is
+ * the truth at its revision; only a strictly newer intent event may override
+ * it. Missing revisions and unknown intents are NOT_READY and disable every
+ * control rather than assuming revision zero or an active production.
+ */
+export function readProgressControls(
+  input: unknown,
+  options: ProgressControlsOptions = {},
+): ProgressControlsCard {
+  const source = isPlainObject(input) ? input : null;
+  const production = source !== null && isPlainObject(source.production) ? source.production : null;
+  const optionValues = isPlainObject(options) ? options : {};
+
+  const productionId = production !== null && textOf(production.id).trim() !== ''
+    ? textOf(production.id).trim()
+    : null;
+  const revision = nonNegativeInteger(source?.revision)
+    ?? nonNegativeInteger(production?.revision);
+  const lastSequence = nonNegativeInteger(source?.lastSequence)
+    ?? nonNegativeInteger(production?.lastSequence);
+
+  let intent: ProgressIntent = production === null || revision === null
+    ? 'unknown'
+    : normalizeIntent(production.intent);
+  if (revision !== null && lastSequence !== null && Array.isArray(source?.events)) {
+    let overriddenAt = -1;
+    let overriddenIntent: ProgressIntent | null = null;
+    for (const event of source.events) {
+      if (!isPlainObject(event)) continue;
+      if (!Number.isSafeInteger(event.sequence) || (event.sequence as number) <= lastSequence) continue;
+      if (typeof event.type !== 'string' || !INTENT_EVENT_TYPES.has(event.type)) continue;
+      if (!isPlainObject(event.data) || !Object.prototype.hasOwnProperty.call(event.data, 'intent')) continue;
+      if ((event.sequence as number) < overriddenAt) continue;
+      overriddenAt = event.sequence as number;
+      overriddenIntent = normalizeIntent(event.data.intent);
+    }
+    if (overriddenIntent !== null) intent = overriddenIntent;
+  }
+
+  const stale = source?.stale === true || source?.gap === true;
+  const ready = productionId !== null && revision !== null && intent !== 'unknown';
+  const baseReason = stale ? STALE_REASON : ready ? null : NOT_READY_REASON;
+
+  const active = intent === 'active';
+  const paused = intent === 'paused';
+  const controls: Record<ProgressControlName, ProgressControlState> = {
+    pause: controlState(
+      !stale && ready && active,
+      disabledReason('pause', intent, baseReason),
+    ),
+    resume: controlState(
+      !stale && ready && paused,
+      disabledReason('resume', intent, baseReason),
+    ),
+    cancel: controlState(
+      !stale && ready && (active || paused),
+      disabledReason('cancel', intent, baseReason),
+    ),
+  };
+
+  let teardown = normalizeTeardown(optionValues.teardown);
+  if (pendingShutdownUnconfirmed(source?.pendingActions)) {
+    teardown = {
+      state: 'shutdown_unconfirmed',
+      evidence: teardown?.state === 'shutdown_unconfirmed' ? teardown.evidence : null,
+      text: TEARDOWN_TEXT.shutdown_unconfirmed,
+    };
+  }
+
+  const pendingActions = Array.isArray(source?.pendingActions) ? source.pendingActions : [];
+  const remainingWork = pendingActions.filter((action) => {
+    if (!isPlainObject(action)) return false;
+    return !TERMINAL_ACTION_STATES.has(textOf(action.state).trim());
+  }).length;
+
+  const collectedTakeIds = Array.isArray(source?.collectedTakeIds)
+    ? source.collectedTakeIds.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+    : [];
+
+  return {
+    productionId,
+    revision,
+    intent,
+    intentText: PROGRESS_INTENT_TEXT[intent],
+    stale,
+    controls,
+    canPause: controls.pause.enabled,
+    canResume: controls.resume.enabled,
+    canCancel: controls.cancel.enabled,
+    teardown,
+    remainingWork,
+    collectedTakeIds,
+  };
+}
+
+function isCommandId(value: string): boolean {
+  return value !== '' && value.length <= 256 && /^[^\s/\\\u0000-\u001f]+$/u.test(value);
+}
+
+function stableProgressHash(value: unknown): string {
+  const source = (function stableJson(entry: unknown): string {
+    if (entry === null || typeof entry !== 'object') return JSON.stringify(entry);
+    if (Array.isArray(entry)) {
+      return `[${entry.map((item) => (item === undefined ? 'null' : stableJson(item))).join(',')}]`;
+    }
+    const object = entry as Record<string, unknown>;
+    const keys = Object.keys(object).filter((key) => object[key] !== undefined).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`).join(',')}}`;
+  })(value);
+  let high = 0x811c9dc5;
+  let low = 0x9e3779b9;
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    high = Math.imul(high ^ code, 0x01000193) >>> 0;
+    low = Math.imul(low ^ code, 0x85ebca6b) >>> 0;
+  }
+  return `fnv1a64:${high.toString(16).padStart(8, '0')}${low.toString(16).padStart(8, '0')}`;
+}
+
+function failure(code: ProgressControlErrorCode, error: string): ProgressControlFailure {
+  return { ok: false, code, error };
+}
+
+/**
+ * Build one pause, resume or cancel command for the exact snapshot the card
+ * shows. Refusals happen before a command exists, so a stale or unavailable
+ * control never becomes a write.
+ */
+export function buildProgressControlCommand(
+  card: ProgressControlsCard,
+  name: ProgressControlName,
+  context: ProgressControlContext = {},
+): ProgressControlResult {
+  if (!isPlainObject(card)) {
+    return failure('NOT_READY', NOT_READY_REASON);
+  }
+  if (card.productionId === null || card.productionId === '' || card.revision === null || card.intent === 'unknown') {
+    return failure('NOT_READY', NOT_READY_REASON);
+  }
+  if (card.stale) {
+    return failure('STALE_VIEW', STALE_REASON);
+  }
+  if (!(PROGRESS_CONTROL_NAMES as readonly string[]).includes(name)) {
+    return failure('NOT_AVAILABLE', 'That production control does not exist.');
+  }
+  if (context === null || typeof context !== 'object' || Array.isArray(context)) {
+    return failure('INVALID_CONTEXT', 'The control context must be an object.');
+  }
+
+  const baseRevision = context.baseRevision === undefined ? card.revision : context.baseRevision;
+  if (!Number.isSafeInteger(baseRevision) || baseRevision < 0) {
+    return failure('INVALID_CONTEXT', 'baseRevision must be a non-negative integer.');
+  }
+  if (baseRevision !== card.revision) {
+    return failure('REVISION_MISMATCH', 'baseRevision does not match the revision this card was read from.');
+  }
+  if (context.commandId !== undefined && !isCommandId(context.commandId)) {
+    return failure('INVALID_CONTEXT', 'commandId is not a valid command identifier.');
+  }
+  if (context.idempotencyKey !== undefined && !isCommandId(context.idempotencyKey)) {
+    return failure('INVALID_CONTEXT', 'idempotencyKey is not a valid idempotency key.');
+  }
+
+  const control = card.controls[name];
+  if (!control || !control.enabled) {
+    return failure('NOT_AVAILABLE', control?.reason ?? 'That production control is not available.');
+  }
+
+  const kind = PROGRESS_COMMANDS[name];
+  const digest = stableProgressHash({
+    productionId: card.productionId,
+    revision: card.revision,
+    kind,
+  }).replace(/^fnv1a64:/, '');
+  const commandId = context.commandId ?? `cmd_progress_${name}_${digest}`;
+  const idempotencyKey = context.idempotencyKey ?? commandId;
+
+  return {
+    ok: true,
+    command: {
+      commandId,
+      idempotencyKey,
+      kind,
+      productionId: card.productionId,
+      expected: { productionRevision: card.revision },
+      payload: {},
+    },
+    card,
+    citation: context.userEventId ?? null,
+  };
+}
+
+/**
+ * Send one accepted control through an IP28 production client. A refused
+ * control never reaches the client, so an unavailable action cannot be sent.
+ */
+export async function sendProgressControl(
+  client: ProgressControlClient,
+  result: ProgressControlResult,
+): Promise<unknown> {
+  if (result.ok === false) {
+    throw new Error(`${result.code}: ${result.error}`);
+  }
+  if (!client || typeof client.sendCommand !== 'function') {
+    throw new TypeError('sendProgressControl requires a production client');
+  }
+  return client.sendCommand(result.command);
+}
+
+function renderControl(
+  name: ProgressControlName,
+  label: string,
+  description: string,
+  state: ProgressControlState,
+): string {
+  const disabled = state.enabled ? '' : ' disabled';
+  return `<button type="button" class="btn ${name === 'cancel' ? 'btn-danger' : 'btn-secondary'}" data-progress-control="${name}" data-progress-command="${PROGRESS_COMMANDS[name]}" aria-label="${escapeHtml(description)}"${disabled}>${escapeHtml(label)}</button>`;
+}
+
+function remainingWorkText(count: number): string {
+  if (count === 0) return 'No actions still active.';
+  return `${count} action${count === 1 ? '' : 's'} still active.`;
+}
+
+/** Pure HTML for the controls. Every durable value is escaped. */
+export function renderProgressControls(card: ProgressControlsCard): string {
+  if (!isPlainObject(card)) card = readProgressControls(null);
+
+  const productionId = card.productionId ?? '';
+  const attributes = [
+    'class="production-card production-progress-controls"',
+    'data-production-card="progress-controls"',
+    'data-progress-controls',
+    `data-production-id="${escapeHtml(productionId)}"`,
+    `data-progress-intent="${card.intent}"`,
+    `data-revision="${card.revision ?? ''}"`,
+    `data-progress-stale="${card.stale ? 'true' : 'false'}"`,
+    `data-progress-remaining-work="${card.remainingWork}"`,
+    `aria-label="Production controls"`,
+  ].join(' ');
+
+  const teardown = card.teardown === null
+    ? ''
+    : `<p class="progress-teardown" data-progress-teardown="${card.teardown.state}" data-progress-teardown-state="${card.teardown.state}" role="status">
+      <span data-progress-teardown-text>${escapeHtml(card.teardown.text)}</span>${card.teardown.evidence === null ? '' : ` <span data-progress-teardown-evidence>Evidence: ${escapeHtml(card.teardown.evidence)}</span>`}
+    </p>`;
+
+  const collected = card.collectedTakeIds.length === 0
+    ? ''
+    : `<ol class="progress-collected-takes" data-progress-collected-takes>${card.collectedTakeIds.map((id) => `<li data-collected-take-id="${escapeHtml(id)}">${escapeHtml(id)}</li>`).join('')}</ol>`;
+
+  return `<section ${attributes}>
+    <header class="progress-controls-head">
+      <h2>Production controls</h2>
+      <span class="progress-controls-intent" data-progress-intent-label>${escapeHtml(card.intentText)}</span>
+    </header>
+    <p class="progress-remaining-work" data-progress-remaining-work>${escapeHtml(remainingWorkText(card.remainingWork))}</p>
+    ${teardown}
+    <p class="progress-collected-copy" data-progress-collected-copy>Collected takes are kept if you cancel.</p>
+    ${collected}
+    <div class="progress-control-buttons">
+      ${renderControl('pause', 'Pause', 'Pause this production', card.controls.pause)}
+      ${renderControl('resume', 'Resume', 'Resume this production', card.controls.resume)}
+      ${renderControl('cancel', 'Cancel production', 'Cancel this production but keep collected takes', card.controls.cancel)}
+    </div>
+  </section>`;
+}
