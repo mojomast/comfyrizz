@@ -211,7 +211,6 @@ export function createApp({
   mkdirSync(rendersDir, { recursive: true });
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
-  const projectChat = createProjectChat({ runtimeDir, store, providerSettings, prepareBrand });
   const events = new EventLog();
   const publishEntry = events.publish.bind(events);
   const pipelineIngested = new Set();
@@ -431,6 +430,35 @@ export function createApp({
       if (!production) return null;
       return createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId });
     },
+  });
+  // IP26: chat is a thin adapter over the same run path. A package bound to a
+  // production never starts a paid run from chat, not even with a legacy plan
+  // hash approval: the production plan card dispatches the IP20 action slot.
+  // The binding is resolved here from the production journal, never from the
+  // request.
+  const findBoundProduction = (packageId) => (typeof packageId === 'string' && packageId !== ''
+    ? productionStore.list().find((production) => production.packageId === packageId) ?? null
+    : null);
+  const chatRuns = {
+    estimate: (...args) => runs.estimate(...args),
+    status: (...args) => runs.status(...args),
+    start: async (options = {}) => {
+      const bound = findBoundProduction(options?.pkg?.id);
+      if (bound) return { approvalRequired: true, planHash: null, productionId: bound.id };
+      return runs.start(options);
+    },
+  };
+  // IP26 (A01): chat gets the run controller, takes, events and measured options
+  // so a confirmed clip correction reaches the same coordinator as the routes.
+  const projectChat = createProjectChat({
+    runtimeDir,
+    store,
+    providerSettings,
+    prepareBrand,
+    takeStore,
+    runs: chatRuns,
+    events,
+    measuredFor: pkg => measuredOptionsFromDir(dirname(store.path(pkg.id))),
   });
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
   // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
