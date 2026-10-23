@@ -327,7 +327,7 @@ test('builds one decision.resolve command whose payload names the proposal', () 
   assert.equal(command.idempotencyKey, 'cmd_fixed_1');
   assert.deepEqual(command.expected, { productionRevision: 7 });
   assert.equal(command.payload.decisionId, 'asg_style_1');
-  assert.equal(command.payload.proposalId, 'asg_style_1');
+  assert.equal(command.payload.decisionId, 'asg_style_1');
   assert.equal(command.payload.optionId, 'reject');
   assert.equal(command.payload.proposalHash, 'a'.repeat(64));
 
@@ -376,7 +376,7 @@ test('reject sends the production command with the proposal id and no prefill', 
     assert.match(root.innerHTML, /data-reference-proposal="asg_style_1"/);
     assert.ok(root.querySelector('[data-change-assignment="asg_style_1"]'), 'the Reject button is rendered');
 
-    const ok = await chat.rejectProposal('reference', 'asg_style_1');
+    const ok = await chat.decideProposal('reference', 'asg_style_1', 'reject');
     assert.equal(ok, true);
     assert.equal(sent.length, 1);
     const [command] = sent;
@@ -385,7 +385,7 @@ test('reject sends the production command with the proposal id and no prefill', 
     assert.equal(command.idempotencyKey, 'cmd_reject_asg_style_1');
     assert.deepEqual(command.expected, { productionRevision: 9 });
     assert.equal(command.payload.decisionId, 'asg_style_1');
-    assert.equal(command.payload.proposalId, 'asg_style_1');
+    assert.equal(command.payload.decisionId, 'asg_style_1');
     assert.equal(command.payload.optionId, 'reject');
 
     assert.equal(changed, 0, 'Reject never pre-fills or asks the host to change the proposal');
@@ -435,7 +435,7 @@ test('accept sends approve for a cast proposal', async () => {
     });
     await chat.ready;
 
-    const ok = await chat.acceptProposal('cast', 'cast_prop_1');
+    const ok = await chat.decideProposal('cast', 'cast_prop_1', 'accept');
     assert.equal(ok, true);
     assert.equal(sent.length, 1);
     assert.equal(sent[0].payload.optionId, 'approve');
@@ -491,7 +491,7 @@ test('an unbound chat never turns Reject back into a composer prefill', async ()
     });
     await chat.ready;
 
-    const ok = await chat.rejectProposal('reference', 'asg_style_1');
+    const ok = await chat.decideProposal('reference', 'asg_style_1', 'reject');
     assert.equal(ok, false);
     assert.equal(changed, 0, 'no host prefill or change hook is called');
     assert.match(root.innerHTML, /needs a production command binding/);
@@ -514,7 +514,7 @@ test('a failed command keeps the proposal and reports one error', async () => {
     });
     await chat.ready;
 
-    const ok = await chat.rejectProposal('reference', 'asg_style_1');
+    const ok = await chat.decideProposal('reference', 'asg_style_1', 'reject');
     assert.equal(ok, false);
     assert.match(root.innerHTML, /revision conflict/);
     assert.match(root.innerHTML, /data-reference-proposal="asg_style_1"/);
@@ -522,4 +522,15 @@ test('a failed command keeps the proposal and reports one error', async () => {
   } finally {
     dom.restore();
   }
+});
+
+test('the default command id is deterministic per production, revision, proposal and option', () => {
+  const base = { productionId: 'prod_1', revision: 4, proposalId: 'asg_style_1', action: 'reject' as const };
+  const first = buildProposalDecisionCommand(base);
+  const retry = buildProposalDecisionCommand(base);
+  assert.equal(first.commandId, retry.commandId);
+  assert.equal(first.idempotencyKey, first.commandId);
+  assert.notEqual(buildProposalDecisionCommand({ ...base, revision: 5 }).commandId, first.commandId);
+  assert.notEqual(buildProposalDecisionCommand({ ...base, action: 'accept' }).commandId, first.commandId);
+  assert.deepEqual(Object.keys(first.payload).sort(), ['decisionId', 'optionId']);
 });

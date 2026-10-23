@@ -65,10 +65,8 @@ export type ProposalDecisionCommand = {
   productionId: string;
   expected: { productionRevision: number };
   payload: {
-    /** IP37's decision record uses this name. */
+    /** IP37's decision record uses this name (the proposal card id). */
     decisionId: string;
-    /** The display id on the proposal card, kept for an auditable event. */
-    proposalId: string;
     optionId: ProposalDecisionOption;
     proposalHash?: string;
   };
@@ -83,15 +81,26 @@ export type ProposalDecisionCommandInput = {
   commandId?: string;
 };
 
-let proposalCommandCounter = 0;
-
-function defaultProposalCommandId(action: ProposalDecisionAction): string {
-  const cryptoValue = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (cryptoValue && typeof cryptoValue.randomUUID === 'function') {
-    return `proposal_${action}_${cryptoValue.randomUUID().replace(/-/g, '')}`;
+/**
+ * Deterministic command id from the production, base revision, decision and
+ * option: a retry of the same click at the same revision is the same command
+ * (server idempotency), never a second resolution.
+ */
+function defaultProposalCommandId(
+  productionId: string,
+  revision: number,
+  decisionId: string,
+  optionId: ProposalDecisionOption,
+): string {
+  const source = JSON.stringify([productionId, revision, decisionId, optionId]);
+  let high = 0x811c9dc5;
+  let low = 0x9e3779b9;
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    high = Math.imul(high ^ code, 0x01000193) >>> 0;
+    low = Math.imul(low ^ code, 0x85ebca6b) >>> 0;
   }
-  proposalCommandCounter += 1;
-  return `proposal_${action}_${proposalCommandCounter.toString(36)}`;
+  return `cmd_decision_${optionId}_${high.toString(16).padStart(8, '0')}${low.toString(16).padStart(8, '0')}`;
 }
 
 function requiredCommandText(value: unknown, label: string): string {
@@ -123,7 +132,7 @@ export function buildProposalDecisionCommand(input: ProposalDecisionCommandInput
   }
   const optionId = proposalDecisionOption(input.action);
   const commandId = input.commandId === undefined
-    ? defaultProposalCommandId(input.action)
+    ? defaultProposalCommandId(productionId, input.revision, proposalId, optionId)
     : requiredCommandText(input.commandId, 'command id');
   const hash = typeof input.proposalHash === 'string' ? input.proposalHash.trim() : '';
   return {
@@ -134,7 +143,6 @@ export function buildProposalDecisionCommand(input: ProposalDecisionCommandInput
     expected: { productionRevision: input.revision },
     payload: {
       decisionId: proposalId,
-      proposalId,
       optionId,
       ...(hash ? { proposalHash: hash } : {}),
     },
@@ -1050,8 +1058,6 @@ export function mountProjectChat(options: {
     confirmCastProposal: confirmCastProposals,
     confirmCast: confirmCastProposals,
     decideProposal,
-    acceptProposal: (kind: ProposalKind, proposalId: string) => decideProposal(kind, proposalId, 'accept'),
-    rejectProposal: (kind: ProposalKind, proposalId: string) => decideProposal(kind, proposalId, 'reject'),
     refreshTurnContext: () => { if (!busy) render(); },
     dismissTurnContextChip: (idOrKind: string) => { if (!busy) dismissTurnContextChip(idOrKind); },
     get turnContextChips() { return turnContextChips(); },
