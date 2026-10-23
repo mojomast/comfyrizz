@@ -237,6 +237,11 @@ export function buildExactLineConditioning(input, ...extra) {
     conditioningFail('EXACT_LINE_VOICE_LANGUAGE', 'input.speakingVoice.language must be a language tag such as en-us');
   }
   const voiceLanguage = speakingVoice.language;
+  // The line is spoken by the resolved voice: its language must be that voice's
+  // language, never silently relabelled (same rule as IP44 VOICE_VOICE_LANGUAGE).
+  if (language.toLowerCase() !== voiceLanguage) {
+    conditioningFail('EXACT_LINE_VOICE_LANGUAGE', `input.line.language ${JSON.stringify(language)} does not match the resolved speaking voice language ${JSON.stringify(voiceLanguage)}`);
+  }
 
   if (input.finalSpeechTakeId !== undefined) {
     conditioningText(input.finalSpeechTakeId, 'EXACT_LINE_FINAL_SPEECH', 'input.finalSpeechTakeId');

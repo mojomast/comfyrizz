@@ -153,11 +153,24 @@ test('the speaking voice must match the selected take exactly', () => {
     { voicePath: 'kokoro', voice: 'MiniMax-Voice-1', language: 'en-us' },
     { voicePath: 'native', voice: 'MiniMax-Voice-1', language: 'fr-fr' },
   ]) {
+    const base = input();
     assert.throws(
-      () => buildExactLineConditioning({ ...input(), speakingVoice }),
+      () => buildExactLineConditioning({ ...base, line: { ...base.line, language: speakingVoice.language }, speakingVoice }),
       code('EXACT_LINE_VOICE_MISMATCH'),
     );
   }
+});
+
+test('the line language must be the resolved speaking voice language', () => {
+  const base = input();
+  assert.throws(
+    () => buildExactLineConditioning({ ...base, line: { ...base.line, language: 'fr-fr' } }),
+    code('EXACT_LINE_VOICE_LANGUAGE'),
+  );
+  assert.throws(
+    () => buildExactLineConditioning({ ...base, takes: undefined, selectedTakeId: undefined, line: { ...base.line, language: 'fr-fr' } }),
+    code('EXACT_LINE_VOICE_LANGUAGE'),
+  );
 });
 
 test('the speaking voice is validated as a shape, never resolved from a model', () => {
