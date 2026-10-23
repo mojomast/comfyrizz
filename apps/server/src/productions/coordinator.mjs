@@ -18,6 +18,13 @@
 // through the IP20 action coordinator, which reserves one approved slot and
 // writes the side effect to the IP17 outbox. Paused, archived, cancelling or
 // superseded productions are suppressed before any step is admitted.
+//
+// IL10: when a take round lands, a stage whose effective pick is `auto`
+// selects exactly one take through the existing take.select command (actor
+// `system`). A pick of `ask` opens a durable take_selection decision for the
+// user instead. Both decisions are derived from the journal, so a restart
+// repeats neither; the coordinator never resolves a spend or delivery
+// decision, approves a plan or reserves budget.
 
 import { createHash } from 'node:crypto';
 
@@ -26,12 +33,24 @@ import {
   isTrustedPlan,
   REJECTING_OPTION_IDS,
 } from './actions.mjs';
+import {
+  effectivePolicyForShot,
+  ITERATION_STAGES,
+  pickForShot,
+} from './iteration.mjs';
 
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
 
 const DEFAULT_MAX_STEPS = 8;
 const MAX_MAX_STEPS = 64;
 const SEEN_EVENT_LIMIT = 1024;
+
+// IL10 / D5: the one reason an automatic take selection is recorded with. It
+// is also how a replay recognises that a selection was the coordinator's, not
+// the user's.
+export const AUTO_PICK_REASON = 'iteration:auto-pick';
+
+const STAGE_ORDER = new Map(ITERATION_STAGES.map((name, index) => [name, index]));
 
 // Events that can reveal new work. An action is the important one: only a
 // terminal action state continues the production. Plan, decision, take and
@@ -203,6 +222,240 @@ function decisionRejected(events, production, required) {
   return typeof optionId === 'string' && REJECTING_OPTION_IDS.includes(optionId);
 }
 
+function takeRoundOf(data) {
+  return Number.isSafeInteger(data?.round) && data.round >= 1 ? data.round : 1;
+}
+
+function takeSelectionDecisionIdFor(productionId, shotId, stage, round) {
+  return `dec_take_${stableDigest('take-selection', productionId, shotId, stage, String(round)).slice(0, 24)}`;
+}
+
+function takeSelectionCommandIdFor(productionId, shotId, stage, round) {
+  return `cmd_auto_${stableDigest('auto-pick', productionId, shotId, stage, String(round)).slice(0, 24)}`;
+}
+
+function takeDecisionCommandIdFor(productionId, shotId, stage, round) {
+  return `cmd_take_decision_${stableDigest('take-selection-request', productionId, shotId, stage, String(round)).slice(0, 24)}`;
+}
+
+function takeScore(record) {
+  const data = record.data;
+  if (typeof data.technicalScore === 'number' && Number.isFinite(data.technicalScore)) {
+    return data.technicalScore;
+  }
+  if (typeof data.score === 'number' && Number.isFinite(data.score)) return data.score;
+  if (Array.isArray(data.checks)) {
+    const checks = data.checks.filter((check) => isPlainObject(check) && typeof check.ok === 'boolean');
+    if (checks.length > 0) {
+      return checks.filter((check) => check.ok).length / checks.length;
+    }
+  }
+  return 0;
+}
+
+function isRecommended(record) {
+  const value = record.data.recommendation;
+  if (value === true) return true;
+  if (typeof value === 'string' && value === record.takeId) return true;
+  if (record.data.recommended === true) return true;
+  return false;
+}
+
+function selectedInGroup(selections, group) {
+  return selections.some((selection) => {
+    const data = selection.data;
+    if (typeof data.takeId !== 'string') return false;
+    if (!group.records.some((record) => record.takeId === data.takeId)) return false;
+    if (typeof data.shotId === 'string' && data.shotId !== group.shotId) return false;
+    if (typeof data.stage === 'string' && data.stage !== group.stage) return false;
+    if (data.round !== undefined && takeRoundOf(data) !== group.round) return false;
+    return true;
+  });
+}
+
+function decisionRequestedInGroup(requests, group) {
+  return requests.some((request) => {
+    const data = request.data;
+    const id = typeof data.decisionId === 'string' ? data.decisionId : data.id;
+    if (id === group.decisionId) return true;
+    if (data.kind !== undefined && data.kind !== 'take_selection') return false;
+    if (data.shotId !== undefined && data.shotId !== group.shotId) return false;
+    if (data.stage !== undefined && data.stage !== group.stage) return false;
+    if (data.round !== undefined && takeRoundOf(data) !== group.round) return false;
+    return data.shotId === group.shotId && data.stage === group.stage;
+  });
+}
+
+function chooseTake(records, reviewDepth) {
+  if (reviewDepth === 'standard' || reviewDepth === 'deep') {
+    const recommended = records.filter(isRecommended);
+    if (recommended.length > 0) return recommended[0];
+  }
+
+  let best = records[0];
+  let bestScore = takeScore(best);
+  for (const record of records.slice(1)) {
+    const score = takeScore(record);
+    if (score > bestScore) {
+      best = record;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/**
+ * Compute the next take selection, or null when every landed round is settled.
+ *
+ * A round is the take count from the effective iteration policy for one shot
+ * and stage. `pickForShot` resolves `hero` (video only) into `ask` or `auto`.
+ * At standard/deep review the agent's one recorded recommendation wins;
+ * otherwise the best technical score wins and a tie keeps the first landed
+ * take. The result is derived only from the journal, so a restart computes the
+ * same decision or the same command id.
+ */
+export function deriveTakeSelection({ production, events: rawEvents, shots } = {}) {
+  if (!isPlainObject(production)) {
+    throw new CoordinatorError('INVALID_PRODUCTION', 'deriveTakeSelection requires a production snapshot', 400);
+  }
+  if (production.intent !== 'active') return null;
+
+  const policy = isPlainObject(production.iteration) && isPlainObject(production.iteration.policy)
+    ? production.iteration.policy
+    : null;
+  if (!policy) return null;
+
+  const shotList = Array.isArray(shots)
+    ? shots
+    : (Array.isArray(production.shotIds) ? production.shotIds.map((id) => ({ id })) : []);
+  const shotOrder = new Map(
+    shotList
+      .filter((shot) => isPlainObject(shot) && typeof shot.id === 'string')
+      .map((shot, index) => [shot.id, index]),
+  );
+  if (shotOrder.size === 0) return null;
+
+  const events = orderedEvents(rawEvents);
+  const groups = new Map();
+  const selections = [];
+  const requests = [];
+
+  for (const event of events) {
+    if (!isPlainObject(event.data)) continue;
+    if (event.type === 'take.selected') {
+      selections.push({ data: event.data, sequence: event.sequence });
+      continue;
+    }
+    if (event.type === 'decision.requested') {
+      requests.push({ data: event.data, sequence: event.sequence });
+      continue;
+    }
+    if (event.type !== 'take.landed') continue;
+
+    const data = event.data;
+    const shotId = data.shotId;
+    const stage = data.stage;
+    const takeId = data.takeId;
+    if (!isIdentifier(shotId) || !shotOrder.has(shotId)) continue;
+    if (typeof stage !== 'string' || !STAGE_ORDER.has(stage)) continue;
+    if (!isIdentifier(takeId)) continue;
+
+    const round = takeRoundOf(data);
+    const key = `${shotId}\u0000${stage}\u0000${round}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        shotId,
+        stage,
+        round,
+        records: [],
+        decisionId: takeSelectionDecisionIdFor(production.id, shotId, stage, round),
+      };
+      groups.set(key, group);
+    }
+    if (group.records.some((record) => record.takeId === takeId)) continue;
+    group.records.push({
+      takeId,
+      index: Number.isSafeInteger(data.index) ? data.index : group.records.length,
+      sequence: Number.isSafeInteger(event.sequence) ? event.sequence : 0,
+      data,
+    });
+  }
+
+  const orderedGroups = [...groups.values()].sort((left, right) => {
+    const shotDelta = (shotOrder.get(left.shotId) ?? Number.MAX_SAFE_INTEGER)
+      - (shotOrder.get(right.shotId) ?? Number.MAX_SAFE_INTEGER);
+    if (shotDelta !== 0) return shotDelta;
+    const stageDelta = (STAGE_ORDER.get(left.stage) ?? Number.MAX_SAFE_INTEGER)
+      - (STAGE_ORDER.get(right.stage) ?? Number.MAX_SAFE_INTEGER);
+    if (stageDelta !== 0) return stageDelta;
+    return left.round - right.round;
+  });
+
+  for (const group of orderedGroups) {
+    const effective = effectivePolicyForShot(policy, group.shotId);
+    const stagePolicy = effective.stages[group.stage];
+    if (!stagePolicy) continue;
+    if (group.records.length < stagePolicy.takes) continue;
+    if (selectedInGroup(selections, group)) continue;
+    if (decisionRequestedInGroup(requests, group)) continue;
+
+    const pick = pickForShot(policy, group.stage, group.shotId, shotList);
+    const base = {
+      productionId: production.id,
+      shotId: group.shotId,
+      stage: group.stage,
+      round: group.round,
+      decisionId: group.decisionId,
+      takes: group.records.map((record) => record.takeId),
+    };
+
+    if (pick === 'ask') {
+      return {
+        kind: 'ask_take_selection',
+        reason: 'take_selection_required',
+        ...base,
+        decisionCommandId: takeDecisionCommandIdFor(
+          production.id,
+          group.shotId,
+          group.stage,
+          group.round,
+        ),
+      };
+    }
+
+    const chosen = chooseTake(group.records, effective.reviewDepth);
+    return {
+      kind: 'select_take',
+      reason: 'take_round_landed',
+      ...base,
+      takeId: chosen.takeId,
+      commandId: takeSelectionCommandIdFor(
+        production.id,
+        group.shotId,
+        group.stage,
+        group.round,
+      ),
+    };
+  }
+
+  return null;
+}
+
+function pendingTakeSelection(events, production) {
+  const pending = new Set(
+    Array.isArray(production.pendingDecisionIds) ? production.pendingDecisionIds : [],
+  );
+  if (pending.size === 0) return null;
+  for (const event of orderedEvents(events)) {
+    if (event.type !== 'decision.requested' || !isPlainObject(event.data)) continue;
+    if (event.data.kind !== 'take_selection') continue;
+    const decisionId = event.data.decisionId ?? event.data.id;
+    if (typeof decisionId === 'string' && pending.has(decisionId)) return decisionId;
+  }
+  return null;
+}
+
 function unmetDecisions(events, production, plan) {
   const unmet = [];
   let rejected = false;
@@ -288,6 +541,17 @@ export function deriveNextStep({ production, events: rawEvents } = {}) {
     return step('suppressed', `intent_${production.intent}`, {
       productionId: production.id,
       intent: production.intent,
+    });
+  }
+
+  // IL10: an open take_selection decision is a user decision. No later slot
+  // (render included) is admitted around it, and resolving it is the user's
+  // action; the coordinator never resolves it itself.
+  const pendingTakeDecisionId = pendingTakeSelection(events, production);
+  if (pendingTakeDecisionId) {
+    return step('await_decision', 'take_selection_pending', {
+      productionId: production.id,
+      decisionIds: [pendingTakeDecisionId],
     });
   }
 
@@ -407,6 +671,9 @@ function validateEventShape(event) {
  *
  * `store` is required. `actions` is an IP20 action coordinator
  * (`{ dispatch }`); `dispatch` may be supplied directly for adapters or tests.
+ * `handler` is the IP18 command handler used only for the automatic
+ * take.select (actor `system`). `shots` is the ordered package scene list
+ * (or a function returning it) so `pickForShot` can resolve hero shots.
  * `clock` only stamps continuation tokens; it never changes the next step.
  */
 export function createProductionCoordinator(options = {}) {
@@ -424,6 +691,15 @@ export function createProductionCoordinator(options = {}) {
   }
   if (options.dispatch !== undefined && typeof options.dispatch !== 'function') {
     throw new TypeError('createProductionCoordinator dispatch must be a function');
+  }
+  const handler = options.handler;
+  if (handler !== undefined
+    && (!isPlainObject(handler) || typeof handler.execute !== 'function')) {
+    throw new TypeError('createProductionCoordinator handler must expose execute');
+  }
+  const shots = options.shots;
+  if (shots !== undefined && !Array.isArray(shots) && typeof shots !== 'function') {
+    throw new TypeError('createProductionCoordinator shots must be an array or a function');
   }
   const clock = options.clock;
   const defaultMaxSteps = normalizeMaxSteps(options.maxSteps, DEFAULT_MAX_STEPS);
@@ -452,6 +728,156 @@ export function createProductionCoordinator(options = {}) {
       throw new CoordinatorError('NOT_FOUND', 'production does not exist', 404, { productionId });
     }
     return production;
+  }
+
+  // The package scene list carries the hero flags. A caller without a package
+  // may pass only the ordered shot ids; isHeroShot then uses its first/last
+  // fallback, and the coordinator never keeps a second hero implementation.
+  function shotsFor(production) {
+    if (typeof shots === 'function') return shots(production);
+    if (Array.isArray(shots)) return shots;
+    return Array.isArray(production.shotIds)
+      ? production.shotIds.map((shotId) => ({ id: shotId }))
+      : [];
+  }
+
+  function nextTakeSelection(productionId) {
+    const production = readProduction(productionId);
+    return deriveTakeSelection({
+      production,
+      events: store.readEvents(productionId),
+      shots: shotsFor(production),
+    });
+  }
+
+  function executeTakeSelection(productionId, selection) {
+    const production = readProduction(productionId);
+
+    if (selection.kind === 'select_take') {
+      if (!handler) {
+        return {
+          status: 'blocked',
+          reason: 'NO_COMMAND_HANDLER',
+          error: {
+            code: 'NO_COMMAND_HANDLER',
+            message: 'auto-pick requires the production command handler',
+          },
+        };
+      }
+      try {
+        const result = handler.execute({
+          commandId: selection.commandId,
+          idempotencyKey: selection.commandId,
+          kind: 'take.select',
+          productionId,
+          expected: { productionRevision: production.revision },
+          payload: {
+            shotId: selection.shotId,
+            stage: selection.stage,
+            round: selection.round,
+            takeId: selection.takeId,
+            actor: 'system',
+            reason: AUTO_PICK_REASON,
+          },
+        }, { actor: 'system' });
+        return {
+          status: 'selected',
+          selection,
+          result: {
+            kind: 'take.selected',
+            shotId: selection.shotId,
+            stage: selection.stage,
+            round: selection.round,
+            takeId: selection.takeId,
+            commandId: selection.commandId,
+            duplicate: result?.duplicate === true,
+          },
+        };
+      } catch (error) {
+        const code = typeof error?.code === 'string' ? error.code : 'TAKE_SELECT_FAILED';
+        return {
+          status: 'blocked',
+          reason: code,
+          error: {
+            code,
+            message: typeof error?.message === 'string'
+              ? error.message
+              : 'the take selection was refused',
+          },
+        };
+      }
+    }
+
+    // pick === 'ask': open one durable take_selection decision. It stays
+    // pending until the user resolves it; the coordinator never resolves it,
+    // approves a plan or reserves budget here.
+    const decisionId = selection.decisionId;
+    const pending = Array.isArray(production.pendingDecisionIds)
+      ? production.pendingDecisionIds
+      : [];
+    const nextProduction = {
+      ...clone(production),
+      pendingDecisionIds: pending.includes(decisionId) ? [...pending] : [...pending, decisionId],
+    };
+    const data = {
+      decisionId,
+      productionId,
+      kind: 'take_selection',
+      status: 'pending',
+      shotId: selection.shotId,
+      stage: selection.stage,
+      round: selection.round,
+      targetIds: [selection.shotId],
+      proposalVersion: 0,
+      inputFingerprint: stableDigest(
+        'take-selection',
+        productionId,
+        selection.shotId,
+        selection.stage,
+        String(selection.round),
+        ...selection.takes,
+      ),
+      options: selection.takes.map((takeId, index) => ({
+        id: takeId,
+        label: `Take ${index + 1}`,
+        artifactIds: [],
+      })),
+    };
+
+    try {
+      const committed = store.commit(productionId, {
+        commandId: selection.decisionCommandId,
+        idempotencyKey: selection.decisionCommandId,
+        baseRevision: production.revision,
+        production: nextProduction,
+        events: [{ type: 'decision.requested', data }],
+      });
+      return {
+        status: 'await_decision',
+        selection,
+        result: {
+          kind: 'take_selection.requested',
+          decisionId,
+          shotId: selection.shotId,
+          stage: selection.stage,
+          round: selection.round,
+          commandId: selection.decisionCommandId,
+          duplicate: committed?.duplicate === true,
+        },
+      };
+    } catch (error) {
+      const code = typeof error?.code === 'string' ? error.code : 'TAKE_DECISION_FAILED';
+      return {
+        status: 'blocked',
+        reason: code,
+        error: {
+          code,
+          message: typeof error?.message === 'string'
+            ? error.message
+            : 'the take selection decision could not be opened',
+        },
+      };
+    }
   }
 
   function latestIntentSequence(productionId) {
@@ -572,12 +998,18 @@ export function createProductionCoordinator(options = {}) {
     session.tokens.set(continuationId, continuation);
     markSeen(session, event.id);
 
+    const events = store.readEvents(productionId);
+    const selection = deriveTakeSelection({
+      production,
+      events,
+      shots: shotsFor(production),
+    });
     return {
       scheduled: true,
       duplicate: false,
       productionId,
       continuation: clone(continuation),
-      next: deriveNextStep({ production, events: store.readEvents(productionId) }),
+      next: selection ?? deriveNextStep({ production, events }),
     };
   }
 
@@ -594,7 +1026,14 @@ export function createProductionCoordinator(options = {}) {
 
   function nextStep(productionId) {
     const production = readProduction(productionId);
-    return deriveNextStep({ production, events: store.readEvents(productionId) });
+    const events = store.readEvents(productionId);
+    const selection = deriveTakeSelection({
+      production,
+      events,
+      shots: shotsFor(production),
+    });
+    if (selection) return selection;
+    return deriveNextStep({ production, events });
   }
 
   function executeDispatch(productionId, next, production) {
@@ -670,7 +1109,52 @@ export function createProductionCoordinator(options = {}) {
       };
     }
 
+    // IL10: a landed take round is settled before any later plan slot runs.
+    // Selection is derived from the journal, so a fresh coordinator with no
+    // queued token still performs the one deterministic auto-pick or opens the
+    // one take_selection decision.
+    const takeSelections = [];
+    let lastSelection = null;
+    for (let index = 0; index < maxSteps; index += 1) {
+      const selection = nextTakeSelection(productionId);
+      if (!selection) break;
+      const outcome = executeTakeSelection(productionId, selection);
+      lastSelection = selection;
+      if (outcome.status === 'blocked') {
+        const blockedToken = firstToken(session);
+        if (blockedToken) session.tokens.delete(blockedToken.id);
+        return {
+          productionId,
+          status: 'blocked',
+          reason: outcome.reason,
+          error: outcome.error,
+          executed: takeSelections.length,
+          bounded: false,
+          actions: [],
+          takeSelections,
+          next: selection,
+        };
+      }
+      takeSelections.push(outcome.result);
+    }
+
     let token = firstToken(session);
+    if (!token && !force && takeSelections.length > 0) {
+      production = readProduction(productionId);
+      const events = store.readEvents(productionId);
+      const awaiting = pendingTakeSelection(events, production);
+      return {
+        productionId,
+        status: awaiting ? 'await_decision' : 'selected',
+        reason: lastSelection?.reason,
+        executed: takeSelections.length,
+        bounded: false,
+        actions: [],
+        takeSelections,
+        next: deriveNextStep({ production, events }),
+      };
+    }
+
     if (!token && !force) {
       if (intentChanged) {
         return { productionId, status: 'superseded', executed: 0, bounded: false, actions: [] };
@@ -695,7 +1179,8 @@ export function createProductionCoordinator(options = {}) {
     }
 
     const executed = [];
-    for (let index = 0; index < maxSteps; index += 1) {
+    const planBudget = Math.max(0, maxSteps - takeSelections.length);
+    for (let index = 0; index < planBudget; index += 1) {
       production = readProduction(productionId);
       const events = store.readEvents(productionId);
       const next = deriveNextStep({ production, events });
@@ -709,6 +1194,7 @@ export function createProductionCoordinator(options = {}) {
           executed: executed.length,
           bounded: false,
           actions: executed,
+          takeSelections,
           next,
         };
       }
@@ -728,6 +1214,7 @@ export function createProductionCoordinator(options = {}) {
         executed: executed.length,
         bounded: false,
         actions: executed,
+        takeSelections,
         next,
       };
     }
@@ -759,12 +1246,19 @@ export function createProductionCoordinator(options = {}) {
       executed: executed.length,
       bounded,
       actions: executed,
+      takeSelections,
       next: after,
     };
   }
 
   function status(productionId) {
     const production = readProduction(productionId);
+    const events = store.readEvents(productionId);
+    const selection = deriveTakeSelection({
+      production,
+      events,
+      shots: shotsFor(production),
+    });
     const session = sessions.get(productionId);
     return {
       productionId,
@@ -772,12 +1266,13 @@ export function createProductionCoordinator(options = {}) {
       intent: production.intent,
       pending: pending(productionId),
       barrier: session?.barrier ?? 0,
-      next: deriveNextStep({ production, events: store.readEvents(productionId) }),
+      next: selection ?? deriveNextStep({ production, events }),
     };
   }
 
   return Object.freeze({
     nextStep,
+    nextTakeSelection,
     onEvent: scheduleEvent,
     continue: continueProduction,
     pending,
