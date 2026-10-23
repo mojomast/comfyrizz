@@ -237,6 +237,7 @@ function normalizeProgress(value: unknown): number {
 export function renderExportWorking(progress: number | { progress?: number } = WORKING_STEP): string {
   const value = normalizeProgress(typeof progress === 'object' ? progress?.progress : progress);
   return `<div class="easy-export-working" data-easy-export-working>
+<div class="easy-export-player" data-easy-player></div>
 <p class="easy-export-status">${escapeHtml(COPY.export.working)}</p>
 ${renderProgressBar({ label: COPY.export.working, value })}
 </div>`;
@@ -328,7 +329,7 @@ export function renderExportDone(input: ExportDoneOptions | string | null = {}):
   return `<section class="easy-export-done" data-easy-export-done>
 <h2 class="easy-export-heading" tabindex="-1">${escapeHtml(COPY.export.doneHeading)}</h2>
 <figure class="easy-export-player">
-<video controls preload="metadata"${source}>${track}</video>
+<video data-easy-player controls preload="metadata"${source}>${track}</video>
 <figcaption class="easy-export-meta" data-easy-export-meta>${escapeHtml(parts.meta)}</figcaption>
 </figure>
 <div class="easy-export-actions">
@@ -348,11 +349,14 @@ ${stale}
 export function renderExportError(reason: string | { reason?: string; message?: string } = DEFAULT_REASON): string {
   const detail = typeof reason === 'string' ? reason : firstString(reason?.reason, reason?.message);
   const text = fill(COPY.export.failed, { reason: detail || DEFAULT_REASON });
-  return `<div class="easy-export-error" data-easy-export-error role="alert">
+  return `<div class="easy-export-failure">
+<div class="easy-export-player" data-easy-player></div>
+<div class="easy-export-error" data-easy-export-error role="alert">
 <p>${escapeHtml(text)}</p>
 <div class="easy-export-error-actions">
 <button type="button" class="btn btn-primary" data-easy-export-retry>${escapeHtml(COPY.export.retry)}</button>
 <button type="button" class="btn btn-secondary" data-easy-export-editor>${escapeHtml(COPY.shell.openEditor)}</button>
+</div>
 </div>
 </div>`;
 }

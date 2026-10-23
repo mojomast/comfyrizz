@@ -1,0 +1,70 @@
+/* UR38: studio layout from 640px down. */
+
+@media (max-width: 640px) {
+  .easy-header {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+    padding-inline: var(--space-3);
+  }
+
+  .easy-name {
+    flex: 1 1 8rem;
+  }
+
+  .easy-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .easy-shell .easy-main {
+    padding-inline: var(--space-3);
+  }
+
+  .easy-actions {
+    position: fixed;
+    padding-inline: var(--space-3);
+  }
+
+  .easy-choice-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .easy-shell .easy-plan-preview,
+  .easy-shell .easy-generate-preview {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding-inline: 0;
+  }
+
+  .easy-shell button,
+  .easy-shell a[href],
+  .easy-shell input:not(.easy-choice-input):not(.easy-segment-input),
+  .easy-shell select,
+  .easy-shell textarea,
+  .easy-shell summary {
+    min-width: 24px;
+    min-height: 24px;
+  }
+
+  .easy-shell a[href] {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .easy-shell[data-easy-step="plan"] [data-easy-player],
+  .easy-shell[data-easy-step="generate"] [data-easy-player],
+  .easy-shell[data-easy-step="review"] [data-easy-player],
+  .easy-shell[data-easy-step="export"] [data-easy-player],
+  html body #app .easy-shell [data-easy-player] #player {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    aspect-ratio: 16 / 9;
+    background: var(--bg-0);
+  }
+}
