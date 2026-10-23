@@ -46,6 +46,13 @@ export const FASTH3_FRAME_MODULUS = 17;
 export const FASTH3_FRAME_OFFSET = 5;
 export const FASTH3_FPS = 24;
 
+/**
+ * VX05: the two-image graph with no LoadAudio input. Prompt-voice shots give the model a written
+ * voice description instead of a clip, so the audio graph is not what they execute.
+ */
+export const FASTH3_NOCLIP_WORKFLOW = "workflows/fasth3_omni_ref2v_noclip.api.json";
+export const FASTH3_PROMPT_WORDS_PER_SECOND = 2.5;
+
 /** The next FastH3 frame count (17n+5) at or above the requested one. */
 export function resolveFastH3Frames(requested) {
   const base = Math.max(FASTH3_FRAME_OFFSET, requested);
@@ -136,12 +143,20 @@ export const REF_EDIT_WORKFLOW = "workflows/flux3_klein_ref_edit.api.json";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 let refEditWorkflowShaCache = null;
+let fastH3NoclipWorkflowShaCache = null;
 
 function refEditWorkflowSha() {
   if (!refEditWorkflowShaCache) {
     refEditWorkflowShaCache = sha256Hex(readFileSync(join(REPO_ROOT, REF_EDIT_WORKFLOW)));
   }
   return refEditWorkflowShaCache;
+}
+
+function fastH3NoclipWorkflowSha() {
+  if (!fastH3NoclipWorkflowShaCache) {
+    fastH3NoclipWorkflowShaCache = sha256Hex(readFileSync(join(REPO_ROOT, FASTH3_NOCLIP_WORKFLOW)));
+  }
+  return fastH3NoclipWorkflowShaCache;
 }
 
 function extraRefParam(index) {
@@ -189,6 +204,33 @@ export function canonical(value) {
 
 export function sha256Hex(text) {
   return createHash("sha256").update(text).digest("hex");
+}
+
+/** A prompt-voice line has no measured WAV, so its duration is estimated from the words. */
+export function estimateFastH3SpeechSeconds(text) {
+  if (typeof text !== "string") return 0;
+  const words = text.trim().split(/\s+/u).filter(Boolean);
+  return words.length / FASTH3_PROMPT_WORDS_PER_SECOND;
+}
+
+/**
+ * VX05: the shipped direction helper emits the clip-mode voice references (`<Audio 1>` and the
+ * `<d>` dialogue tag). A prompt-voice shot has no audio slot, so its prompt carries a fixed voice
+ * section with the description verbatim and the exact line in quotes. The rest of the helper's
+ * prompt is kept as-is so the two modes share one formatting contract.
+ */
+function applyFastH3PromptVoice(prompt, { description, line, language }) {
+  let next = prompt
+    .replace(/^<Audio 1> is .*$/m, () => `voice:\n${description}`)
+    .replace(
+      /^<Audio 1>: reference - .*$/m,
+      () => "<Voice 1>: prompt - generate a new synchronized performance from the written voice description.",
+    )
+    .replace("[reference generation + audio reference]", "[reference generation + prompt voice]");
+  if (line !== undefined) {
+    next = next.replace(/<d>\[[^\]]+\][\s\S]*?<\/d>/, () => `[${language}] "${line}"`);
+  }
+  return next;
 }
 
 export function cacheKeyFor({ workflowSha256, generator, model, modelRevision, params, seed, width, height, frames, refSha256, motionRef }) {
@@ -752,6 +794,12 @@ export function planJobs(pkg, opts = {}) {
     const asset = assets[assetId];
     const kind = kinds.get(assetId);
     const gen = asset.gen || {};
+    // VX05: prompt voice is a FastH3 direction field. An absent voice (or mode "clip") is the
+    // unchanged audio-conditioned path; only an explicit prompt mode selects the no-clip graph.
+    const h3Voice = gen.generator === "fasth3-omni" && gen.direction && typeof gen.direction === "object"
+      ? gen.direction.voice
+      : undefined;
+    const h3VoiceMode = h3Voice && h3Voice.mode === "prompt" ? "prompt" : "clip";
     if (gen.direction !== undefined && gen.generator !== 'fasth3-omni') {
       errors.push(`${assetId}: structured direction is supported only by FastH3 Omni`);
     }
@@ -817,6 +865,12 @@ export function planJobs(pkg, opts = {}) {
     }
     let workflow = gen.workflow;
     let workflowSha256 = gen.workflow_sha256 ?? null;
+    if (kind === "plate" && gen.generator === "fasth3-omni" && h3VoiceMode === "prompt") {
+      // The package names the graph its assets were authored against; prompt mode executes the
+      // committed no-clip graph, with that graph's own hash (never the audio graph's stale one).
+      workflow = FASTH3_NOCLIP_WORKFLOW;
+      workflowSha256 = fastH3NoclipWorkflowSha();
+    }
     let castRefSha256 = null;
     // IP58: a motion reference is admitted only when this exact graph has a video slot. The check
     // runs even when the plate also has an explicit start image, so nothing is silently ignored.
@@ -919,6 +973,7 @@ export function planJobs(pkg, opts = {}) {
       //     temporal lattice), not LTX's 8n+1;
       //   * the MP4 keeps the generated audio, so the asset's own file is the render (no upscale
       //     stage is supported by this graph).
+      const promptVoice = h3VoiceMode === "prompt";
       const width = Number(params.width ?? 832);
       const height = Number(params.height ?? 480);
       const requestedFrames = Number(params.frames ?? 124);
@@ -927,7 +982,22 @@ export function planJobs(pkg, opts = {}) {
       }
       if (params.fps !== undefined && Number(params.fps) !== 24) errors.push(`${assetId}: FastH3 audio/video must use 24 fps`);
       if (params.upscale) errors.push(`${assetId}: FastH3 does not support the LTX upscale stage`);
-      for (const name of ["image", "reference", "audio"]) {
+      if (promptVoice) {
+        if (typeof h3Voice?.description !== "string" || h3Voice.description.trim() === "") {
+          errors.push(`${assetId}: PLAN_H3_NO_VOICE_DESCRIPTION prompt voice mode requires direction.voice.description; it never falls back to a clip`);
+        }
+        if (!Number.isInteger(h3Voice?.seed) || h3Voice.seed < 0 || h3Voice.seed > 0xffffffff) {
+          errors.push(`${assetId}: PLAN_H3_VOICE_SEED_INVALID prompt voice mode requires direction.voice.seed as a uint32`);
+        } else {
+          params.seed = h3Voice.seed;
+        }
+        if (Object.prototype.hasOwnProperty.call(inputs, "audio") && inputs.audio !== undefined) {
+          errors.push(`${assetId}: PLAN_H3_PROMPT_HAS_AUDIO prompt voice mode takes a written description and no audio clip; remove gen.inputs.audio`);
+        }
+        delete params.audio;
+      }
+      const requiredInputs = promptVoice ? ["image", "reference"] : ["image", "reference", "audio"];
+      for (const name of requiredInputs) {
         if (typeof params[name] !== "string" || !params[name]) errors.push(`${assetId}: FastH3 template requires ${name}`);
       }
       const dims = resolveDimensions(width, height, FASTH3_DIM_MULTIPLE);
@@ -945,11 +1015,25 @@ export function planJobs(pkg, opts = {}) {
       params.fps = FASTH3_FPS;
       if (gen.direction !== undefined) {
         try {
-          params.prompt = buildFastH3Prompt(gen.direction, {
+          const dialogue = gen.direction.dialogue;
+          // Prompt mode has no WAV to measure: estimate the line at words / 2.5 and let the same
+          // slot check refuse a line that cannot finish before the cut.
+          const conditioningSeconds = promptVoice
+            ? estimateFastH3SpeechSeconds(dialogue?.text)
+            : assets[inputs.audio]?.media?.durationSeconds;
+          let prompt = buildFastH3Prompt(gen.direction, {
             slotSeconds: fastH3SlotSeconds(pkg, assetId, gen.direction?.slotSeconds),
             sourceSeconds: frames / 24,
-            conditioningSeconds: assets[inputs.audio]?.media?.durationSeconds,
+            conditioningSeconds,
           });
+          if (promptVoice && typeof h3Voice?.description === "string") {
+            prompt = applyFastH3PromptVoice(prompt, {
+              description: h3Voice.description,
+              line: dialogue?.text,
+              language: dialogue?.language,
+            });
+          }
+          params.prompt = prompt;
         } catch (error) { errors.push(`${assetId}: ${error.message}`); }
       } else {
         warnings.push({ asset: assetId, code: 'PLAN_H3_DIRECTION_UNREVIEWED',
@@ -957,9 +1041,15 @@ export function planJobs(pkg, opts = {}) {
       }
       if (inputs.image === inputs.reference) warnings.push({ asset: assetId, code: 'PLAN_H3_DUPLICATE_REFERENCE',
         message: 'The same image occupies both reference slots; this does not anchor a first frame. Prefer distinct identity and composition references when available.' });
-      castRefSha256 = sha256Hex(canonical(["image", "reference", "audio"].map(name => ({
-        name, asset: params[name], sha256: assets[params[name]]?.sha256 ?? null,
-      }))));
+      castRefSha256 = sha256Hex(canonical(promptVoice
+        ? [
+            { name: "image", asset: params.image, sha256: assets[params.image]?.sha256 ?? null },
+            { name: "reference", asset: params.reference, sha256: assets[params.reference]?.sha256 ?? null },
+            { voiceDescription: h3Voice?.description ?? null, seed: h3Voice?.seed ?? null },
+          ]
+        : ["image", "reference", "audio"].map(name => ({
+            name, asset: params[name], sha256: assets[params[name]]?.sha256 ?? null,
+          }))));
     } else if (kind === "plate") {
       // the default is a 64-multiple in 16:9 (N9); 960x544 used to be the default and came back
       // 960x512 from the graph, because half of 544 is 272 and LTX floors to 32
