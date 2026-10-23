@@ -334,12 +334,12 @@ test('the generation plan uses the saved revision without starting a run', async
   expect(planBody).not.toHaveProperty('status');
   expect(startCalls).toBe(0);
   await openVoiceProduction(page);
-  await expect(voice(page).getByRole('button', { name: 'Generate video' })).toBeVisible();
+  await expect(voice(page).getByRole('button', { name: 'Generate video' })).toHaveCount(0);
   await selectInspectorTab(page, 'Scene');
   await page.getByTestId('scene-select').selectOption('s_body');
   await openVoicePanel(page);
   await openVoiceProduction(page);
-  await expect(voice(page).getByRole('button', { name: 'Generate video' })).toBeVisible();
+  await expect(voice(page).getByRole('button', { name: 'Generate video' })).toHaveCount(0);
 });
 
 test('the generation plan can render on the Google Colab VM', async ({ page }) => {

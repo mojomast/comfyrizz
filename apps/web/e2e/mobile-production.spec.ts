@@ -123,7 +123,7 @@ test('Easy at 390 stays Easy, keeps the rail hidden, and its actions are reachab
   await expect(page.locator('#activity-pane')).toBeVisible();
 
   await expectRailTabs(page);
-  await expectReachable(page, '#run-backend');
+  await expectReachable(page, '#sa-tab-generate');
   await expectReachable(page, '#render');
   await expectReachable(page, '#export-menu-toggle');
   await expectReachable(page, '#run-settings-toggle');
@@ -162,7 +162,7 @@ for (const width of [390, 760, 1099] as const) {
     expect(rail!.x).toBeLessThanOrEqual(1);
 
     await expectRailTabs(page);
-    await expectReachable(page, '#run-backend');
+    await expectReachable(page, '#sa-tab-generate');
     await expectReachable(page, '#render');
     await expectReachable(page, '#export-menu-toggle');
     await expectReachable(page, '#run-settings-toggle');
