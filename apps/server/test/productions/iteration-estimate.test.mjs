@@ -57,7 +57,10 @@ function unitsFor(minutes, gpu = 'G4') {
 test('the estimate is a labelled range with no cap and no money by default', () => {
   const result = estimateIteration(input());
 
-  assert.deepEqual(Object.keys(result).sort(), ['gpuMinutes', 'labels', 'units', 'vsCap', 'wallMinutes']);
+  assert.deepEqual(
+    Object.keys(result).sort(),
+    ['gpuMinutes', 'labels', 'units', 'voiceSamples', 'vsCap', 'wallMinutes'],
+  );
 
   for (const field of ['gpuMinutes', 'units', 'wallMinutes']) {
     assert.ok(result[field].low <= result[field].expected, `${field}.low <= expected`);
@@ -207,4 +210,79 @@ test('the estimator does not mutate its input and is deterministic', () => {
   const second = estimateIteration(options);
   assert.deepEqual(first, second);
   assert.equal(JSON.stringify(options), before);
+});
+
+// IL06G: voice audition samples. Director casts three voices over two lines
+// (six samples per character) while Balanced casts two voices over one line
+// (two samples per character). The samples are counted per character, so two
+// characters double the production total, and they stay free local Kokoro work
+// under D1: the Google Colab GPU minutes do not move.
+
+test('voice audition samples are auditions x linesPerVoice per character (Director 6, Balanced 2)', () => {
+  const perCharacter = estimateIteration(input({
+    policy: ITERATION_PRESETS.balanced,
+    characters: 1,
+  }));
+  assert.equal(perCharacter.voiceSamples, 2);
+
+  const directorPerCharacter = estimateIteration(input({
+    policy: ITERATION_PRESETS.director,
+    characters: 1,
+  }));
+  assert.equal(directorPerCharacter.voiceSamples, 6);
+
+  const balanced = estimateIteration(input({ policy: ITERATION_PRESETS.balanced, characters: 2 }));
+  const director = estimateIteration(input({ policy: ITERATION_PRESETS.director, characters: 2 }));
+  assert.equal(balanced.voiceSamples, 4);
+  assert.equal(director.voiceSamples, 12);
+  assert.equal(director.voiceSamples / 2, 6, 'six samples for each of the two characters');
+});
+
+test('a custom linesPerVoice of three counts three lines per voice without adding GPU cost', () => {
+  const oneLine = estimateIteration(input({
+    policy: policy({
+      stages: { voice: { ...structuredClone(ITERATION_PRESETS.balanced.stages.voice), linesPerVoice: 1 } },
+    }),
+    characters: 1,
+  }));
+  const threeLines = estimateIteration(input({
+    policy: policy({
+      stages: { voice: { ...structuredClone(ITERATION_PRESETS.balanced.stages.voice), linesPerVoice: 3 } },
+    }),
+    characters: 1,
+  }));
+
+  assert.equal(oneLine.voiceSamples, 2);
+  assert.equal(threeLines.voiceSamples, 6);
+  assert.deepEqual(threeLines.gpuMinutes, oneLine.gpuMinutes);
+  assert.deepEqual(threeLines.units, oneLine.units);
+  assert.deepEqual(threeLines.wallMinutes, oneLine.wallMinutes);
+});
+
+test('a voice shot override is read from the effective policy per shot', () => {
+  const shots = [presenter(10, 'shot-1'), presenter(10, 'shot-2')];
+  const base = estimateIteration(input({ policy: policy(), shots, characters: 1 }));
+  const overridden = estimateIteration(input({
+    policy: policy({ shotOverrides: { 'shot-2': { stages: { voice: { linesPerVoice: 3 } } } } }),
+    shots,
+    characters: 1,
+  }));
+
+  assert.equal(base.voiceSamples, 4);
+  assert.equal(overridden.voiceSamples, 8);
+  assert.deepEqual(overridden.gpuMinutes, base.gpuMinutes);
+});
+
+test('the video pick hero does not change the estimate', () => {
+  const hero = structuredClone(ITERATION_PRESETS.balanced);
+  hero.level = 'custom';
+  const ask = structuredClone(hero);
+  ask.stages.video = { ...ask.stages.video, pick: 'ask' };
+  hero.stages.video = { ...hero.stages.video, pick: 'hero' };
+
+  const shots = [presenter(10, 'shot-1'), presenter(10, 'shot-2'), presenter(10, 'shot-3')];
+  const withHero = estimateIteration(input({ policy: hero, shots }));
+  const withAsk = estimateIteration(input({ policy: ask, shots }));
+
+  assert.deepEqual(withHero, withAsk);
 });

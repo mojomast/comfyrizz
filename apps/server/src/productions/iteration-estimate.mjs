@@ -84,20 +84,34 @@ function shotMinutes(stages, shot) {
   return { low: keyframeFirst + videoFirst, expected: keyframeAll + videoAll };
 }
 
-function workMinutes(policy, shots) {
+function characterCount(value) {
+  if (value === undefined || value === null) return 1;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new TypeError('characters must be a non-negative integer');
+  }
+  return value;
+}
+
+function workMinutes(policy, shots, characters) {
   let low = 0;
   let expected = 0;
+  let voiceSamples = 0;
   for (const shot of shots) {
     if (!isPlainObject(shot)) throw new TypeError('every shot must be an object');
     if (typeof shot.id !== 'string' || shot.id.length === 0) {
       throw new TypeError('every shot must have a non-empty id');
     }
     const resolved = effectivePolicyForShot(policy, shot.id);
+    // IL06G: one character auditions `auditions` voices over
+    // `linesPerVoice` lines. Local Kokoro stays free under D1, so the count is
+    // reported without adding Google Colab minutes.
+    const voice = resolved.stages.voice;
+    voiceSamples += voice.auditions * voice.linesPerVoice * characters;
     const minutes = shotMinutes(resolved.stages, shot);
     low += minutes.low;
     expected += minutes.expected;
   }
-  return { low, expected };
+  return { low, expected, voiceSamples };
 }
 
 function capFor(ceiling, expectedUnits) {
@@ -117,11 +131,11 @@ function capFor(ceiling, expectedUnits) {
   return { ceiling, fraction, status };
 }
 
-function totalsFor(policy, shots, ratePerHour) {
-  const work = workMinutes(policy, shots);
+function totalsFor(policy, shots, ratePerHour, characters) {
+  const work = workMinutes(policy, shots, characters);
   if (work.expected <= 0) {
     const zero = { low: 0, expected: 0, high: 0 };
-    return { gpuMinutes: zero, units: zero, wallMinutes: zero };
+    return { gpuMinutes: zero, units: zero, wallMinutes: zero, voiceSamples: work.voiceSamples };
   }
 
   const high = work.expected * NEXT_JOB_MARGIN + COLLECT_AND_STOP_RESERVE_MINUTES;
@@ -140,12 +154,12 @@ function totalsFor(policy, shots, ratePerHour) {
     expected: unitsForMinutes(work.expected, ratePerHour),
     high: unitsForMinutes(high, ratePerHour),
   };
-  return { gpuMinutes, units, wallMinutes };
+  return { gpuMinutes, units, wallMinutes, voiceSamples: work.voiceSamples };
 }
 
-function suggestedLevel(shots, ratePerHour, ceiling) {
+function suggestedLevel(shots, ratePerHour, ceiling, characters) {
   for (const level of PRESET_ORDER) {
-    const totals = totalsFor(ITERATION_PRESETS[level], shots, ratePerHour);
+    const totals = totalsFor(ITERATION_PRESETS[level], shots, ratePerHour, characters);
     if (totals.units.expected <= ceiling) return level;
   }
   return null;
@@ -154,16 +168,17 @@ function suggestedLevel(shots, ratePerHour, ceiling) {
 /**
  * Estimate one production's iteration spend from the policy and its shots.
  *
- * `characters` is accepted with the rest of the production summary; local
- * Kokoro voice work is free under D1, so it does not add Google Colab GPU
- * minutes. The returned estimate is a range, never an approval. When the
- * expected units exceed the cap, `suggestedLevel` names the richest preset
- * that still fits (or null when none does).
+ * `characters` defaults to one and is the number of characters auditioned.
+ * Local Kokoro voice work is free under D1, so it does not add Google Colab
+ * GPU minutes; `voiceSamples` reports the audition sample count instead. The
+ * returned estimate is a range, never an approval. When the expected units
+ * exceed the cap, `suggestedLevel` names the richest preset that still fits
+ * (or null when none does).
  *
  * @param {{
  *   policy: object,
  *   shots: Array<{id: string, durationSeconds?: number, kind?: string}>,
- *   characters?: unknown,
+ *   characters?: number,
  *   gpu?: string,
  *   ceiling?: number|null,
  *   pricePerUnit?: number,
@@ -172,6 +187,7 @@ function suggestedLevel(shots, ratePerHour, ceiling) {
  *   gpuMinutes: {low: number, expected: number, high: number},
  *   units: {low: number, expected: number, high: number},
  *   wallMinutes: {low: number, expected: number, high: number},
+ *   voiceSamples: number,
  *   vsCap: {ceiling: number|null, fraction: number|null, status: 'fits'|'warn'|'exceeds'|'no_cap'},
  *   labels: string[],
  *   money?: {low: number, expected: number, high: number},
@@ -196,8 +212,9 @@ export function estimateIteration(options) {
   }
 
   const key = gpuKey(gpu);
+  const characters = characterCount(options.characters);
   const ratePerHour = rateForGpu(key, { env: {} }).ratePerHour;
-  const totals = totalsFor(policy, shots, ratePerHour);
+  const totals = totalsFor(policy, shots, ratePerHour, characters);
   const vsCap = capFor(ceiling, totals.units.expected);
 
   const labels = [ESTIMATE_LABEL];
@@ -207,12 +224,13 @@ export function estimateIteration(options) {
     gpuMinutes: totals.gpuMinutes,
     units: totals.units,
     wallMinutes: totals.wallMinutes,
+    voiceSamples: totals.voiceSamples,
     vsCap,
     labels,
   };
 
   if (vsCap.status === 'exceeds') {
-    result.suggestedLevel = suggestedLevel(shots, ratePerHour, vsCap.ceiling);
+    result.suggestedLevel = suggestedLevel(shots, ratePerHour, vsCap.ceiling, characters);
   }
 
   if (pricePerUnit !== undefined && pricePerUnit !== null) {
