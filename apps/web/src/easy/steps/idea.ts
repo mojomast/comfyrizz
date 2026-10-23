@@ -3,6 +3,7 @@ import { escapeHtml, renderErrorState } from '../components.ts';
 import { confirmDialog } from '../dialog.ts';
 import { ideaPrompt } from '../idea-prompt.ts';
 import { mountEasyReferences } from './references.ts';
+import { bindQuestions, renderQuestions } from './questions.ts';
 import type { EasyQuestion, EasyState, EasyStepContext, EasyStepModule, Look, StepFacts } from '../types.ts';
 
 export const STYLE_PRESETS: readonly Look[] = [
@@ -113,7 +114,14 @@ function normalizeQuestions(result: unknown): EasyQuestion[] {
 
 function patchIdea(ctx: EasyStepContext, patch: Partial<EasyState['idea']>): void {
   const state = ctx.store.get();
-  ctx.store.patch({ idea: { ...state.idea, ...patch } });
+  const textChanged = typeof patch.text === 'string' && patch.text !== state.idea.text;
+  const planned = state.planHash !== null || state.plan.status === 'ready' || state.plan.status === 'stale';
+  ctx.store.patch({
+    idea: { ...state.idea, ...patch },
+    ...(textChanged && planned
+      ? { plan: { ...state.plan, status: 'stale', wordsChanged: true } }
+      : {}),
+  });
 }
 
 function errorHost(view: IdeaView | null): HTMLElement | null {
@@ -361,7 +369,16 @@ export const step: EasyStepModule = {
     };
     activeView = view;
     const stop = bindEvents(view, ctx);
+    let stopQuestions = (): void => {};
+    const state = ctx.store.get();
+    if (view.questions && state.questions.length > 0) {
+      view.questions.innerHTML = renderQuestions(state.questions, state.answers);
+      stopQuestions = bindQuestions(view.questions, {
+        onChange: (answers) => ctx.store.patch({ answers }),
+      });
+    }
     return () => {
+      stopQuestions();
       stop();
       if (activeView === view) activeView = null;
     };

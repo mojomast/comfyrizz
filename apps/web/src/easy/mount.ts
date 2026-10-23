@@ -13,6 +13,10 @@ import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, S
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
 import { writePlan } from './plan-writer.ts';
 import { resumeFacts } from './resume.ts';
+import { approveAndGenerate, retryShot } from './approve-generate.ts';
+import { runCpuGenerate } from './cpu-path.ts';
+import { levelForState } from './steps/level.ts';
+import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-advanced.ts';
 
 import './easy.css';
 
@@ -55,6 +59,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
   let shellReady = false;
   let homeTicket = 0;
   let primaryAction: () => void = () => host.openEditor();
+  let cpuFlight: Promise<unknown> | null = null;
   let facts: StepFacts = {
     hasPackage: false,
     planApproved: false,
@@ -90,6 +95,62 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     if (player) adoptPlayer(slot, player);
   }
 
+  function planNeedsUpdate(state: EasyState): StepId[] {
+    if (state.plan.wordsChanged || state.plan.status === 'stale') return ['plan'];
+    return [];
+  }
+
+  function runCpuFromStudio(): Promise<unknown> {
+    if (cpuFlight) return cpuFlight;
+    cpuFlight = runCpuGenerate({
+      host: {
+        editorStore: host.editorStore,
+        refreshClips: () => host.refreshClips(),
+        announce: (text) => shell?.setStatus(text),
+        rerender: () => showStep(currentStep),
+      },
+      store,
+      go,
+    }).finally(() => {
+      cpuFlight = null;
+    });
+    return cpuFlight;
+  }
+
+  /** Paid work checks the iteration level, then approveAndGenerate (spend cap first). */
+  async function approveFromStudio(): Promise<void> {
+    const state = store.get();
+    const paid = state.compute === 'colab';
+    if (iterationBlocksPaidGeneration({
+      bound: paid && Boolean(state.productionId),
+      level: paid && !state.levelTouched ? null : levelForState(state),
+      known: true,
+    })) {
+      shell?.alert('Choose Draft, Balanced, Director or Custom before a paid generation. Choosing a level is not spend approval.');
+      go('level');
+      return;
+    }
+    let snapshot: unknown = null;
+    if (state.productionId) {
+      try {
+        snapshot = await api.getProduction(state.productionId);
+      } catch {
+        snapshot = null;
+      }
+    }
+    const message = await approveAndGenerate(store.get(), {
+      api: api as never,
+      store,
+      snapshot,
+      go: (step) => go(step),
+    });
+    if (typeof message === 'string' && message) {
+      shell?.alert(message);
+      return;
+    }
+    if (store.get().compute === 'cpu') await runCpuFromStudio();
+  }
+
   function makeCtx(): EasyStepContext {
     return {
       state: store.get(),
@@ -109,6 +170,12 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       rerender: () => showStep(currentStep),
       dialogs: {},
       writePlan: () => writePlan(store.get(), { api, host, store }),
+      approveAndGenerate: () => approveFromStudio(),
+      retryShot: async (shotId, chip) => {
+        const pending = await retryShot(store.get(), { api: api as never, store, go: (step) => go(step) }, shotId, chip);
+        const message = await pending.approve();
+        if (typeof message === 'string' && message) shell?.alert(message);
+      },
     };
   }
 
@@ -137,9 +204,11 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       shell.setPrimary({ label: COPY.shell.openEditor });
       stopStep = () => {};
     }
+    const shellRoot = root.querySelector<HTMLElement>('.easy-shell');
+    if (shellRoot) shellRoot.dataset.easyStep = step;
     const stepperHost = root.querySelector<HTMLElement>('[data-easy-stepper]');
     if (stepperHost) {
-      stepperHost.innerHTML = renderStepper({ current: step, state, facts });
+      stepperHost.innerHTML = renderStepper({ current: step, state, facts, needsUpdate: planNeedsUpdate(state) });
       stopStepper = mountStepper(stepperHost, { onSelect: (next) => go(next) });
     }
     placePlayer();

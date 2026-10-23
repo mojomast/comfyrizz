@@ -84,15 +84,15 @@ export function renderShell({ videoName, saveStatus }: ShellModel): string {
 <div class="easy-step" data-easy-step>
 <h1 class="easy-step-heading" data-easy-heading tabindex="-1"></h1>
 <p class="easy-step-intro" data-easy-intro></p>
-<div class="easy-step-body" data-easy-body></div>
-</div>
-</main>
 <footer class="easy-actions" data-easy-actions>
 <button type="button" class="btn btn-secondary easy-back" data-easy-back hidden>${escapeHtml(COPY.shell.back)}</button>
 <p class="easy-status" data-easy-status aria-live="polite" aria-atomic="true"></p>
 <p class="easy-reason" data-easy-reason id="${PRIMARY_REASON_ID}"></p>
 <button type="button" class="btn btn-primary easy-primary" data-easy-primary hidden disabled></button>
 </footer>
+<div class="easy-step-body" data-easy-body></div>
+</div>
+</main>
 <div class="sr-only easy-visually-hidden" data-easy-alert aria-live="assertive" aria-atomic="true"></div>
 </div>`;
 }

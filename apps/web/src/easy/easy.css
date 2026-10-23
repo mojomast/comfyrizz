@@ -6,7 +6,10 @@
 .easy-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-0);
   color: var(--text-1);
   font-family: var(--font-sans);
@@ -101,9 +104,11 @@
 .easy-main {
   flex: 1 1 auto;
   width: 100%;
+  min-height: 0;
+  overflow: auto;
   max-width: 880px;
   margin-inline: auto;
-  padding-block: var(--space-6);
+  padding-block: var(--space-6) 88px;
   padding-inline: var(--space-5);
 }
 
@@ -111,6 +116,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-height: 100%;
 }
 
 .easy-step-heading {
@@ -139,9 +145,11 @@
 }
 
 .easy-actions {
-  position: sticky;
+  position: fixed;
+  right: 0;
   bottom: 0;
-  z-index: 2;
+  left: 0;
+  z-index: 4;
   display: flex;
   flex: 0 0 auto;
   align-items: center;

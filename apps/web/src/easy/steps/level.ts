@@ -146,5 +146,6 @@ export const step: EasyStepModule = {
     const level = levelForState(state);
     if (level !== state.level) ctx.store.patch({ level });
     await ctx.writePlan?.();
+    if (ctx.store.get().plan.status === 'ready') ctx.go('plan');
   },
 };
