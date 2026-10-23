@@ -22,6 +22,7 @@ import { createProjectChat } from './agent-chat.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
 import { createCharacterRoutes } from './characters/routes.mjs';
 import { createAuditionCache, createAuditionWorker } from './characters/audition.mjs';
+import { createKokoroSynth, probeKokoroRuntime } from './characters/kokoro-synth.mjs';
 import { ingestRun } from './takes/ingest.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
@@ -202,23 +203,16 @@ export function createApp({
   datasetFetch = globalThis.fetch,
   pipelineLaunch,
   mediaRoot = join(runtimeDir, 'media'),
-  // IP45W: the only audition mount seam. A Kokoro synthesizer is injected by
-  // the caller; app.mjs does not invent an in-process one. Without it the
-  // character audition route keeps answering 503 AUDITION_UNAVAILABLE.
+  // IP45K: a Kokoro synthesizer may be injected by a caller (tests, a custom
+  // runtime). Without one the app mounts the local Kokoro synthesizer lazily,
+  // and only after the same python + kokoro_onnx probe the pipeline worker
+  // uses succeeds; a failed probe keeps the route at 503.
   auditionSynth = null,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
   mkdirSync(mediaRoot, { recursive: true });
   const mediaTickets = createMediaTickets();
-  // IP45W: one worker for the app's lifetime. No admission is passed: a paid
-  // engine stays AUDITION_ADMISSION_REQUIRED until a production action can
-  // admit it.
-  const auditionWorker = typeof auditionSynth === 'function'
-    ? createAuditionWorker({
-        cache: createAuditionCache({ rootDir: runtimeDir, synth: { kokoro: auditionSynth } }),
-      })
-    : null;
   const rendersDir = join(runtimeDir, 'renders');
   const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
@@ -784,6 +778,38 @@ export function createApp({
   const productionActions = createActionCoordinator({
     store: productionStore,
     handler: productionCommands,
+    ledgerFor: (production) => createBudgetLedger({
+      runtimeDir,
+      ledgerId: production.budgetLedgerId,
+    }),
+  });
+
+  // IP45K: one free Kokoro path for the app's lifetime. The probe is lazy and
+  // cached, so createApp stays synchronous and a box without kokoro_onnx keeps
+  // answering 503. Paid auditions still need a named, approved IP20 slot.
+  const defaultAuditionSynth = (() => {
+    let synth = null;
+    let probe = null;
+    return async (request) => {
+      if (probe === null) probe = probeKokoroRuntime();
+      if (!(await probe)) {
+        return { ok: false, code: 'AUDITION_UNAVAILABLE', message: 'Kokoro is not available on this server' };
+      }
+      if (!synth) {
+        synth = createKokoroSynth({
+          cacheDir: join(runtimeDir, 'kokoro-auditions'),
+          python: process.env.COMFYRIZZ_PYTHON || 'python3',
+        });
+      }
+      return synth(request);
+    };
+  })();
+  const auditionWorker = createAuditionWorker({
+    cache: createAuditionCache({
+      rootDir: runtimeDir,
+      synth: { kokoro: typeof auditionSynth === 'function' ? auditionSynth : defaultAuditionSynth },
+    }),
+    productionStore,
     ledgerFor: (production) => createBudgetLedger({
       runtimeDir,
       ledgerId: production.budgetLedgerId,
@@ -1602,7 +1628,7 @@ export function createApp({
       rootDir: runtimeDir,
       events,
       mediaTickets,
-      ...(auditionWorker ? { audition: { worker: auditionWorker } } : {}),
+      audition: { worker: auditionWorker },
     }).handle(request, response, url)) return;
     if (await createReferenceRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     return sendJson(response, 404, { error: 'not found' });

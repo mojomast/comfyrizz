@@ -197,6 +197,20 @@ function normalizeActions(actions, ceiling, collectAndStopReserve) {
     if (slot.upperBound > ceiling) {
       throw new ActionError('INVALID_PLAN', `actions[${index}].upperBound exceeds reservationCeiling`, 400);
     }
+    if (slot.kind === 'audition') {
+      if (!isIdentifier(slot.characterId)) {
+        throw new ActionError('INVALID_PLAN', `actions[${index}].characterId is required for an audition`, 400);
+      }
+      if (typeof slot.voice !== 'string' || slot.voice.trim() === '') {
+        throw new ActionError('INVALID_PLAN', `actions[${index}].voice is required for an audition`, 400);
+      }
+      if (typeof slot.line !== 'string' || slot.line.trim() === '') {
+        throw new ActionError('INVALID_PLAN', `actions[${index}].line is required for an audition`, 400);
+      }
+      if (slot.engine !== 'kokoro' && slot.engine !== 'qwen3-tts') {
+        throw new ActionError('INVALID_PLAN', `actions[${index}].engine must be kokoro or qwen3-tts`, 400);
+      }
+    }
     sum = normalizeNumber(sum + slot.upperBound);
     const next = {};
     for (const [key, value] of Object.entries(slot)) {
@@ -745,6 +759,17 @@ export function createActionCoordinator(options = {}) {
       jobId: null,
       runId: null,
       lastError: null,
+      ...(typeof slot.kind === 'string' && slot.kind !== '' ? { kind: slot.kind } : {}),
+      ...(slot.kind === 'audition'
+        ? {
+            audition: {
+              characterId: slot.characterId,
+              voice: slot.voice,
+              line: slot.line,
+              engine: slot.engine,
+            },
+          }
+        : {}),
     };
     const validation = validateAction(action);
     if (!validation.ok) {
@@ -789,6 +814,17 @@ export function createActionCoordinator(options = {}) {
             commandId,
             reservationId,
             upperBound: slot.upperBound,
+            ...(typeof slot.kind === 'string' && slot.kind !== '' ? { kind: slot.kind } : {}),
+            ...(slot.kind === 'audition'
+              ? {
+                  audition: {
+                    characterId: slot.characterId,
+                    voice: slot.voice,
+                    line: slot.line,
+                    engine: slot.engine,
+                  },
+                }
+              : {}),
           },
         }],
       });

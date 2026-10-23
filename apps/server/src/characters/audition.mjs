@@ -26,6 +26,7 @@ import {
   validateVoice,
   voiceHash as computeVoiceHash,
 } from './voice.mjs';
+import { canTransition } from '../productions/contract.mjs';
 
 export const AUDITION_UNAVAILABLE = 'AUDITION_UNAVAILABLE';
 export const AUDITION_READY = 'AUDITION_READY';
@@ -38,6 +39,8 @@ export const AUDITION_INVALID_DIRECTORY = 'AUDITION_INVALID_DIRECTORY';
 export const AUDITION_NO_SYNTH = 'AUDITION_NO_SYNTH';
 export const AUDITION_SYNTH_FAILED = 'AUDITION_SYNTH_FAILED';
 export const AUDITION_WRITE_FAILED = 'AUDITION_WRITE_FAILED';
+export const ACTION_CONSUMED = 'ACTION_CONSUMED';
+export const AUDITION_LEDGER_UNAVAILABLE = 'AUDITION_LEDGER_UNAVAILABLE';
 
 export const DEFAULT_AUDITION_LINE = 'Hello! This is what I sound like.';
 export const AUDITION_DIR = 'auditions';
@@ -448,6 +451,73 @@ function resolveAuditionRequest(characterOrVoice, lineOrOptions, maybeOptions, b
   };
 }
 
+function isIdentifierText(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\s/\\\u0000-\u001f]/u.test(value);
+}
+
+function latestAction(events, actionId, planHash) {
+  let action = null;
+  for (const event of events) {
+    if (event.type !== 'action.state_changed' || !isPlainObject(event.data)) continue;
+    if (event.data.id !== actionId) continue;
+    if (planHash !== undefined && event.data.planHash !== planHash) continue;
+    action = event.data;
+  }
+  return action;
+}
+
+function proposedPlan(events, planId, planHash) {
+  let plan = null;
+  for (const event of events) {
+    if (event.type !== 'plan.proposed' || !isPlainObject(event.data)) continue;
+    if (event.data.id !== planId || event.data.planHash !== planHash) continue;
+    plan = event.data;
+  }
+  return plan;
+}
+
+function planWasApproved(events, planId, planHash) {
+  let approved = false;
+  let rejected = false;
+  for (const event of events) {
+    if (event.type !== 'plan.approved' && event.type !== 'plan.rejected') continue;
+    if (!isPlainObject(event.data) || event.data.planHash !== planHash) continue;
+    if (typeof event.data.planId === 'string' && event.data.planId !== planId) continue;
+    if (event.type === 'plan.rejected') {
+      rejected = true;
+      approved = false;
+    } else {
+      approved = true;
+      rejected = false;
+    }
+  }
+  return approved && !rejected;
+}
+
+function auditionSlotMatches(slot, request) {
+  return isPlainObject(slot)
+    && slot.kind === 'audition'
+    && slot.engine === request.engine
+    && slot.voice === request.voice
+    && slot.line === request.line
+    && slot.characterId === request.characterId;
+}
+
+function noAllocationFailure(result) {
+  if (!isPlainObject(result)) return false;
+  if (result.started === true) return false;
+  if (result.started === false) return true;
+  return [
+    AUDITION_UNAVAILABLE,
+    AUDITION_INVALID_INPUT,
+    AUDITION_INVALID_LINE,
+    AUDITION_INVALID_VOICE,
+    AUDITION_INVALID_DIRECTORY,
+    AUDITION_NO_SYNTH,
+    'AUDITION_SPAWN_FAILED',
+  ].includes(result.code);
+}
+
 /**
  * Create a cache bound to one library directory and synthesizer.
  *
@@ -560,7 +630,13 @@ export function createAuditionCache(options = {}) {
 
     if (isPlainObject(result) && result.ok === false) {
       const code = typeof result.code === 'string' ? result.code : AUDITION_SYNTH_FAILED;
-      return failure(code, 'voice synthesis failed', { engine, voiceHash: hash, line });
+      return failure(code, 'voice synthesis failed', {
+        engine,
+        voiceHash: hash,
+        line,
+        ...(typeof result.started === 'boolean' ? { started: result.started } : {}),
+        ...(Number.isFinite(result.usageUnits) ? { usageUnits: result.usageUnits } : {}),
+      });
     }
 
     let bytes = extractBytes(result, api);
@@ -604,6 +680,8 @@ export function createAuditionCache(options = {}) {
       contentType: 'audio/wav',
       size: bytes.length,
       cached: false,
+      ...(isPlainObject(result) && Number.isFinite(result.usageUnits) ? { usageUnits: result.usageUnits } : {}),
+      ...(isPlainObject(result) && typeof result.started === 'boolean' ? { started: result.started } : {}),
     });
   }
 
@@ -679,12 +757,19 @@ export function createAuditionCache(options = {}) {
     }
   }
 
+  async function supportsEngine(engine) {
+    const synthValue = firstDefined(baseOptions.synth, baseOptions.synthesize);
+    if (engine === 'qwen3-tts' && !(await qwenRuntimeAvailable({}, baseOptions, synthValue))) return false;
+    return Boolean(pickSynth(synthValue, engine));
+  }
+
   return Object.freeze({
     ensure,
     audition: ensure,
     get: ensure,
     prepare: ensure,
     has,
+    supportsEngine,
     key: auditionKey,
     file: auditionFile,
     isCached: (target) => ready.has(resolve(String(target))) && api.sizeOf(resolve(String(target))) > 0,
@@ -716,6 +801,18 @@ export function createAuditionWorker(options = {}) {
   if (admission !== undefined && typeof admission !== 'function') {
     throw new TypeError('createAuditionWorker admission must be a function');
   }
+  const productionStore = options.productionStore;
+  if (productionStore !== undefined
+    && (!productionStore
+      || typeof productionStore.read !== 'function'
+      || typeof productionStore.readEvents !== 'function'
+      || typeof productionStore.commit !== 'function')) {
+    throw new TypeError('createAuditionWorker productionStore must be a production store');
+  }
+  const ledgerFor = options.ledgerFor;
+  if (ledgerFor !== undefined && typeof ledgerFor !== 'function') {
+    throw new TypeError('createAuditionWorker ledgerFor must be a function');
+  }
   const defaultModel = options.model;
 
   async function admitted(request) {
@@ -725,6 +822,318 @@ export function createAuditionWorker(options = {}) {
     } catch {
       return false;
     }
+  }
+
+  function ledgerOf(production) {
+    if (typeof ledgerFor !== 'function') return null;
+    try {
+      return ledgerFor(production);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Resolve the exact named action. There is no search across productions:
+   * the request names one production and one action, and the slot must match
+   * the character, voice, line and engine in both directions.
+   */
+  function productionAdmission(request, input) {
+    if (!productionStore) return null;
+    const productionId = input.productionId;
+    const actionId = input.actionId;
+    if (!isIdentifierText(productionId) || !isIdentifierText(actionId)) return { ok: false };
+    const production = productionStore.read(productionId);
+    if (!production) return { ok: false };
+    const events = productionStore.readEvents(productionId);
+    const action = latestAction(events, actionId);
+    if (!action) return { ok: false };
+    const plan = proposedPlan(events, action.planId, action.planHash);
+    if (!plan) return { ok: false };
+    const slot = Array.isArray(plan.actions) ? plan.actions.find((entry) => entry?.id === actionId) : null;
+    if (!auditionSlotMatches(slot, request)) return { ok: false };
+    if (!planWasApproved(events, plan.id, plan.planHash)) return { ok: false };
+    if (action.state !== 'queued') return { ok: false, consumed: true };
+
+    const ledger = ledgerOf(production);
+    if (!ledger || typeof ledger.status !== 'function') {
+      return { ok: false, ledgerUnavailable: true };
+    }
+    let status;
+    try {
+      status = ledger.status();
+    } catch {
+      return { ok: false, ledgerUnavailable: true };
+    }
+    const open = (status.openReservations ?? []).find((entry) => entry.reservationId === action.reservationId);
+    if (!open) return { ok: false, consumed: true };
+    return { ok: true, production, action, slot, ledger, reservation: open };
+  }
+
+  /** queued -> dispatching -> running, one commit, every edge contract-checked. */
+  function claimAction(context, userEventId) {
+    const { production, action } = context;
+    const productionId = production.id;
+    const commandId = `audition-claim:${action.planHash}:${action.id}`;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const currentProduction = productionStore.read(productionId);
+      if (!currentProduction) return { ok: false, consumed: true };
+      let events;
+      try {
+        events = productionStore.readEvents(productionId);
+      } catch {
+        return { ok: false, consumed: true };
+      }
+      const current = latestAction(events, action.id);
+      if (!current) return { ok: false, consumed: true };
+      if (current.state !== 'queued') return { ok: false, consumed: true };
+      if (!canTransition('queued', 'dispatching') || !canTransition('dispatching', 'running')) {
+        return { ok: false, consumed: false };
+      }
+      const at = new Date().toISOString();
+      const attribution = isIdentifierText(userEventId) ? { userEventId } : {};
+      const steps = [
+        { ...current, state: 'dispatching', lastError: null, auditionStartedAt: at },
+        { ...current, state: 'running', lastError: null, auditionStartedAt: at },
+      ];
+      try {
+        productionStore.commit(productionId, {
+          commandId,
+          idempotencyKey: commandId,
+          baseRevision: currentProduction.revision,
+          events: steps.map((data) => ({ type: 'action.state_changed', data, ...attribution })),
+        });
+        return { ok: true, action: steps[1] };
+      } catch (error) {
+        if (error?.code === 'REVISION_CONFLICT') continue;
+        if (error?.code === 'IDEMPOTENCY_CONFLICT' || error?.code === 'DUPLICATE_EVENT') {
+          return { ok: false, consumed: true };
+        }
+        return { ok: false, consumed: false };
+      }
+    }
+    return { ok: false, consumed: true };
+  }
+
+  /** Walk a terminal path from the current durable state, retrying conflicts. */
+  function commitOutcome(context, states, extra, commandId) {
+    const { production, action } = context;
+    const productionId = production.id;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const currentProduction = productionStore.read(productionId);
+      if (!currentProduction) return false;
+      let events;
+      try {
+        events = productionStore.readEvents(productionId);
+      } catch {
+        return false;
+      }
+      const current = latestAction(events, action.id);
+      if (!current) return false;
+      if (current.state === states[states.length - 1]) return true;
+      if (current.state !== 'running' && current.state !== 'dispatching') return false;
+      let cursor = current.state;
+      const steps = [];
+      for (const state of states) {
+        if (!canTransition(cursor, state)) return false;
+        steps.push(state);
+        cursor = state;
+      }
+      const eventsToWrite = steps.map((state) => ({
+        type: 'action.state_changed',
+        data: { ...current, ...extra, state },
+      }));
+      try {
+        productionStore.commit(productionId, {
+          commandId,
+          idempotencyKey: commandId,
+          baseRevision: currentProduction.revision,
+          events: eventsToWrite,
+        });
+        return true;
+      } catch (error) {
+        if (error?.code === 'REVISION_CONFLICT') continue;
+        if (error?.code === 'IDEMPOTENCY_CONFLICT' || error?.code === 'DUPLICATE_EVENT') return true;
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Acknowledge exactly this action's outbox entry. The store has no public
+   * per-entry ack, so it is drained only when this action's dispatch entry is
+   * the only pending entry; otherwise it is left in place rather than
+   * consuming another action's side effect.
+   */
+  async function acknowledgeOutbox(productionId, actionId) {
+    if (typeof productionStore.pending !== 'function' || typeof productionStore.drainOutbox !== 'function') {
+      return { acknowledged: false, reason: 'STORE_HAS_NO_ACK' };
+    }
+    let pending;
+    try {
+      pending = productionStore.pending(productionId);
+    } catch {
+      return { acknowledged: false, reason: 'PENDING_READ_FAILED' };
+    }
+    const mine = pending.filter((entry) => entry?.type === 'action.dispatch' && entry?.payload?.actionId === actionId);
+    if (mine.length === 0) return { acknowledged: false, reason: 'NO_ENTRY' };
+    if (pending.length !== mine.length) {
+      return { acknowledged: false, reason: 'OTHER_PENDING', pending: pending.length - mine.length };
+    }
+    try {
+      await productionStore.drainOutbox(productionId, () => {});
+      return { acknowledged: true };
+    } catch {
+      return { acknowledged: false, reason: 'DRAIN_FAILED' };
+    }
+  }
+
+  function settle(context, result, succeeded) {
+    const ledger = context.ledger;
+    if (!ledger || typeof ledger.settle !== 'function') {
+      return { ok: false, code: AUDITION_LEDGER_UNAVAILABLE };
+    }
+    const reservationId = context.action.reservationId;
+    const upperBound = Number.isFinite(context.slot?.upperBound) ? context.slot.upperBound : 0;
+    const measured = isPlainObject(result) && Number.isFinite(result.usageUnits) ? result.usageUnits : null;
+
+    let kind;
+    let actualUnits;
+    let evidence;
+    if (succeeded) {
+      if (measured === null) {
+        kind = 'reservation_unverified';
+        evidence = { reason: 'usage_unmeasured' };
+      } else if (measured < 0 || measured > upperBound) {
+        kind = 'reservation_unverified';
+        evidence = { code: 'SLOT_BOUND_EXCEEDED', measured, upperBound };
+      } else {
+        kind = 'actual';
+        actualUnits = measured;
+        evidence = { reason: 'measured_usage' };
+      }
+    } else if (noAllocationFailure(result)) {
+      kind = 'no_allocation';
+      evidence = { reason: 'not_started' };
+    } else {
+      kind = 'reservation_unverified';
+      evidence = { reason: 'outcome_unknown' };
+    }
+
+    try {
+      ledger.settle({
+        reservationId,
+        kind,
+        ...(kind === 'actual' ? { actualUnits } : {}),
+        ...(kind === 'no_allocation' ? { gpuAllocated: false } : {}),
+        idempotencyKey: `audition-settle:${reservationId}`,
+        evidence,
+      });
+    } catch (error) {
+      if (error?.code === 'RESERVATION_NOT_OPEN') return { ok: true, kind, actualUnits, already: true };
+      return { ok: false, code: 'AUDITION_SETTLEMENT_FAILED' };
+    }
+    return { ok: true, kind, actualUnits };
+  }
+
+  async function paidAudition(request, input, context) {
+    if (!context) return null;
+    if (!context.ok) {
+      if (context.ledgerUnavailable) {
+        return failure(AUDITION_LEDGER_UNAVAILABLE, 'the production budget ledger is not available', {
+          engine: request.engine,
+          line: request.line,
+        });
+      }
+      if (context.consumed) {
+        return failure(ACTION_CONSUMED, 'this audition action was already consumed', {
+          engine: request.engine,
+          line: request.line,
+        });
+      }
+      return null;
+    }
+
+    if (typeof cache.supportsEngine === 'function') {
+      let mounted = false;
+      try {
+        mounted = (await cache.supportsEngine(request.engine)) === true;
+      } catch {
+        mounted = false;
+      }
+      if (!mounted) {
+        return failure(AUDITION_UNAVAILABLE, UNAVAILABLE_MESSAGE.missing, {
+          engine: request.engine,
+          line: request.line,
+        });
+      }
+    }
+
+    const claimed = claimAction(context, input.userEventId);
+    if (!claimed.ok) {
+      if (claimed.consumed) {
+        return failure(ACTION_CONSUMED, 'this audition action was already consumed', {
+          engine: request.engine,
+          line: request.line,
+        });
+      }
+      return failure(AUDITION_UNAVAILABLE, 'the audition action could not be claimed', {
+        engine: request.engine,
+        line: request.line,
+      });
+    }
+
+    const outbox = await acknowledgeOutbox(context.production.id, context.action.id);
+    const result = await cache.ensure(input.character ?? { voice: request.voiceObject }, { line: request.line });
+    const succeeded = result.ok === true;
+
+    const settled = settle(context, result, succeeded);
+    if (!settled.ok) {
+      await commitOutcome(
+        context,
+        ['failed'],
+        { lastError: { code: settled.code, message: 'the production ledger could not settle this audition' }, auditionCompletedAt: new Date().toISOString() },
+        `audition-end:${context.action.planHash}:${context.action.id}`,
+      );
+      return failure(settled.code, 'the production ledger could not settle this audition', {
+        engine: request.engine,
+        line: request.line,
+      });
+    }
+
+    if (succeeded) {
+      await commitOutcome(
+        context,
+        ['collecting', 'verifying', 'completed'],
+        {
+          auditionCompletedAt: new Date().toISOString(),
+          auditionSettlement: { kind: settled.kind, units: settled.actualUnits ?? null },
+        },
+        `audition-end:${context.action.planHash}:${context.action.id}`,
+      );
+    } else {
+      await commitOutcome(
+        context,
+        ['failed'],
+        {
+          lastError: {
+            code: typeof result.code === 'string' ? result.code : AUDITION_SYNTH_FAILED,
+            message: typeof result.message === 'string' ? result.message : 'the audition failed',
+          },
+          auditionCompletedAt: new Date().toISOString(),
+        },
+        `audition-end:${context.action.planHash}:${context.action.id}`,
+      );
+    }
+
+    if (!succeeded) return result;
+    return Object.freeze({
+      ...result,
+      voicePath: result.voicePath ?? 'qwen3-tts',
+      settled: { kind: settled.kind, units: settled.actualUnits ?? null },
+      outbox,
+    });
   }
 
   async function run(input = {}) {
@@ -798,6 +1207,23 @@ export function createAuditionWorker(options = {}) {
         line,
         characterId: character?.id,
       });
+
+      if (productionStore) {
+        const context = productionAdmission(request, input);
+        const paid = await paidAudition({ ...request, voiceObject: voice }, input, context);
+        if (paid) return paid;
+        if (context?.ok) {
+          return failure(ACTION_CONSUMED, 'this audition action was already consumed', {
+            engine: voice.engine,
+            line,
+          });
+        }
+        return failure(AUDITION_ADMISSION_REQUIRED, ADMISSION_REQUIRED_MESSAGE, {
+          engine: voice.engine,
+          line,
+        });
+      }
+
       if (!(await admitted(request))) {
         return failure(AUDITION_ADMISSION_REQUIRED, ADMISSION_REQUIRED_MESSAGE, {
           engine: voice.engine,
