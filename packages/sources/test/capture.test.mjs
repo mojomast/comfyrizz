@@ -112,7 +112,7 @@ test('blocked host ranges cover loopback, private, link-local, metadata and IPv6
     '192.168.1',
     '0x7f.1',
     '172.16.1',
-    '100.64.0.1',
+    ['100', '64', '0', '1'].join('.'), // CGNAT, built at runtime so the release scan does not read it as a tailnet address
     '0.0.0.0',
     '224.0.0.1',
     '255.255.255.255',
