@@ -140,3 +140,11 @@ test('the composer has no brief card and the scripted build uses the idea words'
   await expect(page.locator('[data-brief-card]')).toHaveCount(0);
   await expect(page.locator('#brand-kit > summary')).toHaveText('Brand kit');
 });
+
+test('Ctrl+K opens a dialog named Commands', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open in editor' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'advanced');
+  await page.keyboard.press('Control+K');
+  await expect(page.getByRole('dialog', { name: 'Commands' })).toBeVisible();
+});

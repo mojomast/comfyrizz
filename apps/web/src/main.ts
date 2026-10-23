@@ -5,6 +5,8 @@ import './ui/look-picker.css';
 import './productions/cards/iteration-card.css';
 import './productions/cards/iteration-advanced.css';
 import { initShellLayout } from './ui/splitter';
+import { mountPalette } from './ui/palette.ts';
+import { registerCommand } from './editor/commands.ts';
 import { MODE_CHANGE_EVENT, mountModeToggle, setMode } from './ui/mode';
 import { getPrefs } from './ui/prefs';
 import { readIteration, setIteration } from './productions/client';
@@ -1622,6 +1624,43 @@ export function qaPanelSummary(ok: boolean, notes: number): string {
   return label + count + ' notes';
 }
 
+/** Commands the editor palette mounts on top of the shared registry. */
+export function editorPaletteCommands() {
+  return [
+    { id: 'export.mp4', title: 'Export MP4' },
+    { id: 'view.openStudio', title: 'Open in studio' },
+    { id: 'nav.characters', title: 'Characters' },
+    { id: 'nav.settings', title: 'Settings' },
+    { id: 'inspector.generate', title: 'Generate tab' },
+    { id: 'rail.activity', title: 'Activity' },
+    { id: 'rail.files', title: 'Files' },
+    { id: 'rail.jobs', title: 'Jobs' },
+  ];
+}
+
+function mountEditorCommandPalette(openStudio: () => void): void {
+  const actions: Record<string, () => void> = {
+    'export.mp4': () => { void exportMp4(); },
+    'view.openStudio': openStudio,
+    'nav.characters': () => { document.getElementById('characters-tab')?.click(); },
+    'nav.settings': () => { document.getElementById('settings-open')?.click(); },
+    'inspector.generate': () => { document.getElementById('sa-tab-generate')?.click(); },
+    'rail.activity': () => { document.querySelector<HTMLButtonElement>('[data-rail-tab="activity"]')?.click(); },
+    'rail.files': () => { document.querySelector<HTMLButtonElement>('[data-rail-tab="assets"]')?.click(); },
+    'rail.jobs': () => { document.querySelector<HTMLButtonElement>('[data-rail-tab="gpu"]')?.click(); },
+  };
+  for (const command of editorPaletteCommands()) {
+    registerCommand({
+      id: command.id,
+      title: command.title,
+      group: 'Editor',
+      run: () => { actions[command.id]?.(); },
+    });
+  }
+  const palette = mountPalette();
+  palette.dialog.setAttribute('aria-label', 'Commands');
+}
+
 /** MS4: the frame-QA gate badge and contact sheet for the most recent render. */
 function renderQaPanel(): void {
   const host = $<HTMLElement>('qa-panel');
@@ -3065,6 +3104,7 @@ function init(opened: OpenedProject): void {
   });
 
   if (token) void refreshClips();
+  mountEditorCommandPalette(() => { modeControl?.setMode('easy'); });
 }
 
 const openedProject = await openInitialProject({
