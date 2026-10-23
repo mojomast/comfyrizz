@@ -29,6 +29,7 @@ export const UPLOAD_MAX_BYTES = MAX_IMAGE_BYTES;
 
 const IMAGE_ID_RE = /^img_[0-9a-f]{16}$/;
 const REVISION_RE = /^[0-9]{1,9}$/;
+const IF_MATCH_RE = /^[1-9][0-9]*$/;
 const DEFAULT_FILENAME = 'upload';
 const MAX_FILENAME_CHARS = 512;
 const IMAGE_EXTENSIONS_SET = new Set(IMAGE_EXTENSIONS.map(extension => `.${extension}`));
@@ -66,6 +67,7 @@ const STATUS_BY_CODE = Object.freeze({
   RIGHTS_REQUIRED: 400,
   METHOD_NOT_ALLOWED: 405,
   ID_EXISTS: 409,
+  REVISION_CONFLICT: 409,
   LIMIT: 409,
   CAST_LIMIT: 409,
   CAST_NOT_FOUND: 404,
@@ -136,6 +138,19 @@ function headerValue(headers, name) {
     if (key.toLowerCase() === lower) return headers[key];
   }
   return undefined;
+}
+
+function ifMatchRevision(headers) {
+  const value = headerValue(headers, 'if-match');
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !IF_MATCH_RE.test(value)) {
+    fail('INVALID_REVISION', 'if-match must be a positive revision integer');
+  }
+  const revision = Number(value);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    fail('INVALID_REVISION', 'if-match must be a positive revision integer');
+  }
+  return revision;
 }
 
 function normalizeMime(value) {
@@ -665,6 +680,7 @@ export function createCharacterRoutes(options = {}) {
 
   async function handlePatchCharacter(request, response, id) {
     const body = await readJsonBody(request);
+    const expectedRevision = ifMatchRevision(request.headers);
     const patch = { ...body };
     if (patch.fictional === false || patch.fictionalAcknowledged === false || patch.fictionalConfirmed === false) {
       fail('CHAR_KIND_UNSUPPORTED', 'only fictional characters are supported');
@@ -674,7 +690,22 @@ export function createCharacterRoutes(options = {}) {
     delete patch.fictionalConfirmed;
     const store = storeFor();
     if (!store.get(id)) fail('NOT_FOUND', `character ${id} does not exist`, 404);
-    const character = store.update(id, patch);
+    let character;
+    try {
+      character = expectedRevision === undefined
+        ? store.update(id, patch)
+        : store.update(id, patch, { expectedRevision });
+    } catch (error) {
+      if (error?.code === 'REVISION_CONFLICT') {
+        sendJson(response, 409, {
+          error: error.message,
+          code: 'REVISION_CONFLICT',
+          currentRevision: error.currentRevision,
+        });
+        return;
+      }
+      throw error;
+    }
     publish(events, {
       type: 'character.updated',
       characterId: character.id,
