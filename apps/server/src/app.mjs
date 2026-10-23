@@ -45,6 +45,11 @@ import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/t
 import { animationOptions } from './animation-options.mjs';
 import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
 import { createRenderRoutes } from './routes/render.mjs';
+import { createProductionStore } from './productions/store.mjs';
+import { createCommandHandler } from './productions/commands.mjs';
+import { createBudgetLedger } from './productions/ledger.mjs';
+import { createActionCoordinator } from './productions/actions.mjs';
+import { createProductionRoutes } from './routes/productions.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 // IP11: a completion save races with edits. Re-read the latest package and reapply the
@@ -708,6 +713,31 @@ export function createApp({
   // RL11: the export and render routes live in src/routes/render.mjs. This is a pure
   // delegation: the handlers, the shared operation slot and the C13 rendered-timeline
   // bookkeeping are the route module's, the wiring stays here.
+  // IP19/IP20: production commands, action plans and dispatch. The authenticated
+  // local user is the only actor. Headers are not an identity source, and there
+  // is no default spend cap — the ledger stays uncapped until the user sets one.
+  // A failed Google Colab run with unknown usage settles its full reservation
+  // in the ledger; dispatch only reserves.
+  const productionStore = createProductionStore({ runtimeDir });
+  const productionCommands = createCommandHandler({ store: productionStore });
+  const productionActions = createActionCoordinator({
+    store: productionStore,
+    handler: productionCommands,
+    ledgerFor: (production) => createBudgetLedger({
+      runtimeDir,
+      ledgerId: production.budgetLedgerId,
+    }),
+  });
+  const productionRoutes = createProductionRoutes({
+    store: productionStore,
+    handler: productionCommands,
+    actions: productionActions,
+    contextFor: () => ({
+      actor: 'user',
+      userEventId: `ue_${randomUUID()}`,
+    }),
+  });
+
   const renderRoutes = createRenderRoutes({
     store,
     events,
@@ -1452,6 +1482,7 @@ export function createApp({
       }
     }
 
+    if (await productionRoutes.handle(request, response, url)) return;
     if (await takeRoutes.handle(request, response, url)) return;
     if (await createCharacterRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     if (await createReferenceRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;

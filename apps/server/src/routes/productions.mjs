@@ -14,6 +14,7 @@
 // originating user-event id. This module never reads either value from a
 // request header, query parameter or body, and never invents one.
 
+import { ActionError } from '../productions/actions.mjs';
 import { CommandError } from '../productions/commands.mjs';
 import { ProductionStoreError } from '../productions/store.mjs';
 
@@ -33,6 +34,10 @@ const ERROR_DETAIL_KEYS = Object.freeze([
   'idempotencyKey',
   'kind',
   'productionId',
+  'planId',
+  'planHash',
+  'actionId',
+  'reservationId',
 ]);
 
 class RouteError extends Error {
@@ -76,7 +81,7 @@ function mapError(error) {
       message: error.message,
     };
   }
-  if (error instanceof CommandError) {
+  if (error instanceof ActionError || error instanceof CommandError) {
     return {
       status: Number.isSafeInteger(error.status) ? error.status : 500,
       code: typeof error.code === 'string' ? error.code : 'INTERNAL',
@@ -222,11 +227,20 @@ function parseAfter(searchParams) {
  * `handler` is the IP18 command handler and `contextFor(request)` is the
  * server auth layer's attribution source.
  */
+// /api/productions/:id/action-plans
+// /api/productions/:id/actions
+// /api/productions/:id/actions/:actionId
+function matchActionPath(pathname) {
+  const match = /^\/api\/productions\/([^/]+)\/(action-plans|actions)(?:\/([^/]+))?$/.exec(pathname);
+  if (!match) return null;
+  return { id: match[1], resource: match[2], actionId: match[3] ?? null };
+}
+
 export function createProductionRoutes(options = {}) {
   if (!isPlainObject(options)) {
     throw new TypeError('createProductionRoutes options must be an object');
   }
-  const { store, handler, contextFor } = options;
+  const { store, handler, actions = null, contextFor } = options;
   if (!store || typeof store.read !== 'function' || typeof store.readEvents !== 'function') {
     throw new TypeError('createProductionRoutes requires a production store');
   }
@@ -334,9 +348,55 @@ export function createProductionRoutes(options = {}) {
     });
   }
 
+  async function handleAction(request, response, actionPath) {
+    if (!actions || typeof actions.propose !== 'function' || typeof actions.dispatch !== 'function' || typeof actions.getAction !== 'function') {
+      throw new RouteError('ACTIONS_UNAVAILABLE', 'action routes are not configured', 500);
+    }
+    const id = decodeId(actionPath.id);
+    const method = String(request?.method ?? 'GET').toUpperCase();
+    if (actionPath.resource === 'action-plans') {
+      if (actionPath.actionId !== null || method !== 'POST') {
+        throw new RouteError('METHOD_NOT_ALLOWED', 'method not allowed', 405);
+      }
+      const body = await readJsonBody(request);
+      const context = await contextFor(request);
+      const result = await actions.propose({ productionId: id, body, context });
+      sendJson(response, result.duplicate ? 200 : 201, result);
+      return;
+    }
+    if (actionPath.actionId !== null) {
+      if (method !== 'GET' && method !== 'HEAD') {
+        throw new RouteError('METHOD_NOT_ALLOWED', 'method not allowed', 405);
+      }
+      const result = actions.getAction({ productionId: id, actionId: decodeId(actionPath.actionId) });
+      sendJson(response, 200, result);
+      return;
+    }
+    if (method !== 'POST') {
+      throw new RouteError('METHOD_NOT_ALLOWED', 'method not allowed', 405);
+    }
+    const body = await readJsonBody(request);
+    const context = await contextFor(request);
+    const result = await actions.dispatch({ productionId: id, body, context });
+    sendJson(response, 202, result);
+  }
+
   async function handle(request, response, url) {
     const parsed = parseRequestUrl(request, url);
     if (!parsed) return false;
+    const actionPath = matchActionPath(parsed.pathname);
+    if (actionPath) {
+      try {
+        await handleAction(request, response, actionPath);
+      } catch (error) {
+        if (response.headersSent) {
+          response.destroy?.(error);
+          return true;
+        }
+        sendError(response, error);
+      }
+      return true;
+    }
     const match = PRODUCTION_ROUTE_PATTERN.exec(parsed.pathname);
     if (!match) return false;
 
