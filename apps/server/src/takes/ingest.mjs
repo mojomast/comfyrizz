@@ -245,9 +245,12 @@ function resolveRetrySource(outputDir, produced) {
  * @param {string} [input.runId]
  * @param {string} [input.backend]
  * @param {object} [input.retry] rejected: retrying a failed clip is `ingestRunWithRetries`
+ * @param {boolean} [input.autoSelect=true] let the store select a new take when allowed; pass
+ *   false when the caller must decide selection itself (IP11 rebase), which still snapshots
+ *   every take and restores the selection the clip had before this ingest
  * @returns {{takes: object[], selected: Record<string, string>, failed: object[]}}
  */
-export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, corrections = {}, runId = null, backend = null, retry = null } = {}) {
+export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, corrections = {}, runId = null, backend = null, retry = null, autoSelect = true } = {}) {
   if (!isObject(pkg) || typeof pkg.id !== 'string' || pkg.id === '') {
     throw new TypeError('ingestRun needs a package with an id');
   }
@@ -289,6 +292,8 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
   const outputs = [...(appliedResult.applied || []), ...(appliedResult.candidates || [])];
   const takes = [];
   const added = new Map();
+  const autoSelectEnabled = autoSelect !== false;
+  const previousSelection = new Map();
 
   for (const item of outputs) {
     if (!isObject(item)) continue;
@@ -313,6 +318,11 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
     const media = mediaFor(job, job?.cutout ?? asset.cutout, output) ?? {};
     const correction = isObject(corrections?.[assetId]) ? clone(corrections[assetId]) : undefined;
 
+    if (!autoSelectEnabled && !previousSelection.has(assetId)) {
+      const before = typeof store.read === 'function' ? store.read(pkgId) : null;
+      previousSelection.set(assetId, before?.clips?.[assetId]?.selected ?? null);
+    }
+
     try {
       const take = store.addTake(pkgId, assetId, {
         srcPath,
@@ -330,6 +340,19 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
       const message = cleanError(error);
       if (!failedAssets.has(assetId)) failedAssets.set(assetId, message);
       failed.push({ assetId, job: jobId, state: 'failed', error: message });
+    }
+  }
+
+  // IP11: an ingest that must not select yet still leaves the store's byte snapshot intact.
+  // addTake may have auto-selected; put the clip's previous selection back so the caller can
+  // decide against the latest package revision without losing a concurrent manual choice.
+  if (!autoSelectEnabled && typeof store.setSelected === 'function') {
+    for (const [assetId, selected] of previousSelection) {
+      const doc = typeof store.read === 'function' ? store.read(pkgId) : null;
+      const entry = doc?.clips?.[assetId];
+      if (!entry) continue;
+      const current = entry.selected ?? null;
+      if (current !== selected) store.setSelected(pkgId, assetId, selected);
     }
   }
 

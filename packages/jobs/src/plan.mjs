@@ -63,6 +63,69 @@ export function resolveFastH3Frames(requested) {
 export const FILE_PARAMS = ["image", "reference", "mask", "audio"];
 
 /**
+ * IP58/A25: the one motion-reference input name. A plate names the **documented excerpt derivative**
+ * asset in `gen.inputs.motion_reference`; the raw reference upload is never a graph input. There is
+ * deliberately no `asset.frames` / `asset.derivatives` fallback: a frame extracted from a clip is a
+ * start image (an explicit `image`), not motion transfer.
+ *
+ * A workflow may receive this input only when its capability profile declares
+ * `slots.motion_reference`. The shipped LTX i2v and FastH3 Omni graphs do not, so naming a motion
+ * reference on them is a planning error, not a silent start-frame substitution.
+ */
+export const MOTION_REFERENCE_INPUT = "motion_reference";
+const MOTION_REFERENCE_CONTROLS = [
+  "motion_reference_original",
+  "motion_reference_original_sha256",
+  "motion_reference_in",
+  "motion_reference_out",
+  "motion_reference_fps",
+  "motion_reference_audio",
+];
+const MOTION_AUDIO_POLICIES = ["muted", "none", "present"];
+const SHA256_RE = /^[a-f0-9]{64}$/;
+
+function capabilityProfile(generator, slots = {}) {
+  return Object.freeze({
+    generator,
+    slots: Object.freeze({
+      image: false,
+      reference: false,
+      mask: false,
+      audio: false,
+      motion_reference: false,
+      ...slots,
+    }),
+  });
+}
+
+/**
+ * What each shipped graph can really consume. `motion_reference: true` means the graph has a video
+ * conditioning slot; none ships yet. `workflowCapabilities` on `planJobs` may add a profile for a
+ * test fixture or a future graph without changing this table.
+ */
+export const WORKFLOW_CAPABILITY_PROFILES = Object.freeze({
+  "workflows/flux3_klein_t2i.api.json": capabilityProfile("flux3-klein"),
+  "workflows/flux3_klein_img2img.api.json": capabilityProfile("flux3-klein", { image: true }),
+  "workflows/flux3_klein_ref_edit.api.json": capabilityProfile("flux3-klein", { image: true, reference: true }),
+  "workflows/character_lora_klein.api.json": capabilityProfile("flux3-klein", { image: true, reference: true }),
+  "workflows/character_identity_pulid.api.json": capabilityProfile("flux3-klein", { image: true, reference: true }),
+  "workflows/ltx25_i2v_2stage.api.json": capabilityProfile("ltx25", { image: true }),
+  "workflows/ltx25_t2v_2stage.api.json": capabilityProfile("ltx25"),
+  "workflows/ltx25_a2v_2stage.api.json": capabilityProfile("ltx25-a2v", { image: true, audio: true }),
+  "workflows/fasth3_omni_ref2va.api.json": capabilityProfile("fasth3-omni", { image: true, reference: true, audio: true }),
+});
+
+function profileForWorkflow(workflow, overrides) {
+  if (overrides && Object.prototype.hasOwnProperty.call(overrides, workflow)) return overrides[workflow];
+  return WORKFLOW_CAPABILITY_PROFILES[workflow] ?? capabilityProfile(null);
+}
+
+function hasMotionReferenceSlot(profile) {
+  const slots = profile && typeof profile === "object" ? profile.slots : null;
+  return Boolean(slots && (slots.motion_reference === true || slots.video === true));
+}
+
+/**
  * Klein reference edits take up to 10 reference images. The shipped graph wires image0
  * (`reference` / `image` on node 10). Further refs are uploaded under `_reference_2` …
  * `_reference_10` so they stay out of the params map (a name the map does not declare
@@ -86,7 +149,7 @@ function extraRefParam(index) {
 }
 
 export function isUploadParam(param) {
-  return FILE_PARAMS.includes(param) || /^_reference_(?:[2-9]|10)$/.test(param);
+  return param === MOTION_REFERENCE_INPUT || FILE_PARAMS.includes(param) || /^_reference_(?:[2-9]|10)$/.test(param);
 }
 
 function fileParamNames() {
@@ -128,8 +191,8 @@ export function sha256Hex(text) {
   return createHash("sha256").update(text).digest("hex");
 }
 
-export function cacheKeyFor({ workflowSha256, generator, model, modelRevision, params, seed, width, height, frames, refSha256 }) {
-  // `refSha256` is omitted unless a cast reference was attached, so a package with no cast
+export function cacheKeyFor({ workflowSha256, generator, model, modelRevision, params, seed, width, height, frames, refSha256, motionRef }) {
+  // `refSha256` and `motionRef` are omitted unless they were attached, so a package with neither
   // hashes exactly as before.
   const body = {
     workflowSha256: workflowSha256 ?? null,
@@ -143,6 +206,9 @@ export function cacheKeyFor({ workflowSha256, generator, model, modelRevision, p
     frames: frames ?? null,
   };
   if (refSha256 != null) body.refSha256 = refSha256;
+  // IP58: derivative hashes and excerpt parameters are part of the key, so a new excerpt of the same
+  // source cannot reuse a previous clip's paid output.
+  if (motionRef != null) body.motionRef = motionRef;
   return sha256Hex(canonical(body));
 }
 
@@ -247,6 +313,179 @@ function resolveFileInput({ param, value, assetId, pkg, kinds, errors }) {
       "so there is nothing to upload and the graph would be handed a value LoadImage cannot load",
   );
   return null;
+}
+
+/**
+ * Resolve a plate's motion reference against the workflow's capability profile.
+ *
+ * Canonical package shape (all values are `gen.inputs` scalars, so the package stays schema-valid):
+ *   motion_reference:              asset id of the excerpt derivative (kind video, ready file+sha)
+ *   motion_reference_original:     optional original asset id (default: excerpt.source.id)
+ *   motion_reference_original_sha256: optional original sha256 (default: that asset's sha256)
+ *   motion_reference_in:           source in-point seconds (default 0)
+ *   motion_reference_out:          source out-point seconds (default excerpt media.durationSeconds)
+ *   motion_reference_fps:          excerpt fps (default excerpt media.fps)
+ *   motion_reference_audio:        muted | none | present (default excerpt media.audio ?? none)
+ *
+ * Returns `{ fileInput, ...provenance }` and removes the planner controls from `params`. The file
+ * input is always the excerpt's file: an excerpt that names the original file/hash is refused.
+ */
+function resolveMotionReference({ pkg, assetId, kind, gen, inputs, params, profile, errors }) {
+  const named = inputs[MOTION_REFERENCE_INPUT];
+  const present = named !== undefined && named !== null;
+  // these are planner controls, never node params (the runner refuses an unmapped param)
+  for (const name of MOTION_REFERENCE_CONTROLS) delete params[name];
+  if (!present) return null;
+  delete params[MOTION_REFERENCE_INPUT];
+
+  const workflow = gen.workflow ?? "(no workflow)";
+  const unsupported = (detail) =>
+    `PLAN_MOTION_REFERENCE_UNSUPPORTED assets.${assetId}: motion reference ${JSON.stringify(named)} cannot be executed by ` +
+    `${workflow} (${detail}); its capability profile declares no motion reference video slot. ` +
+    "Use an explicit `image` start frame if that is what is wanted - a clip's frame 0 is not motion transfer.";
+  const invalid = (detail) => `PLAN_MOTION_REFERENCE_INVALID assets.${assetId}: ${detail}`;
+
+  if (kind !== "plate") {
+    errors.push(unsupported(`a ${kind} job`));
+    return null;
+  }
+  if (!hasMotionReferenceSlot(profile)) {
+    errors.push(unsupported("workflow capability profile"));
+    return null;
+  }
+  if (typeof named !== "string" || !named.trim()) {
+    errors.push(invalid(`${MOTION_REFERENCE_INPUT} must name the excerpt derivative asset, got ${JSON.stringify(named)}`));
+    return null;
+  }
+
+  const excerptAsset = pkg.assets?.[named];
+  if (!excerptAsset || typeof excerptAsset !== "object") {
+    errors.push(invalid(`${JSON.stringify(named)} is not an asset in this package; motion references name an excerpt asset, not a path or a raw upload`));
+    return null;
+  }
+  if (excerptAsset.kind !== "video") {
+    errors.push(invalid(`excerpt asset ${named} is a ${JSON.stringify(excerptAsset.kind)} asset, not a video`));
+    return null;
+  }
+  const excerptFile = excerptAsset.file;
+  const excerptSha256 = excerptAsset.sha256;
+  if (typeof excerptFile !== "string" || !excerptFile) {
+    errors.push(invalid(`excerpt asset ${named} carries no file; the runner has nothing to upload`));
+    return null;
+  }
+  const excerptPathProblem = pathProblem(excerptFile);
+  if (excerptPathProblem) {
+    errors.push(invalid(`excerpt asset ${named} file ${excerptPathProblem} (${JSON.stringify(excerptFile)})`));
+    return null;
+  }
+  if (typeof excerptSha256 !== "string" || !SHA256_RE.test(excerptSha256)) {
+    errors.push(invalid(`excerpt asset ${named} needs a lowercase sha256 of the derivative bytes`));
+    return null;
+  }
+
+  const sourceId = excerptAsset.source && typeof excerptAsset.source.id === "string" ? excerptAsset.source.id : null;
+  const originalId = typeof inputs.motion_reference_original === "string" && inputs.motion_reference_original
+    ? inputs.motion_reference_original
+    : sourceId;
+  const originalAsset = originalId ? pkg.assets?.[originalId] : null;
+  const originalSha256 = typeof inputs.motion_reference_original_sha256 === "string"
+    ? inputs.motion_reference_original_sha256
+    : originalAsset?.sha256;
+  const originalFile = typeof originalAsset?.file === "string"
+    ? originalAsset.file
+    : excerptAsset.source && typeof excerptAsset.source.original_file === "string"
+      ? excerptAsset.source.original_file
+      : null;
+  if (typeof originalId !== "string" || !originalId || typeof originalSha256 !== "string" || !SHA256_RE.test(originalSha256)) {
+    errors.push(
+      `PLAN_MOTION_REFERENCE_PROVENANCE assets.${assetId}: the excerpt needs its original asset id and sha256 ` +
+        "(name it in motion_reference_original/motion_reference_original_sha256, or set source.id on the excerpt asset)",
+    );
+    return null;
+  }
+  if (originalId === named || excerptSha256 === originalSha256 || (originalFile && excerptFile === originalFile)) {
+    errors.push(
+      `PLAN_MOTION_REFERENCE_RAW_SOURCE assets.${assetId}: ${JSON.stringify(named)} is the raw original, not an excerpt; ` +
+        "make the documented trim/scale derivative a separate asset and name that instead",
+    );
+    return null;
+  }
+
+  const originalFps = Number(originalAsset?.media?.fps);
+  const excerptFps = Number(inputs.motion_reference_fps ?? excerptAsset.media?.fps);
+  const inSeconds = Number(inputs.motion_reference_in ?? 0);
+  const outSeconds = Number(inputs.motion_reference_out ?? excerptAsset.media?.durationSeconds);
+  const audio = typeof inputs.motion_reference_audio === "string"
+    ? inputs.motion_reference_audio
+    : (excerptAsset.media?.audio ?? "none");
+  if (!Number.isFinite(inSeconds) || inSeconds < 0) {
+    errors.push(invalid(`motion_reference_in must be a non-negative number of seconds, got ${JSON.stringify(inputs.motion_reference_in)}`));
+    return null;
+  }
+  if (!Number.isFinite(outSeconds) || outSeconds <= inSeconds) {
+    errors.push(invalid(`motion_reference_out must be greater than the in-point, got ${JSON.stringify(inputs.motion_reference_out)}`));
+    return null;
+  }
+  if (!Number.isFinite(excerptFps) || excerptFps <= 0 || excerptFps > 240) {
+    errors.push(invalid(`motion_reference_fps must be a positive frame rate, got ${JSON.stringify(inputs.motion_reference_fps)}`));
+    return null;
+  }
+  if (!MOTION_AUDIO_POLICIES.includes(audio)) {
+    errors.push(invalid(`motion_reference_audio must be one of ${MOTION_AUDIO_POLICIES.join(", ")}, got ${JSON.stringify(audio)}`));
+    return null;
+  }
+
+  const transformations = [{ op: "trim", inSeconds, outSeconds }];
+  transformations.push({ op: "fps", ...(Number.isFinite(originalFps) && originalFps > 0 ? { from: originalFps } : {}), to: excerptFps });
+  if (
+    Number(originalAsset?.media?.width) > 0 &&
+    Number(originalAsset?.media?.height) > 0 &&
+    Number(excerptAsset.media?.width) > 0 &&
+    Number(excerptAsset.media?.height) > 0 &&
+    (originalAsset.media.width !== excerptAsset.media.width || originalAsset.media.height !== excerptAsset.media.height)
+  ) {
+    transformations.push({
+      op: "scale",
+      from: { width: originalAsset.media.width, height: originalAsset.media.height },
+      to: { width: excerptAsset.media.width, height: excerptAsset.media.height },
+    });
+  }
+  transformations.push({ op: "audio", policy: audio });
+
+  return {
+    fileInput: { param: MOTION_REFERENCE_INPUT, from: "package", path: excerptFile },
+    slot: MOTION_REFERENCE_INPUT,
+    workflow,
+    original: { asset: originalId, sha256: originalSha256, ...(originalFile ? { file: originalFile } : {}) },
+    excerpt: { asset: named, file: excerptFile, sha256: excerptSha256 },
+    source: { inSeconds, outSeconds, fps: excerptFps },
+    transformations,
+    audio,
+  };
+}
+
+/** The job-facing provenance record, without the internal fileInput instruction. */
+function motionReferenceProvenance(motion) {
+  return {
+    slot: motion.slot,
+    workflow: motion.workflow,
+    original: motion.original,
+    excerpt: motion.excerpt,
+    source: motion.source,
+    transformations: motion.transformations,
+    audio: motion.audio,
+  };
+}
+
+/** Cache-key view of a motion reference: both byte hashes plus the excerpt parameters. */
+function motionReferenceKey(motion) {
+  return {
+    originalSha256: motion.original.sha256,
+    excerptSha256: motion.excerpt.sha256,
+    source: motion.source,
+    audio: motion.audio,
+    transformations: motion.transformations,
+  };
 }
 
 /**
@@ -433,6 +672,8 @@ function applyCastReferences({ pkg, assetId, params, workflow, workflowSha256, e
  * @param {object} [opts]
  * @param {string[]} [opts.assets] only plan these asset ids
  * @param {boolean} [opts.includeReady] also plan assets whose status is ready/candidate
+ * @param {object} [opts.workflowCapabilities] extra/replacement capability profiles, keyed by
+ *   workflow path (tests use this for a graph with a motion-reference video slot; none ships yet)
  * @returns {{v:number, packageId:string, revision:number, fps:number, jobs:object[], batches:object[], skipped:object[], hash:string}}
  */
 export function planJobs(pkg, opts = {}) {
@@ -577,6 +818,18 @@ export function planJobs(pkg, opts = {}) {
     let workflow = gen.workflow;
     let workflowSha256 = gen.workflow_sha256 ?? null;
     let castRefSha256 = null;
+    // IP58: a motion reference is admitted only when this exact graph has a video slot. The check
+    // runs even when the plate also has an explicit start image, so nothing is silently ignored.
+    const motionReference = resolveMotionReference({
+      pkg,
+      assetId,
+      kind,
+      gen,
+      inputs,
+      params,
+      profile: profileForWorkflow(gen.workflow, opts.workflowCapabilities),
+      errors,
+    });
     if (kind === "still") {
       const cast = applyCastReferences({ pkg, assetId, params, workflow, workflowSha256, errors });
       if (cast) {
@@ -803,6 +1056,18 @@ export function planJobs(pkg, opts = {}) {
         withFileInputs(up, up.params, assetId, { pkg, kinds, errors });
         // and it inherits the plate's prompt guards, so its note says the same thing
         if (promptGuards?.length) up.promptGuards = promptGuards;
+        // the finals pass reuses (or replaces) the plate graph, so it needs the same motion slot
+        if (motionReference) {
+          if (!hasMotionReferenceSlot(profileForWorkflow(upscaleWorkflow, opts.workflowCapabilities))) {
+            errors.push(
+              `PLAN_MOTION_REFERENCE_UNSUPPORTED assets.${assetId}: motion reference ${JSON.stringify(motionReference.excerpt.asset)} ` +
+                `cannot be executed by the upscale graph ${upscaleWorkflow}; its capability profile declares no motion reference video slot`,
+            );
+          } else {
+            up.fileInputs = [...(up.fileInputs || []), motionReference.fileInput];
+            up.motionReference = motionReferenceProvenance(motionReference);
+          }
+        }
         up.cacheKey = cacheKeyFor({
           workflowSha256: up.workflowSha256,
           generator: up.generator,
@@ -813,6 +1078,7 @@ export function planJobs(pkg, opts = {}) {
           width: up.dims.width,
           height: up.dims.height,
           frames: up.frames,
+          ...(motionReference ? { motionRef: motionReferenceKey(motionReference) } : {}),
         });
         add(up);
       }
@@ -832,6 +1098,10 @@ export function planJobs(pkg, opts = {}) {
     // which local file to upload, and where it comes from. The graph itself is never handed an
     // asset id - that is the GPU test 2 failure this exists to prevent.
     withFileInputs(job, params, assetId, { pkg, kinds, errors });
+    if (motionReference) {
+      job.fileInputs = [...(job.fileInputs || []), motionReference.fileInput];
+      job.motionReference = motionReferenceProvenance(motionReference);
+    }
     job.seed = Number.isFinite(Number(params.seed)) ? Number(params.seed) : null;
     if (!job.cacheKey) {
       job.cacheKey = cacheKeyFor({
@@ -845,6 +1115,7 @@ export function planJobs(pkg, opts = {}) {
         height: job.dims?.height,
         frames: job.frames,
         ...(castRefSha256 ? { refSha256: castRefSha256 } : {}),
+        ...(motionReference ? { motionRef: motionReferenceKey(motionReference) } : {}),
       });
     }
     add(job);
@@ -912,7 +1183,7 @@ export function checkJobsDoc(doc) {
         problems.push(`${job.id}: every fileInputs entry must be an object`);
         continue;
       }
-      if (!isUploadParam(entry.param)) problems.push(`${job.id}: fileInputs param ${JSON.stringify(entry.param)} is not one of ${FILE_PARAMS.join(", ")} or _reference_2.._reference_10`);
+      if (!isUploadParam(entry.param)) problems.push(`${job.id}: fileInputs param ${JSON.stringify(entry.param)} is not one of ${FILE_PARAMS.join(", ")}, ${MOTION_REFERENCE_INPUT} or _reference_2.._reference_10`);
       if (entry.from !== "job" && entry.from !== "package") problems.push(`${job.id}: fileInputs ${entry.param} from ${JSON.stringify(entry.from)} must be job or package`);
       const fileIssue = pathProblem(entry.path);
       if (fileIssue) problems.push(`${job.id}: fileInputs ${entry.param} path ${fileIssue}`);
@@ -932,6 +1203,32 @@ export function checkJobsDoc(doc) {
     }
     for (const dep of job.deps || []) {
       if (!(doc.jobs || []).some((other) => other.id === dep)) problems.push(`${job.id}: dependency ${dep} is not in this document`);
+    }
+    if (job.motionReference !== undefined) {
+      const motion = job.motionReference;
+      if (!motion || typeof motion !== "object") {
+        problems.push(`${job.id}: motionReference must be an object`);
+      } else {
+        const original = motion.original;
+        const excerpt = motion.excerpt;
+        const source = motion.source;
+        if (!original || typeof original.asset !== "string" || !SHA256_RE.test(String(original.sha256 ?? ""))) {
+          problems.push(`${job.id}: motionReference.original needs the original asset id and sha256`);
+        }
+        if (!excerpt || pathProblem(excerpt.file) || !SHA256_RE.test(String(excerpt.sha256 ?? ""))) {
+          problems.push(`${job.id}: motionReference.excerpt needs a relative file and its sha256`);
+        }
+        if (!source || !Number.isFinite(source.inSeconds) || !Number.isFinite(source.outSeconds) || !(source.outSeconds > source.inSeconds) || !Number.isFinite(source.fps)) {
+          problems.push(`${job.id}: motionReference.source needs inSeconds < outSeconds and a frame rate`);
+        }
+        if (!MOTION_AUDIO_POLICIES.includes(motion.audio)) {
+          problems.push(`${job.id}: motionReference.audio must be one of ${MOTION_AUDIO_POLICIES.join(", ")}`);
+        }
+        const entry = (job.fileInputs || []).find((candidate) => candidate && candidate.param === MOTION_REFERENCE_INPUT);
+        if (!entry || entry.from !== "package" || entry.path !== excerpt?.file) {
+          problems.push(`${job.id}: motionReference needs exactly one motion_reference file input naming the excerpt`);
+        }
+      }
     }
   }
   for (const warning of doc.warnings || []) {

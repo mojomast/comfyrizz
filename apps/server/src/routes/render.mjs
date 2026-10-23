@@ -12,7 +12,7 @@
  * (C13), so an edit can be diffed against what the frame grid actually was. No secrets:
  * the API token and the provider keys never reach it.
  */
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { buildVariants } from '../variant.mjs';
@@ -21,6 +21,22 @@ import { sceneAssetIds } from '../scene.mjs';
 import { packageTimeline, timingChangeReason } from '../edit.mjs';
 import { measuredOptionsFromDir } from '../compile-package.mjs';
 import { loadCompositionManifest } from '../../../../packages/compositions/src/index.mjs';
+
+/**
+ * IP54: the one table of final-delivery callers owned by this module. A route
+ * outside this list is not a delivery route; a route added here must go through
+ * `admitRender`, which is the only path from these handlers to a renderer or
+ * exporter. The full production pipeline is the fifth caller and is gated in
+ * app.mjs with the same readiness function.
+ */
+export const DELIVERY_ROUTE_PATHS = Object.freeze([
+  '/api/export',
+  '/api/render',
+  '/api/scene/render',
+  '/api/render/edited',
+]);
+
+const DELIVERY_ROUTE_SET = new Set(DELIVERY_ROUTE_PATHS);
 
 export function createRenderRoutes(options = {}) {
   const {
@@ -34,11 +50,22 @@ export function createRenderRoutes(options = {}) {
     sceneCacheDir,
     operations,
     renderGate,
+    readiness,
     draftRenderTarget,
     resolveRenderTarget,
     sendJson,
     readJson,
+    production,
+    reviewStarted,
+    requireReadiness = false,
+    runtimeDir,
   } = options;
+
+  const productionFor = typeof production === 'function' ? production : null;
+  const reviewProbe = typeof reviewStarted === 'function' ? reviewStarted : null;
+  // IP25: a caller may inject the shared readiness under its own name; otherwise
+  // the render gate app.mjs already owns is the one shared readiness.
+  const sharedReadiness = typeof readiness === 'function' ? readiness : renderGate;
 
   if (!store || typeof store.read !== 'function') throw new TypeError('createRenderRoutes requires a package store');
   if (!events || typeof events.publish !== 'function') throw new TypeError('createRenderRoutes requires an event log');
@@ -75,7 +102,226 @@ export function createRenderRoutes(options = {}) {
     return { busy: false, holder: null, release };
   }
 
-  async function handleExport(request, response) {
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function sendRouteError(response, error) {
+    const status = Number.isSafeInteger(error?.status) ? error.status : 500;
+    return sendJson(response, status, {
+      error: error?.message ?? 'render failed',
+      ...(typeof error?.code === 'string' ? { code: error.code } : {}),
+      ...(error?.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
+    });
+  }
+
+  async function productionBinding(pkg) {
+    if (!productionFor) return null;
+    const binding = await productionFor(pkg);
+    if (!binding) return null;
+    if (!isPlainObject(binding)
+      || typeof binding.productionId !== 'string'
+      || binding.productionId === ''
+      || !isPlainObject(binding.context)
+      || !binding.handler
+      || typeof binding.handler.execute !== 'function') {
+      const error = new Error('production binding is invalid');
+      error.status = 500;
+      error.code = 'PRODUCTION_BINDING_INVALID';
+      throw error;
+    }
+    return binding;
+  }
+
+  function boundIdentity(body) {
+    const commandId = typeof body?.commandId === 'string' && body.commandId.trim() !== ''
+      ? body.commandId
+      : null;
+    const idempotencyKey = typeof body?.idempotencyKey === 'string' && body.idempotencyKey.trim() !== ''
+      ? body.idempotencyKey
+      : null;
+    if (!commandId && !idempotencyKey) {
+      const error = new Error('commandId or idempotencyKey is required on a production-bound request');
+      error.status = 400;
+      error.code = 'MISSING_COMMAND_ID';
+      throw error;
+    }
+    return {
+      commandId: commandId ?? idempotencyKey,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    };
+  }
+
+  function boundExpected(body) {
+    const expected = isPlainObject(body?.expected) ? body.expected : {};
+    if (!Number.isSafeInteger(expected.productionRevision) || expected.productionRevision < 0) {
+      const error = new Error('expected.productionRevision is required on a production-bound request');
+      error.status = 400;
+      error.code = 'PRODUCTION_REVISION_REQUIRED';
+      throw error;
+    }
+    return expected;
+  }
+
+  function executeBound(binding, identity, expected, kind, payload) {
+    return binding.handler.execute({
+      commandId: identity.commandId,
+      ...(identity.idempotencyKey ? { idempotencyKey: identity.idempotencyKey } : {}),
+      kind,
+      productionId: binding.productionId,
+      expected,
+      payload,
+    }, binding.context);
+  }
+
+  function overrideInfo(body) {
+    if (body?.override === undefined) return { provided: false, valid: false, reason: null };
+    if (!isPlainObject(body.override)) return { provided: true, valid: false, reason: null };
+    const reason = body.override.reason;
+    const valid = typeof reason === 'string'
+      && reason.length >= 4
+      && reason.length <= 500
+      && reason.trim().length >= 4;
+    return { provided: true, valid, reason: valid ? reason : null };
+  }
+
+  /** IP25: whether this package already has a take record to be ready against. */
+  function reviewStartedFor(pkg) {
+    if (reviewProbe) {
+      try {
+        return reviewProbe(pkg) === true;
+      } catch {
+        return true;
+      }
+    }
+    if (typeof pkg?.id !== 'string' || pkg.id === '') return false;
+    const base = typeof runtimeDir === 'string' && runtimeDir !== '' ? runtimeDir : dirname(rendersDir);
+    return existsSync(join(base, 'takes', `${pkg.id}.json`));
+  }
+
+  /**
+   * IP25: one readiness admission for every legacy render route. A request is
+   * gated when it is production-bound, when the caller asks for it, or when the
+   * package already has a take record. A bound request journals gate.override
+   * (when used) and render.request through the same command handler; a blocked
+   * request journals nothing and never reaches a renderer, exporter or ledger.
+   */
+  async function admitRender({ pkg, body, pathname, revision, binding, alwaysGate = false, details = {} }) {
+    const required = alwaysGate
+      || Boolean(binding)
+      || requireReadiness === true
+      || typeof readiness === 'function'
+      || reviewStartedFor(pkg);
+    if (!required || typeof sharedReadiness !== 'function') {
+      return { blocked: null, binding, revision, commandId: null, duplicate: false, overrode: false };
+    }
+
+    const identity = binding ? boundIdentity(body) : null;
+    const expected = binding ? boundExpected(body) : null;
+    const override = overrideInfo(body);
+
+    if (binding && override.provided) {
+      if (!override.valid) {
+        const gate = sharedReadiness(pkg, body, pathname);
+        return {
+          blocked: gate ?? {
+            status: 400,
+            body: { error: 'override.reason must be a string of 4 to 500 characters', code: 'INVALID_OVERRIDE' },
+          },
+          binding,
+          revision,
+          commandId: identity.commandId,
+          duplicate: false,
+          overrode: false,
+        };
+      }
+
+      const overrideIdentity = {
+        commandId: `${identity.commandId}:override`,
+        ...(identity.idempotencyKey ? { idempotencyKey: `${identity.idempotencyKey}:override` } : {}),
+      };
+      const overrideResult = executeBound(binding, overrideIdentity, expected, 'gate.override', {
+        path: pathname,
+        packageId: pkg.id,
+        packageRevision: revision,
+        reason: override.reason,
+      });
+
+      const gate = sharedReadiness(pkg, body, pathname);
+      if (gate) {
+        return { blocked: gate, binding, revision: overrideResult.revision, commandId: identity.commandId, duplicate: false, overrode: true };
+      }
+
+      const requestResult = executeBound(
+        binding,
+        identity,
+        { productionRevision: overrideResult.revision },
+        'render.request',
+        {
+          path: pathname,
+          packageId: pkg.id,
+          packageRevision: revision,
+          overrode: true,
+          ...details,
+        },
+      );
+      return {
+        blocked: null,
+        binding,
+        revision: requestResult.revision,
+        commandId: identity.commandId,
+        duplicate: requestResult.duplicate === true,
+        overrode: true,
+      };
+    }
+
+    const gate = sharedReadiness(pkg, body, pathname);
+    if (gate) {
+      return { blocked: gate, binding, revision, commandId: identity?.commandId ?? null, duplicate: false, overrode: false };
+    }
+    if (!binding) {
+      return { blocked: null, binding, revision, commandId: null, duplicate: false, overrode: false };
+    }
+
+    const result = executeBound(binding, identity, expected, 'render.request', {
+      path: pathname,
+      packageId: pkg.id,
+      packageRevision: revision,
+      ...details,
+    });
+    return {
+      blocked: null,
+      binding,
+      revision: result.revision,
+      commandId: identity.commandId,
+      duplicate: result.duplicate === true,
+      overrode: false,
+    };
+  }
+
+  function productionFields(admission) {
+    if (!admission?.binding) return {};
+    return {
+      productionId: admission.binding.productionId,
+      productionRevision: admission.revision,
+      commandId: admission.commandId,
+      ...(admission.duplicate ? { duplicate: true } : {}),
+      ...(admission.overrode ? { overrode: true } : {}),
+    };
+  }
+
+  function productionHeaders(admission) {
+    if (!admission?.binding) return {};
+    return {
+      'x-comfyrizz-production-id': admission.binding.productionId,
+      'x-comfyrizz-production-revision': String(admission.revision),
+      'x-comfyrizz-command-id': admission.commandId,
+      ...(admission.duplicate ? { 'x-comfyrizz-duplicate': '1' } : {}),
+      ...(admission.overrode ? { 'x-comfyrizz-gate-override': '1' } : {}),
+    };
+  }
+
+  async function handleExport(request, response, pathname = '/api/export') {
     // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
     // this export with the holder instead of a second job on the same budget.
     // RL06: take the shared slot before the body is read, so a slow request cannot let a
@@ -103,6 +349,23 @@ export function createRenderRoutes(options = {}) {
           packagePath = store.path(id);
           revision = pkg.revision;
         }
+        let binding;
+        let admission;
+        try {
+          binding = await productionBinding(pkg);
+          admission = await admitRender({
+            pkg,
+            body,
+            pathname,
+            revision,
+            binding,
+            details: body.variants && typeof body.variants === 'object' ? { variants: true } : {},
+          });
+        } catch (error) {
+          return sendRouteError(response, error);
+        }
+        if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
+
         events.publish({ type: 'export.started', exportId, packageId: pkg.id, revision });
         if (body.variants && typeof body.variants === 'object') {
           // L1: one bundle per language/aspect variant plus a variants.json manifest.
@@ -124,7 +387,14 @@ export function createRenderRoutes(options = {}) {
             dir: result.dir,
             variants: result.manifest.variants.length,
           });
-          return sendJson(response, 200, { exportId, packageId: pkg.id, dir: result.dir, manifestPath: result.manifestPath, manifest: result.manifest });
+          return sendJson(response, 200, {
+            exportId,
+            packageId: pkg.id,
+            dir: result.dir,
+            manifestPath: result.manifestPath,
+            manifest: result.manifest,
+            ...productionFields(admission),
+          });
         }
         const result = await exporter({
           pkg,
@@ -147,7 +417,7 @@ export function createRenderRoutes(options = {}) {
           complete: result.complete,
           excluded: result.excluded,
         });
-        return sendJson(response, 200, { exportId, ...result });
+        return sendJson(response, 200, { exportId, ...result, ...productionFields(admission) });
       } catch (error) {
         events.publish({ type: 'export.failed', exportId, packageId: pkg?.id, message: error.message });
         return sendJson(response, error.status ?? 500, { error: error.message, exportId });
@@ -194,10 +464,22 @@ export function createRenderRoutes(options = {}) {
         revision = pkg.revision;
       }
 
-      const gate = renderGate(pkg, body, pathname);
-      if (gate) {
-        return sendJson(response, gate.status, gate.body);
+      let binding;
+      let admission;
+      try {
+        binding = await productionBinding(pkg);
+        admission = await admitRender({
+          pkg,
+          body,
+          pathname,
+          revision,
+          binding,
+          alwaysGate: true,
+        });
+      } catch (error) {
+        return sendRouteError(response, error);
       }
+      if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
 
       events.publish({ type: 'render.started', renderId, packageId: pkg.id, revision });
       try {
@@ -234,6 +516,7 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-timeline-sha256': result.hash,
           'x-comfyrizz-frames': String(result.frames),
           ...(revision == null ? {} : { 'x-comfyrizz-revision': String(revision) }),
+          ...productionHeaders(admission),
         });
         createReadStream(result.output).pipe(response);
       } catch (error) {
@@ -249,7 +532,7 @@ export function createRenderRoutes(options = {}) {
   // C11: re-render just one scene. The renderer's incremental renderer reuses every cached
   // segment whose key did not change (A6), then re-stitches and muxes; the response is the
   // full-length MP4.
-  async function handleSceneRender(request, response) {
+  async function handleSceneRender(request, response, pathname = '/api/scene/render') {
     // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
     // this scene render with the holder instead of a second job on the same budget.
     // RL06: the shared slot is taken before the body is read, so a scene render cannot
@@ -273,6 +556,23 @@ export function createRenderRoutes(options = {}) {
       if (assets === null) return sendJson(response, 404, { error: `unknown scene ${body.sceneId}` });
       const output = join(rendersDir, `${renderId}.mp4`);
       const cacheDir = sceneCacheDir(target.pkg.id);
+      let binding;
+      let admission;
+      try {
+        binding = await productionBinding(target.pkg);
+        admission = await admitRender({
+          pkg: target.pkg,
+          body,
+          pathname,
+          revision: target.revision,
+          binding,
+          details: { sceneId: body.sceneId },
+        });
+      } catch (error) {
+        return sendRouteError(response, error);
+      }
+      if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
+
       events.publish({ type: 'scene.render.started', renderId, packageId: target.pkg.id, revision: target.revision, sceneId: body.sceneId, assets });
       try {
         const result = await renderScene(target.packagePath, output, {
@@ -308,6 +608,7 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-full-render': result.full ? '1' : '0',
           'x-comfyrizz-full-reason': result.reason ?? '',
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
+          ...productionHeaders(admission),
         });
         createReadStream(result.output).pipe(response);
       } catch (error) {
@@ -323,7 +624,7 @@ export function createRenderRoutes(options = {}) {
   // C13: an agent edit only re-renders the scenes whose compiled segment changed. The new
   // package is diffed against the last rendered timeline; a scene-local change goes through
   // the A6 incremental cache, a timing change falls back to a full render with a reason.
-  async function handleEditedRender(request, response) {
+  async function handleEditedRender(request, response, pathname = '/api/render/edited') {
     // RL10c: a running Google Colab pipeline owns the shared slot, so the coordinator refuses
     // this edited render with the holder instead of a second job on the same budget.
     // RL06: an edited render shares the scene render slot, taken before the body is read.
@@ -346,6 +647,23 @@ export function createRenderRoutes(options = {}) {
           ...(error.currentRevision != null ? { currentRevision: error.currentRevision } : {}),
         });
       }
+      let binding;
+      let admission;
+      try {
+        binding = await productionBinding(target.pkg);
+        admission = await admitRender({
+          pkg: target.pkg,
+          body,
+          pathname,
+          revision: target.revision,
+          binding,
+          details: { edited: true },
+        });
+      } catch (error) {
+        return sendRouteError(response, error);
+      }
+      if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
+
       const previous = lastRendered.get(target.pkg.id) ?? null;
       const nextTimeline = packageTimeline(target.packagePath, target.pkg);
       const fullReason = loadCompositionManifest(dirname(target.packagePath), target.pkg)
@@ -413,6 +731,7 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-timeline-sha256': String(timelineHash ?? ''),
           'x-comfyrizz-frames': String(result.frames),
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
+          ...productionHeaders(admission),
         });
         createReadStream(result.output ?? output).pipe(response);
       } catch (error) {
@@ -437,21 +756,24 @@ export function createRenderRoutes(options = {}) {
       return false;
     }
     if (typeof pathname !== 'string') return false;
+    if (!DELIVERY_ROUTE_SET.has(pathname) || request.method !== 'POST') return false;
 
-    if (pathname === '/api/export' && request.method === 'POST') {
-      await handleExport(request, response);
+    // Every delivery caller is dispatched from the one table above and every
+    // handler below admits through `admitRender` before any side effect.
+    if (pathname === '/api/export') {
+      await handleExport(request, response, pathname);
       return true;
     }
-    if (pathname === '/api/render' && request.method === 'POST') {
+    if (pathname === '/api/render') {
       await handleRender(request, response, pathname);
       return true;
     }
-    if (pathname === '/api/scene/render' && request.method === 'POST') {
-      await handleSceneRender(request, response);
+    if (pathname === '/api/scene/render') {
+      await handleSceneRender(request, response, pathname);
       return true;
     }
-    if (pathname === '/api/render/edited' && request.method === 'POST') {
-      await handleEditedRender(request, response);
+    if (pathname === '/api/render/edited') {
+      await handleEditedRender(request, response, pathname);
       return true;
     }
     return false;

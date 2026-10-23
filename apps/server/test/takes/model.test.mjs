@@ -237,6 +237,96 @@ test('TR01: genFingerprint is stable across key order and changes with every com
   assert.equal(genFingerprint(undefined), genFingerprint(null));
 });
 
+test('IP12: genFingerprint changes with the model revision and model weights hash', () => {
+  const base = {
+    prompt: 'shot',
+    inputs: { image: 'a_ref' },
+    model: 'ltx-2.5',
+    model_revision: 'rev-a',
+  };
+  const fingerprint = genFingerprint(base);
+
+  assert.notEqual(fingerprint, genFingerprint({ ...base, model_revision: 'rev-b' }));
+  assert.notEqual(fingerprint, genFingerprint({ ...base, model_sha256: digest('weights') }));
+  assert.equal(fingerprint, genFingerprint({
+    model_revision: 'rev-a',
+    model: 'ltx-2.5',
+    inputs: { image: 'a_ref' },
+    prompt: 'shot',
+  }));
+});
+
+test('IP12: referenced asset bytes change the fingerprint through a reference chain', () => {
+  const refs = {
+    a_ref: {
+      sha256: digest('ref-file-a'),
+      bytes: 111,
+      gen: { inputs: { image: 'b_raw' }, model_revision: 'raw-rev-1' },
+    },
+    b_raw: { sha256: digest('raw-file-b'), bytes: 222 },
+  };
+  const gen = {
+    prompt: 'shot',
+    inputs: { image: 'a_ref', strength: 0.5 },
+    model_revision: 'rev-a',
+  };
+  const fingerprint = genFingerprint(gen, refs);
+
+  assert.notEqual(fingerprint, genFingerprint(gen, {
+    ...refs,
+    a_ref: { ...refs.a_ref, sha256: digest('ref-file-a2') },
+  }), 'direct reference bytes');
+  assert.notEqual(fingerprint, genFingerprint(gen, {
+    ...refs,
+    a_ref: { ...refs.a_ref, bytes: 112 },
+  }), 'direct reference size');
+  assert.notEqual(fingerprint, genFingerprint(gen, {
+    ...refs,
+    a_ref: { ...refs.a_ref, gen: { ...refs.a_ref.gen, model_revision: 'raw-rev-2' } },
+  }), 'transitive reference model revision');
+  assert.notEqual(fingerprint, genFingerprint(gen, {
+    ...refs,
+    b_raw: { ...refs.b_raw, sha256: digest('raw-file-b2') },
+  }), 'transitive reference bytes');
+
+  assert.equal(fingerprint, genFingerprint(gen, {
+    ...refs,
+    unrelated: { sha256: digest('unused') },
+  }));
+  assert.equal(fingerprint, genFingerprint(gen, { ...refs, a_ref: { ...refs.a_ref } }));
+});
+
+test('IP12: cyclic references stay stable and hashable', () => {
+  const refs = {
+    a_ref: { sha256: digest('cycle-a'), gen: { inputs: { image: 'b_raw' } } },
+    b_raw: { sha256: digest('cycle-b'), gen: { inputs: { image: 'a_ref' } } },
+  };
+
+  const first = genFingerprint({ inputs: { image: 'a_ref' } }, refs);
+  assert.match(first, /^[0-9a-f]{64}$/);
+  assert.equal(first, genFingerprint({ inputs: { image: 'a_ref' } }, refs));
+});
+
+test('IP12: deriveClipState sees a take as stale when a referenced asset changes bytes', () => {
+  const oldRefs = { a_ref: { sha256: digest('ref-old'), bytes: 10 } };
+  const newRefs = { a_ref: { sha256: digest('ref-new'), bytes: 11 } };
+  const assetGen = {
+    prompt: 'shot',
+    inputs: { image: 'a_ref' },
+    model_revision: 'rev-a',
+  };
+  const take = makeTake({
+    gen: assetGen,
+    sourceGenFingerprint: genFingerprint(assetGen, oldRefs),
+    verdict: 'approved',
+  });
+  const takes = { selected: take.takeId, takes: [take] };
+
+  assert.equal(deriveClipState({ takes, assetGen, refs: oldRefs }), 'approved');
+  assert.equal(deriveClipState({ takes, assetGen, refs: newRefs }), 'stale');
+  assert.equal(deriveClipState({ takes, assetGen, references: newRefs }), 'stale');
+});
+
 test('TR01: deriveClipState covers all eight states', () => {
   const unreviewed = makeTake({ verdict: 'unreviewed' });
   const approved = makeTake({ verdict: 'approved' });

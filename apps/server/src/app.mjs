@@ -1,6 +1,7 @@
 import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { colabStatus } from './colab-status.mjs';
@@ -20,10 +21,12 @@ import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
 import { createCharacterRoutes } from './characters/routes.mjs';
+import { createAuditionCache, createAuditionWorker } from './characters/audition.mjs';
+import { createKokoroSynth, probeKokoroRuntime } from './characters/kokoro-synth.mjs';
 import { ingestRun } from './takes/ingest.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
-import { TAKES_SCHEMA } from './takes/model.mjs';
+import { TAKES_SCHEMA, shouldAutoSelect } from './takes/model.mjs';
 import { createTakeRoutes } from './takes/routes.mjs';
 import { buildCorrection } from './takes/correction.mjs';
 import { listClips } from './takes/clips.mjs';
@@ -44,8 +47,16 @@ import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/t
 import { animationOptions } from './animation-options.mjs';
 import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
 import { createRenderRoutes } from './routes/render.mjs';
+import { createProductionStore } from './productions/store.mjs';
+import { createCommandHandler } from './productions/commands.mjs';
+import { createBudgetLedger } from './productions/ledger.mjs';
+import { createActionCoordinator } from './productions/actions.mjs';
+import { createProductionRoutes } from './routes/productions.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
+// IP11: a completion save races with edits. Re-read the latest package and reapply the
+// run's result a bounded number of times instead of overwriting or failing the run.
+const MAX_CAS_ATTEMPTS = 5;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -143,6 +154,36 @@ async function defaultBackendFactory(backendId, opts = {}) {
   return null;
 }
 
+// IP11: did the owner change this asset after the run started? The comparison is against
+// the package the run started from (captured before staging), never the staged package:
+// a correction deliberately differs from what is stored, and must still auto-select.
+function assetEditedSinceBaseline({ baseline, current, pkg, assetId }) {
+  if (!current) return false;
+  const startRevision = baseline?.revision ?? pkg?.revision ?? null;
+  if (startRevision !== null && current.revision === startRevision) return false;
+  if (!baseline?.assets) return true;
+  const before = baseline.assets[assetId];
+  const after = current.assets?.[assetId];
+  if (before === undefined && after === undefined) return false;
+  return !isDeepStrictEqual(before, after);
+}
+
+// G5-10: a run can name an asset the package did not have yet (the runner's non-upscaled
+// plate). mergeRunMedia deliberately refuses to replace an asset that was in the staged
+// package, but a ready asset absent from both the staged and the live package is a new
+// output and belongs in the rebased package.
+function mergeFinalRunMedia({ staged, current, generated }) {
+  const merged = mergeRunMedia({ staged, current, generated });
+  if (!current) return merged;
+  for (const [assetId, asset] of Object.entries(generated.assets ?? {})) {
+    if (merged.assets?.[assetId] !== undefined) continue;
+    if (staged.assets?.[assetId] !== undefined) continue;
+    if (!asset || typeof asset !== 'object' || asset.status !== 'ready' || !asset.file) continue;
+    merged.assets = { ...merged.assets, [assetId]: structuredClone(asset) };
+  }
+  return merged;
+}
+
 export function createApp({
   root = repoRoot,
   colabProgressDir = null,
@@ -156,9 +197,17 @@ export function createApp({
   providers = providerAvailability(),
   providerSettings = null,
   backendFactory = defaultBackendFactory,
+  // IP02F: only the exact string '1' opts into the deterministic CPU placeholder
+  // backend; every other value (including 'true' and '0') leaves the default app as-is.
+  fakeBackend = process.env.COMFYRIZZ_FAKE_BACKEND === '1',
   datasetFetch = globalThis.fetch,
   pipelineLaunch,
   mediaRoot = join(runtimeDir, 'media'),
+  // IP45K: a Kokoro synthesizer may be injected by a caller (tests, a custom
+  // runtime). Without one the app mounts the local Kokoro synthesizer lazily,
+  // and only after the same python + kokoro_onnx probe the pipeline worker
+  // uses succeeds; a failed probe keeps the route at 503.
+  auditionSynth = null,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
@@ -169,11 +218,12 @@ export function createApp({
   mkdirSync(rendersDir, { recursive: true });
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
-  const projectChat = createProjectChat({ runtimeDir, store, providerSettings, prepareBrand });
   const events = new EventLog();
   const publishEntry = events.publish.bind(events);
   const pipelineIngested = new Set();
   const runPackages = new Map();
+  // IP11: runId -> { revision, assets } captured from the stored package before staging.
+  const runBaselines = new Map();
   // TR09: pipelines finish in the worker, so the server consumes the run directory
   // afterwards (never editing the worker). A terminal media run schedules one queued
   // regenerate; both hooks run after the completed/finished event has been published.
@@ -210,7 +260,17 @@ export function createApp({
 
   // C9: stage where H8's runPackage resolves relative paths: the package JSON, the repo's
   // workflow graphs, and any assets the package already has on disk.
-  async function prepareRunWorkDir(pkg, workDir) {
+  async function prepareRunWorkDir(pkg, workDir, options = {}) {
+    // IP11: remember the stored package the run starts from. `pkg` can be a corrected
+    // staging copy, so its assets must never be the baseline for "was this edited?".
+    if (options?.runId && options.dryRun !== true) {
+      let stored = null;
+      try { stored = store.read(pkg.id); } catch { stored = null; }
+      runBaselines.set(options.runId, {
+        revision: stored?.revision ?? pkg.revision ?? null,
+        assets: stored ? JSON.parse(JSON.stringify(stored.assets ?? {})) : null,
+      });
+    }
     mkdirSync(workDir, { recursive: true });
     writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg, null, 2));
     const workflowsLink = join(workDir, 'workflows');
@@ -230,14 +290,16 @@ export function createApp({
   // H8's `runPackage`/`backend.appliedBackendId` (H-fix7), so no server-side normaliser is needed.
   async function completeRun({ pkg, result, record }) {
     if (pkg?.id && record?.runId) runPackages.set(record.runId, pkg.id);
+    const baseline = record?.runId ? runBaselines.get(record.runId) ?? null : null;
+    if (record?.runId) runBaselines.delete(record.runId);
     if (!result?.package) return { revision: null, render: null };
     const id = pkg.id;
     const packageDir = dirname(store.path(id));
-    const collectedAssets = join(record.outputDir, 'assets');
     if (record.mode === 'take') {
-      // TR07: snapshot the run's outputs as takes *before* the collected assets are copied over
-      // the package's own files. The take store keeps the bytes, so a later overwrite cannot
-      // destroy the take that produced it.
+      // IP11/TR07: snapshot the run's outputs as takes *before* the package is touched.
+      // The take store keeps the bytes, so a later overwrite cannot destroy the take that
+      // produced it, and the package asset points at the take file instead of a copy of
+      // the run's output.
       const ingested = ingestRun({
         pkg,
         manifest: result.manifest,
@@ -247,55 +309,82 @@ export function createApp({
         corrections: record.corrections ?? {},
         runId: record.runId,
         backend: record.backendId,
+        autoSelect: false,
       });
-      if (existsSync(collectedAssets)) cpSync(collectedAssets, join(packageDir, 'assets'), { recursive: true });
-      const copied = copyNamedAssets({ pkg: result.package, outputDir: record.outputDir, packageDir });
-      if (copied.length) {
-        events.publish({ type: 'run.log', runId: record.runId, line: `collected ${copied.length} package file(s): ${copied.join(', ')}` });
+
+      const byAsset = new Map();
+      for (const take of ingested.takes) {
+        if (!byAsset.has(take.assetId)) byAsset.set(take.assetId, []);
+        byAsset.get(take.assetId).push(take);
       }
-      // ingestRun has already written the new takes (including lastJob), so read the fresh doc
-      // before applying the auto-selected takes to the package.
-      const takeDoc = takeStore.read(id) ?? { schema: TAKES_SCHEMA, packageId: id, clips: {}, overrides: [] };
-      let next = result.package;
-      for (const [assetId, takeId] of Object.entries(ingested.selected)) {
-        next = selectTake(next, takeDoc, assetId, takeId);
+
+      // Rebase onto the latest stored package. The stored asset is the baseline: a
+      // correction staging copy deliberately differs from it and must still auto-select,
+      // while any owner edit made during the run wins and leaves the output as a candidate.
+      let saved = null;
+      let attempt = 0;
+      const applied = {};
+      while (!saved) {
+        const current = store.read(id);
+        const takeDoc = takeStore.read(id) ?? { schema: TAKES_SCHEMA, packageId: id, clips: {}, overrides: [] };
+        let next = current ?? result.package;
+        const candidate = {};
+        for (const [assetId, assetTakes] of byAsset) {
+          if (assetEditedSinceBaseline({ baseline, current, pkg, assetId })) continue;
+          for (const take of assetTakes) {
+            if (!shouldAutoSelect(takeDoc.clips?.[assetId], take)) continue;
+            next = selectTake(next, takeDoc, assetId, take.takeId);
+            candidate[assetId] = take.takeId;
+          }
+        }
+        try {
+          saved = current ? store.save(id, next, current.revision) : store.write(next);
+        } catch (error) {
+          if (!(error instanceof ConflictError) || attempt >= MAX_CAS_ATTEMPTS) throw error;
+          attempt += 1;
+          continue;
+        }
+        // Persist the take document only after the package accepted the selection, so a
+        // conflicted attempt cannot leave a take selected over an owner-edited package.
+        takeStore.write(id, takeDoc);
+        Object.assign(applied, candidate);
       }
-      takeStore.write(id, takeDoc);
-      const current = store.read(id);
-      const saved = current ? store.save(id, next, pkg.revision) : store.write(next);
+
       events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
-      const landed = new Map();
-      for (const take of ingested.takes) landed.set(take.assetId, take);
-      for (const [assetId, take] of landed) {
+      for (const take of ingested.takes) {
         events.publish({
           type: 'clip.take.landed',
           packageId: id,
-          assetId,
+          assetId: take.assetId,
           takeId: take.takeId,
-          selected: ingested.selected[assetId] ?? null,
+          selected: applied[take.assetId] === take.takeId ? take.takeId : null,
           runId: record.runId,
         });
       }
       return { revision: saved.revision, render: null };
     }
-    const current = store.read(id);
-    const merged = mergeRunMedia({ staged: pkg, current, generated: result.package });
-    // Snapshot all finished full-run outputs as takes too: interruption must not
-    // strand generated footage outside the review UI.
-    if (result.manifest?.jobs) {
-      const ingested = ingestRun({ pkg, manifest: result.manifest, jobsDoc: result.jobsDoc,
-        outputDir: record.outputDir, store: takeStore, runId: record.runId, backend: record.backendId });
-      for (const take of ingested.takes) events.publish({ type: 'clip.take.landed', packageId: id,
-        assetId: take.assetId, takeId: take.takeId, runId: record.runId });
-    }
+    // TR07: only an explicit take-mode run lands takes. A final run's outputs stay in the
+    // package, and any verified in-flight preview already landed its own take before now.
     // G5-10: the applied package can also name files outside `assets/` (the runner's
     // non-upscaled plates live at `out/intermediates/<id>.plate.mp4`), so copy every path it
     // names — otherwise the renderer falls back to placeholders.
-    const copied = copyNamedAssets({ pkg: changedRunMedia(current, merged), outputDir: record.outputDir, packageDir });
+    let saved = null;
+    let attempt = 0;
+    let copied = [];
+    while (!saved) {
+      const current = store.read(id);
+      const merged = mergeFinalRunMedia({ staged: pkg, current, generated: result.package });
+      copied = copyNamedAssets({ pkg: changedRunMedia(current, merged), outputDir: record.outputDir, packageDir });
+      try {
+        saved = current ? store.save(id, merged, current.revision) : store.write(merged);
+      } catch (error) {
+        if (!(error instanceof ConflictError) || attempt >= MAX_CAS_ATTEMPTS) throw error;
+        attempt += 1;
+      }
+    }
     if (copied.length) {
       events.publish({ type: 'run.log', runId: record.runId, line: `collected ${copied.length} package file(s): ${copied.join(', ')}` });
     }
-    const saved = current ? store.save(id, merged, current.revision) : store.write(merged);
     events.publish({ type: 'package.updated', packageId: id, revision: saved.revision });
     // A partial run keeps its finished plates (H8 already applied them), but there is nothing
     // honest to render when the manifest says the run did not complete.
@@ -317,7 +406,76 @@ export function createApp({
     };
   }
 
-  const runs = createRunController({ backendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun, isBusy: () => Boolean(pipelines?.active()) });
+  // IP02F: the flag wraps the configured factory rather than replacing it, so an
+  // injected factory keeps handling 'cpu' itself and every other id is untouched.
+  let effectiveBackendFactory = backendFactory;
+  if (fakeBackend) {
+    console.warn('COMFYRIZZ_FAKE_BACKEND=1: CPU placeholder backend enabled (dev/test only)');
+    effectiveBackendFactory = async (backendId, opts = {}) => {
+      const delegated = await backendFactory(backendId, opts);
+      if (backendId !== 'cpu' || delegated) return delegated;
+      const mod = await import('../../../packages/backends/src/cpu-backend.mjs');
+      return mod.createCpuBackend();
+    };
+  }
+
+  // IP24: the production journal is shared by the legacy /api/run adapter and
+  // the /api/productions facade, so a bound package can only start from the
+  // action slot that was dispatched for it.
+  const productionStore = createProductionStore({ runtimeDir });
+  // IP66: the chat adapter uses the same command handler as the production
+  // facade. The handler is created here, before the chat, so a bound package's
+  // turn can dispatch agent-attributed commands through the one command path.
+  const productionCommands = createCommandHandler({ store: productionStore });
+  const runs = createRunController({
+    backendFactory: effectiveBackendFactory,
+    events,
+    runtimeDir,
+    prepareWorkDir: prepareRunWorkDir,
+    onComplete: completeRun,
+    isBusy: () => Boolean(pipelines?.active()),
+    productionStore,
+    ledgerFor: ({ productionId }) => {
+      if (typeof productionId !== 'string' || productionId === '') return null;
+      const production = productionStore.read(productionId);
+      if (!production) return null;
+      return createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId });
+    },
+  });
+  // IP26: chat is a thin adapter over the same run path. A package bound to a
+  // production never starts a paid run from chat, not even with a legacy plan
+  // hash approval: the production plan card dispatches the IP20 action slot.
+  // The binding is resolved here from the production journal, never from the
+  // request.
+  const findBoundProduction = (packageId) => (typeof packageId === 'string' && packageId !== ''
+    ? productionStore.list().find((production) => production.packageId === packageId) ?? null
+    : null);
+  const chatRuns = {
+    estimate: (...args) => runs.estimate(...args),
+    status: (...args) => runs.status(...args),
+    start: async (options = {}) => {
+      const bound = findBoundProduction(options?.pkg?.id);
+      if (bound) return { approvalRequired: true, planHash: null, productionId: bound.id };
+      return runs.start(options);
+    },
+  };
+  // IP26 (A01): chat gets the run controller, takes, events and measured options
+  // so a confirmed clip correction reaches the same coordinator as the routes.
+  const projectChat = createProjectChat({
+    runtimeDir,
+    store,
+    providerSettings,
+    prepareBrand,
+    takeStore,
+    runs: chatRuns,
+    events,
+    measuredFor: pkg => measuredOptionsFromDir(dirname(store.path(pkg.id))),
+    production: {
+      findBound: findBoundProduction,
+      read: productionId => productionStore.read(productionId),
+      command: (envelope, attribution) => productionCommands.execute(envelope, attribution),
+    },
+  });
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
   // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
   // package's working resolution.
@@ -367,8 +525,11 @@ export function createApp({
     return doc;
   }
 
+  // IP54: the single final-delivery gate. Every render/export caller — the four
+  // route handlers and the full pipeline below — admits through this one
+  // function, so the clip rule and the override journal cannot drift per route.
   // Returns null when the render may proceed, or {status, body} when it must not.
-  function renderGate(pkg, body, pathname) {
+  function finalDeliveryGate(pkg, body, pathname) {
     const gate = finalGate(pkg, takeDocFor(pkg.id), gateClips(pkg));
     if (gate.ok) return null;
 
@@ -617,6 +778,61 @@ export function createApp({
   // RL11: the export and render routes live in src/routes/render.mjs. This is a pure
   // delegation: the handlers, the shared operation slot and the C13 rendered-timeline
   // bookkeeping are the route module's, the wiring stays here.
+  // IP19/IP20: production commands, action plans and dispatch. The authenticated
+  // local user is the only actor. Headers are not an identity source, and there
+  // is no default spend cap — the ledger stays uncapped until the user sets one.
+  // A failed Google Colab run with unknown usage settles its full reservation
+  // in the ledger; dispatch only reserves.
+  const productionActions = createActionCoordinator({
+    store: productionStore,
+    handler: productionCommands,
+    ledgerFor: (production) => createBudgetLedger({
+      runtimeDir,
+      ledgerId: production.budgetLedgerId,
+    }),
+  });
+
+  // IP45K: one free Kokoro path for the app's lifetime. The probe is lazy and
+  // cached, so createApp stays synchronous and a box without kokoro_onnx keeps
+  // answering 503. Paid auditions still need a named, approved IP20 slot.
+  const defaultAuditionSynth = (() => {
+    let synth = null;
+    let probe = null;
+    return async (request) => {
+      if (probe === null) probe = probeKokoroRuntime();
+      if (!(await probe)) {
+        return { ok: false, code: 'AUDITION_UNAVAILABLE', message: 'Kokoro is not available on this server' };
+      }
+      if (!synth) {
+        synth = createKokoroSynth({
+          cacheDir: join(runtimeDir, 'kokoro-auditions'),
+          python: process.env.COMFYRIZZ_PYTHON || 'python3',
+        });
+      }
+      return synth(request);
+    };
+  })();
+  const auditionWorker = createAuditionWorker({
+    cache: createAuditionCache({
+      rootDir: runtimeDir,
+      synth: { kokoro: typeof auditionSynth === 'function' ? auditionSynth : defaultAuditionSynth },
+    }),
+    productionStore,
+    ledgerFor: (production) => createBudgetLedger({
+      runtimeDir,
+      ledgerId: production.budgetLedgerId,
+    }),
+  });
+  const productionRoutes = createProductionRoutes({
+    store: productionStore,
+    handler: productionCommands,
+    actions: productionActions,
+    contextFor: () => ({
+      actor: 'user',
+      userEventId: `ue_${randomUUID()}`,
+    }),
+  });
+
   const renderRoutes = createRenderRoutes({
     store,
     events,
@@ -627,7 +843,15 @@ export function createApp({
     rendersDir,
     sceneCacheDir,
     operations,
-    renderGate,
+    renderGate: finalDeliveryGate,
+    runtimeDir,
+    reviewStarted: pkg => {
+      try {
+        return takeStore.read(pkg.id) != null;
+      } catch {
+        return true;
+      }
+    },
     draftRenderTarget,
     resolveRenderTarget,
     sendJson,
@@ -801,7 +1025,7 @@ export function createApp({
       if (!pkg) return sendJson(response, 404, { error: 'package not found' });
       if (body.baseRevision !== pkg.revision) return sendJson(response, 409, { error: 'revision conflict', currentRevision: pkg.revision });
       if (!url.pathname.endsWith('/plan')) {
-        const gate = renderGate(pkg, body, url.pathname);
+        const gate = finalDeliveryGate(pkg, body, url.pathname);
         if (gate) return sendJson(response, gate.status, gate.body);
       }
       try {
@@ -877,6 +1101,21 @@ export function createApp({
 
     if (providerSettings && await handleProviderSettings({ request, response, url, settings: providerSettings, readJson, sendJson })) return;
 
+    const chatRecoveryMatch = /^\/api\/agent\/chat\/([^/]+)\/recovery$/.exec(url.pathname);
+    if (chatRecoveryMatch && request.method === 'POST') {
+      try {
+        let conversationId = chatRecoveryMatch[1];
+        try { conversationId = decodeURIComponent(conversationId); } catch { throw Object.assign(new Error('Invalid conversation ID'), { status: 400 }); }
+        return sendJson(response, 200, projectChat.resolveRecovery(conversationId, await readJson(request)));
+      } catch (error) {
+        return sendJson(response, error.status ?? 502, {
+          error: providerSettings ? providerSettings.redact(error.message) : error.message,
+          ...(error.code ? { code: error.code } : {}),
+          ...(error.recoveryConflict ? { recoveryConflict: error.recoveryConflict } : {}),
+        });
+      }
+    }
+
     const chatMatch = /^\/api\/agent\/chat(?:\/([^/]+))?$/.exec(url.pathname);
     if (chatMatch) {
       try {
@@ -884,7 +1123,11 @@ export function createApp({
         if (request.method === 'POST' && !chatMatch[1]) return sendJson(response, 200, await projectChat.send(await readJson(request)));
         return sendJson(response, 405, { error: 'method not allowed' });
       } catch (error) {
-        return sendJson(response, error.status ?? 502, { error: providerSettings ? providerSettings.redact(error.message) : error.message });
+        return sendJson(response, error.status ?? 502, {
+          error: providerSettings ? providerSettings.redact(error.message) : error.message,
+          ...(error.code ? { code: error.code } : {}),
+          ...(error.recoveryConflict ? { recoveryConflict: error.recoveryConflict } : {}),
+        });
       }
     }
 
@@ -1129,10 +1372,18 @@ export function createApp({
           assets: body.assets,
           mode: body.mode,
           corrections: body.corrections,
+          // IP24: one input shape. A bound package starts only with the IP20
+          // authority and the revision it was dispatched against.
+          authority: body.authority,
+          expected: body.expected,
         });
-        return sendJson(response, result.status === 409 ? 409 : 200, result);
+        const status = Number.isSafeInteger(result.status) && result.status >= 400 ? result.status : 200;
+        return sendJson(response, status, result);
       } catch (error) {
-        return sendJson(response, 400, { error: error.message });
+        return sendJson(response, Number.isInteger(error?.status) ? error.status : 400, {
+          error: error.message,
+          ...(typeof error?.code === 'string' ? { code: error.code } : {}),
+        });
       }
     }
 
@@ -1142,10 +1393,28 @@ export function createApp({
 
     if (url.pathname === '/api/run/approve' && request.method === 'POST') {
       const body = await readJson(request);
+      // IP24: a plan that lives in a production journal is approved (or
+      // rejected) through the production command path, never by this legacy
+      // in-memory set. Refusing here keeps one authority per plan hash.
+      if (typeof body?.planHash === 'string' && body.planHash !== '') {
+        for (const production of productionStore.list()) {
+          const journaled = productionStore.readEvents(production.id)
+            .some(event => event.type === 'plan.proposed' && event.data?.planHash === body.planHash);
+          if (journaled) {
+            return sendJson(response, 409, {
+              error: 'this plan is bound to a production; approve it through the production command path',
+              code: 'PLAN_BOUND_TO_PRODUCTION',
+            });
+          }
+        }
+      }
       try {
         return sendJson(response, 200, runs.approve(body.planHash));
       } catch (error) {
-        return sendJson(response, 400, { error: error.message });
+        return sendJson(response, 400, {
+          error: error.message,
+          ...(typeof error?.code === 'string' ? { code: error.code } : {}),
+        });
       }
     }
 
@@ -1361,8 +1630,14 @@ export function createApp({
       }
     }
 
+    if (await productionRoutes.handle(request, response, url)) return;
     if (await takeRoutes.handle(request, response, url)) return;
-    if (await createCharacterRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
+    if (await createCharacterRoutes({
+      rootDir: runtimeDir,
+      events,
+      mediaTickets,
+      audition: { worker: auditionWorker },
+    }).handle(request, response, url)) return;
     if (await createReferenceRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     return sendJson(response, 404, { error: 'not found' });
   }

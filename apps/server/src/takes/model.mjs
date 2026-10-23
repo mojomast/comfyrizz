@@ -374,23 +374,129 @@ export function retryRecord({ attempts = 0, recovered = false, error = null } = 
   return record;
 }
 
+function referenceIndex(refs) {
+  if (!refs) return null;
+  if (typeof refs === 'function' || refs instanceof Map) return refs;
+  if (Array.isArray(refs)) {
+    const map = new Map();
+    for (const entry of refs) {
+      if (!isPlainObject(entry)) continue;
+      const id = entry.assetId ?? entry.id ?? entry.ref ?? entry.asset;
+      if (typeof id === 'string') map.set(id, entry);
+    }
+    return map;
+  }
+  if (isPlainObject(refs)) {
+    for (const key of ['refs', 'references', 'assets', 'assetIndex']) {
+      if (isPlainObject(refs[key])) return refs[key];
+    }
+    return refs;
+  }
+  return null;
+}
+
+function referenceAt(index, id) {
+  if (!index) return undefined;
+  if (typeof index === 'function') return index(id);
+  if (index instanceof Map) return index.get(id);
+  return Object.hasOwn(index, id) ? index[id] : undefined;
+}
+
+function referenceContent(ref) {
+  if (typeof ref === 'string') return { sha256: ref };
+  if (Buffer.isBuffer(ref) || ref instanceof Uint8Array) {
+    return {
+      sha256: createHash('sha256').update(ref).digest('hex'),
+      bytes: ref.byteLength,
+    };
+  }
+  if (!isPlainObject(ref)) return null;
+  const content = {};
+  for (const key of ['sha256', 'sha', 'hash', 'content_sha256', 'contentHash', 'digest']) {
+    if (typeof ref[key] === 'string' && ref[key] !== '') {
+      content.sha256 = ref[key];
+      break;
+    }
+  }
+  for (const key of ['bytes', 'size', 'byteLength']) {
+    if (Number.isSafeInteger(ref[key]) && ref[key] >= 0) {
+      content.bytes = ref[key];
+      break;
+    }
+  }
+  return Object.keys(content).length > 0 ? content : null;
+}
+
+function referencePayload(id, ref, index, seen) {
+  const payload = { ref: id };
+  const content = referenceContent(ref);
+  if (content) Object.assign(payload, content);
+  if (isPlainObject(ref)) {
+    if (ref.model !== undefined) payload.model = ref.model;
+    if (ref.model_revision !== undefined) payload.model_revision = ref.model_revision;
+    if (ref.modelRevision !== undefined) payload.modelRevision = ref.modelRevision;
+    if (ref.model_sha256 !== undefined) payload.model_sha256 = ref.model_sha256;
+    const nested = isPlainObject(ref.gen)
+      ? ref.gen
+      : (isPlainObject(ref.inputs) ? { inputs: ref.inputs } : null);
+    if (nested && !seen.has(id)) {
+      const nextSeen = new Set(seen);
+      nextSeen.add(id);
+      payload.gen = fingerprintPayload(nested, index, nextSeen);
+    }
+  }
+  return payload;
+}
+
+function resolveInputValue(value, index, seen) {
+  if (typeof value === 'string') {
+    const ref = referenceAt(index, value);
+    if (ref !== undefined && ref !== null) return referencePayload(value, ref, index, seen);
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(item => resolveInputValue(item, index, seen));
+  return value;
+}
+
+function resolveInputs(inputs, index, seen) {
+  if (!index || !isPlainObject(inputs)) return inputs ?? null;
+  const resolved = {};
+  for (const key of Object.keys(inputs).sort()) {
+    resolved[key] = resolveInputValue(inputs[key], index, seen);
+  }
+  return resolved;
+}
+
+function fingerprintPayload(gen, index, seen) {
+  const source = isPlainObject(gen) ? gen : {};
+  return {
+    prompt: source.prompt ?? null,
+    negative: source.negative ?? null,
+    seed: source.seed ?? null,
+    inputs: resolveInputs(source.inputs, index, seen),
+    ...(source.direction !== undefined ? { direction: source.direction } : {}),
+    workflow_sha256: source.workflow_sha256 ?? null,
+    ...(source.model !== undefined ? { model: source.model } : {}),
+    ...(source.model_revision !== undefined ? { model_revision: source.model_revision } : {}),
+    ...(source.modelRevision !== undefined ? { modelRevision: source.modelRevision } : {}),
+    ...(source.model_sha256 !== undefined ? { model_sha256: source.model_sha256 } : {}),
+    ...(source.modelSha256 !== undefined ? { modelSha256: source.modelSha256 } : {}),
+  };
+}
+
 /**
  * Stable sha256 over the fields that decide whether a take still matches the asset.
  * Object key order never changes the digest; arrays keep their order.
  *
+ * `refs` maps an input's asset id to that asset (or its content hash/size), so a change
+ * to a referenced file, or to a reference it transitively depends on, changes the digest.
+ *
  * @param {object|null|undefined} gen
+ * @param {object|Map|Array|Function|null} [refs]
  * @returns {string} lowercase hex sha256
  */
-export function genFingerprint(gen) {
-  const source = isPlainObject(gen) ? gen : {};
-  const payload = {
-    prompt: source.prompt ?? null,
-    negative: source.negative ?? null,
-    seed: source.seed ?? null,
-    inputs: source.inputs ?? null,
-    ...(source.direction !== undefined ? { direction: source.direction } : {}),
-    workflow_sha256: source.workflow_sha256 ?? null,
-  };
+export function genFingerprint(gen, refs = null) {
+  const payload = fingerprintPayload(gen, referenceIndex(refs), new Set());
   return createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex');
 }
 
@@ -423,20 +529,26 @@ function isNewer(candidate, selected) {
   return a.n > b.n || (a.n === b.n && a.at > b.at);
 }
 
-function verdictState(take, takes, assetGen) {
+function verdictState(take, takes, assetGen, refs) {
   const selected = take;
   if (!selected) return 'planned';
 
-  if (isPlainObject(selected.gen) && isPlainObject(assetGen)
-    && genFingerprint(selected.gen) !== genFingerprint(assetGen)
-    && selected.sourceGenFingerprint !== genFingerprint(assetGen)) {
-    return 'stale';
+  if (isPlainObject(selected.gen) && isPlainObject(assetGen)) {
+    const assetFingerprint = genFingerprint(assetGen, refs);
+    const selectedFingerprint = genFingerprint(selected.gen, refs);
+    const sourceFingerprint = typeof selected.sourceGenFingerprint === 'string'
+      ? selected.sourceGenFingerprint
+      : null;
+    const stale = refs
+      ? (sourceFingerprint ? sourceFingerprint !== assetFingerprint : selectedFingerprint !== assetFingerprint)
+      : (selectedFingerprint !== assetFingerprint && sourceFingerprint !== assetFingerprint);
+    if (stale) return 'stale';
   }
 
   if (selected.verdict === 'approved') return 'approved';
   if (selected.verdict === 'rejected') {
     const newer = Array.isArray(takes) ? takes.find((candidate) => isNewer(candidate, selected)) : null;
-    if (newer) return verdictState(newer, takes, assetGen);
+    if (newer) return verdictState(newer, takes, assetGen, refs);
     return 'rejected';
   }
   return 'review';
@@ -448,9 +560,10 @@ function verdictState(take, takes, assetGen) {
  *
  * `takes` is the sidecar entry for the clip (`{selected, takes, lastJob, queued}`) or a
  * bare take array. Explicit `lastJob`/`queued`/`assetGen` win; `assetGen` falls back to
- * `clip.gen` so a package asset can be passed directly.
+ * `clip.gen` so a package asset can be passed directly. `refs` is the same reference
+ * index `genFingerprint` accepts, so a changed referenced file reaches the stale state.
  *
- * @param {{clip?: object|null, takes?: object|Array|null, lastJob?: object|null, queued?: object|null, assetGen?: object|null}} input
+ * @param {{clip?: object|null, takes?: object|Array|null, lastJob?: object|null, queued?: object|null, assetGen?: object|null, refs?: object|Map|Array|Function|null, references?: object|Map|Array|Function|null, assetRefs?: object|Map|Array|Function|null, assetIndex?: object|Map|Array|Function|null}} input
  * @returns {'planned'|'queued'|'generating'|'review'|'approved'|'rejected'|'failed'|'stale'}
  */
 export function deriveClipState(input = {}) {
@@ -463,6 +576,9 @@ export function deriveClipState(input = {}) {
   const lastJob = input.lastJob !== undefined ? input.lastJob : entry.lastJob;
   const queued = input.queued !== undefined ? input.queued : entry.queued;
   const assetGen = input.assetGen !== undefined ? input.assetGen : (isPlainObject(clip) ? clip.gen : undefined);
+  const refs = referenceIndex(
+    input.refs ?? input.references ?? input.assetRefs ?? input.assetIndex ?? null,
+  );
 
   const jobState = isPlainObject(lastJob) && typeof lastJob.state === 'string'
     ? lastJob.state.trim().toLowerCase()
@@ -483,7 +599,7 @@ export function deriveClipState(input = {}) {
     ?? newestTake(takes);
   if (!selected) return 'planned';
 
-  return verdictState(selected, takes, assetGen);
+  return verdictState(selected, takes, assetGen, refs);
 }
 
 /**

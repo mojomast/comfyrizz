@@ -454,10 +454,22 @@ export function createCharacterStore(options = {}) {
     return out;
   }
 
-  function update(id, patch = {}) {
+  function update(id, patch = {}, options = {}) {
     assertId(id);
     if (!isPlainObject(patch)) fail('INVALID_INPUT', 'character patch must be an object');
+    if (!isPlainObject(options)) fail('INVALID_INPUT', 'character update options must be an object');
+    const expectedRevision = options.expectedRevision;
+    if (expectedRevision !== undefined && positiveInteger(expectedRevision) === undefined) {
+      fail('INVALID_REVISION', 'expectedRevision must be a positive integer', { expectedRevision });
+    }
     const current = requireCharacter(id);
+    if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+      fail('REVISION_CONFLICT', `character ${id} is at revision ${current.revision}`, {
+        id,
+        currentRevision: current.revision,
+        expectedRevision,
+      });
+    }
     const changes = validatePatchSafe(patch);
     const library = readLibrary();
     const others = library.characters.filter(entry => entry.id !== id);

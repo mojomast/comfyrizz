@@ -19,6 +19,7 @@ export const VOICE_ENGINES = Object.freeze(['kokoro', 'qwen3-tts', 'none']);
 export const KOKORO_VOICE_IDS = Object.freeze(KOKORO_VOICES.map((voice) => voice.id));
 export const QWEN_SPEAKER_IDS = Object.freeze([...QWEN_SPEAKERS]);
 export const VOICE_PRESET_IDS = Object.freeze(VOICE_PRESETS.map((preset) => preset.id));
+export const VOICE_LANGUAGES = Object.freeze([...new Set(KOKORO_VOICES.map((voice) => voice.language))]);
 
 export const MAX_SAMPLE_LINES = 5;
 export const MAX_SAMPLE_LINE_CHARS = 200;
@@ -38,6 +39,7 @@ const HASH_HEX_CHARS = 16;
 const AUDITION_FILE_RE = /^auditions\/[0-9a-f]{16,64}\.wav$/;
 const HASH_RE = /^[0-9a-f]{16,64}$/;
 const LANGUAGE_RE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/;
+const NATIVE_VOICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
 const INPUT_FIELDS = new Set([
@@ -137,8 +139,8 @@ function setIfPresent(target, source, key, transform = (value) => value) {
 
 function languageValue(value, field = 'language') {
   const language = textValue(value, field, { max: MAX_LANGUAGE_CHARS }).toLowerCase();
-  if (!LANGUAGE_RE.test(language)) {
-    fail('VOICE_INVALID_LANGUAGE', field, `${field} must be a short language tag such as en-us`);
+  if (!LANGUAGE_RE.test(language) || !VOICE_LANGUAGES.includes(language)) {
+    fail('VOICE_INVALID_LANGUAGE', field, `${field} must be one of: ${VOICE_LANGUAGES.join(', ')}`);
   }
   return language;
 }
@@ -370,6 +372,111 @@ export function checkVoice(input) {
 export const validateCharacterVoice = validateVoice;
 export const normalizeVoice = validateVoice;
 export const expandPreset = resolvePreset;
+
+export function supportsNativeVoice(model) {
+  return model?.capabilities?.supportsNativeVoice === true;
+}
+
+function nativeVoiceCatalogue(model) {
+  const entries = model?.capabilities?.nativeVoices;
+  const catalogue = new Map();
+  if (!Array.isArray(entries)) return catalogue;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    if (typeof entry.id !== 'string' || !NATIVE_VOICE_ID_RE.test(entry.id)) continue;
+    if (catalogue.has(entry.id)) continue;
+    const language = typeof entry.language === 'string' && entry.language.trim() !== ''
+      ? entry.language.trim().toLowerCase()
+      : undefined;
+    catalogue.set(entry.id, { id: entry.id, language });
+  }
+  return catalogue;
+}
+
+function resolveNativeSpeakingVoice(model, options) {
+  const catalogue = nativeVoiceCatalogue(model);
+  const requested = options.nativeVoice !== undefined
+    ? options.nativeVoice
+    : model.capabilities.defaultNativeVoice;
+  if (typeof requested !== 'string' || requested.trim() === '') {
+    fail('VOICE_NATIVE_VOICE_REQUIRED', 'nativeVoice', 'no native voice was selected and the model declares no default');
+  }
+  const voice = requested.trim();
+  const entry = catalogue.get(voice);
+  if (!entry) {
+    fail(
+      'VOICE_NATIVE_VOICE_UNKNOWN',
+      'nativeVoice',
+      `native voice ${JSON.stringify(voice)} is not a declared built-in preset`,
+    );
+  }
+  const language = options.language !== undefined
+    ? languageValue(options.language, 'language')
+    : entry.language !== undefined
+      ? languageValue(entry.language, 'nativeVoices.language')
+      : fail(
+        'VOICE_NATIVE_LANGUAGE_REQUIRED',
+        'language',
+        `native voice ${JSON.stringify(voice)} declares no language; pass language explicitly`,
+      );
+  if (entry.language !== undefined && language !== entry.language) {
+    // Review fix-up: a declared native voice is never relabelled to another language.
+    fail('VOICE_VOICE_LANGUAGE', 'language', `native voice ${entry.id} is ${entry.language}, not ${language}`);
+  }
+  return { voicePath: 'native', voice: entry.id, language };
+}
+
+function resolveKokoroSpeakingVoice(options) {
+  const { voice } = options;
+  let voiceId;
+  if (typeof voice === 'string') {
+    voiceId = textValue(voice, 'voice', { max: MAX_VOICE_NAME_CHARS });
+  } else if (voice && typeof voice === 'object' && !Array.isArray(voice)) {
+    if (voice.enabled === false || (voice.engine !== undefined && voice.engine !== 'kokoro')) {
+      fail(
+        'VOICE_KOKORO_REQUIRED',
+        'voice',
+        'this character voice has no Kokoro voice; speaking through Kokoro requires an explicit Kokoro voice',
+      );
+    }
+    if (voice.voice === undefined || voice.voice === null) {
+      fail('VOICE_KOKORO_REQUIRED', 'voice', 'this character voice has no Kokoro voice');
+    }
+    voiceId = textValue(voice.voice, 'voice.voice', { max: MAX_VOICE_NAME_CHARS });
+  } else {
+    fail('VOICE_KOKORO_REQUIRED', 'voice', 'speaking through Kokoro requires a Kokoro voice');
+  }
+  const entry = KOKORO_BY_ID.get(voiceId);
+  if (!entry) {
+    fail('VOICE_UNKNOWN_VOICE', 'voice', `unknown Kokoro voice ${JSON.stringify(voiceId)}`);
+  }
+  const language = options.language === undefined
+    ? entry.language
+    : languageValue(options.language);
+  if (language !== entry.language) {
+    fail('VOICE_VOICE_LANGUAGE', 'language', `Kokoro voice ${voiceId} is ${entry.language}, not ${language}`);
+  }
+  return { voicePath: 'kokoro', voice: voiceId, language };
+}
+
+export function resolveSpeakingVoice(options = {}) {
+  const raw = objectInput(options, 'options');
+  for (const key of Object.keys(raw)) {
+    if (!['model', 'voice', 'nativeVoice', 'language'].includes(key)) {
+      fail('VOICE_UNKNOWN_FIELD', key, `unknown speaking voice option ${key}`);
+    }
+  }
+  const resolved = supportsNativeVoice(raw.model)
+    ? resolveNativeSpeakingVoice(raw.model, raw)
+    : resolveKokoroSpeakingVoice(raw);
+  return deepFreeze({ voicePath: resolved.voicePath, voice: resolved.voice, language: resolved.language });
+}
+
+export function recordSpeakingVoice(record, options = {}) {
+  const base = objectInput(record, 'record');
+  const resolved = resolveSpeakingVoice(options);
+  return deepFreeze({ ...base, ...resolved });
+}
 
 function packagePersona(persona) {
   const points = Array.from(persona);

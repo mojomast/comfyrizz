@@ -184,7 +184,7 @@ export type QueueResult = {
   kind?: ReferenceKind;
 };
 
-export type ChangeKind = 'all' | 'pending' | 'references' | 'message';
+export type ChangeKind = 'all' | 'pending' | 'references' | 'message' | 'boards' | 'attachments';
 
 export type PrecheckOk = {
   ok: true;
@@ -1059,6 +1059,648 @@ export class ReferencePanelController {
     this.destroyed = true;
     this.listeners.clear();
   }
+}
+
+export const REFERENCE_BOARD_LIMITS = {
+  maxBoards: 24,
+  nameMaxChars: 80,
+  maxReferences: LIMITS.maxReferences,
+} as const;
+
+export type ReferenceBoardEntry = {
+  refId: string;
+  role: ReferenceRole;
+  label?: string;
+  note?: string;
+};
+
+export type ReferenceBoard = {
+  id: string;
+  name: string;
+  role: ReferenceRole;
+  entries: ReferenceBoardEntry[];
+  revision?: number;
+};
+
+export type ReferenceBoardMode = 'attach' | 'replace';
+
+export type ReferenceBoardAttachment = {
+  shotId: string;
+  boardId: string;
+  role: ReferenceRole;
+  revision?: number;
+  commandId?: string;
+};
+
+export type ReferenceBoardCommand = {
+  kind: 'artifact.attach';
+  productionId: string;
+  commandId: string;
+  idempotencyKey: string;
+  expected: { productionRevision: number };
+  payload: {
+    artifactKind: 'conditioning';
+    shotId: string;
+    boardId: string;
+    role: ReferenceRole;
+    mode: ReferenceBoardMode;
+    references: Array<{ refId: string; role: ReferenceRole }>;
+    replaces: string[];
+  };
+};
+
+export type ReferenceBoardState = {
+  productionId: string;
+  revision: number;
+  boards: ReferenceBoard[];
+  attachments: ReferenceBoardAttachment[];
+  shots: string[];
+  pending: string[];
+  loading: boolean;
+  stale: boolean;
+  message: string;
+  messageError: boolean;
+};
+
+export type ReferenceBoardCommandResult = {
+  ok: boolean;
+  code?: string;
+  error?: string;
+  commandId?: string;
+  idempotencyKey?: string;
+  command?: ReferenceBoardCommand;
+};
+
+export type ReferenceBoardSendCommand = (
+  command: ReferenceBoardCommand,
+) => Promise<unknown> | unknown;
+
+export type ReferenceBoardControllerOptions = {
+  productionId: string;
+  revision?: number;
+  boards?: readonly unknown[];
+  attachments?: readonly ReferenceBoardAttachment[];
+  shots?: readonly string[];
+  loading?: boolean;
+  stale?: boolean;
+  sendCommand: ReferenceBoardSendCommand;
+  randomId?: () => string;
+  onChange?: (state: ReferenceBoardState, change: ChangeKind) => void;
+};
+
+function boardRole(value: unknown, fallback: ReferenceRole = 'other'): ReferenceRole {
+  if (value === undefined || value === null || value === '') return fallback;
+  return ROLES.includes(value as ReferenceRole) ? (value as ReferenceRole) : 'other';
+}
+
+function boardText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function normalizeReferenceBoard(value: unknown): ReferenceBoard {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('a reference board must be an object');
+  }
+  const source = value as Record<string, unknown>;
+  const id = boardText(source.id);
+  if (!id) throw new TypeError('a reference board id is required');
+  const name = boardText(source.name);
+  if (!name) throw new TypeError('a reference board name is required');
+  const role = boardRole(source.role);
+  const rawEntries = Array.isArray(source.entries)
+    ? source.entries
+    : Array.isArray(source.references)
+      ? source.references
+      : [];
+  const entries = new Map<string, ReferenceBoardEntry>();
+
+  for (const raw of rawEntries) {
+    const item = typeof raw === 'string'
+      ? { refId: raw }
+      : raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? raw as Record<string, unknown>
+        : null;
+    if (!item) continue;
+    const refId = boardText(item.refId ?? item.id);
+    if (!refId) continue;
+    const entryRole = item.role === undefined || item.role === null || item.role === ''
+      ? role
+      : boardRole(item.role);
+    const entry: ReferenceBoardEntry = { refId, role: entryRole };
+    const label = boardText(item.label);
+    if (label) entry.label = label.slice(0, LIMITS.labelMaxChars);
+    const note = typeof item.note === 'string' ? item.note.trim() : '';
+    if (note) entry.note = note.slice(0, LIMITS.noteMaxChars);
+    entries.set(refId, entry);
+  }
+
+  const board: ReferenceBoard = {
+    id,
+    name: name.slice(0, REFERENCE_BOARD_LIMITS.nameMaxChars),
+    role,
+    entries: Array.from(entries.values()).slice(0, REFERENCE_BOARD_LIMITS.maxReferences),
+  };
+  const revision = finiteNumber(source.revision);
+  if (revision !== null && revision >= 0 && Number.isSafeInteger(revision)) {
+    board.revision = revision;
+  }
+  return board;
+}
+
+export function normalizeReferenceBoards(values: unknown): ReferenceBoard[] {
+  const boards = new Map<string, ReferenceBoard>();
+  for (const value of Array.isArray(values) ? values : []) {
+    let board: ReferenceBoard;
+    try {
+      board = normalizeReferenceBoard(value);
+    } catch {
+      continue;
+    }
+    boards.set(board.id, board);
+  }
+  return Array.from(boards.values()).slice(0, REFERENCE_BOARD_LIMITS.maxBoards);
+}
+
+function uniqueIds(values: readonly unknown[]): string[] {
+  const ids = new Set<string>();
+  for (const value of values) {
+    const id = boardText(value);
+    if (id) ids.add(id);
+  }
+  return Array.from(ids);
+}
+
+export function buildReferenceBoardCommand(input: {
+  productionId: string;
+  productionRevision: number;
+  shotId: string;
+  board: unknown;
+  mode: ReferenceBoardMode;
+  commandId: string;
+  idempotencyKey: string;
+  replaces?: readonly string[];
+}): ReferenceBoardCommand {
+  const productionId = boardText(input?.productionId);
+  if (!productionId) throw new TypeError('a production id is required');
+  const shotId = boardText(input?.shotId);
+  if (!shotId) throw new TypeError('a shot id is required');
+  if (input?.mode !== 'attach' && input?.mode !== 'replace') {
+    throw new TypeError('the board mode must be attach or replace');
+  }
+  const commandId = boardText(input?.commandId);
+  if (!commandId) throw new TypeError('a command id is required');
+  const idempotencyKey = boardText(input?.idempotencyKey);
+  if (!idempotencyKey) throw new TypeError('an idempotency key is required');
+  const revision = finiteNumber(input?.productionRevision);
+  if (revision === null || revision < 0 || !Number.isSafeInteger(revision)) {
+    throw new TypeError('the production revision must be a non-negative integer');
+  }
+  const board = normalizeReferenceBoard(input.board);
+
+  return {
+    kind: 'artifact.attach',
+    productionId,
+    commandId,
+    idempotencyKey,
+    expected: { productionRevision: revision },
+    payload: {
+      artifactKind: 'conditioning',
+      shotId,
+      boardId: board.id,
+      role: board.role,
+      mode: input.mode,
+      references: board.entries.map(entry => ({ refId: entry.refId, role: entry.role })),
+      replaces: uniqueIds(Array.isArray(input.replaces) ? input.replaces : []),
+    },
+  };
+}
+
+function normalizeBoardAttachment(
+  value: unknown,
+  boards: readonly ReferenceBoard[],
+): ReferenceBoardAttachment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const shotId = boardText(source.shotId);
+  const boardId = boardText(source.boardId);
+  if (!shotId || !boardId) return null;
+  const board = boards.find(item => item.id === boardId);
+  const attachment: ReferenceBoardAttachment = {
+    shotId,
+    boardId,
+    role: boardRole(source.role, board?.role ?? 'other'),
+  };
+  const revision = finiteNumber(source.revision);
+  if (revision !== null) attachment.revision = revision;
+  const commandId = boardText(source.commandId);
+  if (commandId) attachment.commandId = commandId;
+  return attachment;
+}
+
+function boardCommandError(error: unknown): {
+  code?: string;
+  message: string;
+  stale: boolean;
+  currentRevision: number | null;
+} {
+  const source = error && typeof error === 'object' ? error as Record<string, unknown> : null;
+  const body = source?.body && typeof source.body === 'object'
+    ? source.body as Record<string, unknown>
+    : null;
+  const code = boardText(source?.code) || boardText(body?.code) || undefined;
+  const currentRevision = finiteNumber(source?.currentRevision) ?? finiteNumber(body?.currentRevision);
+  return {
+    ...(code ? { code } : {}),
+    message: messageOf(error),
+    stale: code === 'REVISION_CONFLICT' || finiteNumber(source?.status) === 409,
+    currentRevision,
+  };
+}
+
+function revisionOf(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const direct = finiteNumber(source.revision) ?? finiteNumber(source.productionRevision);
+  if (direct !== null && direct >= 0 && Number.isSafeInteger(direct)) return direct;
+  const production = source.production;
+  if (production && typeof production === 'object' && !Array.isArray(production)) {
+    const nested = finiteNumber((production as Record<string, unknown>).revision);
+    if (nested !== null && nested >= 0 && Number.isSafeInteger(nested)) return nested;
+  }
+  return null;
+}
+
+type BoardListener = (state: ReferenceBoardState, change: ChangeKind) => void;
+
+export class ReferenceBoardController {
+  productionId: string;
+  sendCommand: ReferenceBoardSendCommand;
+  randomId: () => string;
+  onChange?: (state: ReferenceBoardState, change: ChangeKind) => void;
+  state: ReferenceBoardState;
+  listeners: Set<BoardListener>;
+  pendingKeys: Set<string>;
+  destroyed: boolean;
+
+  constructor(options: ReferenceBoardControllerOptions) {
+    if (!options || typeof options !== 'object') {
+      throw new TypeError('ReferenceBoardController requires options');
+    }
+    const productionId = boardText(options.productionId);
+    if (!productionId) throw new TypeError('ReferenceBoardController requires a productionId');
+    if (typeof options.sendCommand !== 'function') {
+      throw new TypeError('ReferenceBoardController requires sendCommand');
+    }
+    const boards = normalizeReferenceBoards(options.boards ?? []);
+    const attachments: ReferenceBoardAttachment[] = [];
+    const seen = new Set<string>();
+    for (const value of Array.isArray(options.attachments) ? options.attachments : []) {
+      const attachment = normalizeBoardAttachment(value, boards);
+      if (!attachment) continue;
+      const key = `${attachment.shotId}\u0000${attachment.boardId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      attachments.push(attachment);
+    }
+    this.productionId = productionId;
+    this.sendCommand = options.sendCommand;
+    this.randomId = options.randomId ?? (() => Math.random().toString(36).slice(2, 10));
+    this.onChange = options.onChange;
+    this.listeners = new Set();
+    this.pendingKeys = new Set();
+    this.destroyed = false;
+    const revision = finiteNumber(options.revision);
+    this.state = {
+      productionId,
+      revision: revision !== null && revision >= 0 ? revision : 0,
+      boards,
+      attachments,
+      shots: uniqueIds(Array.isArray(options.shots) ? options.shots : []),
+      pending: [],
+      loading: options.loading === true,
+      stale: options.stale === true,
+      message: '',
+      messageError: false,
+    };
+  }
+
+  subscribe(listener: BoardListener): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  getState(): ReferenceBoardState {
+    return this.snapshot();
+  }
+
+  snapshot(): ReferenceBoardState {
+    return {
+      productionId: this.state.productionId,
+      revision: this.state.revision,
+      boards: this.state.boards.map(board => ({
+        ...board,
+        entries: board.entries.map(entry => ({ ...entry })),
+      })),
+      attachments: this.state.attachments.map(attachment => ({ ...attachment })),
+      shots: [...this.state.shots],
+      pending: [...this.state.pending],
+      loading: this.state.loading,
+      stale: this.state.stale,
+      message: this.state.message,
+      messageError: this.state.messageError,
+    };
+  }
+
+  notify(kind: ChangeKind = 'all'): void {
+    if (this.destroyed) return;
+    const snapshot = this.snapshot();
+    for (const listener of Array.from(this.listeners)) {
+      try { listener(snapshot, kind); } catch { /* a view error must not break a command */ }
+    }
+    try { this.onChange?.(snapshot, kind); } catch { /* optional observer */ }
+  }
+
+  setBoards(values: readonly unknown[]): void {
+    const boards = normalizeReferenceBoards(values);
+    const ids = new Set(boards.map(board => board.id));
+    this.state.boards = boards;
+    this.state.attachments = this.state.attachments.filter(attachment => ids.has(attachment.boardId));
+    this.notify('boards');
+  }
+
+  setShots(values: readonly unknown[]): void {
+    this.state.shots = uniqueIds(values);
+    this.notify('boards');
+  }
+
+  setAttachments(values: readonly unknown[]): void {
+    const attachments: ReferenceBoardAttachment[] = [];
+    const seen = new Set<string>();
+    for (const value of values) {
+      const attachment = normalizeBoardAttachment(value, this.state.boards);
+      if (!attachment) continue;
+      const key = `${attachment.shotId}\u0000${attachment.boardId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      attachments.push(attachment);
+    }
+    this.state.attachments = attachments;
+    this.notify('attachments');
+  }
+
+  setRevision(revision: unknown): void {
+    const value = finiteNumber(revision);
+    if (value === null || value < 0 || !Number.isSafeInteger(value)) return;
+    this.state.revision = value;
+    this.state.stale = false;
+    this.notify('boards');
+  }
+
+  setLoading(loading: boolean): void {
+    this.state.loading = loading === true;
+    this.notify('boards');
+  }
+
+  board(boardId: string): ReferenceBoard | undefined {
+    return this.state.boards.find(board => board.id === boardId);
+  }
+
+  attachmentsFor(shotId: string): ReferenceBoardAttachment[] {
+    const shot = boardText(shotId);
+    return this.state.attachments.filter(attachment => attachment.shotId === shot);
+  }
+
+  attach(shotId: string, boardId: string): Promise<ReferenceBoardCommandResult> {
+    return this.dispatch(shotId, boardId, 'attach');
+  }
+
+  attachBoard(shotId: string, boardId: string): Promise<ReferenceBoardCommandResult> {
+    return this.dispatch(shotId, boardId, 'attach');
+  }
+
+  replace(shotId: string, boardId: string): Promise<ReferenceBoardCommandResult> {
+    return this.dispatch(shotId, boardId, 'replace');
+  }
+
+  replaceBoard(shotId: string, boardId: string): Promise<ReferenceBoardCommandResult> {
+    return this.dispatch(shotId, boardId, 'replace');
+  }
+
+  async dispatch(
+    rawShotId: string,
+    rawBoardId: string,
+    mode: ReferenceBoardMode,
+  ): Promise<ReferenceBoardCommandResult> {
+    if (this.destroyed) return { ok: false, code: 'DESTROYED', error: 'The board panel is closed.' };
+    const shotId = boardText(rawShotId);
+    if (!shotId) return this.refuse('INVALID_SHOT', 'Choose a shot before attaching a board.');
+    const boardId = boardText(rawBoardId);
+    const board = boardId ? this.board(boardId) : undefined;
+    if (!board) return this.refuse('UNKNOWN_BOARD', 'That reference board is no longer available.');
+    const pendingKey = `${shotId}\u0000${board.id}`;
+    if (this.pendingKeys.has(pendingKey)) {
+      return { ok: false, code: 'IN_PROGRESS', error: 'That board change is already in progress.' };
+    }
+    if (mode === 'attach' && this.state.attachments.some(attachment =>
+      attachment.shotId === shotId && attachment.boardId === board.id)) {
+      return this.refuse('ALREADY_ATTACHED', `${board.name} is already attached to ${shotId}.`);
+    }
+
+    const random = boardText(this.randomId()) || Math.random().toString(36).slice(2, 10);
+    const commandId = `cmd_${random}`;
+    const idempotencyKey = `idem_${random}`;
+    const replaces = mode === 'replace'
+      ? this.state.attachments
+        .filter(attachment => attachment.shotId === shotId
+          && attachment.role === board.role
+          && attachment.boardId !== board.id)
+        .map(attachment => attachment.boardId)
+      : [];
+    const command = buildReferenceBoardCommand({
+      productionId: this.productionId,
+      productionRevision: this.state.revision,
+      shotId,
+      board,
+      mode,
+      commandId,
+      idempotencyKey,
+      replaces,
+    });
+
+    this.pendingKeys.add(pendingKey);
+    this.state.pending.push(pendingKey);
+    this.notify('pending');
+
+    try {
+      const response = await this.sendCommand(command);
+      const revision = revisionOf(response);
+      if (revision !== null) this.state.revision = Math.max(this.state.revision, revision);
+      if (mode === 'replace') {
+        this.state.attachments = this.state.attachments.filter(attachment =>
+          !(attachment.shotId === shotId && attachment.role === board.role));
+      }
+      this.state.attachments.push({
+        shotId,
+        boardId: board.id,
+        role: board.role,
+        revision: this.state.revision,
+        commandId,
+      });
+      this.state.message = mode === 'replace'
+        ? `Replaced the ${ROLE_LABELS[board.role].toLowerCase()} board on ${shotId} with ${board.name}.`
+        : `Attached ${board.name} to ${shotId}.`;
+      this.state.messageError = false;
+      this.state.stale = false;
+      this.notify('attachments');
+      return { ok: true, commandId, idempotencyKey, command };
+    } catch (error) {
+      const details = boardCommandError(error);
+      if (details.currentRevision !== null) {
+        this.state.revision = Math.max(this.state.revision, details.currentRevision);
+      }
+      if (details.stale) this.state.stale = true;
+      this.state.message = mode === 'replace'
+        ? `Could not replace the board on ${shotId}: ${details.message}`
+        : `Could not attach ${board.name} to ${shotId}: ${details.message}`;
+      this.state.messageError = true;
+      this.notify('attachments');
+      return {
+        ok: false,
+        ...(details.code ? { code: details.code } : {}),
+        error: details.message,
+        commandId,
+        idempotencyKey,
+        command,
+      };
+    } finally {
+      this.pendingKeys.delete(pendingKey);
+      this.state.pending = this.state.pending.filter(key => key !== pendingKey);
+      this.notify('pending');
+    }
+  }
+
+  refuse(code: string, message: string): ReferenceBoardCommandResult {
+    this.state.message = message;
+    this.state.messageError = true;
+    this.notify('attachments');
+    return { ok: false, code, error: message };
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.listeners.clear();
+  }
+}
+
+export function renderReferenceBoard(board: unknown): string {
+  let normalized: ReferenceBoard;
+  try {
+    normalized = normalizeReferenceBoard(board);
+  } catch {
+    return '';
+  }
+  const roleLabel = ROLE_LABELS[normalized.role];
+  const entries = normalized.entries.length === 0
+    ? '<li class="ref-board-empty-line">No references on this board.</li>'
+    : normalized.entries.map(entry => {
+      const label = entry.label || entry.refId;
+      return `<li class="ref-board-ref" data-board-ref="${escapeHtml(entry.refId)}" data-board-ref-role="${entry.role}">
+        <span class="ref-board-ref-label">${escapeHtml(label)}</span>
+        <span class="chip ref-board-ref-role">${escapeHtml(ROLE_LABELS[entry.role])}</span>
+        ${entry.note ? `<span class="ref-board-ref-note">${escapeHtml(entry.note)}</span>` : ''}
+      </li>`;
+    }).join('');
+  return `<article class="ref-board panel" data-reference-board="${escapeHtml(normalized.id)}" data-board-role="${normalized.role}">
+    <header class="ref-board-header">
+      <h3 class="ref-board-name">${escapeHtml(normalized.name)}</h3>
+      <span class="chip ref-board-role" data-board-role-label>${escapeHtml(roleLabel)}</span>
+      <span class="ref-board-count">${normalized.entries.length} reference${normalized.entries.length === 1 ? '' : 's'}</span>
+    </header>
+    <ul class="ref-board-refs">${entries}</ul>
+  </article>`;
+}
+
+export type ReferenceBoardsView = {
+  boards?: readonly unknown[];
+  attachments?: readonly ReferenceBoardAttachment[];
+  shots?: readonly string[];
+  loading?: boolean;
+  stale?: boolean;
+  message?: string;
+  messageError?: boolean;
+};
+
+export function renderReferenceBoards(
+  state: ReferenceBoardsView,
+  options: { shots?: readonly string[] } = {},
+): string {
+  if (state?.loading === true) {
+    return '<section class="ref-boards panel" data-reference-boards data-board-state="loading" role="status" aria-live="polite">Loading reference boards…</section>';
+  }
+
+  const boards = normalizeReferenceBoards(state?.boards ?? []);
+  const attachments = (Array.isArray(state?.attachments) ? state.attachments : [])
+    .filter((attachment): attachment is ReferenceBoardAttachment =>
+      Boolean(attachment) && typeof attachment === 'object');
+  const shots = uniqueIds(options.shots ?? state?.shots ?? []);
+  const message = String(state?.message ?? '');
+  const error = state?.messageError === true
+    ? `<p class="ref-board-error" role="alert">${escapeHtml(message || 'Reference boards could not be loaded.')}</p>`
+    : '';
+
+  if (boards.length === 0) {
+    if (error) {
+      return `<section class="ref-boards panel" data-reference-boards data-board-state="error">${error}</section>`;
+    }
+    return `<section class="ref-boards panel" data-reference-boards data-board-state="empty">
+      <div class="empty-state ref-board-empty" data-board-empty>
+        <h3 class="empty-state-title">No reference boards yet</h3>
+        <p class="empty-state-line">Group references by role, then attach a board to each shot.</p>
+      </div>
+    </section>`;
+  }
+
+  const stale = state?.stale === true
+    ? '<p class="ref-board-stale" data-board-stale="true" role="status">Boards are stale. Refresh before changing them.</p>'
+    : '';
+  const shotMarkup = shots.map(shotId => {
+    const rows = attachments.filter(attachment => attachment.shotId === shotId);
+    const attached = rows.length === 0
+      ? '<li class="ref-board-none">No boards attached.</li>'
+      : rows.map(attachment => {
+        const attachedBoard = boards.find(board => board.id === attachment.boardId);
+        const name = attachedBoard?.name ?? attachment.boardId;
+        return `<li class="ref-board-attachment" data-board-attached="${escapeHtml(attachment.boardId)}" data-board-attachment-role="${attachment.role}">
+          <span class="ref-board-attachment-name">${escapeHtml(name)}</span>
+          <span class="chip ref-board-attachment-role">${escapeHtml(ROLE_LABELS[attachment.role])}</span>
+        </li>`;
+      }).join('');
+    const actions = boards.map(board => {
+      const isAttached = rows.some(attachment => attachment.boardId === board.id);
+      const roleWord = ROLE_LABELS[board.role].toLowerCase();
+      return `<button type="button" class="btn btn-secondary btn-sm ref-board-attach" data-board-attach data-shot-id="${escapeHtml(shotId)}" data-board-id="${escapeHtml(board.id)}" aria-label="Attach ${escapeHtml(board.name)} to ${escapeHtml(shotId)}"${isAttached ? ' disabled aria-disabled="true"' : ''}>Attach</button>
+        <button type="button" class="btn btn-ghost btn-sm ref-board-replace" data-board-replace data-shot-id="${escapeHtml(shotId)}" data-board-id="${escapeHtml(board.id)}" aria-label="Replace the ${escapeHtml(roleWord)} board on ${escapeHtml(shotId)} with ${escapeHtml(board.name)}">Replace</button>`;
+    }).join('');
+    return `<div class="ref-board-shot" data-board-shot="${escapeHtml(shotId)}">
+      <h4 class="ref-board-shot-name">${escapeHtml(shotId)}</h4>
+      <ul class="ref-board-attachments">${attached}</ul>
+      <div class="ref-board-actions">${actions}</div>
+    </div>`;
+  }).join('');
+
+  return `<section class="ref-boards panel" data-reference-boards data-board-state="${error ? 'error' : 'ready'}">
+    <header class="ref-boards-header">
+      <h3 class="ref-boards-title">Reference boards</h3>
+      <span class="ref-boards-count">${boards.length} board${boards.length === 1 ? '' : 's'}</span>
+    </header>
+    ${stale}
+    ${error}
+    ${shotMarkup}
+    <div class="ref-board-list">${boards.map(renderReferenceBoard).join('')}</div>
+  </section>`;
 }
 
 let panelSequence = 0;

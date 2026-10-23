@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 4ce8351a679c4e690728d93113d4018f320514c035d32feeb4541c7f115db9a5
+// Schema sha256: 0d3dace4eee24b4637401a085080049b9cc726642c6dc65cf54ca372a4e39b69
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -777,6 +777,19 @@ export interface Scene {
    */
   narration_style?: string;
   narration_asset?: AssetId;
+  /**
+   * IP51: optional trim of this scene's audio. startSeconds is the inclusive in-point and endSeconds
+   * the exclusive out-point; endSeconds must be greater than startSeconds. offsetFrames shifts the
+   * trimmed audio on the timeline and may be negative. linked keeps the trim attached to the scene
+   * when the scene is re-timed. The cross-field endSeconds > startSeconds rule is documented here
+   * because package-v1 has no trim semantic validator.
+   */
+  audio_trim?: {
+    startSeconds: number;
+    endSeconds: number;
+    offsetFrames: number;
+    linked: boolean;
+    };
   presenter_asset?: AssetId;
   /**
    * H17: this scene's own answer about the AI presenter - off, picture-in-picture, or the

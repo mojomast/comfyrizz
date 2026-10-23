@@ -719,3 +719,73 @@ html body #app #statusbar #save-status[data-state='rejected'] {
     overflow: visible;
   }
 }
+
+/* ==========================================================================
+   IP59: mobile tabs and sheets (< 68.75rem / 1100px)
+
+   Easy is a deliberate filter, not a temporary narrow layout: it is never
+   forced to show the Advanced rail or the run-settings anchor at any width.
+   Advanced gets the right rail back as a bottom sheet with full-width tabs.
+   These rules are scoped to Advanced so they never outrank the Easy filter in
+   topbar.css or the user's data-shell-right='off' choice in this file.
+   ========================================================================== */
+
+@media (max-width: 68.75rem) {
+  html[data-mode='advanced'] body #app main.shell-main {
+    grid-template-columns: var(--left-w) var(--left-split-w) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'left split-left center'
+      'right right right';
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html[data-mode='advanced'] body #app:not([data-shell-right='off']) #activity-pane {
+    grid-area: right;
+    display: flex;
+    height: auto;
+    max-height: min(48vh, 420px);
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border-top: var(--elevation-border-1);
+    border-right: 0;
+  }
+
+  html[data-mode='advanced'] body #app:not([data-shell-right='off']) #activity-pane > .rail-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  html[data-mode='advanced'] body #app:not([data-shell-right='off']) #activity-pane .rail-tabs {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+  }
+
+  html[data-mode='advanced'] body #app:not([data-shell-right='off']) #activity-pane .rail-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: var(--space-1);
+    text-align: center;
+  }
+}
+
+@media (max-width: 47.5rem) {
+  html[data-mode='advanced'] body #app main.shell-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      'left'
+      'center'
+      'right';
+    height: auto;
+    overflow: visible;
+  }
+
+  html[data-mode='advanced'] body #app:not([data-shell-right='off']) #activity-pane {
+    max-height: 70vh;
+  }
+}

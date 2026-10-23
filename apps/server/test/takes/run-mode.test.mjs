@@ -214,7 +214,9 @@ test('TR07: the default mode is still a final render and lands no takes', async 
     assert.equal(finished.render.frames, 7);
     assert.equal(renderCalls.length, 1, 'default mode still renders once');
     assert.equal(app.events.entries.some(event => event.type === 'clip.take.landed'), false);
+    assert.equal(app.takeStore.read(fixture.id), null, 'default mode writes no takes sidecar');
     assert.equal(existsSync(takesPath(runtime, fixture.id)), false);
+    assert.equal(existsSync(join(runtime, 'packages', fixture.id, 'takes')), false, 'default mode writes no take files');
   } finally {
     app.close();
   }

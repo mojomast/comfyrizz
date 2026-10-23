@@ -5,6 +5,7 @@
  *   getState(): { doc, derived, session }
  *   subscribe(fn): unsubscribe
  *   dispatch(cmd | cmd[]): Result     // array = one undo step
+ *   applyAgentBatch(cmds): Result     // agent edits: one undo step, history kept
  *   preview(cmd) / cancelPreview()    // transient gesture; not an undo step
  *   undo / redo / canUndo / canRedo
  *   saveStatus(): 'saved' | 'pending' | 'offline' | 'conflict' | 'rejected'
@@ -79,6 +80,12 @@ export interface EditorStore {
   getState(): EditorSnapshot;
   subscribe(fn: () => void): () => void;
   dispatch(cmd: Command | Command[]): Result;
+  /**
+   * Apply an agent-proposed command list as one undoable edit. It runs through
+   * the same validation and history path as dispatch; it never replaces the
+   * document (replaceDocument clears undo by design).
+   */
+  applyAgentBatch(commands: Command[]): Result;
   preview(cmd: Command): void;
   cancelPreview(): void;
   undo(): void;
@@ -357,6 +364,15 @@ export function createEditorStore(options: {
       const selectionAfter = selectionFor(committed, applied.doc, commands[commands.length - 1]!, selectionBefore);
       commit(applied.doc, selectionBefore, selectionAfter);
       return { ok: true, ...trimReport(cmd, snapshot.derived.timeline) };
+    },
+    applyAgentBatch(commands) {
+      if (!Array.isArray(commands)) {
+        return { ok: false, code: 'invalid-batch', error: 'An agent batch must be a list of commands.' };
+      }
+      if (commands.some(command => !command || typeof command !== 'object' || typeof (command as { type?: unknown }).type !== 'string')) {
+        return { ok: false, code: 'invalid-batch', error: 'An agent batch contains an invalid command.' };
+      }
+      return store.dispatch(commands);
     },
     preview(cmd) {
       const applied = applyCommand(committed, cmd, measuredFor(committed, measured));

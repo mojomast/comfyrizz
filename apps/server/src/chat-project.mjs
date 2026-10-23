@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { createToolset, conversationPlanSchema, STYLE_PRESET_DEFAULTS, brandTheme } from '../../../packages/agent/dist/src/index.js';
@@ -311,7 +311,23 @@ function applyReferenceAssignment(draft, assignment, ref, result, sceneHasStartF
 
 function referenceSidecar({ pkg, used, skipped }) {
   const notes = new Map();
+  const references = new Map();
   for (const entry of used) {
+    if (!references.has(entry.ref.id)) {
+      references.set(entry.ref.id, {
+        refId: entry.ref.id,
+        label: capText(entry.ref.label, 80),
+        kind: entry.ref.kind,
+        mime: entry.ref.mime,
+        role: entry.ref.role ?? 'other',
+        note: capText(entry.ref.note, TEXT_CAP),
+        sha256: entry.ref.sha256,
+        ...(entry.ref.bytes !== undefined ? { bytes: entry.ref.bytes } : {}),
+        ...(entry.ref.width !== undefined ? { width: entry.ref.width } : {}),
+        ...(entry.ref.height !== undefined ? { height: entry.ref.height } : {}),
+        ...(entry.ref.durationSec !== undefined ? { durationSec: entry.ref.durationSec } : {}),
+      });
+    }
     if (notes.has(entry.ref.id)) continue;
     notes.set(entry.ref.id, {
       refId: entry.ref.id,
@@ -325,6 +341,7 @@ function referenceSidecar({ pkg, used, skipped }) {
     schema: 'comfyrizz.references/v1',
     packageId: pkg.id,
     packageRevision: pkg.revision,
+    references: [...references.values()],
     assignments: used.map(entry => ({
       ...(entry.assignment.id ? { id: entry.assignment.id } : {}),
       refId: entry.ref.id,
@@ -340,6 +357,25 @@ function referenceSidecar({ pkg, used, skipped }) {
     notes: [...notes.values()],
     ...(skipped.length ? { skipped } : {}),
   };
+}
+
+const PACKAGE_ID_RE = /^[A-Za-z0-9_.-]+$/;
+
+// A production owns its reference lineage. The canonical sidecar lives under the
+// project's package directory so two projects in one runtime never rewrite each
+// other's provenance; builds for the same project replace only that project.
+function referenceSidecarPath(runtimeDir, packageId) {
+  if (typeof packageId !== 'string' || !PACKAGE_ID_RE.test(packageId)) {
+    throw new Error('invalid package id for references.json');
+  }
+  return join(runtimeDir, 'packages', packageId, 'references.json');
+}
+
+function writeSidecarFile(path, sidecar) {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(sidecar, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temp, path);
 }
 
 function applyReferenceAssignments({ draft, references, runtimeDir }) {
@@ -403,10 +439,10 @@ function applyReferenceAssignments({ draft, references, runtimeDir }) {
 
   if (!used.length) return null;
   const sidecar = referenceSidecar({ pkg: draft, used, skipped });
-  const sidecarPath = join(runtimeDir, 'packages', 'references.json');
-  const temp = `${sidecarPath}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(sidecar, null, 2)}\n`, { mode: 0o600 });
-  renameSync(temp, sidecarPath);
+  writeSidecarFile(referenceSidecarPath(runtimeDir, draft.id), sidecar);
+  // Compatibility mirror for readers that still look beside the package files.
+  // It is not the lineage record; the project-scoped file above is.
+  writeSidecarFile(join(runtimeDir, 'packages', 'references.json'), sidecar);
   return sidecar;
 }
 

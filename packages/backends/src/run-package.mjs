@@ -10,7 +10,18 @@
 // It is deliberately backend-agnostic: it calls only the methods of the `Backend` typedef in
 // `index.mjs`. Apps call `backend.runPackage(pkg, opts)` (each factory attaches it), so the web run
 // panel and `apps/server` do not branch on the provider.
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -130,6 +141,118 @@ export function stagePackageFiles(pkg, { workDir, packageDir = null } = {}) {
   return { copied, missing };
 }
 
+/** How many times a failed verification may trigger a fresh collect before apply gives up. */
+export const COLLECT_RETRY_LIMIT = 2;
+
+const UNSAFE_SEGMENTS = new Set(["", ".", ".."]);
+
+/**
+ * Split a manifest output path into safe relative segments.
+ *
+ * A manifest is remote input: a path that is absolute, carries a drive letter, contains a NUL, or
+ * walks out through `..` is refused rather than joined onto the collected directory. This is the one
+ * check every verification (collect-time and apply-time) shares, so a path that escapes can never be
+ * applied - and "refused" is reported instead of silently hashing the wrong file.
+ */
+function safeRelativePath(relative) {
+  if (typeof relative !== "string" || relative.length === 0) return { ok: false, reason: "has no relative path" };
+  if (relative.includes("\0")) return { ok: false, reason: "contains a NUL byte" };
+  if (relative.startsWith("/") || relative.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(relative)) {
+    return { ok: false, reason: "is absolute" };
+  }
+  const parts = relative.split(/[\\/]/);
+  if (parts.some((part) => UNSAFE_SEGMENTS.has(part))) {
+    return { ok: false, reason: "escapes the collected directory (empty, '.' or '..' segment)" };
+  }
+  return { ok: true, parts };
+}
+
+function sha256File(path) {
+  const digest = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  const fd = openSync(path, "r");
+  try {
+    let read;
+    while ((read = readSync(fd, buffer, 0, buffer.length, null)) > 0) {
+      digest.update(read === buffer.length ? buffer : buffer.subarray(0, read));
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return digest.digest("hex");
+}
+
+/**
+ * Verify the files a manifest records against a collected directory. Pure: no transfer, no mutation.
+ *
+ * `hashes: true` is the apply-time contract: every recorded output must exist, be the recorded size,
+ * carry a sha256, and re-hash to it. The default only checks presence and size, which is what the
+ * older collect paths did; new collect/verify/apply flows pass `hashes: true`.
+ *
+ * @returns {{manifest: object, verified: boolean, problems: string[], outputs: object[]}}
+ */
+export function verifyAgainstManifest(manifest, destDir, { hashes = false } = {}) {
+  const problems = [];
+  const outputs = [];
+  for (const entry of manifest?.jobs || []) {
+    for (const output of entry.outputs || []) {
+      const relative = output?.relative || output?.file || "";
+      const record = { job: entry.job ?? null, relative, ok: false, problem: null, sha256: output?.sha256 ?? null };
+      const safe = safeRelativePath(relative);
+      if (!safe.ok) {
+        record.problem = `${entry.job}: ${relative || "(no path)"} ${safe.reason}`;
+      } else {
+        const file = join(destDir, ...safe.parts);
+        if (!existsSync(file)) {
+          record.problem = `${entry.job}: ${relative} was not collected`;
+        } else {
+          const stat = statSync(file);
+          if (!stat.isFile()) {
+            record.problem = `${entry.job}: ${relative} is not a file`;
+          } else if (output?.bytes && stat.size !== output.bytes) {
+            record.problem = `${entry.job}: ${relative} is ${stat.size} bytes, the manifest says ${output.bytes}`;
+          } else if (hashes) {
+            if (typeof output?.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(output.sha256)) {
+              record.problem = `${entry.job}: ${relative} has no sha256 in the manifest, so it cannot be verified`;
+            } else {
+              const actual = sha256File(file);
+              if (actual.toLowerCase() !== output.sha256.toLowerCase()) {
+                record.problem = `${entry.job}: ${relative} sha256 is ${actual}, the manifest says ${output.sha256}`;
+              }
+            }
+          }
+          if (!record.problem) {
+            record.ok = true;
+            record.bytes = stat.size;
+          }
+        }
+      }
+      if (record.problem) problems.push(record.problem);
+      outputs.push(record);
+    }
+  }
+  return { manifest, verified: problems.length === 0, problems, outputs };
+}
+
+/** A manifest narrowed to the outputs that actually verified: good takes survive a bad sibling. */
+function manifestForVerifiedOutputs(manifest, verification) {
+  // A backend may answer verification with only a boolean. A clean boolean keeps the manifest; a
+  // failed one cannot name the good outputs, so nothing is applied rather than guessing.
+  if (!Array.isArray(verification?.outputs)) {
+    if (verification?.verified === true) return manifest;
+    return { ...manifest, jobs: (manifest.jobs || []).map((entry) => ({ ...entry, outputs: [] })) };
+  }
+  const key = (job, relative) => `${job}\u0000${relative}`;
+  const verified = new Set((verification?.outputs || []).filter((output) => output.ok).map((output) => key(output.job, output.relative)));
+  return {
+    ...manifest,
+    jobs: (manifest.jobs || []).map((entry) => ({
+      ...entry,
+      outputs: (entry.outputs || []).filter((output) => verified.has(key(entry.job, output.relative || output.file || ""))),
+    })),
+  };
+}
+
 export async function runPackage(backend, pkg, opts = {}) {
   if (!backend || typeof backend.run !== "function") throw new TypeError("runPackage needs a backend");
   if (!pkg || typeof pkg !== "object") throw new TypeError("runPackage needs a package");
@@ -206,6 +329,8 @@ export async function runPackage(backend, pkg, opts = {}) {
     bootstrap: null,
     health: null,
     manifest: null,
+    collect: null,
+    verification: null,
     counts: null,
     ok: false,
     package: null,
@@ -256,12 +381,60 @@ export async function runPackage(backend, pkg, opts = {}) {
     // run object read as one: `counts: null`, "applied 0", ok false, and not a word about why. The
     // manifest is the verdict or there is no verdict.
     result.manifest = run?.manifest ?? null;
+    result.collect = run?.collect ?? null;
     if (!result.manifest) {
       result.error = run?.lost === true ? "the run never produced a manifest (its exec was lost)" : "the backend returned no manifest for this run";
     }
     result.counts = result.manifest?.counts ?? null;
     result.ok = result.manifest?.complete === true && !(result.counts?.failed > 0) && !(result.counts?.skipped > 0);
     emit("ran", { counts: result.counts });
+
+    // 5. verify where the backend actually collected, then apply only what verified.
+    //
+    // A Google Colab run collects into its own scratch (`<scratch>/out`), which is not the caller's
+    // `outDir` (pipeline-worker passes outDir=<run>/media-out, scratch=<run>/media-runtime). Verifying
+    // `outDir` there would call every output missing and re-download the whole tree while the GPU is
+    // still billing. The collected dir is the backend's answer; verification is a pure check over it.
+    let collectedDir = run?.collect?.local ?? outDir;
+    let verification = null;
+    if (result.manifest) {
+      const canVerify = Boolean(run?.collect?.local) || typeof backend.verify === "function";
+      if (canVerify) {
+        const verifyNow = async (dir) =>
+          typeof backend.verify === "function"
+            ? await backend.verify(result.manifest, dir)
+            : verifyAgainstManifest(result.manifest, dir, { hashes: true });
+        try {
+          verification = await verifyNow(collectedDir);
+        } catch (error) {
+          verification = { verified: false, problems: [`verification failed: ${error.message}`], outputs: [] };
+        }
+        verification = verification ?? { verified: false, problems: ["verification returned no verdict"], outputs: [] };
+        emit("verified", { verified: verification.verified, problems: verification.problems });
+        let attempts = 0;
+        while (!verification.verified && attempts < COLLECT_RETRY_LIMIT && typeof backend.collect === "function") {
+          attempts += 1;
+          onEvent({ v: 1, event: "collect_retry", type: "collect_retry", attempt: attempts, problems: verification.problems, dir: collectedDir });
+          emit("collecting", { attempt: attempts });
+          try {
+            const collected = await backend.collect(result.manifest, collectedDir, { onEvent });
+            if (collected?.local) collectedDir = collected.local;
+            verification = collected?.outputs
+              ? { verified: collected.verified === true, problems: collected.problems ?? [], outputs: collected.outputs }
+              : await verifyNow(collectedDir);
+          } catch (error) {
+            verification = {
+              verified: false,
+              problems: [...(verification.problems || []), `collect retry ${attempts} failed: ${error.message}`],
+              outputs: verification.outputs || [],
+            };
+          }
+        }
+        result.verification = { ...verification, attempts, dir: collectedDir };
+        emit("verify", { verified: verification.verified, problems: verification.problems, attempts });
+        if (!verification.verified) result.ok = false;
+      }
+    }
 
     if (apply) {
       // the tag the schema accepts for the assets this run produced: the backend decides, because
@@ -271,10 +444,15 @@ export async function runPackage(backend, pkg, opts = {}) {
           ? await backend.appliedBackendId({ up: result.up })
           : (backend.id ?? null);
       result.backend.appliedId = appliedId;
+      // A verified output is the only thing apply may see. A tampered or mismatched file is left out
+      // of the narrowed manifest; good siblings are still applied, and result.ok stays false.
+      const applyManifest = verification
+        ? manifestForVerifiedOutputs(result.manifest, verification)
+        : result.manifest;
       const applied = applyManifestToPackage(pkg, {
-        manifest: result.manifest,
+        manifest: applyManifest,
         jobsDoc,
-        outDir,
+        outDir: collectedDir,
         backend: appliedId,
       });
       result.package = applied.package;
@@ -286,7 +464,7 @@ export async function runPackage(backend, pkg, opts = {}) {
       // R1: the gate runs over what was just applied, the way validate and health already shell out to
       // python. Advisory: the run record carries the verdict, the run itself is not failed by it.
       if (gateCommand !== null) {
-        result.gate = runQualityGate({ package: applied.package, outDir, gateCommand });
+        result.gate = runQualityGate({ package: applied.package, outDir: collectedDir, gateCommand });
         emit("gated", { ok: result.gate.ok, judged: result.gate.judged ?? null, failures: result.gate.failures?.length ?? null });
       }
     }

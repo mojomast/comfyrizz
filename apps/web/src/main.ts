@@ -15,7 +15,15 @@ import { mountCharactersTab } from './characters/mount.ts';
 import { mountReferencePanel } from './references/panel';
 import { apiFetch, installSessionToken, savePackageRequest, sessionToken } from './editor/api.ts';
 import { createAutosave } from './editor/autosave.ts';
-import { createIndexedDbDraftStore, createMemoryDraftStore } from './editor/recovery.ts';
+import {
+  createIndexedDbDraftStore,
+  createMemoryDraftStore,
+  discardRecovery,
+  findRecovery,
+  recoveryDocument,
+  restoreRecovery,
+  type RecoveryOffer,
+} from './editor/recovery.ts';
 import { createEditorStore } from './editor/store.ts';
 import { mountAnimationInspector } from './editor/inspector/animation.ts';
 import { mountVoiceSettings, readRenderLocation, writeRenderLocation } from './voice-settings';
@@ -70,9 +78,9 @@ const paintSaveStatus = () => {
 };
 editorStore.subscribe(paintSaveStatus);
 paintSaveStatus();
+const drafts = typeof indexedDB === 'undefined' ? createMemoryDraftStore() : createIndexedDbDraftStore();
 let autosave: ReturnType<typeof createAutosave> | null = null;
 if (sessionToken()) {
-  const drafts = typeof indexedDB === 'undefined' ? createMemoryDraftStore() : createIndexedDbDraftStore();
   autosave = createAutosave(editorStore, { save: payload => savePackageRequest(apiFetch, payload), drafts });
 }
 
@@ -98,6 +106,128 @@ async function saveEditorNow(): Promise<{
     text: editorStore.statusText(),
   };
 }
+function recoveryLine(label: string, local: string, server: string): string {
+  return `${label}\n  local:  ${local}\n  server: ${server}`;
+}
+
+function dismissRecoveryPrompt(): void {
+  document.getElementById('recovery-prompt')?.remove();
+}
+
+function showRecoveryPrompt(offer: RecoveryOffer): void {
+  dismissRecoveryPrompt();
+  const host = document.createElement('section');
+  host.id = 'recovery-prompt';
+  host.dataset.recoveryPrompt = '1';
+  host.dataset.packageId = offer.packageId;
+  host.setAttribute('role', 'alert');
+  host.setAttribute('aria-live', 'polite');
+  host.setAttribute('aria-label', 'Recovery available for this project');
+  host.style.cssText = 'position:fixed;left:16px;bottom:calc(var(--statusbar-height, 44px) + 12px);z-index:80;max-width:min(620px,calc(100vw - 32px));display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid rgba(255,180,80,.55);border-radius:10px;background:#171b24;color:#f4f6fb;box-shadow:0 10px 30px rgba(0,0,0,.45);font-size:13px';
+
+  const title = document.createElement('strong');
+  title.textContent = `Recovery available for ${offer.comparison.server.title || offer.packageId}`;
+  const summary = document.createElement('span');
+  summary.textContent = offer.summary;
+  summary.style.cssText = 'opacity:.85;line-height:1.4';
+
+  const details = document.createElement('pre');
+  details.hidden = true;
+  details.dataset.recoveryDetails = '1';
+  details.style.cssText = 'margin:0;padding:8px;border-radius:6px;background:rgba(255,255,255,.06);white-space:pre-wrap;font-size:12px;line-height:1.45';
+  const changed = offer.comparison.changedScenes.length ? offer.comparison.changedScenes.join(', ') : 'none';
+  details.textContent = [
+    recoveryLine('Title', offer.comparison.local.title || '—', offer.comparison.server.title || '—'),
+    recoveryLine('Revision', String(offer.comparison.localRevision ?? '—'), String(offer.comparison.serverRevision ?? '—')),
+    recoveryLine('Scenes', String(offer.comparison.local.sceneCount), String(offer.comparison.server.sceneCount)),
+    `Changed scenes: ${changed}`,
+    `Captured: ${offer.at}`,
+  ].join('\n');
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+  const button = (label: string, action: 'compare' | 'restore' | 'discard', primary = false) => {
+    const element = document.createElement('button');
+    element.type = 'button';
+    element.className = `btn ${primary ? 'btn-primary' : 'btn-secondary'} btn-sm`;
+    element.dataset.recoveryAction = action;
+    element.textContent = label;
+    actions.append(element);
+    return element;
+  };
+
+  const compare = button('Compare', 'compare');
+  compare.setAttribute('aria-expanded', 'false');
+  compare.addEventListener('click', () => {
+    details.hidden = !details.hidden;
+    compare.setAttribute('aria-expanded', String(!details.hidden));
+    compare.textContent = details.hidden ? 'Compare' : 'Hide comparison';
+  });
+  button('Restore', 'restore', true).addEventListener('click', () => {
+    const baseRevision = Number(editorStore.getState().doc.package.revision ?? 0);
+    const restored = restoreRecovery(editorStore, offer);
+    pkg = restored.package as unknown as PackageV1;
+    const compiled = editorStore.getState().derived.timeline;
+    if (compiled) timeline = compiled as unknown as Timeline;
+    scrub.max = String(Math.max(0, timeline.durationInFrames - 1));
+    updatePreview(pkg, timeline, generatedAssets);
+    renderStoryboard();
+    renderModeSummary();
+    dismissRecoveryPrompt();
+    logActivity(`Restored the local recovery copy for ${offer.packageId}`);
+    void publishRestored(restored, baseRevision, offer);
+  });
+  button('Discard', 'discard').addEventListener('click', () => {
+    dismissRecoveryPrompt();
+    void discardRecovery(drafts, offer).then(
+      () => logActivity(`Discarded the local recovery copy for ${offer.packageId}`),
+      error => logActivity(`Could not discard the recovery copy: ${(error as Error).message}`),
+    );
+  });
+
+  host.append(title, summary, details, actions);
+  document.body.append(host);
+}
+
+async function publishRestored(restored: ReturnType<typeof recoveryDocument>, baseRevision: number, offer: RecoveryOffer): Promise<void> {
+  const result = await savePackageRequest(apiFetch, {
+    packageId: offer.packageId,
+    baseRevision,
+    package: restored.package,
+    editor: restored.editor,
+    editSequence: 0,
+  });
+  if (result.ok) {
+    editorStore.noteSave({ type: 'ack', editSequence: 0, revision: result.revision });
+    pkg = editorStore.getState().doc.package as unknown as PackageV1;
+    await discardRecovery(drafts, offer).catch(() => undefined);
+    logActivity(`Recovery saved at revision ${result.revision}`);
+    return;
+  }
+  if (result.status === 'conflict') {
+    editorStore.noteSave({ type: 'conflict', currentRevision: result.currentRevision });
+    logActivity('Recovery restored locally; the server has a newer revision');
+    return;
+  }
+  if (result.status === 'offline') {
+    editorStore.noteSave({ type: 'offline' });
+    logActivity('Recovery restored locally; saving is offline');
+    return;
+  }
+  editorStore.noteSave({ type: 'rejected', error: result.error });
+  logActivity(`Recovery restored locally; the server rejected the save: ${result.error ?? 'unknown error'}`);
+}
+
+async function checkRecoveryOnBoot(opened: OpenedProject): Promise<void> {
+  if (!sessionToken() || opened.source === 'bundled') return;
+  try {
+    const offer = await findRecovery(drafts, editorStore.getState().doc);
+    if (offer) showRecoveryPrompt(offer);
+  } catch (error) {
+    logActivity(`Could not read the local recovery copy: ${(error as Error).message}`);
+  }
+}
+
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
 let editorApi: SceneTimelineHandle | null = null;
 function adoptEditorPackage(next: PackageV1): void {
@@ -2693,3 +2823,4 @@ const openedProject = await openInitialProject({
 });
 seededChatId = openedProject.chatId ?? null;
 init(openedProject);
+void checkRecoveryOnBoot(openedProject);

@@ -12,7 +12,7 @@
 //   * a wall-clock cap applies even if metering is stale                 -> admit()
 //   * unknown comfyrizz-* sessions are offered, never auto-stopped       -> orphans()
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { withRunPackage } from "./run-package.mjs";
+import { withRunPackage, verifyAgainstManifest } from "./run-package.mjs";
 import { createLivePreviewCollector } from './live-previews.mjs';
 import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
 import { dirname, join, resolve } from "node:path";
@@ -54,6 +54,30 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..");
+
+/** A production id is used as one path segment, so it may not carry a separator or a traversal part. */
+export const PRODUCTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/**
+ * The per-production scratch root for Google Colab work (ITERATIVE_PRODUCTION_AGENT §9.2).
+ *
+ * A production's session must never share a temporary directory with another production, and the
+ * fallback must never be inside the repository (only `.runtime/` is gitignored). Both the production
+ * id and the runtime root are therefore required: with neither, `createColabBackend` keeps its old
+ * per-package `$TMPDIR/comfyrizz-colab-<packageId>` default instead of pretending a package id is a
+ * production.
+ */
+export function productionScratchDir({ productionId, runtimeDir = process.env.COMFYRIZZ_RUNTIME || null } = {}) {
+  if (typeof productionId !== "string" || !PRODUCTION_ID_PATTERN.test(productionId)) {
+    throw new Error(
+      "productionScratchDir needs a path-safe productionId (letters, digits, dot, dash or underscore; no separators or '..')",
+    );
+  }
+  if (!runtimeDir) {
+    throw new Error("productionScratchDir needs a runtimeDir (or COMFYRIZZ_RUNTIME); it never defaults inside the repository");
+  }
+  return join(resolve(runtimeDir), "productions", productionId, "scratch");
+}
 
 /**
  * Measured wall minutes per job kind (SPEC.md 6.6).
@@ -172,6 +196,10 @@ export function createColabBackend({
   // API refused with a 400 after the session was already paid for. A backend has no business guessing
   // which directory the package lives in: without one, the bundle carries the runner and the schemas.
   packageDir = null,
+  // per-production scratch (IP09): when a production id is given, the runtime root is required too,
+  // so the fallback can never be a non-gitignored folder inside the repository
+  productionId = null,
+  runtimeDir = process.env.COMFYRIZZ_RUNTIME || null,
   scratchDir = null,
   logDir = null,
   budgetUnits = 0,
@@ -207,8 +235,15 @@ export function createColabBackend({
   // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
   ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
   if (!packageId) throw new Error("createColabBackend needs a packageId (it names the session)");
+  if (productionId !== null && productionId !== undefined && (typeof productionId !== "string" || !PRODUCTION_ID_PATTERN.test(productionId))) {
+    throw new Error("createColabBackend needs a path-safe productionId (letters, digits, dot, dash or underscore; no separators or '..')");
+  }
   const session = sessionNameFor(packageId);
-  const scratch = scratchDir || join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${packageId}`);
+  const scratch =
+    scratchDir
+    || (productionId
+      ? productionScratchDir({ productionId, runtimeDir })
+      : join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${packageId}`));
   const logs = logDir || join(scratch, "logs");
   mkdirSync(scratch, { recursive: true });
   if (modelsLock === join(REPO, 'colab', 'models.lock.json')) {
@@ -221,6 +256,7 @@ export function createColabBackend({
   const client = cli || new ColabCli({ logDir: logs, detached: false, bin: resolvedBinary.bin, home: home || undefined });
   const state = {
     session,
+    productionId: productionId || null,
     createdByUs: false,
     startedAtMs: null,
     usageBefore: null,
@@ -234,6 +270,10 @@ export function createColabBackend({
     downloaded: new Map(),
     // "manifest" skips generated plates so a remote render can use the files still on the VM.
     collectPolicy: "full",
+    // IP10: a verified collection from an earlier process, kept for this backend's run().
+    recovery: null,
+    // Set by the runPackage wrapper so ensureUp can look for collected output before allocating.
+    runPackageWorkDir: null,
   };
 
   const emit = (onEvent, event) => {
@@ -268,6 +308,148 @@ export function createColabBackend({
   }
 
   const owns = () => Object.prototype.hasOwnProperty.call(registry().sessions, session);
+
+  /**
+   * IP10: what a process that died after collecting left behind.
+   *
+   * The scratch is per production and durable, so a restart can trust a manifest that was written by
+   * the VM and downloaded here - but only after the same checks the apply step uses: the manifest must
+   * describe *this* jobs document, every job must be settled, and every recorded output must be
+   * present with its recorded size and sha256. Nothing here calls the CLI: recovery is the answer for
+   * a VM that is already stopped (or gone), and it must never become a reason to pay for another one.
+   */
+  function collectedPlanMatch(manifest, doc) {
+    const expected = Array.isArray(doc?.jobs) ? doc.jobs : [];
+    if (!expected.length) return { ok: false, reason: "the jobs document has no jobs to recover" };
+    if (typeof doc.packageId === "string" && typeof manifest?.packageId === "string" && manifest.packageId !== doc.packageId) {
+      return { ok: false, stale: true, reason: "the collected manifest belongs to a different package" };
+    }
+    // A manifest without the plan hash cannot prove it belongs to this jobs.json: output paths are
+    // stable across seeds and edits, so matching them alone would apply stale bytes. Refuse instead.
+    if (typeof doc.hash === "string" && doc.hash && manifest?.jobsHash !== doc.hash) {
+      return { ok: false, stale: true, reason: "the collected manifest belongs to a different jobs.json" };
+    }
+    const recorded = new Map();
+    for (const entry of Array.isArray(manifest?.jobs) ? manifest.jobs : []) {
+      if (entry && typeof entry.job === "string") recorded.set(entry.job, entry);
+    }
+    const expectedIds = new Set(expected.map((job) => job.id));
+    const missing = expected.filter((job) => !recorded.has(job.id)).map((job) => job.id);
+    const extra = [...recorded.keys()].filter((id) => !expectedIds.has(id));
+    if (missing.length || extra.length) {
+      const detail = [missing.length ? `missing ${missing.slice(0, 3).join(", ")}` : "", extra.length ? `extra ${extra.slice(0, 3).join(", ")}` : ""].filter(Boolean).join("; ");
+      return { ok: false, stale: true, reason: `the collected manifest describes a different plan (${detail})` };
+    }
+    const outputPath = (output) => output?.relative || output?.file || "";
+    for (const job of expected) {
+      const entry = recorded.get(job.id);
+      if (!["succeeded", "cached"].includes(entry.status)) {
+        return { ok: false, matched: true, reason: `job ${job.id} is ${entry.status}, not finished` };
+      }
+      const outputs = Array.isArray(entry.outputs) ? entry.outputs : [];
+      if (!outputs.length) return { ok: false, matched: true, reason: `job ${job.id} records no outputs` };
+      if (typeof job.output === "string" && job.output && !outputs.some((output) => outputPath(output) === job.output || outputPath(output) === `out/${job.output}`)) {
+        return { ok: false, matched: true, reason: `job ${job.id} does not record ${job.output}` };
+      }
+    }
+    return { ok: true };
+  }
+
+  function readAttemptRecords(outDir) {
+    const dir = join(outDir, "attempts");
+    if (!existsSync(dir)) return [];
+    const attempts = [];
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        attempts.push(JSON.parse(readFileSync(join(dir, name), "utf8")));
+      } catch {
+        /* a torn attempt file is not allowed to turn a verified collection into a crash */
+      }
+    }
+    return attempts;
+  }
+
+  function recoverCollectedOutput({ jobsFile = null, doc = null, onEvent = null } = {}) {
+    const local = join(scratch, "out");
+    const manifestPath = join(local, "manifest.json");
+    if (!existsSync(manifestPath)) {
+      return { recovered: false, local, reason: "no collected output is present in the scratch directory" };
+    }
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    } catch (error) {
+      return { recovered: false, local, reason: `the collected manifest is unreadable: ${error.message}` };
+    }
+    let jobsDoc = doc;
+    if (!jobsDoc && jobsFile) {
+      try {
+        jobsDoc = JSON.parse(readFileSync(jobsFile, "utf8"));
+      } catch (error) {
+        return { recovered: false, local, manifest, reason: `the jobs document is unreadable: ${error.message}` };
+      }
+    }
+    if (jobsDoc) {
+      const match = collectedPlanMatch(manifest, jobsDoc);
+      if (!match.ok) return { recovered: false, local, manifest, ...match };
+    }
+    if (manifest?.complete !== true) {
+      return { recovered: false, matched: Boolean(jobsDoc), local, manifest, reason: "the collected manifest is not complete" };
+    }
+    const verification = verifyAgainstManifest(manifest, local, { hashes: true });
+    if (!verification.verified) {
+      return {
+        recovered: false,
+        matched: Boolean(jobsDoc),
+        local,
+        manifest,
+        verified: false,
+        problems: verification.problems,
+        reason: `the collected output did not verify: ${verification.problems.slice(0, 3).join("; ")}`,
+      };
+    }
+    const files = verification.outputs.length;
+    const attempts = readAttemptRecords(local);
+    const collect = {
+      ok: true,
+      manifest,
+      attempts,
+      local,
+      verified: true,
+      problems: [],
+      missing: [],
+      files,
+      fetched: 0,
+      skipped: files,
+      recovered: true,
+    };
+    emit(onEvent, {
+      type: "collect_recovered",
+      local,
+      files,
+      verified: true,
+      jobs: Array.isArray(manifest.jobs) ? manifest.jobs.length : 0,
+      manifest: "verified",
+    });
+    return {
+      recovered: true,
+      local,
+      manifest,
+      collect,
+      verification,
+      jobs: Array.isArray(manifest.jobs) ? manifest.jobs.length : 0,
+      files,
+      reason: "verified collected output from an earlier run",
+    };
+  }
+
+  function recoveryFor({ jobsFile = null, doc = null, onEvent = null } = {}) {
+    if (state.recovery?.recovered && state.recovery.jobsFile === jobsFile) return state.recovery;
+    const result = jobsFile ? { ...recoverCollectedOutput({ jobsFile, doc, onEvent }), jobsFile } : recoverCollectedOutput({ doc, onEvent });
+    state.recovery = result;
+    return result;
+  }
 
   /** A step through the CLI, tolerating a missing binary with a clear message instead of a stack. */
   async function step(args, opts = {}) {
@@ -641,6 +823,22 @@ export function createColabBackend({
 
     /** Allocate only if needed. The caller has already shown the spend approval card. */
     async ensureUp({ approved = false, onEvent = null, signal = null } = {}) {
+      // IP10: a restart after a completed collect has nothing left to buy. Check the scratch tree
+      // before `colab sessions` (which is only read-only but still a CLI round trip), and never call
+      // `colab new` for work that is already on this host.
+      if (state.runPackageWorkDir) {
+        const candidate = recoveryFor({ jobsFile: join(state.runPackageWorkDir, "jobs.json"), onEvent });
+        if (candidate.recovered) {
+          emit(onEvent, { type: "ensure_up", recovered: true, session, jobs: candidate.jobs, files: candidate.files });
+          return {
+            state: "recovered",
+            session,
+            hardware: gpu,
+            recovered: true,
+            evidence: `verified ${candidate.files} collected file(s) from ${candidate.local}`,
+          };
+        }
+      }
       const found = await sessions();
       const existing = found.sessions.find((entry) => entry.name === session && !entry.orphan);
       if (existing && owns()) {
@@ -698,6 +896,11 @@ export function createColabBackend({
 
     /** Upload the HF token as a 0600 file, then run the bootstrap script. Never `--env`. */
     async bootstrap({ onEvent = null, timeout = 900, signal = null } = {}) {
+      // IP10: there is no VM to bootstrap when the run is coming from the host's scratch.
+      if (state.recovery?.recovered) {
+        emit(onEvent, { type: "bootstrap", skipped: true, recovered: true });
+        return { code: 0, recovered: true, skipped: true };
+      }
       if (!hfTokenPath || !existsSync(hfTokenPath)) {
         throw new ColabCliError("Refusing to bootstrap without the Hugging Face token file (see preflight).");
       }
@@ -764,6 +967,10 @@ export function createColabBackend({
     },
 
     async health({ onEvent = null } = {}) {
+      if (state.recovery?.recovered) {
+        emit(onEvent, { type: "health", recovered: true });
+        return { ok: true, recovered: true, detail: "using the verified collected output; no VM health check was needed" };
+      }
       const result = await execScript(healthScript, { step: "health", timeout: 300, wallMs: 360000, onEvent });
       const outcome = execOutcome(result, "health");
       if (!outcome.ok) {
@@ -790,6 +997,31 @@ export function createColabBackend({
      */
     async run(jobsFile, onEvent = () => {}, signal = null) {
       const doc = JSON.parse(readFileSync(jobsFile, "utf8"));
+      // IP10: a restarted process must continue from what the last one collected. A complete,
+      // checksum-verified manifest for this exact plan is the run's result; no upload, no exec and no
+      // inference submit happens. A manifest that belongs to another plan is ignored (a new run wins);
+      // a matching but unfinished or unverifiable one is reported and left to the normal path.
+      const collected = recoveryFor({ jobsFile, doc, onEvent });
+      if (collected.recovered) {
+        state.runId = collected.manifest.run_id || state.runId;
+        emit(onEvent, { type: "run_recovered", recovered: true, jobs: collected.jobs, files: collected.files, local: collected.local });
+        return {
+          lost: false,
+          recovered: true,
+          batchesRun: [],
+          manifest: collected.manifest,
+          collect: collected.collect,
+          missing: [],
+          recovery: {
+            local: collected.local,
+            files: collected.files,
+            jobs: collected.jobs,
+            verified: true,
+            reason: collected.reason,
+          },
+        };
+      }
+      if (collected.matched) emit(onEvent, { type: "recovery_refused", reason: collected.reason, problems: collected.problems || [] });
       const jobs = Array.isArray(doc.jobs) ? doc.jobs : [];
       const batchNames = (doc.batches || []).map((entry) => entry.name);
       const perBatch = batchNames.length > 1;
@@ -895,8 +1127,14 @@ export function createColabBackend({
         if (collect.manifest) batchManifests.push(collect.manifest);
       }
 
-      collect = await collectOut({ onEvent, expectComplete: true });
-      manifest = collect.manifest || manifest;
+      // A single-batch plan already collected its whole tree in the loop above; collecting it a second
+      // time only lists it again and re-downloads nothing (the remembered listing skips every file),
+      // but it still costs a billed `colab exec`. A multi-batch plan needs the final collect to merge
+      // what the last batch wrote.
+      if (perBatch || !collect) {
+        collect = await collectOut({ onEvent, expectComplete: true });
+        manifest = collect.manifest || manifest;
+      }
       if (perBatch && batchManifests.length) manifest = mergeBatchManifests([...batchManifests, ...(manifest ? [manifest] : [])], jobs);
       if (!manifest) {
         // G5-7: without a manifest there is no verdict to apply, and the run panel used to show a bare
@@ -934,10 +1172,73 @@ export function createColabBackend({
       };
     },
 
-    async collect(manifest, destDir) {
-      const downloaded = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: destDir });
-      if (!downloaded.ok) throw new ColabCliError("collecting out/ from the VM failed");
-      return verifyAgainstManifest(manifest, destDir);
+    /**
+     * Collect is its own retryable step (IP09): re-fetch the VM's existing out/ tree, then verify.
+     *
+     * It never runs `run_jobs.py` or `reconcile.py` - a failed transfer must not cost inference. The
+     * tree is listed again on the VM and every file is downloaded again (`remember: null`), because a
+     * retry follows a failed digest and the cached "size and mtime agreed" record cannot be trusted.
+     */
+    async collect(manifest, destDir, { onEvent = null } = {}) {
+      const downloaded = await downloadTree({
+        remoteDir: `${REMOTE_ROOT}/out`,
+        localDir: destDir,
+        onEvent,
+        remember: null,
+      });
+      const verification = downloaded.ok
+        ? verifyAgainstManifest(manifest, destDir, { hashes: true })
+        : {
+            manifest,
+            verified: false,
+            outputs: [],
+            problems: [`collecting out/ from the VM failed${downloaded.detail ? `: ${downloaded.detail}` : ""}`],
+          };
+      emit(onEvent, {
+        type: "collect",
+        retry: true,
+        verified: verification.verified,
+        problems: verification.problems,
+        files: downloaded.files ?? 0,
+        fetched: downloaded.fetched ?? 0,
+        skipped: downloaded.skipped ?? 0,
+        missing: downloaded.missing ?? [],
+      });
+      return {
+        ok: downloaded.ok && verification.verified,
+        local: destDir,
+        verified: verification.verified,
+        problems: verification.problems,
+        outputs: verification.outputs,
+        missing: downloaded.missing ?? [],
+        files: downloaded.files ?? 0,
+        fetched: downloaded.fetched ?? 0,
+        skipped: downloaded.skipped ?? 0,
+      };
+    },
+
+    /** Pure verification (no transfer): the apply-time check over an already-collected directory. */
+    async verify(manifest, destDir) {
+      return verifyAgainstManifest(manifest, destDir, { hashes: true });
+    },
+
+    /**
+     * IP10: inspect the scratch for an already-collected, verified result for `jobsFile`.
+     *
+     * Read-only and CLI-free. `recovered: true` means `run()` will return that manifest without
+     * submitting anything; `stale: true` means the scratch belongs to a different plan and must not be
+     * applied; `matched: true` with `recovered: false` means this plan's output is there but unfinished
+     * or did not verify.
+     */
+    async recoverCollected(options = {}) {
+      const { jobsFile = null, onEvent = null } = typeof options === "string" ? { jobsFile: options } : options || {};
+      return recoveryFor({ jobsFile, onEvent });
+    },
+
+    /** Alias for `recoverCollected`: the verb a restart caller looks for. */
+    async recover(options = {}) {
+      const { jobsFile = null, onEvent = null } = typeof options === "string" ? { jobsFile: options } : options || {};
+      return recoveryFor({ jobsFile, onEvent });
     },
 
     /**
@@ -1210,7 +1511,21 @@ export function createColabBackend({
   }
 
   state.runId = null;
-  return withRunPackage(backend);
+  const bound = withRunPackage(backend);
+  // IP10: runPackage writes workDir/jobs.json before ensureUp, so the wrapper only has to remember
+  // the work directory for the recovery preflight. Direct `run()` callers are covered as well.
+  const runPackageBound = bound.runPackage;
+  bound.runPackage = async (pkg, opts = {}) => {
+    const previous = state.runPackageWorkDir;
+    state.runPackageWorkDir = typeof opts.workDir === "string" ? opts.workDir : null;
+    state.recovery = null;
+    try {
+      return await runPackageBound(pkg, opts);
+    } finally {
+      state.runPackageWorkDir = previous;
+    }
+  };
+  return bound;
 }
 
 /**
@@ -1361,21 +1676,7 @@ export function assertBundleComplete(bundle, opts = {}) {
   return true;
 }
 
-/** The manifest alone decides success; every recorded output is re-hashed on disk. */
-export function verifyAgainstManifest(manifest, destDir) {
-  const problems = [];
-  for (const entry of manifest?.jobs || []) {
-    for (const output of entry.outputs || []) {
-      const file = join(destDir, output.relative || output.file || "");
-      if (!existsSync(file)) {
-        problems.push(`${entry.job}: ${output.relative || output.file} was not collected`);
-        continue;
-      }
-      const size = statSync(file).size;
-      if (output.bytes && size !== output.bytes) problems.push(`${entry.job}: ${output.relative} is ${size} bytes, the manifest says ${output.bytes}`);
-    }
-  }
-  return { manifest, verified: problems.length === 0, problems };
-}
+/** The manifest alone decides success; the shared verifier lives in run-package.mjs. */
+export { verifyAgainstManifest };
 
 export { REMOTE_ROOT, HF_TOKEN_REMOTE_PATH };

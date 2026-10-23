@@ -2,10 +2,14 @@
  * M2: the renderer side of the M1 sound design. Kept free of JSX/Remotion so it
  * can be unit-tested on plain Node (see test/audio-mix.test.mjs).
  *
- * The package declares the mix (`pkg.audio`: a music bed, plate ambience and
- * short SFX); this module turns that into per-frame linear gains the Remotion
- * `<Audio>` nodes can read. A package with no `audio` block resolves to an empty
- * mix, so a video without sound design renders exactly as before.
+ * The package declares the mix (`pkg.audio`: a music bed, native dialogue, plate
+ * ambience and short SFX); this module turns that into per-frame linear gains the
+ * Remotion `<Audio>` nodes can read. A package with no `audio` block resolves to
+ * an empty mix, so a video without sound design renders exactly as before.
+ *
+ * A FastH3 Omni plate's native audio is dialogue: it gets its own unity-gain bus
+ * and is never ducked. LTX plate audio and FastH3 shots without a dialogue
+ * direction stay on the ambience bus.
  *
  * Ducking is a sidechain under the narration: the music bed and the ambience bus
  * drop by `reduction_db` while a caption cue is speaking, with a 20 ms attack and
@@ -22,6 +26,7 @@ export const AUDIO_MIX_DEFAULTS = Object.freeze({
   musicFadeInSeconds: 0.5,
   musicFadeOutSeconds: 1,
   musicLoop: true,
+  dialogueGainDb: 0,
   ambienceGainDb: -24,
   sfxGainDb: -6,
   duckReductionDb: -12,
@@ -58,6 +63,60 @@ function readyPlateWithAudio(asset) {
     asset.file.length > 0 &&
     asset.media?.audio === 'present'
   );
+}
+
+/** A plate whose generation direction asked for spoken dialogue. */
+function hasNativeDialogue(asset) {
+  return isObject(asset?.gen?.direction?.dialogue);
+}
+
+/**
+ * IP51: the window a scene's audio actually plays. `null` means the legacy
+ * scene-bound placement. A linked trim is derived from the current picture
+ * trim and the placed scene duration, so re-timing the scene keeps the audio
+ * attached; only an unlinked trim stores an independent J/L window.
+ */
+function audioPlacement(scene, timed, fps) {
+  const trim = isObject(scene?.audio_trim) ? scene.audio_trim : null;
+  if (!trim) return null;
+  const offsetFrames = Number.isInteger(trim.offsetFrames) ? trim.offsetFrames : 0;
+  const from = timed.from + offsetFrames;
+  if (trim.linked === true) {
+    const picture = isObject(scene.background?.trim) ? scene.background.trim : null;
+    const startSeconds =
+      typeof picture?.startSeconds === 'number' && Number.isFinite(picture.startSeconds) && picture.startSeconds >= 0
+        ? picture.startSeconds
+        : 0;
+    const durationInFrames = Math.max(0, Math.floor(timed.durationInFrames ?? 0));
+    return { from, durationInFrames, startSeconds, endSeconds: startSeconds + durationInFrames / fps };
+  }
+  const startSeconds = trim.startSeconds;
+  const endSeconds = trim.endSeconds;
+  if (
+    typeof startSeconds !== 'number' ||
+    typeof endSeconds !== 'number' ||
+    !Number.isFinite(startSeconds) ||
+    !Number.isFinite(endSeconds) ||
+    startSeconds < 0 ||
+    endSeconds <= startSeconds
+  ) {
+    return null;
+  }
+  return {
+    from,
+    durationInFrames: Math.max(1, Math.round((endSeconds - startSeconds) * fps)),
+    startSeconds,
+    endSeconds,
+  };
+}
+
+/** Gains for a trimmed window, indexed by output frame. */
+function timedGains(envelope, from, durationInFrames, base) {
+  const out = new Array(Math.max(0, durationInFrames));
+  for (let frame = 0; frame < out.length; frame += 1) {
+    out[frame] = (envelope[from + frame] ?? 1) * base;
+  }
+  return out;
 }
 
 /** Fill the ducking defaults from the schema. */
@@ -177,6 +236,7 @@ export function sfxFrame(timeline, sfx) {
  * @returns {{
  *   enabled: boolean,
  *   music: null | { assetId: string, file: string, gainDb: number, loop: boolean, duck: ReturnType<typeof normalizeDuck>, gains: number[] },
+ *   dialogue: Array<{ assetId: string, file: string, sceneId: string, from: number, durationInFrames: number, gainDb: number, duck: ReturnType<typeof normalizeDuck>, gains: number[] }>,
  *   ambience: Array<{ assetId: string, file: string, sceneId: string, from: number, durationInFrames: number, gainDb: number, duck: ReturnType<typeof normalizeDuck>, gains: number[] }>,
  *   sfx: Array<{ assetId: string, file: string, sceneId: string, from: number, durationInFrames: number, gainDb: number }>,
  * }}
@@ -184,11 +244,12 @@ export function sfxFrame(timeline, sfx) {
 export function resolveAudioMix(pkg, timeline) {
   const assets = pkg?.assets ?? {};
   const audio = isObject(pkg?.audio) ? pkg.audio : null;
-  const mix = { enabled: false, music: null, ambience: [], sfx: [] };
+  const mix = { enabled: false, music: null, dialogue: [], ambience: [], sfx: [] };
   if (!audio) return mix;
   const fps = timeline?.fps ?? 30;
   const frames = Math.max(0, timeline?.durationInFrames ?? 0);
   const intervals = narrationIntervals(timeline);
+  const timelineScenes = new Map((timeline?.scenes ?? []).map(scene => [scene.id, scene]));
 
   if (isObject(audio.music) && readyAudio(assets[audio.music.asset])) {
     const music = audio.music;
@@ -209,26 +270,56 @@ export function resolveAudioMix(pkg, timeline) {
     };
   }
 
+  const dialogue = isObject(audio.dialogue) ? audio.dialogue : {};
+  if (dialogue.enabled !== false) {
+    const gainDb = typeof dialogue.gain_db === 'number' ? dialogue.gain_db : AUDIO_MIX_DEFAULTS.dialogueGainDb;
+    const duck = normalizeDuck({ enabled: false });
+    const base = dbToLinear(gainDb);
+    for (const scene of pkg?.scenes ?? []) {
+      const asset = assets[scene?.background?.asset];
+      if (!readyPlateWithAudio(asset) || !hasNativeDialogue(asset)) continue;
+      const timed = timelineScenes.get(scene.id);
+      if (!timed) continue;
+      const placement = audioPlacement(scene, timed, fps);
+      const from = placement ? placement.from : timed.from;
+      const durationInFrames = placement ? placement.durationInFrames : timed.durationInFrames;
+      mix.dialogue.push({
+        assetId: scene.background.asset,
+        file: asset.file,
+        sceneId: scene.id,
+        from,
+        durationInFrames,
+        ...(placement ? { startSeconds: placement.startSeconds, endSeconds: placement.endSeconds } : {}),
+        gainDb,
+        duck,
+        gains: new Array(Math.max(0, durationInFrames)).fill(base),
+      });
+    }
+  }
+
   if (isObject(audio.ambience) && audio.ambience.enabled !== false) {
     const gainDb = typeof audio.ambience.gain_db === 'number' ? audio.ambience.gain_db : AUDIO_MIX_DEFAULTS.ambienceGainDb;
     const duck = normalizeDuck(audio.ambience.duck);
     const envelope = duckEnvelope(frames, fps, intervals, duck);
     const base = dbToLinear(gainDb);
-    const timelineScenes = new Map((timeline?.scenes ?? []).map(scene => [scene.id, scene]));
     for (const scene of pkg?.scenes ?? []) {
       const asset = assets[scene?.background?.asset];
-      if (!readyPlateWithAudio(asset)) continue;
+      if (!readyPlateWithAudio(asset) || hasNativeDialogue(asset)) continue;
       const timed = timelineScenes.get(scene.id);
       if (!timed) continue;
+      const placement = audioPlacement(scene, timed, fps);
       mix.ambience.push({
         assetId: scene.background.asset,
         file: asset.file,
         sceneId: scene.id,
-        from: timed.from,
-        durationInFrames: timed.durationInFrames,
+        from: placement ? placement.from : timed.from,
+        durationInFrames: placement ? placement.durationInFrames : timed.durationInFrames,
+        ...(placement ? { startSeconds: placement.startSeconds, endSeconds: placement.endSeconds } : {}),
         gainDb,
         duck,
-        gains: envelope.slice(timed.from, timed.from + timed.durationInFrames).map(gain => gain * base),
+        gains: placement
+          ? timedGains(envelope, placement.from, placement.durationInFrames, base)
+          : envelope.slice(timed.from, timed.from + timed.durationInFrames).map(gain => gain * base),
       });
     }
   }
@@ -249,6 +340,6 @@ export function resolveAudioMix(pkg, timeline) {
     });
   }
 
-  mix.enabled = Boolean(mix.music) || mix.ambience.length > 0 || mix.sfx.length > 0;
+  mix.enabled = Boolean(mix.music) || mix.dialogue.length > 0 || mix.ambience.length > 0 || mix.sfx.length > 0;
   return mix;
 }

@@ -12,9 +12,13 @@ import {
   createTakesApi,
   isMediaTicketUrl,
   takeLooksLikeImage,
+  reviewCostCardEstimateLabel,
   takePosterMediaUrl,
   type ClipSummary,
   type ClipTake,
+  type ProductionReviewApi,
+  type ReviewCostCard,
+  type ReviewRedoProposalInput,
   type TakesApi,
   type TakesResponse,
 } from './api.ts';
@@ -347,6 +351,17 @@ export interface ReviewDrawerModelOptions {
   onRedo?: ReviewClipAction;
   onSelect?: (clipId: string) => void;
   onOpenTakes?: (clipId: string) => void;
+  /** IP31: production command binding for Redo, select and reject. */
+  production?: ProductionReviewApi | null;
+  /** An already-proposed plan card to render immediately. */
+  costCard?: ReviewCostCard | null;
+  /** Extra plan-proposal input (for example the Takes inspector correction). */
+  redoInput?: (clip: ClipSummary) => Partial<ReviewRedoProposalInput> | null | undefined;
+  onPreview?: (clip: ClipSummary, takeId: string) => void;
+  onSelectTake?: (clip: ClipSummary, takeId: string) => void | Promise<void>;
+  onRejectTake?: (clip: ClipSummary, takeId: string) => void | Promise<void>;
+  /** Usually `?package=`; a getter keeps a re-opened project current. */
+  packageId?: string | (() => string);
   onAnnounce?: (message: string) => void;
   onChange?: (model: ReviewDrawerModel) => void;
   confirm?: (message: string) => boolean;
@@ -378,6 +393,11 @@ export interface ReviewDrawerHandle {
   isOpen(): boolean;
   setClips(clips: readonly ClipSummary[]): void;
   setGate(gate: ReviewGateLike | null | undefined): void;
+  previewTake(takeId?: string, clipId?: string): Promise<boolean>;
+  selectTake(takeId?: string, clipId?: string): Promise<boolean>;
+  rejectTake(takeId?: string, clipId?: string, note?: string): Promise<boolean>;
+  approveCost(): Promise<boolean>;
+  cancelCost(): void;
   requestOverride(gate?: ReviewGateLike | null): Promise<string | null>;
   closeOverride(): void;
   destroy(): void;
@@ -622,7 +642,13 @@ export class ReviewDrawerModel {
   liveMessage = '';
   busy = false;
   fallbackGate: ReviewGateLike | null;
+  /** The persisted proposal currently shown before spend. */
+  costCard: ReviewCostCard | null = null;
+  costError = '';
+  /** Which take is only being looked at; preview never writes a selection. */
+  previewTakeId: string | null = null;
   options: ReviewDrawerModelOptions;
+  private pendingCostClipId = '';
 
   constructor(options: ReviewDrawerModelOptions = {}) {
     this.options = options;
@@ -634,6 +660,7 @@ export class ReviewDrawerModel {
     this.rowHeight = Math.max(1, Number(options.rowHeight) || reviewRowHeight(options.density ?? currentDensity()));
     this.overscan = Math.max(0, Math.floor(Number(options.overscan ?? REVIEW_OVERSCAN) || 0));
     this.fallbackGate = options.gate ?? null;
+    this.costCard = options.costCard ?? null;
     this.ensureActive();
   }
 
@@ -779,6 +806,17 @@ export class ReviewDrawerModel {
       if (this.options.onApprove) {
         const result = await this.options.onApprove(clip);
         ok = result !== false;
+      } else if (this.options.production) {
+        const takeId = this.selectedTakeId(clip);
+        if (!takeId) {
+          ok = false;
+        } else {
+          await this.options.production.approveTake({
+            clipId: clip.clipId,
+            assetId: textOf(clip.assetId),
+            takeId,
+          });
+        }
       }
     } catch {
       ok = false;
@@ -830,6 +868,209 @@ export class ReviewDrawerModel {
     }
   }
 
+  private packageIdValue(): string {
+    const value = typeof this.options.packageId === 'function'
+      ? this.options.packageId()
+      : this.options.packageId;
+    return textOf(value).trim();
+  }
+
+  private selectedTakeId(clip: ClipSummary | null | undefined): string {
+    return textOf(clip?.selected);
+  }
+
+  private proposedRedoInput(clip: ClipSummary): ReviewRedoProposalInput {
+    const extra = this.options.redoInput?.(clip);
+    const packageId = this.packageIdValue();
+    return {
+      ...(isObject(extra) ? extra : {}),
+      clipId: clip.clipId,
+      assetId: textOf(clip.assetId),
+      ...(packageId ? { packageId } : {}),
+    };
+  }
+
+  private messageOf(error: unknown): string {
+    if (error instanceof Error && error.message) return error.message;
+    return typeof error === 'string' ? error : '';
+  }
+
+  /**
+   * IP31F: with a production binding, Redo proposes an IP20 action plan and
+   * shows the server's cost card. It deliberately does not queue the clip or
+   * send a spend command.
+   */
+  private async proposeRedo(clip: ClipSummary): Promise<boolean> {
+    const production = this.options.production;
+    if (!production) return false;
+    this.busy = true;
+    this.costCard = null;
+    this.costError = '';
+    try {
+      const card = await production.proposeRedo(this.proposedRedoInput(clip));
+      this.costCard = card;
+      this.costError = '';
+      this.pendingCostClipId = clip.clipId;
+      this.setLive(`Review the cost before spending on ${shortClipId(clip.clipId)}`);
+      this.notify();
+      return true;
+    } catch (error) {
+      const message = this.messageOf(error);
+      this.costError = message || 'The plan proposal was invalid';
+      this.setLive(message
+        ? `Redo failed: ${message}`
+        : `Could not propose a redo for ${shortClipId(clip.clipId)}`);
+      this.notify();
+      return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private costClipId(): string {
+    return textOf(this.costCard?.clipId) || this.pendingCostClipId;
+  }
+
+  async approveCost(): Promise<boolean> {
+    if (this.busy) return false;
+    const card = this.costCard;
+    const production = this.options.production;
+    if (!card || !production) return false;
+    this.busy = true;
+    try {
+      await production.approvePlan(card);
+      const clipId = this.costClipId();
+      this.costCard = null;
+      this.costError = '';
+      this.pendingCostClipId = '';
+      if (clipId) this.updateClip(clipId, { state: 'queued', queued: true, newTakes: 0 });
+      this.setLive(`Spend approved for ${shortClipId(clipId) || 'the clip'}`);
+      this.ensureActive();
+      this.notify();
+      return true;
+    } catch (error) {
+      const message = this.messageOf(error);
+      this.costError = message || 'The spend was not approved';
+      this.setLive(`Could not approve spend: ${this.costError}`);
+      this.notify();
+      return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  cancelCost(): void {
+    if (!this.costCard) return;
+    const clipId = this.costClipId();
+    this.costCard = null;
+    this.costError = '';
+    this.pendingCostClipId = '';
+    this.setLive(`Spend cancelled for ${shortClipId(clipId) || 'the clip'}`);
+    this.notify();
+  }
+
+  /**
+   * Previewing is read-only. It records the take the user is looking at and
+   * never sends `take.select`; only `selectTake` below may write a selection.
+   */
+  async previewTake(takeId?: string, clipId = this.activeId): Promise<boolean> {
+    const clip = this.clips.find(item => item.clipId === clipId);
+    if (!clip) return false;
+    const resolved = textOf(takeId) || this.selectedTakeId(clip);
+    if (!resolved) return false;
+    this.previewTakeId = resolved;
+    this.options.onPreview?.(clip, resolved);
+    this.setLive(`Previewing take ${resolved}`);
+    this.notify();
+    return true;
+  }
+
+  async selectTake(takeId?: string, clipId = this.activeId): Promise<boolean> {
+    if (this.busy) return false;
+    const clip = this.clips.find(item => item.clipId === clipId);
+    if (!clip) return false;
+    const resolved = textOf(takeId) || this.selectedTakeId(clip);
+    if (!resolved) return false;
+    const production = this.options.production;
+    if (!production && !this.options.onSelectTake) return false;
+    this.busy = true;
+    try {
+      if (this.options.onSelectTake) await this.options.onSelectTake(clip, resolved);
+      else await production!.selectTake({
+        clipId: clip.clipId,
+        assetId: textOf(clip.assetId),
+        takeId: resolved,
+      });
+      this.updateClip(clip.clipId, { selected: resolved });
+      this.previewTakeId = resolved;
+      this.setLive(`Selected take ${resolved} for ${shortClipId(clip.clipId)}`);
+      this.notify();
+      return true;
+    } catch (error) {
+      const message = this.messageOf(error);
+      this.setLive(message
+        ? `Could not select take: ${message}`
+        : `Could not select take for ${shortClipId(clip.clipId)}`);
+      this.notify();
+      return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async rejectTake(takeId?: string, clipId = this.activeId, note?: string): Promise<boolean> {
+    if (this.busy) return false;
+    const clip = this.clips.find(item => item.clipId === clipId);
+    if (!clip) return false;
+    const resolved = textOf(takeId) || this.selectedTakeId(clip);
+    if (!resolved) return false;
+    const production = this.options.production;
+    if (!production && !this.options.onRejectTake) return false;
+    this.busy = true;
+    try {
+      if (this.options.onRejectTake) await this.options.onRejectTake(clip, resolved);
+      else await production!.rejectTake({
+        clipId: clip.clipId,
+        assetId: textOf(clip.assetId),
+        takeId: resolved,
+        ...(note !== undefined ? { note } : {}),
+      });
+      this.updateClip(clip.clipId, { state: 'rejected' });
+      this.setLive(`Take ${resolved} rejected for ${shortClipId(clip.clipId)}`);
+      this.notify();
+      return true;
+    } catch (error) {
+      const message = this.messageOf(error);
+      this.setLive(message
+        ? `Could not reject take: ${message}`
+        : `Could not reject take for ${shortClipId(clip.clipId)}`);
+      this.notify();
+      return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  reject(clipId = this.activeId, takeId?: string, note?: string): Promise<boolean> {
+    return this.rejectTake(takeId, clipId, note);
+  }
+
+  select(takeId?: string, clipId = this.activeId): Promise<boolean> {
+    return this.selectTake(takeId, clipId);
+  }
+
+  preview(takeId?: string, clipId = this.activeId): Promise<boolean> {
+    return this.previewTake(takeId, clipId);
+  }
+
+  approveSpend(): Promise<boolean> {
+    return this.approveCost();
+  }
+
+  cancelSpend(): void {
+    this.cancelCost();
+  }
+
   private redoFailureReason(clip: ClipSummary, result: ReviewActionResult): string {
     if (isObject(result) && result.ok === false) {
       const reason = textOf(result.reason).trim();
@@ -842,6 +1083,7 @@ export class ReviewDrawerModel {
     if (this.busy) return false;
     const clip = this.clips.find(item => item.clipId === clipId);
     if (!clip) return false;
+    if (this.options.production) return await this.proposeRedo(clip);
     this.busy = true;
     try {
       let result: ReviewActionResult = true;
@@ -977,6 +1219,7 @@ function drawerShell(model: ReviewDrawerModel): string {
     <div class="review-list-wrap">
       <div class="review-list" id="review-list" role="listbox" aria-label="Clips" aria-activedescendant="" data-review-list></div>
     </div>
+    <section class="review-cost-card panel" data-review-cost-card${model.costCard ? ` data-plan-hash="${escapeReviewHtml(model.costCard.planHash)}" data-plan-id="${escapeReviewHtml(model.costCard.planId)}" data-plan-revision="${escapeReviewHtml(model.costCard.proposalRevision)}" data-reservation-ceiling="${escapeReviewHtml(model.costCard.reservationCeiling)}"` : ' hidden'} aria-labelledby="review-cost-title">${reviewCostCardBody(model.costCard)}</section>
     <div class="review-footer">
       <button type="button" class="btn btn-secondary btn-sm review-approve-all" data-review-approve-all aria-keyshortcuts="Shift+A">Approve all visible</button>
       <div class="review-gate-actions" data-review-gate-actions></div>
@@ -1000,6 +1243,55 @@ function gateActions(model: ReviewDrawerModel): string {
   }
   return `<span class="hint">${gate.blocking?.length ?? Math.max(0, gate.total - gate.approved)} waiting</span>
     <button type="button" class="btn btn-secondary btn-sm render-bar-override-open" data-render-open-override>Render anyway</button>`;
+}
+
+function costBackendLabel(card: ReviewCostCard): string {
+  const id = textOf(card.backendId).trim();
+  if (!id) return 'Backend chosen at dispatch';
+  const normalized = id.toLowerCase().replace(/[_-]+/g, ' ').trim();
+  return normalized === 'colab' || normalized === 'google colab' ? 'Google Colab' : id;
+}
+
+function costBudgetLabel(card: ReviewCostCard): string {
+  const ceiling = numberOrNull(card.reservationCeiling);
+  if (ceiling === null) return 'Reservation ceiling pending';
+  return `${ceiling} unit${ceiling === 1 ? '' : 's'} reservation ceiling`;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The body of the pre-spend card. It renders only the server's action plan and
+ * never HTML supplied by a model or client-computed estimate values.
+ */
+export function reviewCostCardBody(card: ReviewCostCard | null | undefined): string {
+  if (!card) return '';
+  const estimate = reviewCostCardEstimateLabel(card);
+  const plan = textOf(card.planHash);
+  const planId = textOf(card.planId);
+  const shortPlan = plan.length > 14 ? `${plan.slice(0, 8)}…${plan.slice(-4)}` : plan;
+  const planRevision = Number.isSafeInteger(card.proposalRevision) ? card.proposalRevision : 0;
+  return `<div class="review-cost-head">
+      <h3 id="review-cost-title">Cost before you spend</h3>
+      <span class="badge badge-warn" data-review-cost-backend>${escapeReviewHtml(costBackendLabel(card))}</span>
+    </div>
+    <p class="review-cost-lead" data-review-cost-estimate>${escapeReviewHtml(estimate)}</p>
+    <dl class="review-cost-facts">
+      <div><dt>Reservation ceiling</dt><dd data-review-cost-budget>${escapeReviewHtml(costBudgetLabel(card))}</dd></div>
+      <div><dt>Plan</dt><dd data-review-cost-plan title="${escapeReviewHtml(plan)}" data-plan-id="${escapeReviewHtml(planId)}" data-plan-revision="${escapeReviewHtml(planRevision)}">${escapeReviewHtml(shortPlan)} · revision ${escapeReviewHtml(planRevision)}</dd></div>
+    </dl>
+    <p class="review-cost-error" data-review-cost-error role="alert"></p>
+    <div class="review-cost-actions toolbar">
+      <button type="button" class="btn btn-primary primary btn-sm" data-review-cost-approve>Approve spend</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-review-cost-cancel>Cancel</button>
+    </div>`;
+}
+
+export function renderReviewCostCard(card: ReviewCostCard | null | undefined): string {
+  if (!card) return '';
+  return `<section class="review-cost-card panel" data-review-cost-card data-plan-hash="${escapeReviewHtml(card.planHash)}" data-plan-id="${escapeReviewHtml(card.planId)}" data-plan-revision="${escapeReviewHtml(card.proposalRevision)}" data-reservation-ceiling="${escapeReviewHtml(card.reservationCeiling)}" aria-labelledby="review-cost-title">${reviewCostCardBody(card)}</section>`;
 }
 
 function hydratedDrawerShell(model: ReviewDrawerModel): string {
@@ -1111,6 +1403,7 @@ export function mountReviewDrawer(
   const count = q<HTMLElement>('[data-override-count]')!;
   const error = q<HTMLElement>('[data-override-error]')!;
   const live = q<HTMLElement>('[data-review-live]')!;
+  const costCard = q<HTMLElement>('[data-review-cost-card]')!;
 
   const externalOnChange = options.onChange;
   model.options.onChange = () => {
@@ -1232,6 +1525,25 @@ export function mountReviewDrawer(
     const approveAll = q<HTMLButtonElement>('[data-review-approve-all]');
     if (approveAll) approveAll.disabled = !rows.some(row => row.group === 'needs') || model.busy;
     if (live.textContent !== model.liveMessage) live.textContent = model.liveMessage;
+    if (costCard) {
+      if (model.costCard) {
+        costCard.removeAttribute('hidden');
+        costCard.dataset.planHash = model.costCard.planHash;
+        costCard.dataset.planId = model.costCard.planId;
+        costCard.dataset.planRevision = String(model.costCard.proposalRevision);
+        costCard.dataset.reservationCeiling = String(model.costCard.reservationCeiling);
+        costCard.innerHTML = reviewCostCardBody(model.costCard);
+        const error = costCard.querySelector<HTMLElement>('[data-review-cost-error]');
+        if (error) error.textContent = model.costError;
+      } else {
+        costCard.setAttribute('hidden', '');
+        costCard.removeAttribute('data-plan-hash');
+        costCard.removeAttribute('data-plan-id');
+        costCard.removeAttribute('data-plan-revision');
+        costCard.removeAttribute('data-reservation-ceiling');
+        costCard.innerHTML = '';
+      }
+    }
     bindGateActions();
     hydrateThumbs();
   }
@@ -1303,6 +1615,15 @@ export function mountReviewDrawer(
     if (row?.dataset.reviewClip) {
       model.setActive(row.dataset.reviewClip);
       options.onSelect?.(row.dataset.reviewClip);
+      focusActive();
+      return;
+    }
+    if (target.closest('[data-review-cost-approve]')) {
+      void model.approveCost().then(() => focusActive());
+      return;
+    }
+    if (target.closest('[data-review-cost-cancel]')) {
+      model.cancelCost();
       focusActive();
       return;
     }
@@ -1380,6 +1701,11 @@ export function mountReviewDrawer(
     isOpen() { return !aside.hidden; },
     setClips(clips) { model.setClips(clips); },
     setGate(gate) { model.setGate(gate); },
+    previewTake(takeId, clipId) { return model.previewTake(takeId, clipId); },
+    selectTake(takeId, clipId) { return model.selectTake(takeId, clipId); },
+    rejectTake(takeId, clipId, note) { return model.rejectTake(takeId, clipId, note); },
+    approveCost() { return model.approveCost(); },
+    cancelCost() { model.cancelCost(); },
     requestOverride(nextGate) {
       if (nextGate !== undefined) model.setGate(nextGate);
       return openOverride();

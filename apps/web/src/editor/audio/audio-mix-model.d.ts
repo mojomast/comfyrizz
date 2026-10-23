@@ -7,7 +7,8 @@ declare module '../../../../../apps/renderer/src/audio-mix-model.js' {
       duck: { enabled: boolean; reductionDb: number; attackMs: number; releaseMs: number };
       gains: number[];
     };
-    ambience: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number; gains: number[] }>;
+    dialogue: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number; gains: number[]; startSeconds?: number; endSeconds?: number }>;
+    ambience: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number; gains: number[]; startSeconds?: number; endSeconds?: number }>;
     sfx: Array<{ sceneId: string; gainDb: number; from: number; durationInFrames: number }>;
   };
 }

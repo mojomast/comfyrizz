@@ -461,6 +461,337 @@ function regenerateResult(response: Response, body: JsonObject, clipId: string):
   throw new TakesApiError('unexpected clip response', response.status || 502, 'INVALID_RESPONSE');
 }
 
+// --- IP31/IP31F: production-bound review commands -------------------------
+//
+// The review drawer may be bound to a production. In that mode Redo proposes
+// an IP20 action plan, never a run: the server computes the planHash and the
+// reservation ceiling, and the drawer renders that durable plan as the cost
+// card. The approval cites only the server-recorded planId, planHash and plan
+// revision. Selection and rejection are explicit commands (`take.select`,
+// `clip.reject`) and are never side effects of previewing a take.
+
+export interface ProductionTakeCommandInput {
+  clipId: string;
+  assetId?: string;
+  takeId: string;
+  note?: string;
+}
+
+export interface ReviewRedoProposalInput {
+  packageId?: string;
+  clipId: string;
+  assetId?: string;
+  change?: CorrectionChange;
+  correction?: ClipCorrection | null;
+  diff?: CorrectionDiff[];
+  backendId?: string;
+  /** The user's scoped upper bound for this one plan. The server echoes it. */
+  reservationCeiling?: number;
+  requiredDecisions?: unknown[];
+  reason?: string;
+}
+
+/**
+ * The durable action plan the drawer shows before spending. Every spend
+ * identity (`planId`, `planHash`, `proposalRevision`, `reservationCeiling`)
+ * comes from the server's IP20 action-plans response, never from the client.
+ */
+export interface ReviewCostCard {
+  productionId: string;
+  planId: string;
+  planHash: string;
+  /** The plan revision the approval must cite. */
+  proposalRevision: number;
+  /** The production revision after the proposal committed. */
+  revision: number;
+  clipId: string;
+  assetId: string;
+  /** The server plan's reservation ceiling: an estimate and an upper bound. */
+  reservationCeiling: number;
+  backendId: string | null;
+  requiredDecisions: unknown[];
+  actions: JsonObject[];
+  commandId: string;
+  duplicate?: boolean;
+}
+
+export interface ReviewPlanApproval {
+  kind: 'approved';
+  approved: true;
+  productionId: string;
+  planId: string;
+  planHash: string;
+  proposalRevision: number;
+  revision: number;
+  commandId: string;
+  duplicate?: boolean;
+}
+
+export interface ProductionReviewApi {
+  proposeRedo(input: ReviewRedoProposalInput): Promise<ReviewCostCard>;
+  approvePlan(card: ReviewCostCard): Promise<ReviewPlanApproval>;
+  selectTake(input: ProductionTakeCommandInput): Promise<JsonObject>;
+  rejectTake(input: ProductionTakeCommandInput): Promise<JsonObject>;
+  approveTake(input: ProductionTakeCommandInput): Promise<JsonObject>;
+}
+
+export interface CreateProductionReviewApiOptions {
+  apiFetch: TakesApiFetch;
+  productionId: string | (() => string);
+  /** The production revision the next command expects (compare-and-swap). */
+  revision: number | (() => number);
+  /** Injected in tests so command, plan and action ids are deterministic. */
+  commandId?: (prefix: string) => string;
+  packageRevision?: number | (() => number | null | undefined);
+}
+
+export function productionCommandPath(productionId: string): string {
+  return `/api/productions/${encodeURIComponent(productionId)}/commands`;
+}
+
+export function productionActionPlansPath(productionId: string): string {
+  return `/api/productions/${encodeURIComponent(productionId)}/action-plans`;
+}
+
+let productionCommandCounter = 0;
+
+function defaultProductionCommandId(prefix: string): string {
+  const cryptoValue = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (cryptoValue && typeof cryptoValue.randomUUID === 'function') {
+    return `${prefix}_${cryptoValue.randomUUID().replace(/-/g, '')}`;
+  }
+  productionCommandCounter += 1;
+  return `${prefix}_${Date.now().toString(36)}_${productionCommandCounter.toString(36)}`;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function nonNegativeAmount(value: unknown): number | null {
+  const amount = numberOrNull(value);
+  return amount !== null && amount >= 0 ? amount : null;
+}
+
+function safeRevision(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+/** A short, human cost summary used by the card and its accessible label. */
+export function reviewCostCardEstimateLabel(card: ReviewCostCard | null | undefined): string {
+  const ceiling = nonNegativeAmount(card?.reservationCeiling);
+  if (ceiling === null) return 'Cost to be confirmed';
+  return `Estimated upper bound: ${ceiling} unit${ceiling === 1 ? '' : 's'}`;
+}
+
+export function createProductionReviewApi(options: CreateProductionReviewApiOptions): ProductionReviewApi {
+  if (!isObject(options) || typeof options.apiFetch !== 'function') {
+    throw new TypeError('createProductionReviewApi requires an apiFetch function');
+  }
+  const { apiFetch } = options;
+  const productionIdSource = options.productionId;
+  const revisionSource = options.revision;
+  const packageRevisionSource = options.packageRevision;
+  const makeCommandId = typeof options.commandId === 'function'
+    ? options.commandId
+    : defaultProductionCommandId;
+
+  function productionId(): string {
+    const value = typeof productionIdSource === 'function' ? productionIdSource() : productionIdSource;
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw new TakesApiError('the production id is required', 0, 'INVALID_ARGUMENT');
+    }
+    return value.trim();
+  }
+
+  let revision = typeof revisionSource === 'function' ? Number(revisionSource()) : Number(revisionSource);
+  if (!Number.isSafeInteger(revision) || revision < 0) revision = 0;
+
+  function currentRevision(): number {
+    if (typeof revisionSource === 'function') {
+      const next = Number(revisionSource());
+      if (Number.isSafeInteger(next) && next >= 0) revision = next;
+    }
+    return revision;
+  }
+
+  function packageRevision(): number | undefined {
+    if (packageRevisionSource === undefined) return undefined;
+    const value = typeof packageRevisionSource === 'function' ? packageRevisionSource() : packageRevisionSource;
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  }
+
+  async function sendCommand(kind: string, payload: JsonObject): Promise<JsonObject> {
+    const id = productionId();
+    const commandId = makeCommandId(kind.replaceAll('.', '_'));
+    const expected: JsonObject = { productionRevision: currentRevision() };
+    const packageRev = packageRevision();
+    if (packageRev !== undefined) expected.packageRevision = packageRev;
+
+    const response = await apiFetch(productionCommandPath(id), {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        commandId,
+        idempotencyKey: commandId,
+        kind,
+        expected,
+        payload,
+      }),
+    });
+    const body = await jsonBody<JsonObject>(response);
+    if (typeof body.revision === 'number' && Number.isSafeInteger(body.revision) && body.revision >= 0) {
+      revision = body.revision;
+    }
+    body.commandId = textValue(body.commandId) || commandId;
+    return body;
+  }
+
+  return {
+    async proposeRedo(input) {
+      if (!isObject(input) || typeof input.clipId !== 'string' || input.clipId === '') {
+        throw new TakesApiError('clipId is required to propose a redo', 0, 'INVALID_ARGUMENT');
+      }
+      const id = productionId();
+      const commandId = makeCommandId('plan_propose');
+      const planId = makeCommandId('plan');
+      const actionId = makeCommandId('action_redo');
+      const ceiling = nonNegativeAmount(input.reservationCeiling) ?? 0;
+      const action: JsonObject = {
+        id: actionId,
+        kind: 'take.redo',
+        targetId: input.clipId,
+        upperBound: ceiling,
+        ...(input.assetId ? { assetId: input.assetId } : {}),
+        ...(input.backendId ? { backendId: input.backendId } : {}),
+      };
+      const payload: JsonObject = {
+        planId,
+        revision: 0,
+        requiredDecisions: Array.isArray(input.requiredDecisions) ? input.requiredDecisions : [],
+        reservationCeiling: ceiling,
+        actions: [action],
+        ...(input.packageId ? { packageId: input.packageId } : {}),
+        ...(input.change ? { change: input.change } : {}),
+        ...(input.correction !== undefined && input.correction !== null ? { correction: input.correction } : {}),
+        ...(Array.isArray(input.diff) ? { diff: input.diff } : {}),
+        ...(input.backendId ? { backendId: input.backendId } : {}),
+        ...(input.reason ? { reason: input.reason } : {}),
+      };
+
+      const response = await apiFetch(productionActionPlansPath(id), {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          commandId,
+          idempotencyKey: commandId,
+          expected: { productionRevision: currentRevision() },
+          payload,
+        }),
+      });
+      const body = await jsonBody<JsonObject>(response);
+      if (typeof body.revision === 'number' && Number.isSafeInteger(body.revision) && body.revision >= 0) {
+        revision = body.revision;
+      }
+      const productionRevision = safeRevision(body.revision);
+      if (productionRevision === null) {
+        throw new TakesApiError('the plan proposal did not include the production revision', response.status, 'INVALID_RESPONSE');
+      }
+
+      // Spend identity is server-owned. Only the IP20 plan is read here; the
+      // request body and its estimate are never used as fallbacks.
+      const plan = isObject(body.plan) ? body.plan : null;
+      if (!plan) {
+        throw new TakesApiError('the plan proposal did not include a plan', response.status, 'INVALID_RESPONSE');
+      }
+      const serverPlanId = textValue(plan.id);
+      if (!serverPlanId) {
+        throw new TakesApiError('the plan proposal did not include a plan id', response.status, 'INVALID_RESPONSE');
+      }
+      const planHash = textValue(plan.planHash);
+      if (!planHash) {
+        throw new TakesApiError('the plan proposal did not include a plan hash', response.status, 'INVALID_RESPONSE');
+      }
+      const proposalRevision = safeRevision(plan.revision);
+      if (proposalRevision === null) {
+        throw new TakesApiError('the plan proposal did not include the plan revision', response.status, 'INVALID_RESPONSE');
+      }
+      const reservationCeiling = nonNegativeAmount(plan.reservationCeiling);
+      if (reservationCeiling === null) {
+        throw new TakesApiError('the plan proposal did not include a reservation ceiling', response.status, 'INVALID_RESPONSE');
+      }
+      const actions = Array.isArray(plan.actions) ? plan.actions.filter(isObject) : [];
+      return {
+        productionId: textValue(body.productionId) || id,
+        planId: serverPlanId,
+        planHash,
+        proposalRevision,
+        revision: productionRevision,
+        clipId: input.clipId,
+        assetId: input.assetId ?? '',
+        reservationCeiling,
+        backendId: textValue(plan.backendId) || null,
+        requiredDecisions: Array.isArray(plan.requiredDecisions) ? plan.requiredDecisions : [],
+        actions,
+        commandId: textValue(body.commandId) || commandId,
+        ...(body.duplicate === true ? { duplicate: true } : {}),
+      };
+    },
+
+    async approvePlan(card) {
+      const planId = textValue(card?.planId).trim();
+      const planHash = textValue(card?.planHash).trim();
+      const proposalRevision = safeRevision(card?.proposalRevision);
+      if (!planId || !planHash || proposalRevision === null) {
+        throw new TakesApiError(
+          'planId, planHash and the plan revision are required to approve spend',
+          0,
+          'INVALID_ARGUMENT',
+        );
+      }
+
+      const body = await sendCommand('plan.approve', { planId, planHash, proposalRevision });
+      return {
+        kind: 'approved',
+        approved: true,
+        productionId: textValue(body.productionId) || card.productionId || productionId(),
+        planId,
+        planHash,
+        proposalRevision,
+        revision: safeRevision(body.revision) ?? currentRevision(),
+        commandId: String(body.commandId),
+        ...(body.duplicate === true ? { duplicate: true } : {}),
+      };
+    },
+
+    async selectTake(input) {
+      return await sendCommand('take.select', {
+        clipId: input.clipId,
+        ...(input.assetId ? { assetId: input.assetId } : {}),
+        takeId: input.takeId,
+      });
+    },
+
+    async rejectTake(input) {
+      const payload: JsonObject = {
+        clipId: input.clipId,
+        ...(input.assetId ? { assetId: input.assetId } : {}),
+        takeId: input.takeId,
+      };
+      if (input.note !== undefined) payload.note = input.note;
+      return await sendCommand('clip.reject', payload);
+    },
+
+    async approveTake(input) {
+      return await sendCommand('clip.approve', {
+        clipId: input.clipId,
+        ...(input.assetId ? { assetId: input.assetId } : {}),
+        takeId: input.takeId,
+      });
+    },
+  };
+}
+
 export function createTakesApi(options: CreateTakesApiOptions): TakesApi {
   const { apiFetch } = options;
   if (typeof apiFetch !== 'function') throw new TypeError('createTakesApi requires an apiFetch function');

@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { KOKORO_VOICES } from '../../../../packages/tts/voices.mjs';
+import { VOICE_LANGUAGES } from './voice.mjs';
 
 export const SCHEMA = 'comfyrizz.character/v1';
 export const CHARACTER_SCHEMA = SCHEMA;
@@ -32,7 +34,6 @@ export const IDENTITY_METHODS = Object.freeze(['klein_ref', 'ip_adapter', 'pulid
 export const VOICE_ENGINES = Object.freeze(['kokoro', 'qwen3-tts', 'none']);
 export const CHUNKING_MODES = Object.freeze(['sentence', 'paragraph']);
 export const QWEN_MODES = Object.freeze(['custom', 'design']);
-export const LANGUAGES = Object.freeze(['en-us']);
 
 const MB = 1024 * 1024;
 
@@ -100,6 +101,7 @@ const SAFE_TOKEN_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const LORA_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const AUDITION_FILE_RE = /^auditions\/[A-Za-z0-9_-]{1,64}\.wav$/;
 const HEX_COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const KOKORO_LANGUAGE_BY_ID = new Map(KOKORO_VOICES.map((voice) => [voice.id, voice.language]));
 
 const TOP_KEYS = new Set([
   'schema',
@@ -762,7 +764,15 @@ function voiceValue(value, path, { patch = false } = {}) {
     });
   }
   if (raw.language !== undefined) {
-    out.language = enumValue(raw.language, LANGUAGES, `${path}.language`, 'CHAR_INVALID_LANGUAGE');
+    out.language = enumValue(raw.language, VOICE_LANGUAGES, `${path}.language`, 'CHAR_INVALID_LANGUAGE');
+    const kokoroLanguage = KOKORO_LANGUAGE_BY_ID.get(out.voice);
+    if (kokoroLanguage !== undefined && kokoroLanguage !== out.language) {
+      fail(
+        'CHAR_INVALID_LANGUAGE',
+        `${path}.language`,
+        `${path}.language must be ${kokoroLanguage} for Kokoro voice ${out.voice}`,
+      );
+    }
   }
   if (raw.presetId !== undefined) {
     const presetId = textValue(raw.presetId, `${path}.presetId`, {
