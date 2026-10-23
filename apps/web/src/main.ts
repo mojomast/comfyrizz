@@ -2328,6 +2328,10 @@ function init(opened: OpenedProject): void {
   renderBar = mountRenderBar(renderBarHost, {
     clips: () => clipStore.all(),
     gate: () => clipStore.gate(),
+    compare: {
+      api: takesApi,
+      packageId: () => String(pkg.id ?? ''),
+    },
     onRender: reason => exportMp4(reason),
     onSelectBlocker: selectClipForReview,
     onApprove: async clip => {

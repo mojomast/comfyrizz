@@ -6,7 +6,8 @@
  * reason. The gate helpers and the HTML renderer are pure so a fake clip list
  * can exercise them without a DOM, a network or a server.
  */
-import type { ClipSummary } from './api.ts';
+import type { ClipSummary, TakesApi, TakesResponse } from './api.ts';
+import { mountCompare, type CompareHandle, type CompareMountOptions } from './compare.ts';
 import { mountReviewDrawer, type ReviewClipAction } from './review-drawer.ts';
 
 export const MIN_OVERRIDE_REASON = 4;
@@ -201,6 +202,29 @@ export function renderRenderBar(gate: RenderGateSummary, options: RenderBarRende
 export const renderBarHtml = renderRenderBar;
 export const renderBar = renderRenderBar;
 
+export function compareOptionsForClip(
+  clip: ClipSummary,
+  clips: readonly ClipSummary[],
+  takesResponse: TakesResponse,
+  packageId: string,
+  api: Pick<TakesApi, 'getTakes' | 'select' | 'takeUrl'>,
+): CompareMountOptions | null {
+  const shotId = textOf(clip.sceneId);
+  if (!shotId.trim()) return null;
+  const shots = clips
+    .map(item => ({ shotId: textOf(item.sceneId), clipId: textOf(item.clipId) }))
+    .filter(item => item.shotId.trim() && item.clipId);
+  return {
+    api,
+    packageId,
+    clipId: clip.clipId,
+    shotId,
+    takes: takesResponse.takes,
+    selected: takesResponse.selected,
+    shots,
+  };
+}
+
 export interface RenderBarMountOptions {
   /** One of `gate` or `clips` is required. */
   gate?: () => RenderGateSummary;
@@ -213,6 +237,10 @@ export interface RenderBarMountOptions {
   disabled?: boolean | (() => boolean);
   description?: string;
   drawerHost?: HTMLElement;
+  compare?: {
+    api: Pick<TakesApi, 'getTakes' | 'select' | 'takeUrl'>;
+    packageId: () => string;
+  };
 }
 
 export interface RenderBarHandle {
@@ -281,6 +309,9 @@ export function mountRenderBar(el: HTMLElement, options: RenderBarMountOptions):
   let gateOverride: RenderGateSummary | null = null;
   let usingClips = Boolean(options.clips);
   let destroyed = false;
+  let compareHost: HTMLElement | null = null;
+  let compareHandle: CompareHandle | null = null;
+  let compareToken = 0;
 
   const disabledNow = (): boolean => (typeof options.disabled === 'function' ? options.disabled() : options.disabled === true);
 
@@ -293,12 +324,97 @@ export function mountRenderBar(el: HTMLElement, options: RenderBarMountOptions):
     onRedo: options.onRedo,
     onOpenTakes: options.onOpenTakes,
     onRender: options.onRender,
+    ...(options.compare ? { onCompare: (clip: ClipSummary) => { void openCompare(clip); } } : {}),
     onChange: () => paintPill(),
     onOpenChange: (open) => {
+      if (!open) teardownCompare(false);
       const button = el.querySelector<HTMLButtonElement>('[data-review-open]');
       button?.setAttribute('aria-expanded', open ? 'true' : 'false');
     },
   });
+
+  function announceCompare(message: string): void {
+    const live = drawer.element.querySelector<HTMLElement>('[data-review-live]');
+    if (live) live.textContent = message;
+  }
+
+  function ensureCompareHost(): HTMLElement {
+    if (compareHost) return compareHost;
+    const host = document.createElement('div');
+    host.className = 'compare-dialog-host';
+    host.dataset.compareDialogHost = '';
+    drawer.element.insertAdjacentElement('afterend', host);
+    compareHost = host;
+    return host;
+  }
+
+  function teardownCompare(returnFocus: boolean): void {
+    compareToken += 1;
+    const handle = compareHandle;
+    compareHandle = null;
+    handle?.destroy();
+    if (returnFocus) drawer.element.querySelector<HTMLElement>('[data-review-compare]')?.focus();
+  }
+
+  async function refreshDrawerAfterKeep(clipId: string, packageId: string): Promise<void> {
+    const compare = options.compare;
+    if (!compare) return;
+    try {
+      const response = await compare.api.getTakes(packageId, clipId);
+      if (destroyed) return;
+      drawer.setClips(drawer.model.clips.map(clip => (clip.clipId === clipId ? response.clip : clip)));
+    } catch {
+      return;
+    }
+  }
+
+  async function openCompare(clip: ClipSummary): Promise<void> {
+    const compare = options.compare;
+    if (!compare) return;
+    if (!textOf(clip.sceneId).trim()) {
+      announceCompare('Compare needs a shot id');
+      return;
+    }
+    const packageId = compare.packageId();
+    const token = ++compareToken;
+    let response: TakesResponse;
+    try {
+      response = await compare.api.getTakes(packageId, clip.clipId);
+    } catch (error) {
+      if (token !== compareToken || destroyed) return;
+      const reason = error instanceof Error && error.message ? `: ${error.message}` : '';
+      announceCompare(`Could not open compare${reason}`);
+      return;
+    }
+    if (token !== compareToken || destroyed) return;
+    const mountOptions = compareOptionsForClip(clip, drawer.model.clips, response, packageId, compare.api);
+    if (!mountOptions) {
+      announceCompare('Compare needs a shot id');
+      return;
+    }
+
+    teardownCompare(false);
+    const host = ensureCompareHost();
+    let lastSelected = mountOptions.selected ?? null;
+    const handle = mountCompare(host, {
+      ...mountOptions,
+      onClose: () => { teardownCompare(true); },
+    });
+    compareHandle = handle;
+    handle.controller.subscribe((state, change) => {
+      if (change === 'shot') {
+        lastSelected = state.selected;
+        return;
+      }
+      if (change !== 'keep') return;
+      if (!state.selected || state.keepError || state.selected === lastSelected) {
+        lastSelected = state.selected;
+        return;
+      }
+      lastSelected = state.selected;
+      void refreshDrawerAfterKeep(clip.clipId, packageId);
+    });
+  }
 
   function paintPill(): void {
     if (destroyed) return;
@@ -352,6 +468,9 @@ export function mountRenderBar(el: HTMLElement, options: RenderBarMountOptions):
     },
     destroy() {
       destroyed = true;
+      teardownCompare(false);
+      compareHost?.remove();
+      compareHost = null;
       drawer.destroy();
       el.innerHTML = '';
     },
