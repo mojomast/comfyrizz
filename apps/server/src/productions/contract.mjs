@@ -765,6 +765,12 @@ function iterationSetPayload(errors, value, path) {
     push(errors, shotIdsPath, 'INVALID_ARRAY', `${shotIdsPath} must be an array`);
     return;
   }
+  // An empty list would be a second spelling of "no scope" (the whole
+  // production); a scoped change names at least one shot, otherwise omit scope.
+  if (Array.isArray(value.scope.shotIds) && value.scope.shotIds.length === 0) {
+    push(errors, shotIdsPath, 'INVALID_ARRAY', `${shotIdsPath} must name at least one shot; omit scope for the whole production`);
+    return;
+  }
   requireUniqueIds(errors, value.scope.shotIds, shotIdsPath);
 }
 

@@ -127,11 +127,22 @@ test('an iteration.set envelope validates with and without a shot scope', () => 
     })),
     'iteration.set without scope',
   );
-  assertValid(
+});
+
+test('an empty shot scope is refused: omit scope for the whole production', () => {
+  assertError(
     validateCommandEnvelope(validCommand({
       payload: { policy: validPolicy(), scope: { shotIds: [] } },
     })),
     'iteration.set with an empty scope',
+    'INVALID_ARRAY',
+    '/payload/scope/shotIds',
+  );
+  assertError(
+    validateEvent(validEvent({ data: { policy: validPolicy(), scope: { shotIds: [] } } })),
+    'iteration.set event with an empty scope',
+    'INVALID_ARRAY',
+    '/data/scope/shotIds',
   );
 });
 
