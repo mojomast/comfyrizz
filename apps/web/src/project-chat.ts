@@ -2,6 +2,7 @@ import type { PackageV1 } from '../../../packages/schema/types';
 import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import type { InlineAsset } from '../../renderer/src/components';
 import { sceneNumberOf, slotLabel, type ReferenceAssignment } from './references/panel.ts';
+import { isRecoveryConflict, recoveryPanelHtml, recoveryRequest, type RecoveryConflict } from './chat-recovery.ts';
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -57,6 +58,14 @@ export type ChatProject = {
 };
 type ChatReply = {
   conversation: Conversation; reply: string; built: boolean; project?: ChatProject;
+};
+type RecoveryReply = ChatReply & {
+  resolved?: 'none' | 'discarded' | 'retry';
+  restored?: boolean;
+  retry?: { message?: string | null; action?: string | null; mode?: string | null } | null;
+  code?: string;
+  error?: string;
+  recoveryConflict?: RecoveryConflict;
 };
 type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[]; turnContext?: TurnContextChip[] };
 
@@ -392,6 +401,8 @@ export function mountProjectChat(options: {
   let pending: TurnRequest | null = null;
   let errorText = '';
   let conflict = false;
+  let recovery: RecoveryConflict | null = null;
+  let recoveryHint = '';
   const dismissedContextChipIds = new Set<string>();
   const readTurnContext = options.getTurnContext ?? options.turnContext;
 
@@ -466,9 +477,11 @@ export function mountProjectChat(options: {
   function render(): void {
     const plan = conversation?.plan;
     const contextHtml = renderTurnContextChips(turnContextChips());
+    const recoveryHtml = recovery ? recoveryPanelHtml(recovery, esc) : '';
+    const recoveryHintHtml = recoveryHint ? `<p class="hint">${esc(recoveryHint)}</p>` : '';
     if (!plan) {
       panel.hidden = false;
-      panel.innerHTML = `${contextHtml}${errorText ? `<p role="alert">${esc(errorText)}</p>` : '<p class="hint chat-welcome">Chat with the agent to develop your video.</p>'}${renderSuggestedPrompts()}${proposalsHtml()}${castProposalsHtml()}<div class="project-plan-actions"><button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}</div>`;
+      panel.innerHTML = `${contextHtml}${errorText ? `<p role="alert">${esc(errorText)}</p>` : recovery ? '' : '<p class="hint chat-welcome">Chat with the agent to develop your video.</p>'}${recovery ? recoveryHtml : `${renderSuggestedPrompts()}${proposalsHtml()}${castProposalsHtml()}<div class="project-plan-actions"><button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}</div>`}${recoveryHintHtml}`;
       bindActions();
       return;
     }
@@ -492,11 +505,11 @@ export function mountProjectChat(options: {
           ${scene.narration ? `<p class="plan-narration">${esc(scene.narration)}</p>` : ''}
           <small>${esc(scene.visual)}</small></div><time>${scene.seconds}s</time></li>`).join('')}
       </ol></details>
-      <div class="project-plan-actions">
+      ${recovery ? recoveryHtml : `<div class="project-plan-actions">
         ${built ? '' : `<button type="button" id="project-plan-build" class="btn btn-sm btn-primary">Build this project</button>`}
         <button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>
         <span class="hint">${built ? 'Edit scene copy directly in the storyboard.' : 'Ask for changes, or build to apply it.'}</span>
-      </div>${proposalsHtml()}${castProposalsHtml()}${errorText ? `<p role="alert">${esc(errorText)}</p>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}` : ''}`;
+      </div>`}${recovery ? '' : proposalsHtml()}${recovery ? '' : castProposalsHtml()}${errorText ? `<p role="alert">${esc(errorText)}</p>${!recovery && pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${!recovery && conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}` : ''}${recoveryHintHtml}`;
     panel.querySelector('#project-plan-build')?.addEventListener('click', () => {
       void send('Build this plan exactly as it is now.', 'express', 'build');
     });
@@ -507,6 +520,8 @@ export function mountProjectChat(options: {
     panel.querySelector('#project-new')?.addEventListener('click', reset);
     panel.querySelector('#project-retry')?.addEventListener('click', () => { if (pending && !busy) void perform(pending); });
     panel.querySelector('#project-reload')?.addEventListener('click', () => { if (!busy) void load(); });
+    panel.querySelector('#chat-recovery-discard')?.addEventListener('click', () => { if (!busy) void resolveRecoveryChoice('discard'); });
+    panel.querySelector('#chat-recovery-retry')?.addEventListener('click', () => { if (!busy) void resolveRecoveryChoice('retry'); });
     panel.querySelectorAll<HTMLButtonElement>('[data-prompt]').forEach(chip => {
       chip.addEventListener('click', () => {
         const text = chip.getAttribute('data-prompt') || chip.textContent?.trim() || '';
@@ -574,7 +589,7 @@ export function mountProjectChat(options: {
     if (busy) return;
     conversationId = null;
     conversation = null;
-    pending = null; errorText = ''; conflict = false;
+    pending = null; errorText = ''; conflict = false; recovery = null; recoveryHint = '';
     dismissedContextChipIds.clear();
     localStorage.removeItem(STORAGE_KEY);
     options.replace([]);
@@ -599,12 +614,15 @@ export function mountProjectChat(options: {
         throw new Error('The linked conversation belongs to a different project.');
       }
       conversation = reply.conversation;
-      pending = null; errorText = ''; conflict = false;
+      pending = null; errorText = ''; conflict = false; recoveryHint = '';
+      recovery = isRecoveryConflict(body) ? (body.recoveryConflict ?? {}) : null;
       dismissedContextChipIds.clear();
       options.replace(reply.conversation.messages);
       if (reply.project) options.applyProject(reply.project, reply.conversation.phase === 'built');
       try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
-      options.log(`Restored conversation: ${reply.conversation.messages.length} messages`);
+      options.log(recovery
+        ? 'Restored a conversation that needs a recovery decision'
+        : `Restored conversation: ${reply.conversation.messages.length} messages`);
     } catch (error) {
       options.log(`Could not restore the video conversation: ${(error as Error).message}`);
     } finally {
@@ -632,7 +650,7 @@ export function mountProjectChat(options: {
   }
 
   async function send(text: string, mode: 'plan' | 'express', action?: 'build', confirm?: string[], confirmCast?: string[]): Promise<void> {
-    if (busy || !text.trim()) return;
+    if (busy || recovery || !text.trim()) return;
     busy = true;
     await loaded;
     const turnContext = turnContextChips();
@@ -653,10 +671,81 @@ export function mountProjectChat(options: {
     }
   }
 
+  /** Apply a get-style recovery body without treating it as a new turn. */
+  function applyRecoveryBody(body: RecoveryReply): void {
+    if (!body || !body.conversation || typeof body.conversation !== 'object') return;
+    conversation = body.conversation;
+    if (typeof body.conversation.id === 'string' && body.conversation.id) {
+      conversationId = body.conversation.id;
+      localStorage.setItem(STORAGE_KEY, conversationId);
+    }
+    options.replace(Array.isArray(body.conversation.messages) ? body.conversation.messages : []);
+    if (body.project) options.applyProject(body.project, body.conversation.phase === 'built');
+    try { void options.onCastChanged?.(body.conversation.cast ?? []); } catch { /* optional observer */ }
+  }
+
+  async function resolveRecoveryChoice(choice: 'discard' | 'retry'): Promise<void> {
+    if (busy || !recovery) return;
+    const target: RecoveryConflict = {
+      ...recovery,
+      ...(recovery.id || recovery.conversationId || !conversationId ? {} : { id: conversationId }),
+    };
+    busy = true;
+    errorText = ''; recoveryHint = '';
+    options.setBusy(true, choice === 'discard' ? 'restoring the last good save…' : 'retrying the turn…');
+    render();
+    try {
+      const request = recoveryRequest(choice, target);
+      const response = await options.apiFetch(request.path, {
+        method: request.method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request.body),
+      });
+      const body = await response.json().catch(() => ({})) as RecoveryReply;
+      if (!response.ok) {
+        if (isRecoveryConflict(body)) {
+          recovery = body.recoveryConflict ?? target;
+          errorText = 'The conversation changed again. Choose how to continue.';
+          options.log('The conversation changed while recovering; choose again.');
+          return;
+        }
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      recovery = null;
+      conflict = false;
+      applyRecoveryBody(body);
+      pending = null;
+      if (choice === 'retry') {
+        const retry = body.retry;
+        if (retry && typeof retry.message === 'string' && retry.message.trim()) {
+          const mode: 'plan' | 'express' = retry.mode === 'express' ? 'express' : 'plan';
+          const action = retry.action === 'build' ? 'build' as const : undefined;
+          busy = false;
+          options.setBusy(false);
+          // A fresh turnId and the current turn context are created by send().
+          await send(retry.message, mode, action);
+          return;
+        }
+        recoveryHint = 'The previous message was not saved. Send it again to retry the turn.';
+        options.log('Recovery cleared. Send your message again.');
+      } else {
+        options.log(body.restored ? 'Restored the last good save.' : 'Kept the newest save.');
+      }
+    } catch (error) {
+      errorText = (error as Error).message;
+      options.log(`Could not resolve the conversation recovery: ${(error as Error).message}`);
+    } finally {
+      busy = false;
+      options.setBusy(false);
+      render();
+    }
+  }
+
   async function perform(request: TurnRequest): Promise<void> {
     busy = true;
     errorText = ''; conflict = false; render();
     options.setBusy(true, 'the agent is writing the next version…');
+    let failureBody: RecoveryReply | null = null;
     try {
       const response = await options.apiFetch('/api/agent/chat', {
         method: 'POST',
@@ -664,7 +753,11 @@ export function mountProjectChat(options: {
         body: JSON.stringify({ ...request, ...(options.brand?.() ? { brand: options.brand() } : {}) }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) { conflict = response.status === 409; throw new Error(body.error ?? `HTTP ${response.status}`); }
+      if (!response.ok) {
+        failureBody = body as RecoveryReply;
+        conflict = response.status === 409;
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
       const reply = body as ChatReply;
       pending = null;
       options.replace(reply.conversation.messages);
@@ -672,9 +765,16 @@ export function mountProjectChat(options: {
       void options.onReferencesChanged?.();
       options.log(reply.built ? `Project updated: ${reply.project?.package.title ?? reply.conversation.plan?.title}` : 'Agent replied; project unchanged');
     } catch (error) {
-      errorText = (error as Error).message;
-      options.append('assistant', `I couldn't complete that turn: ${errorText}`);
-      options.log(`Video conversation failed: ${(error as Error).message}`);
+      if (failureBody && isRecoveryConflict(failureBody)) {
+        recovery = failureBody.recoveryConflict ?? {};
+        conflict = false;
+        errorText = '';
+        options.log('This conversation needs a recovery decision.');
+      } else {
+        errorText = (error as Error).message;
+        options.append('assistant', `I couldn't complete that turn: ${errorText}`);
+        options.log(`Video conversation failed: ${(error as Error).message}`);
+      }
     } finally {
       busy = false;
       dismissedContextChipIds.clear();

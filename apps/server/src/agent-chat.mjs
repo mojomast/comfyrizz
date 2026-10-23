@@ -291,15 +291,24 @@ export function createProjectChat({
       provider: session.provider ?? null,
       model: session.model ?? null,
     };
-    const duplicate = entries.some(item => (entry.turnId && item.turnId === entry.turnId)
-      || (Number.isSafeInteger(item.revision) && item.revision === entry.revision));
+    const duplicate = entries.some(item => item?.type !== 'recovery'
+      && ((entry.turnId && item.turnId === entry.turnId)
+        || (Number.isSafeInteger(item.revision) && item.revision === entry.revision)));
     writeAtomic(journalPath(id), duplicate ? text : `${text}${JSON.stringify(entry)}\n`);
+  }
+  // A recovery decision is an audit line, not a turn: it never advances the
+  // conversation and must never make the failed turn replayable.
+  function appendRecoveryJournal(id, { choice, turnId }) {
+    const { text } = readJournal(id);
+    const entry = { type: 'recovery', choice, turnId: turnId ?? null, at: new Date().toISOString() };
+    writeAtomic(journalPath(id), `${text}${JSON.stringify(entry)}\n`);
   }
   const repairJournal = (id, session) => appendJournal(id, session, session.lastTurnBuilt);
   function committedTurn(id, turnId) {
     if (!turnId) return null;
     const { entries } = readJournal(id);
     for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (entries[index]?.type === 'recovery') continue;
       if (entries[index]?.turnId === turnId) return entries[index];
     }
     return null;
@@ -388,6 +397,70 @@ export function createProjectChat({
     if (!session) fail(404, 'Conversation not found');
     const body = response(session);
     return conflict ? { ...body, recoveryConflict: conflict } : body;
+  }
+
+  /**
+   * IP40R: a RECOVERY_CONFLICT is a user decision, never a bricked chat.
+   * `discard` (the safe default) only reverts the exact unproven partial
+   * package write; `retry` clears the intent and lets the client run a fresh
+   * turn with a new turnId. Neither touches takes documents or paid artifacts.
+   */
+  function resolveRecovery(id, options) {
+    if (!validId(id)) fail(400, 'Invalid conversation ID');
+    const choice = options?.choice;
+    if (choice !== 'discard' && choice !== 'retry') fail(400, "choice must be 'discard' or 'retry'");
+    const expected = options?.expected;
+    return withLock(id, () => {
+      const conflict = recoverLocked(id);
+      const session = read(id);
+      if (!conflict) {
+        if (!session) fail(404, 'Conversation not found');
+        return { resolved: 'none', ...response(session) };
+      }
+      if (!session) fail(404, 'Conversation not found');
+      if (expected !== undefined && expected !== null) {
+        if (!Number.isSafeInteger(expected) || expected !== conflict.found) {
+          fail(409, 'RECOVERY_CHANGED', { code: 'RECOVERY_CHANGED', recoveryConflict: conflict });
+        }
+      }
+      const intent = readIntent(id);
+      if (!intent) return { resolved: 'none', ...response(session) };
+      const ref = isPlainObject(intent.package) ? intent.package : null;
+      let restored = false;
+      if (choice === 'discard' && ref?.before && ref.projectId) {
+        const pkg = store.read(ref.projectId);
+        // Only the exactly-identified partial write is ours to undo. Any later
+        // save (an editor, another writer) is already the last good save.
+        if (pkg && pkg.revision === ref.predictedRevision) {
+          try {
+            store.save(ref.projectId, { ...clone(ref.before) }, pkg.revision);
+            restored = true;
+          } catch (error) {
+            if (error.currentRevision !== undefined) {
+              fail(409, 'RECOVERY_CHANGED', {
+                code: 'RECOVERY_CHANGED',
+                recoveryConflict: recoveryConflict(intent, store.read(ref.projectId)),
+              });
+            }
+            throw error;
+          }
+        }
+      }
+      const turnId = intent.turnId ?? null;
+      const retry = choice === 'retry'
+        ? (isPlainObject(intent.request)
+          ? {
+            message: intent.request.message ?? null,
+            action: intent.request.action ?? null,
+            mode: intent.request.mode ?? null,
+          }
+          : null)
+        : null;
+      deleteIntent(id);
+      appendRecoveryJournal(id, { choice, turnId });
+      if (choice === 'retry') return { resolved: 'retry', retry, ...response(session) };
+      return { resolved: 'discarded', restored, ...response(session) };
+    });
   }
 
   /** Clip review is opt-in and derived from the same timeline/takes as the HTTP routes. */
@@ -1036,7 +1109,19 @@ export function createProjectChat({
           baseRevision: commitBaseRevision,
           revision: commitSession.revision,
           createdAt: new Date().toISOString(),
-          package: projectId ? { projectId, expectedRevision: capturedPackageRevision } : null,
+          // IP40R: the user's own turn, so a retry can be re-run exactly. Confirm
+          // lists and provider credentials are deliberately never recorded.
+          request: {
+            message: input.message.trim(),
+            action: input.action ?? null,
+            mode: input.mode ?? null,
+          },
+          package: projectId ? {
+            projectId,
+            expectedRevision: capturedPackageRevision,
+            predictedRevision: capturedPackageRevision === null ? 1 : capturedPackageRevision + 1,
+            ...(isPlainObject(current) ? { before: clone(current) } : {}),
+          } : null,
           takesOps,
         };
         writeIntent(intent);
@@ -1111,5 +1196,5 @@ export function createProjectChat({
     } finally { active.delete(id); }
   }
 
-  return { get, send };
+  return { get, send, resolveRecovery };
 }

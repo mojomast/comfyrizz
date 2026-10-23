@@ -998,6 +998,21 @@ export function createApp({
 
     if (providerSettings && await handleProviderSettings({ request, response, url, settings: providerSettings, readJson, sendJson })) return;
 
+    const chatRecoveryMatch = /^\/api\/agent\/chat\/([^/]+)\/recovery$/.exec(url.pathname);
+    if (chatRecoveryMatch && request.method === 'POST') {
+      try {
+        let conversationId = chatRecoveryMatch[1];
+        try { conversationId = decodeURIComponent(conversationId); } catch { throw Object.assign(new Error('Invalid conversation ID'), { status: 400 }); }
+        return sendJson(response, 200, projectChat.resolveRecovery(conversationId, await readJson(request)));
+      } catch (error) {
+        return sendJson(response, error.status ?? 502, {
+          error: providerSettings ? providerSettings.redact(error.message) : error.message,
+          ...(error.code ? { code: error.code } : {}),
+          ...(error.recoveryConflict ? { recoveryConflict: error.recoveryConflict } : {}),
+        });
+      }
+    }
+
     const chatMatch = /^\/api\/agent\/chat(?:\/([^/]+))?$/.exec(url.pathname);
     if (chatMatch) {
       try {
@@ -1005,7 +1020,11 @@ export function createApp({
         if (request.method === 'POST' && !chatMatch[1]) return sendJson(response, 200, await projectChat.send(await readJson(request)));
         return sendJson(response, 405, { error: 'method not allowed' });
       } catch (error) {
-        return sendJson(response, error.status ?? 502, { error: providerSettings ? providerSettings.redact(error.message) : error.message });
+        return sendJson(response, error.status ?? 502, {
+          error: providerSettings ? providerSettings.redact(error.message) : error.message,
+          ...(error.code ? { code: error.code } : {}),
+          ...(error.recoveryConflict ? { recoveryConflict: error.recoveryConflict } : {}),
+        });
       }
     }
 
