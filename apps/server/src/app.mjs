@@ -413,7 +413,25 @@ export function createApp({
     };
   }
 
-  const runs = createRunController({ backendFactory: effectiveBackendFactory, events, runtimeDir, prepareWorkDir: prepareRunWorkDir, onComplete: completeRun, isBusy: () => Boolean(pipelines?.active()) });
+  // IP24: the production journal is shared by the legacy /api/run adapter and
+  // the /api/productions facade, so a bound package can only start from the
+  // action slot that was dispatched for it.
+  const productionStore = createProductionStore({ runtimeDir });
+  const runs = createRunController({
+    backendFactory: effectiveBackendFactory,
+    events,
+    runtimeDir,
+    prepareWorkDir: prepareRunWorkDir,
+    onComplete: completeRun,
+    isBusy: () => Boolean(pipelines?.active()),
+    productionStore,
+    ledgerFor: ({ productionId }) => {
+      if (typeof productionId !== 'string' || productionId === '') return null;
+      const production = productionStore.read(productionId);
+      if (!production) return null;
+      return createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId });
+    },
+  });
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
   // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
   // package's working resolution.
@@ -721,7 +739,6 @@ export function createApp({
   // is no default spend cap — the ledger stays uncapped until the user sets one.
   // A failed Google Colab run with unknown usage settles its full reservation
   // in the ledger; dispatch only reserves.
-  const productionStore = createProductionStore({ runtimeDir });
   const productionCommands = createCommandHandler({ store: productionStore });
   const productionActions = createActionCoordinator({
     store: productionStore,
@@ -1280,10 +1297,18 @@ export function createApp({
           assets: body.assets,
           mode: body.mode,
           corrections: body.corrections,
+          // IP24: one input shape. A bound package starts only with the IP20
+          // authority and the revision it was dispatched against.
+          authority: body.authority,
+          expected: body.expected,
         });
-        return sendJson(response, result.status === 409 ? 409 : 200, result);
+        const status = Number.isSafeInteger(result.status) && result.status >= 400 ? result.status : 200;
+        return sendJson(response, status, result);
       } catch (error) {
-        return sendJson(response, 400, { error: error.message });
+        return sendJson(response, Number.isInteger(error?.status) ? error.status : 400, {
+          error: error.message,
+          ...(typeof error?.code === 'string' ? { code: error.code } : {}),
+        });
       }
     }
 
@@ -1293,10 +1318,28 @@ export function createApp({
 
     if (url.pathname === '/api/run/approve' && request.method === 'POST') {
       const body = await readJson(request);
+      // IP24: a plan that lives in a production journal is approved (or
+      // rejected) through the production command path, never by this legacy
+      // in-memory set. Refusing here keeps one authority per plan hash.
+      if (typeof body?.planHash === 'string' && body.planHash !== '') {
+        for (const production of productionStore.list()) {
+          const journaled = productionStore.readEvents(production.id)
+            .some(event => event.type === 'plan.proposed' && event.data?.planHash === body.planHash);
+          if (journaled) {
+            return sendJson(response, 409, {
+              error: 'this plan is bound to a production; approve it through the production command path',
+              code: 'PLAN_BOUND_TO_PRODUCTION',
+            });
+          }
+        }
+      }
       try {
         return sendJson(response, 200, runs.approve(body.planHash));
       } catch (error) {
-        return sendJson(response, 400, { error: error.message });
+        return sendJson(response, 400, {
+          error: error.message,
+          ...(typeof error?.code === 'string' ? { code: error.code } : {}),
+        });
       }
     }
 

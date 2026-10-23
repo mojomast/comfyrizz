@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PER_HOUR, DEFAULT_GPU } from '../../../packages/backends/src/budget.mjs';
+import { createBudgetLedger } from './productions/ledger.mjs';
 
 /** Kept as the exported name earlier code and tests reference; the value is the shared default (PO-3). */
 export const G4_RATE_PER_HOUR = DEFAULT_RATE_PER_HOUR;
@@ -179,6 +180,22 @@ function clipJobFor(record, event) {
   return { type: 'clip.job', assetId, runId: record.runId, state, progress };
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Latest durable record of one action, following its state events. */
+function durableAction(events, planHash, actionId) {
+  let action = null;
+  for (const event of events) {
+    if (event.type !== 'action.state_changed' || !isPlainObject(event.data)) continue;
+    if (event.data.id !== actionId) continue;
+    if (typeof event.data.planHash === 'string' && event.data.planHash !== planHash) continue;
+    action = event.data;
+  }
+  return action;
+}
+
 /**
  * @param {object} options
  * @param {(backendId: string, opts: object) => object} options.backendFactory
@@ -190,10 +207,16 @@ function clipJobFor(record, event) {
  *   persist the applied package and render it; the return value lands on the run record
  * @param {(context: {productionId: string|null, packageId: string|null}) => object|Promise<object|null>|null} [options.ledgerFor]
  *   resolve the production's persistent budget ledger; null or omitted keeps the in-memory behaviour
+ * @param {{read: Function, list?: Function, readEvents: Function, commit: Function}|null} [options.productionStore]
+ *   the IP17 production journal; when present, a package bound to a production must
+ *   present the IP20 authority that dispatched its action slot
  */
-export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null } = {}) {
+export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null, productionStore = null } = {}) {
   if (typeof backendFactory !== 'function') throw new Error('createRunController needs a backendFactory');
   if (ledgerFor !== null && typeof ledgerFor !== 'function') throw new Error('ledgerFor must be a function');
+  if (productionStore !== null && (typeof productionStore.read !== 'function' || typeof productionStore.readEvents !== 'function' || typeof productionStore.commit !== 'function')) {
+    throw new Error('productionStore must be a production journal');
+  }
   const runsDir = join(runtimeDir, 'runs');
   mkdirSync(runsDir, { recursive: true });
 
@@ -204,6 +227,208 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   let spentEstimate = 0;
 
   const publish = (event) => events?.publish?.(event);
+
+  /** The production a package belongs to, if any: an explicit package binding or a production's packageId. */
+  function boundProductionFor(pkg) {
+    if (!productionStore) return null;
+    if (typeof pkg?.productionId === 'string' && pkg.productionId.trim() !== '') return pkg.productionId.trim();
+    if (typeof pkg?.id === 'string' && typeof productionStore.list === 'function') {
+      const matches = productionStore.list().filter((production) => production.packageId === pkg.id);
+      if (matches.length > 0) return [...matches].sort((left, right) => left.id.localeCompare(right.id))[0].id;
+    }
+    return null;
+  }
+
+  /**
+   * IP24: a bound start is authorized only by the journal, never by a boolean.
+   * The plan must be proposed with that hash, approved by a user (rejection
+   * wins), and its action must still be queued with an open slot reservation.
+   */
+  function verifyBoundAuthority({ pkg, authority, expected }) {
+    const boundProductionId = boundProductionFor(pkg);
+    if (!boundProductionId) return { bound: false };
+    if (!isPlainObject(authority)) {
+      return { bound: true, response: { error: 'a production-bound run requires its dispatched action authority', code: 'BOUND_AUTHORITY_REQUIRED', status: 400 } };
+    }
+    if (!isPlainObject(expected) || !Number.isSafeInteger(expected.productionRevision) || expected.productionRevision < 0) {
+      return { bound: true, response: { error: 'expected.productionRevision is required for a production-bound run', code: 'BOUND_AUTHORITY_REQUIRED', status: 400 } };
+    }
+    const productionId = authority.productionId;
+    if (typeof productionId !== 'string' || productionId === '') {
+      return { bound: true, response: { error: 'authority.productionId is required', code: 'BOUND_AUTHORITY_REQUIRED', status: 400 } };
+    }
+    if (productionId !== boundProductionId) {
+      return { bound: true, response: { error: 'the authority production does not own this package', code: 'PRODUCTION_MISMATCH', status: 403 } };
+    }
+    const planId = authority.planId;
+    const planHash = authority.planHash;
+    const actionId = authority.actionId;
+    if (![planId, planHash, actionId].every((value) => typeof value === 'string' && value !== '')) {
+      return { bound: true, response: { error: 'authority requires planId, planHash and actionId', code: 'BOUND_AUTHORITY_REQUIRED', status: 400 } };
+    }
+    if (!productionStore) {
+      return { bound: true, response: { error: 'the production journal is not available', code: 'BOUND_AUTHORITY_UNAVAILABLE', status: 500 } };
+    }
+    const production = productionStore.read(productionId);
+    if (!production) {
+      return { bound: true, response: { error: 'production not found', code: 'PRODUCTION_NOT_FOUND', status: 404 } };
+    }
+    if (production.revision !== expected.productionRevision) {
+      return {
+        bound: true,
+        response: {
+          error: 'revision conflict',
+          code: 'REVISION_CONFLICT',
+          status: 409,
+          currentRevision: production.revision,
+          baseRevision: expected.productionRevision,
+        },
+      };
+    }
+
+    const events = productionStore.readEvents(productionId);
+    let plan = null;
+    for (const event of events) {
+      if (event.type !== 'plan.proposed' || !isPlainObject(event.data)) continue;
+      if (event.data.id !== planId || event.data.planHash !== planHash) continue;
+      plan = event.data;
+    }
+    if (!plan) {
+      return { bound: true, response: { error: 'the authority does not name a proposed plan', code: 'UNKNOWN_PLAN', status: 404 } };
+    }
+    const slots = Array.isArray(plan.actions) ? plan.actions : [];
+    const slot = slots.find((entry) => entry?.id === actionId);
+    if (!slot) {
+      return { bound: true, response: { error: 'the action is not on the proposed plan', code: 'UNKNOWN_ACTION', status: 404 } };
+    }
+
+    let approved = false;
+    let approvedByUser = false;
+    let rejected = false;
+    for (const event of events) {
+      if (event.type !== 'plan.approved' && event.type !== 'plan.rejected') continue;
+      if (!isPlainObject(event.data) || event.data.planHash !== planHash) continue;
+      if (typeof event.data.planId === 'string' && event.data.planId !== planId) continue;
+      if (event.type === 'plan.rejected') {
+        rejected = true;
+        continue;
+      }
+      approved = true;
+      if (typeof event.userEventId === 'string' && event.userEventId !== '') approvedByUser = true;
+    }
+    if (rejected) {
+      return { bound: true, response: { error: 'the plan was rejected', code: 'PLAN_REJECTED', status: 409, planHash } };
+    }
+    if (!approved || !approvedByUser) {
+      return { bound: true, response: { error: 'the plan hash has no user approval', code: 'APPROVAL_REQUIRED', status: 409, planHash } };
+    }
+
+    const action = durableAction(events, planHash, actionId);
+    if (!action) {
+      return { bound: true, response: { error: 'the action was never dispatched', code: 'UNKNOWN_ACTION', status: 404 } };
+    }
+    if (action.state !== 'queued') {
+      return { bound: true, response: { error: 'this action authority was already consumed', code: 'ACTION_CONSUMED', status: 409, planHash, actionId } };
+    }
+    if (typeof action.reservationId !== 'string' || action.reservationId === '') {
+      return { bound: true, response: { error: 'the queued action has no slot reservation', code: 'ACTION_NOT_ADMITTED', status: 409, planHash, actionId } };
+    }
+
+    return {
+      bound: true,
+      productionId,
+      productionRevision: production.revision,
+      plan,
+      slot,
+      action,
+      reservationId: action.reservationId,
+      upperBound: Number.isFinite(slot.upperBound) ? slot.upperBound : 0,
+      planHash,
+      planId,
+      actionId,
+    };
+  }
+
+  /** Consume the IP20 slot durably before any paid backend work; a restart cannot re-run it. */
+  function consumeBoundAction(verdict, runId, expectedRevision, userEventId) {
+    const action = {
+      ...verdict.action,
+      state: 'running',
+      runId,
+      lastError: null,
+    };
+    const commandId = `run-start:${verdict.planHash}:${verdict.actionId}`;
+    try {
+      const committed = productionStore.commit(verdict.productionId, {
+        commandId,
+        idempotencyKey: commandId,
+        baseRevision: expectedRevision,
+        events: [{
+          type: 'action.state_changed',
+          data: action,
+          ...(typeof userEventId === 'string' && userEventId !== '' ? { userEventId } : {}),
+        }],
+      });
+      const recorded = (committed.events ?? []).find((event) => event.type === 'action.state_changed')?.data ?? action;
+      return { action: recorded };
+    } catch (error) {
+      if (error?.code === 'REVISION_CONFLICT') {
+        return { response: { error: 'revision conflict', code: 'REVISION_CONFLICT', status: 409, currentRevision: error.currentRevision } };
+      }
+      if (error?.code === 'IDEMPOTENCY_CONFLICT' || error?.code === 'DUPLICATE_EVENT') {
+        return { response: { error: 'this action authority was already consumed', code: 'ACTION_CONSUMED', status: 409 } };
+      }
+      throw error;
+    }
+  }
+
+  /** A post-consumption failure is durable too: never leave the slot running with no run. */
+  function failBoundAction(verdict, runId, error) {
+    const current = productionStore.read(verdict.productionId);
+    if (!current) return;
+    const action = {
+      ...verdict.action,
+      state: 'failed',
+      runId,
+      lastError: {
+        code: typeof error?.code === 'string' ? error.code : 'RUN_PREPARE_FAILED',
+        message: typeof error?.message === 'string' && error.message !== '' ? error.message : 'the run could not be prepared',
+      },
+    };
+    const commandId = `run-fail:${verdict.planHash}:${verdict.actionId}`;
+    try {
+      productionStore.commit(verdict.productionId, {
+        commandId,
+        idempotencyKey: commandId,
+        baseRevision: current.revision,
+        events: [{ type: 'action.state_changed', data: action }],
+      });
+    } catch { /* the original failure is the client-visible result */ }
+  }
+
+  function closeBoundReservation(ledger, reservationId, reason) {
+    try {
+      return ledger.settle({
+        reservationId,
+        kind: 'no_allocation',
+        gpuAllocated: false,
+        idempotencyKey: `run-close:${reservationId}:${reason}`,
+        evidence: { reason },
+      });
+    } catch (error) {
+      if (error?.code === 'RESERVATION_NOT_OPEN') return null;
+      throw error;
+    }
+  }
+
+  async function ledgerForBound(verdict) {
+    if (ledgerFor) return ledgerFor({ productionId: verdict.productionId, packageId: null });
+    if (!productionStore) return null;
+    const production = productionStore.read(verdict.productionId);
+    if (!production) return null;
+    return createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId });
+  }
+
 
   /** Settle a run's spend exactly once; the ledger survives retries and double waits. */
   function settle(record, units, kind) {
@@ -323,9 +548,9 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     });
   }
 
-  function settleLedgerRun(ledger, runId, settled) {
+  function settleLedgerRun(ledger, reservationId, settled) {
     return ledger.settle({
-      reservationId: `run:${runId}`,
+      reservationId,
       ...ledgerSettlementFor(settled),
     });
   }
@@ -432,7 +657,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     return { planHash, approved: true };
   }
 
-  async function execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour, teardownMode, includeReady, assets, ledger = null }) {
+  async function execute(record, { backendId, pkg, budgetUnits, comfyuiUrl, ratePerHour, teardownMode, includeReady, assets, ledger = null, reservationId = null }) {
     const emit = (event) => {
       record.events.push(event);
       publish({ type: 'run.event', runId: record.runId, event });
@@ -516,7 +741,12 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         });
         return;
       }
-      outcome = { kind: 'completed', units: incrementOf(record) };
+      // IP24: a backend that reports its real usage settles the real units,
+      // even when that exceeds the estimate. The ledger never caps a settlement.
+      const completedActual = readSpend(instance, [result.spend, result.usage]);
+      outcome = completedActual !== null
+        ? { kind: 'actual', units: completedActual }
+        : { kind: 'completed', units: incrementOf(record) };
       publish({
         type: 'run.finished',
         runId: record.runId,
@@ -557,11 +787,11 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           : { kind: 'completed', units: incrementOf(record) };
       }
       const settled = settle(record, outcome.units, outcome.kind);
-      if (ledger) settleLedgerRun(ledger, record.runId, settled);
+      if (ledger) settleLedgerRun(ledger, reservationId ?? `run:${record.runId}`, settled);
     }
   }
 
-  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null, productionId = null, userEventId = undefined, actor = undefined, idempotencyKey = undefined }) {
+  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null, productionId = null, userEventId = undefined, actor = undefined, idempotencyKey = undefined, authority = undefined, expected = undefined }) {
     if (mode !== 'final' && mode !== 'take') throw new Error("mode must be 'final' or 'take'");
     if (activeRunId) return { error: 'run busy', runId: activeRunId, status: 409 };
     // IP08: claim the one-start guard synchronously, before the first await, so
@@ -574,6 +804,97 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     let ledger = null;
     let admission = null;
     try {
+      // IP24: the production journal is the only authority for a bound package.
+      // Nothing is consumed until the estimate is inside the approved slot.
+      const verdict = verifyBoundAuthority({ pkg, authority, expected });
+      if (verdict.bound) {
+        if (verdict.response) return verdict.response;
+        ledger = await ledgerForBound(verdict);
+        if (!ledger) return { error: 'the production budget ledger is not available', code: 'LEDGER_UNAVAILABLE', status: 500 };
+        const preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
+        if (!preview.budget.allowed) {
+          publish({ type: 'run.refused', ...preview });
+          return { ...preview, refused: true, productionId: verdict.productionId };
+        }
+        const increment = incrementOf(preview);
+        if (increment > verdict.upperBound) {
+          return {
+            ...preview,
+            error: 'the run estimate exceeds the approved action slot',
+            code: 'SLOT_BOUND_EXCEEDED',
+            status: 409,
+            productionId: verdict.productionId,
+            slot: { actionId: verdict.actionId, upperBound: verdict.upperBound },
+          };
+        }
+        const runMode = mode === 'take' ? 'take' : 'final';
+        const runCorrections = corrections && typeof corrections === 'object' && !Array.isArray(corrections) ? corrections : null;
+        const runId = runIdFor(preview.planHash);
+        const consumed = consumeBoundAction(verdict, runId, expected.productionRevision, userEventId);
+        if (consumed.response) return consumed.response;
+        const workDir = join(runsDir, runId, 'work');
+        const outputDir = join(runsDir, runId, 'out');
+        try {
+          mkdirSync(outputDir, { recursive: true });
+          if (prepareWorkDir) await prepareWorkDir(pkg, workDir, { runId, backendId });
+        } catch (error) {
+          failBoundAction(verdict, runId, error);
+          closeBoundReservation(ledger, verdict.reservationId, 'prepare_failed');
+          throw error;
+        }
+        const record = {
+          runId,
+          backendId,
+          status: 'starting',
+          planHash: preview.planHash,
+          budget: preview.budget,
+          estimate: preview.estimate,
+          backend: preview.backend,
+          jobs: preview.jobs,
+          events: [],
+          workDir,
+          outputDir,
+          revision: null,
+          render: null,
+          mode: runMode,
+          corrections: runCorrections,
+          productionId: verdict.productionId,
+          reservationId: verdict.reservationId,
+          startedAt: new Date().toISOString(),
+          signal: new AbortController().signal,
+        };
+        runs.set(runId, record);
+        activeRunId = runId;
+        publish({ type: 'run.budget', runId, backendId, budget: preview.budget, estimate: preview.estimate, jobs: preview.jobs });
+        publish({ type: 'run.started', runId, backendId, planHash: preview.planHash, budget: preview.budget });
+        record.done = execute(record, {
+          backendId,
+          pkg,
+          budgetUnits,
+          comfyuiUrl,
+          ratePerHour: preview.ratePerHour,
+          teardownMode,
+          includeReady,
+          assets,
+          ledger,
+          reservationId: verdict.reservationId,
+        }).finally(() => {
+          activeRunId = null;
+        });
+        return {
+          runId,
+          status: record.status,
+          ...preview,
+          approved: true,
+          productionId: verdict.productionId,
+          authority: {
+            productionId: verdict.productionId,
+            planId: verdict.planId,
+            planHash: verdict.planHash,
+            actionId: verdict.actionId,
+          },
+        };
+      }
       if (ledgerFor) {
         ledger = await ledgerFor({ productionId: productionId ?? null, packageId: pkg?.id ?? null });
       }
