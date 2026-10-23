@@ -38,6 +38,32 @@ const sameTarget = (assignment, target) => Boolean(assignment && assignment.acti
   && assignment.slot === target.slot);
 const validId = id => typeof id === 'string' && /^chat_[A-Za-z0-9_-]{8,80}$/.test(id);
 
+// IP39W: rejecting is a durable decision on the proposal record, not a model
+// turn. An unknown id is a caller error; a repeated rejection is an idempotent
+// success so a retried request can never fail after it already landed.
+function rejectProposalRecords(session, { rejectAssignments, rejectCastProposals }, turnId, now) {
+  const referenceAssignments = Array.isArray(session?.referenceAssignments) ? clone(session.referenceAssignments) : [];
+  const castProposals = Array.isArray(session?.castProposals) ? clone(session.castProposals) : [];
+  const apply = (records, ids) => {
+    for (const proposalId of ids ?? []) {
+      const index = records.findIndex(record => record?.id === proposalId);
+      if (index < 0) fail(404, 'UNKNOWN_PROPOSAL', { code: 'UNKNOWN_PROPOSAL' });
+      const record = records[index];
+      if (record.status === 'rejected') continue;
+      if (record.status !== 'proposed') fail(409, 'PROPOSAL_CONFIRMED', { code: 'PROPOSAL_CONFIRMED' });
+      records[index] = {
+        ...record,
+        status: 'rejected',
+        rejectedAt: now,
+        ...(turnId ? { turnId } : {}),
+      };
+    }
+  };
+  apply(referenceAssignments, rejectAssignments);
+  apply(castProposals, rejectCastProposals);
+  return { referenceAssignments, castProposals };
+}
+
 const CAST_SESSION_FIELDS = ['cast', 'castPlacements', 'castProposals'];
 
 function sameExceptCastChanges(base, current) {
@@ -662,9 +688,16 @@ export function createProjectChat({
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'A chat message is required');
     const id = input.conversationId ?? `chat_${randomUUID()}`;
     if (!validId(id)) fail(400, 'Invalid conversation ID');
-    if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 8000) fail(400, 'Message must contain 1–8000 characters');
     if (input.action !== undefined && input.action !== 'build') fail(400, 'Unknown conversation action');
     if (input.turnId !== undefined && (typeof input.turnId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(input.turnId))) fail(400, 'Invalid turn ID');
+    if (input.rejectAssignments !== undefined && (!Array.isArray(input.rejectAssignments)
+      || input.rejectAssignments.some(assignmentId => typeof assignmentId !== 'string' || !assignmentId || assignmentId.length > 80))) {
+      fail(400, 'rejectAssignments must be a list of assignment IDs');
+    }
+    if (input.rejectCastProposals !== undefined && (!Array.isArray(input.rejectCastProposals)
+      || input.rejectCastProposals.some(proposalId => typeof proposalId !== 'string' || !proposalId || proposalId.length > 80))) {
+      fail(400, 'rejectCastProposals must be a list of proposal IDs');
+    }
     if (input.confirmAssignments !== undefined && (!Array.isArray(input.confirmAssignments)
       || input.confirmAssignments.some(assignmentId => typeof assignmentId !== 'string' || !assignmentId || assignmentId.length > 80))) {
       fail(400, 'confirmAssignments must be a list of assignment IDs');
@@ -677,10 +710,70 @@ export function createProjectChat({
       || input.confirmCastProposals.some(proposalId => typeof proposalId !== 'string' || !proposalId || proposalId.length > 80))) {
       fail(400, 'confirmCastProposals must be a list of proposal IDs');
     }
-    if (!input.provider || input.provider === 'none' || !providerSettings) fail(400, 'Choose a live provider and model in Agent settings to chat');
+    const hasMessage = typeof input.message === 'string' && Boolean(input.message.trim());
+    const decisionOnly = !hasMessage
+      && (Boolean(input.rejectAssignments?.length) || Boolean(input.rejectCastProposals?.length))
+      && input.action === undefined
+      && !input.confirmAssignments?.length
+      && !input.confirmClipProposals?.length
+      && !input.confirmCastProposals?.length;
+    if (!decisionOnly && (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 8000)) {
+      fail(400, 'Message must contain 1–8000 characters');
+    }
+    if (decisionOnly) {
+      if (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 0) fail(400, 'A rejection needs the conversation base revision');
+      if (!input.turnId) fail(400, 'A rejection needs a fresh turn ID');
+    } else if (!input.provider || input.provider === 'none' || !providerSettings) {
+      fail(400, 'Choose a live provider and model in Agent settings to chat');
+    }
     if (active.has(id)) fail(409, 'This conversation already has a turn in progress');
     active.add(id);
     try {
+      // A rejection-only request is a decision, not a conversation turn: it
+      // commits under the same lock and journal, but never resolves a provider
+      // or calls the model.
+      if (decisionOnly) {
+        let decided = null;
+        let replay = null;
+        withLock(id, () => {
+          const conflict = recoverLocked(id);
+          if (conflict) fail(409, 'RECOVERY_CONFLICT', { code: 'RECOVERY_CONFLICT', recoveryConflict: conflict });
+          const session = read(id) ?? { id, revision: 0, messages: [], plan: null, phase: 'chatting', projectId: null, projectRevision: null };
+          if (input.turnId === session.lastTurnId) {
+            replay = response(session, Boolean(session.lastTurnBuilt));
+            return;
+          }
+          const committed = committedTurn(id, input.turnId);
+          if (committed) {
+            replay = response(session, Boolean(committed.built));
+            return;
+          }
+          if (input.baseRevision !== session.revision) {
+            fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision: session.revision });
+          }
+          const now = new Date().toISOString();
+          const { referenceAssignments, castProposals } = rejectProposalRecords(
+            session,
+            { rejectAssignments: input.rejectAssignments, rejectCastProposals: input.rejectCastProposals },
+            input.turnId,
+            now,
+          );
+          const nextSession = {
+            ...session,
+            revision: session.revision + 1,
+            lastTurnId: input.turnId,
+            lastTurnBuilt: false,
+            ...(referenceAssignments.length || Array.isArray(session.referenceAssignments) ? { referenceAssignments } : {}),
+            ...(castProposals.length || Array.isArray(session.castProposals) ? { castProposals } : {}),
+          };
+          writeCas(nextSession, session.revision);
+          appendJournal(id, nextSession, false);
+          decided = nextSession;
+        });
+        if (replay) return replay;
+        return response(decided ?? read(id));
+      }
+
       // Phase A: one short lock covers recovery and the read-modify snapshot of
       // the conversation. The model call never runs under this lock.
       let session = null;
@@ -696,6 +789,8 @@ export function createProjectChat({
       let cast = [];
       let castPlacements = [];
       let castProposals = [];
+      let rejectionAt = null;
+      let rejectedReferenceIds = new Set();
       let corrections = [];
       const selectOps = [];
       const verdictOps = [];
@@ -730,6 +825,28 @@ export function createProjectChat({
         cast = Array.isArray(session.cast) ? clone(session.cast) : [];
         castPlacements = Array.isArray(session.castPlacements) ? clone(session.castPlacements) : [];
         castProposals = Array.isArray(session.castProposals) ? clone(session.castProposals) : [];
+
+        // IP39W: rejecting is settled before any confirmation is considered, so
+        // a rejected id in the same turn's confirm list is refused rather than
+        // quietly ignored by the status check.
+        rejectionAt = new Date().toISOString();
+        const rejection = rejectProposalRecords(
+          session,
+          { rejectAssignments: input.rejectAssignments, rejectCastProposals: input.rejectCastProposals },
+          input.turnId ?? null,
+          rejectionAt,
+        );
+        castProposals = rejection.castProposals;
+        rejectedReferenceIds = new Set(rejection.referenceAssignments
+          .filter(record => record?.status === 'rejected' && typeof record.id === 'string')
+          .map(record => record.id));
+        const rejectedCastIds = new Set(castProposals
+          .filter(record => record?.status === 'rejected' && typeof record.id === 'string')
+          .map(record => record.id));
+        if (input.confirmAssignments?.some(assignmentId => rejectedReferenceIds.has(assignmentId))
+          || input.confirmCastProposals?.some(proposalId => rejectedCastIds.has(proposalId))) {
+          fail(409, 'PROPOSAL_REJECTED', { code: 'PROPOSAL_REJECTED' });
+        }
 
         // Clip proposals are proposals until the user confirms them by ID (a text "yes"
         // trusts the model and still goes through the same take functions as the routes).
@@ -867,6 +984,17 @@ export function createProjectChat({
       let referenceAssignments = Array.isArray(session.referenceAssignments)
         ? clone(session.referenceAssignments)
         : [];
+      if (rejectedReferenceIds.size) {
+        referenceAssignments = referenceAssignments.map(assignment => (assignment
+          && assignment.status !== 'rejected' && rejectedReferenceIds.has(assignment.id))
+          ? {
+            ...assignment,
+            status: 'rejected',
+            rejectedAt: rejectionAt,
+            ...(input.turnId ? { turnId: input.turnId } : {}),
+          }
+          : assignment);
+      }
       const syncReferenceAssignments = () => {
         if (!referenceStore) return;
         referenceStore.setAssignments(confirmedAssignments(referenceAssignments, referenceStore.list()));

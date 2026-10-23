@@ -195,7 +195,7 @@ type RecoveryReply = ChatReply & {
   error?: string;
   recoveryConflict?: RecoveryConflict;
 };
-type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[]; turnContext?: TurnContextChip[] };
+type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[]; rejectAssignments?: string[]; rejectCastProposals?: string[]; turnContext?: TurnContextChip[] };
 
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const STORAGE_KEY = 'comfyrizz.project-chat';
@@ -779,13 +779,90 @@ export function mountProjectChat(options: {
 
   /**
    * IP39: a legacy chat without a production binding may still confirm through
-   * its old chat turn. Reject has no such fallback: it must never become a
-   * composer prefill (A07), so the caller gets one explicit error instead.
+   * its old chat turn. IP39W gives Reject a decision-only server request and an
+   * editable composer suggestion instead of failing or silently sending.
    */
   function legacyProposalAccept(kind: ProposalKind, proposalId: string): Promise<boolean> {
     if (kind === 'reference') void confirmAssignments([proposalId]);
     else void confirmCastProposals([proposalId]);
     return Promise.resolve(true);
+  }
+
+  function proposalRejectLabel(kind: ProposalKind, proposalId: string): string {
+    if (kind === 'reference') {
+      const assignment = (conversation?.referenceAssignments ?? []).find(item => item?.id === proposalId);
+      const refId = assignment?.refId ?? '';
+      return options.referenceLabel?.(refId) || refId || proposalId;
+    }
+    const proposal = (conversation?.castProposals ?? []).find(item => item?.id === proposalId);
+    return proposal
+      ? castProposalLabel(proposal, {
+        ...(options.characterLabel ? { characterLabel: options.characterLabel } : {}),
+        ...(options.castLabel ? { castLabel: options.castLabel } : {}),
+        ...(options.sceneLabel ? { sceneLabel: options.sceneLabel } : {}),
+      })
+      : proposalId;
+  }
+
+  function composerInput(): HTMLTextAreaElement | HTMLInputElement | null {
+    return (panel.querySelector('#prompt') ??
+      panel.ownerDocument?.getElementById('prompt') ??
+      (typeof document !== 'undefined' ? document.getElementById('prompt') : null)) as HTMLTextAreaElement | HTMLInputElement | null;
+  }
+
+  function prefillComposer(text: string): void {
+    const promptInput = composerInput();
+    if (!promptInput) return;
+    promptInput.value = text;
+    promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+    promptInput.focus();
+  }
+
+  /**
+   * IP39W: without a production binding, rejecting is still a durable server
+   * decision. The request is decision-only (no message, no provider), and the
+   * composer gets an editable suggestion that is never sent automatically.
+   */
+  async function rejectWithoutBinding(kind: ProposalKind, proposalId: string): Promise<boolean> {
+    const stillPending = kind === 'reference'
+      ? proposedAssignments().some(assignment => assignment.id === proposalId)
+      : proposedCastProposals().some(proposal => proposal.id === proposalId);
+    if (!stillPending) return false;
+    const label = proposalRejectLabel(kind, proposalId);
+    busy = true;
+    errorText = '';
+    render();
+    try {
+      const response = await options.apiFetch('/api/agent/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          conversationId: ensureConversationId(),
+          turnId: crypto.randomUUID(),
+          baseRevision: conversation?.revision ?? 0,
+          ...(kind === 'reference'
+            ? { rejectAssignments: [proposalId] }
+            : { rejectCastProposals: [proposalId] }),
+        }),
+      });
+      const body = await response.json().catch(() => ({})) as ChatReply & { error?: string };
+      if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
+      if (body?.conversation) {
+        options.replace(body.conversation.messages);
+        adopt(body, Boolean(body.built));
+      }
+      prefillComposer(`Not this one: ${label}. `);
+      options.log(`Rejected proposal ${proposalId}; the composer has an editable message`);
+      if (kind === 'reference') void options.onReferencesChanged?.();
+      return true;
+    } catch (error) {
+      errorText = `Could not reject proposal: ${(error as Error).message}`;
+      options.log(`Could not reject proposal ${proposalId}: ${(error as Error).message}`);
+      return false;
+    } finally {
+      busy = false;
+      render();
+    }
   }
 
   function currentProposalId(binding: ProposalCommandBinding): string {
@@ -862,10 +939,15 @@ export function mountProjectChat(options: {
     const binding = options.proposalCommands;
     if (!binding) {
       if (action === 'accept') return await legacyProposalAccept(kind, id);
-      errorText = 'Rejecting a proposal needs a production command binding.';
-      options.log(`Could not reject proposal ${id}: no production command binding`);
-      render();
-      return false;
+      // A host with no composer cannot present the editable rejection message,
+      // so it keeps the explicit legacy error rather than rejecting silently.
+      if (!composerInput()) {
+        errorText = 'Rejecting a proposal needs a production command binding.';
+        options.log(`Could not reject proposal ${id}: no composer or production command binding`);
+        render();
+        return false;
+      }
+      return await rejectWithoutBinding(kind, id);
     }
 
     const pending = kind === 'reference'
