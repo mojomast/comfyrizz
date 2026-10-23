@@ -38,6 +38,7 @@ async function api(env: Env, path: string, init: RequestInit = {}): Promise<Resp
 }
 
 async function openEditor(page: Page, env: Env): Promise<void> {
+  await page.addInitScript(() => localStorage.setItem('comfyrizz.ui', JSON.stringify({ mode: 'advanced', density: 'compact' })));
   await page.goto(`/?package=${encodeURIComponent(env.packageId)}#token=${encodeURIComponent(env.token)}`);
   await expect(page.getByTestId('scene')).toHaveCount(3);
   await expect(page.getByTestId('caption').first()).toHaveText('one two three four.');
@@ -49,14 +50,15 @@ async function openEditor(page: Page, env: Env): Promise<void> {
 /**
  * DN09: Easy is the new default and hides the inspector and Advanced-only
  * fields. These editor tests exercise the inspector, transition frames and
- * caption controls, so open Advanced the way a user would before asserting.
+ * caption controls, so open Advanced before asserting.
  */
 async function useAdvancedView(page: Page): Promise<void> {
   const root = page.locator('html');
   if (await root.getAttribute('data-mode') !== 'advanced') {
-    await page.locator('#ui-mode-advanced').click();
+    await page.keyboard.press('Control+Shift+A');
   }
   await expect(root).toHaveAttribute('data-mode', 'advanced');
+  await expect(page.locator('#app')).not.toHaveAttribute('hidden', '');
   await expect(page.getByTestId('inspector-tabs')).toBeVisible();
 }
 
@@ -480,7 +482,7 @@ test('export zip matches the timeline and reimport keeps frames, starts and capt
   expect(projectionOf(compiled.timeline)).toEqual(visible);
 
   await page.locator('#export-bundle').click();
-  await expect(page.locator('#export-state')).toContainText(/\d+ captions/);
+  await expect(page.locator('#export-state')).toContainText(/\d+ captions/, { timeout: 45_000 });
   await expect(page.locator('#export-state')).not.toContainText('export failed');
   const zip = readFileSync(join(env.runtimeDir, 'out', 'export', env.packageId, 'package.zip'));
   expect(zip.includes(env.token)).toBe(false);

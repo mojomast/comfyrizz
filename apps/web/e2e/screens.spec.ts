@@ -1,10 +1,11 @@
 /**
- * DN10: screenshot matrix for the density + Easy/Advanced view work.
+ * DN10: screenshot matrix for the density + Easy/Advanced shell work.
  *
  * Captures 1440x900 and 2560x1440 x {easy, advanced} x {compact, comfortable}
  * (8 frames) plus one drawer-open frame = 9 PNGs in test-results/density/.
- * One app, one data model: each frame only changes prefs (mode/density) and
- * reloads; no state is cleared.
+ * Easy frames show the Easy Idea step; Advanced frames show the editor. One
+ * app, one data model: each frame starts from fresh mode/density prefs; no
+ * project state is cleared.
  */
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -48,16 +49,28 @@ function editorUrl(env: Env): string {
   return `/?package=${encodeURIComponent(env.packageId)}#token=${encodeURIComponent(env.token)}`;
 }
 
-async function openEditor(page: Page, env: Env): Promise<void> {
-  await page.goto(editorUrl(env));
-  await expect(page.getByTestId('scene')).toHaveCount(3);
-  await expect(page.locator('#save-status')).toHaveText('Saved');
+function ideaUrl(env: Env): string {
+  return `/?package=${encodeURIComponent(env.packageId)}&step=idea#token=${encodeURIComponent(env.token)}`;
 }
 
-async function setPrefs(page: Page, mode: UiMode, density: UiDensity): Promise<void> {
-  await page.evaluate(([key, value]) => {
-    localStorage.setItem(key, JSON.stringify(value));
-  }, [PREFS_KEY, { mode, density, panels: DEFAULT_PANELS }] as const);
+async function expectShell(page: Page, mode: UiMode): Promise<void> {
+  const root = page.locator('html');
+  await expect(root).toHaveAttribute('data-mode', mode);
+  if (mode === 'easy') {
+    await expect(page.locator('#easy-root')).toBeVisible();
+    await expect(page.locator('#app')).toHaveAttribute('hidden', '');
+    await expect(page.locator('[data-easy-stepper] button[aria-current="step"]')).toContainText('Idea');
+    return;
+  }
+  await expect(page.locator('#easy-root')).toBeHidden();
+  await expect(page.locator('#app')).not.toHaveAttribute('hidden', '');
+  await expect(page.getByTestId('inspector-tabs')).toBeVisible();
+}
+
+async function openEditor(page: Page, env: Env, mode: UiMode): Promise<void> {
+  await page.goto(mode === 'easy' ? ideaUrl(env) : editorUrl(env));
+  await expect(page.getByTestId('scene')).toHaveCount(3);
+  await expectShell(page, mode);
 }
 
 async function mockReviewClips(page: Page, env: Env): Promise<void> {
@@ -111,32 +124,30 @@ test('DN10 screenshot matrix', async ({ page }) => {
     { width: 2560, height: 1440, label: '2560x1440' },
   ];
 
-  await openEditor(page, env);
-
   for (const vp of viewports) {
-    await page.setViewportSize({ width: vp.width, height: vp.height });
     for (const mode of ['easy', 'advanced'] as UiMode[]) {
       for (const density of ['compact', 'comfortable'] as UiDensity[]) {
-        await setPrefs(page, mode, density);
-        await page.goto(`/?package=${encodeURIComponent(env.packageId)}`);
-        await openEditor(page, env);
-        await page.waitForTimeout(300);
+        const framePage = await page.context().newPage();
+        await framePage.setViewportSize({ width: vp.width, height: vp.height });
+        await framePage.addInitScript(([key, prefs]) => {
+          localStorage.setItem(key, JSON.stringify(prefs));
+        }, [PREFS_KEY, { mode, density, panels: DEFAULT_PANELS }] as const);
+        await openEditor(framePage, env, mode);
+        await framePage.waitForTimeout(300);
         const name = `${vp.label}-${mode}-${density}.png`;
-        await page.screenshot({ path: join(OUT_DIR, name) });
+        await framePage.screenshot({ path: join(OUT_DIR, name) });
         files.push(name);
+        await framePage.close();
       }
     }
   }
 
   // Drawer-open frame.
   const drawerPage = await page.context().newPage();
+  await drawerPage.addInitScript(() => localStorage.setItem('comfyrizz.ui', JSON.stringify({ mode: 'advanced', density: 'comfortable' })));
   await mockReviewClips(drawerPage, env);
   await drawerPage.setViewportSize({ width: 1440, height: 900 });
-  await drawerPage.goto(editorUrl(env));
-  await expect(drawerPage.getByTestId('scene')).toHaveCount(3);
-  await setPrefs(drawerPage, 'advanced', 'comfortable');
-  await drawerPage.goto(`/?package=${encodeURIComponent(env.packageId)}`);
-  await expect(drawerPage.getByTestId('scene')).toHaveCount(3);
+  await openEditor(drawerPage, env, 'advanced');
   const pill = drawerPage.locator('#render-bar-host [data-review-open]');
   await expect(pill).toBeVisible();
   await pill.click();
@@ -151,6 +162,6 @@ test('DN10 screenshot matrix', async ({ page }) => {
   // eslint-disable-next-line no-console
   console.log(`DN10 screenshots (${files.length}): ${files.join(', ')}`);
   // eslint-disable-next-line no-console
-  console.log('DN10 note: before/after - centre column at 2560 uses full width with no empty band over 25%; density/mode are view filters over one data model.');
+  console.log('DN10 note: Easy frames show the Easy Idea step; Advanced frames use the full centre column at 2560 with no empty band over 25%.');
   expect(files).toHaveLength(9);
 });

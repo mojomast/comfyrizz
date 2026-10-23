@@ -1,10 +1,10 @@
 /**
- * DN09: density modes and the Easy/Advanced view filter.
+ * DN09: density modes and the Easy/Advanced shell switch.
  *
- * The app has one data model. These tests treat a mode as a filter over the
- * same live DOM: switching hides nodes (it never unmounts them), the choice and
- * the density live in `localStorage['comfyrizz.ui']`, and the approval drawer
- * keeps the render-gate hooks the rest of the suite relies on.
+ * The app has one data model. Easy mounts the studio at #easy-root and hides
+ * the Advanced #app; switching back never unmounts it. The choice and the
+ * density live in `localStorage['comfyrizz.ui']`, and the approval drawer keeps
+ * the render-gate hooks the rest of the suite relies on.
  *
  * Chromium, loopback, no GPU. MIT, same as the repo.
  */
@@ -74,8 +74,19 @@ async function densityVariable(page: Page): Promise<string> {
   return page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--d').trim());
 }
 
-function dataAdvHiddenInEasy(page: Page): Promise<boolean> {
-  return page.locator('[data-testid="narration"]').isHidden();
+async function useAdvancedPrefs(page: Page): Promise<void> {
+  await page.addInitScript(() => localStorage.setItem('comfyrizz.ui', JSON.stringify({ mode: 'advanced', density: 'compact' })));
+}
+
+async function expectEasyShell(page: Page): Promise<void> {
+  await expect(page.locator('#easy-root')).toBeVisible();
+  await expect(page.locator('#app')).toHaveAttribute('hidden', '');
+}
+
+async function expectAdvancedShell(page: Page): Promise<void> {
+  await expect(page.locator('#easy-root')).toBeHidden();
+  await expect(page.locator('#app')).not.toHaveAttribute('hidden', '');
+  await expect(page.getByTestId('inspector-tabs')).toBeVisible();
 }
 
 /**
@@ -95,7 +106,7 @@ async function mockReviewClips(
     return {
       clipId,
       sceneId: clipId.split(':')[0]!,
-      assetId: 'a_plate',
+      assetId: `asset_${clipId.split(':')[0]}`,
       slot: 'background',
       kind: 'plate',
       from: Math.max(0, index) * 30,
@@ -129,7 +140,7 @@ async function mockReviewClips(
           packageId: env.packageId,
           revision: 1,
           clip: clipFor(clipId),
-          assetId: 'a_plate',
+          assetId: `asset_${clipId.split(':')[0]}`,
           selected: null,
           takes: [],
           history: [],
@@ -153,10 +164,10 @@ async function mockReviewClips(
 async function useAdvanced(page: Page): Promise<void> {
   const root = page.locator('html');
   if (await root.getAttribute('data-mode') !== 'advanced') {
-    await page.locator('#ui-mode-advanced').click();
+    await page.keyboard.press('Control+Shift+A');
   }
   await expect(root).toHaveAttribute('data-mode', 'advanced');
-  await expect(page.getByTestId('inspector-tabs')).toBeVisible();
+  await expectAdvancedShell(page);
 }
 
 const reviewPill = (page: Page) => page.locator('#render-bar-host [data-review-open]');
@@ -175,15 +186,15 @@ test('new users start in Easy; the toggle persists mode and its default density'
   await expect(root).toHaveAttribute('data-density', 'comfortable');
   await expect(page.locator('#ui-mode-easy')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#ui-mode-advanced')).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#easy-actions')).toBeVisible();
+  await expectEasyShell(page);
   expect(await storedPrefs(page)).toBeNull();
 
   await page.keyboard.press('Control+Shift+A');
   await expect(root).toHaveAttribute('data-mode', 'advanced');
   await expect(root).toHaveAttribute('data-density', 'compact');
   await expect(page.locator('#ui-mode-live')).toHaveText('Advanced view. All controls are visible.');
-  await expect(page.locator('#easy-actions')).toBeHidden();
-  await expect(page.getByTestId('inspector-tabs')).toBeVisible();
+  await expect(page.locator('#easy-root')).toBeHidden();
+  await expectAdvancedShell(page);
   expect(await storedPrefs(page)).toMatchObject({ mode: 'advanced', density: 'compact' });
 
   // Mode still chooses its default until a density is picked explicitly.
@@ -191,17 +202,20 @@ test('new users start in Easy; the toggle persists mode and its default density'
   await expect(root).toHaveAttribute('data-mode', 'easy');
   await expect(root).toHaveAttribute('data-density', 'comfortable');
   await expect(page.locator('#ui-mode-live')).toHaveText('Easy view. Advanced controls are hidden.');
+  await expectEasyShell(page);
   expect(await storedPrefs(page)).toMatchObject({ mode: 'easy', density: 'comfortable' });
 
   await page.keyboard.press('Control+Shift+A');
   await expect(root).toHaveAttribute('data-mode', 'advanced');
   await expect(root).toHaveAttribute('data-density', 'compact');
+  await expectAdvancedShell(page);
 
   await page.reload();
   await expect(page.getByTestId('scene')).toHaveCount(3);
   await expect(root).toHaveAttribute('data-mode', 'advanced');
   await expect(root).toHaveAttribute('data-density', 'compact');
   await expect(page.locator('#ui-mode-advanced')).toHaveAttribute('aria-pressed', 'true');
+  await expectAdvancedShell(page);
 });
 
 test('an explicit density sticks across mode switches and reloads', async ({ page }) => {
@@ -213,9 +227,10 @@ test('an explicit density sticks across mode switches and reloads', async ({ pag
   await page.reload();
   await expect(page.getByTestId('scene')).toHaveCount(3);
   await expect(root).toHaveAttribute('data-density', 'compact');
+  await expectEasyShell(page);
   expect(await densityVariable(page)).toBe('0');
 
-  await page.locator('#ui-mode-advanced').click();
+  await useAdvanced(page);
   await expect(root).toHaveAttribute('data-mode', 'advanced');
   await expect(root).toHaveAttribute('data-density', 'compact');
   expect(await densityVariable(page)).toBe('0');
@@ -225,16 +240,19 @@ test('an explicit density sticks across mode switches and reloads', async ({ pag
   await expect(page.getByTestId('scene')).toHaveCount(3);
   await expect(root).toHaveAttribute('data-mode', 'advanced');
   await expect(root).toHaveAttribute('data-density', 'comfortable');
+  await expectAdvancedShell(page);
   expect(await densityVariable(page)).toBe('1');
 
   await page.locator('#ui-mode-easy').click();
   await expect(root).toHaveAttribute('data-mode', 'easy');
   await expect(root).toHaveAttribute('data-density', 'comfortable');
+  await expectEasyShell(page);
   expect(await densityVariable(page)).toBe('1');
 });
 
 test('an Advanced edit survives the Easy filter and comes back unchanged', async ({ page }) => {
   const env = loadEnv();
+  await useAdvancedPrefs(page);
   await openEditor(page, env);
   await useAdvanced(page);
   const root = page.locator('html');
@@ -249,11 +267,13 @@ test('an Advanced edit survives the Easy filter and comes back unchanged', async
 
   const narration = page.getByTestId('narration');
   await narration.fill('Typed in Advanced, still here in Easy.');
+  await page.getByTestId('apply-narration').click();
+  await expect(page.locator('[data-action]')).toHaveText('Edit applied.');
 
   await page.locator('#ui-mode-easy').click();
   await expect(root).toHaveAttribute('data-mode', 'easy');
   await expect(page.getByTestId('inspector-tabs')).toBeHidden();
-  await expect(page.locator('#easy-actions')).toBeVisible();
+  await expectEasyShell(page);
   await expect(page.locator('#mode-summary')).toContainText('Custom transition');
 
   // Hidden, not unmounted: the same inputs keep their state while Easy is on.
@@ -265,7 +285,7 @@ test('an Advanced edit survives the Easy filter and comes back unchanged', async
   await expect(page.getByTestId('scene')).toHaveCount(3);
   await expect(page.getByTestId('caption').first()).toHaveText('one two three four.');
 
-  await page.locator('#ui-mode-advanced').click();
+  await useAdvanced(page);
   await expect(root).toHaveAttribute('data-mode', 'advanced');
   await expect(narration).toBeVisible();
   await expect(narration).toHaveValue('Typed in Advanced, still here in Easy.');
@@ -273,13 +293,9 @@ test('an Advanced edit survives the Easy filter and comes back unchanged', async
   await expect(page.getByLabel('Transition frames')).toHaveValue('9');
 });
 
-// Known DN03 integration bug (reported in open_issues): mountReviewDrawer
-// aliases model.options to the caller's options object, so assigning
-// model.options.onChange overwrites the caller's onChange and recurses inside
-// notify(). Until review-drawer.ts is fixed, refreshClips() cannot hand clips
-// to the render bar/drawer, so this test fails at the first pill assertion.
 test('the drawer opens from R, moves with J, approves with A, advances and closes with Esc', async ({ page }) => {
   const env = loadEnv();
+  await useAdvancedPrefs(page);
   const { approved } = await mockReviewClips(page, env, ['s_close:a_plate']);
   await openEditor(page, env);
 
@@ -320,6 +336,7 @@ test('the drawer opens from R, moves with J, approves with A, advances and close
 
 test('splitter arrow keys move the column and the width survives a reload', async ({ page }) => {
   const env = loadEnv();
+  await useAdvancedPrefs(page);
   await openEditor(page, env);
 
   const splitter = page.locator('.shell-splitter[data-split="left"]');
@@ -348,6 +365,7 @@ test('splitter arrow keys move the column and the width survives a reload', asyn
 
 test('the render gate hooks stay inside the drawer and flip when every clip is approved', async ({ page }) => {
   const env = loadEnv();
+  await useAdvancedPrefs(page);
   await mockReviewClips(page, env);
   await openEditor(page, env);
 
@@ -405,16 +423,23 @@ for (const mode of ['easy', 'advanced'] as const) {
   }
 }
 
-test('Easy hides Advanced-only nodes instead of destroying them', async ({ page }) => {
+test('Easy opens the studio and hides the Advanced app without destroying it', async ({ page }) => {
   const env = loadEnv();
+  await useAdvancedPrefs(page);
   await openEditor(page, env);
   await useAdvanced(page);
 
+  const root = page.locator('html');
   const advNode = page.getByLabel('Transition frames');
-  await expect(advNode).toBeAttached();
+  await expect(advNode).toBeVisible();
   await page.locator('#ui-mode-easy').click();
-  await expect(page.locator('html')).toHaveAttribute('data-mode', 'easy');
-  expect(await dataAdvHiddenInEasy(page)).toBe(true);
+  await expect(root).toHaveAttribute('data-mode', 'easy');
+  await expectEasyShell(page);
   await expect(advNode).toBeAttached();
   await expect(advNode).toBeHidden();
+
+  await page.keyboard.press('Control+Shift+A');
+  await expect(root).toHaveAttribute('data-mode', 'advanced');
+  await expectAdvancedShell(page);
+  await expect(advNode).toBeVisible();
 });

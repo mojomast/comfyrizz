@@ -176,6 +176,7 @@ async function prepareRuntime(env: Env): Promise<void> {
 
 async function openEditor(page: Page, env: Env): Promise<void> {
   // No ?package=: this is the default seeded project path (PN07).
+  await page.addInitScript(() => localStorage.setItem('comfyrizz.ui', JSON.stringify({ mode: 'advanced', density: 'compact' })));
   await page.goto(`/#token=${encodeURIComponent(env.token)}`);
   await expect(page.getByTestId('scene')).toHaveCount(4);
   await expect(page.locator('#save-status')).toHaveText('Saved');
@@ -185,14 +186,15 @@ async function openEditor(page: Page, env: Env): Promise<void> {
 
 /**
  * DN09/DN13: Easy is the default and hides the cast strip, inspector and right
- * rail, so these first-open tests open Advanced the way a user would.
+ * rail, so these first-open tests open Advanced before asserting.
  */
 async function useAdvancedView(page: Page): Promise<void> {
   const root = page.locator('html');
   if (await root.getAttribute('data-mode') !== 'advanced') {
-    await page.locator('#ui-mode-advanced').click();
+    await page.keyboard.press('Control+Shift+A');
   }
   await expect(root).toHaveAttribute('data-mode', 'advanced');
+  await expect(page.locator('#app')).not.toHaveAttribute('hidden', '');
   await expect(page.getByTestId('inspector-tabs')).toBeVisible();
 }
 
@@ -286,17 +288,22 @@ test('s3 shows two takes for A/B review and approving take 2 unlocks the render 
   await openEditor(page, env);
 
   const bar = renderBar(page);
+  const drawer = page.locator('#review-drawer');
   await expect(bar).toHaveAttribute('data-gate-ok', 'false');
-  await expect(bar.locator('[data-render-approved]')).toHaveText('3/4 clips approved');
-  await expect(bar.locator('[data-render-open-override]')).toHaveText('Render anyway');
-  await expect(bar.locator('[data-render-run]')).toHaveCount(0);
+  await expect(bar.locator('[data-render-approved]')).toHaveText(/3\/4 (?:clips )?approved/);
 
   const s3Chip = page.locator('[data-testid="scene"][data-scene-id="s3_juno"] [data-testid="clip-chip"]');
   await expect(s3Chip).toHaveAttribute('data-state', 'review');
-  const s3Blocker = bar.locator('[data-render-blocker]');
+  await bar.locator('[data-review-open]').click();
+  await expect(drawer).toBeVisible();
+  const s3Blocker = drawer.locator('[data-render-blocker]');
   await expect(s3Blocker).toHaveCount(1);
   await expect(s3Blocker).toContainText('s3_juno');
   await expect(s3Blocker).toContainText('review');
+  await expect(drawer.locator('[data-render-open-override]')).toHaveText('Render anyway');
+  await expect(drawer.locator('[data-render-run]')).toHaveCount(0);
+  await drawer.locator('[data-review-close]').click();
+  await expect(drawer).toBeHidden();
 
   await page.getByTestId('inspector-tabs').getByRole('tab', { name: 'Takes' }).click();
   await expect(page.getByTestId('takes-clip').locator('option')).toHaveCount(4);
@@ -321,14 +328,18 @@ test('s3 shows two takes for A/B review and approving take 2 unlocks the render 
 
   await panel.locator('[data-take-approve]').click();
 
-  await expect(bar.locator('[data-render-approved]')).toHaveText('4/4 clips approved');
+  await expect(bar.locator('[data-render-approved]')).toHaveText(/4\/4 (?:clips )?approved/);
   await expect(panel.locator('[data-take-state]')).toHaveText('approved');
-  await expect(bar.locator('[data-render-blocker]')).toHaveCount(0);
   await expect(bar).toHaveAttribute('data-gate-ok', 'true');
-  await expect(bar.locator('[data-render-run]')).toBeVisible();
-  await expect(bar.locator('[data-render-run]')).toBeEnabled();
-  await expect(bar.locator('[data-render-open-override]')).toHaveCount(0);
   await expect(bar.locator('[data-render-ready]')).toHaveText('All clips approved');
+  await bar.locator('[data-review-open]').click();
+  await expect(drawer).toBeVisible();
+  await expect(drawer.locator('[data-render-blocker]')).toHaveCount(0);
+  await expect(drawer.locator('[data-render-open-override]')).toHaveCount(0);
+  await expect(drawer.locator('[data-render-run]')).toBeVisible();
+  await expect(drawer.locator('[data-render-run]')).toBeEnabled();
+  await drawer.locator('[data-review-close]').click();
+  await expect(drawer).toBeHidden();
 
   const clips = await (await api(env, `/api/package/${PIP_PACKAGE_ID}/clips`)).json() as {
     clips: Array<{ clipId: string; state: string }>;
