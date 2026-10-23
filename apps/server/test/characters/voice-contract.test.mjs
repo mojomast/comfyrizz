@@ -226,3 +226,14 @@ test('the rejected aliases and shape-sniffing helpers are not exported', () => {
     assert.equal(voiceModule[name], undefined, name);
   }
 });
+
+test('review fix-up: a declared native voice is never relabelled to another language', () => {
+  assert.throws(
+    () => resolveSpeakingVoice({ model: NATIVE_MODEL, nativeVoice: 'minimax-narrator', language: 'en-gb' }),
+    (error) => error instanceof VoiceValidationError && error.code === 'VOICE_VOICE_LANGUAGE',
+  );
+  assert.deepEqual(
+    resolveSpeakingVoice({ model: NATIVE_MODEL, nativeVoice: 'minimax-no-language', language: 'en-gb' }),
+    { voicePath: 'native', voice: 'minimax-no-language', language: 'en-gb' },
+  );
+});

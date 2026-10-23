@@ -419,6 +419,10 @@ function resolveNativeSpeakingVoice(model, options) {
         'language',
         `native voice ${JSON.stringify(voice)} declares no language; pass language explicitly`,
       );
+  if (entry.language !== undefined && language !== entry.language) {
+    // Review fix-up: a declared native voice is never relabelled to another language.
+    fail('VOICE_VOICE_LANGUAGE', 'language', `native voice ${entry.id} is ${entry.language}, not ${language}`);
+  }
   return { voicePath: 'native', voice: entry.id, language };
 }
 
