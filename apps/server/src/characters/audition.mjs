@@ -961,13 +961,15 @@ export function createAuditionWorker(options = {}) {
   }
 
   /**
-   * Acknowledge exactly this action's outbox entry. The store has no public
-   * per-entry ack, so it is drained only when this action's dispatch entry is
-   * the only pending entry; otherwise it is left in place rather than
-   * consuming another action's side effect.
+   * Acknowledge exactly this action's outbox entry. A store with per-entry
+   * acknowledgement handles it directly, so another action's pending entry is
+   * never drained or consumed. Older stores only expose drainOutbox(), which
+   * is safe to call solely when this action's entry is the only one pending.
    */
   async function acknowledgeOutbox(productionId, actionId) {
-    if (typeof productionStore.pending !== 'function' || typeof productionStore.drainOutbox !== 'function') {
+    const hasEntryAck = typeof productionStore.acknowledgeOutboxEntry === 'function';
+    if (typeof productionStore.pending !== 'function'
+      || (!hasEntryAck && typeof productionStore.drainOutbox !== 'function')) {
       return { acknowledged: false, reason: 'STORE_HAS_NO_ACK' };
     }
     let pending;
@@ -978,6 +980,13 @@ export function createAuditionWorker(options = {}) {
     }
     const mine = pending.filter((entry) => entry?.type === 'action.dispatch' && entry?.payload?.actionId === actionId);
     if (mine.length === 0) return { acknowledged: false, reason: 'NO_ENTRY' };
+    if (hasEntryAck) {
+      try {
+        return await productionStore.acknowledgeOutboxEntry({ productionId, outboxId: mine[0].id });
+      } catch {
+        return { acknowledged: false, reason: 'ACK_FAILED' };
+      }
+    }
     if (pending.length !== mine.length) {
       return { acknowledged: false, reason: 'OTHER_PENDING', pending: pending.length - mine.length };
     }

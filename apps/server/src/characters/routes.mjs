@@ -583,6 +583,7 @@ function resolveAuditionConfig(value) {
 function auditionStatusFor(code) {
   switch (code) {
     case 'AUDITION_NATIVE_VOICE':
+    case 'ACTION_CONSUMED':
       return 409;
     case 'AUDITION_ADMISSION_REQUIRED':
       return 403;
@@ -592,6 +593,7 @@ function auditionStatusFor(code) {
       return 400;
     case 'AUDITION_UNAVAILABLE':
     case 'AUDITION_NO_SYNTH':
+    case 'AUDITION_LEDGER_UNAVAILABLE':
       return 503;
     case 'AUDITION_SYNTH_FAILED':
     case 'AUDITION_WRITE_FAILED':
@@ -1088,6 +1090,18 @@ export function createCharacterRoutes(options = {}) {
     if (!character) fail('NOT_FOUND', `character ${id} does not exist`, 404);
 
     const body = await readOptionalJsonBody(request);
+    const productionId = body.productionId;
+    const actionId = body.actionId;
+    for (const [field, value] of [['productionId', productionId], ['actionId', actionId]]) {
+      if (value !== undefined && (typeof value !== 'string' || value.length === 0)) {
+        sendJson(response, 400, {
+          ok: false,
+          code: 'AUDITION_INVALID_INPUT',
+          message: `${field} must be a non-empty string`,
+        });
+        return true;
+      }
+    }
     const result = await auditionConfig.worker.run({
       character,
       voice: character.voice,
@@ -1095,6 +1109,8 @@ export function createCharacterRoutes(options = {}) {
       model: auditionConfig.model,
       ...(body.nativeVoice !== undefined ? { nativeVoice: body.nativeVoice } : {}),
       ...(body.language !== undefined ? { language: body.language } : {}),
+      ...(productionId !== undefined ? { productionId } : {}),
+      ...(actionId !== undefined ? { actionId } : {}),
     });
 
     if (!result || result.ok !== true) {

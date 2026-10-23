@@ -798,6 +798,47 @@ export function createProductionStore(options = {}) {
   }
 
   /**
+   * Acknowledge exactly one committed outbox entry. The durable ack lands
+   * before the pending file is removed, so recovery never republishes it and
+   * drainOutbox() skips it. Every other entry is untouched.
+   */
+  function acknowledgeOutboxEntry(input) {
+    if (!isPlainObject(input)) {
+      fail('INVALID_INPUT', 'acknowledgeOutboxEntry requires one object argument');
+    }
+    const paths = pathsFor(input.productionId);
+    const state = readStateAt(paths);
+    if (!state) {
+      fail('NOT_FOUND', 'production does not exist', { productionId: input.productionId });
+    }
+    const outboxId = assertSafeId(input.outboxId, 'outbox id');
+    const manifest = committedOutboxManifest(state);
+    const entry = manifest.get(outboxId);
+    if (!entry) {
+      fail('OUTBOX_NOT_FOUND', `outbox entry ${outboxId} is not committed`, {
+        productionId: input.productionId,
+        outboxId,
+      });
+    }
+    const ack = ackPath(paths, outboxId);
+    if (api.existsSync(ack)) {
+      return { id: outboxId, acknowledged: false, reason: 'ALREADY_ACKNOWLEDGED' };
+    }
+    const stored = readPendingEntry(paths, outboxId);
+    const attempts = stored && Number.isSafeInteger(stored.attempts)
+      ? stored.attempts
+      : Number.isSafeInteger(entry.attempts) ? entry.attempts : 0;
+    const record = { id: outboxId, attempts, at: clockIso(clock) };
+    writeAtomic(ack, `${JSON.stringify(record, null, 2)}\n`);
+    try {
+      api.unlinkSync(pendingPath(paths, outboxId));
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    return { id: outboxId, acknowledged: true };
+  }
+
+  /**
    * Repair a production directory: discard uncommitted staging, remove orphan
    * outbox files, rematerialise committed outbox files that were lost, and
    * return the recovered view.
@@ -864,6 +905,7 @@ export function createProductionStore(options = {}) {
     enqueueOutbox,
     pending,
     drainOutbox,
+    acknowledgeOutboxEntry,
     recover,
   };
 }
