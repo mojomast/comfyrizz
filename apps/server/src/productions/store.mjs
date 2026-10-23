@@ -42,6 +42,7 @@ import { createHash } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { validateEvent, validateProduction } from './contract.mjs';
+import { validateIterationPolicy } from './iteration.mjs';
 
 export const PRODUCTION_STORE_SCHEMA = 'comfyrizz.production-store/v1';
 
@@ -72,6 +73,44 @@ function isPlainObject(value) {
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * Keep `production.iteration` as the durable effective policy projection.
+ * The store, not the caller, owns the projection revision: it is the
+ * production revision at which the policy was committed. The level is always
+ * derived from the policy content by the iteration contract.
+ */
+function projectIteration(previous, production, at) {
+  if (production.iteration === undefined) return;
+  if (sameJson(production.iteration, previous.iteration)) return;
+  if (!isPlainObject(production.iteration) || !isPlainObject(production.iteration.policy)) {
+    fail('INVALID_PRODUCTION', 'production.iteration must carry a policy');
+  }
+
+  let policy;
+  try {
+    policy = validateIterationPolicy(production.iteration.policy);
+  } catch (error) {
+    fail('INVALID_PRODUCTION', 'production.iteration.policy is invalid', {
+      errors: [{
+        path: '/iteration/policy',
+        code: error && typeof error.code === 'string' ? error.code : 'ITERATION_POLICY_INVALID',
+        message: error && typeof error.message === 'string' ? error.message : 'iteration policy is invalid',
+      }],
+    });
+  }
+
+  production.iteration = {
+    policy: clone(policy),
+    level: policy.level,
+    setAt: typeof production.iteration.setAt === 'string' ? production.iteration.setAt : at,
+    revision: production.revision,
+  };
 }
 
 function insideOrEqual(root, target) {
@@ -654,6 +693,7 @@ export function createProductionStore(options = {}) {
     }
     production.revision = state.production.revision + 1;
     production.lastSequence = nextSequence - 1;
+    projectIteration(state.production, production, now);
     const productionValidation = validateProduction(production);
     if (!productionValidation.ok) {
       fail('INVALID_PRODUCTION', 'next production is invalid', { errors: productionValidation.errors });
