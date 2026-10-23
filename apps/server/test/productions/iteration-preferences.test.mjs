@@ -269,3 +269,15 @@ test('the policy validator is keyed to iteration.policy only', (t) => {
     policy: { level: 'balanced' },
   });
 });
+
+test('an iteration policy is saved only at project or user scope', (t) => {
+  const store = makeStore(tempRuntime(t));
+  for (const [scope, scopeId] of [['character', 'char_1'], ['language', 'fr-fr']]) {
+    assertCode(() => store.set(setInput({
+      scope,
+      scopeId,
+      commandId: `cmd_${scope}_policy`,
+    })), 'INVALID_SCOPE');
+  }
+  assert.equal(store.revision(), 0);
+});

@@ -37,6 +37,11 @@ const VALUE_VALIDATORS = Object.freeze({
   'iteration.policy': validateIterationPolicy,
 });
 
+// PLAN IL09: an iteration level is a project default or a user default only.
+const KEY_SCOPES = Object.freeze({
+  'iteration.policy': Object.freeze(['user', 'project']),
+});
+
 const SCOPES = new Set(['user', 'project', 'character', 'language']);
 const SCOPES_BY_RANK = Object.freeze({ user: 1, project: 2, language: 3, character: 4 });
 const ACTORS = new Set(['user', 'agent', 'system']);
@@ -518,6 +523,9 @@ export function createPreferencesStore(options = {}) {
     const reason = normalizeReason(input, actor);
     const { scope, scopeId } = normalizeScope(input);
     const key = normalizeKey(input);
+    if (KEY_SCOPES[key] && !KEY_SCOPES[key].includes(scope)) {
+      fail('INVALID_SCOPE', `${key} can only be saved at ${KEY_SCOPES[key].join(' or ')} scope`);
+    }
     const value = validateKeyedValue(key, normalizeValue(input));
 
     const hash = requestHash('set', {
