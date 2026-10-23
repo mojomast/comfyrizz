@@ -1,3 +1,19 @@
+.easy-home-screen {
+  width: 100%;
+  min-height: 100vh;
+}
+
+[data-easy-home] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+[data-easy-home] > a {
+  min-height: var(--target-min);
+}
+
 .easy-home-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

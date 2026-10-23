@@ -5,6 +5,8 @@ import { deriveStep, reachable, readStepFromUrl, writeStepToUrl } from './steps.
 export interface EasyRoute {
   step: StepId;
   view: 'easy' | 'editor';
+  /** A visit with no video and no step. The studio steps stay behind New video. */
+  home: boolean;
 }
 
 function searchOf(search: string): string {
@@ -20,7 +22,10 @@ export function initialRoute(search: string, state: EasyState | null | undefined
   const current = state ?? defaultEasyState();
   const requested = readStepFromUrl(query);
   const step = requested && reachable(requested, current, facts) ? requested : deriveStep(current, facts);
-  return { step, view };
+  const packageId = params.get('package')?.trim() ?? '';
+  const requestedStep = params.get('step')?.trim() ?? '';
+  const home = view === 'easy' && packageId === '' && requestedStep === '';
+  return { step, view, home };
 }
 
 /** Next address bar value. `view=editor` is dropped because a step change stays in Easy. */

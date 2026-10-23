@@ -389,7 +389,15 @@ html body #app #transport {
 }
 
 html body #app #palette {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
+  background: transparent;
 }
 
 /* Right column: run, Google Colab card & gauges, activity, assets, GPU queue */
@@ -770,4 +778,64 @@ html body #app #statusbar #save-status[data-state='rejected'] {
   html[data-mode='advanced'] body #app:not([data-shell-right='off']) #activity-pane {
     max-height: 70vh;
   }
+}
+
+/* UR66: below 1024 the editor sends people back to studio.
+   From 1024 to 1279 the rail tabs are icons and the top bar stays on one line. */
+.editor-small-screen {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  html[data-mode='advanced'] body #app .editor-small-screen {
+    position: fixed;
+    z-index: 80;
+    top: calc(var(--topbar-height) + var(--space-3));
+    left: var(--space-3);
+    right: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+    margin: 0;
+    padding: var(--space-4);
+    background: var(--bg-1);
+    color: var(--text-1);
+    border: var(--elevation-border-1);
+    border-radius: var(--radius-panel);
+  }
+
+  html[data-mode='advanced'] body #app .editor-small-screen p {
+    margin: 0;
+  }
+
+  html[data-mode='advanced'] body #app .editor-small-screen .btn:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset, 2px);
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  html body #app #topbar {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  html[data-mode='advanced'] body #app:not([data-shell-right='off']) #activity-pane .rail-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0;
+    line-height: 0;
+  }
+
+  html[data-mode='advanced'] body #app:not([data-shell-right='off']) #activity-pane .rail-tab::before {
+    font-size: 16px;
+    line-height: 1;
+    color: var(--text-1);
+  }
+
+  html[data-mode='advanced'] body #app #rail-tab-activity::before { content: "☰"; }
+  html[data-mode='advanced'] body #app #rail-tab-assets::before { content: "▤"; }
+  html[data-mode='advanced'] body #app #rail-tab-gpu::before { content: "◷"; }
 }

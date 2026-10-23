@@ -1,8 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { defaultEasyState } from '../src/easy/store.ts';
+import { ideaPrompt } from '../src/easy/idea-prompt.ts';
 
 const source = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+const indexHtml = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8');
 
 function loadSummary(): (ok: boolean, notes: number) => string {
   const match = source.match(/export function qaPanelSummary\(ok: boolean, notes: number\): string \{[\s\S]*?\n\}/);
@@ -28,4 +31,127 @@ test('frame quality check wording matches after a fixture render', async ({ page
   await expect(page.locator('#qa-panel')).toHaveText('Quality check passed · 4 notes');
   await page.setContent(`<div id="qa-panel"><span class="chip qa-bad">${problems}</span></div>`);
   await expect(page.locator('#qa-panel')).toHaveText('Quality check found problems · 1 notes');
+});
+
+test('in Advanced there is no easy actions bar or storyboard re-render buttons', async ({ page }) => {
+  expect(source).not.toContain('mountEasyActions');
+  expect(source).not.toContain('renderModeSummary');
+  expect(source).not.toContain('modeSummaryLabels');
+  expect(source).not.toContain('id="easy-actions"');
+  expect(source).not.toContain("id = 'easy-actions'");
+  expect(source).not.toContain('Re-render scene');
+  expect(source).not.toContain('data-scene-action="rerender"');
+  expect(indexHtml).not.toContain('id="easy-actions"');
+  expect(indexHtml).not.toContain('id="render-changes"');
+
+  await page.setContent(indexHtml);
+  await page.locator('html').evaluate(root => root.setAttribute('data-mode', 'advanced'));
+  await expect(page.locator('#easy-actions')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Render changes' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Re-render scene' })).toHaveCount(0);
+});
+
+test('the top bar contains no text Storyboard', async ({ page }) => {
+  expect(indexHtml).not.toContain('flow-stepper');
+  expect(indexHtml).not.toContain('stepper-label');
+  await page.setContent(indexHtml);
+  await expect(page.locator('#topbar')).not.toContainText('Storyboard');
+});
+
+test('exactly one Export MP4 button, More contains Export bundle, and the rail has no Export bundle', async ({ page }) => {
+  expect(source).not.toContain('>Export bundle</button>');
+  expect(source).not.toContain('id="export-bundle"');
+  expect(indexHtml).not.toContain('id="topbar-export-mp4"');
+  await page.setContent(indexHtml);
+  await expect(page.getByRole('button', { name: 'Export MP4' })).toHaveCount(1);
+  await expect(page.locator('#export-menu')).toContainText('Export bundle');
+  await expect(page.locator('#activity-pane')).not.toContainText('Export bundle');
+  await expect(page.locator('#topbar')).not.toContainText('approved');
+});
+
+test('there is no Express button and Skip questions is a labelled checkbox', async ({ page }) => {
+  expect(indexHtml).not.toContain('id="mode-express"');
+  expect(source).toContain("briefMode = skipQuestions.checked ? 'express' : 'plan'");
+  await page.setContent(indexHtml);
+  await expect(page.getByRole('button', { name: 'Express' })).toHaveCount(0);
+  const skip = page.getByRole('checkbox', { name: 'Skip questions' });
+  await expect(skip).toHaveCount(1);
+  await expect(skip).not.toBeChecked();
+});
+
+test('presenter quick chips and Regenerate media are gone, and scene chip ids stay', async () => {
+  expect(source).not.toContain('WEB_PRESENTER_PRESETS');
+  expect(source).not.toContain('Intro/outro');
+  expect(source).not.toContain('data-presenter-preset');
+  expect(source).not.toContain('>Regenerate media</button>');
+  expect(source).toContain('>Try again</button>');
+  expect(source).toContain("id: 'warmer'");
+  expect(source).toContain("id: 'calmer-motion'");
+  expect(source).toContain("id: 'more-depth'");
+  expect(source).toContain("id: 'less-busy'");
+  expect(source).toContain("label: 'Warmer'");
+  expect(source).toContain("label: 'Calmer'");
+  expect(source).toContain("label: 'More detail'");
+  expect(source).toContain("label: 'Simpler'");
+});
+
+test('exactly one Saved in the top bar and status bar, and ctx stays in Diagnostics', async ({ page }) => {
+  expect(source).toContain("const PALETTE_LABELS = ['Background', 'Accent', 'Text', 'Highlight']");
+  expect(source).not.toContain('Palette ${');
+  expect(indexHtml).toContain('>Colours<');
+  expect(indexHtml).not.toContain('>Theme<');
+  await page.setContent(indexHtml);
+  const saved = page.locator('#topbar, #statusbar').getByText('Saved', { exact: true });
+  await expect(saved).toHaveCount(1);
+  const closed = await page.locator('#statusbar').evaluate(el => (el as HTMLElement).innerText);
+  expect(closed).not.toMatch(/\bctx\b/);
+  await page.locator('#diagnostics > summary').click();
+  const opened = await page.locator('#statusbar').evaluate(el => (el as HTMLElement).innerText);
+  expect(opened).toMatch(/\bctx\b/);
+  expect(opened).toMatch(/open weights/);
+});
+
+test('with the timeline visible, one Play button is visible', async ({ page }) => {
+  const html = indexHtml.replace(
+    '<div id="scene-timeline"></div>',
+    '<div id="scene-timeline"><button type="button">Play</button></div>',
+  );
+  await page.setContent(html);
+  await expect(page.locator('#timeline-dock')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toHaveCount(1);
+  await expect(page.locator('#play')).toBeHidden();
+  await expect(page.locator('#scrub')).toBeHidden();
+  await expect(page.locator('#time')).toBeHidden();
+});
+
+test('the composer has no brief card and the scripted build uses the idea words', async ({ page }) => {
+  expect(source).not.toContain('data-brief-card');
+  expect(source).not.toContain('function briefToPrompt');
+  expect(source).not.toContain('function renderBriefCard');
+  expect(source).not.toContain('function readBriefCard');
+  expect(source).not.toContain('function buildFromCard');
+  expect(source).toContain('runBrief(composerBuildBrief(text))');
+  expect(source).toContain('return ideaPrompt(state)');
+  expect(indexHtml).not.toContain('data-brief-card');
+  const state = defaultEasyState();
+  state.idea.text = 'Crumb & Co opens at dawn';
+  expect(ideaPrompt(state)).toContain('Crumb & Co opens at dawn');
+  await page.setContent(indexHtml);
+  await expect(page.locator('[data-brief-card]')).toHaveCount(0);
+  await expect(page.locator('#brand-kit > summary')).toHaveText('Brand kit');
+});
+
+test('Ctrl+K opens a dialog named Commands', async ({ page }) => {
+  await page.goto('/?step=idea');
+  await page.getByRole('button', { name: 'Open in editor' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'advanced');
+  await page.keyboard.press('Control+K');
+  await expect(page.getByRole('dialog', { name: 'Commands' })).toBeVisible();
+});
+
+test('the status bar has one Google Colab control', async ({ page }) => {
+  await page.goto('/?step=idea');
+  await page.getByRole('button', { name: 'Open in editor' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'advanced');
+  await expect(page.locator('#statusbar').getByRole('button', { name: /Google Colab/ })).toHaveCount(1);
 });

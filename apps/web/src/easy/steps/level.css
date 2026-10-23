@@ -39,6 +39,19 @@
   outline-offset: var(--focus-offset);
 }
 
+.easy-level-custom {
+  margin: 0;
+}
+
+.easy-level-custom button {
+  min-height: var(--target-min);
+}
+
+.easy-level-custom button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 .easy-level-compute {
   display: flex;
   flex-direction: column;

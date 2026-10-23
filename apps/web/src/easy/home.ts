@@ -60,6 +60,16 @@ function meta(video: HomeVideo): string {
   return parts.join(' · ');
 }
 
+/** The screen a bare visit shows before Idea. */
+export function renderHomeScreen(videos: readonly HomeVideo[]): string {
+  const frame = `<div class="easy-shell easy-home-screen" data-easy-home-screen>
+<header class="easy-header">
+<a class="easy-logo" href="/"><span aria-hidden="true">◆</span> Comfyrizz</a>
+</header>
+<main class="easy-main">`;
+  return frame + renderHome(videos) + '</main></div>';
+}
+
 export function renderHome(videos: readonly HomeVideo[]): string {
   const start = `<a href="${escapeHtml(ideaHref())}">${escapeHtml(NEW_VIDEO)}</a>`;
   const example = `<a href="${escapeHtml(exampleHref())}">${escapeHtml(COPY.recent.example)}</a>`;

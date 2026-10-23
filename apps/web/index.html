@@ -12,10 +12,21 @@
     <link rel="stylesheet" href="/src/ui/components.css" />
     <link rel="stylesheet" href="/src/ui/shell.css" />
     <link rel="stylesheet" href="/src/ui/topbar.css" />
+    <style>
+      #app:not([data-shell-timeline='off']) #play,
+      #app:not([data-shell-timeline='off']) #scrub,
+      #app:not([data-shell-timeline='off']) #time {
+        display: none;
+      }
+    </style>
     <title>Comfyrizz — CPU motion graphics</title>
   </head>
   <body>
     <div id="app" class="app-shell" data-shell="grid">
+      <div id="editor-small-screen" class="editor-small-screen" role="status">
+        <p>The editor works best on a larger screen.</p>
+        <button type="button" id="editor-back-to-studio" class="btn btn-primary btn-sm">Back to studio</button>
+      </div>
       <header id="topbar" class="toolbar shell-topbar" data-region="topbar">
         <div class="topbar-brand-group">
           <div class="brand" aria-label="Comfyrizz"><img src="/favicon.svg" width="24" height="24" alt="Comfyrizz" /><span class="sr-only">Comfyrizz</span></div>
@@ -23,30 +34,20 @@
           <span class="topbar-project-name" id="project-name" title="Project name">Pip’s Night Shift</span>
         </div>
 
-        <nav class="flow-stepper" aria-label="Project flow">
-          <ol class="stepper-list">
-            <li class="stepper-item is-complete"><span class="stepper-label">Brief</span></li>
-            <li class="stepper-sep" aria-hidden="true">·</li>
-            <li class="stepper-item is-active" aria-current="step"><span class="stepper-label">Storyboard</span></li>
-            <li class="stepper-sep" aria-hidden="true">·</li>
-            <li class="stepper-item"><span class="stepper-label">Takes</span></li>
-            <li class="stepper-sep" aria-hidden="true">·</li>
-            <li class="stepper-item"><span class="stepper-label">Render</span></li>
-          </ol>
-        </nav>
-
         <span class="spacer toolbar-spacer"></span>
+        <span id="save-status" class="badge" data-testid="save-status" role="status" aria-live="polite" data-state="saved">Saved</span>
 
         <button type="button" id="settings-open" class="btn btn-secondary btn-sm">Settings</button>
 
         <div class="split-button" id="render-split-button">
-          <button id="render" class="btn btn-primary btn-sm primary" type="button" title="Render video">Render</button>
-          <button type="button" id="export-menu-toggle" class="btn btn-secondary btn-sm split-toggle" aria-haspopup="menu" aria-expanded="false" aria-label="Export menu" title="Export options">
-            Export <span class="split-caret" aria-hidden="true">▾</span>
+          <button id="render" class="btn btn-primary btn-sm primary" type="button" title="Export MP4">Export MP4</button>
+          <button type="button" id="export-menu-toggle" class="btn btn-secondary btn-sm split-toggle" aria-haspopup="menu" aria-expanded="false" aria-label="More" title="More">
+            More <span class="split-caret" aria-hidden="true">▾</span>
           </button>
-          <div id="export-menu" class="popover export-menu" role="menu" aria-label="Export options" hidden>
-            <button type="button" id="topbar-export-mp4" class="btn btn-ghost btn-sm menu-item" role="menuitem">Export MP4</button>
+          <div id="export-menu" class="popover export-menu" role="menu" aria-label="More" hidden>
             <button type="button" id="topbar-export-bundle" class="btn btn-ghost btn-sm menu-item" role="menuitem">Export bundle</button>
+            <button type="button" id="more-duplicate-video" class="btn btn-ghost btn-sm menu-item" role="menuitem" hidden>Duplicate video</button>
+            <button type="button" id="more-open-studio" class="btn btn-ghost btn-sm menu-item" role="menuitem">Open in studio</button>
           </div>
         </div>
       </header>
@@ -59,11 +60,15 @@
           <form id="composer">
             <div id="brief-panel" class="brief-panel popover" hidden></div>
             <textarea id="prompt" rows="2" placeholder="Describe your video, or tell the agent what to change…"></textarea>
+            <details id="brand-kit">
+              <summary>Brand kit</summary>
+              <div id="brand-kit-host"></div>
+            </details>
             <div class="composer-row">
-              <span class="mode-toggle" role="group" aria-label="Planning mode">
-                <button type="button" id="mode-plan" class="btn btn-sm mode active" data-mode="plan">Chat</button>
-                <button type="button" id="mode-express" class="btn btn-sm mode" data-mode="express">Express</button>
-              </span>
+              <label class="toggle" for="skip-questions">
+                <input type="checkbox" id="skip-questions" />
+                Skip questions
+              </label>
               <span class="hint" id="composer-hint">Enter to send · keys stay on the server</span>
               <button type="submit" id="composer-send" class="btn btn-primary btn-sm">Send</button>
             </div>
@@ -80,10 +85,10 @@
           </div>
           <div id="script-audio-panel"></div>
           <div id="qa-panel" class="qa-panel" hidden></div>
-          <div class="pane-head panel-header"><b>Theme</b><span class="hint">palette changes the procedural backgrounds</span></div>
+          <div class="pane-head panel-header"><b>Colours</b><span class="hint">these colours change the backgrounds</span></div>
           <div id="palette" class="palette"></div>
           <div id="spend-card"></div>
-          <div class="pane-head panel-header"><b>Storyboard</b><span class="hint">inline edits update the Player immediately</span><span class="pane-tools"><span id="render-changes-state" class="hint"></span><button type="button" id="render-changes" class="btn btn-secondary btn-sm pane-action">Render changes</button></span></div>
+          <div class="pane-head panel-header"><b>Storyboard</b><span class="hint">inline edits update the Player immediately</span></div>
           <div id="storyboard"></div>
         </section>
 
@@ -140,6 +145,7 @@
           <section id="rail-panel-gpu" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-gpu" tabindex="0" data-rail-panel="gpu" hidden>
             <div class="pane-head panel-header"><b>Jobs</b><span class="hint">fallbacks active until approved</span></div>
             <div id="gpu-queue"></div>
+            <div id="colab-history-host"></div>
           </section>
         </aside>
       </main>
@@ -149,14 +155,20 @@
       </section>
 
       <footer id="statusbar" class="toolbar shell-statusbar" data-region="statusbar" role="contentinfo" aria-label="Status bar">
-        <span class="badge badge-ok" title="Every asset in this package is generated or CC0">open weights</span>
         <span id="llm-status" class="hint"></span>
-        <span class="meter" id="ctx">ctx 0 / 200k</span>
         <span class="meter" id="spend">0.0 GPU units</span>
         <span id="render-state" class="hint"></span>
         <span class="spacer toolbar-spacer"></span>
+        <details id="diagnostics" class="diagnostics">
+          <summary>Diagnostics</summary>
+          <div id="diagnostics-panel" class="diagnostics-panel" role="group" aria-label="Diagnostics">
+            <span class="badge badge-ok" title="Every asset in this package is generated or CC0">open weights</span>
+            <span class="meter" id="ctx">ctx 0 / 200k</span>
+            <span id="events-status" class="badge badge-ok" data-testid="events-status" data-state="connected" title="Server events stream">Events connected</span>
+            <span id="queue-status" class="badge" data-testid="queue-status" data-count="0" title="Queue is empty">0 queued</span>
+          </div>
+        </details>
         <kbd class="kbd" title="Play or pause timeline">Space</kbd>
-        <span id="save-status" class="badge" data-testid="save-status" role="status" aria-live="polite" data-state="saved">Saved</span>
       </footer>
     </div>
     <div id="easy-root" hidden></div>

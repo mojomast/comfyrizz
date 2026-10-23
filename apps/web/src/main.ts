@@ -5,7 +5,10 @@ import './ui/look-picker.css';
 import './productions/cards/iteration-card.css';
 import './productions/cards/iteration-advanced.css';
 import { initShellLayout } from './ui/splitter';
-import { MODE_CHANGE_EVENT, mountModeToggle, setMode, type ModeController } from './ui/mode';
+import { mountPalette } from './ui/palette.ts';
+import { toast } from './ui/toast.ts';
+import { registerCommand } from './editor/commands.ts';
+import { MODE_CHANGE_EVENT, mountModeToggle, setMode } from './ui/mode';
 import { getPrefs } from './ui/prefs';
 import { readIteration, setIteration } from './productions/client';
 import { mountIterationLevel, type IterationLevelMount } from './productions/cards/iteration-advanced';
@@ -13,12 +16,16 @@ import { mountEasyStudio } from './easy/mount.ts';
 import { approveAndGenerate } from './easy/approve-generate.ts';
 import { createEasyApi } from './easy/api.ts';
 import { defaultEasyState } from './easy/store.ts';
-import type { EasyState } from './easy/types.ts';
+import { ideaPrompt } from './easy/idea-prompt.ts';
+import { bindQuestions, renderQuestions } from './easy/steps/questions.ts';
+import type { EasyQuestion, EasyState } from './easy/types.ts';
 import { mountInspectorGenerate } from './editor/inspector/generate.ts';
 import { mountProductionTab } from './editor/inspector/production.ts';
 import { mountSettingsDialog } from './settings/dialog.ts';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
+import { mountRemoteGpuHistory } from './colab-history.ts';
+import colabHistoryJson from '../../../examples/pip-night-shift/colab-history.json';
 import { readRunSnapshot } from './run-progress.ts';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
@@ -92,6 +99,29 @@ if (colabHost) mountSettingsCard(colabHost, apiFetch);
 // Live gauges of Google Colab runs: the notebook's bars, polled from /api/colab/progress.
 const colabProgressHost = document.getElementById('colab-progress-host');
 if (colabProgressHost) mountRemoteGpuProgress(colabProgressHost, apiFetch);
+// The status bar keeps the Google Colab chip. The runs drawer button is not a second control.
+settleStatusChip();
+const colabHistoryHost = document.getElementById('colab-history-host');
+if (colabHistoryHost) mountRemoteGpuHistory(colabHistoryHost, colabHistoryJson);
+
+function settleStatusChip(): void {
+  const progressHost = document.getElementById('colab-progress-host');
+  progressHost?.querySelector('.colab-progress-toggle')?.remove();
+  const card = document.getElementById('colab-card-host');
+  if (progressHost && card?.parentElement) card.after(progressHost);
+
+  const trigger = document.getElementById('colab-popover-trigger');
+  if (!trigger || trigger.dataset.opensCard === 'true') return;
+  trigger.dataset.opensCard = 'true';
+  trigger.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    document.querySelector<HTMLButtonElement>('[data-rail-tab="activity"]')?.click();
+    const host = document.getElementById('colab-card-host');
+    host?.scrollIntoView({ block: 'nearest' });
+    host?.querySelector<HTMLElement>('button, a, input, select, textarea')?.focus();
+  }, true);
+}
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 const editorStore = createEditorStore({ package: pkg as never });
@@ -198,7 +228,6 @@ function showRecoveryPrompt(offer: RecoveryOffer): void {
     scrub.max = String(Math.max(0, timeline.durationInFrames - 1));
     updatePreview(pkg, timeline, generatedAssets);
     renderStoryboard();
-    renderModeSummary();
     dismissRecoveryPrompt();
     logActivity(`Restored the local recovery copy for ${offer.packageId}`);
     void publishRestored(restored, baseRevision, offer);
@@ -780,6 +809,7 @@ async function refreshClips(): Promise<void> {
     scriptPanel?.setClips(result.clips);
     productionTab?.setClips(result.clips);
     renderBar?.update();
+    syncExportButton();
     await hydrateTakePreview(result.clips, request);
   } catch (error) {
     if (request === clipsRequest) logActivity(`Clips refresh failed: ${(error as Error).message}`);
@@ -1042,83 +1072,19 @@ function markDirty(reason: string): void {
   $('draft').textContent = `draft · ${reason} · recompiled on export`;
   syncTimeline();
   updatePreview(pkg, timeline, generatedAssets);
-  renderModeSummary();
 }
 
-function modeSummaryLabels(): string[] {
-  const source = (editorStore.getState().doc.package ?? pkg) as unknown as PackageV1;
-  const scenes = source.scenes ?? [];
-  const labels: string[] = [];
-  const customTransition = scenes.some(scene => {
-    const transition = scene.transitionOut;
-    if (!transition) return false;
-    return transition.type !== 'cut' || Number(transition.frames ?? 0) > 0;
-  });
-  if (customTransition) labels.push('Custom transition');
-  if (scenes.some(scene => typeof scene.preferredFrames === 'number')) labels.push('Custom timing');
-  if (scenes.some(scene => Boolean(scene.motion?.recipe || scene.motion?.seed !== undefined || scene.motion?.cue_phrases?.length))) {
-    labels.push('Custom motion');
-  }
-  if (source.voice?.enabled) labels.push('Custom voice');
-  if (source.presenter?.enabled === true) labels.push('AI presenter');
-  return labels;
-}
-
-function renderModeSummary(): void {
-  const host = document.getElementById('mode-summary');
-  if (!host) return;
-  host.innerHTML = modeSummaryLabels()
-    .map(label => `<span class="mode-chip" role="listitem">${esc(label)}</span>`)
-    .join('');
-}
-
-function mountEasyActions(mode: ModeController | null): void {
-  const transport = document.getElementById('transport');
-  if (!transport || document.getElementById('easy-actions')) return;
-  const host = document.createElement('div');
-  host.id = 'easy-actions';
-  host.className = 'easy-actions';
-  host.dataset.easySurface = 'true';
-  host.innerHTML = `
-    <span class="easy-actions-label">Easy view</span>
-    <button type="button" id="easy-generate" class="btn btn-primary btn-sm primary">Generate</button>
-    <button type="button" id="easy-preview" class="btn btn-secondary btn-sm">Preview</button>
-    <span id="mode-summary" class="mode-summary" role="list" aria-label="Custom settings hidden in Easy view"></span>
-    <span class="easy-actions-spacer"></span>
-    <button type="button" id="easy-advanced" class="btn btn-ghost btn-sm">Advanced settings</button>`;
-  transport.after(host);
-
-  host.querySelector<HTMLButtonElement>('#easy-generate')?.addEventListener('click', () => {
-    const prompt = document.getElementById('prompt') as HTMLTextAreaElement | null;
-    const composer = document.getElementById('composer') as HTMLFormElement | null;
-    if (!prompt) return;
-    if (prompt.value.trim() && composer) composer.requestSubmit();
-    else prompt.focus();
-  });
-  host.querySelector<HTMLButtonElement>('#easy-preview')?.addEventListener('click', () => {
-    player?.seekTo(0);
-    const play = document.getElementById('play');
-    if (play?.textContent?.trim() === 'Play') play.click();
-  });
-  host.querySelector<HTMLButtonElement>('#easy-advanced')?.addEventListener('click', () => {
-    mode?.setMode('advanced');
-  });
-  renderModeSummary();
-}
-
-/** C-pres: the storyboard's presenter toolbar (coverage + quick presets + placement + label). */
+/** C-pres: the storyboard's presenter toolbar (coverage + placement + label). */
 function presenterBar(): string {
   const presenter = (pkg.presenter ?? {}) as { enabled?: boolean; scenes?: unknown; placement?: string; label?: string };
   const coverage = presenter.enabled !== true ? 'none' : presenter.scenes === 'all' ? 'all' : 'bookends';
   const placement = presenter.placement ?? 'pip-br';
   const labelOn = presenter.label !== '';
   const coverageButtons = WEB_PRESENTER_COVERAGES.map(option => `<button type="button" data-presenter-coverage="${option.id}" class="${option.id === coverage ? 'selected' : ''}" title="${esc(option.hint)}">${esc(option.label)}</button>`).join('');
-  const presetButtons = WEB_PRESENTER_PRESETS.map(option => `<button type="button" data-presenter-preset="${option.id}" class="preset-small" title="Rewrite every scene's presenter value">${esc(option.label)}</button>`).join('');
   const placementOptions = WEB_PRESENTER_PLACEMENTS.map(value => `<option value="${value}"${value === placement ? ' selected' : ''}>${esc(value)}</option>`).join('');
   return `<div class="presenter-bar">
     <span class="label">AI presenter</span>
     <div class="presenter-chips">${coverageButtons}</div>
-    <span class="hint">quick:</span><div class="presenter-chips">${presetButtons}</div>
     <label>Placement <select data-presenter-placement>${placementOptions}</select></label>
     <label class="toggle"><input type="checkbox" data-presenter-label${labelOn ? ' checked' : ''} /> “AI presenter” label</label>
     <span class="hint">${presenter.enabled === true ? `on · ${coverage}` : 'off by default'}</span>
@@ -1167,8 +1133,7 @@ function renderStoryboard(): void {
           <option value="split"${scene.presenter === 'split' ? ' selected' : ''}>split (hero only)</option>
         </select>
         <div class="scene-actions">
-          <button type="button" data-scene-action="rerender" data-scene="${esc(scene.id)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${sceneState.rendering === scene.id ? 'Re-rendering…' : 'Re-render scene'}</button>
-          <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Regenerate media</button>
+          <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Try again</button>
         </div>
         <div class="scene-chips">${WEB_SCENE_CHIPS.map(chip => `<button type="button" data-scene-action="chip" data-chip="${esc(chip.id)}" data-scene="${esc(scene.id)}" title="${esc(chip.hint)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${esc(chip.label)}</button>`).join('')}</div>
         ${sceneState.rendering === scene.id && sceneState.log.length > 0 ? `<div class="scene-log">${sceneState.log.slice(-2).map(line => `<div>${esc(line)}</div>`).join('')}</div>` : ''}
@@ -1211,8 +1176,7 @@ function renderStoryboard(): void {
     button.addEventListener('click', event => {
       event.stopPropagation();
       const sceneId = button.dataset.scene!;
-      if (button.dataset.sceneAction === 'rerender') void reRenderScene(sceneId);
-      else if (button.dataset.sceneAction === 'chip') void applySceneChipFlow(sceneId, button.dataset.chip!);
+      if (button.dataset.sceneAction === 'chip') void applySceneChipFlow(sceneId, button.dataset.chip!);
       else void planSceneMedia(sceneId);
     });
   });
@@ -1227,9 +1191,6 @@ function renderStoryboard(): void {
   host.querySelectorAll<HTMLButtonElement>('button[data-presenter-coverage]').forEach(button => {
     button.addEventListener('click', () => void applyPresenterFlow({ coverage: button.dataset.presenterCoverage }, `coverage ${button.dataset.presenterCoverage}`));
   });
-  host.querySelectorAll<HTMLButtonElement>('button[data-presenter-preset]').forEach(button => {
-    button.addEventListener('click', () => void applyPresenterFlow({ preset: button.dataset.presenterPreset }, `preset ${button.dataset.presenterPreset}`));
-  });
   const placement = host.querySelector<HTMLSelectElement>('select[data-presenter-placement]');
   placement?.addEventListener('change', () => void applyPresenterFlow({ placement: placement.value }, `placement ${placement.value}`));
   const labelToggle = host.querySelector<HTMLInputElement>('input[data-presenter-label]');
@@ -1240,8 +1201,9 @@ function renderStoryboard(): void {
     audioMixEnabled = mixToggle.checked;
     logActivity(`Sound design ${audioMixEnabled ? 'on' : 'off'} for the next render/export`);
   });
-  renderModeSummary();
 }
+
+const PALETTE_LABELS = ['Background', 'Accent', 'Text', 'Highlight'];
 
 function renderPalette(): void {
   const host = $('palette');
@@ -1249,7 +1211,7 @@ function renderPalette(): void {
   if (!theme) return;
   const colors = (theme.palette ??= ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee']);
   host.innerHTML = colors
-    .map((color, index) => `<label>Palette ${index + 1}<input type="color" data-color="${index}" value="${esc(color)}" /></label>`)
+    .map((color, index) => `<label>${esc(PALETTE_LABELS[index] ?? `Colour ${index + 1}`)}<input type="color" data-color="${index}" value="${esc(color)}" /></label>`)
     .join('');
   host.querySelectorAll<HTMLInputElement>('input[data-color]').forEach(input => {
     input.addEventListener('input', () => {
@@ -1688,6 +1650,43 @@ export function qaPanelSummary(ok: boolean, notes: number): string {
   return label + count + ' notes';
 }
 
+/** Commands the editor palette mounts on top of the shared registry. */
+export function editorPaletteCommands() {
+  return [
+    { id: 'export.mp4', title: 'Export MP4' },
+    { id: 'view.openStudio', title: 'Open in studio' },
+    { id: 'nav.characters', title: 'Characters' },
+    { id: 'nav.settings', title: 'Settings' },
+    { id: 'inspector.generate', title: 'Generate tab' },
+    { id: 'rail.activity', title: 'Activity' },
+    { id: 'rail.files', title: 'Files' },
+    { id: 'rail.jobs', title: 'Jobs' },
+  ];
+}
+
+function mountEditorCommandPalette(openStudio: () => void): void {
+  const actions: Record<string, () => void> = {
+    'export.mp4': () => { void exportMp4(); },
+    'view.openStudio': openStudio,
+    'nav.characters': () => { document.getElementById('characters-tab')?.click(); },
+    'nav.settings': () => { document.getElementById('settings-open')?.click(); },
+    'inspector.generate': () => { document.getElementById('sa-tab-generate')?.click(); },
+    'rail.activity': () => { document.querySelector<HTMLButtonElement>('[data-rail-tab="activity"]')?.click(); },
+    'rail.files': () => { document.querySelector<HTMLButtonElement>('[data-rail-tab="assets"]')?.click(); },
+    'rail.jobs': () => { document.querySelector<HTMLButtonElement>('[data-rail-tab="gpu"]')?.click(); },
+  };
+  for (const command of editorPaletteCommands()) {
+    registerCommand({
+      id: command.id,
+      title: command.title,
+      group: 'Editor',
+      run: () => { actions[command.id]?.(); },
+    });
+  }
+  const palette = mountPalette();
+  palette.dialog.setAttribute('aria-label', 'Commands');
+}
+
 /** MS4: the frame-QA gate badge and contact sheet for the most recent render. */
 function renderQaPanel(): void {
   const host = $<HTMLElement>('qa-panel');
@@ -1780,8 +1779,7 @@ function renderExportPanel(): void {
   const refused = exportState.refused.length
     ? `<div class="export-refused">${exportState.refused.map(item => `<div class="event">refused <b>${esc(item.assetId)}</b>${item.licenseId ? ` · ${esc(item.licenseId)}` : ''} — ${esc(item.reason ?? 'not redistributable')}</div>`).join('')}</div>`
     : '';
-  host.innerHTML = `<div class="export-head"><button id="export-bundle"${exportState.running ? ' disabled' : ''}>${exportState.running ? 'Exporting…' : 'Export bundle'}</button><span class="hint" id="export-state">${esc(exportState.label || 'video · captions · credits · zip')}</span></div><div class="hint">Social pack: thumb.jpg · preview.gif · card.png (1200×630) · chapters.txt</div>${log}${files}${refused}`;
-  $('export-bundle').addEventListener('click', () => void exportBundle());
+  host.innerHTML = `<div class="export-head"><span class="hint" id="export-state">${esc(exportState.label || 'video · captions · credits · zip')}</span></div><div class="hint">Social pack: thumb.jpg · preview.gif · card.png (1200×630) · chapters.txt</div>${log}${files}${refused}`;
 }
 
 async function exportBundle(): Promise<void> {
@@ -1829,6 +1827,7 @@ async function exportBundle(): Promise<void> {
   } catch (error) {
     exportState.label = `export failed: ${(error as Error).message}`;
     logActivity(`Export bundle failed: ${(error as Error).message}`);
+    toast({ tone: 'danger', text: `Export failed. ${(error as Error).message}` });
   } finally {
     exportState.running = false;
     renderExportPanel();
@@ -2171,9 +2170,19 @@ async function renderExportBlob(overrideReason?: string): Promise<{ blob: Blob; 
   return { blob, revision: Number(pkg.revision) || 0, ...(renderId ? { renderId } : {}) };
 }
 
+function syncExportButton(): void {
+  const button = document.getElementById('render') as HTMLButtonElement | null;
+  if (!button || button.dataset.exporting === 'true') return;
+  const gate = clipStore.gate();
+  const blocked = gate.total > 0 && !gate.ok;
+  button.disabled = blocked;
+  button.title = blocked ? `${gate.approved}/${gate.total} approved` : 'Export MP4';
+}
+
 async function exportMp4(overrideReason?: string): Promise<void> {
   const button = $<HTMLButtonElement>('render');
   const label = $('render-state');
+  button.dataset.exporting = 'true';
   button.disabled = true;
   label.textContent = 'recompiling + rendering on CPU (~90 s)…';
   logActivity(overrideReason ? 'Export started with a written render-gate override' : 'Export started: recompile with A2, render with Remotion on CPU');
@@ -2189,173 +2198,93 @@ async function exportMp4(overrideReason?: string): Promise<void> {
     state.dirty = false;
     $('draft').textContent = 'exported MP4 · timeline recompiled by the server';
     logActivity('Export finished: H.264 MP4 downloaded');
+    toast({ tone: 'ok', text: 'Export finished.' });
   } catch (error) {
     const blocked = error as RenderExportError;
     if (overrideReason === undefined && blocked.code === 'RENDER_GATE_BLOCKED') {
       void refreshClips();
       const reason = await renderBar?.requestOverride(blocked.gate ?? clipStore.gate());
-      if (reason) { button.disabled = false; await exportMp4(reason); return; }
+      if (reason) {
+        delete button.dataset.exporting;
+        await exportMp4(reason);
+        return;
+      }
     }
     label.textContent = `export failed: ${(error as Error).message}`;
     logActivity(`Export failed: ${(error as Error).message}`);
+    toast({ tone: 'danger', text: `Export failed. ${(error as Error).message}` });
   } finally {
-    button.disabled = false;
+    if (button.dataset.exporting === 'true') delete button.dataset.exporting;
+    syncExportButton();
   }
 }
 
-function briefToPrompt(brief: Record<string, unknown>): string {
-  const audience = (brief.audience ?? {}) as { who?: string; language?: string };
-  const style = (brief.style ?? {}) as { preset?: string; palette?: string[] };
-  const voice = (brief.voice ?? {}) as { engine?: string; persona?: string };
-  const music = (brief.music ?? {}) as { enabled?: boolean; mood?: string };
-  const tone = Array.isArray(brief.tone) ? (brief.tone as string[]).join(', ') : '';
-  const mustInclude = Array.isArray(brief.must_include) ? (brief.must_include as string[]) : [];
-  const avoid = Array.isArray(brief.avoid) ? (brief.avoid as string[]) : [];
-  return [
-    String(brief.key_message ?? ''),
-    `Goal: ${brief.goal ?? 'launch'}.`,
-    `Audience: ${audience.who ?? 'developers'} (${audience.language ?? 'en'}).`,
-    brief.length_s ? `Length: about ${brief.length_s} seconds.` : '',
-    brief.aspect ? `Aspect: ${brief.aspect}.` : '',
-    tone ? `Tone: ${tone}.` : '',
-    style.preset ? `Look: ${style.preset}${style.palette?.length ? ` (palette ${style.palette.join(' ')})` : ''}.` : '',
-    voice.persona ? `Narration (${voice.engine ?? 'kokoro'}): ${voice.persona}.` : 'No narration.',
-    music.enabled ? `Music: ${music.mood ?? 'instrumental bed'}.` : 'No music.',
-    brief.presenter && brief.presenter !== 'none' ? `Presenter: ${brief.presenter === 'all' ? 'every scene' : 'intro and outro'} (opt-in).` : '',
-    brief.cta ? `End with: ${brief.cta}.` : '',
-    mustInclude.length ? `Must include: ${mustInclude.join(', ')}.` : '',
-    avoid.length ? `Avoid: ${avoid.join(', ')}.` : '',
-  ].filter(Boolean).join(' ');
-}
-
-const WEB_STYLE_PRESETS = ['clay', 'glass', 'editorial-flat', 'isometric-tech', 'paper-cut', 'cinematic-dark'];
-const WEB_ASPECTS = ['16:9', '9:16', '1:1'];
-// R2 step 5: the per-scene fixed edit chips (kept in sync with packages/agent SCENE_CHIPS).
 const WEB_SCENE_CHIPS: { id: string; label: string; hint: string }[] = [
   { id: 'warmer', label: 'Warmer', hint: 'Warm this scene’s palette' },
-  { id: 'calmer-motion', label: 'Calmer motion', hint: 'Soften entrances to a fade' },
-  { id: 'more-depth', label: 'More depth', hint: 'Parallax + z on the overlay' },
-  { id: 'less-busy', label: 'Less busy', hint: 'Trim bullets and overlays' },
+  { id: 'calmer-motion', label: 'Calmer', hint: 'Soften entrances to a fade' },
+  { id: 'more-depth', label: 'More detail', hint: 'Parallax + z on the overlay' },
+  { id: 'less-busy', label: 'Simpler', hint: 'Trim bullets and overlays' },
 ];
-// C-pres: the presenter controls, kept in sync with packages/agent presenter.ts.
 const WEB_PRESENTER_COVERAGES: { id: string; label: string; hint: string }[] = [
   { id: 'none', label: 'None', hint: 'Off by default — most videos have none' },
   { id: 'bookends', label: 'Intro + outro', hint: 'Show the presenter on the first and last scene' },
   { id: 'all', label: 'All scenes', hint: 'Show the presenter on every scene' },
 ];
-const WEB_PRESENTER_PRESETS: { id: string; label: string }[] = [
-  { id: 'intro-outro', label: 'Intro/outro' },
-  { id: 'all', label: 'All scenes' },
-  { id: 'none', label: 'None' },
-];
 const WEB_PRESENTER_PLACEMENTS = ['pip-br', 'pip-bl', 'pip-bc', 'split-left'];
 
-/** Read a dotted path (`audience.who`) out of the brief as a string. */
-function briefValue(brief: Record<string, unknown>, path: string): string {
-  let value: unknown = brief;
-  for (const part of path.split('.')) value = (value as Record<string, unknown> | undefined)?.[part];
-  if (value === undefined || value === null) return '';
-  return Array.isArray(value) ? value.join(', ') : String(value);
+/** Scripted builds send the idea through the same sentence order as Easy. */
+export function composerBuildBrief(text: string, questions: EasyQuestion[] = [], answers: Record<string, string> = {}): string {
+  const state = defaultEasyState();
+  state.idea.text = text;
+  state.questions = questions;
+  state.answers = answers;
+  return ideaPrompt(state);
 }
 
-/** Merge the Brief card's inputs back into a brief object (cleared fields become undefined). */
-function readBriefCard(): Record<string, unknown> {
-  const brief = structuredClone(briefState.brief ?? {});
-  for (const input of document.querySelectorAll<HTMLInputElement | HTMLSelectElement>('#brief-panel [data-brief-field]')) {
-    const path = input.getAttribute('data-brief-field') as string;
-    const parts = path.split('.');
-    let target: Record<string, unknown> = brief;
-    for (const part of parts.slice(0, -1)) {
-      target[part] = target[part] && typeof target[part] === 'object' ? target[part] : {};
-      target = target[part] as Record<string, unknown>;
-    }
-    const raw = input.value.trim();
-    target[parts[parts.length - 1]] = raw === '' ? undefined : path === 'length_s' ? Number(raw) : raw;
-  }
-  return brief;
+function easyQuestionsFrom(questions: BriefQuestion[]): EasyQuestion[] {
+  return questions.map(question => ({
+    id: question.id,
+    field: question.field,
+    prompt: question.prompt,
+    options: question.chips,
+    decide: question.decide,
+  }));
 }
 
-function renderBriefQuestions(panel: HTMLElement): void {
-  const questions = briefState.pending.map(question => {
-    const selected = briefState.choices[question.id];
-    const chips = question.chips.map(chip =>
-      `<button type="button" data-brief-q="${esc(question.id)}" data-brief-value="${esc(chip)}" class="${selected === chip ? 'selected' : ''}">${esc(chip)}</button>`,
-    ).join('');
-    return `<div class="brief-question"><span class="q">${esc(question.prompt)}</span><div class="brief-chips">${chips}<button type="button" class="decide ${selected === undefined ? 'selected' : ''}" data-brief-q="${esc(question.id)}" data-brief-decide="1">Decide for me</button></div></div>`;
-  }).join('');
-  panel.innerHTML = `<div class="brief-head">Plan mode · answer up to ${briefState.pending.length} question(s), or let the agent decide.</div>${questions}<div class="brief-actions"><span class="hint">${briefState.busy ? 'planning…' : 'Nothing is built until you confirm.'}</span><button type="button" id="brief-apply">Looks right</button></div>`;
-  panel.querySelectorAll<HTMLButtonElement>('[data-brief-q]').forEach(button => {
-    button.addEventListener('click', () => {
-      const id = button.getAttribute('data-brief-q') as string;
-      briefState.choices[id] = button.hasAttribute('data-brief-decide') ? undefined : (button.getAttribute('data-brief-value') as string);
-      renderBriefPanel();
-    });
-  });
-  $('brief-apply').addEventListener('click', () => void resolveBrief());
-}
-
-/** Step 4: the editable Brief card plus the script-first outline with estimated seconds. */
-function renderBriefCard(panel: HTMLElement): void {
-  const brief = briefState.brief ?? {};
-  const outline = briefState.outline;
-  const field = (path: string, label: string, type = 'text') =>
-    `<label>${esc(label)}<input data-brief-field="${path}" type="${type}" value="${esc(briefValue(brief, path))}" /></label>`;
-  const select = (path: string, label: string, options: string[]) => {
-    const current = briefValue(brief, path);
-    const opts = options.map(option => `<option value="${esc(option)}" ${option === current ? 'selected' : ''}>${esc(option)}</option>`).join('');
-    return `<label>${esc(label)}<select data-brief-field="${path}">${opts}</select></label>`;
-  };
-  // R2 step 5: the six looks as CPU/SVG thumbnails. A hidden select keeps the
-  // card's form-reading code unchanged; the grid is what the owner taps.
-  const currentPreset = briefValue(brief, 'style.preset');
-  const presetIds = briefState.presets.length ? briefState.presets.map(card => card.id) : WEB_STYLE_PRESETS;
-  const presetCards: PresetCard[] = briefState.presets.length
-    ? briefState.presets
-    : presetIds.map(id => ({ id, label: id, palette: [], font: '', attributes: '', thumbnail: '' }));
-  const presetPicker = `<div class="look-picker">${presetCards.map(card => `<button type="button" class="look-option ${card.id === currentPreset ? 'selected' : ''}" data-brief-preset="${esc(card.id)}" title="${esc(card.attributes)}"><span class="look-thumb">${card.thumbnail || '<span class="look-thumb-empty" aria-hidden="true"></span>'}</span><span class="look-caption"><span class="look-label">${esc(card.label)}</span><span class="look-check" aria-hidden="true"></span></span></button>`).join('')}<select data-brief-field="style.preset" hidden>${presetIds.map(id => `<option value="${esc(id)}" ${id === currentPreset ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select></div>`;
-  // C-pres: the presenter chip (off by default). Writes brief.presenter; the build maps it to
-  // package.presenter coverage. Per-scene overrides stay on the storyboard.
-  const presenterOptions: [string, string][] = [['none', 'No presenter (default)'], ['bookends', 'Intro + outro'], ['all', 'All scenes']];
-  const currentPresenter = briefValue(brief, 'presenter') || 'none';
-  const presenterPicker = `<label>Presenter<select data-brief-field="presenter">${presenterOptions.map(([value, label]) => `<option value="${value}"${value === currentPresenter ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
-  const beats = (outline?.beats ?? []).map(beat =>
-    `<li class="${beat.placeholder ? 'placeholder' : ''}"><span class="role">${esc(beat.role)}</span><strong>${esc(beat.headline)}</strong><span class="narration">${esc(beat.narration)}</span><span class="secs">${beat.seconds.toFixed(1)} s</span></li>`,
-  ).join('');
-  const summary = outline
-    ? `≈ ${outline.estimatedSeconds.toFixed(1)} s on screen · target ${outline.targetSeconds} s · ${outline.fit}`
-    : 'outline unavailable';
-  const notes = (outline?.notes ?? []).map(note => `<li>${esc(note)}</li>`).join('');
-  panel.innerHTML = `<div class="brief-head">Brief · edit anything, then build.</div>
-    <div class="brief-card">${field('key_message', 'Key message')}${field('audience.who', 'Audience')}${field('length_s', 'Seconds', 'number')}${field('cta', 'CTA')}${select('aspect', 'Aspect', WEB_ASPECTS)}${field('voice.persona', 'Narration')}${presenterPicker}${presetPicker}${brandCard()}</div>
-    <ol class="brief-outline">${beats}</ol>
-    <div class="brief-actions"><span class="hint">${esc(summary)}</span><button type="button" id="brief-refresh" ${briefState.busy ? 'disabled' : ''}>Update outline</button><button type="button" id="brief-build" ${briefState.busy ? 'disabled' : ''}>Build video</button></div>
-    ${notes ? `<ul class="brief-notes">${notes}</ul>` : ''}`;
-  const presetSelect = panel.querySelector<HTMLSelectElement>('select[data-brief-field="style.preset"]');
-  panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
-    button.addEventListener('click', () => {
-      const id = button.getAttribute('data-brief-preset') as string;
-      if (presetSelect) presetSelect.value = id;
-      panel.querySelectorAll('[data-brief-preset]').forEach(other => other.classList.toggle('selected', other === button));
-    });
-  });
-  presetSelect?.addEventListener('change', () => {
-    panel.querySelectorAll<HTMLButtonElement>('[data-brief-preset]').forEach(button => {
-      button.classList.toggle('selected', button.getAttribute('data-brief-preset') === presetSelect.value);
-    });
-  });
-  panel.querySelectorAll<HTMLInputElement>('[data-brand-field]').forEach(input => {
+function bindBrandHost(host: HTMLElement): void {
+  host.querySelectorAll<HTMLInputElement>('[data-brand-field]').forEach(input => {
     input.addEventListener('input', () => {
       (brandState as unknown as Record<string, string>)[input.getAttribute('data-brand-field') as string] = input.value.trim();
     });
   });
-  const logoInput = panel.querySelector<HTMLInputElement>('#brand-logo');
+  const logoInput = host.querySelector<HTMLInputElement>('#brand-logo');
   logoInput?.addEventListener('change', () => void readLogoFile(logoInput));
-  $('brand-save')?.addEventListener('click', () => void saveBrand());
-  $('brief-refresh').addEventListener('click', () => void refreshBriefOutline());
-  $('brief-build').addEventListener('click', () => void buildFromCard());
+  host.querySelector('#brand-save')?.addEventListener('click', () => void saveBrand());
 }
 
-/** B1: the optional brand-kit section of the Brief card. */
+function renderBrandKit(): void {
+  const host = document.getElementById('brand-kit-host');
+  if (!host) return;
+  host.innerHTML = brandCard();
+  bindBrandHost(host);
+}
+
+function showQuestionBlock(): void {
+  document.getElementById('composer-questions')?.remove();
+  if (briefState.pending.length === 0) return;
+  const host = document.createElement('div');
+  host.id = 'composer-questions';
+  const questions = easyQuestionsFrom(briefState.pending);
+  host.innerHTML = renderQuestions(questions, briefState.choices as Record<string, string>);
+  $('messages').append(host);
+  bindQuestions(host, {
+    onChange: answers => {
+      briefState.choices = answers;
+    },
+  });
+}
+
+/** B1: the optional brand-kit section, kept behind the composer disclosure. */
 function brandCard(): string {
   const kit = brandState.kit;
   const swatches = Array.isArray(kit?.palette)
@@ -2364,9 +2293,7 @@ function brandCard(): string {
   const warnings = brandState.warnings.length
     ? `<ul class="brief-notes">${brandState.warnings.map(warning => `<li>${esc(warning.message)}</li>`).join('')}</ul>`
     : '';
-  return `<details class="brief-brand" ${kit ? 'open' : ''}>
-    <summary>Brand kit ${kit ? '· applied' : '· optional'}</summary>
-    <div class="brief-brand-grid">
+  return `<div class="brief-brand-grid">
       <label>Palette hexes<input data-brand-field="palette" value="${esc(brandState.palette)}" placeholder="#0d0f14, #6d8cff" /></label>
       <label>Font family<input data-brand-field="fontFamily" value="${esc(brandState.fontFamily)}" placeholder="Söhne" /></label>
       <label>Font file<input data-brand-field="fontFile" value="${esc(brandState.fontFile)}" placeholder="assets/brand/soehne.woff2" /></label>
@@ -2374,11 +2301,10 @@ function brandCard(): string {
       <label>Tone words<input data-brand-field="tone" value="${esc(brandState.tone)}" placeholder="bold, warm" /></label>
       <label>Logo (SVG/PNG)<input type="file" id="brand-logo" accept=".svg,.png,.jpg,.jpeg" /></label>
     </div>
-    <div class="brief-brand-actions"><button type="button" id="brand-save" ${brandState.busy ? 'disabled' : ''}>Save brand kit</button><span class="hint">${brandState.logoName ? `logo: ${esc(brandState.logoName)}` : 'Palette and font flow into the brief and every generated style block.'}</span></div>
-    ${swatches}${warnings}</details>`;
+    <div class="brief-brand-actions"><button type="button" id="brand-save" ${brandState.busy ? 'disabled' : ''}>Save brand kit</button><span class="hint">${brandState.logoName ? `logo: ${esc(brandState.logoName)}` : 'Palette and font flow into every generated style block.'}</span></div>
+    ${swatches}${warnings}`;
 }
 
-/** Stage an uploaded logo as base64 (the server writes the asset). */
 async function readLogoFile(input: HTMLInputElement): Promise<void> {
   const file = input.files?.[0];
   if (!file) return;
@@ -2393,10 +2319,9 @@ async function readLogoFile(input: HTMLInputElement): Promise<void> {
   brandState.logoDataBase64 = btoa(binary);
   brandState.logoAssetId = '';
   logActivity(`Brand logo staged: ${file.name}`);
-  renderBriefPanel();
+  renderBrandKit();
 }
 
-/** POST the loose kit to `/api/brand` to preview the normalised theme + warnings. */
 async function saveBrand(): Promise<void> {
   if (brandState.busy) return;
   const brand = brandPayload();
@@ -2405,7 +2330,7 @@ async function saveBrand(): Promise<void> {
     return;
   }
   brandState.busy = true;
-  renderBriefPanel();
+  renderBrandKit();
   try {
     const response = await apiFetch('/api/brand', {
       method: 'POST',
@@ -2422,19 +2347,7 @@ async function saveBrand(): Promise<void> {
     logActivity(`Brand kit failed: ${(error as Error).message}`);
   }
   brandState.busy = false;
-  renderBriefPanel();
-}
-
-function renderBriefPanel(): void {
-  const panel = $('brief-panel');
-  if (briefState.pending.length === 0 && !briefState.brief) {
-    panel.hidden = true;
-    panel.innerHTML = '';
-    return;
-  }
-  panel.hidden = false;
-  if (briefState.pending.length > 0) renderBriefQuestions(panel);
-  else renderBriefCard(panel);
+  renderBrandKit();
 }
 
 async function requestBrief(prompt: string, decisions?: Record<string, string | undefined>): Promise<BriefPlan> {
@@ -2448,43 +2361,6 @@ async function requestBrief(prompt: string, decisions?: Record<string, string | 
   return body as BriefPlan;
 }
 
-/** POST the edited card to `/api/brief/outline` and re-render with fresh beats. */
-async function refreshBriefOutline(): Promise<void> {
-  if (briefState.busy) return;
-  briefState.brief = readBriefCard();
-  briefState.busy = true;
-  renderBriefPanel();
-  try {
-    const response = await apiFetch('/api/brief/outline', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ brief: briefState.brief, ...(brandPayload() ? { brand: brandPayload() } : {}) }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-    briefState.brief = (body as BriefPlan).brief;
-    briefState.outline = (body as BriefPlan).outline ?? null;
-    if ((body as BriefPlan).presets?.length) briefState.presets = (body as BriefPlan).presets as PresetCard[];
-    logActivity(`Outline updated: ${briefState.outline?.beats.length ?? 0} beat(s), ≈ ${briefState.outline?.estimatedSeconds ?? 0} s`);
-  } catch (error) {
-    logActivity(`Outline refresh failed: ${(error as Error).message}`);
-  }
-  briefState.busy = false;
-  renderBriefPanel();
-}
-
-async function buildFromCard(): Promise<void> {
-  if (briefState.busy) return;
-  const brief = readBriefCard();
-  briefState.brief = brief;
-  briefState.pending = [];
-  logActivity('Plan mode: brief confirmed, building');
-  await runBrief(briefToPrompt(brief));
-  briefState.brief = null;
-  briefState.outline = null;
-  renderBriefPanel();
-}
-
 async function planBriefFlow(text: string): Promise<void> {
   briefState.busy = true;
   $('composer-hint').textContent = 'planning the brief…';
@@ -2492,47 +2368,44 @@ async function planBriefFlow(text: string): Promise<void> {
     const plan = await requestBrief(text);
     briefState.prompt = text;
     if (plan.presets?.length) briefState.presets = plan.presets;
-    if (plan.complete) {
+    if (plan.complete || plan.questions.length === 0) {
       briefState.pending = [];
-      briefState.brief = plan.brief;
-      briefState.outline = plan.outline ?? null;
-      renderBriefPanel();
+      document.getElementById('composer-questions')?.remove();
       logActivity('Plan mode: brief ready to review');
+      await runBrief(composerBuildBrief(text));
       return;
     }
     briefState.pending = plan.questions;
     briefState.choices = {};
     briefState.brief = null;
     briefState.outline = null;
-    renderBriefPanel();
+    showQuestionBlock();
     logActivity(`Plan mode: ${plan.questions.length} question(s) to confirm`);
   } catch (error) {
     logActivity(`Plan mode failed: ${(error as Error).message}`);
-    await runBrief(text);
+    await runBrief(composerBuildBrief(text));
   } finally {
     briefState.busy = false;
     $('composer-hint').textContent = 'Enter to send · keys stay on the server';
-    renderBriefPanel();
   }
 }
 
 async function resolveBrief(): Promise<void> {
   if (briefState.busy || briefState.pending.length === 0) return;
   briefState.busy = true;
-  renderBriefPanel();
   try {
-    const plan = await requestBrief(briefState.prompt, briefState.choices);
+    const questions = easyQuestionsFrom(briefState.pending);
+    const answers = briefState.choices as Record<string, string>;
+    await requestBrief(briefState.prompt, briefState.choices);
+    const text = briefState.prompt;
     briefState.pending = [];
-    briefState.brief = plan.brief;
-    briefState.outline = plan.outline ?? null;
-    if (plan.presets?.length) briefState.presets = plan.presets;
-    renderBriefPanel();
-    logActivity('Plan mode: brief ready to review');
+    document.getElementById('composer-questions')?.remove();
+    logActivity('Plan mode: brief confirmed, building');
+    await runBrief(composerBuildBrief(text, questions, answers));
   } catch (error) {
     logActivity(`Plan mode failed: ${(error as Error).message}`);
   }
   briefState.busy = false;
-  renderBriefPanel();
 }
 
 function appendChatMessage(role: 'user' | 'assistant', text: string): void {
@@ -2572,7 +2445,7 @@ function adoptChatProject(project: ChatProject, built: boolean): void {
     briefState.brief = null;
     briefState.pending = [];
     briefState.outline = null;
-    renderBriefPanel();
+    document.getElementById('composer-questions')?.remove();
   }
 }
 
@@ -2638,9 +2511,12 @@ function init(opened: OpenedProject): void {
   renderRunPanel();
   renderExportPanel();
   renderSpendCard();
-  renderBriefPanel();
+  renderBrandKit();
 
   const modeControl = mountModeToggle();
+  document.getElementById('editor-back-to-studio')?.addEventListener('click', () => {
+    modeControl?.setMode('easy');
+  });
   if (modeControl) {
     const renderSplit = document.getElementById('render-split-button');
     if (renderSplit?.parentElement) renderSplit.after(modeControl.element);
@@ -2666,8 +2542,6 @@ function init(opened: OpenedProject): void {
   });
   void iterationLevelMount.refresh();
   mountSettingsDialog(document.body);
-  mountEasyActions(modeControl);
-  editorStore.subscribe(() => renderModeSummary());
 
   agentSettings = mountAgentSettings(apiFetch, logActivity);
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: opened.activity }];
@@ -2806,13 +2680,13 @@ function init(opened: OpenedProject): void {
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   const renderButton = $('render');
-  const splitGroup = document.getElementById('render-split-button');
   let renderBarHost = document.getElementById('render-bar-host');
   if (!renderBarHost) {
     renderBarHost = document.createElement('div');
     renderBarHost.id = 'render-bar-host';
-    (splitGroup ?? renderButton).before(renderBarHost);
   }
+  renderBarHost.hidden = true;
+  document.body.append(renderBarHost);
   renderBar = mountRenderBar(renderBarHost, {
     clips: () => clipStore.all(),
     gate: () => clipStore.gate(),
@@ -2861,6 +2735,7 @@ function init(opened: OpenedProject): void {
       void openClipViewer(clip, findReviewOpenButton(target.clipId) ?? renderBarHost, target.takeId);
     },
   } as RenderBarOptions);
+  syncExportButton();
   renderButton.addEventListener('click', () => void beginExport());
   const renderLocation = $<HTMLSelectElement>('render-location');
   if (renderLocation) {
@@ -2876,14 +2751,14 @@ function init(opened: OpenedProject): void {
 
   const exportMenuToggle = document.getElementById('export-menu-toggle');
   const exportMenu = document.getElementById('export-menu');
-  const topbarExportMp4 = document.getElementById('topbar-export-mp4');
   const topbarExportBundle = document.getElementById('topbar-export-bundle');
+  const openStudio = document.getElementById('more-open-studio');
 
   function openExportMenu(): void {
     if (!exportMenu || !exportMenuToggle) return;
     exportMenu.hidden = false;
     exportMenuToggle.setAttribute('aria-expanded', 'true');
-    const first = exportMenu.querySelector<HTMLElement>('[role="menuitem"], button');
+    const first = exportMenu.querySelector<HTMLElement>('[role="menuitem"]:not([hidden])');
     first?.focus();
   }
 
@@ -2906,7 +2781,7 @@ function init(opened: OpenedProject): void {
       closeExportMenu(true);
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      const items = Array.from(exportMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"], button'));
+      const items = Array.from(exportMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([hidden])'));
       const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
       if (currentIndex === -1) {
         items[0]?.focus();
@@ -2919,14 +2794,14 @@ function init(opened: OpenedProject): void {
     }
   });
 
-  topbarExportMp4?.addEventListener('click', () => {
-    closeExportMenu(false);
-    void beginExport();
-  });
-
   topbarExportBundle?.addEventListener('click', () => {
     closeExportMenu(false);
     void exportBundle();
+  });
+
+  openStudio?.addEventListener('click', () => {
+    closeExportMenu(false);
+    modeControl?.setMode('easy');
   });
 
   document.addEventListener('click', event => {
@@ -2935,13 +2810,10 @@ function init(opened: OpenedProject): void {
       closeExportMenu(false);
     }
   });
-  $('render-changes').addEventListener('click', () => void renderChangedScenes());
-  document.querySelectorAll<HTMLButtonElement>('.mode-toggle .mode').forEach(button => {
-    button.addEventListener('click', () => {
-      briefMode = (button.getAttribute('data-mode') as BriefMode) ?? 'plan';
-      document.querySelectorAll('.mode-toggle .mode').forEach(other => other.classList.toggle('active', other === button));
-      logActivity(`Composer mode: ${briefMode}`);
-    });
+  const skipQuestions = document.getElementById('skip-questions') as HTMLInputElement | null;
+  skipQuestions?.addEventListener('change', () => {
+    briefMode = skipQuestions.checked ? 'express' : 'plan';
+    logActivity(`Composer mode: ${briefMode}`);
   });
 
   if (token) {
@@ -3015,6 +2887,7 @@ function init(opened: OpenedProject): void {
       }
       if (exportState.refused.length === 0 && Array.isArray(data.excluded)) exportState.refused = data.excluded;
       renderExportPanel();
+      toast({ tone: 'ok', text: 'Export finished.' });
     });
     stream.addEventListener('export.failed', event => {
       const data = JSON.parse((event as MessageEvent).data) as { message: string };
@@ -3022,6 +2895,7 @@ function init(opened: OpenedProject): void {
       exportState.label = `export failed: ${data.message}`;
       renderExportPanel();
       logActivity(`Export bundle failed: ${data.message}`);
+      toast({ tone: 'danger', text: `Export failed. ${data.message}` });
     });
     stream.addEventListener('run.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { runId: string; backendId: string };
@@ -3073,6 +2947,7 @@ function init(opened: OpenedProject): void {
     stream.addEventListener('run.refused', event => {
       const data = JSON.parse((event as MessageEvent).data) as { budget?: { message?: string } };
       logActivity(`Server refused the run: ${data.budget?.message ?? 'budget too small'}`);
+      toast({ tone: 'danger', text: `Run refused. ${data.budget?.message ?? 'The budget is too small.'}` });
     });
     // C11: the per-scene re-render's progress lines arrive over SSE; the card for the scene
     // being rebuilt shows the last two.
@@ -3260,10 +3135,11 @@ function init(opened: OpenedProject): void {
     renderMessages();
     $('messages').scrollTop = $('messages').scrollHeight;
     if (briefMode === 'plan' && token) void planBriefFlow(text);
-    else void runBrief(text);
+    else void runBrief(composerBuildBrief(text));
   });
 
   if (token) void refreshClips();
+  mountEditorCommandPalette(() => { modeControl?.setMode('easy'); });
 }
 
 const openedProject = await openInitialProject({
