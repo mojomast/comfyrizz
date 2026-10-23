@@ -20,6 +20,7 @@ import { CommandError } from './commands.mjs';
 import { ITERATION_LEVEL_REQUIRED, RECORDED_ACTORS, validateAction } from './contract.mjs';
 import { ProductionLedgerError } from './ledger.mjs';
 import { ProductionStoreError } from './store.mjs';
+import { effectivePolicyForShot } from './iteration.mjs';
 
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
 
@@ -512,6 +513,123 @@ function dispatchResult(productionId, action, commit) {
  * Create the action coordinator. `ledgerFor(production)` opens the production's
  * existing budget ledger and must not invent a spend cap.
  */
+const KIND_TO_STAGE = Object.freeze({
+  render: 'video',
+  take: 'video',
+  video: 'video',
+  image: 'keyframe',
+  generate: 'keyframe',
+});
+
+function roundOf(slot) {
+  return Number.isInteger(slot?.round) && slot.round >= 1 ? slot.round : 1;
+}
+
+function validatePlanIterationSlots(production, plan) {
+  if (!isPlainObject(production)
+    || !isPlainObject(production.iteration)
+    || !isPlainObject(production.iteration.policy)) {
+    return;
+  }
+  const policy = production.iteration.policy;
+  const shotIds = Array.isArray(production.shotIds) ? production.shotIds : [];
+  const actions = Array.isArray(plan?.actions) ? plan.actions : [];
+
+  const groups = new Map();
+  for (let i = 0; i < actions.length; i += 1) {
+    const slot = actions[i];
+    if (!isPlainObject(slot)) continue;
+    const stage = KIND_TO_STAGE[slot.kind];
+    if (stage === undefined) continue;
+
+    let shot = null;
+    const targetId = slot.targetId;
+    if (typeof targetId === 'string') {
+      if (shotIds.includes(targetId)) {
+        shot = targetId;
+      } else if (targetId.includes(':')) {
+        const candidate = targetId.slice(0, targetId.indexOf(':'));
+        if (shotIds.includes(candidate)) shot = candidate;
+      }
+    }
+    if (shot === null) {
+      throw new ActionError('INVALID_PLAN', `actions[${i}].targetId is not a shot or line of this production`, 400);
+    }
+
+    const key = `${shot}\u0000${stage}`;
+    if (!groups.has(key)) groups.set(key, { shot, stage, slots: [], rounds: new Map() });
+    const group = groups.get(key);
+    group.slots.push(slot);
+    const round = roundOf(slot);
+    const current = group.rounds.get(round) ?? 0;
+    group.rounds.set(round, current + 1);
+  }
+
+  for (const group of groups.values()) {
+    const effective = effectivePolicyForShot(policy, group.shot);
+    const stagePolicy = effective.stages[group.stage];
+    const allowedTotal = stagePolicy.takes * stagePolicy.rounds;
+    const allowedRounds = stagePolicy.rounds;
+    const allowedPerRound = stagePolicy.takes;
+
+    const distinctRounds = group.rounds.size;
+    if (distinctRounds > allowedRounds) {
+      throw new ActionError(
+        'ITERATION_EXCEEDED',
+        `${group.shot} ${group.stage}: ${distinctRounds} rounds exceed allowed ${allowedRounds}`,
+        400,
+        { shotId: group.shot, stage: group.stage, allowed: allowedRounds, requested: distinctRounds },
+      );
+    }
+
+    let maxPerRound = 0;
+    for (const count of group.rounds.values()) {
+      if (count > maxPerRound) maxPerRound = count;
+    }
+    if (maxPerRound > allowedPerRound) {
+      throw new ActionError(
+        'ITERATION_EXCEEDED',
+        `${group.shot} ${group.stage}: ${maxPerRound} slots in one round exceed allowed ${allowedPerRound}`,
+        400,
+        { shotId: group.shot, stage: group.stage, allowed: allowedPerRound, requested: maxPerRound },
+      );
+    }
+
+    const total = group.slots.length;
+    if (total > allowedTotal) {
+      throw new ActionError(
+        'ITERATION_EXCEEDED',
+        `${group.shot} ${group.stage}: ${total} slots exceed allowed ${allowedTotal}`,
+        400,
+        { shotId: group.shot, stage: group.stage, allowed: allowedTotal, requested: total },
+      );
+    }
+  }
+
+  const auditionCounts = new Map();
+  for (let i = 0; i < actions.length; i += 1) {
+    const slot = actions[i];
+    if (!isPlainObject(slot) || slot.kind !== 'audition') continue;
+    const characterId = slot.characterId;
+    if (typeof characterId !== 'string') continue;
+    const current = auditionCounts.get(characterId) ?? 0;
+    auditionCounts.set(characterId, current + 1);
+  }
+
+  const voiceStage = policy.stages.voice;
+  for (const [characterId, count] of auditionCounts) {
+    const allowed = voiceStage.auditions;
+    if (count > allowed) {
+      throw new ActionError(
+        'ITERATION_EXCEEDED',
+        `character ${characterId} voice: ${count} auditions exceed allowed ${allowed}`,
+        400,
+        { characterId, stage: 'voice', allowed, requested: count },
+      );
+    }
+  }
+}
+
 export function createActionCoordinator(options = {}) {
   if (!isPlainObject(options)) {
     throw new TypeError('createActionCoordinator options must be an object');
@@ -582,6 +700,16 @@ export function createActionCoordinator(options = {}) {
     } catch (error) {
       if (prior) throw conflict(commandId, idempotencyKey);
       throw error;
+    }
+
+    const production = store.read(productionId);
+    if (production) {
+      try {
+        validatePlanIterationSlots(production, stored);
+      } catch (error) {
+        if (prior) throw conflict(commandId, idempotencyKey);
+        throw error;
+      }
     }
 
     const envelope = {
