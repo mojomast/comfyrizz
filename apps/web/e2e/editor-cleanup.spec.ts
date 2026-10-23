@@ -66,3 +66,13 @@ test('exactly one Export MP4 button, More contains Export bundle, and the rail h
   await expect(page.locator('#activity-pane')).not.toContainText('Export bundle');
   await expect(page.locator('#topbar')).not.toContainText('approved');
 });
+
+test('there is no Express button and Skip questions is a labelled checkbox', async ({ page }) => {
+  expect(indexHtml).not.toContain('id="mode-express"');
+  expect(source).toContain("briefMode = skipQuestions.checked ? 'express' : 'plan'");
+  await page.setContent(indexHtml);
+  await expect(page.getByRole('button', { name: 'Express' })).toHaveCount(0);
+  const skip = page.getByRole('checkbox', { name: 'Skip questions' });
+  await expect(skip).toHaveCount(1);
+  await expect(skip).not.toBeChecked();
+});

@@ -2883,12 +2883,10 @@ function init(opened: OpenedProject): void {
       closeExportMenu(false);
     }
   });
-  document.querySelectorAll<HTMLButtonElement>('.mode-toggle .mode').forEach(button => {
-    button.addEventListener('click', () => {
-      briefMode = (button.getAttribute('data-mode') as BriefMode) ?? 'plan';
-      document.querySelectorAll('.mode-toggle .mode').forEach(other => other.classList.toggle('active', other === button));
-      logActivity(`Composer mode: ${briefMode}`);
-    });
+  const skipQuestions = document.getElementById('skip-questions') as HTMLInputElement | null;
+  skipQuestions?.addEventListener('change', () => {
+    briefMode = skipQuestions.checked ? 'express' : 'plan';
+    logActivity(`Composer mode: ${briefMode}`);
   });
 
   if (token) {

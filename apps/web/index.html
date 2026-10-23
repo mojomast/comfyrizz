@@ -49,10 +49,10 @@
             <div id="brief-panel" class="brief-panel popover" hidden></div>
             <textarea id="prompt" rows="2" placeholder="Describe your video, or tell the agent what to change…"></textarea>
             <div class="composer-row">
-              <span class="mode-toggle" role="group" aria-label="Planning mode">
-                <button type="button" id="mode-plan" class="btn btn-sm mode active" data-mode="plan">Chat</button>
-                <button type="button" id="mode-express" class="btn btn-sm mode" data-mode="express">Express</button>
-              </span>
+              <label class="toggle" for="skip-questions">
+                <input type="checkbox" id="skip-questions" />
+                Skip questions
+              </label>
               <span class="hint" id="composer-hint">Enter to send · keys stay on the server</span>
               <button type="submit" id="composer-send" class="btn btn-primary btn-sm">Send</button>
             </div>
