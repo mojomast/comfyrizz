@@ -21,6 +21,7 @@ import { ITERATION_LEVEL_REQUIRED, RECORDED_ACTORS, validateAction } from './con
 import { ProductionLedgerError } from './ledger.mjs';
 import { ProductionStoreError } from './store.mjs';
 import { effectivePolicyForShot } from './iteration.mjs';
+import { IterationScopeError, validateIterationScope } from './iteration-scope.mjs';
 
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
 
@@ -187,6 +188,46 @@ function conflict(commandId, idempotencyKey) {
   );
 }
 
+function normalizeScope(raw, field) {
+  try {
+    return validateIterationScope(raw);
+  } catch (error) {
+    if (error instanceof IterationScopeError) {
+      throw new ActionError('ITERATION_SCOPE_INVALID', `${field} is not a valid iteration scope`, 400, {
+        field: error.field,
+      });
+    }
+    throw error;
+  }
+}
+
+function scopeMismatch(message, details) {
+  return new ActionError('ITERATION_SCOPE_MISMATCH', message, 400, details);
+}
+
+function slotTargetIds(slot) {
+  const ids = new Set();
+  if (typeof slot.targetId === 'string' && slot.targetId !== '') {
+    ids.add(slot.targetId);
+    const separator = slot.targetId.indexOf(':');
+    if (separator > 0) ids.add(slot.targetId.slice(0, separator));
+    return ids;
+  }
+  if (typeof slot.shotId === 'string' && slot.shotId !== '') ids.add(slot.shotId);
+  if (typeof slot.clipId === 'string' && slot.clipId !== '') ids.add(slot.clipId);
+  return ids;
+}
+
+function scopeMatchesSlotTarget(scope, slot) {
+  const target = scope.target;
+  const ids = slotTargetIds(slot);
+  if (ids.size === 0) return true;
+  if (target.shotId === undefined && target.clipId === undefined) return false;
+  if (target.shotId !== undefined && !ids.has(target.shotId)) return false;
+  if (target.clipId !== undefined && !ids.has(target.clipId)) return false;
+  return true;
+}
+
 function normalizeActions(actions, ceiling, collectAndStopReserve) {
   if (!Array.isArray(actions)) {
     throw new ActionError('INVALID_PLAN', 'actions must be an array of slots', 400);
@@ -232,6 +273,16 @@ function normalizeActions(actions, ceiling, collectAndStopReserve) {
     }
     next.id = slot.id;
     next.upperBound = slot.upperBound;
+    if (Object.hasOwn(slot, 'scope')) {
+      const scope = normalizeScope(slot.scope, `actions[${index}].scope`);
+      if (!scopeMatchesSlotTarget(scope, next)) {
+        throw scopeMismatch(
+          `actions[${index}].scope target does not match the slot target`,
+          { actionId: slot.id },
+        );
+      }
+      next.scope = scope;
+    }
     return next;
   });
   if (sum > ceiling) {
@@ -268,7 +319,25 @@ function buildStoredPlan(payload, productionId) {
     throw new ActionError('INVALID_PLAN', 'requiredDecisions must be an array', 400);
   }
   const ceiling = normalizeNumber(payload.reservationCeiling);
+  const turnScope = Object.hasOwn(payload, 'scope') ? normalizeScope(payload.scope, 'scope') : undefined;
   const actions = normalizeActions(payload.actions, ceiling, normalizeNumber(collectAndStopReserve));
+  if (turnScope !== undefined) {
+    actions.forEach((slot, index) => {
+      if (!isPaidSlot(slot)) return;
+      if (!Object.hasOwn(slot, 'scope')) {
+        throw scopeMismatch(
+          `actions[${index}].scope is required in a scoped turn`,
+          { actionId: slot.id },
+        );
+      }
+      if (canonicalJson(slot.scope) !== canonicalJson(turnScope)) {
+        throw scopeMismatch(
+          `actions[${index}].scope must match the turn iteration scope`,
+          { actionId: slot.id },
+        );
+      }
+    });
+  }
 
   const content = {};
   for (const [key, value] of Object.entries(payload)) {
@@ -282,6 +351,8 @@ function buildStoredPlan(payload, productionId) {
   content.collectAndStopReserve = normalizeNumber(collectAndStopReserve);
   content.requiredDecisions = payload.requiredDecisions;
   content.actions = actions;
+  if (turnScope !== undefined) content.scope = turnScope;
+  else delete content.scope;
 
   const planHash = computePlanHash(content);
   const suppliedHash = Object.prototype.hasOwnProperty.call(payload, 'planHash');
