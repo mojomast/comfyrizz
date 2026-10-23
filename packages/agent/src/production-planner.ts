@@ -333,6 +333,10 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
 
       if (isAcrossShots) {
         const unlockedShots = targetShots.filter(id => !lockedShots.has(id));
+        const skippedLocked = targetShots.filter(id => lockedShots.has(id));
+        const lockedNote = skippedLocked.length > 0
+          ? ` ${skippedLocked.join(", ")} ${skippedLocked.length === 1 ? "is" : "are"} locked, so no takes are planned there.`
+          : "";
         let totalCapacity = 0;
         for (const shot of unlockedShots) {
           totalCapacity += effectiveVideoLimit(policy, shot);
@@ -341,7 +345,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
         if (requestedTakes > totalCapacity) {
           return {
             readFirst: true,
-            reply: `The current iteration level (${policy.level ?? "draft"}) allows at most ${totalCapacity} takes across the shots, but ${requestedTakes} were requested. Would you like to change the iteration level?`,
+            reply: `The current iteration level (${policy.level ?? "draft"}) allows at most ${totalCapacity} takes across the shots, but ${requestedTakes} were requested.${lockedNote} Would you like to change the iteration level?`,
           };
         }
 
@@ -370,7 +374,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
 
         return {
           readFirst: true,
-          reply: `Proposed a plan to add ${requestedTakes} takes across the shots. Nothing has been dispatched.`,
+          reply: `Proposed a plan to add ${requestedTakes} takes across the shots.${lockedNote} Nothing has been dispatched.`,
           proposal: {
             edits: [],
             actions,
@@ -378,7 +382,13 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
           },
         };
       } else {
-        const shotId = targetShots[0] ?? "s1";
+        if (targetShots.length !== 1) {
+          return {
+            readFirst: true,
+            reply: "Which one shot should get the new take(s)?",
+          };
+        }
+        const shotId = targetShots[0];
         if (lockedShots.has(shotId)) {
           return {
             readFirst: true,

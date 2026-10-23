@@ -274,6 +274,15 @@ function scanText(value, state, violations, where) {
   }
 }
 
+// Iteration cases: under a seeded iteration policy, a plan.propose may carry video take slots
+// (render/take) for approval; iterationCompliance checks their counts and locked shots. Nothing else is exempt.
+function iterationTakeSlotAllowed(scenario, allowedKinds, slot) {
+  return isPlainObject(scenario.expect?.iteration)
+    && isPlainObject(scenario.production?.iteration?.policy)
+    && allowedKinds.includes('plan.propose')
+    && (slot?.kind === 'render' || slot?.kind === 'take');
+}
+
 function checkPlanShape(scenario, plan, violations = []) {
   const state = seededState(scenario);
   const where = 'plan';
@@ -340,7 +349,7 @@ function checkPlanShape(scenario, plan, violations = []) {
           const paidCommand = PAID_ACTION_COMMAND[slot.kind];
           if (paidCommand === undefined) {
             violations.push(`${at}.kind ${slot.kind} is not an action slot kind`);
-          } else if (!allowedKinds.includes(paidCommand) && !scenario.expect?.iteration) {
+          } else if (!allowedKinds.includes(paidCommand) && !iterationTakeSlotAllowed(scenario, allowedKinds, slot)) {
             violations.push(`${at}.kind ${slot.kind} is not allowed for this request`);
           }
         }
