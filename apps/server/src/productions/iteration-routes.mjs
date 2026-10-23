@@ -18,27 +18,12 @@
 import { ITERATION_PRESETS, validateIterationPolicy } from './iteration.mjs';
 import { estimateIteration } from './iteration-estimate.mjs';
 import { recommendIteration } from './iteration-recommend.mjs';
+import { lockedShotsFor } from './commands.mjs';
 
 const ITERATION_ROUTE_PATTERN = /^\/api\/productions\/([^/]+)\/iteration$/;
 
 const POLICY_KEY = 'iteration.policy';
 const PRESET_LEVELS = Object.freeze(['draft', 'balanced', 'director']);
-
-// D6: the same in-flight and completed states the command handler locks. The
-// authoritative rule lives in commands.mjs (lockedShotsFor); this module only
-// lists its result for a read, because that helper is not exported and the
-// command module is outside this task's files.
-const LOCKED_ACTION_STATES = new Set([
-  'queued',
-  'dispatching',
-  'running',
-  'collecting',
-  'verifying',
-  'completed',
-  'submission_unknown',
-  'reconciling',
-  'cancel_requested',
-]);
 
 class IterationRouteError extends Error {
   constructor(code, message, status) {
@@ -212,28 +197,10 @@ function recommendationFor({ durationSeconds, shots, characters, userDefault }) 
   });
 }
 
-function shotIdOf(data) {
-  return typeof data.shotId === 'string' && data.shotId !== '' ? data.shotId : null;
-}
-
+// D6: the one lock rule lives in commands.mjs (lockedShotsFor); this read only
+// lists its result, production shots first, in a stable order.
 function lockedShotIdsFor(production, events) {
-  const latestByAction = new Map();
-  const locked = new Set();
-  for (const event of events) {
-    if (!isPlainObject(event) || !isPlainObject(event.data)) continue;
-    const data = event.data;
-    if (event.type === 'action.state_changed') {
-      if (typeof data.id === 'string' && data.id !== '') latestByAction.set(data.id, data);
-    } else if (event.type === 'take.requested' || event.type === 'take.landed') {
-      const shotId = shotIdOf(data);
-      if (shotId) locked.add(shotId);
-    }
-  }
-  for (const action of latestByAction.values()) {
-    const shotId = shotIdOf(action);
-    if (shotId && LOCKED_ACTION_STATES.has(action.state)) locked.add(shotId);
-  }
-
+  const locked = lockedShotsFor(events);
   const shotIds = Array.isArray(production.shotIds) ? production.shotIds : [];
   return [...new Set([...shotIds, ...locked])].filter((shotId) => locked.has(shotId));
 }

@@ -115,7 +115,8 @@ function shotIdOf(data) {
   return typeof data.shotId === 'string' && data.shotId !== '' ? data.shotId : null;
 }
 
-function lockedShotsFor(events) {
+// IL08: exported read-only so the iteration read route lists exactly the shots this rule locks.
+export function lockedShotsFor(events) {
   // An action locks its shot only while its LATEST state is in flight or
   // completed; an action later cancelled or failed before rendering does not.
   const latestByAction = new Map();
