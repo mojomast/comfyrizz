@@ -184,7 +184,7 @@ the corresponding `package.json`.
 
 ## What it deliberately does not check
 
-- **Google Colab** - no check inspects, contacts or reports on Colab runtimes or
+- **Google Colab** - no check inspects, contacts or reports on Google Colab runtimes or
   anything under `colab/`. Doctor is a local preflight only.
 - **Paid providers and live LLM probes** - it never calls an LLM provider. Whether a
   key is configured is inferred solely from env var names being set or unset; no

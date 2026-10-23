@@ -23,7 +23,7 @@ stops for you, or on your own ComfyUI. MIT licensed.
 
 <sub>Every frame above came out of Comfyrizz. Labels, numbers and captions are drawn by code, never by the image model.</sub>
 
-[Why it's different](#why-its-different) · [Tour](#feature-tour) · [Quick start](#quick-start) · [Offline demo](#offline-demo-with-a-cassette) · [Google Colab](#google-colab) · [Architecture](#architecture) · [Submission](#hackathon-submission)
+[Why it's different](#why-its-different) · [Docs](docs/README.md) · [Tour](#feature-tour) · [Quick start](#quick-start) · [Offline demo](#offline-demo-with-a-cassette) · [Google Colab](#google-colab) · [Architecture](#architecture) · [Submission](#hackathon-submission)
 
 </div>
 
@@ -44,6 +44,33 @@ stops for you, or on your own ComfyUI. MIT licensed.
   rights-filtered `package.zip` ship only what may be redistributed.
 
 ## Feature tour
+
+### Iterative production agent
+
+Work on a video scene by scene instead of in one shot. A **production** is a durable, journaled
+record: the agent reads it, proposes a **plan card**, and you approve or reject it. Only approved,
+scoped work is dispatched, by a deterministic production coordinator. The agent can never approve
+its own plan, select a take or spend: guardrails refuse approval and spend commands and any shot or
+line id outside the requested scope. Each production has its own budget ledger, and the
+**Google Colab spend cap is set by you per production** (there is no default cap, and you can turn it off;
+reservations and settlements are recorded either way). Behavioural evals replay a committed
+cassette against the real command and action modules. See
+[docs/features/production-agent.md](docs/features/production-agent.md).
+
+### Easy and Advanced modes
+
+The editor opens in **Easy** mode, which hides advanced controls; **Advanced** shows everything.
+Toggle with **Ctrl/Cmd+Shift+A**. A separate **density** setting (comfortable or compact) is saved
+with it. The brand identity is **Kinetic ZZ** ([`brand/`](brand/README.md)). See
+[docs/features/interface.md](docs/features/interface.md).
+
+### Voice and research
+
+Characters speak with the video model's **native voice** when the model declares that capability
+(for example MiniMax); otherwise they use a local **Kokoro** voice, which can be auditioned free.
+Voice cloning is not supported. For research, you choose **Use my URLs** or **Search for me**; the
+agent cannot choose for you, and fetched text is treated as untrusted data. See
+[voice](docs/features/voice.md) and [research](docs/features/research.md).
 
 ### Chat agent and editor
 
@@ -78,7 +105,7 @@ brief. `examples/launch-demo` stays bundled and is still the package behind `ren
 
 <img src="docs/media/character-library.webp" alt="Character library: cards for each saved character with role, revision and primary portrait" width="880">
 
-Characters is a library for the people and mascots in a video. Define a character once with a name,
+Characters is a library for the people and mascots in your videos, reused across projects. Define a character once with a name,
 `@handle`, role, look, voice and bible, upload PNG, JPEG or WEBP reference images, then add a pinned
 snapshot to a project. Library edits never change an existing project: the cast chip offers **Update
 to vN**, and timeline review marks rebuilt clips **stale** instead of re-rendering silently.
@@ -276,6 +303,8 @@ flowchart TD
     B -->|style.list / suggest / apply| R["24 style recipes<br/>effects · transitions · fonts"]
     R --> C
     B --> C["Package<br/>comfyrizz.package/v1"]
+    B -->|"propose only"| P["Production journal<br/>plan cards · approvals · budget ledger"]
+    P -->|"approved slots"| D
     C --> D["jobs.json<br/>FLUX 3 Klein stills · LTX-2.5 plates · upscale"]
     D --> S{"Spend card approved?"}
     S -->|Google Colab| E["Google Colab G4<br/>up · bootstrap · run · collect · verified stop"]
@@ -309,6 +338,10 @@ The full design is in [docs/SPEC.md](docs/SPEC.md).
 | `COMFYRIZZ_LLM_CASSETTE` | `record:<file>` or `play:<file>` for agent cassettes. Off by default. |
 | `COMFYRIZZ_HF_TOKEN_FILE` | Path to a `0600` Hugging Face read token file for the gated models. |
 | `COMFYRIZZ_COLAB_BIN` | Path to the `colab` CLI, if it isn't in `~/.local/bin` or on `PATH`. |
+| `COMFYRIZZ_PYTHON` | Python interpreter for the pipeline (default `python3`). |
+| `COMFYRIZZ_EVAL_CASSETTE` | Alternative cassette for the production-agent eval. |
+| `COMFYRIZZ_COLAB_PROGRESS_DIR`, `COMFYRIZZ_COLAB_RENDER_ALLOWANCE_MINUTES` | Google Colab progress-file directory and remote-render time allowance. |
+| `COMFYRIZZ_QWEN_TTS_PYTHON`, `COMFYRIZZ_QWEN_ASR_PYTHON`, `COMFYRIZZ_QWEN_DEVICE`, `COMFYRIZZ_QWEN_MODELS` | Optional local Qwen3-TTS and ASR environments. |
 | `REMOTION_BROWSER` | Chrome or Chromium used for rendering. |
 
 Provider details: [docs/AGENT_PROVIDERS.md](docs/AGENT_PROVIDERS.md).
@@ -318,7 +351,8 @@ Provider details: [docs/AGENT_PROVIDERS.md](docs/AGENT_PROVIDERS.md).
 ```
 apps/
   web/          Vite + TypeScript UI: chat, brief, Remotion Player, timeline, inspectors; demo.html
-  server/       Loopback HTTP server: packages, agent, pipeline, render, export, SSE, cassette hook
+  server/       Loopback HTTP server: packages, agent, productions (journal, coordinator, ledger),
+                characters, takes, pipeline, render, export, SSE, cassette hook
   renderer/     Remotion project: layouts, transitions, storytelling recipes, finishing layer, CLI renders
 packages/
   schema/       comfyrizz.package/v1 + jobs/v1 schemas, TS + Python validators, motion lint
@@ -346,13 +380,26 @@ pnpm test                      # every workspace package's node:test suite (buil
 pnpm run test:py               # pipeline-py pytest; needs .venv (pipeline-py/requirements-dev.txt)
 pnpm run test:scan             # release scan: no personal paths or secrets
 node --test scripts/doctor/*.test.mjs scripts/cassette/*.test.mjs
+pnpm --filter @comfyrizz/server test    # server suite only (productions, characters, takes, ...)
+pnpm --filter @comfyrizz/agent test     # agent suite only (tools, production guardrails, planner)
+pnpm --filter @comfyrizz/web test       # web unit suite (plus `typecheck`)
 pnpm --filter @comfyrizz/web test:e2e   # Playwright (Chromium, loopback only)
+pnpm run check                 # test + web typecheck + release scan
+node packages/agent/scripts/eval-production.mjs     # production-agent evals (replays the committed cassette)
+node packages/agent/scripts/eval-conversation.mjs   # conversation evals
 ```
+
+The eval scripts need `pnpm --filter @comfyrizz/agent build` first. More in
+[docs/features/testing.md](docs/features/testing.md).
 
 GPU paths are tested against a fake `colab` CLI and a fake Comfy server, so no suite starts a
 runtime or spends anything. Backend and pipeline tests honour `COMFYRIZZ_PYTHON` for the pipeline
 interpreter and keep scratch files under `os.tmpdir()`. The motion library's tests are listed in
 [docs/MOTION_STYLES.md](docs/MOTION_STYLES.md#every-command).
+
+## In progress
+
+Not yet on `main`, so not documented here: iteration levels, an asset viewer and a UI revamp.
 
 ## Hackathon submission
 

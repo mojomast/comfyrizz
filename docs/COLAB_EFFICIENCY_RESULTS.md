@@ -1,4 +1,4 @@
-# Colab efficiency experiments — October 19, 2026
+# Google Colab efficiency experiments — October 19, 2026
 
 Companion to [the research review](COLAB_EFFICIENCY.md). Exact inputs, outputs, logs and receipts are archived under `~/comfyrizz-gpu-tests/efficiency-20261019/`. Reproduction tools are in [`scripts/bench`](../scripts/bench/README.md).
 

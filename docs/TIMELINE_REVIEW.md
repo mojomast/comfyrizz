@@ -22,7 +22,7 @@ TTS are out of scope: narration already has its own takes in the editor sidecar.
    plan hash are shown before anything runs.
 5. A/B the new take against the old one in the Player. Approve one take per clip.
 6. When the render bar says `n/n clips approved`, render the final MP4. The selected
-   takes are now the package's normal asset files, so local and Colab renders consume
+   takes are now the package's normal asset files, so local and Google Colab renders consume
    exactly what you previewed.
 
 A take is a complete replacement for one clip. There is no partial-segment retake and
@@ -234,10 +234,10 @@ declared, the server refuses the correction instead of silently ignoring it.
 }
 ```
 
-### 4.3 Correct several clips before one Colab boot
+### 4.3 Correct several clips before one Google Colab boot
 
 Use **Regenerate** per clip in the panel, or the batch route to plan several
-corrections into one run. The batch shares one Colab boot, one estimate and one
+corrections into one run. The batch shares one Google Colab boot, one estimate and one
 `planHash`, while each item keeps its own correction and diff:
 
 ```http
@@ -304,7 +304,7 @@ user's action:
   confirmation surface in this shell), or
 - for API/automation, send the proposal id in `confirmClipProposals` on
   `POST /api/agent/chat`. The server applies it through the same take functions as
-  the routes above, and a Colab proposal still stops at `approval_required`.
+  the routes above, and a Google Colab proposal still stops at `approval_required`.
 
 The agent sees at most 40 clip rows in its manifest; on a larger project, name the clip
 or scene so it can read that one. The chat endpoint requires a configured provider and
@@ -338,7 +338,7 @@ The approval response is:
 ```
 
 For your own ComfyUI the run is `external`: Comfyrizz does not meter it, so there is no
-spend approval step, but the correction and take flow are identical. Only Colab
+spend approval step, but the correction and take flow are identical. Only Google Colab
 returns `approval_required`.
 
 ## 6. Review: A/B, select, approve, reject, revert
@@ -371,7 +371,7 @@ the picture match. When in doubt, select first, then approve.
 | --- | --- | --- |
 | What runs | The browser Player with the same `PackageComposition` as the MP4 | Remotion on CPU, or the Google Colab remote render path |
 | Which media | The selected take, or the take you click for A/B, through a short-lived media ticket | The selected take's file, now written into the package asset by `selectTake` |
-| Cost | No render, no Colab spend; only a media ticket | Normal render cost and time |
+| Cost | No render, no Google Colab spend; only a media ticket | Normal render cost and time |
 | Timing | Never changes: swapping a take only changes `asset.file`/`media`; scene `from`/`durationInFrames` come from the compiled timeline | Never changes for a take swap; a take of a different length is fitted (trimmed to the clip's frames, or the last frame is held), the same way the renderer already fits plates |
 | Output | Instant in the Player; optional **Render changes** for a true pixel check of one scene | The MP4 (and the export bundle/social cuts from the existing export flow) |
 
@@ -550,7 +550,7 @@ as take 1 and loses verdicts; keep it with the runtime.
 
 The slow parts - GPU generation and the final encode - are **pre-warmed before the
 clock**. The 60 seconds are the review decisions, which is the feature. Say so on
-camera; do not pretend a Colab render finished in 30 seconds.
+camera; do not pretend a Google Colab render finished in 30 seconds.
 
 What is live: opening the project, the Takes tab, the chat proposal, the regenerate
 request and its Spend card, the A/B clicks, the take-approval clicks and the Render
@@ -595,7 +595,7 @@ fake backend.
 | 0:55-1:00 | Render bar | Click **Render**. "The gate is open; the final render consumes the selected takes - exactly what the Player showed." Cut to the rehearsed MP4 if the encode is still running. |
 
 If a clip shows `stale`, say why: its generation fields changed after approval, so the
-old verdict no longer applies; **Use take N** re-applies the take. If Colab spend is
+old verdict no longer applies; **Use take N** re-applies the take. If Google Colab spend is
 not approved, the clip keeps its previous state and nothing runs; there is no free
 retry.
 
@@ -614,7 +614,7 @@ node --test apps/server/test/takes/model.test.mjs
 node --test apps/server/test/takes/store.test.mjs
 
 # the whole loop through createApp with a fake backend:
-# adopt take 1, Colab approval, corrected take 2, gate 409, approve all, one render
+# adopt take 1, Google Colab approval, corrected take 2, gate 409, approve all, one render
 node --test apps/server/test/takes/e2e.test.mjs
 
 # the other take layers
@@ -647,11 +647,11 @@ pnpm run test:scan
 | Symptom | Check |
 | --- | --- |
 | `No reviewable clips in this package yet` | The project has no asset with `gen.generator`, or the timeline has no generated background/foreground/presenter. Uploads and SVGs are not clips. |
-| Clip is stuck `queued` | Another run is active. Check the run status; queued regenerates drain after the active run ends. A regenerate waiting for Colab spend is not `queued`; its approval card is in the Takes panel. |
+| Clip is stuck `queued` | Another run is active. Check the run status; queued regenerates drain after the active run ends. A regenerate waiting for Google Colab spend is not `queued`; its approval card is in the Takes panel. |
 | `RENDER_GATE_BLOCKED` | Read `blocking[]`; a `stale` or `review` clip blocks even if an older take was approved. Approve the selected take, or override with a 4-500 character reason. |
 | New take did not replace the selected one | An approved take is never auto-replaced. The new take is in the strip with `+1 new`; select it to compare. |
 | `NO_PREVIOUS_TAKE` on Revert | There is no earlier selection in this clip's history. Select the take you want directly. |
-| Colab approval does not apply | The correction or budget changed, which changed the `planHash`. Approve the new hash; a previous hash cannot authorize a different plan. |
+| Google Colab approval does not apply | The correction or budget changed, which changed the `planHash`. Approve the new hash; a previous hash cannot authorize a different plan. |
 | A take is missing from the strip after 12 takes | The oldest rejected, unselected take was purged over the cap. Its metadata remains with `purged: true`; approved and selected takes are never purged. |
 | Preview shows the old picture after a selection | Refresh the Takes tab or wait for `clip.take.selected`; the shell remounts the Player from the selected take. A hard refresh clears a stale media ticket cache. |
 | 401 on a take URL | The media ticket expired. The panel mints a new one; never construct `/api/media/...` by hand. |
@@ -669,5 +669,5 @@ pnpm run test:scan
 | Tests | `apps/server/test/takes/`, `apps/web/test/takes-*.test.ts` |
 
 The raw design, including the resolved decisions on the render gate, per-regeneration
-Colab spend, the take cap and the agent's propose-only role, is in
+Google Colab spend, the take cap and the agent's propose-only role, is in
 [the feature spec](specs/TIMELINE_REVIEW.md).

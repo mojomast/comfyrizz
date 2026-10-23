@@ -162,7 +162,7 @@ The 24 gallery cards each carry a `licences` array (subset of the allowlist) in 
 
 ## ComfyUI-side quality manifest (runtime only)
 
-`scripts/motionkit/data/comfy-workflows.json` (schema `comfyrizz.comfy-workflows/v1`) records the machinery used *at runtime* inside the Google Colab boundary — that execution is mojo-opencode's, not this feature's: RIFE 4.25 (MIT, 2× interpolation), FILM (Apache-2.0), Depth Anything V2 Small (Apache-2.0 depth for parallax), LTX-Video 0.9 / AnimateDiff motion-control, and per-recipe prompt/LoRA hints. Anything whose licence is not vendorable (MIT/ISC/CC0-1.0/OFL-1.1) is `runtimeOnly: true, vendor: false`; LTX-2.x is flagged restricted; the validator refuses secrets, plain `http://` URLs and any Colab/notebook wiring in the manifest.
+`scripts/motionkit/data/comfy-workflows.json` (schema `comfyrizz.comfy-workflows/v1`) records the machinery used *at runtime* inside the Google Colab boundary — that execution is mojo-opencode's, not this feature's: RIFE 4.25 (MIT, 2× interpolation), FILM (Apache-2.0), Depth Anything V2 Small (Apache-2.0 depth for parallax), LTX-Video 0.9 / AnimateDiff motion-control, and per-recipe prompt/LoRA hints. Anything whose licence is not vendorable (MIT/ISC/CC0-1.0/OFL-1.1) is `runtimeOnly: true, vendor: false`; LTX-2.x is flagged restricted; the validator refuses secrets, plain `http://` URLs and any Google Colab or notebook wiring in the manifest.
 
 ## Every command
 
