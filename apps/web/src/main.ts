@@ -24,7 +24,7 @@ import { mountProductionTab } from './editor/inspector/production.ts';
 import { mountSettingsDialog } from './settings/dialog.ts';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
-import { mountColabHistory } from './colab-history.ts';
+import { mountRemoteGpuHistory } from './colab-history.ts';
 import colabHistoryJson from '../../../examples/pip-night-shift/colab-history.json';
 import { readRunSnapshot } from './run-progress.ts';
 import { mountAgentSettings } from './agent-settings';
@@ -100,19 +100,19 @@ if (colabHost) mountSettingsCard(colabHost, apiFetch);
 const colabProgressHost = document.getElementById('colab-progress-host');
 if (colabProgressHost) mountRemoteGpuProgress(colabProgressHost, apiFetch);
 // The status bar keeps the Google Colab chip. The runs drawer button is not a second control.
-settleColabStatusControl();
+settleStatusChip();
 const colabHistoryHost = document.getElementById('colab-history-host');
-if (colabHistoryHost) mountColabHistory(colabHistoryHost, colabHistoryJson);
+if (colabHistoryHost) mountRemoteGpuHistory(colabHistoryHost, colabHistoryJson);
 
-function settleColabStatusControl(): void {
+function settleStatusChip(): void {
   const progressHost = document.getElementById('colab-progress-host');
   progressHost?.querySelector('.colab-progress-toggle')?.remove();
   const card = document.getElementById('colab-card-host');
   if (progressHost && card?.parentElement) card.after(progressHost);
 
   const trigger = document.getElementById('colab-popover-trigger');
-  if (!trigger || trigger.dataset.opensColabCard === 'true') return;
-  trigger.dataset.opensColabCard = 'true';
+  if (!trigger || trigger.dataset.opensCard === 'true') return;
+  trigger.dataset.opensCard = 'true';
   trigger.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
