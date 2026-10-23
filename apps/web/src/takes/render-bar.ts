@@ -412,7 +412,8 @@ export function mountRenderBar(el: HTMLElement, options: RenderBarMountOptions):
         return;
       }
       lastSelected = state.selected;
-      void refreshDrawerAfterKeep(clip.clipId, packageId);
+      // `[`/`]` may have moved compare to a sibling clip: refresh the clip that was kept.
+      void refreshDrawerAfterKeep(state.clipId, state.packageId);
     });
   }
 

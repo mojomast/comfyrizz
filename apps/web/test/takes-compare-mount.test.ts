@@ -173,3 +173,9 @@ test('main.ts passes the takes API and package id to mountRenderBar compare', ()
     'main.ts must pass compare: { api: takesApi, packageId } to mountRenderBar',
   );
 });
+
+test('after a Keep the drawer refreshes the clip compare is on, not the clip it opened with', () => {
+  const source = readFileSync(new URL('../src/takes/render-bar.ts', import.meta.url), 'utf8');
+  assert.match(source, /refreshDrawerAfterKeep\(state\.clipId, state\.packageId\)/);
+  assert.doesNotMatch(source, /refreshDrawerAfterKeep\(clip\.clipId/);
+});
