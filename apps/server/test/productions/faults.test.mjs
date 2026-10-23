@@ -535,7 +535,7 @@ test('an approved plan and a resolved decision survive a restart and replay exac
     kind: 'decision.resolve',
     productionId: ctx.productionId,
     expected: { productionRevision: ctx.store.read(ctx.productionId).revision },
-    payload: { decisionId: 'dec_cast' },
+    payload: { decisionId: 'dec_cast', optionId: 'approve' },
   };
   ctx.handler.execute(resolveCommand, USER);
   const afterDecision = deriveNextStep({
