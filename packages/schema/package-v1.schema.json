@@ -1507,6 +1507,10 @@
             "code"
           ]
         },
+        "hero": {
+          "type": "boolean",
+          "description": "Marks this shot as a hero shot for iteration: Balanced video pick 'hero' asks the user on hero shots. When no scene in the production is flagged, the first and last shots are the heroes (resolved in apps/server/src/productions/iteration.mjs, not here). Unrelated to layout 'hero' and motion.emphasis 'hero'."
+        },
         "variant": {
           "type": "string",
           "enum": [
