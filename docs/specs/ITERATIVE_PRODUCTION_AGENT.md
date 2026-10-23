@@ -287,3 +287,107 @@ A production stores one iteration policy (`comfyrizz.iteration-policy/v1`) as an
   are not rendered and not in flight. A locked shot returns
   `ITERATION_SHOT_LOCKED` and keeps its current stages. An already proposed
   plan is not mutated; the plan card shows "level changed — re-propose".
+
+## 13. Element-scoped iteration from the asset viewer
+
+The asset viewer can attach one element-scoped iteration request to a chat turn.
+The user guide is [ASSET_VIEWER.md](../ASSET_VIEWER.md). The viewer never calls
+regenerate, select, approve or reserve. It emits a scope; the agent proposes,
+and the user approves through the existing plan gate.
+
+### 13.1 `comfyrizz.iteration-scope/v1`
+
+The scope names one existing target and one element. Its shape and vocabulary
+are closed: unknown keys and aliases are invalid, and the schema identifier is
+not a `schema` property inside the object. Target identifiers come from
+server-owned package and production state; clients do not invent them.
+
+```
+{
+  target: { packageId, clipId?, takeId?, assetId?, shotId? },
+  element: "character" | "voice_line" | "background" | "motion"
+    | "framing" | "lighting" | "audio" | "other",
+  elementRef?: { characterId } | { lineId },
+  region?: { x, y, w, h },
+  time?: { at } | { in, out },
+  note,
+  preserve
+}
+```
+
+The fields have these contracts:
+
+- **`target`** is required and contains required `packageId` plus optional
+  `clipId`, `takeId`, `assetId` and `shotId`. No other target keys are allowed.
+- **`element`** is required and uses exactly the eight values above. A
+  `character` element may have `elementRef: {characterId}`; a `voice_line`
+  element may have `elementRef: {lineId}`. The reference has exactly one key,
+  must match the element, and is not allowed for other elements.
+- **`region`**, when present, has exactly `x`, `y`, `w` and `h`. All are finite
+  normalized numbers: `x >= 0`, `y >= 0`, `w > 0`, `h > 0`, `x + w <= 1`, and
+  `y + h <= 1`. Coordinates refer to the media, not its letterboxed display.
+- **`time`** is either `{at}` with `at >= 0`, or `{in, out}` with
+  `0 <= in < out`. Values are finite seconds. The two forms cannot be mixed.
+- **`note`** is required, trimmed, 1–500 characters, and contains no control
+  characters. It remains quoted, untrusted user text rather than becoming a
+  structured generation directive.
+- **`preserve`** contains unique entries from `character`, `voice`,
+  `background`, `motion`, `framing`, `lighting`, `audio` and `timing`. It cannot
+  contain the element being changed. If omitted, normalization supplies every
+  preserve key except the changed element; `voice_line` maps to `voice`, and
+  `other` has no corresponding preserve key to remove. Normalized output uses
+  the canonical preserve order above.
+
+Malformed scopes fail validation with `ITERATION_SCOPE_INVALID`. Validation is
+pure and does not read files, use a clock, call a network service, or generate
+identifiers.
+
+`toPromptHint(scope)` deterministically names the element, optional region and
+time, and preserved parts. It does not include the note. The structured scope
+travels separately from the quoted note, and the hint is the correction
+`promptAppend` on the legacy confirmation path. In v1 a region is a prompt hint,
+not a masked-inpainting instruction or a rendering-backend change.
+
+### 13.2 Scoped turns, plans, and `ITERATION_SCOPE_MISMATCH`
+
+For a bound production, the viewer submits the validated object as the chat
+turn's `iterationScope`. For an unbound or legacy project it only pre-fills the
+composer with the note and deterministic hint; it never sends that turn for the
+user.
+
+`production_read` exposes the turn scope to the agent. A scoped
+`production_propose_plan` carries the same object as `plan.scope`; the tool
+fills an omitted plan scope from the turn and refuses a different one. A plan
+scope is not allowed in an unscoped turn.
+
+The action-plan boundary also validates `payload.scope` and each action slot's
+optional `scope`. In a scoped turn:
+
+- every paid slot carries a normalized scope exactly equal to the turn scope;
+- the slot names a shot or clip target matching the scope's `shotId` or
+  `clipId`;
+- the scope cannot be dropped, moved to another target, changed, or widened to
+  a package-only scope; and
+- unpaid slots are not required to duplicate the scope.
+
+A dropped or unequal paid-slot scope, or a scope/target mismatch, returns HTTP
+400 `ITERATION_SCOPE_MISMATCH` before a `plan.proposed` event is journaled.
+Malformed scope data remains `ITERATION_SCOPE_INVALID`. The server-computed
+plan hash covers the turn scope and slot scopes, so approval names the exact
+scoped proposal.
+
+Scope never bypasses the other gates. The user approves the plan and its hash;
+IL04 requires an iteration level for paid approval, IL05 rejects work beyond
+the policy, and the persistent ledger enforces the Google Colab spend cap.
+Selecting an element is not approval. A completed approved iteration lands as
+a new take beside the old one and does not implicitly select or approve it.
+
+### 13.3 Agent rule 12
+
+The production agent's twelfth rule is normative:
+
+> 12. Scoped iteration: when the turn carries an iteration scope, propose exactly one plan limited to that target and element within the iteration level; state what is preserved; never approve, never touch other shots; if the level allows no further take, ask whether to change the level and propose nothing.
+
+Instructions embedded in the untrusted note cannot widen this scope. Changing
+the level is a separate user decision, not part of approving the element
+request.
