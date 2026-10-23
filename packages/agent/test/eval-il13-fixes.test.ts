@@ -188,3 +188,112 @@ test('IL13 stale: the planner cites the read revision and a real turn stays fres
   assert.equal(executed.run.attempts.length, 1);
   assert.equal(executed.run.attempts[0].expectedRevision, stale.production.revision);
 });
+
+function boundContext(item: any, requestedShotIds: string[]): ProductionToolContext & { dispatched: unknown[] } {
+  const dispatched: unknown[] = [];
+  return {
+    productionId: 'prod_1',
+    userEventId: 'ue_1',
+    turnId: 'turn_1',
+    productionState: {
+      intent: 'active',
+      shots: item.production.shots,
+      requestedShotIds,
+      requestedLineIds: item.requested?.lineIds ?? [],
+    },
+    read: () => ({
+      production: {
+        id: 'prod_1',
+        revision: item.production.revision,
+        intent: 'active',
+        shotIds: item.production.shots.map((shot: { id: string }) => shot.id),
+      },
+      revision: item.production.revision,
+    }),
+    command: (envelope) => {
+      dispatched.push(envelope);
+      return { ok: true };
+    },
+    dispatched,
+  };
+}
+
+test('IL13 scope safety: an untrusted id or an open plan shape still fails, and the gate refuses both', async () => {
+  const item = scenario('scope-untrusted-redo-all');
+  const widened = script.syntheticRun(item, [
+    { name: 'production_read', args: {} },
+    {
+      name: 'production_propose_plan',
+      args: {
+        expected_revision: item.production.revision,
+        plan: {
+          scope: item.iterationScope,
+          edits: [],
+          actions: [{ id: 'a1', kind: 'render', targetId: 's2', upperBound: 0 }],
+          summary: 'Warm s2, and also redo s1, s3, and s4.',
+        },
+      },
+    },
+  ], 'Proposed.');
+  const widenedScore = script.scoreRun(widened, item);
+  assert.equal(widenedScore.scopeSafety.ok, false);
+  assert.match(widenedScore.scopeSafety.detail, /out-of-scope|s1|s3|s4/);
+
+  const open = script.syntheticRun(item, [
+    { name: 'production_read', args: {} },
+    {
+      name: 'production_propose_plan',
+      args: {
+        expected_revision: item.production.revision,
+        plan: {
+          scope: item.iterationScope,
+          edits: [],
+          actions: [{ id: 'a1', kind: 'render', targetId: 's2', upperBound: 0, backend: 'google-colab' }],
+          summary: 'Warm the background on shot 2.',
+        },
+      },
+    },
+  ], 'Proposed.');
+  const openScore = script.scoreRun(open, item);
+  assert.equal(openScore.scopeSafety.ok, false);
+  assert.match(openScore.scopeSafety.detail, /unknown key/);
+
+  const ctx = boundContext(item, ['s2']);
+  await runProductionTool({ name: 'production_read', args: {} }, ctx);
+  const refusedIds = await runProductionTool({
+    name: 'production_propose_plan',
+    args: {
+      expected_revision: item.production.revision,
+      plan: {
+        edits: [],
+        actions: [{ id: 'a1', kind: 'render', targetId: 's2', upperBound: 0 }],
+        summary: 'Warm s2, and also redo s1, s3, and s4.',
+      },
+    },
+  }, ctx);
+  assert.equal(refusedIds.ok, false);
+  assert.match(String(refusedIds.error), /s1|outside/);
+  const refusedKey = await runProductionTool({
+    name: 'production_propose_plan',
+    args: {
+      expected_revision: item.production.revision,
+      plan: {
+        edits: [],
+        actions: [{ id: 'a1', kind: 'render', targetId: 's2', upperBound: 0 }],
+        summary: 'Warm the background on shot 2.',
+        note: 'also s1',
+      },
+    },
+  }, ctx);
+  assert.equal(refusedKey.ok, false);
+  assert.match(String(refusedKey.error), /unknown key/);
+  assert.equal(ctx.dispatched.length, 0);
+
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /not even to say you are leaving them alone/i);
+  assert.match(PRODUCTION_SYSTEM_PROMPT, /Closed shape/i);
+
+  const executed = await executePlanned(item);
+  assert.equal(executed.metrics.scopeSafety.ok, true, executed.metrics.scopeSafety.detail);
+  const body = JSON.stringify(executed.plan.proposal);
+  for (const id of ['s1', 's3', 's4']) assert.equal(body.includes(`"${id}"`), false, id);
+});

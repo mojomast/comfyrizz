@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
   actionSlotViolation,
+  commandShapeViolation,
+  planShapeViolation,
   scopeViolations,
   PRODUCTION_TURN_PROCEDURE,
   type ProductionAgentState,
@@ -674,6 +676,10 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
   if (ctx.productionState && Object.prototype.hasOwnProperty.call(plan, 'revision')) {
     return errorResult('plan.revision is server-owned; omit it. expected_revision is the top-level revision from production_read');
   }
+  if (ctx.productionState) {
+    const shape = planShapeViolation(plan);
+    if (shape) return errorResult(shape);
+  }
   const serverKey = SERVER_PLAN_KEYS.find(key => Object.prototype.hasOwnProperty.call(plan, key));
   if (serverKey) return errorResult(`plan.${serverKey} is computed by the server and cannot be proposed`, 'SERVER_PLAN_IDENTITY');
 
@@ -781,6 +787,10 @@ async function issueCommand(args: Record<string, unknown>, ctx: ProductionToolCo
   if (payloadValue !== undefined && payloadValue !== null) {
     if (!isPlainObject(payloadValue)) return errorResult('payload must be an object');
     payload = cloneJson(payloadValue);
+  }
+  if (ctx.productionState) {
+    const shape = commandShapeViolation(kind, payload);
+    if (shape) return errorResult(shape);
   }
   const refused = enforceProductionState(ctx, productionId.value!, revision.value!, payload);
   if (refused) return refused;
