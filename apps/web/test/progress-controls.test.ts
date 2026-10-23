@@ -147,10 +147,11 @@ test('remaining active work counts pending actions that are not terminal', () =>
     ],
   }));
 
-  assert.equal(card.remainingWork, 2);
+  // interrupted and submission_unknown still need reconciliation (may hold compute).
+  assert.equal(card.remainingWork, 4);
   const html = renderProgressControls(card);
   assert.match(html, /data-progress-remaining-work/);
-  assert.match(html, /2 actions still active/);
+  assert.match(html, /4 actions still active/);
 });
 
 test('a cancel command is deterministic from production, revision and kind', () => {

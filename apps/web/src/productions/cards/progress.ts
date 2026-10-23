@@ -614,12 +614,13 @@ export interface ProgressControlClient {
   sendCommand: (envelope: unknown) => Promise<unknown> | unknown;
 }
 
+// Settled action states (contract ACTION_TRANSITIONS). `interrupted` and
+// `submission_unknown` are NOT settled: they may still hold compute or a paid
+// run and must be reconciled, so they count as remaining work.
 const TERMINAL_ACTION_STATES = new Set([
   'completed',
   'failed',
   'cancelled',
-  'interrupted',
-  'submission_unknown',
 ]);
 
 const INTENT_EVENT_TYPES = new Set([
