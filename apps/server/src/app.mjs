@@ -21,6 +21,7 @@ import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
 import { createCharacterRoutes } from './characters/routes.mjs';
+import { createAuditionCache, createAuditionWorker } from './characters/audition.mjs';
 import { ingestRun } from './takes/ingest.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
@@ -201,11 +202,23 @@ export function createApp({
   datasetFetch = globalThis.fetch,
   pipelineLaunch,
   mediaRoot = join(runtimeDir, 'media'),
+  // IP45W: the only audition mount seam. A Kokoro synthesizer is injected by
+  // the caller; app.mjs does not invent an in-process one. Without it the
+  // character audition route keeps answering 503 AUDITION_UNAVAILABLE.
+  auditionSynth = null,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   mkdirSync(runtimeDir, { recursive: true });
   mkdirSync(mediaRoot, { recursive: true });
   const mediaTickets = createMediaTickets();
+  // IP45W: one worker for the app's lifetime. No admission is passed: a paid
+  // engine stays AUDITION_ADMISSION_REQUIRED until a production action can
+  // admit it.
+  const auditionWorker = typeof auditionSynth === 'function'
+    ? createAuditionWorker({
+        cache: createAuditionCache({ rootDir: runtimeDir, synth: { kokoro: auditionSynth } }),
+      })
+    : null;
   const rendersDir = join(runtimeDir, 'renders');
   const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
@@ -1585,7 +1598,12 @@ export function createApp({
 
     if (await productionRoutes.handle(request, response, url)) return;
     if (await takeRoutes.handle(request, response, url)) return;
-    if (await createCharacterRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
+    if (await createCharacterRoutes({
+      rootDir: runtimeDir,
+      events,
+      mediaTickets,
+      ...(auditionWorker ? { audition: { worker: auditionWorker } } : {}),
+    }).handle(request, response, url)) return;
     if (await createReferenceRoutes({ rootDir: runtimeDir, events }).handle(request, response, url)) return;
     return sendJson(response, 404, { error: 'not found' });
   }
