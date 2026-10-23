@@ -6,6 +6,7 @@
  * point and it does nothing until it is called. The drawer is non-modal, keeps
  * every input alive while it is hidden and only moves focus after an approval.
  */
+import { confirmDialog } from '../easy/dialog.ts';
 import { apiFetch } from '../editor/api.ts';
 import {
   activeReviewTake,
@@ -608,6 +609,11 @@ function rowId(index: number): string {
   return `review-option-${index}`;
 }
 
+function shotRowLabel(index: number, scene: string): string {
+  const title = scene.trim() !== '' ? scene.trim() : 'Untitled';
+  return `Shot ${index + 1} · ${title}`;
+}
+
 export function renderReviewRows(
   rows: readonly ReviewRow[],
   options: { activeId?: string; offset?: number } = {},
@@ -626,7 +632,7 @@ export function renderReviewRows(
     return `<div class="review-row" id="${rowId(index)}" role="option" tabindex="${active ? '0' : '-1'}" aria-selected="${active ? 'true' : 'false'}" data-review-clip="${escapeReviewHtml(row.clipId)}" data-review-status="${row.group}" data-tone="${row.tone}"${blocking} title="${escapeReviewHtml(row.title)}">
       <span class="review-thumb" aria-hidden="true" data-review-thumb><span data-review-thumb-fallback>${escapeReviewHtml(row.kind)}</span></span>
       <span class="review-row-main">
-        <span class="review-row-title" title="${escapeReviewHtml(row.fullId)}">${escapeReviewHtml(row.shortId)}</span>
+        <span class="review-row-title" title="${escapeReviewHtml(row.fullId)}">${escapeReviewHtml(shotRowLabel(index, row.scene))}</span>
         <span class="review-row-meta">
           <span class="review-row-scene">${escapeReviewHtml(row.scene)}${row.slot ? ` · ${escapeReviewHtml(row.slot)}` : ''}</span>
           <span class="review-take hint tabular-nums">${escapeReviewHtml(row.takeLabel)}</span>
@@ -1168,8 +1174,17 @@ export class ReviewDrawerModel {
       this.notify();
       return 0;
     }
-    const confirm = this.options.confirm ?? (typeof globalThis.confirm === 'function' ? globalThis.confirm.bind(globalThis) : null);
-    if (confirm && !confirm(`Approve ${visible.length} visible clip${visible.length === 1 ? '' : 's'}?`)) {
+    const message = `Approve ${visible.length} visible clip${visible.length === 1 ? '' : 's'}?`;
+    const ask = this.options.confirm;
+    const accepted = ask
+      ? ask(message)
+      : await confirmDialog({
+        title: 'Approve visible shots',
+        text: message,
+        confirmLabel: 'Approve',
+        cancelLabel: 'Cancel',
+      });
+    if (!accepted) {
       this.setLive('Approve all cancelled');
       this.notify();
       return 0;

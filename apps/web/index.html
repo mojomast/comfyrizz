@@ -89,15 +89,14 @@
 
         <aside id="activity-pane" class="pane panel shell-right rail" data-region="right" aria-label="Inspector">
           <div class="pane-head panel-header rail-head">
-            <div id="rail-tabs" class="tabs rail-tabs" role="tablist" aria-label="Run, Activity, Assets and GPU queue" aria-orientation="horizontal">
-              <button type="button" id="rail-tab-run" class="tab rail-tab" role="tab" aria-selected="true" aria-controls="rail-panel-run" tabindex="0" data-rail-tab="run">Run</button>
-              <button type="button" id="rail-tab-activity" class="tab rail-tab" role="tab" aria-selected="false" aria-controls="rail-panel-activity" tabindex="-1" data-rail-tab="activity">Activity</button>
-              <button type="button" id="rail-tab-assets" class="tab rail-tab" role="tab" aria-selected="false" aria-controls="rail-panel-assets" tabindex="-1" data-rail-tab="assets">Assets</button>
-              <button type="button" id="rail-tab-gpu" class="tab rail-tab" role="tab" aria-selected="false" aria-controls="rail-panel-gpu" tabindex="-1" data-rail-tab="gpu">GPU queue</button>
+            <div id="rail-tabs" class="tabs rail-tabs" role="tablist" aria-label="Activity, Files and Jobs" aria-orientation="horizontal">
+              <button type="button" id="rail-tab-activity" class="tab rail-tab" role="tab" aria-selected="true" aria-controls="rail-panel-activity" tabindex="0" data-rail-tab="activity">Activity</button>
+              <button type="button" id="rail-tab-assets" class="tab rail-tab" role="tab" aria-selected="false" aria-controls="rail-panel-assets" tabindex="-1" data-rail-tab="assets">Files</button>
+              <button type="button" id="rail-tab-gpu" class="tab rail-tab" role="tab" aria-selected="false" aria-controls="rail-panel-gpu" tabindex="-1" data-rail-tab="gpu">Jobs</button>
             </div>
           </div>
 
-          <section id="rail-panel-run" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-run" tabindex="0" data-rail-panel="run">
+          <section id="rail-panel-activity" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-activity" tabindex="0" data-rail-panel="activity">
             <div class="pane-head panel-header"><b>Run</b><span class="hint">Run status</span></div>
             <div id="run-filters" class="rail-filters" role="group" aria-label="Filter run events">
               <button type="button" id="run-filter-all" class="btn btn-secondary btn-sm rail-filter" data-run-filter="all" aria-pressed="true">All</button>
@@ -108,9 +107,6 @@
             <div id="colab-card-host" class="colab-card-host"></div>
             <div id="colab-progress-host" class="colab-progress-host gauge"></div>
             <div id="export-panel"></div>
-          </section>
-
-          <section id="rail-panel-activity" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-activity" tabindex="0" data-rail-panel="activity" hidden>
             <div class="pane-head panel-header"><b>Activity</b><span class="hint">local + server</span></div>
             <div id="activity"></div>
             <div id="activity-more" class="rail-more" hidden>
@@ -120,7 +116,7 @@
           </section>
 
           <section id="rail-panel-assets" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-assets" tabindex="0" data-rail-panel="assets" hidden>
-            <div class="pane-head panel-header"><b>Assets</b><span class="hint">Newest first</span></div>
+            <div class="pane-head panel-header"><b>Files</b><span class="hint">Newest first</span></div>
             <div id="asset-filters" class="rail-filters" role="group" aria-label="Filter assets">
               <label class="rail-filter-field" for="asset-type-filter">Type
                 <select id="asset-type-filter" aria-label="Filter assets by type">
@@ -142,7 +138,7 @@
           </section>
 
           <section id="rail-panel-gpu" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-gpu" tabindex="0" data-rail-panel="gpu" hidden>
-            <div class="pane-head panel-header"><b>GPU queue</b><span class="hint">fallbacks active until approved</span></div>
+            <div class="pane-head panel-header"><b>Jobs</b><span class="hint">fallbacks active until approved</span></div>
             <div id="gpu-queue"></div>
           </section>
         </aside>

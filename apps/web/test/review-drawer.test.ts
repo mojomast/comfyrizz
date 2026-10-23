@@ -1412,3 +1412,23 @@ test('the mounted drawer shows the cost card before spend and only queues on app
     restore();
   }
 });
+
+test('UR53 rows name the shot, confirm() is gone, and the rail tabs are Activity, Files and Jobs', () => {
+  const html = renderReviewRows(reviewRows([clip(1, {
+    assetId: 'a_svg_319cdeadbeefb84ee3',
+    sceneId: 'Hands knead dough',
+  })]));
+  assert.match(html, /Shot 1 · Hands knead dough/);
+  assert.equal(html.includes('a_svg_'), false);
+
+  const source = readFileSync(new URL('../src/takes/review-drawer.ts', import.meta.url), 'utf8');
+  assert.equal(source.includes('confirm('), false);
+
+  const index = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const names = [...index.matchAll(/data-rail-tab="[^"]+"[^>]*>([^<]+)</g)].map(match => match[1]);
+  assert.deepEqual(names, ['Activity', 'Files', 'Jobs']);
+
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /mountProductionTab/);
+  assert.match(main, /sa-tab-production/);
+});

@@ -23,7 +23,7 @@ interface Env {
 type UiMode = 'easy' | 'advanced';
 
 const PREFS_KEY = 'comfyrizz.ui';
-const RAIL_TABS = ['run', 'activity', 'assets', 'gpu'] as const;
+const RAIL_TABS = ['activity', 'assets', 'gpu'] as const;
 
 function loadEnv(): Env {
   return JSON.parse(readFileSync(new URL('./.e2e-env.json', import.meta.url), 'utf8')) as Env;
@@ -91,6 +91,8 @@ async function noHorizontalOverflow(page: Page): Promise<void> {
 }
 
 async function expectRailTabs(page: Page): Promise<void> {
+  await expect(page.locator('#rail-tab-run')).toHaveCount(0);
+  await expect(page.locator('#rail-panel-run')).toHaveCount(0);
   for (const tab of RAIL_TABS) {
     const button = page.locator(`#rail-tab-${tab}`);
     await expectReachable(page, `#rail-tab-${tab}`);
