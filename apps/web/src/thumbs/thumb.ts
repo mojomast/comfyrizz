@@ -120,7 +120,7 @@ function renderWaveform(
   doc: Document,
   result: Extract<ThumbResult, { status: 'ready' }>,
   options: RenderThumbOptions,
-): HTMLElement {
+): SVGSVGElement {
   const svg = doc.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('class', 'thumb-waveform');
   svg.setAttribute('viewBox', '0 0 100 100');
