@@ -145,16 +145,14 @@ function renderOptions(
 export function renderBanner({ tone, text, actions = [] }: BannerModel): string {
   const toneName = safeTone(tone);
   const role = toneName === 'danger' ? 'alert' : 'status';
-  const actionHtml = actions.length
-    ? `<div class="easy-banner-actions">${actions.map((action) => renderAction(action)).join('')}</div>`
-    : '';
+  const buttons = actions.map((action) => renderAction(action)).join('');
+  const actionHtml = actions.length ? `<div class="easy-banner-actions">${buttons}</div>` : '';
   return `<div class="easy-banner easy-banner-${toneName}" role="${role}" data-easy-banner-tone="${toneName}"><p class="easy-banner-text">${escapeHtml(text)}</p>${actionHtml}</div>`;
 }
 
 export function renderEmptyState({ text, actions = [] }: EmptyStateModel): string {
-  const actionHtml = actions.length
-    ? `<div class="easy-empty-actions">${actions.map((action) => renderAction(action)).join('')}</div>`
-    : '';
+  const buttons = actions.map((action) => renderAction(action)).join('');
+  const actionHtml = actions.length ? `<div class="easy-empty-actions">${buttons}</div>` : '';
   return `<div class="easy-empty"><p class="easy-empty-text">${escapeHtml(text)}</p>${actionHtml}</div>`;
 }
 
@@ -162,7 +160,8 @@ export function renderErrorState({ what, why, action }: ErrorStateModel): string
   const details = why
     ? `<details class="easy-error-why"><summary>${COPY.errors.details}</summary><p>${escapeHtml(why)}</p></details>`
     : '';
-  const actionHtml = action ? `<div class="easy-error-action">${renderAction(action)}</div>` : '';
+  const button = action ? renderAction(action) : '';
+  const actionHtml = button ? `<div class="easy-error-action">${button}</div>` : '';
   return `<div class="easy-error" role="alert"><p class="easy-error-what">${escapeHtml(what)}</p>${details}${actionHtml}</div>`;
 }
 
@@ -173,7 +172,7 @@ export function renderSkeleton(rows: number, loadingText: string): string {
 }
 
 export function renderChoiceCards({ name, legend, options, value }: ChoiceCardsModel): string {
-  return `<fieldset class="easy-choice-cards"><legend class="easy-choice-legend">${escapeHtml(legend)}</legend><div class="easy-choice-grid">${renderOptions(
+  const optionHtml = renderOptions(
     options,
     name,
     value,
@@ -182,11 +181,12 @@ export function renderChoiceCards({ name, legend, options, value }: ChoiceCardsM
     'easy-choice-title',
     'easy-choice-body',
     'easy-choice-extra',
-  )}</div></fieldset>`;
+  );
+  return `<fieldset class="easy-choice-cards"><legend class="easy-choice-legend">${escapeHtml(legend)}</legend><div class="easy-choice-grid">${optionHtml}</div></fieldset>`;
 }
 
 export function renderSegmented({ name, legend, options, value }: SegmentedModel): string {
-  return `<fieldset class="easy-segmented"><legend class="easy-segment-legend">${escapeHtml(legend)}</legend><div class="easy-segment-row">${renderOptions(
+  const optionHtml = renderOptions(
     options,
     name,
     value,
@@ -195,7 +195,8 @@ export function renderSegmented({ name, legend, options, value }: SegmentedModel
     'easy-segment-title',
     'easy-segment-body',
     'easy-segment-extra',
-  )}</div></fieldset>`;
+  );
+  return `<fieldset class="easy-segmented"><legend class="easy-segment-legend">${escapeHtml(legend)}</legend><div class="easy-segment-row">${optionHtml}</div></fieldset>`;
 }
 
 export function renderChip({ label, pressed, data }: ChipModel): string {
