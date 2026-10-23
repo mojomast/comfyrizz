@@ -41,6 +41,38 @@ export {
 } from './conversation.js';
 export type { ConversationCharacters, ConversationClips, ConversationPlan, ConversationReferences } from './conversation.js';
 export {
+  AGENT_COMMAND_KINDS,
+  APPROVAL_COMMANDS,
+  DECISION_COMMANDS,
+  FORBIDDEN_AGENT_COMMANDS,
+  PRODUCTION_RULES,
+  PRODUCTION_SYSTEM_PROMPT,
+  PRODUCTION_TOOLS,
+  PRODUCTION_TOOL_NAMES,
+  SPEND_COMMANDS,
+  isProductionToolName,
+  productionToolsFor,
+  runProductionTool,
+} from './production-tools.js';
+export type {
+  AgentCommandKind,
+  ProductionCommandAttribution,
+  ProductionCommandDispatch,
+  ProductionCommandEnvelope,
+  ProductionReadState,
+  ProductionToolCall,
+  ProductionToolCapabilities,
+  ProductionToolContext,
+  ProductionToolResult,
+} from './production-tools.js';
+export { idMentions, scopeFromState, scopeViolations } from './production-planner.js';
+export type {
+  ProductionAgentState,
+  ProductionEdit,
+  ProductionReadSnapshot,
+  ProductionShotState,
+} from './production-planner.js';
+export {
   CHARACTER_BIBLE_NOTES_MAX_CHARS,
   CHARACTER_IDENTITY_PROMPT_MAX_CHARS,
   CHARACTER_IMAGE_VIEWS,

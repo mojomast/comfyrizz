@@ -423,6 +423,10 @@ export function createApp({
   // the /api/productions facade, so a bound package can only start from the
   // action slot that was dispatched for it.
   const productionStore = createProductionStore({ runtimeDir });
+  // IP66: the chat adapter uses the same command handler as the production
+  // facade. The handler is created here, before the chat, so a bound package's
+  // turn can dispatch agent-attributed commands through the one command path.
+  const productionCommands = createCommandHandler({ store: productionStore });
   const runs = createRunController({
     backendFactory: effectiveBackendFactory,
     events,
@@ -466,6 +470,11 @@ export function createApp({
     runs: chatRuns,
     events,
     measuredFor: pkg => measuredOptionsFromDir(dirname(store.path(pkg.id))),
+    production: {
+      findBound: findBoundProduction,
+      read: productionId => productionStore.read(productionId),
+      command: (envelope, attribution) => productionCommands.execute(envelope, attribution),
+    },
   });
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
   // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
@@ -774,7 +783,6 @@ export function createApp({
   // is no default spend cap — the ledger stays uncapped until the user sets one.
   // A failed Google Colab run with unknown usage settles its full reservation
   // in the ledger; dispatch only reserves.
-  const productionCommands = createCommandHandler({ store: productionStore });
   const productionActions = createActionCoordinator({
     store: productionStore,
     handler: productionCommands,

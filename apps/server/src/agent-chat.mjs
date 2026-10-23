@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { withConversationLock } from './conversation-lock.mjs';
-import { runConversationTurn, brandTheme, CONVERSATION_PROMPT_VERSION, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
+import { runConversationTurn, brandTheme, CONVERSATION_PROMPT_VERSION, idMentions, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
 import { createOpenAICompatibleModel } from '../../../packages/llm/dist/src/index.js';
 import { buildChatProject, chatProjectResponse } from './chat-project.mjs';
 import { rebaseChatPlans } from './chat-state.mjs';
@@ -218,6 +218,71 @@ function recordStarted(takeStore, pkgId, assetId, result) {
   return doc;
 }
 
+const PRODUCTION_COPY_LINE_KEYS = ['headline', 'sub', 'body', 'footnote'];
+
+function productionTextLines(value) {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(/\r?\n|(?<=[.!?])\s+/u)
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+// A shot's lines are the real script sentences and on-screen copy the bound
+// package already carries. The line count is exactly that content: an empty or
+// single-line shot never gains a synthetic line id.
+function productionLinesForShot(shotId, scene) {
+  const texts = [];
+  if (Array.isArray(scene?.lines)) {
+    for (const line of scene.lines) if (typeof line === 'string' && line.trim()) texts.push(line.trim());
+  }
+  texts.push(...productionTextLines(scene?.narration));
+  if (isPlainObject(scene?.copy)) {
+    for (const key of PRODUCTION_COPY_LINE_KEYS) {
+      if (typeof scene.copy[key] === 'string' && scene.copy[key].trim()) texts.push(scene.copy[key].trim());
+    }
+    if (Array.isArray(scene.copy.items)) {
+      for (const item of scene.copy.items) if (typeof item === 'string' && item.trim()) texts.push(item.trim());
+    }
+  }
+  const unique = [...new Set(texts)];
+  return unique.map((_, index) => `${shotId}:l${index + 1}`);
+}
+
+// Shot ids come from the production journal; the package supplies the lines
+// those shots contain. A shot the package does not carry keeps an empty line
+// list rather than inventing ids.
+function productionShotsFor(snapshot, pkg) {
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const shotIds = Array.isArray(snapshot?.shotIds)
+    ? snapshot.shotIds.filter(id => typeof id === 'string' && id !== '')
+    : [];
+  return shotIds.map(shotId => ({
+    id: shotId,
+    lines: productionLinesForShot(shotId, scenes.find(scene => scene?.id === shotId) ?? null),
+  }));
+}
+
+// Explicit turnContext chips are the only source of a requested scope. There is
+// deliberately no last-selected fallback: no chips means the state's default.
+function requestedProductionIds(turnContext) {
+  const shotIds = new Set();
+  const lineIds = new Set();
+  for (const chip of Array.isArray(turnContext) ? turnContext : []) {
+    if (!isPlainObject(chip)) continue;
+    const fields = ['value', 'id', 'label', 'sceneId', 'shotId', 'lineId', 'targetId'];
+    for (const field of fields) {
+      const text = chip[field];
+      if (typeof text !== 'string') continue;
+      for (const id of idMentions(text)) {
+        if (id.includes(':')) lineIds.add(id);
+        else shotIds.add(id);
+      }
+    }
+  }
+  return { requestedShotIds: [...shotIds], requestedLineIds: [...lineIds] };
+}
+
 export function createProjectChat({
   runtimeDir,
   store,
@@ -231,6 +296,7 @@ export function createProjectChat({
   characterStore = null,
   hooks = null,
   modelFactory = null,
+  production = null,
 }) {
   const dir = join(runtimeDir, 'conversations');
   mkdirSync(dir, { recursive: true });
@@ -255,6 +321,39 @@ export function createProjectChat({
     const value = await measuredFor(pkg);
     return isPlainObject(value) ? value : {};
   };
+  // IP66: the binding is resolved from the production journal for the package
+  // the conversation is actually working on. A production context is only
+  // built with productionState and a real user turn, so live chat never reaches
+  // the unguarded IP35 dispatch path and never invents an attribution.
+  function productionContextFor(pkg, input) {
+    if (!production
+      || typeof production.findBound !== 'function'
+      || typeof production.read !== 'function'
+      || typeof production.command !== 'function'
+      || !pkg?.id) return null;
+    const turnId = typeof input?.turnId === 'string' && input.turnId !== '' ? input.turnId : null;
+    if (!turnId) return null;
+    const bound = production.findBound(pkg.id);
+    if (!isPlainObject(bound) || typeof bound.id !== 'string' || bound.id === '') return null;
+    const snapshot = production.read(bound.id);
+    if (!isPlainObject(snapshot)) return null;
+    const intent = typeof snapshot.intent === 'string' ? snapshot.intent : 'active';
+    const requested = requestedProductionIds(input?.turnContext);
+    return {
+      productionId: bound.id,
+      userEventId: `ue_${turnId}`,
+      turnId,
+      read: productionId => production.read(productionId),
+      command: (envelope, attribution) => production.command(envelope, attribution),
+      capabilities: { read: true, proposePlan: true, commands: true },
+      productionState: {
+        intent,
+        shots: productionShotsFor(snapshot, pkg),
+        requestedShotIds: requested.requestedShotIds,
+        requestedLineIds: requested.requestedLineIds,
+      },
+    };
+  }
   function read(id) {
     if (!validId(id)) fail(400, 'Invalid conversation ID');
     const file = join(dir, `${id}.json`);
@@ -1165,6 +1264,7 @@ export function createProjectChat({
           },
         };
       };
+      const productionContext = productionContextFor(simCurrent, input);
       // The explicit UI action applies the reviewed draft without another creative generation.
       const result = input.action === 'build' ? await (async () => {
         await build(rebased.plan);
@@ -1178,6 +1278,7 @@ export function createProjectChat({
         references,
         clips,
         characters,
+        ...(productionContext ? { production: productionContext } : {}),
         projectContext: simCurrent ? {
           id: simCurrent.id, revision: simCurrent.revision, title: simCurrent.title, format: simCurrent.format,
           theme: simCurrent.theme, manuallyEditedSinceLastBuild: simCurrent.revision !== session.projectRevision,
