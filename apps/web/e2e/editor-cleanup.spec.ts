@@ -48,3 +48,10 @@ test('in Advanced there is no easy actions bar or storyboard re-render buttons',
   await expect(page.getByRole('button', { name: 'Render changes' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Re-render scene' })).toHaveCount(0);
 });
+
+test('the top bar contains no text Storyboard', async ({ page }) => {
+  expect(indexHtml).not.toContain('flow-stepper');
+  expect(indexHtml).not.toContain('stepper-label');
+  await page.setContent(indexHtml);
+  await expect(page.locator('#topbar')).not.toContainText('Storyboard');
+});

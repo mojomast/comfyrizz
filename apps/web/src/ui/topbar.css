@@ -1,4 +1,4 @@
-/* UO06: Top bar layout, flow stepper, run settings popover and split render button.
+/* UO06: Top bar layout and split render button.
    Dark pro tool palette: borders over shadows, one indigo accent, no gradients. */
 
 /* Brand & Project name */
@@ -23,49 +23,6 @@
   max-width: calc(var(--space-6) * 6);
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* Flow stepper (Brief · Storyboard · Takes · Render) */
-.flow-stepper {
-  display: inline-flex;
-  align-items: center;
-  margin-left: var(--space-2);
-  flex-shrink: 0;
-}
-
-.stepper-list {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.stepper-item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--font-size-12);
-  font-weight: var(--font-weight-500);
-  color: var(--text-2);
-  white-space: nowrap;
-}
-
-.stepper-item.is-active,
-.stepper-item[aria-current="step"] {
-  color: var(--text-1);
-  font-weight: var(--font-weight-600);
-}
-
-.stepper-item.is-complete {
-  color: var(--text-2);
-}
-
-.stepper-sep {
-  color: var(--text-3);
-  font-size: var(--font-size-12);
-  user-select: none;
 }
 
 /* Split button: Primary Render + Export menu toggle */
