@@ -434,6 +434,19 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     }
   }
 
+  /** The durable state of the action this run consumed, read from the journal. */
+  function currentBoundAction(record) {
+    const productionId = record?.productionId;
+    const planHash = record?.actionPlanHash ?? record?.planHash;
+    const actionId = record?.actionId;
+    if (!productionStore || !productionId || !planHash || !actionId) return null;
+    try {
+      return durableAction(productionStore.readEvents(productionId), planHash, actionId);
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * IP24D: the backend instance now exists, so the action may claim `running`.
    * The edge is checked against the contract and retried on a revision
@@ -603,6 +616,16 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     }
   }
 
+  /** IP24C: the run record's own outcome for a cancelled action, never a guess. */
+  function boundRunOutcome(record) {
+    if (record?.runOutcome === 'completed' || record?.runOutcome === 'failed' || record?.runOutcome === 'unknown') {
+      return record.runOutcome;
+    }
+    if (record?.status === 'done' || record?.status === 'idle') return 'completed';
+    if (record?.status === 'failed' || record?.status === 'stop_unconfirmed') return 'failed';
+    return 'unknown';
+  }
+
   function boundEndTarget(record) {
     if (record.status === 'done' || record.status === 'idle') {
       return { state: 'completed', lastError: null };
@@ -630,6 +653,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     const actionId = record.actionId;
     if (!productionStore || !productionId || !planHash || !actionId) return false;
     const commandId = `${commandPrefix}:${planHash}:${actionId}`;
+    const cancelCommandId = `run-cancelled:${planHash}:${actionId}`;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const production = productionStore.read(productionId);
       if (!production) return false;
@@ -641,6 +665,41 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       }
       if (!current) return false;
       if (current.runId && record.runId && current.runId !== record.runId) return false;
+      // IP24C: a cancel terminal is written once, from cancel_requested. A
+      // completed action is never re-opened by a late cancel.
+      if (current.state === 'cancelled') return true;
+      if (current.state === 'cancel_requested') {
+        const outcome = boundRunOutcome(record);
+        try {
+          productionStore.commit(productionId, {
+            commandId: cancelCommandId,
+            idempotencyKey: cancelCommandId,
+            baseRevision: production.revision,
+            events: [{
+              type: 'action.state_changed',
+              data: {
+                ...current,
+                state: 'cancelled',
+                runId: record.runId ?? current.runId ?? null,
+                lastError: outcome === 'completed'
+                  ? null
+                  : {
+                    code: 'CANCELLED',
+                    message: typeof record.error === 'string' && record.error !== ''
+                      ? record.error
+                      : 'the run was cancelled',
+                  },
+                runOutcome: outcome,
+              },
+            }],
+          });
+          return true;
+        } catch (error) {
+          if (error?.code === 'REVISION_CONFLICT') continue;
+          if (error?.code === 'IDEMPOTENCY_CONFLICT' || error?.code === 'DUPLICATE_EVENT') return false;
+          throw error;
+        }
+      }
       if (current.state === target.state) {
         if (target.state !== 'failed') return true;
         if (current.lastError?.code === target.lastError?.code) return true;
@@ -699,9 +758,11 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
 
   /**
    * A crash between the run record and the journal (or the ledger) is repaired
-   * here. Only a `running` action is recovered; a finished run record names its
-   * real outcome, and anything without one is `submission_unknown` so it is
-   * never started again.
+   * here. A `running`/`dispatching` action follows the IP24L/IP24D rules; a
+   * `cancel_requested` action is closed as `cancelled` without touching a
+   * backend, charging its real settlement or the full reservation when usage
+   * is unknown. Anything without a finished record that was never cancelled is
+   * `submission_unknown` so it is never started again.
    */
   function recoverBoundActions() {
     if (!productionStore || typeof productionStore.list !== 'function') return;
@@ -728,8 +789,18 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       }
       let ledger;
       let ledgerResolved = false;
+      const ensureLedger = () => {
+        if (ledgerResolved) return ledger;
+        ledgerResolved = true;
+        try {
+          ledger = recoveryLedgerFor(production);
+        } catch {
+          ledger = null;
+        }
+        return ledger;
+      };
       for (const action of actions.values()) {
-        if (action.state !== 'running' && action.state !== 'dispatching') continue;
+        if (action.state !== 'running' && action.state !== 'dispatching' && action.state !== 'cancel_requested') continue;
         const runId = typeof action.runId === 'string' && action.runId !== '' ? action.runId : null;
         // Only this controller's runs are repaired here. A pipeline action's
         // run record lives elsewhere and must not be mistaken for an unknown
@@ -741,6 +812,59 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         const planHash = typeof action.planHash === 'string' && action.planHash !== ''
           ? action.planHash
           : record?.actionPlanHash ?? record?.planHash ?? null;
+        // IP24C: a cancel_requested legacy action whose process died must end
+        // cancelled without touching a backend. A finished run record proves
+        // its real settlement; without one the usage is unknown, so the full
+        // reservation is charged (IP06), never zero.
+        if (action.state === 'cancel_requested') {
+          if (record && record.finished === true) {
+            try {
+              settleRecordedRun(record, ensureLedger());
+            } catch { /* the next controller start retries */ }
+            try {
+              commitBoundEnd({
+                productionId: production.id,
+                actionId: action.id,
+                actionPlanHash: planHash,
+                planHash: record.planHash ?? planHash,
+                runId: record.runId ?? runId,
+                status: record.status,
+                error: record.error,
+                errorCode: record.errorCode,
+                runOutcome: boundRunOutcome(record),
+              }, boundEndTarget(record), 'run-cancel');
+            } catch { /* the next controller start retries */ }
+          } else {
+            const ledgerForCancel = ensureLedger();
+            const reservationId = typeof action.reservationId === 'string' && action.reservationId !== ''
+              ? action.reservationId
+              : (runId ? `run:${runId}` : null);
+            let settled = true;
+            if (ledgerForCancel && reservationId) {
+              try {
+                ledgerForCancel.settle({
+                  reservationId,
+                  kind: 'reservation_unverified',
+                  idempotencyKey: `run-cancel-unverified:${reservationId}`,
+                });
+              } catch (error) {
+                if (error?.code !== 'RESERVATION_NOT_OPEN') settled = false;
+              }
+            }
+            if (!settled) continue; /* retry settlement on the next start */
+            if (!planHash) continue;
+            try {
+              commitBoundEnd({
+                productionId: production.id,
+                actionId: action.id,
+                actionPlanHash: planHash,
+                runId,
+                runOutcome: 'unknown',
+              }, { state: 'cancelled', lastError: null }, 'run-cancel');
+            } catch { /* the next controller start retries */ }
+          }
+          continue;
+        }
         // IP24D: a dispatching action never reached a backend. Unless its run
         // record proves the run really started and finished, it is an unknown
         // submission and its reservation stays open.
@@ -758,16 +882,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           } catch { /* the next controller start retries */ }
           continue;
         }
-        if (!ledgerResolved) {
-          ledgerResolved = true;
-          try {
-            ledger = recoveryLedgerFor(production);
-          } catch {
-            ledger = null;
-          }
-        }
         try {
-          settleRecordedRun(record, ledger);
+          settleRecordedRun(record, ensureLedger());
         } catch { /* the next controller start retries */ }
         const endRecord = {
           productionId: production.id,
@@ -1029,6 +1145,16 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           workDir: record.workDir, outDir: record.outputDir, scratchDir: dirname(record.outputDir),
         });
       } catch (error) {
+        // A cancel that landed while dispatching wins over the factory failure:
+        // no backend exists, so nothing was allocated and the action is closed
+        // as cancelled rather than failed.
+        if (currentBoundAction(record)?.state === 'cancel_requested') {
+          record.status = 'cancelled';
+          record.error = 'the run was cancelled before the backend was created';
+          if (record.productionId) record.errorCode = 'CANCELLED';
+          outcome = { kind: 'not_allocated', units: 0 };
+          return;
+        }
         // No backend instance exists, so no compute can have been billed for this run.
         record.status = 'failed';
         record.error = error.message;
@@ -1041,10 +1167,29 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         outcome = { kind: 'not_allocated', units: 0 };
         return;
       }
+      // IP24C: a cancel may have been journaled while the backend factory was
+      // awaited. It is checked before `running` is claimed, so runPackage is
+      // never called and the slot settles as no_allocation.
+      if (currentBoundAction(record)?.state === 'cancel_requested') {
+        record.status = 'cancelled';
+        record.error = 'the run was cancelled before any backend work';
+        if (record.productionId) record.errorCode = 'CANCELLED';
+        outcome = { kind: 'not_allocated', units: 0 };
+        return;
+      }
       // IP24D: only now does a backend instance exist, so the action may leave
       // `dispatching`. This is checked against the contract and retried on a
       // revision conflict.
       commitBoundRunning(record);
+      // A cancel can also land between the check above and the running commit;
+      // in that case the commit refuses and the run must still stop here.
+      if (currentBoundAction(record)?.state === 'cancel_requested') {
+        record.status = 'cancelled';
+        record.error = 'the run was cancelled before any backend work';
+        if (record.productionId) record.errorCode = 'CANCELLED';
+        outcome = { kind: 'not_allocated', units: 0 };
+        return;
+      }
       record.status = 'running';
       // H8's runPackage does plan -> estimate -> up -> health -> run -> collect -> apply -> teardown.
       const result = await instance.runPackage(pkg, {
