@@ -35,8 +35,7 @@ export interface StepFacts { hasPackage: boolean; planApproved: boolean; actions
 export interface EasyStepContext {
   state: EasyState;
   store: { get(): EasyState; patch(p: Partial<EasyState>): void };
-  // Appendix B: ReturnType<typeof import('./api.ts').createEasyApi>. api.ts lands in UR04, which restores this exact type.
-  api: any;
+  api: ReturnType<typeof import('./api.ts').createEasyApi>;
   host: EasyHost;
   shell: { setPrimary(o: { label: string; disabled?: boolean; reason?: string | null }): void; setStatus(t: string): void; alert(t: string): void; setBanner(html: string): void };
   go(step: StepId): void;
