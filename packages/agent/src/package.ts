@@ -4,9 +4,7 @@
  * brief can become a valid comfyrizz.package/v1 document without a GPU.
  */
 
-const briefSpecifier = import.meta.url.endsWith('.ts') ? './brief.ts' : './brief.js';
-const briefModule = await import(briefSpecifier) as typeof import('./brief.js');
-const { draftKeyMessages, extractBrief, mentionsNumbers } = briefModule;
+import { draftKeyMessages, extractBrief, mentionsNumbers } from './brief.js';
 
 export const PACKAGE_SCHEMA = 'https://comfyrizz.example/schema/package-v1.json';
 export const DEFAULT_PALETTE = ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'];

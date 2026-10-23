@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const packageSpecifier = import.meta.url.endsWith('.ts') ? '../src/package.ts' : '../src/package.js';
-const { defaultCpuScenes } = await import(packageSpecifier) as typeof import('../src/package.js');
+import { defaultCpuScenes } from '../src/package.js';
 
 const BAKERY = 'A 30 second video for my bakery, Crumb & Co, announcing our new sourdough subscription.';
 const NUMERIC = 'A 30 second video for my bakery, Crumb & Co, announcing our new sourdough subscription. Revenue grew 40% last quarter.';
