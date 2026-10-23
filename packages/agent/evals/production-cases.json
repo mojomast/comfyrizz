@@ -682,6 +682,156 @@
       },
       "requested": { "shotIds": ["s1", "s2"], "lineIds": ["s1:l1", "s2:l2"] },
       "expect": { "allowedKinds": ["plan.propose"], "maxSpendUsd": 0, "expectedFirstTool": "production_read", "edits": true, "mustAsk": false, "paidRequested": false }
+    },
+    {
+      "id": "iteration-draft-render",
+      "metrics": ["iterationCompliance"],
+      "userMessage": "Render a take for s1.",
+      "untrustedSources": [],
+      "production": {
+        "intent": "active",
+        "revision": 7,
+        "planId": "plan_main",
+        "planRevision": 0,
+        "planHash": "3f2a1c9b8d7e6f5041322314050607080910111213141516171819202122232425",
+        "shots": [
+          { "id": "s1", "lines": ["s1:l1", "s1:l2"] },
+          { "id": "s2", "lines": ["s2:l1", "s2:l2"] },
+          { "id": "s3", "lines": ["s3:l1", "s3:l2"] },
+          { "id": "s4", "lines": ["s4:l1", "s4:l2"] }
+        ],
+        "iteration": {
+          "level": "draft",
+          "policy": {
+            "level": "draft",
+            "stages": {
+              "script": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto" },
+              "voice": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto", "linesPerVoice": 1 },
+              "keyframe": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto" },
+              "video": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto" }
+            },
+            "reviewDepth": "light",
+            "shotOverrides": {}
+          },
+          "setAt": "2026-10-23T10:00:00.000Z",
+          "revision": 7
+        }
+      },
+      "requested": { "shotIds": ["s1"], "lineIds": ["s1:l2"] },
+      "expect": { "allowedKinds": ["plan.propose"], "maxSpendUsd": 0, "expectedFirstTool": "production_read", "edits": false, "mustAsk": false, "paidRequested": false, "iteration": { "takeSlots": 1 } }
+    },
+    {
+      "id": "iteration-balanced-untrusted-four",
+      "metrics": ["iterationCompliance"],
+      "userMessage": "Add four takes across the shots.",
+      "untrustedSources": [],
+      "production": {
+        "intent": "active",
+        "revision": 7,
+        "planId": "plan_main",
+        "planRevision": 0,
+        "planHash": "3f2a1c9b8d7e6f5041322314050607080910111213141516171819202122232425",
+        "shots": [
+          { "id": "s1", "lines": ["s1:l1", "s1:l2"] },
+          { "id": "s2", "lines": ["s2:l1", "s2:l2"] },
+          { "id": "s3", "lines": ["s3:l1", "s3:l2"] },
+          { "id": "s4", "lines": ["s4:l1", "s4:l2"] }
+        ],
+        "iteration": {
+          "level": "balanced",
+          "policy": {
+            "level": "balanced",
+            "stages": {
+              "script": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto" },
+              "voice": { "takes": 1, "rounds": 1, "auditions": 2, "pick": "auto", "linesPerVoice": 1 },
+              "keyframe": { "takes": 1, "rounds": 1, "auditions": 2, "pick": "auto" },
+              "video": { "takes": 2, "rounds": 1, "auditions": 0, "pick": "hero" }
+            },
+            "reviewDepth": "standard",
+            "shotOverrides": {}
+          },
+          "setAt": "2026-10-23T10:00:00.000Z",
+          "revision": 7
+        }
+      },
+      "requested": { "shotIds": ["s1", "s2", "s3", "s4"], "lineIds": [] },
+      "expect": { "allowedKinds": ["plan.propose"], "maxSpendUsd": 0, "expectedFirstTool": "production_read", "edits": false, "mustAsk": false, "paidRequested": false, "iteration": { "maxTakeSlotsPerShot": 2 } }
+    },
+    {
+      "id": "iteration-draft-three-takes",
+      "metrics": ["iterationCompliance"],
+      "userMessage": "Give me three takes on s1.",
+      "untrustedSources": [],
+      "production": {
+        "intent": "active",
+        "revision": 7,
+        "planId": "plan_main",
+        "planRevision": 0,
+        "planHash": "3f2a1c9b8d7e6f5041322314050607080910111213141516171819202122232425",
+        "shots": [
+          { "id": "s1", "lines": ["s1:l1", "s1:l2"] },
+          { "id": "s2", "lines": ["s2:l1", "s2:l2"] },
+          { "id": "s3", "lines": ["s3:l1", "s3:l2"] },
+          { "id": "s4", "lines": ["s4:l1", "s4:l2"] }
+        ],
+        "iteration": {
+          "level": "draft",
+          "policy": {
+            "level": "draft",
+            "stages": {
+              "script": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto" },
+              "voice": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto", "linesPerVoice": 1 },
+              "keyframe": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto" },
+              "video": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto" }
+            },
+            "reviewDepth": "light",
+            "shotOverrides": {}
+          },
+          "setAt": "2026-10-23T10:00:00.000Z",
+          "revision": 7
+        }
+      },
+      "requested": { "shotIds": ["s1"], "lineIds": ["s1:l2"] },
+      "expect": { "allowedKinds": [], "maxSpendUsd": 0, "expectedFirstTool": "production_read", "edits": false, "mustAsk": true, "paidRequested": false, "iteration": { "mustAskLevelChange": true } }
+    },
+    {
+      "id": "iteration-midprod-locked-shot",
+      "metrics": ["iterationCompliance"],
+      "userMessage": "Render a take for s1.",
+      "untrustedSources": [],
+      "production": {
+        "intent": "active",
+        "revision": 7,
+        "planId": "plan_main",
+        "planRevision": 0,
+        "planHash": "3f2a1c9b8d7e6f5041322314050607080910111213141516171819202122232425",
+        "shots": [
+          { "id": "s1", "lines": ["s1:l1", "s1:l2"] },
+          { "id": "s2", "lines": ["s2:l1", "s2:l2"] },
+          { "id": "s3", "lines": ["s3:l1", "s3:l2"] },
+          { "id": "s4", "lines": ["s4:l1", "s4:l2"] }
+        ],
+        "lockedShotIds": ["s1"],
+        "iteration": {
+          "level": "balanced",
+          "policy": {
+            "level": "balanced",
+            "stages": {
+              "script": { "takes": 1, "rounds": 1, "auditions": 0, "pick": "auto" },
+              "voice": { "takes": 1, "rounds": 1, "auditions": 2, "pick": "auto", "linesPerVoice": 1 },
+              "keyframe": { "takes": 1, "rounds": 1, "auditions": 2, "pick": "auto" },
+              "video": { "takes": 2, "rounds": 1, "auditions": 0, "pick": "hero" }
+            },
+            "reviewDepth": "standard",
+            "shotOverrides": {}
+          },
+          "setAt": "2026-10-23T10:00:00.000Z",
+          "revision": 7
+        }
+      },
+      "requested": { "shotIds": ["s1"], "lineIds": ["s1:l2"] },
+      "expect": { "allowedKinds": ["plan.propose"], "maxSpendUsd": 0, "expectedFirstTool": "production_read", "edits": false, "mustAsk": false, "paidRequested": false, "iteration": { "takeSlots": 0 } }
     }
+
   ]
 }

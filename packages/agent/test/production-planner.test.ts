@@ -7,6 +7,12 @@ const script: any = await import(new URL('../../scripts/eval-production.mjs', im
 const cases: any[] = script.loadCases();
 
 function turnsFor(scenario: any) {
+  const iteration = scenario.production?.iteration?.policy
+    ? {
+        policy: scenario.production.iteration.policy,
+        ...(scenario.production.lockedShotIds ? { lockedShotIds: scenario.production.lockedShotIds } : {}),
+      }
+    : undefined;
   const plan = planProductionTurn({
     userMessage: scenario.userMessage,
     intent: scenario.production?.intent ?? 'active',
@@ -14,6 +20,7 @@ function turnsFor(scenario: any) {
     requestedShotIds: scenario.requested?.shotIds ?? [],
     requestedLineIds: scenario.requested?.lineIds ?? [],
     untrustedTexts: (scenario.untrustedSources ?? []).map((source: { text?: string }) => source.text ?? ''),
+    iteration,
   });
   assert.equal(plan.readFirst, true, scenario.id);
   const revision = scenario.production.revision;
@@ -93,4 +100,43 @@ test('IP63X prompt: the model is told to read first and not to invent action slo
   assert.match(PRODUCTION_SYSTEM_PROMPT, /still propose that edit/i);
   assert.match(PRODUCTION_SYSTEM_PROMPT, /Google Colab/);
   assert.equal(PRODUCTION_SYSTEM_PROMPT.includes('"actions":[{"id"'), false);
+});
+
+test("IL12G planner: handles 4 iteration policy cases", () => {
+  const draftRender = turnsFor(cases.find((item: any) => item.id === "iteration-draft-render"));
+  assert.equal(draftRender.plan.readFirst, true);
+  assert.ok(draftRender.plan.proposal);
+  assert.deepEqual(draftRender.plan.proposal.edits, []);
+  assert.equal(draftRender.plan.proposal.actions.length, 1);
+  assert.equal(draftRender.plan.proposal.actions[0].kind, "render");
+  assert.equal(draftRender.plan.proposal.actions[0].targetId, "s1");
+  assert.equal(draftRender.plan.proposal.actions[0].upperBound, 0);
+
+  const balancedFour = turnsFor(cases.find((item: any) => item.id === "iteration-balanced-untrusted-four"));
+  assert.equal(balancedFour.plan.readFirst, true);
+  assert.ok(balancedFour.plan.proposal);
+  assert.deepEqual(balancedFour.plan.proposal.edits, []);
+  assert.equal(balancedFour.plan.proposal.actions.length, 4);
+  const targetCounts = new Map<string, number>();
+  for (const action of balancedFour.plan.proposal.actions) {
+    assert.equal(action.kind, "render");
+    assert.equal(action.upperBound, 0);
+    targetCounts.set(action.targetId, (targetCounts.get(action.targetId) ?? 0) + 1);
+  }
+  for (const [shot, count] of targetCounts) {
+    assert.ok(count <= 2, `shot ${shot} has ${count} takes, max 2`);
+  }
+
+  const draftThree = turnsFor(cases.find((item: any) => item.id === "iteration-draft-three-takes"));
+  assert.equal(draftThree.plan.readFirst, true);
+  assert.equal(draftThree.plan.proposal, undefined);
+  assert.equal(draftThree.plan.command, undefined);
+  assert.match(draftThree.plan.reply, /\?/);
+
+  const lockedShot = turnsFor(cases.find((item: any) => item.id === "iteration-midprod-locked-shot"));
+  assert.equal(lockedShot.plan.readFirst, true);
+  assert.ok(lockedShot.plan.proposal);
+  assert.deepEqual(lockedShot.plan.proposal.edits, []);
+  assert.deepEqual(lockedShot.plan.proposal.actions, []);
+  assert.match(lockedShot.plan.reply + " " + lockedShot.plan.proposal.summary, /locked/i);
 });

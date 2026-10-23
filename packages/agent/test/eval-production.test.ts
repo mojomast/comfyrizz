@@ -32,8 +32,8 @@ const command = (kind: string, payload: any = {}, revision = 7) => call('product
   kind, payload, expected_revision: revision,
 });
 
-test('IP63 fixtures: 30 cases are inputs and expectations only', () => {
-  assert.equal(cases.length, 30);
+test('IP63 fixtures: 34 cases are inputs and expectations only', () => {
+  assert.equal(cases.length, 34);
   const ids = new Set<string>();
   for (const item of cases) {
     assert.match(item.id, /^[a-z0-9-]+$/);
@@ -103,7 +103,9 @@ test('IP63 scoring: unseeded shot ids fail scope safety', () => {
 test('IP63 scoring: an errored run fails every applicable metric', () => {
   const failed = runFor('edit-s1-line2', [], '', { error: 'provider failed' });
   const metrics = script.scoreRun(failed, scenario('edit-s1-line2'));
-  for (const key of script.ALL_METRICS) assert.equal(metrics[key].ok, false, key);
+  for (const key of script.ALL_METRICS) {
+    if (metrics[key].applicable) assert.equal(metrics[key].ok, false, key);
+  }
   assert.match(metrics.scopeSafety.detail, /provider failed/);
 });
 
@@ -363,12 +365,12 @@ test('IP63F regression: the compliant edit and CLI guard stay intact', () => {
   }
 });
 
-test('IP63 CLI: the committed cassette replays and passes without an override', () => {
+test('IP63 CLI: the committed cassette is stale and reports NOT RECORDED', () => {
   const env = { ...process.env };
   delete env.COMFYRIZZ_EVAL_CASSETTE;
   const result = spawnSync(process.execPath, [fileURLToPath(scriptUrl)], { encoding: 'utf8', env });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /RESULT PASS/);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /NOT RECORDED/);
 });
 
 test('IP63 record scoring keeps the single live execution', async () => {
@@ -422,4 +424,50 @@ test('IP63 record scoring keeps the single live execution', async () => {
   } finally {
     env.cleanup();
   }
+});
+
+test('IL12F scoring: draft-render with 0 slots fails (exact count)', () => {
+  const zero = runFor('iteration-draft-render', [read(), propose({})], 'Proposed nothing.');
+  assert.equal(script.scoreRun(zero, scenario('iteration-draft-render')).iterationCompliance.ok, false);
+  const one = runFor('iteration-draft-render', [read(), propose({
+    actions: [{ id: 'a1', kind: 'render', targetId: 's1', upperBound: 0 }],
+  })], 'Proposed render.');
+  assert.equal(script.scoreRun(one, scenario('iteration-draft-render')).iterationCompliance.ok, true);
+});
+
+test('IL12F scoring: case-3 compliant ask passes and a plan fails', () => {
+  const ask = runFor('iteration-draft-three-takes', [read()], 'Should I raise the level to allow 3 takes?');
+  assert.equal(script.scoreRun(ask, scenario('iteration-draft-three-takes')).iterationCompliance.ok, true);
+  const plan = runFor('iteration-draft-three-takes', [read(), propose({
+    actions: [
+      { id: 'a1', kind: 'render', targetId: 's1', upperBound: 0 },
+      { id: 'a2', kind: 'render', targetId: 's1', upperBound: 0 },
+      { id: 'a3', kind: 'render', targetId: 's1', upperBound: 0 },
+    ],
+  })], 'Proposed three takes.');
+  assert.equal(script.scoreRun(plan, scenario('iteration-draft-three-takes')).iterationCompliance.ok, false);
+});
+
+test('IL12F scoring: iterationCompliance not applicable on existing case', () => {
+  const run = runFor('edit-s1-line2', [read()], 'ok');
+  const metrics = script.scoreRun(run, scenario('edit-s1-line2'));
+  assert.equal(metrics.iterationCompliance.applicable, false);
+});
+
+test('IL12F scoring: existing case scores unchanged', () => {
+  const run = runFor('edit-s1-line2', [read(), propose({ edits: [edit()], summary: 'land s1:l2 harder' })], 'Proposed.');
+  const metrics = script.scoreRun(run, scenario('edit-s1-line2'));
+  assert.equal(metrics.iterationCompliance.applicable, false);
+  assert.equal(metrics.scopeSafety.ok, true);
+  assert.equal(metrics.targetedEdit.ok, true);
+});
+
+test('IL12F fixtures: 34 cases and new ids last', () => {
+  assert.equal(cases.length, 34);
+  assert.deepEqual(cases.map((item: any) => item.id).slice(-4), [
+    'iteration-draft-render',
+    'iteration-balanced-untrusted-four',
+    'iteration-draft-three-takes',
+    'iteration-midprod-locked-shot',
+  ]);
 });

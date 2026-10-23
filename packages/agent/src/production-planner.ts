@@ -64,6 +64,48 @@ export interface ProductionTurnInput {
   requestedLineIds?: string[];
   /** Data, never instructions. The planner does not copy these into a plan. */
   untrustedTexts?: string[];
+  iteration?: {
+    policy: any;
+    lockedShotIds?: string[];
+  };
+}
+
+
+export interface ProductionActionSlot {
+  id: string;
+  kind: "render";
+  targetId: string;
+  upperBound: number;
+}
+
+function parseRequestedTakes(message: string): number | undefined {
+  const match = message.match(/\b(a|an|one|two|three|four|five|six|\d+)\s+takes?\b/i);
+  if (match) {
+    const raw = match[1].toLowerCase();
+    const map: Record<string, number> = {
+      a: 1,
+      an: 1,
+      one: 1,
+      two: 2,
+      three: 3,
+      four: 4,
+      five: 5,
+      six: 6,
+    };
+    return map[raw] ?? parseInt(raw, 10);
+  }
+  if (/\brender\b/i.test(message)) {
+    return 1;
+  }
+  return undefined;
+}
+
+function effectiveVideoLimit(policy: any, shotId: string): number {
+  const override = policy?.shotOverrides?.[shotId];
+  const videoStage = override?.stages?.video ?? policy?.stages?.video;
+  const takes = typeof videoStage?.takes === "number" ? videoStage.takes : 1;
+  const rounds = typeof videoStage?.rounds === "number" ? videoStage.rounds : 1;
+  return takes * rounds;
 }
 
 export interface ProductionEdit {
@@ -77,7 +119,12 @@ export interface ProductionTurnPlan {
   reply: string;
   proposal?: {
     edits: ProductionEdit[];
-    actions: [];
+    actions: Array<{
+      id: string;
+      kind: "render";
+      targetId: string;
+      upperBound: number;
+    }> | [];
     summary: string;
   };
   command?: {
@@ -269,6 +316,109 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
       },
     };
   }
+
+  if (input.iteration?.policy) {
+    const policy = input.iteration.policy;
+    const isCost = isCostQuestion(input.userMessage);
+    const requestedTakes = parseRequestedTakes(input.userMessage);
+
+    if (!isCost && requestedTakes !== undefined) {
+      const isAcrossShots = /\bacross\s+(?:the\s+)?shots\b/i.test(input.userMessage);
+      const lockedShots = new Set(input.iteration.lockedShotIds ?? []);
+      const requestedShots = input.requestedShotIds && input.requestedShotIds.length > 0
+        ? input.requestedShotIds
+        : [...idMentions(input.userMessage)].filter(id => !id.includes(":"));
+      const allShots = (input.shots ?? []).map(s => s.id);
+      const targetShots = requestedShots.length > 0 ? requestedShots : allShots;
+
+      if (isAcrossShots) {
+        const unlockedShots = targetShots.filter(id => !lockedShots.has(id));
+        let totalCapacity = 0;
+        for (const shot of unlockedShots) {
+          totalCapacity += effectiveVideoLimit(policy, shot);
+        }
+
+        if (requestedTakes > totalCapacity) {
+          return {
+            readFirst: true,
+            reply: `The current iteration level (${policy.level ?? "draft"}) allows at most ${totalCapacity} takes across the shots, but ${requestedTakes} were requested. Would you like to change the iteration level?`,
+          };
+        }
+
+        const actions: ProductionActionSlot[] = [];
+        const shotCounts = new Map<string, number>();
+        for (const shot of unlockedShots) shotCounts.set(shot, 0);
+
+        let allocated = 0;
+        let idx = 0;
+        while (allocated < requestedTakes && unlockedShots.length > 0) {
+          const shot = unlockedShots[idx % unlockedShots.length];
+          const count = shotCounts.get(shot) ?? 0;
+          const limit = effectiveVideoLimit(policy, shot);
+          if (count < limit) {
+            shotCounts.set(shot, count + 1);
+            actions.push({
+              id: `a${allocated + 1}`,
+              kind: "render",
+              targetId: shot,
+              upperBound: 0,
+            });
+            allocated++;
+          }
+          idx++;
+        }
+
+        return {
+          readFirst: true,
+          reply: `Proposed a plan to add ${requestedTakes} takes across the shots. Nothing has been dispatched.`,
+          proposal: {
+            edits: [],
+            actions,
+            summary: input.userMessage.trim(),
+          },
+        };
+      } else {
+        const shotId = targetShots[0] ?? "s1";
+        if (lockedShots.has(shotId)) {
+          return {
+            readFirst: true,
+            reply: `Shot ${shotId} is locked, so no new takes can be rendered.`,
+            proposal: {
+              edits: [],
+              actions: [],
+              summary: `Shot ${shotId} is locked; no takes can be rendered.`,
+            },
+          };
+        }
+
+        const limit = effectiveVideoLimit(policy, shotId);
+        if (requestedTakes > limit) {
+          return {
+            readFirst: true,
+            reply: `The current iteration level (${policy.level ?? "draft"}) allows at most ${limit} take(s) for ${shotId}, but ${requestedTakes} were requested. Would you like to change the iteration level?`,
+          };
+        }
+
+        const actions: ProductionActionSlot[] = Array.from({ length: requestedTakes }, (_, i) => ({
+          id: `a${i + 1}`,
+          kind: "render",
+          targetId: shotId,
+          upperBound: 0,
+        }));
+
+        return {
+          readFirst: true,
+          reply: `Proposed a plan to render ${requestedTakes === 1 ? "a take" : `${requestedTakes} takes`} for ${shotId}. Nothing has been dispatched.`,
+          proposal: {
+            edits: [],
+            actions,
+            summary: input.userMessage.trim(),
+          },
+        };
+      }
+    }
+  }
+
 
   if (isRenderRequest(input.userMessage)) {
     const shotId = input.requestedShotIds?.[0] ?? `s${input.userMessage.match(/\brender\s+s(\d+)\b/i)?.[1] ?? ''}`;
