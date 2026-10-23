@@ -129,7 +129,10 @@ function clampPosition(value: unknown): number {
 
 /**
  * A shot entry is only usable when it carries both ids itself. A missing clip
- * id is never filled from the shot id; that entry is dropped instead.
+ * id is never filled from the shot id; that entry is dropped instead. An entry
+ * that shares only one id with the caller's shot (same shotId with another
+ * clipId, or the reverse) contradicts it and is dropped too: the caller's
+ * explicit shotId + clipId pair is the one the compare view opens on.
  */
 function normalizeShots(
   shots: readonly CompareShot[] | null | undefined,
@@ -139,6 +142,7 @@ function normalizeShots(
   for (const shot of Array.isArray(shots) ? shots : []) {
     if (!shot || typeof shot.shotId !== 'string' || !shot.shotId) continue;
     if (typeof shot.clipId !== 'string' || !shot.clipId) continue;
+    if ((shot.shotId === fallback.shotId) !== (shot.clipId === fallback.clipId)) continue;
     list.push({
       shotId: shot.shotId,
       clipId: shot.clipId,
@@ -147,7 +151,7 @@ function normalizeShots(
     });
   }
   if (list.length === 0) return [fallback];
-  if (!list.some(shot => shot.shotId === fallback.shotId || shot.clipId === fallback.clipId)) {
+  if (!list.some(shot => shot.shotId === fallback.shotId && shot.clipId === fallback.clipId)) {
     list.unshift(fallback);
   }
   return list;
@@ -203,7 +207,7 @@ export class CompareController {
       selected: typeof options.selected === 'string' ? options.selected : null,
     });
     const shotIndex = Math.max(0, shots.findIndex(shot => (
-      shot.shotId === shotId || shot.clipId === options.clipId
+      shot.shotId === shotId && shot.clipId === options.clipId
     )));
     const active = shots[shotIndex] ?? shots[0]!;
 
