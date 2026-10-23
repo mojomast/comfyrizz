@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const source = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+const indexHtml = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8');
 
 function loadSummary(): (ok: boolean, notes: number) => string {
   const match = source.match(/export function qaPanelSummary\(ok: boolean, notes: number\): string \{[\s\S]*?\n\}/);
@@ -28,4 +29,22 @@ test('frame quality check wording matches after a fixture render', async ({ page
   await expect(page.locator('#qa-panel')).toHaveText('Quality check passed · 4 notes');
   await page.setContent(`<div id="qa-panel"><span class="chip qa-bad">${problems}</span></div>`);
   await expect(page.locator('#qa-panel')).toHaveText('Quality check found problems · 1 notes');
+});
+
+test('in Advanced there is no easy actions bar or storyboard re-render buttons', async ({ page }) => {
+  expect(source).not.toContain('mountEasyActions');
+  expect(source).not.toContain('renderModeSummary');
+  expect(source).not.toContain('modeSummaryLabels');
+  expect(source).not.toContain('id="easy-actions"');
+  expect(source).not.toContain("id = 'easy-actions'");
+  expect(source).not.toContain('Re-render scene');
+  expect(source).not.toContain('data-scene-action="rerender"');
+  expect(indexHtml).not.toContain('id="easy-actions"');
+  expect(indexHtml).not.toContain('id="render-changes"');
+
+  await page.setContent(indexHtml);
+  await page.locator('html').evaluate(root => root.setAttribute('data-mode', 'advanced'));
+  await expect(page.locator('#easy-actions')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Render changes' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Re-render scene' })).toHaveCount(0);
 });

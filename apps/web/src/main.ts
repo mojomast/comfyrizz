@@ -5,7 +5,7 @@ import './ui/look-picker.css';
 import './productions/cards/iteration-card.css';
 import './productions/cards/iteration-advanced.css';
 import { initShellLayout } from './ui/splitter';
-import { MODE_CHANGE_EVENT, mountModeToggle, setMode, type ModeController } from './ui/mode';
+import { MODE_CHANGE_EVENT, mountModeToggle, setMode } from './ui/mode';
 import { getPrefs } from './ui/prefs';
 import { readIteration, setIteration } from './productions/client';
 import { mountIterationLevel, type IterationLevelMount } from './productions/cards/iteration-advanced';
@@ -198,7 +198,6 @@ function showRecoveryPrompt(offer: RecoveryOffer): void {
     scrub.max = String(Math.max(0, timeline.durationInFrames - 1));
     updatePreview(pkg, timeline, generatedAssets);
     renderStoryboard();
-    renderModeSummary();
     dismissRecoveryPrompt();
     logActivity(`Restored the local recovery copy for ${offer.packageId}`);
     void publishRestored(restored, baseRevision, offer);
@@ -1042,68 +1041,6 @@ function markDirty(reason: string): void {
   $('draft').textContent = `draft · ${reason} · recompiled on export`;
   syncTimeline();
   updatePreview(pkg, timeline, generatedAssets);
-  renderModeSummary();
-}
-
-function modeSummaryLabels(): string[] {
-  const source = (editorStore.getState().doc.package ?? pkg) as unknown as PackageV1;
-  const scenes = source.scenes ?? [];
-  const labels: string[] = [];
-  const customTransition = scenes.some(scene => {
-    const transition = scene.transitionOut;
-    if (!transition) return false;
-    return transition.type !== 'cut' || Number(transition.frames ?? 0) > 0;
-  });
-  if (customTransition) labels.push('Custom transition');
-  if (scenes.some(scene => typeof scene.preferredFrames === 'number')) labels.push('Custom timing');
-  if (scenes.some(scene => Boolean(scene.motion?.recipe || scene.motion?.seed !== undefined || scene.motion?.cue_phrases?.length))) {
-    labels.push('Custom motion');
-  }
-  if (source.voice?.enabled) labels.push('Custom voice');
-  if (source.presenter?.enabled === true) labels.push('AI presenter');
-  return labels;
-}
-
-function renderModeSummary(): void {
-  const host = document.getElementById('mode-summary');
-  if (!host) return;
-  host.innerHTML = modeSummaryLabels()
-    .map(label => `<span class="mode-chip" role="listitem">${esc(label)}</span>`)
-    .join('');
-}
-
-function mountEasyActions(mode: ModeController | null): void {
-  const transport = document.getElementById('transport');
-  if (!transport || document.getElementById('easy-actions')) return;
-  const host = document.createElement('div');
-  host.id = 'easy-actions';
-  host.className = 'easy-actions';
-  host.dataset.easySurface = 'true';
-  host.innerHTML = `
-    <span class="easy-actions-label">Easy view</span>
-    <button type="button" id="easy-generate" class="btn btn-primary btn-sm primary">Generate</button>
-    <button type="button" id="easy-preview" class="btn btn-secondary btn-sm">Preview</button>
-    <span id="mode-summary" class="mode-summary" role="list" aria-label="Custom settings hidden in Easy view"></span>
-    <span class="easy-actions-spacer"></span>
-    <button type="button" id="easy-advanced" class="btn btn-ghost btn-sm">Advanced settings</button>`;
-  transport.after(host);
-
-  host.querySelector<HTMLButtonElement>('#easy-generate')?.addEventListener('click', () => {
-    const prompt = document.getElementById('prompt') as HTMLTextAreaElement | null;
-    const composer = document.getElementById('composer') as HTMLFormElement | null;
-    if (!prompt) return;
-    if (prompt.value.trim() && composer) composer.requestSubmit();
-    else prompt.focus();
-  });
-  host.querySelector<HTMLButtonElement>('#easy-preview')?.addEventListener('click', () => {
-    player?.seekTo(0);
-    const play = document.getElementById('play');
-    if (play?.textContent?.trim() === 'Play') play.click();
-  });
-  host.querySelector<HTMLButtonElement>('#easy-advanced')?.addEventListener('click', () => {
-    mode?.setMode('advanced');
-  });
-  renderModeSummary();
 }
 
 /** C-pres: the storyboard's presenter toolbar (coverage + quick presets + placement + label). */
@@ -1167,7 +1104,6 @@ function renderStoryboard(): void {
           <option value="split"${scene.presenter === 'split' ? ' selected' : ''}>split (hero only)</option>
         </select>
         <div class="scene-actions">
-          <button type="button" data-scene-action="rerender" data-scene="${esc(scene.id)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${sceneState.rendering === scene.id ? 'Re-rendering…' : 'Re-render scene'}</button>
           <button type="button" data-scene-action="regen" data-scene="${esc(scene.id)}">Regenerate media</button>
         </div>
         <div class="scene-chips">${WEB_SCENE_CHIPS.map(chip => `<button type="button" data-scene-action="chip" data-chip="${esc(chip.id)}" data-scene="${esc(scene.id)}" title="${esc(chip.hint)}"${sceneState.rendering === scene.id ? ' disabled' : ''}>${esc(chip.label)}</button>`).join('')}</div>
@@ -1211,8 +1147,7 @@ function renderStoryboard(): void {
     button.addEventListener('click', event => {
       event.stopPropagation();
       const sceneId = button.dataset.scene!;
-      if (button.dataset.sceneAction === 'rerender') void reRenderScene(sceneId);
-      else if (button.dataset.sceneAction === 'chip') void applySceneChipFlow(sceneId, button.dataset.chip!);
+      if (button.dataset.sceneAction === 'chip') void applySceneChipFlow(sceneId, button.dataset.chip!);
       else void planSceneMedia(sceneId);
     });
   });
@@ -1240,7 +1175,6 @@ function renderStoryboard(): void {
     audioMixEnabled = mixToggle.checked;
     logActivity(`Sound design ${audioMixEnabled ? 'on' : 'off'} for the next render/export`);
   });
-  renderModeSummary();
 }
 
 function renderPalette(): void {
@@ -2666,8 +2600,6 @@ function init(opened: OpenedProject): void {
   });
   void iterationLevelMount.refresh();
   mountSettingsDialog(document.body);
-  mountEasyActions(modeControl);
-  editorStore.subscribe(() => renderModeSummary());
 
   agentSettings = mountAgentSettings(apiFetch, logActivity);
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: opened.activity }];
@@ -2935,7 +2867,6 @@ function init(opened: OpenedProject): void {
       closeExportMenu(false);
     }
   });
-  $('render-changes').addEventListener('click', () => void renderChangedScenes());
   document.querySelectorAll<HTMLButtonElement>('.mode-toggle .mode').forEach(button => {
     button.addEventListener('click', () => {
       briefMode = (button.getAttribute('data-mode') as BriefMode) ?? 'plan';
