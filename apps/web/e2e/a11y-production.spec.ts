@@ -5,8 +5,7 @@
  * app mounts, using durable-record-shaped data. No server, Google Colab
  * session, paid backend or network call is involved.
  *
- * A serious or critical violation fails the sweep, except the two pre-existing
- * component defects allowlisted below; each one is annotated on the test.
+ * Every serious or critical violation fails the sweep with no exceptions.
  * Moderate and minor findings stay visible in the report without failing.
  */
 import { expect, test } from '@playwright/test';
@@ -32,21 +31,6 @@ type AxeFinding = {
   nodes: Array<string | string[]>;
 };
 
-// Two pre-existing component findings are tracked outside this test-only task:
-// the plan card's approve control has an aria-label that does not contain its
-// visible text ("Approve plan"), and the active review filter chip uses the
-// accent colour on the accent background (2.64:1). Both are allowlisted by
-// rule + selector so any other serious or critical finding still fails.
-const KNOWN_FINDINGS: ReadonlyArray<{ id: string; selector: string }> = [
-  { id: 'label-content-name-mismatch', selector: '[data-plan-approve=""]' },
-  { id: 'color-contrast', selector: 'button[data-review-filter' },
-];
-
-function isKnownFinding(id: string, node: { target: string[] }): boolean {
-  const known = KNOWN_FINDINGS.filter(item => item.id === id);
-  return known.some(item => node.target.length === 1 && node.target[0].includes(item.selector));
-}
-
 function describeFinding(item: { id: string; impact?: string | null; nodes: Array<{ target: string[] }> }): AxeFinding {
   return {
     id: item.id,
@@ -55,19 +39,10 @@ function describeFinding(item: { id: string; impact?: string | null; nodes: Arra
   };
 }
 
-function splitFindings(violations: readonly { id: string; impact?: string | null; nodes: Array<{ target: string[] }> }[]): {
-  blocking: AxeFinding[];
-  known: AxeFinding[];
-} {
-  const serious = violations.filter(item => item.impact === 'serious' || item.impact === 'critical');
-  return {
-    blocking: serious
-      .filter(item => !item.nodes.every(node => isKnownFinding(item.id, node)))
-      .map(describeFinding),
-    known: serious
-      .filter(item => item.nodes.every(node => isKnownFinding(item.id, node)))
-      .map(describeFinding),
-  };
+function seriousFindings(violations: readonly { id: string; impact?: string | null; nodes: Array<{ target: string[] }> }[]): AxeFinding[] {
+  return violations
+    .filter(item => item.impact === 'serious' || item.impact === 'critical')
+    .map(describeFinding);
 }
 
 async function openHarness(page: import('@playwright/test').Page): Promise<void> {
@@ -89,14 +64,8 @@ async function installMarkup(page: import('@playwright/test').Page, markup: stri
 
 async function expectNoSeriousOrCritical(page: import('@playwright/test').Page, state: string): Promise<void> {
   const results = await new AxeBuilder({ page }).analyze();
-  const { blocking, known } = splitFindings(results.violations);
-  if (known.length > 0) {
-    test.info().annotations.push({
-      type: 'known-a11y-finding',
-      description: `${state}: ${known.map(item => `${item.id} ${item.nodes.flat().join(', ')}`).join('; ')}`,
-    });
-  }
-  expect(blocking, `${state}: serious or critical Axe findings`).toEqual([]);
+  const serious = seriousFindings(results.violations);
+  expect(serious, `${state}: serious or critical Axe findings`).toEqual([]);
 }
 
 test('review drawer states have no serious accessibility violations', async ({ page }) => {

@@ -901,9 +901,9 @@
 
 .review-chip[aria-pressed="true"],
 .review-chip[data-active="true"] {
-  color: var(--accent);
+  color: var(--text-1);
   background: var(--accent-bg);
-  border-color: var(--accent-border);
+  border-color: var(--accent);
 }
 
 .review-chip-count {

@@ -419,3 +419,35 @@ test('sendPlanApproval sends the built command through the one command client', 
     /STALE_VIEW/,
   );
 });
+
+// IP64F: WCAG 2.5.3 label-in-name. The visible text on the approve control is
+// "Approve plan"; its accessible name must contain that exact text. The
+// explanation may follow it, but it may not replace it.
+function approveControl(html: string): { attributes: string; label: string | null; visible: string } {
+  const match = html.match(/<button\b[^>]*\bdata-plan-approve\b[^>]*>([\s\S]*?)<\/button>/i);
+  assert.ok(match, 'the plan card renders a data-plan-approve button');
+  const opening = match[0].slice(0, match[0].indexOf('>') + 1);
+  const label = opening.match(/\baria-label="([^"]*)"/i)?.[1] ?? null;
+  const visible = match[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return { attributes: opening, label, visible };
+}
+
+function normalise(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+for (const [name, card] of [
+  ['pending approvable', readPlanCard(state())],
+  ['stale disabled', readPlanCard(state({ stale: true }))],
+] as const) {
+  test(`the ${name} approve control keeps the visible label in its accessible name`, () => {
+    const control = approveControl(renderPlanCard(card));
+    const accessibleName = control.label ?? control.visible;
+
+    assert.equal(control.visible, 'Approve plan', 'the visible text is unchanged');
+    assert.ok(
+      normalise(accessibleName).includes(normalise(control.visible)),
+      `accessible name "${accessibleName}" must contain the visible text "${control.visible}"`,
+    );
+  });
+}

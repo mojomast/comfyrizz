@@ -660,7 +660,7 @@ export function renderPlanCard(card: PlanCard, options: PlanCardRenderOptions = 
     <p class="plan-card-decisions" data-plan-required-decisions>${card.requiredDecisions.length} required decision${card.requiredDecisions.length === 1 ? '' : 's'}</p>
     ${actions}
     <div class="plan-card-buttons">
-      <button type="button" class="btn btn-primary" data-plan-approve aria-label="Approve this exact plan and its spend upper bound"${disabled}>Approve plan</button>
+      <button type="button" class="btn btn-primary" data-plan-approve aria-label="Approve plan: this exact plan and its spend upper bound"${disabled}>Approve plan</button>
     </div>
   </section>`;
 }
