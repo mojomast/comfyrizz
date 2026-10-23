@@ -12,7 +12,7 @@ type Go = (step: 'generate') => void;
 
 interface ApproveDeps {
   api: {
-    setSpendCap: (id: string, body: { ceiling: number }) => Promise<unknown>;
+    setSpendCap: (id: string, body: { ceiling: number; expected: { productionRevision: number } }) => Promise<unknown>;
     sendCommand: (id: string, command: unknown) => Promise<unknown>;
     dispatchAction: (id: string, body: unknown) => Promise<unknown>;
     startRun: (body: unknown) => Promise<unknown>;
@@ -77,7 +77,10 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
 
   const id = productionId(state);
   if (colab && includeSpendCap) {
-    await deps.api.setSpendCap(id, { ceiling: state.spendCap });
+    await deps.api.setSpendCap(id, {
+      ceiling: state.spendCap,
+      expected: { productionRevision: card.revision },
+    });
   }
 
   if (built.ok === true && (colab || hasPlan(card))) {
