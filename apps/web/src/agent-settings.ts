@@ -1,6 +1,4 @@
-if (typeof process === 'undefined') {
-  void import('./agent-settings.css');
-}
+import './agent-settings.css';
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type Profile = {
