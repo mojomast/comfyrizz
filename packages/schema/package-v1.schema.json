@@ -2251,6 +2251,12 @@
           "type": "string",
           "maxLength": 512
         },
+        "voicePath": {
+          "type": "string",
+          "enum": [
+            "prompt"
+          ]
+        },
         "cast": {
           "$ref": "#/$defs/castId",
           "description": "CAST1: this still depicts the cast member. The planner appends that member's ref_asset to the Klein reference-edit inputs."

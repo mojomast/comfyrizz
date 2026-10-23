@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 8b7068f63227ec8d86aa124efe1fda38ed12b90477c7f603d666e84a426704e9
+// Schema sha256: 9955e1847b7b9bc9d0a9cfaea77fb753bab1016a1e0b4aa8e077598a3a9094a1
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -980,6 +980,7 @@ export interface Asset {
   redistributable?: boolean;
   gen?: Gen;
   notes?: string;
+  voicePath?: "prompt";
   /**
    * CAST1: this still depicts the cast member. The planner appends that member's ref_asset to the
    * Klein reference-edit inputs.
