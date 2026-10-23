@@ -114,10 +114,18 @@ test('a model name is never a capability: MiniMax without the flag still uses Ko
   assert.equal(action.language, 'en-gb');
 });
 
-test('a stale native request on a model without the capability falls back to Kokoro', () => {
+test('a stale native request on a model without the capability is refused, never silently dropped', () => {
+  // Review fix-up: the named preset used to be discarded and Kokoro planned.
+  assert.throws(
+    () => buildNativeTestAction(actionInput({
+      model: CPU_MODEL,
+      nativeVoice: 'minimax-narrator',
+      voice: { engine: 'kokoro', voice: 'af_heart' },
+    })),
+    code('NATIVE_TEST_NATIVE_UNAVAILABLE'),
+  );
   const action = buildNativeTestAction(actionInput({
     model: CPU_MODEL,
-    nativeVoice: 'minimax-narrator',
     voice: { engine: 'kokoro', voice: 'af_heart' },
   }));
   assert.equal(action.voicePath, 'kokoro');

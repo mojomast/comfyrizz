@@ -183,11 +183,20 @@ export function buildNativeTestAction(input, ...extra) {
   // the model declares native speech; otherwise the Kokoro fallback is used.
   const nativeCapable = supportsNativeVoice(model);
   if (raw.voice !== undefined && isRecord(raw.voice)) refuseForbidden(raw.voice, 'voice');
+  if (!nativeCapable && raw.nativeVoice !== undefined) {
+    // Never drop a named preset silently: the caller asked for a native voice
+    // the selected model does not declare, so the plan must be re-made.
+    fail(
+      'NATIVE_TEST_NATIVE_UNAVAILABLE',
+      'nativeVoice',
+      'the selected model does not declare a native voice; remove nativeVoice to use the Kokoro fallback',
+    );
+  }
 
   const speaking = resolveSpeakingVoice({
     model,
     ...(raw.voice !== undefined ? { voice: raw.voice } : {}),
-    ...(nativeCapable && raw.nativeVoice !== undefined ? { nativeVoice: raw.nativeVoice } : {}),
+    ...(raw.nativeVoice !== undefined ? { nativeVoice: raw.nativeVoice } : {}),
     ...(lineLanguage !== undefined ? { language: lineLanguage } : {}),
   });
 
