@@ -1,8 +1,8 @@
 /**
  * IP59: mobile tabs and sheets.
  *
- * The shell has one DOM at every width. Easy stays Easy: the right rail and the
- * run-settings anchor are never forced open. Advanced below 1100px turns the
+ * The shell has one DOM at every width. Easy stays Easy: the right rail is
+ * never forced open. Advanced below 1100px turns the
  * right rail into a reachable bottom sheet with full-width tabs, and a
  * collapsed rail stays collapsed until its toggle brings it back.
  *
@@ -110,7 +110,7 @@ test('Easy at 390 stays Easy, keeps the rail hidden, and its actions are reachab
 
   await expect(page.locator('#activity-pane')).toBeHidden();
   await expect(page.locator('#easy-actions')).toBeVisible();
-  await expect(page.locator('#topbar .run-settings-anchor')).toBeHidden();
+  await expect(page.locator('#run-settings-toggle')).toHaveCount(0);
 
   await expectReachable(page, '#easy-generate');
   await expectReachable(page, '#easy-preview');
@@ -126,7 +126,7 @@ test('Easy at 390 stays Easy, keeps the rail hidden, and its actions are reachab
   await expectReachable(page, '#sa-tab-generate');
   await expectReachable(page, '#render');
   await expectReachable(page, '#export-menu-toggle');
-  await expectReachable(page, '#run-settings-toggle');
+  await expectReachable(page, '#settings-open');
 });
 
 for (const width of [760, 1099] as const) {
@@ -136,7 +136,7 @@ for (const width of [760, 1099] as const) {
 
     await expect(page.locator('#activity-pane')).toBeHidden();
     await expect(page.locator('.shell-splitter[data-split="right"]')).toBeHidden();
-    await expect(page.locator('#topbar .run-settings-anchor')).toBeHidden();
+    await expect(page.locator('#run-settings-popover')).toHaveCount(0);
     await expect(page.locator('#easy-actions')).toBeVisible();
     await expectReachable(page, '#easy-advanced');
     await noHorizontalOverflow(page);
@@ -165,7 +165,7 @@ for (const width of [390, 760, 1099] as const) {
     await expectReachable(page, '#sa-tab-generate');
     await expectReachable(page, '#render');
     await expectReachable(page, '#export-menu-toggle');
-    await expectReachable(page, '#run-settings-toggle');
+    await expectReachable(page, '#settings-open');
     if (width === 390) await noHorizontalOverflow(page);
   });
 }

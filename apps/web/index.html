@@ -37,57 +37,7 @@
 
         <span class="spacer toolbar-spacer"></span>
 
-        <div class="run-settings-anchor">
-          <button type="button" id="run-settings-toggle" class="btn btn-secondary btn-sm" aria-haspopup="dialog" aria-expanded="false" aria-controls="run-settings-popover">Run settings</button>
-          <div id="run-settings-popover" class="popover run-settings-popover" role="dialog" aria-modal="false" aria-labelledby="run-settings-title" hidden>
-            <div class="run-settings-head">
-              <span id="run-settings-title" class="popover-title">Run settings</span>
-              <button type="button" id="run-settings-close" class="btn btn-ghost btn-icon btn-sm" aria-label="Close run settings">✕</button>
-            </div>
-            <div class="popover-body run-settings-grid">
-              <div class="field">
-                <label class="field-label" for="backend">Backend</label>
-                <select id="backend">
-                  <option value="cpu">CPU · no network</option>
-                  <option value="byo-comfyui">BYO ComfyUI</option>
-                  <option value="colab">Google Colab G4</option>
-                </select>
-                <span class="field-hint">Compute environment for generation</span>
-              </div>
-              <div class="field">
-                <label class="field-label" for="llm">LLM</label>
-                <select id="llm">
-                  <option value="none">local · scripted model</option>
-                  <option value="opencode-go">OpenCode Go</option>
-                  <option value="custom">Custom · OpenAI-compatible</option>
-                  <option value="openrouter">OpenRouter</option>
-                </select>
-                <span class="field-hint">Provider for video planning</span>
-              </div>
-              <div class="field">
-                <label class="field-label" for="agent-model">Model</label>
-                <div class="run-settings-model-row">
-                  <input id="agent-model" list="agent-model-options" placeholder="scripted" disabled maxlength="300" /><datalist id="agent-model-options"></datalist>
-                  <button type="button" id="agent-settings-open" class="btn btn-secondary btn-sm">Agent settings</button>
-                </div>
-                <span class="field-hint">Active model on the selected provider</span>
-              </div>
-              <div class="field">
-                <label class="field-label" for="budget">Budget</label>
-                <input id="budget" type="number" min="0" step="0.5" value="15" readonly aria-readonly="true" title="Set the spend cap in Generate" />
-                <span class="field-hint">Set the spend cap in Generate</span>
-              </div>
-              <div class="field">
-                <label class="field-label" for="render-location">Render</label>
-                <select id="render-location" title="Where the final MP4 is assembled">
-                  <option value="local">This machine</option>
-                  <option value="colab">Google Colab VM</option>
-                </select>
-                <span class="field-hint">Where the final MP4 is assembled</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <button type="button" id="settings-open" class="btn btn-secondary btn-sm">Settings</button>
 
         <div class="split-button" id="render-split-button">
           <button id="render" class="btn btn-primary btn-sm primary" type="button" title="Render video">Render</button>
@@ -103,7 +53,7 @@
 
       <main class="shell-main" data-region="workspace">
         <section id="chat-pane" class="pane panel shell-left" data-region="left" aria-label="Chat and references">
-          <div class="pane-head panel-header"><b>Chat</b><span class="hint">brief → local agent → package</span></div>
+          <div class="pane-head panel-header"><b>Chat</b><span class="hint">Your conversation</span></div>
           <div id="messages"></div>
           <div id="project-plan-panel" hidden></div>
           <form id="composer">
@@ -121,7 +71,7 @@
         </section>
 
         <section id="work-pane" class="pane panel shell-center" data-region="center" aria-label="Preview">
-          <div class="pane-head panel-header"><b>Preview</b><span id="draft" class="hint">compiled timeline</span></div>
+          <div class="pane-head panel-header"><b>Preview</b><span id="draft" class="hint">Preview</span></div>
           <div id="player" aria-label="Remotion preview"></div>
           <div id="transport" class="toolbar shell-transport">
             <button id="play" class="btn btn-secondary btn-sm">Play</button>
@@ -148,7 +98,7 @@
           </div>
 
           <section id="rail-panel-run" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-run" tabindex="0" data-rail-panel="run">
-            <div class="pane-head panel-header"><b>Run</b><span class="hint">backend lifecycle</span></div>
+            <div class="pane-head panel-header"><b>Run</b><span class="hint">Run status</span></div>
             <div id="run-filters" class="rail-filters" role="group" aria-label="Filter run events">
               <button type="button" id="run-filter-all" class="btn btn-secondary btn-sm rail-filter" data-run-filter="all" aria-pressed="true">All</button>
               <button type="button" id="run-filter-errors" class="btn btn-secondary btn-sm rail-filter" data-run-filter="errors" aria-pressed="false">Errors</button>
@@ -170,7 +120,7 @@
           </section>
 
           <section id="rail-panel-assets" class="rail-panel" role="tabpanel" aria-labelledby="rail-tab-assets" tabindex="0" data-rail-panel="assets" hidden>
-            <div class="pane-head panel-header"><b>Assets</b><span class="hint">generated-first</span></div>
+            <div class="pane-head panel-header"><b>Assets</b><span class="hint">Newest first</span></div>
             <div id="asset-filters" class="rail-filters" role="group" aria-label="Filter assets">
               <label class="rail-filter-field" for="asset-type-filter">Type
                 <select id="asset-type-filter" aria-label="Filter assets by type">

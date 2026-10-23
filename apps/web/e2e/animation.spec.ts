@@ -138,23 +138,15 @@ async function openSceneAdvanced(page: Page): Promise<void> {
   await expandDetails(page.getByTestId('script-audio').locator('details.sa-advanced'));
 }
 
-/**
- * UO05/UO06: the top bar's run controls (backend, llm, model, budget, render
- * location) live in the "Run settings" popover. Open it, act, then close it so
- * the popover cannot overlay the panel the next assertion looks at.
- */
-async function openRunSettings(page: Page): Promise<void> {
-  const popover = page.locator('#run-settings-popover');
-  if (await popover.isVisible()) return;
-  await page.locator('#run-settings-toggle').click();
-  await expect(popover).toBeVisible();
-}
-
-async function closeRunSettings(page: Page): Promise<void> {
-  const popover = page.locator('#run-settings-popover');
-  if (!await popover.isVisible()) return;
-  await page.locator('#run-settings-close').click();
-  await expect(popover).toBeHidden();
+/** Final MP4 location lives in Settings → Google Colab and spend. */
+async function setRenderLocation(page: Page, value: 'local' | 'colab'): Promise<void> {
+  const dialog = page.locator('dialog.settings-dialog');
+  await page.locator('#settings-open').click();
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-settings-section="colab"]').click();
+  await dialog.locator('#render-location').selectOption(value);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
 }
 
 test.beforeEach(() => {
@@ -354,16 +346,13 @@ test('the generation plan can render on the Google Colab VM', async ({ page }) =
     });
   });
   await openEditor(page, env);
-  await openRunSettings(page);
-  await page.locator('#render-location').selectOption('colab');
-  await closeRunSettings(page);
+  await setRenderLocation(page, 'colab');
   await openVoicePanel(page);
-  await expect(voice(page).getByLabel('Final render')).toHaveValue('colab');
   await openVoiceProduction(page);
   await voice(page).getByRole('button', { name: 'Check generation plan' }).click();
   expect(planBody!.renderLocation).toBe('colab');
   await openVoiceProduction(page);
-  await expect(voice(page).locator('.hint', { hasText: 'Google Colab VM' })).toBeVisible();
+  await expect(voice(page).locator('.hint', { hasText: 'Google Colab makes the final video' })).toBeVisible();
 });
 
 test('a rejected voice save names the failure and keeps the edit', async ({ page }) => {

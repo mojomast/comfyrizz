@@ -27,7 +27,7 @@ function uniquePush(list, value) {
 // The same scene -> plate link the VX13 direction pass uses: a scene names its
 // plates through a background, a foreground layer, a media layer or narration.
 // No ownership is guessed.
-function sceneAssetIds(scene) {
+export function sceneAssetIds(scene) {
   const ids = [];
   if (isObject(scene.background)) uniquePush(ids, scene.background.asset);
   if (Array.isArray(scene.foreground)) {

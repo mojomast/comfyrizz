@@ -38,7 +38,7 @@ import {
   ITERATION_STAGES,
   pickForShot,
 } from './iteration.mjs';
-import { promptVoiceGate } from './voice-gate.mjs';
+import { promptVoiceGate, sceneAssetIds } from './voice-gate.mjs';
 
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
 
@@ -142,27 +142,6 @@ function commandIdFor(productionId, planHash, actionId) {
 
 function continuationIdFor(productionId, eventId) {
   return `cont_${stableDigest('continuation', productionId, eventId).slice(0, 24)}`;
-}
-
-function sceneAssetIds(scene) {
-  const ids = [];
-  if (!isPlainObject(scene)) return ids;
-  const push = (value) => {
-    if (typeof value === 'string' && value !== '' && !ids.includes(value)) ids.push(value);
-  };
-  if (isPlainObject(scene.background)) push(scene.background.asset);
-  if (Array.isArray(scene.foreground)) {
-    for (const layer of scene.foreground) {
-      if (isPlainObject(layer)) push(layer.asset);
-    }
-  }
-  if (Array.isArray(scene.media)) {
-    for (const layer of scene.media) {
-      if (isPlainObject(layer)) push(layer.asset);
-    }
-  }
-  push(scene.narration_asset);
-  return ids;
 }
 
 // Every identifier an action can use to name the plate it works on. A scene id
@@ -1124,6 +1103,58 @@ export function createProductionCoordinator(options = {}) {
     return deriveNextStep({ production, events });
   }
 
+  function voiceRefusal(voiceBlock) {
+    return {
+      status: 'blocked',
+      reason: voiceBlock.code,
+      admitted: false,
+      code: voiceBlock.code,
+      blocked: voiceBlock,
+      error: {
+        code: voiceBlock.code,
+        message: voiceBlock.code === 'VOICE_AUDITION_STALE'
+          ? 'the approved prompt voice audition is stale; approve it again before dispatch'
+          : 'the character prompt voice audition must be approved before this shot can dispatch',
+      },
+    };
+  }
+
+  // The dispatch route names one plan revision and action slot; resolve that
+  // same slot so the gate sees the plate the caller is about to admit.
+  function planSlotForAction(events, payload) {
+    if (!isPlainObject(payload)) return null;
+    if (!isIdentifier(payload.planId)) return null;
+    if (!Number.isSafeInteger(payload.planRevision) || payload.planRevision < 0) return null;
+    if (!isIdentifier(payload.actionId)) return null;
+    let plan = null;
+    for (const event of events) {
+      if (event.type !== 'plan.proposed' || !isPlainObject(event.data)) continue;
+      if (event.data.id !== payload.planId || event.data.revision !== payload.planRevision) continue;
+      plan = event.data;
+    }
+    if (!plan || !Array.isArray(plan.actions)) return null;
+    return plan.actions.find((entry) => isPlainObject(entry) && entry.id === payload.actionId) ?? null;
+  }
+
+  function dispatchAction({ productionId, body, context } = {}) {
+    if (actions === undefined || typeof actions.dispatch !== 'function') {
+      return {
+        status: 'blocked',
+        reason: 'no_executor',
+        error: { code: 'NO_EXECUTOR', message: 'the coordinator has no action executor' },
+      };
+    }
+
+    const slot = planSlotForAction(store.readEvents(productionId), body?.payload);
+    if (slot) {
+      const production = readProduction(productionId);
+      const voiceBlock = blockedAction(production, { slot });
+      if (voiceBlock) return voiceRefusal(voiceBlock);
+    }
+
+    return actions.dispatch({ productionId, body, context });
+  }
+
   function executeDispatch(productionId, next, production) {
     if (actions === undefined && typeof options.dispatch !== 'function') {
       return {
@@ -1134,21 +1165,7 @@ export function createProductionCoordinator(options = {}) {
     }
 
     const voiceBlock = blockedAction(production, next);
-    if (voiceBlock) {
-      return {
-        status: 'blocked',
-        reason: voiceBlock.code,
-        admitted: false,
-        code: voiceBlock.code,
-        blocked: voiceBlock,
-        error: {
-          code: voiceBlock.code,
-          message: voiceBlock.code === 'VOICE_AUDITION_STALE'
-            ? 'the approved prompt voice audition is stale; approve it again before dispatch'
-            : 'the character prompt voice audition must be approved before this shot can dispatch',
-        },
-      };
-    }
+    if (voiceBlock) return voiceRefusal(voiceBlock);
 
     const commandId = next.commandId ?? commandIdFor(productionId, next.planHash, next.actionId);
     const body = {
@@ -1383,6 +1400,7 @@ export function createProductionCoordinator(options = {}) {
     nextTakeSelection,
     onEvent: scheduleEvent,
     continue: continueProduction,
+    dispatch: dispatchAction,
     pending,
     status,
   });

@@ -63,8 +63,18 @@ export interface VoiceModeState {
   shots: VoiceModeShotState[];
 }
 
+export interface VoiceModeUiState {
+  suggestBusy?: boolean;
+  auditionBusy?: boolean;
+  message?: string;
+  error?: boolean;
+  code?: string;
+  auditionUrl?: string;
+}
+
 export interface RenderVoiceModeOptions {
   tier?: VoiceModeTier;
+  ui?: VoiceModeUiState | null;
 }
 
 const CONTROL_CHARS_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
@@ -168,20 +178,38 @@ function renderToggle(state: VoiceModeState): string {
     </label>`;
 }
 
-function renderPrompt(state: VoiceModeState): string {
+function renderPrompt(state: VoiceModeState, ui: VoiceModeUiState): string {
   if (state.mode !== 'prompt') {
     return '<p class="chr-hint" data-voice-mode-clip-note>Uses the character\'s voice clip. No voice description is generated.</p>';
   }
   const empty = state.description.trim() === '';
+  const suggestBusy = ui.suggestBusy === true;
+  const auditionBusy = ui.auditionBusy === true;
   return `<div class="chr-voice-mode-prompt" data-voice-mode-prompt>
       <label class="chr-field chr-field-wide">${escapeHtml(VOICE_DESCRIPTION_LABEL)}<textarea data-voice-mode-description maxlength="${MAX_VOICE_DESCRIPTION_CHARS}" rows="3" placeholder="Warm, low and unhurried. Clear articulation, gentle energy.">${escapeHtml(state.description)}</textarea></label>
       <div class="chr-voice-mode-actions">
-        <button type="button" class="chr-btn" data-action="voice-mode-suggest" aria-label="Suggest a voice description">Suggest</button>
-        <button type="button" class="chr-btn chr-btn-primary" data-action="voice-mode-audition" aria-label="Audition this voice description"${empty ? ' disabled' : ''}>Audition</button>
+        <button type="button" class="chr-btn" data-action="voice-mode-suggest" aria-label="Suggest a voice description"${suggestBusy ? ' disabled aria-busy="true"' : ''}>${suggestBusy ? 'Suggesting…' : 'Suggest'}</button>
+        <button type="button" class="chr-btn chr-btn-primary" data-action="voice-mode-audition" aria-label="Audition this voice description"${empty || auditionBusy ? ' disabled' : ''}${auditionBusy ? ' aria-busy="true"' : ''}>${auditionBusy ? 'Auditioning…' : 'Audition'}</button>
       </div>
       <p class="chr-hint" data-voice-mode-fictional-note>Describe a fictional voice. Do not name or imitate a real person.</p>
       <p class="chr-hint" data-voice-mode-note>Auditioning a written voice uses a short Google Colab run. It does not approve or reserve any spend.</p>
     </div>`;
+}
+
+function renderStatus(ui: VoiceModeUiState): string {
+  const message = typeof ui.message === 'string' ? ui.message : '';
+  if (!message) return '';
+  const code = typeof ui.code === 'string' && ui.code ? ` <code>${escapeHtml(ui.code)}</code>` : '';
+  const role = ui.error ? 'alert' : 'status';
+  const className = ui.error ? 'chr-status chr-status-error' : 'chr-hint';
+  return `<p class="${className}" data-voice-mode-status role="${role}" aria-live="polite">${escapeHtml(message)}${code}</p>`;
+}
+
+function renderAuditionResult(ui: VoiceModeUiState): string {
+  const url = typeof ui.auditionUrl === 'string' ? ui.auditionUrl : '';
+  return url
+    ? `<audio controls src="${escapeHtml(url)}" data-voice-mode-audition-result></audio>`
+    : '';
 }
 
 function renderOverrideOptions(selected: H3VoiceMode | null): string {
@@ -234,9 +262,13 @@ export function renderVoiceMode(
 ): string {
   const tier: VoiceModeTier = options.tier === 'advanced' ? 'advanced' : 'easy';
   const advanced = tier === 'advanced';
-  return `<section class="chr-voice-mode" data-voice-mode data-schema="${VOICE_MODE_SCHEMA}" data-tier="${tier}" data-character-id="${escapeHtml(state.characterId)}" data-mode="${state.mode}" data-effective-mode="${state.effectiveMode}" aria-label="Voice mode">
+  const ui: VoiceModeUiState = options.ui ?? {};
+  const busy = ui.suggestBusy === true || ui.auditionBusy === true;
+  return `<section class="chr-voice-mode" data-voice-mode data-schema="${VOICE_MODE_SCHEMA}" data-tier="${tier}" data-character-id="${escapeHtml(state.characterId)}" data-mode="${state.mode}" data-effective-mode="${state.effectiveMode}" aria-label="Voice mode"${busy ? ' aria-busy="true"' : ''}>
     ${renderToggle(state)}
-    ${renderPrompt(state)}
+    ${renderPrompt(state, ui)}
+    ${renderStatus(ui)}
+    ${renderAuditionResult(ui)}
     ${advanced ? renderAdvanced(state) : ''}
   </section>`;
 }

@@ -8,7 +8,7 @@ import {
   type UiMode,
   type UiPrefs,
   type UiPrefsStore,
-} from './prefs';
+} from './prefs.ts';
 
 export type Mode = UiMode;
 
@@ -16,8 +16,16 @@ export const MODE_STORAGE_KEY = STORAGE_KEY;
 export const MODE_CHANGE_EVENT = 'comfyrizz-mode-change';
 export const MODE_SHORTCUT = 'Ctrl/Cmd+Shift+A';
 export const MODE_LABELS: Readonly<Record<UiMode, string>> = Object.freeze({
-  easy: 'Easy',
-  advanced: 'Advanced',
+  easy: 'Studio',
+  advanced: 'Editor',
+});
+export const MODE_BUTTON_LABELS: Readonly<Record<UiMode, string>> = Object.freeze({
+  easy: 'Back to studio',
+  advanced: 'Open in editor',
+});
+export const MODE_LIVE_TEXT: Readonly<Record<UiMode, string>> = Object.freeze({
+  easy: 'Studio view.',
+  advanced: 'Editor view. All controls are visible.',
 });
 
 export interface ModeRoot {
@@ -55,9 +63,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 function modeAnnouncement(mode: UiMode): string {
-  return mode === 'advanced'
-    ? 'Advanced view. All controls are visible.'
-    : 'Easy view. Advanced controls are hidden.';
+  return MODE_LIVE_TEXT[mode];
 }
 
 function resolveDocument(options: ModeOptions): Document | null {
@@ -103,8 +109,8 @@ export function mountModeToggle(options: ModeOptions = {}): ModeController | nul
     button.id = `ui-mode-${mode}`;
     button.className = 'btn btn-secondary btn-sm mode-switch-btn';
     button.dataset.uiMode = mode;
-    button.textContent = MODE_LABELS[mode];
-    button.title = `${MODE_LABELS[mode]} view (Ctrl/Cmd+Shift+A)`;
+    button.textContent = MODE_BUTTON_LABELS[mode];
+    button.title = `${MODE_LABELS[mode]} view (${MODE_SHORTCUT})`;
     button.setAttribute('aria-pressed', 'false');
     button.setAttribute('aria-keyshortcuts', 'Control+Shift+A Meta+Shift+A');
     if (mode === 'advanced') {

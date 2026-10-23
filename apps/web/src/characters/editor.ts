@@ -20,7 +20,16 @@ import type {
   ExpressionItem,
   WardrobeItem,
 } from './api.ts';
-import { readVoiceModeState, renderVoiceMode } from './voice-mode.ts';
+import {
+  readVoiceModeState,
+  renderVoiceMode,
+  voiceModeCharacterPatch,
+  voiceModeDescriptionPatch,
+  voiceModeOverridePayload,
+  voiceModeSeedPatch,
+  type H3VoiceMode,
+  type VoiceModeUiState,
+} from './voice-mode.ts';
 
 export const EDITOR_SECTIONS = Object.freeze([
   { id: 'identity', title: 'Identity' },
@@ -182,6 +191,14 @@ export type CharacterEditorOptions = {
   voiceOptions?: Partial<VoiceOptions> | null;
   loadVoiceOptions?: ((signal?: AbortSignal) => Promise<VoiceOptions | Record<string, unknown>>) | null;
   fetchVoiceOptions?: ((signal?: AbortSignal) => Promise<VoiceOptions | Record<string, unknown>>) | null;
+  suggestVoiceDescription?: ((input: {
+    characterId?: string;
+    persona?: string;
+    sampleLines: string[];
+  }) => Promise<unknown>) | null;
+  production?: { id?: string; revision?: number; h3VoiceMode?: unknown } | null;
+  sendCommand?: ((envelope: unknown) => Promise<unknown>) | null;
+  commandId?: ((prefix: string) => string) | null;
   apiFetch?: ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) | null;
   audition?: ((
     character: unknown,
@@ -397,6 +414,18 @@ function errorMessage(error: unknown): string {
   return text ? text.slice(0, 400) : 'The character could not be saved.';
 }
 
+function errorCode(error: unknown): string {
+  const code = isPlainObject(error) ? error.code : undefined;
+  return typeof code === 'string' ? code : '';
+}
+
+let voiceModeCommandCounter = 0;
+
+function freshVoiceModeCommandId(): string {
+  voiceModeCommandCounter += 1;
+  return `cmd_voice_mode_${Date.now().toString(36)}_${voiceModeCommandCounter.toString(36)}`;
+}
+
 function method<T extends (...args: never[]) => unknown>(
   source: Record<string, unknown> | null | undefined,
   names: string[],
@@ -518,6 +547,8 @@ export class CharacterEditorController {
   destroyed: boolean;
   qwenAvailable: boolean;
   original: Character | null;
+  voiceUi: VoiceModeUiState;
+  production: { id?: string; revision?: number; h3VoiceMode?: unknown } | null;
 
   constructor(options: CharacterEditorOptions) {
     if (!options || typeof options !== 'object' || !options.api) {
@@ -544,6 +575,8 @@ export class CharacterEditorController {
         // best effort
       }
     };
+    this.voiceUi = {};
+    this.production = isPlainObject(options.production) ? clone(options.production) : null;
     const character = options.character ?? options.initial ?? options.value ?? null;
     this.original = character ? clone(character) : null;
     const draft = character ? draftFromCharacter(character) : blankDraft();
@@ -589,7 +622,10 @@ export class CharacterEditorController {
   }
 
   render(): string {
-    return renderCharacterEditor(this.getState());
+    return renderCharacterEditor(this.getState(), {
+      voiceModeProduction: this.production,
+      voiceModeUi: this.voiceUi,
+    });
   }
 
   toHTML(): string {
@@ -1120,6 +1156,275 @@ export class CharacterEditorController {
     return this.audition(line);
   }
 
+  /** Edit the Describe box without saving; the next save persists the draft. */
+  setVoiceModeDescription(description: unknown, notify = true): void {
+    const text = typeof description === 'string' ? description : '';
+    this.state.draft.voice = {
+      ...this.state.draft.voice,
+      voiceDescription: text,
+    } as CharacterVoice;
+    this.state.dirty = true;
+    if (notify) this.notify();
+  }
+
+  async persistVoiceModePatch(patch: CharacterPatch): Promise<boolean> {
+    const character = this.state.character;
+    if (!character || this.state.mode === 'create') {
+      this.notify();
+      return true;
+    }
+    if (this.state.saving) return false;
+    this.state.saving = true;
+    this.voiceUi = { ...this.voiceUi, message: '', error: false, code: '' };
+    this.notify();
+    try {
+      const updated = await this.patch(character.id, patch);
+      if (updated && typeof updated === 'object') this.applyCharacter(updated);
+      this.state.message = 'Saved.';
+      this.state.messageError = false;
+      this.state.saving = false;
+      this.notify();
+      return true;
+    } catch (error) {
+      this.state.saving = false;
+      this.state.message = errorMessage(error);
+      this.state.messageError = true;
+      this.voiceUi = { ...this.voiceUi, message: errorMessage(error), error: true, code: errorCode(error) };
+      this.notify();
+      return false;
+    }
+  }
+
+  async setVoiceMode(mode: unknown): Promise<boolean> {
+    let patch: { voice: { h3Mode: H3VoiceMode } };
+    try {
+      patch = voiceModeCharacterPatch(mode);
+    } catch (error) {
+      this.voiceUi = { ...this.voiceUi, message: errorMessage(error), error: true, code: errorCode(error) };
+      this.notify();
+      return false;
+    }
+    this.state.draft.voice = { ...this.state.draft.voice, ...patch.voice } as CharacterVoice;
+    this.state.dirty = true;
+    return this.persistVoiceModePatch(patch as CharacterPatch);
+  }
+
+  async saveVoiceModeSeed(seed: unknown): Promise<boolean> {
+    let patch: { voice: { seed: number } };
+    try {
+      const value = typeof seed === 'string'
+        ? (seed.trim() === '' ? Number.NaN : Number(seed))
+        : seed;
+      patch = voiceModeSeedPatch(value);
+    } catch (error) {
+      this.voiceUi = { ...this.voiceUi, message: errorMessage(error), error: true, code: errorCode(error) };
+      this.notify();
+      return false;
+    }
+    this.state.draft.voice = { ...this.state.draft.voice, ...patch.voice } as CharacterVoice;
+    this.state.dirty = true;
+    return this.persistVoiceModePatch(patch as CharacterPatch);
+  }
+
+  async saveVoiceModeOverride(override: unknown): Promise<boolean> {
+    let payload: { h3VoiceMode: H3VoiceMode | null };
+    try {
+      payload = voiceModeOverridePayload(override);
+    } catch (error) {
+      this.voiceUi = { ...this.voiceUi, message: errorMessage(error), error: true, code: errorCode(error) };
+      this.notify();
+      return false;
+    }
+    const productionId = asString(this.production?.id);
+    const sendCommand = this.options.sendCommand
+      ?? method<(envelope: unknown) => Promise<unknown>>(
+        this.api as Record<string, unknown>,
+        ['sendCommand'],
+      );
+    if (!productionId || !sendCommand) {
+      this.voiceUi = {
+        ...this.voiceUi,
+        message: 'A production override is not available here. Open the voice card from a production.',
+        error: true,
+        code: 'VOICE_MODE_PRODUCTION_REQUIRED',
+      };
+      this.notify();
+      return false;
+    }
+    const commandId = this.options.commandId?.('voice_mode_set') ?? freshVoiceModeCommandId();
+    const revision = Number(this.production?.revision);
+    const envelope = {
+      commandId,
+      idempotencyKey: commandId,
+      kind: 'voice_mode.set',
+      productionId,
+      ...(Number.isSafeInteger(revision) && revision >= 0
+        ? { expected: { productionRevision: revision } }
+        : {}),
+      payload,
+    };
+    try {
+      await sendCommand(envelope);
+      this.production = { ...(this.production ?? { id: productionId }), h3VoiceMode: payload.h3VoiceMode };
+      this.voiceUi = { ...this.voiceUi, message: 'Production override saved.', error: false, code: '' };
+      this.notify();
+      return true;
+    } catch (error) {
+      this.voiceUi = { ...this.voiceUi, message: errorMessage(error), error: true, code: errorCode(error) };
+      this.notify();
+      return false;
+    }
+  }
+
+  async suggestVoiceModeDescription(): Promise<boolean> {
+    if (this.voiceUi.suggestBusy === true) return false;
+    const suggest = this.options.suggestVoiceDescription
+      ?? method<(input: Record<string, unknown>) => Promise<unknown>>(
+        this.api as Record<string, unknown>,
+        ['suggestVoiceDescription'],
+      );
+    if (!suggest) {
+      this.voiceUi = {
+        ...this.voiceUi,
+        message: 'Voice description suggestions are not available in this build.',
+        error: true,
+        code: 'VOICE_DESCRIPTION_SUGGEST_UNAVAILABLE',
+      };
+      this.notify();
+      return false;
+    }
+    const voice = this.state.draft.voice as unknown as Record<string, unknown>;
+    const persona = asString(voice.persona) || this.state.draft.bible.speakingStyle || this.state.draft.summary;
+    this.voiceUi = { ...this.voiceUi, suggestBusy: true, message: '', error: false, code: '' };
+    this.notify();
+    try {
+      const result = await suggest({
+        ...(this.state.character?.id ? { characterId: this.state.character.id } : {}),
+        ...(persona ? { persona } : {}),
+        sampleLines: clone(this.state.draft.voice.sampleLines),
+      });
+      const record = isPlainObject(result) ? result : {};
+      const raw = typeof result === 'string'
+        ? result
+        : asString(record.voiceDescription ?? record.description);
+      const patch = voiceModeDescriptionPatch(raw);
+      this.state.draft.voice = {
+        ...this.state.draft.voice,
+        voiceDescription: patch.voice.voiceDescription,
+      } as CharacterVoice;
+      this.state.dirty = true;
+      this.voiceUi = {
+        ...this.voiceUi,
+        suggestBusy: false,
+        message: 'Suggestion added. Save the character to keep it.',
+        error: false,
+        code: '',
+      };
+      this.notify();
+      return true;
+    } catch (error) {
+      this.voiceUi = {
+        ...this.voiceUi,
+        suggestBusy: false,
+        message: errorMessage(error),
+        error: true,
+        code: errorCode(error),
+      };
+      this.notify();
+      return false;
+    }
+  }
+
+  async auditionVoiceModeDescription(): Promise<boolean> {
+    if (this.voiceUi.auditionBusy === true) return false;
+    const character = this.state.character;
+    let patch: { voice: { voiceDescription: string } };
+    try {
+      patch = voiceModeDescriptionPatch(
+        asString((this.state.draft.voice as unknown as Record<string, unknown>).voiceDescription),
+      );
+    } catch (error) {
+      this.voiceUi = { ...this.voiceUi, message: errorMessage(error), error: true, code: errorCode(error) };
+      this.notify();
+      return false;
+    }
+    const requestAudition = method<(request: Record<string, unknown>) => Promise<unknown>>(
+      this.api as Record<string, unknown>,
+      ['requestAudition'],
+    );
+    if (!character || !requestAudition) {
+      this.voiceUi = {
+        ...this.voiceUi,
+        message: 'Voice auditions are not available in this build.',
+        error: true,
+        code: 'AUDITION_UNAVAILABLE',
+      };
+      this.notify();
+      return false;
+    }
+    this.state.draft.voice = {
+      ...this.state.draft.voice,
+      h3Mode: 'prompt',
+      voiceDescription: patch.voice.voiceDescription,
+    } as CharacterVoice;
+    this.state.dirty = true;
+    this.voiceUi = {
+      ...this.voiceUi,
+      auditionBusy: true,
+      message: 'Auditioning…',
+      error: false,
+      code: '',
+      auditionUrl: '',
+    };
+    this.notify();
+    try {
+      const savedVoice: Record<string, unknown> = isPlainObject(character.voice) ? character.voice : {};
+      if (savedVoice.h3Mode !== 'prompt'
+        || asString(savedVoice.voiceDescription).trim() !== patch.voice.voiceDescription) {
+        const updated = await this.patch(character.id, {
+          voice: {
+            h3Mode: 'prompt',
+            voiceDescription: patch.voice.voiceDescription,
+          },
+        } as CharacterPatch);
+        if (updated && typeof updated === 'object') this.applyCharacter(updated);
+      }
+      const line = String(
+        this.state.draft.voice.sampleLines[0] ?? 'Hello! This is what I sound like.',
+      ).slice(0, MAX_SAMPLE_LINE_CHARS);
+      const outcome = await requestAudition({
+        characterId: character.id,
+        line,
+        description: patch.voice.voiceDescription,
+      });
+      const record = isPlainObject(outcome) ? outcome : {};
+      const ok = record.ok === true;
+      const code = asString(record.code);
+      const message = asString(record.message)
+        || (ok ? 'Audition ready.' : 'The voice audition could not be generated.');
+      this.voiceUi = {
+        ...this.voiceUi,
+        auditionBusy: false,
+        message,
+        error: !ok,
+        code,
+        auditionUrl: asString(record.url),
+      };
+      this.notify();
+      return ok;
+    } catch (error) {
+      this.voiceUi = {
+        ...this.voiceUi,
+        auditionBusy: false,
+        message: errorMessage(error),
+        error: true,
+        code: errorCode(error),
+      };
+      this.notify();
+      return false;
+    }
+  }
+
   async uploadImage(file: unknown, options: Record<string, unknown> = {}): Promise<CharacterImage | null> {
     const character = this.state.character;
     if (!character) {
@@ -1292,14 +1597,18 @@ function auditionFor(state: CharacterEditorState): AuditionState {
 }
 
 /** VX11 voice-mode card; only for a saved character (it needs an id). */
-function renderVoiceModeCard(state: RenderableState): string {
+function renderVoiceModeCard(state: RenderableState, options: EditorRenderOptions): string {
   const character = state.character;
   if (!character || typeof character.id !== 'string' || character.id === '') return '';
   const voice = { ...(character.voice as unknown as Record<string, unknown> | undefined ?? {}), ...(state.draft.voice as unknown as Record<string, unknown>) };
-  return renderVoiceMode(readVoiceModeState({ character: { id: character.id, voice } }));
+  const production = isPlainObject(options.voiceModeProduction) ? options.voiceModeProduction : null;
+  return renderVoiceMode(
+    readVoiceModeState({ character: { id: character.id, voice }, production }),
+    { tier: 'advanced', ui: options.voiceModeUi ?? null },
+  );
 }
 
-function renderVoice(state: RenderableState): string {
+function renderVoice(state: RenderableState, options: EditorRenderOptions): string {
   const voice = state.draft.voice;
   const availability = auditionFor(state);
   const voices = voice.engine === 'qwen3-tts'
@@ -1335,7 +1644,7 @@ function renderVoice(state: RenderableState): string {
       <span class="chr-hint" data-audition-reason role="status">${escapeHtml(availability.reason || state.audition.message)}</span>
       ${state.audition.url ? `<audio controls src="${escapeHtml(state.audition.url)}"></audio>` : ''}
     </div>
-    ${renderVoiceModeCard(state)}
+    ${renderVoiceModeCard(state, options)}
   </details>`;
 }
 
@@ -1361,6 +1670,8 @@ export type EditorRenderOptions = {
   voiceOptions?: Partial<VoiceOptions> | null;
   qwenAvailable?: boolean;
   fictional?: boolean;
+  voiceModeProduction?: { h3VoiceMode?: unknown } | null;
+  voiceModeUi?: VoiceModeUiState | null;
 };
 
 export function renderCharacterEditor(
@@ -1419,7 +1730,7 @@ export function renderCharacterEditor(
       ${renderLook(value)}
       ${renderWardrobe(value)}
       ${renderExpressions(value)}
-      ${renderVoice(value)}
+      ${renderVoice(value, options)}
       ${renderBible(value)}
     </div>
   </aside>`;
@@ -1458,7 +1769,7 @@ export function mountCharacterEditor(
   let unsubscribe: (() => void) | null = null;
 
   const render = () => {
-    root.innerHTML = renderCharacterEditor(controller.getState());
+    root.innerHTML = controller.render();
   };
 
   const onBlur = (event: Event) => {
@@ -1468,11 +1779,31 @@ export function mountCharacterEditor(
     void controller.saveField(target.dataset.field, elementValue(target));
   };
 
+  const onInput = (event: Event) => {
+    const target = event.target as HTMLTextAreaElement | null;
+    if (!target || target.dataset?.voiceModeDescription === undefined) return;
+    controller.setVoiceModeDescription(target.value, false);
+    const button = root.querySelector('[data-action="voice-mode-audition"]') as HTMLElement & { disabled: boolean } | null;
+    if (button) button.disabled = target.value.trim() === '';
+  };
+
   const onChange = (event: Event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
     if (!target) return;
     if (target.dataset?.fictional !== undefined) {
       controller.setFictional((target as HTMLInputElement).checked);
+      return;
+    }
+    if (target.dataset?.voiceModeToggle !== undefined) {
+      void controller.setVoiceMode((target as HTMLInputElement).checked ? 'prompt' : 'clip');
+      return;
+    }
+    if (target.dataset?.voiceModeSeed !== undefined) {
+      void controller.saveVoiceModeSeed((target as HTMLInputElement).value);
+      return;
+    }
+    if (target.dataset?.voiceProductionOverride !== undefined) {
+      void controller.saveVoiceModeOverride((target as HTMLSelectElement).value || null);
       return;
     }
     if (target.dataset?.field === 'voice.engine') {
@@ -1516,6 +1847,8 @@ export function mountCharacterEditor(
       const imgId = action.dataset.imgId;
       if (imgId) void controller.setPrimary(imgId);
     } else if (name === 'audition') void controller.audition();
+    else if (name === 'voice-mode-suggest') void controller.suggestVoiceModeDescription();
+    else if (name === 'voice-mode-audition') void controller.auditionVoiceModeDescription();
     else if (name === 'add-sample-line') controller.addSampleLine();
     else if (name === 'remove-sample-line') controller.removeSampleLine(Number(action.dataset.index));
   };
@@ -1531,6 +1864,7 @@ export function mountCharacterEditor(
   root.addEventListener('change', onChange);
   root.addEventListener('click', onClick);
   root.addEventListener('change', onUpload);
+  root.addEventListener('input', onInput);
   render();
   void controller.loadVoiceOptions();
   if (!options.character && (options.id || controller.state.character)) {
@@ -1545,6 +1879,7 @@ export function mountCharacterEditor(
       root.removeEventListener('change', onChange);
       root.removeEventListener('click', onClick);
       root.removeEventListener('change', onUpload);
+      root.removeEventListener('input', onInput);
       unsubscribe?.();
       controller.destroy();
       root.innerHTML = '';

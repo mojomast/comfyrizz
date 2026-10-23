@@ -132,7 +132,9 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
       { planId: 'plan_1', planRevision: 0, actionId: 'act_2' },
     ],
   );
-  assert.equal(calls.find((item) => item.kind === 'spend-cap').body.ceiling, 12);
+  const spend = calls.find((item) => item.kind === 'spend-cap').body;
+  assert.equal(spend.ceiling, 12);
+  assert.deepEqual(spend.expected, { productionRevision: 4 });
 });
 
 test('a stale card refetches, marks the plan stale, and does not dispatch', async () => {
