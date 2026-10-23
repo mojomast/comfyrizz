@@ -779,6 +779,7 @@ async function refreshClips(): Promise<void> {
     scriptPanel?.setClips(result.clips);
     productionTab?.setClips(result.clips);
     renderBar?.update();
+    syncExportButton();
     await hydrateTakePreview(result.clips, request);
   } catch (error) {
     if (request === clipsRequest) logActivity(`Clips refresh failed: ${(error as Error).message}`);
@@ -1714,8 +1715,7 @@ function renderExportPanel(): void {
   const refused = exportState.refused.length
     ? `<div class="export-refused">${exportState.refused.map(item => `<div class="event">refused <b>${esc(item.assetId)}</b>${item.licenseId ? ` · ${esc(item.licenseId)}` : ''} — ${esc(item.reason ?? 'not redistributable')}</div>`).join('')}</div>`
     : '';
-  host.innerHTML = `<div class="export-head"><button id="export-bundle"${exportState.running ? ' disabled' : ''}>${exportState.running ? 'Exporting…' : 'Export bundle'}</button><span class="hint" id="export-state">${esc(exportState.label || 'video · captions · credits · zip')}</span></div><div class="hint">Social pack: thumb.jpg · preview.gif · card.png (1200×630) · chapters.txt</div>${log}${files}${refused}`;
-  $('export-bundle').addEventListener('click', () => void exportBundle());
+  host.innerHTML = `<div class="export-head"><span class="hint" id="export-state">${esc(exportState.label || 'video · captions · credits · zip')}</span></div><div class="hint">Social pack: thumb.jpg · preview.gif · card.png (1200×630) · chapters.txt</div>${log}${files}${refused}`;
 }
 
 async function exportBundle(): Promise<void> {
@@ -2105,9 +2105,19 @@ async function renderExportBlob(overrideReason?: string): Promise<{ blob: Blob; 
   return { blob, revision: Number(pkg.revision) || 0, ...(renderId ? { renderId } : {}) };
 }
 
+function syncExportButton(): void {
+  const button = document.getElementById('render') as HTMLButtonElement | null;
+  if (!button || button.dataset.exporting === 'true') return;
+  const gate = clipStore.gate();
+  const blocked = gate.total > 0 && !gate.ok;
+  button.disabled = blocked;
+  button.title = blocked ? `${gate.approved}/${gate.total} approved` : 'Export MP4';
+}
+
 async function exportMp4(overrideReason?: string): Promise<void> {
   const button = $<HTMLButtonElement>('render');
   const label = $('render-state');
+  button.dataset.exporting = 'true';
   button.disabled = true;
   label.textContent = 'recompiling + rendering on CPU (~90 s)…';
   logActivity(overrideReason ? 'Export started with a written render-gate override' : 'Export started: recompile with A2, render with Remotion on CPU');
@@ -2128,12 +2138,17 @@ async function exportMp4(overrideReason?: string): Promise<void> {
     if (overrideReason === undefined && blocked.code === 'RENDER_GATE_BLOCKED') {
       void refreshClips();
       const reason = await renderBar?.requestOverride(blocked.gate ?? clipStore.gate());
-      if (reason) { button.disabled = false; await exportMp4(reason); return; }
+      if (reason) {
+        delete button.dataset.exporting;
+        await exportMp4(reason);
+        return;
+      }
     }
     label.textContent = `export failed: ${(error as Error).message}`;
     logActivity(`Export failed: ${(error as Error).message}`);
   } finally {
-    button.disabled = false;
+    if (button.dataset.exporting === 'true') delete button.dataset.exporting;
+    syncExportButton();
   }
 }
 
@@ -2738,13 +2753,13 @@ function init(opened: OpenedProject): void {
   $('play').addEventListener('click', () => player?.toggle());
   scrub.addEventListener('input', () => player?.seekTo(Number(scrub.value)));
   const renderButton = $('render');
-  const splitGroup = document.getElementById('render-split-button');
   let renderBarHost = document.getElementById('render-bar-host');
   if (!renderBarHost) {
     renderBarHost = document.createElement('div');
     renderBarHost.id = 'render-bar-host';
-    (splitGroup ?? renderButton).before(renderBarHost);
   }
+  renderBarHost.hidden = true;
+  document.body.append(renderBarHost);
   renderBar = mountRenderBar(renderBarHost, {
     clips: () => clipStore.all(),
     gate: () => clipStore.gate(),
@@ -2793,6 +2808,7 @@ function init(opened: OpenedProject): void {
       void openClipViewer(clip, findReviewOpenButton(target.clipId) ?? renderBarHost, target.takeId);
     },
   } as RenderBarOptions);
+  syncExportButton();
   renderButton.addEventListener('click', () => void beginExport());
   const renderLocation = $<HTMLSelectElement>('render-location');
   if (renderLocation) {
@@ -2808,14 +2824,14 @@ function init(opened: OpenedProject): void {
 
   const exportMenuToggle = document.getElementById('export-menu-toggle');
   const exportMenu = document.getElementById('export-menu');
-  const topbarExportMp4 = document.getElementById('topbar-export-mp4');
   const topbarExportBundle = document.getElementById('topbar-export-bundle');
+  const openStudio = document.getElementById('more-open-studio');
 
   function openExportMenu(): void {
     if (!exportMenu || !exportMenuToggle) return;
     exportMenu.hidden = false;
     exportMenuToggle.setAttribute('aria-expanded', 'true');
-    const first = exportMenu.querySelector<HTMLElement>('[role="menuitem"], button');
+    const first = exportMenu.querySelector<HTMLElement>('[role="menuitem"]:not([hidden])');
     first?.focus();
   }
 
@@ -2838,7 +2854,7 @@ function init(opened: OpenedProject): void {
       closeExportMenu(true);
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      const items = Array.from(exportMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"], button'));
+      const items = Array.from(exportMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([hidden])'));
       const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
       if (currentIndex === -1) {
         items[0]?.focus();
@@ -2851,14 +2867,14 @@ function init(opened: OpenedProject): void {
     }
   });
 
-  topbarExportMp4?.addEventListener('click', () => {
-    closeExportMenu(false);
-    void beginExport();
-  });
-
   topbarExportBundle?.addEventListener('click', () => {
     closeExportMenu(false);
     void exportBundle();
+  });
+
+  openStudio?.addEventListener('click', () => {
+    closeExportMenu(false);
+    modeControl?.setMode('easy');
   });
 
   document.addEventListener('click', event => {

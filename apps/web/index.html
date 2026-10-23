@@ -28,13 +28,14 @@
         <button type="button" id="settings-open" class="btn btn-secondary btn-sm">Settings</button>
 
         <div class="split-button" id="render-split-button">
-          <button id="render" class="btn btn-primary btn-sm primary" type="button" title="Render video">Render</button>
-          <button type="button" id="export-menu-toggle" class="btn btn-secondary btn-sm split-toggle" aria-haspopup="menu" aria-expanded="false" aria-label="Export menu" title="Export options">
-            Export <span class="split-caret" aria-hidden="true">▾</span>
+          <button id="render" class="btn btn-primary btn-sm primary" type="button" title="Export MP4">Export MP4</button>
+          <button type="button" id="export-menu-toggle" class="btn btn-secondary btn-sm split-toggle" aria-haspopup="menu" aria-expanded="false" aria-label="More" title="More">
+            More <span class="split-caret" aria-hidden="true">▾</span>
           </button>
-          <div id="export-menu" class="popover export-menu" role="menu" aria-label="Export options" hidden>
-            <button type="button" id="topbar-export-mp4" class="btn btn-ghost btn-sm menu-item" role="menuitem">Export MP4</button>
+          <div id="export-menu" class="popover export-menu" role="menu" aria-label="More" hidden>
             <button type="button" id="topbar-export-bundle" class="btn btn-ghost btn-sm menu-item" role="menuitem">Export bundle</button>
+            <button type="button" id="more-duplicate-video" class="btn btn-ghost btn-sm menu-item" role="menuitem" hidden>Duplicate video</button>
+            <button type="button" id="more-open-studio" class="btn btn-ghost btn-sm menu-item" role="menuitem">Open in studio</button>
           </div>
         </div>
       </header>

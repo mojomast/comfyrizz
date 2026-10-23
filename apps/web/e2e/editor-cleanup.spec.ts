@@ -55,3 +55,14 @@ test('the top bar contains no text Storyboard', async ({ page }) => {
   await page.setContent(indexHtml);
   await expect(page.locator('#topbar')).not.toContainText('Storyboard');
 });
+
+test('exactly one Export MP4 button, More contains Export bundle, and the rail has no Export bundle', async ({ page }) => {
+  expect(source).not.toContain('>Export bundle</button>');
+  expect(source).not.toContain('id="export-bundle"');
+  expect(indexHtml).not.toContain('id="topbar-export-mp4"');
+  await page.setContent(indexHtml);
+  await expect(page.getByRole('button', { name: 'Export MP4' })).toHaveCount(1);
+  await expect(page.locator('#export-menu')).toContainText('Export bundle');
+  await expect(page.locator('#activity-pane')).not.toContainText('Export bundle');
+  await expect(page.locator('#topbar')).not.toContainText('approved');
+});
