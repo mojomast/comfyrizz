@@ -139,14 +139,23 @@ test('IP49: a native speaking voice needs one explicitly declared preset', async
   assert.equal(directory.ok, false);
   assert.match(String(directory.error), /VOICE_NATIVE_VOICE_UNKNOWN/);
 
+  // Review fix-up: nativeVoice has ONE location (the top-level argument);
+  // voice.nativeVoice is an unknown voice key, not an alias.
   const nested = await runCharacterTool(
     voiceProposal({ voice: { engine: 'none', nativeVoice: 'MiniMax-2' } }),
     ctx,
   );
-  assert.equal(nested.ok, true);
-  assert.equal((nested.proposal as any).voicePath, 'native');
-  assert.equal((nested.proposal as any).nativeVoice, 'MiniMax-2');
-  assert.deepEqual(ctx.calls, [{ name: 'propose', value: nested.proposal }]);
+  assert.equal(nested.ok, false);
+  assert.equal(ctx.calls.length, 0);
+
+  const named = await runCharacterTool(
+    voiceProposal({ voice: { engine: 'none' }, nativeVoice: 'MiniMax-2' }),
+    ctx,
+  );
+  assert.equal(named.ok, true);
+  assert.equal((named.proposal as any).voicePath, 'native');
+  assert.equal((named.proposal as any).nativeVoice, 'MiniMax-2');
+  assert.deepEqual(ctx.calls, [{ name: 'propose', value: named.proposal }]);
 });
 
 test('IP49: a single declared native voice is never picked when none was named', async () => {
@@ -268,4 +277,33 @@ test('IP49: legacy voice proposals are unchanged without a speaking-voice contex
     voice: { engine: 'kokoro', voice: 'af_heart', speed: 1.1 },
     reason: 'Keep one speaking voice for the whole video.',
   });
+});
+
+test('IP49 review fix-up: a named native preset is never silently dropped off the native path', async () => {
+  for (const ctx of [fakeContext({ speakingVoice: KOKORO }), fakeContext()]) {
+    const result = await runCharacterTool(
+      voiceProposal({ voice: { engine: 'kokoro', voice: 'af_heart' }, nativeVoice: 'MiniMax-1' }),
+      ctx,
+    );
+    assert.equal(result.ok, false);
+    assert.match(String(result.error), /VOICE_NATIVE_VOICE_UNAVAILABLE/);
+    assert.equal(ctx.calls.length, 0);
+  }
+  const draft = await runCharacterTool({
+    name: 'character_propose_draft',
+    args: { name: 'Bean', role: 'mascot', summary: 'A bean', identity_prompt: 'round bean', nativeVoice: 'MiniMax-1' },
+  }, fakeContext({ speakingVoice: NATIVE, nativeVoices: [{ id: 'MiniMax-1' }] }));
+  assert.equal(draft.ok, false);
+  assert.match(String(draft.error), /nativeVoice requires voice/);
+});
+
+test('IP49 review fix-up: Qwen is refused on the native path too (native preset or Kokoro only)', async () => {
+  const ctx = fakeContext({ speakingVoice: NATIVE, nativeVoices: [{ id: 'MiniMax-1' }] });
+  const result = await runCharacterTool(
+    voiceProposal({ voice: { engine: 'qwen3-tts', voice: 'Ryan' }, nativeVoice: 'MiniMax-1' }),
+    ctx,
+  );
+  assert.equal(result.ok, false);
+  assert.match(String(result.error), /VOICE_KOKORO_REQUIRED/);
+  assert.equal(ctx.calls.length, 0);
 });

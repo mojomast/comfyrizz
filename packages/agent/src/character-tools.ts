@@ -283,12 +283,6 @@ const voiceSchema = {
       description: 'kokoro, qwen3-tts, or none. One voice per video. Native speaking voices use the model preset, not this engine.',
     },
     voice: { type: 'string', minLength: 1, maxLength: 64 },
-    nativeVoice: {
-      type: 'string',
-      minLength: 1,
-      maxLength: 80,
-      description: 'A declared built-in native preset id for models with a native voice. Never a file or URL.',
-    },
     speed: { type: 'number', minimum: 0.5, maximum: 1.5 },
     blend: {
       type: 'array',
@@ -643,7 +637,7 @@ function readScenes(args: Record<string, unknown>, ctx: CharacterToolContext): R
 function readVoice(raw: unknown, key = 'voice'): Read<CharacterVoice> {
   if (!isPlainObject(raw)) return fail(`${key} must be an object`);
   const allowed = new Set([
-    'engine', 'voice', 'nativeVoice', 'speed', 'blend', 'chunking', 'qwen_mode', 'delivery', 'persona',
+    'engine', 'voice', 'speed', 'blend', 'chunking', 'qwen_mode', 'delivery', 'persona',
     'language', 'presetId', 'sampleLines',
   ]);
   const unknown = Object.keys(raw).find(name => !allowed.has(name));
@@ -715,16 +709,12 @@ function readVoice(raw: unknown, key = 'voice'): Read<CharacterVoice> {
 }
 
 /**
- * Read an explicit native preset id from the tool args or the voice object.
- * This is only an id: paths, URLs and unknown ids never become a native voice.
+ * Read the explicit native preset id from the top-level nativeVoice argument
+ * (its only location). This is only an id: paths, URLs and unknown ids never
+ * become a native voice.
  */
-function readNativeVoice(args: Record<string, unknown>, rawVoice: unknown): Read<string | undefined> {
-  const top = args.nativeVoice;
-  const nested = isPlainObject(rawVoice) ? rawVoice.nativeVoice : undefined;
-  if (top !== undefined && nested !== undefined && top !== nested) {
-    return fail('nativeVoice does not match voice.nativeVoice');
-  }
-  const raw = top !== undefined ? top : nested;
+function readNativeVoice(args: Record<string, unknown>): Read<string | undefined> {
+  const raw = args.nativeVoice;
   if (raw === undefined || raw === null) return { value: undefined };
   if (typeof raw !== 'string') return fail('nativeVoice must be a string');
   const value = raw.trim();
@@ -749,6 +739,14 @@ function speakingChoiceFor(
   ctx: CharacterToolContext,
 ): Read<SpeakingChoice> {
   const speaking = speakingVoiceOf(ctx);
+  if (voice.engine === 'qwen3-tts' && speaking) {
+    return fail('VOICE_KOKORO_REQUIRED: the speaking voice is the native preset or Kokoro; use engine kokoro, or none for no voice');
+  }
+  if (nativeVoice && speaking?.voicePath !== 'native') {
+    // Never silently drop a named preset: it is only valid when the host
+    // resolved the native path for the selected model.
+    return fail('VOICE_NATIVE_VOICE_UNAVAILABLE: the selected model has no resolved native voice; do not name a nativeVoice');
+  }
   if (!speaking) return { value: {} };
 
   if (speaking.voicePath === 'native') {
@@ -1195,7 +1193,7 @@ async function proposeDraft(args: Record<string, unknown>, ctx: CharacterToolCon
   const identity = readText(args, 'identity_prompt', CHARACTER_IDENTITY_PROMPT_MAX_CHARS);
   if ('error' in identity) return errorResult(identity.error);
 
-  const nativeVoice = readNativeVoice(args, args.voice);
+  const nativeVoice = readNativeVoice(args);
   if ('error' in nativeVoice) return errorResult(nativeVoice.error);
   let voice: CharacterVoice | undefined;
   if (args.voice !== undefined && args.voice !== null) {
@@ -1203,6 +1201,7 @@ async function proposeDraft(args: Record<string, unknown>, ctx: CharacterToolCon
     if ('error' in read) return errorResult(read.error);
     voice = read.value;
   }
+  if (nativeVoice.value && !voice) return errorResult('nativeVoice requires voice');
   let choice: SpeakingChoice = {};
   if (voice) {
     const read = speakingChoiceFor(voice, nativeVoice.value, ctx);
@@ -1246,7 +1245,7 @@ async function proposeVoice(args: Record<string, unknown>, ctx: CharacterToolCon
   if (args.voice === undefined || args.voice === null) return errorResult('voice is required');
   const voice = readVoice(args.voice);
   if ('error' in voice) return errorResult(voice.error);
-  const nativeVoice = readNativeVoice(args, args.voice);
+  const nativeVoice = readNativeVoice(args);
   if ('error' in nativeVoice) return errorResult(nativeVoice.error);
   const choice = speakingChoiceFor(voice.value, nativeVoice.value, ctx);
   if ('error' in choice) return errorResult(choice.error);
