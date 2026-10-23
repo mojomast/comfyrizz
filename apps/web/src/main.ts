@@ -15,6 +15,7 @@ import { createEasyApi } from './easy/api.ts';
 import { defaultEasyState } from './easy/store.ts';
 import type { EasyState } from './easy/types.ts';
 import { mountInspectorGenerate } from './editor/inspector/generate.ts';
+import { mountSettingsDialog } from './settings/dialog.ts';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
 import { readRunSnapshot } from './run-progress.ts';
@@ -2248,6 +2249,7 @@ function init(opened: OpenedProject): void {
     void iterationLevelMount?.refresh();
   });
   void iterationLevelMount.refresh();
+  mountSettingsDialog(document.body);
   mountEasyActions(modeControl);
   editorStore.subscribe(() => renderModeSummary());
 
