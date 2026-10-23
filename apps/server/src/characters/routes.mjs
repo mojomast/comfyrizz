@@ -1,6 +1,6 @@
 import * as nodeFs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { extname, join } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   CHARACTER_ID_RE,
   MAX_IMAGE_BYTES,
@@ -402,6 +402,26 @@ function readJsonBody(request) {
   });
 }
 
+function readOptionalJsonBody(request) {
+  return readLimited(request, JSON_BODY_MAX_BYTES).then(body => {
+    if (!body.ok) {
+      fail('TOO_LARGE', 'request body is too large', 413);
+    }
+    const text = body.bytes.toString('utf8');
+    if (text.trim() === '') return {};
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new RouteError('INVALID_JSON', 'request body must be JSON');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new RouteError('INVALID_JSON', 'request body must be a JSON object');
+    }
+    return parsed;
+  });
+}
+
 function characterIdInRoute(value) {
   if (typeof value !== 'string' || !CHARACTER_ID_RE.test(value)) {
     fail('INVALID_ID', 'character id must match chr_ followed by 16 lowercase hex characters');
@@ -527,6 +547,50 @@ function serveThumb(request, response, store, id, image) {
   serveImage(request, response, original);
 }
 
+const AUDITION_OPTION_KEYS = new Set(['worker', 'model']);
+
+function resolveAuditionConfig(value) {
+  if (value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('audition must be an object');
+  }
+  for (const key of Object.keys(value)) {
+    if (!AUDITION_OPTION_KEYS.has(key)) {
+      throw new TypeError(`unknown audition option ${key}`);
+    }
+  }
+  if (!value.worker || typeof value.worker.run !== 'function') {
+    throw new TypeError('audition.worker must provide run()');
+  }
+  return Object.freeze({ worker: value.worker, model: value.model });
+}
+
+function auditionStatusFor(code) {
+  switch (code) {
+    case 'AUDITION_NATIVE_VOICE':
+      return 409;
+    case 'AUDITION_ADMISSION_REQUIRED':
+      return 403;
+    case 'AUDITION_INVALID_INPUT':
+    case 'AUDITION_INVALID_LINE':
+    case 'AUDITION_INVALID_VOICE':
+      return 400;
+    case 'AUDITION_UNAVAILABLE':
+    case 'AUDITION_NO_SYNTH':
+      return 503;
+    case 'AUDITION_SYNTH_FAILED':
+    case 'AUDITION_WRITE_FAILED':
+      return 502;
+    default:
+      return 500;
+  }
+}
+
+function insideDirectory(root, file) {
+  const rel = relative(root, file);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
 export function createCharacterRoutes(options = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) {
     throw new TypeError('createCharacterRoutes options must be an object');
@@ -535,6 +599,8 @@ export function createCharacterRoutes(options = {}) {
   const sessions = resolveSessions(options);
   const events = options.events;
   const thumbBuilder = options.thumbnail ?? options.thumb;
+  const auditionConfig = resolveAuditionConfig(options.audition);
+  const mediaTickets = options.mediaTickets;
 
   function sessionStore() {
     if (!sessions) {
@@ -971,6 +1037,89 @@ export function createCharacterRoutes(options = {}) {
     sendJson(response, 200, { cast: castForResponse(storeFor(), result), removed: result.entry.castId });
   }
 
+  async function handleAudition(request, response, id) {
+    const method = String(request.method ?? 'GET').toUpperCase();
+    if (method !== 'POST') {
+      sendError(response, 405, 'METHOD_NOT_ALLOWED', 'method not allowed');
+      return true;
+    }
+    if (!auditionConfig) {
+      sendError(response, 503, 'AUDITION_UNAVAILABLE', 'voice auditions are not configured on this server');
+      return true;
+    }
+    if (!mediaTickets || typeof mediaTickets.mint !== 'function') {
+      sendError(response, 503, 'AUDITION_UNAVAILABLE', 'media tickets are not available');
+      return true;
+    }
+
+    const store = storeFor();
+    const character = store.get(id);
+    if (!character) fail('NOT_FOUND', `character ${id} does not exist`, 404);
+
+    const body = await readOptionalJsonBody(request);
+    const result = await auditionConfig.worker.run({
+      character,
+      voice: character.voice,
+      line: body.line,
+      model: auditionConfig.model,
+      ...(body.nativeVoice !== undefined ? { nativeVoice: body.nativeVoice } : {}),
+      ...(body.language !== undefined ? { language: body.language } : {}),
+    });
+
+    if (!result || result.ok !== true) {
+      const code = typeof result?.code === 'string' ? result.code : 'AUDITION_SYNTH_FAILED';
+      sendJson(response, auditionStatusFor(code), result ?? {
+        ok: false,
+        code,
+        message: 'the audition worker returned no result',
+      });
+      return true;
+    }
+
+    if (typeof result.path !== 'string' || typeof result.file !== 'string') {
+      sendError(response, 500, 'AUDITION_INVALID_INPUT', 'the audition worker returned an invalid file');
+      return true;
+    }
+    const directory = typeof store.auditionsDir === 'function'
+      ? store.auditionsDir(id)
+      : typeof (options.rootDir ?? options.runtimeDir) === 'string'
+        ? join(options.rootDir ?? options.runtimeDir, 'characters', id, 'auditions')
+        : null;
+    if (!directory) {
+      sendError(response, 500, 'AUDITION_INVALID_DIRECTORY', 'the audition directory is not configured');
+      return true;
+    }
+
+    const root = resolve(directory);
+    const file = resolve(result.path);
+    if (!insideDirectory(root, file)) {
+      sendError(response, 500, 'AUDITION_INVALID_INPUT', 'the audition file escapes the character directory');
+      return true;
+    }
+    if (!nodeFs.existsSync(file) || !nodeFs.statSync(file).isFile()) {
+      sendError(response, 500, 'AUDITION_UNAVAILABLE', 'the audition file does not exist');
+      return true;
+    }
+
+    const minted = mediaTickets.mint(file, { artifactId: `character:${id}:${result.file}` });
+    publish(events, {
+      type: 'character.audition.ready',
+      characterId: id,
+      voicePath: result.voicePath,
+      engine: result.engine,
+      file: result.file,
+      cached: result.cached === true,
+    });
+    const { path: _localPath, ...view } = result;
+    sendJson(response, 200, {
+      ...view,
+      ticket: minted.ticket,
+      expiresAt: minted.expiresAt,
+      url: minted.url,
+    });
+    return true;
+  }
+
   async function handleCharacters(request, response, rest, searchParams) {
     const method = String(request.method ?? 'GET').toUpperCase();
     const decoded = rest === '' ? [] : rest.split('/').map(safeDecode);
@@ -993,6 +1142,11 @@ export function createCharacterRoutes(options = {}) {
       else if (method === 'PATCH' || method === 'PUT') await handlePatchCharacter(request, response, id);
       else if (method === 'DELETE') handleDeleteCharacter(response, id);
       else sendError(response, 405, 'METHOD_NOT_ALLOWED', 'method not allowed');
+      return true;
+    }
+
+    if (decoded.length === 2 && decoded[1] === 'audition') {
+      await handleAudition(request, response, id);
       return true;
     }
 

@@ -21,12 +21,16 @@ import { basename, dirname, join, resolve } from 'node:path';
 import {
   MAX_SAMPLE_LINE_CHARS,
   VoiceValidationError,
+  resolveSpeakingVoice,
+  supportsNativeVoice,
   validateVoice,
   voiceHash as computeVoiceHash,
 } from './voice.mjs';
 
 export const AUDITION_UNAVAILABLE = 'AUDITION_UNAVAILABLE';
 export const AUDITION_READY = 'AUDITION_READY';
+export const AUDITION_NATIVE_VOICE = 'AUDITION_NATIVE_VOICE';
+export const AUDITION_ADMISSION_REQUIRED = 'AUDITION_ADMISSION_REQUIRED';
 export const AUDITION_INVALID_INPUT = 'AUDITION_INVALID_INPUT';
 export const AUDITION_INVALID_LINE = 'AUDITION_INVALID_LINE';
 export const AUDITION_INVALID_VOICE = 'AUDITION_INVALID_VOICE';
@@ -54,6 +58,16 @@ const UNAVAILABLE_MESSAGE = {
   none: 'This character has no voice configured',
   missing: 'No synthesizer is available for this voice',
 };
+
+/**
+ * Engines that spend money or a remote GPU. Kokoro runs locally on CPU and is
+ * the only unpaid synthesis path. The list is a property of the engine, never a
+ * guess from the voice name.
+ */
+export const PAID_VOICE_ENGINES = Object.freeze(['qwen3-tts']);
+
+const NATIVE_VOICE_MESSAGE = 'This model speaks with its built-in voice; audition it in a generated take';
+const ADMISSION_REQUIRED_MESSAGE = 'paid voice synthesis needs an admitted action';
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -676,6 +690,149 @@ export function createAuditionCache(options = {}) {
     isCached: (target) => ready.has(resolve(String(target))) && api.sizeOf(resolve(String(target))) > 0,
     clearMemoryCache: () => ready.clear(),
   });
+}
+
+/**
+ * Create the audition worker the HTTP route calls.
+ *
+ * The worker has one explicit Q4 decision: a model whose capabilities declare
+ * a native voice answers AUDITION_NATIVE_VOICE and is never synthesised.
+ * Otherwise the character's Kokoro voice is the speaking path. A paid engine
+ * is synthesised only when the injected `admission(request)` function returns
+ * true for that exact request.
+ *
+ * options:
+ * - cache: a createAuditionCache() (or any object with ensure())
+ * - admission: optional async (request) => boolean
+ * - model: optional default model; run({ model }) overrides it
+ */
+export function createAuditionWorker(options = {}) {
+  if (!isPlainObject(options)) throw new TypeError('createAuditionWorker options must be an object');
+  const cache = options.cache ?? createAuditionCache(options);
+  if (!cache || typeof cache.ensure !== 'function') {
+    throw new TypeError('createAuditionWorker requires an audition cache with ensure()');
+  }
+  const admission = options.admission;
+  if (admission !== undefined && typeof admission !== 'function') {
+    throw new TypeError('createAuditionWorker admission must be a function');
+  }
+  const defaultModel = options.model;
+
+  async function admitted(request) {
+    if (typeof admission !== 'function') return false;
+    try {
+      return (await admission(request)) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function run(input = {}) {
+    if (!isPlainObject(input)) {
+      return failure(AUDITION_INVALID_INPUT, 'an audition request object is required');
+    }
+
+    const { character, voice: rawVoice } = resolveVoiceInput(input.character ?? input, input);
+    if (!rawVoice) {
+      return failure(AUDITION_INVALID_VOICE, 'a character or voice is required');
+    }
+
+    const model = input.model ?? defaultModel;
+    const requestedLine = firstDefined(
+      input.line,
+      input.text,
+      rawVoice?.sampleLines?.[0],
+      DEFAULT_AUDITION_LINE,
+    );
+    const line = normalizeLine(requestedLine);
+
+    if (supportsNativeVoice(model)) {
+      const speakingOptions = {
+        model,
+        ...(rawVoice !== undefined ? { voice: rawVoice } : {}),
+        ...(input.nativeVoice !== undefined ? { nativeVoice: input.nativeVoice } : {}),
+        ...(input.language !== undefined ? { language: input.language } : {}),
+      };
+      let speaking;
+      try {
+        speaking = resolveSpeakingVoice(speakingOptions);
+      } catch (error) {
+        const code = typeof error?.code === 'string' ? error.code : AUDITION_INVALID_VOICE;
+        return failure(code, error?.message ?? 'the native speaking voice is invalid', {
+          voicePath: 'native',
+        });
+      }
+      return failure(AUDITION_NATIVE_VOICE, NATIVE_VOICE_MESSAGE, {
+        voicePath: speaking.voicePath,
+        voice: speaking.voice,
+        language: speaking.language,
+        ...(line ? { line } : {}),
+      });
+    }
+
+    let voice;
+    try {
+      voice = validateVoice(rawVoice);
+    } catch (error) {
+      if (error instanceof VoiceValidationError) {
+        return failure(AUDITION_INVALID_VOICE, error.message, { cause: error.code, field: error.field });
+      }
+      return failure(AUDITION_INVALID_VOICE, 'the voice could not be validated');
+    }
+
+    if (!line) {
+      return failure(AUDITION_INVALID_LINE, `line must be 1 to ${MAX_SAMPLE_LINE_CHARS} characters`, {
+        engine: voice.engine,
+      });
+    }
+
+    if (voice.engine === 'none') {
+      return failure(AUDITION_UNAVAILABLE, UNAVAILABLE_MESSAGE.none, { engine: 'none' });
+    }
+
+    if (PAID_VOICE_ENGINES.includes(voice.engine)) {
+      const request = Object.freeze({
+        kind: 'audition',
+        engine: voice.engine,
+        voice: voice.voice,
+        line,
+        characterId: character?.id,
+      });
+      if (!(await admitted(request))) {
+        return failure(AUDITION_ADMISSION_REQUIRED, ADMISSION_REQUIRED_MESSAGE, {
+          engine: voice.engine,
+          line,
+        });
+      }
+      const result = await cache.ensure(character ?? { voice }, { line });
+      if (!result.ok) return result;
+      return Object.freeze({ ...result, voice: voice.voice, line });
+    }
+
+    let speaking;
+    try {
+      speaking = resolveSpeakingVoice({
+        model,
+        voice,
+        ...(input.language !== undefined ? { language: input.language } : {}),
+      });
+    } catch (error) {
+      const code = typeof error?.code === 'string' ? error.code : AUDITION_INVALID_VOICE;
+      return failure(code, error?.message ?? 'the speaking voice is invalid', { engine: voice.engine });
+    }
+
+    const result = await cache.ensure(character ?? { voice }, { line });
+    if (!result.ok) return result;
+    return Object.freeze({
+      ...result,
+      voicePath: speaking.voicePath,
+      voice: speaking.voice,
+      language: speaking.language,
+      line,
+    });
+  }
+
+  return Object.freeze({ run });
 }
 
 /** One-shot helper; disk caching still applies across calls. */
