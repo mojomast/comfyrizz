@@ -42,8 +42,10 @@ function thumbsClient(
   return { client, calls };
 }
 
+// Response.text() settles on a later macrotask, so drain with setImmediate
+// (not mocked; only setTimeout is) rather than a fixed number of microtasks.
 async function flush(turns = 8) {
-  for (let index = 0; index < turns; index += 1) await Promise.resolve();
+  for (let index = 0; index < turns; index += 1) await new Promise(resolve => setImmediate(resolve));
 }
 
 function abortError() {
