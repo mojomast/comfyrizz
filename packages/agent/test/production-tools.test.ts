@@ -15,7 +15,7 @@ import {
   type ProductionCommandAttribution,
   type ProductionCommandEnvelope,
   type ProductionToolContext,
-} from '../src/production-tools.ts';
+} from '../src/production-tools.js';
 
 const ALLOWED = [
   'plan.propose',
@@ -289,6 +289,22 @@ test('IP35: propose records one plan.propose with server attribution and no appr
   assert.match(envelope.idempotencyKey, /^key_[0-9a-f]{32}$/);
   assert.deepEqual(attribution, { actor: 'agent', userEventId: 'ue_1' });
   assert.equal(JSON.stringify(envelope).includes('plan.approve'), false);
+});
+
+test('IP35: propose refuses server-owned plan identity (hash, execution id, allocation)', async () => {
+  for (const key of ['planHash', 'contentHash', 'executionId', 'allocation']) {
+    const ctx = fakeContext();
+    const result = await runProductionTool({
+      name: 'production_propose_plan',
+      args: {
+        plan: { planId: 'plan_1', revision: 0, reservationCeiling: 1, requiredDecisions: [], actions: [{ id: 'a', upperBound: 1 }], [key]: 'forged' },
+        expected_revision: 4,
+      },
+    }, ctx);
+    assert.equal(result.ok, false, `${key} must be refused`);
+    assert.equal(result.code, 'SERVER_PLAN_IDENTITY');
+    assert.equal(ctx.dispatched.length, 0, `${key}: nothing is dispatched`);
+  }
 });
 
 test('IP35: ids are deterministic from the context, not from tool arguments', async () => {

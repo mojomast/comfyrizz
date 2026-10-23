@@ -74,6 +74,10 @@ const CLIENT_IDENTITY_KEYS = [
 ];
 
 const ID_RE = /^[^\s/\\\u0000-\u001f]+$/u;
+// Plan identity is server-owned: the IP20 action-plans service computes the
+// hash and execution id from the plan content. A proposal that names any of
+// these is refused, so the agent can never author a plan's identity.
+const SERVER_PLAN_KEYS = ['planHash', 'contentHash', 'executionId', 'allocation'];
 
 export interface ProductionToolCapabilities {
   read?: boolean;
@@ -448,6 +452,8 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
   const candidate = args.plan;
   if (!isPlainObject(candidate)) return errorResult('plan must be an object');
   const plan = candidate;
+  const serverKey = SERVER_PLAN_KEYS.find(key => Object.prototype.hasOwnProperty.call(plan, key));
+  if (serverKey) return errorResult(`plan.${serverKey} is computed by the server and cannot be proposed`, 'SERVER_PLAN_IDENTITY');
 
   const productionId = resolveProductionId(args, ctx);
   if (productionId.error) return errorResult(productionId.error);
