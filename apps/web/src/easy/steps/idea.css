@@ -64,6 +64,20 @@
   margin-top: var(--space-2);
 }
 
+.easy-idea-template {
+  position: relative;
+}
+
+.easy-idea-template:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.easy-idea-template:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
 .easy-idea-segments {
   display: flex;
   flex-wrap: wrap;

@@ -39,9 +39,44 @@ function escapeAttr(value: unknown): string {
 
 function templateChips(): string {
   const chips = COPY.idea.templates
-    .map((template) => `<button type="button" class="easy-chip easy-idea-template" data-easy-template="${escapeAttr(template.id)}">${escapeHtml(template.label)}</button>`)
+    .map((template) => `<label class="easy-chip easy-idea-template" data-easy-template="${escapeAttr(template.id)}"><input class="easy-segment-input" type="radio" name="easy-idea-template" value="${escapeAttr(template.id)}" /><span>${escapeHtml(template.label)}</span></label>`)
     .join('');
   return `<fieldset class="easy-idea-templates"><legend class="easy-idea-legend">${escapeHtml(COPY.idea.templatesLabel)}</legend><div class="easy-idea-chip-row">${chips}</div></fieldset>`;
+}
+
+export interface TemplateOption {
+  id: string;
+  text: string;
+}
+
+export interface TemplateChangePlan {
+  needsConfirm: boolean;
+  text: string;
+  restoreId: string | null;
+}
+
+export function templateChangeNeedsConfirm(
+  currentText: string,
+  templates: readonly { text: string }[] = COPY.idea.templates,
+): boolean {
+  const text = currentText.trim();
+  if (!text) return false;
+  return !templates.some((template) => template.text.trim() === text);
+}
+
+export function templateChangePlan(
+  currentText: string,
+  targetId: string,
+  appliedId: string | null,
+  templates: readonly TemplateOption[] = COPY.idea.templates,
+): TemplateChangePlan | null {
+  const target = templates.find((template) => template.id === targetId);
+  if (!target) return null;
+  return {
+    needsConfirm: templateChangeNeedsConfirm(currentText, templates),
+    text: target.text,
+    restoreId: appliedId,
+  };
 }
 
 function lengthSegments(state: EasyState): string {
@@ -243,6 +278,23 @@ function bindEvents(view: IdeaView, ctx: EasyStepContext): () => void {
     });
   }
 
+  let appliedTemplateId: string | null = null;
+
+  const templateRadios = (): HTMLInputElement[] => Array.from(
+    view.root.querySelectorAll<HTMLInputElement>('input[name="easy-idea-template"]'),
+  );
+
+  const setTemplateChecked = (id: string | null): void => {
+    for (const radio of templateRadios()) radio.checked = radio.value === id;
+  };
+
+  const applyTemplate = (text: string, id: string): void => {
+    if (view.textarea) view.textarea.value = text;
+    patchIdea(ctx, { text });
+    clearTooShort(view);
+    appliedTemplateId = id;
+  };
+
   const onInput = (event: Event): void => {
     const target = event.target;
     if (target instanceof HTMLTextAreaElement && target.id === 'easy-idea') {
@@ -266,6 +318,29 @@ function bindEvents(view: IdeaView, ctx: EasyStepContext): () => void {
       patchIdea(ctx, { look: target.value });
       return;
     }
+    if (target.name === 'easy-idea-template') {
+      const currentText = view.textarea ? view.textarea.value : ctx.store.get().idea.text;
+      const plan = templateChangePlan(currentText, target.value, appliedTemplateId);
+      if (!plan) return;
+      if (!plan.needsConfirm) {
+        applyTemplate(plan.text, target.value);
+        return;
+      }
+      void confirmDialog({
+        title: COPY.idea.replaceTitle,
+        text: COPY.idea.replaceText,
+        confirmLabel: COPY.idea.replaceConfirm,
+        cancelLabel: COPY.idea.keep,
+        opener: target,
+      }).then((replace) => {
+        if (replace) {
+          applyTemplate(plan.text, target.value);
+        } else {
+          setTemplateChecked(plan.restoreId);
+        }
+      });
+      return;
+    }
     if (target.id === 'easy-idea-sound') {
       patchIdea(ctx, { sound: target.checked });
     }
@@ -279,36 +354,7 @@ function bindEvents(view: IdeaView, ctx: EasyStepContext): () => void {
     if (retry) {
       clearBriefError(view);
       void submit(ctx);
-      return;
     }
-
-    const button = target.closest<HTMLElement>('[data-easy-template]');
-    if (!button) return;
-    const id = button.getAttribute('data-easy-template');
-    const template = COPY.idea.templates.find((item) => item.id === id);
-    if (!template) return;
-
-    const apply = (): void => {
-      if (view.textarea) view.textarea.value = template.text;
-      patchIdea(ctx, { text: template.text });
-      clearTooShort(view);
-      view.textarea?.focus();
-    };
-
-    if (!view.textarea || view.textarea.value.trim() === '') {
-      apply();
-      return;
-    }
-
-    void confirmDialog({
-      title: COPY.idea.replaceTitle,
-      text: COPY.idea.replaceText,
-      confirmLabel: COPY.idea.replaceConfirm,
-      cancelLabel: COPY.idea.keep,
-      opener: button,
-    }).then((replace) => {
-      if (replace) apply();
-    });
   };
 
   view.root.addEventListener('input', onInput);

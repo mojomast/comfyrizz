@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 import { COPY } from '../src/easy/copy.ts';
 import { defaultEasyState } from '../src/easy/store.ts';
-import { step } from '../src/easy/steps/idea.ts';
+import { templateChangeNeedsConfirm, templateChangePlan, step } from '../src/easy/steps/idea.ts';
 import { ideaPrompt } from '../src/easy/idea-prompt.ts';
 
 const facts = {
@@ -40,10 +40,18 @@ test('the idea render has one labelled textarea, templates, segments and look ca
   assert.match(html, /<label[^>]*for="easy-idea"[^>]*>Your idea<\/label>/);
 
   assert.equal(count(html, /data-easy-template=/g), 4);
+  assert.match(html, /<fieldset[^>]*class="easy-idea-templates"/);
+  assert.match(html, /<legend[^>]*>Start from<\/legend>/);
   for (const template of COPY.idea.templates) {
-    assert.match(html, new RegExp(`data-easy-template="${template.id}"`));
+    assert.match(html, new RegExp(`<label[^>]*class="easy-chip easy-idea-template"[^>]*data-easy-template="${template.id}"`));
+    assert.match(html, new RegExp(`<input[^>]*type="radio"[^>]*name="easy-idea-template"[^>]*value="${template.id}"`));
     assert.ok(html.includes(template.label));
   }
+
+  const templates = html.match(/<input[^>]*name="easy-idea-template"[^>]*>/g) || [];
+  assert.equal(templates.length, 4);
+  assert.equal(count(html, /<button\b/g), 0);
+  assert.equal(count(html, /tabindex=/g), 0);
 
   const lengths = html.match(/<input[^>]*name="easy-idea-length"[^>]*>/g) || [];
   assert.equal(lengths.length, 4);
@@ -68,6 +76,45 @@ test('the idea render has one labelled textarea, templates, segments and look ca
   assert.match(html, /<details[^>]*class="easy-idea-more"/);
   assert.match(html, /data-easy-references/);
   assert.match(html, /type="checkbox"[^>]*id="easy-idea-sound"[^>]*checked/);
+});
+
+test('(a) checking a template with an empty textarea applies its text with no confirm', () => {
+  const template = COPY.idea.templates[0];
+  const plan = templateChangePlan('', template.id, null);
+
+  assert.ok(plan);
+  assert.equal(plan.needsConfirm, false);
+  assert.equal(plan.text, template.text);
+  assert.equal(plan.restoreId, null);
+
+  assert.equal(templateChangeNeedsConfirm('   ', COPY.idea.templates), false);
+});
+
+test('(b) moving between templates while the textarea holds template text needs no confirm', () => {
+  const first = COPY.idea.templates[0];
+  const second = COPY.idea.templates[1];
+  const plan = templateChangePlan(first.text, second.id, first.id);
+
+  assert.ok(plan);
+  assert.equal(plan.needsConfirm, false);
+  assert.equal(plan.text, second.text);
+  assert.equal(templateChangeNeedsConfirm(first.text, COPY.idea.templates), false);
+  assert.equal(templateChangeNeedsConfirm(`  ${first.text}  `, COPY.idea.templates), false);
+});
+
+test('(c) user-written text needs a confirm and cancelling restores the previous template', () => {
+  const target = COPY.idea.templates[2];
+  const plan = templateChangePlan('My own bakery idea', target.id, 'launch');
+
+  assert.ok(plan);
+  assert.equal(plan.needsConfirm, true);
+  assert.equal(plan.text, target.text);
+  assert.equal(plan.restoreId, 'launch');
+  assert.equal(templateChangeNeedsConfirm('My own bakery idea', COPY.idea.templates), true);
+
+  const withoutPrevious = templateChangePlan('My own bakery idea', target.id, null);
+  assert.ok(withoutPrevious);
+  assert.equal(withoutPrevious.restoreId, null);
 });
 
 test('ideaPrompt keeps the brief sentence order and skips decide answers', () => {
