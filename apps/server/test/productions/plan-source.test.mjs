@@ -23,6 +23,7 @@ import {
   deriveNextStep,
 } from '../../src/productions/coordinator.mjs';
 import { createBudgetLedger, ledgerPaths } from '../../src/productions/ledger.mjs';
+import { ITERATION_PRESETS } from '../../src/productions/iteration.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
 import { createProductionRoutes } from '../../src/routes/productions.mjs';
 
@@ -308,6 +309,11 @@ test('the action-plans propose, approve and dispatch path reserves exactly one s
   const proposed = await propose(routes, id, planPayload());
   assert.equal(proposed.status, 201, proposed.raw);
   assert.equal(proposed.body.planHash, computePlanHash(proposed.body.plan));
+
+  const iteration = await command(routes, id, 'iteration.set', store.read(id).revision, {
+    policy: structuredClone(ITERATION_PRESETS.balanced),
+  }, { commandId: 'cmd_iteration_plan', idempotencyKey: 'key_iteration_plan' });
+  assert.equal(iteration.status, 200, iteration.raw);
 
   const approved = await command(routes, id, 'plan.approve', store.read(id).revision, {
     planId: 'plan_1',

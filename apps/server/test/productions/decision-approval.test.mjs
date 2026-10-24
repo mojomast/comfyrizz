@@ -21,6 +21,7 @@ import {
 import { createCommandHandler } from '../../src/productions/commands.mjs';
 import { createProductionCoordinator } from '../../src/productions/coordinator.mjs';
 import { createBudgetLedger, ledgerPaths } from '../../src/productions/ledger.mjs';
+import { ITERATION_PRESETS } from '../../src/productions/iteration.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
 import { createProductionRoutes } from '../../src/routes/productions.mjs';
 
@@ -165,7 +166,20 @@ async function command(routes, productionId, kind, revision, payload, suffix) {
   });
 }
 
+async function setIterationLevel(routes, productionId, suffix) {
+  const production = await call(routes, {
+    method: 'GET',
+    url: `/api/productions/${productionId}`,
+  });
+  assert.equal(production.status, 200, production.raw);
+  const response = await command(routes, productionId, 'iteration.set', production.body.revision, {
+    policy: structuredClone(ITERATION_PRESETS.balanced),
+  }, suffix);
+  assert.equal(response.status, 200, response.raw);
+}
+
 async function approvePlan(routes, productionId, plan, suffix = 'approve') {
+  await setIterationLevel(routes, productionId, `iteration_${suffix}`);
   const production = await call(routes, {
     method: 'GET',
     url: `/api/productions/${productionId}`,

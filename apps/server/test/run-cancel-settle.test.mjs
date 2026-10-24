@@ -19,6 +19,7 @@ import { createProductionStore } from '../src/productions/store.mjs';
 import { createCommandHandler } from '../src/productions/commands.mjs';
 import { createActionCoordinator } from '../src/productions/actions.mjs';
 import { createBudgetLedger } from '../src/productions/ledger.mjs';
+import { ITERATION_PRESETS } from '../src/productions/iteration.mjs';
 import { canTransition } from '../src/productions/contract.mjs';
 
 const USER = Object.freeze({ actor: 'user', userEventId: 'ue_ip24c_user' });
@@ -143,6 +144,15 @@ function makeProduction(t, { upperBound = UPPER_BOUND } = {}) {
     },
   });
   const planHash = proposed.planHash;
+
+  handler.execute({
+    commandId: `cmd_ip24c_iteration_${suffix}`,
+    idempotencyKey: `key_ip24c_iteration_${suffix}`,
+    kind: 'iteration.set',
+    productionId,
+    expected: { productionRevision: store.read(productionId).revision },
+    payload: { policy: structuredClone(ITERATION_PRESETS.balanced) },
+  }, USER);
 
   handler.execute({
     commandId: `cmd_ip24c_approve_${suffix}`,

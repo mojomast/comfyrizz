@@ -32,6 +32,7 @@ import {
   deriveNextStep,
 } from '../../src/productions/coordinator.mjs';
 import { createBudgetLedger } from '../../src/productions/ledger.mjs';
+import { ITERATION_PRESETS } from '../../src/productions/iteration.mjs';
 import { createPipelineAdapter } from '../../src/productions/pipeline-adapter.mjs';
 import {
   createProductionStore,
@@ -421,6 +422,16 @@ function coordinatorWorld(t, slots = [slot('act_1'), slot('act_2')], planOverrid
       },
     },
   });
+  const iterationCommand = {
+    commandId: 'cmd_ip62_iteration',
+    idempotencyKey: 'key_ip62_iteration',
+    kind: 'iteration.set',
+    productionId,
+    expected: { productionRevision: store.read(productionId).revision },
+    payload: { policy: structuredClone(ITERATION_PRESETS.balanced) },
+  };
+  handler.execute(iterationCommand, USER);
+
   const approveCommand = {
     commandId: 'cmd_ip62_approve',
     idempotencyKey: 'key_ip62_approve',
@@ -441,6 +452,7 @@ function coordinatorWorld(t, slots = [slot('act_1'), slot('act_2')], planOverrid
     productionId,
     planHash: proposed.planHash,
     createCommand,
+    iterationCommand,
     approveCommand,
   };
 }
@@ -553,6 +565,7 @@ test('an approved plan and a resolved decision survive a restart and replay exac
   assert.equal(replayedCreate.duplicate, true);
   assert.equal(replayedCreate.productionId, ctx.productionId, 'identity is stable across a restart');
   assert.equal(restarted.store.list().length, 1, 'a create replay never makes a second production');
+  assert.equal(restarted.handler.execute(ctx.iterationCommand, USER).duplicate, true);
   assert.equal(restarted.handler.execute(ctx.approveCommand, USER).duplicate, true);
   assert.equal(restarted.handler.execute(resolveCommand, USER).duplicate, true);
   assert.equal(restarted.store.read(ctx.productionId).revision, revision);
