@@ -8,10 +8,19 @@
 
 import { COPY } from './copy.ts';
 import {
+  escapeToEditor,
+  escapeToHome,
+  escapeToStudio,
+  isSuperEasyDone,
+  makeAnotherState,
+  renderSuperEasyDoneActions,
+} from './escape.ts';
+import {
   SUPER_EASY_MIN_PROMPT_CHARS,
   renderSuperEasyHome,
 } from './home.ts';
 import { renderSuperEasyProgress } from './progress-view.ts';
+import { getMode, setMode } from '../../ui/mode.ts';
 import type { EasyState } from '../types.ts';
 
 export const SUPER_EASY_EXAMPLE_PROMPT = COPY.home.promptPlaceholder;
@@ -30,8 +39,16 @@ export interface SuperEasyMountOptions {
   subscribe?(listener: () => void): () => void;
   /** Latest production snapshot for the progress view. */
   snapshot?(): unknown;
+  /** Current address, so escape links keep the package id. Defaults to the browser. */
+  search?(): string;
+  /** Replace the address without navigating away. Defaults to browser history. */
+  navigate?(url: string): void;
   /** Leave Super Easy for the existing Easy Studio. */
-  onMoreControl(): void;
+  onMoreControl(packageId: string | null): void;
+  /** Open the Advanced editor for this video. */
+  onOpenEditor?(packageId: string | null): void;
+  /** Clear local state for a new video; the server package is kept. */
+  onMakeAnother?(next: EasyState): void;
   /** SE09 owns the run; the shell only hands it the one prompt. */
   onGenerate?(input: SuperEasyGenerateInput): void | Promise<void>;
   reducedMotion?: boolean;
@@ -68,15 +85,72 @@ export function superEasyScreen(state: Pick<EasyState, 'productionId' | 'generat
  */
 export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHandle {
   const { root } = options;
-  let current = superEasyScreen(options.state());
+  let freshStart = false;
+  const screenNow = (): SuperEasyScreen => (freshStart ? 'home' : superEasyScreen(options.state()));
+  let current = screenNow();
   let promptText = options.state().idea.text ?? '';
   let destroyed = false;
+
+  function currentSearch(): string {
+    if (options.search) return options.search();
+    try {
+      return globalThis.location?.search ?? '';
+    } catch {
+      return '';
+    }
+  }
+
+  function replaceUrl(url: string): void {
+    if (options.navigate) {
+      options.navigate(url);
+      return;
+    }
+    try {
+      const history = globalThis.history;
+      if (history && typeof history.replaceState === 'function') {
+        history.replaceState({}, '', url === '' ? './' : url);
+      }
+    } catch {
+      /* history is absent in tests and some embedded shells */
+    }
+  }
+
+  function openEditor(): void {
+    const packageId = options.state().packageId;
+    if (options.onOpenEditor) {
+      options.onOpenEditor(packageId);
+      return;
+    }
+    replaceUrl(escapeToEditor(currentSearch(), packageId));
+    if (getMode() !== 'advanced') setMode('advanced');
+  }
+
+  function makeAnother(): void {
+    freshStart = true;
+    promptText = '';
+    const next = makeAnotherState();
+    options.onMakeAnother?.(next);
+    replaceUrl(escapeToHome(currentSearch()));
+    render();
+  }
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
     if (closest('[data-super-easy-more-control]')) {
       event.preventDefault();
-      options.onMoreControl();
+      const packageId = options.state().packageId;
+      replaceUrl(escapeToStudio(currentSearch(), packageId));
+      options.onMoreControl(packageId);
+      return;
+    }
+    if (closest('[data-super-easy-open-editor]')) {
+      event.preventDefault();
+      openEditor();
+      return;
+    }
+    if (closest('[data-super-easy-make-another]')) {
+      event.preventDefault();
+      makeAnother();
       return;
     }
     if (closest('[data-super-easy-example]')) {
@@ -100,19 +174,27 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       return;
     }
     promptText = prompt;
+    freshStart = false;
     if (options.onGenerate) void options.onGenerate({ prompt, compute: 'cpu' });
   };
 
   const render = (): void => {
     if (destroyed) return;
-    const next = superEasyScreen(options.state());
+    const next = screenNow();
     current = next;
     if (next === 'progress') {
-      root.innerHTML = renderSuperEasyProgress(options.snapshot?.() ?? null, {
+      const snapshot = options.snapshot?.() ?? null;
+      const doneActions = isSuperEasyDone(snapshot) ? renderSuperEasyDoneActions() : '';
+      root.innerHTML = renderSuperEasyProgress(snapshot, {
         ...(options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion }),
-      });
+      }) + doneActions;
     } else {
-      root.innerHTML = renderSuperEasyHome({ prompt: promptText });
+      const state = options.state();
+      root.innerHTML = renderSuperEasyHome({
+        prompt: promptText,
+        packageId: state.packageId,
+        search: currentSearch(),
+      });
     }
     root.dataset.superEasyView = next;
   };
@@ -124,7 +206,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     if (destroyed) return;
     // The home keeps the person's typed prompt; only a screen change or a
     // progress update needs a repaint. A switch into progress always repaints.
-    if (superEasyScreen(options.state()) === 'home' && current === 'home') return;
+    if (!freshStart && screenNow() === 'home' && current === 'home') return;
     render();
   }) ?? (() => {});
 

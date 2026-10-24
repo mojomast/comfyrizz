@@ -6,14 +6,17 @@
 
 import { COPY } from './copy.ts';
 import { escapeHtml } from '../components.ts';
+import { escapeToStudio } from './escape.ts';
 
 export const SUPER_EASY_MIN_PROMPT_CHARS = 10;
-
-const MORE_CONTROL_HREF = '?step=idea';
 
 export interface SuperEasyHomeOptions {
   /** Initial prompt text; escaped before it reaches the page. */
   prompt?: string;
+  /** Current video id, kept by the more-control escape. */
+  packageId?: string | null;
+  /** Current address, so unrelated query parameters survive the escape. */
+  search?: string;
 }
 
 /**
@@ -24,6 +27,7 @@ export interface SuperEasyHomeOptions {
  */
 export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string {
   const prompt = typeof options.prompt === 'string' ? options.prompt : '';
+  const moreControlHref = escapeToStudio(options.search ?? '', options.packageId ?? null);
   return `<section class="super-easy-home" aria-labelledby="super-easy-title" data-super-easy-home>
 <h1 class="super-easy-home-title" id="super-easy-title">${escapeHtml(COPY.home.title)}</h1>
 <form class="super-easy-home-form" data-super-easy-form>
@@ -35,6 +39,6 @@ export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string 
 <button type="button" class="btn btn-secondary super-easy-home-example" data-super-easy-example>${escapeHtml(COPY.home.tryExample)}</button>
 </div>
 </form>
-<p class="super-easy-home-more"><a class="super-easy-home-more-link" href="${MORE_CONTROL_HREF}" data-super-easy-more-control>${escapeHtml(COPY.home.moreControl)}</a></p>
+<p class="super-easy-home-more"><a class="super-easy-home-more-link" href="${escapeHtml(moreControlHref)}" data-super-easy-more-control>${escapeHtml(COPY.home.moreControl)}</a></p>
 </section>`;
 }
