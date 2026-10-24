@@ -222,3 +222,13 @@ test('network failure throws OFFLINE', async () => {
     return true;
   });
 });
+
+test('setSpendCap refuses a missing productionRevision before the request', async () => {
+  const { fetchImpl, calls } = makeFetch([{ status: 200, body: {} }]);
+  const api = createEasyApi(fetchImpl);
+  await assert.rejects(
+    () => api.setSpendCap('p1', { ceiling: 5 }),
+    (error) => error instanceof EasyApiError && error.code === 'PRODUCTION_REVISION_REQUIRED',
+  );
+  assert.equal(calls.length, 0);
+});

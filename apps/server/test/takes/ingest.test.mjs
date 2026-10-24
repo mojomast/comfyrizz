@@ -386,3 +386,43 @@ test('TR04: corrections are applied only to their own asset, never to another ou
   assert.equal(byAsset.get('a_bg').correction.note, 'only the background');
   assert.equal(byAsset.get('a_fg').correction, undefined);
 });
+
+test('TR04/H-FIX7: bare factory id colab is stamped as colab:G4 on the take', (t) => {
+  const space = workspace(t);
+  const store = storeFor(space);
+  const bytes = Buffer.concat([PNG, Buffer.from('colab provenance')]);
+  writeOutput(space, 'assets/a_bg.png', bytes);
+  const pkg = basePackage({ gen: { ...basePackage().assets.a_bg.gen, backend: 'colab:G4' } });
+
+  const result = ingestRun({
+    pkg,
+    manifest: manifestFor(bytes),
+    jobsDoc: jobsDoc({ backend: 'http://127.0.0.1:8189' }),
+    outputDir: space.outputDir,
+    store,
+    runId: 'run_colab',
+    backend: 'colab',
+  });
+
+  assert.equal(result.takes.length, 1);
+  assert.equal(result.takes[0].gen.backend, 'colab:G4', 'URL and bare colab must not land as provenance');
+});
+
+test('TR04/H-FIX7: without a planned tag, bare colab still becomes colab:G4', (t) => {
+  const space = workspace(t);
+  const store = storeFor(space);
+  const bytes = Buffer.concat([PNG, Buffer.from('bare factory')]);
+  writeOutput(space, 'assets/a_bg.png', bytes);
+
+  const result = ingestRun({
+    pkg: basePackage(),
+    manifest: manifestFor(bytes),
+    jobsDoc: jobsDoc({ backend: undefined }),
+    outputDir: space.outputDir,
+    store,
+    runId: 'run_bare',
+    backend: 'colab',
+  });
+
+  assert.equal(result.takes[0].gen.backend, 'colab:G4');
+});

@@ -20,6 +20,7 @@ import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { applyManifestToPackage, mediaFor } from '../../../../packages/jobs/src/apply.mjs';
 import { thumbKey } from '../thumbs/spec.mjs';
 import { MAX_RETRY_ATTEMPTS, genFingerprint, retryRecord } from './model.mjs';
+import { provenanceBackend } from './provenance-backend.mjs';
 
 const SHA256_RE = /^[0-9a-f]{64}$/i;
 const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
@@ -135,8 +136,11 @@ function genFor({ asset, job, entry, backend, updatedAt }) {
   if (inputs !== undefined) gen.inputs = inputs;
   if (jobId !== undefined && jobId !== null && jobId !== '') gen.job_id = jobId;
   if (attemptId !== undefined && attemptId !== null && attemptId !== '') gen.attempt_id = attemptId;
-  if (typeof job?.backend === 'string' && job.backend) gen.backend = job.backend;
-  else if (typeof backend === 'string' && backend) gen.backend = backend;
+  // Prefer a schema-valid tag. job.backend is often a ComfyUI URL; the run
+  // factory id is bare "colab". Both must become colab:<hardware> (H-FIX7).
+  const stamped = provenanceBackend(base.backend, backend, job?.backend);
+  if (stamped) gen.backend = stamped;
+  else delete gen.backend;
   if (isObject(job?.inputs)) {
     if (typeof job.inputs.prompt === 'string') gen.prompt = job.inputs.prompt;
     if (typeof job.inputs.negative === 'string') gen.negative = job.inputs.negative;

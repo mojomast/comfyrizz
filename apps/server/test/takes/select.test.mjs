@@ -219,3 +219,21 @@ test('TR06: a take for another asset is rejected', () => {
     error => error instanceof TakeSelectionError && error.code === 'ASSET_MISMATCH',
   );
 });
+
+test('TR06/H-FIX7: a take stamped with bare colab still selects after provenance normalize', () => {
+  const pkg = makePackage();
+  const take = makeTake({
+    gen: {
+      generator: 'flux3-klein',
+      seed: 7,
+      inputs: { seed: 7 },
+      workflow_sha256: digest('workflow'),
+      backend: 'colab',
+    },
+  });
+  const doc = makeDoc({ takes: [take] });
+
+  const selected = selectTake(pkg, doc, 'a_plate1', BASE_TAKE_ID);
+  assert.equal(validatePackage(selected).valid, true, JSON.stringify(validatePackage(selected).errors));
+  assert.equal(assetOf(selected).gen.backend, 'colab:G4');
+});
