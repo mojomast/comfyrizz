@@ -99,6 +99,11 @@
 }
 
 .easy-main {
+  /* The editor's global `main` rule (style.css) is a three-column grid with a
+     line-coloured background; reset it so Easy steps use the full width. */
+  display: block;
+  grid-template-columns: none;
+  background: none;
   flex: 1 1 auto;
   width: 100%;
   max-width: 880px;
