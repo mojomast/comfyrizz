@@ -75,7 +75,8 @@ export function renderShell({ videoName, saveStatus }: ShellModel): string {
 <div class="easy-header-actions">
 <button type="button" class="btn btn-secondary easy-header-button" data-easy-help>${escapeHtml(COPY.shell.help)}</button>
 <button type="button" class="btn btn-secondary easy-header-button" data-easy-settings>${escapeHtml(COPY.shell.settings)}</button>
-<button type="button" class="btn btn-secondary easy-header-button" data-easy-open-editor>${escapeHtml(COPY.shell.openEditor)}</button>
+<span class="easy-header-divider" aria-hidden="true"></span>
+<button type="button" class="btn btn-ghost easy-header-button easy-open-editor" data-easy-open-editor>${escapeHtml(COPY.shell.openEditor)}</button>
 </div>
 </header>
 <div class="easy-stepper-host" data-easy-stepper></div>

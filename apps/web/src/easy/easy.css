@@ -79,6 +79,20 @@
   white-space: nowrap;
 }
 
+.easy-header-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: var(--space-4);
+  margin-inline: var(--space-1);
+  background: var(--border);
+}
+
+@media (max-width: 640px) {
+  .easy-header-divider {
+    display: none;
+  }
+}
+
 .easy-stepper-host {
   display: flex;
   flex: 0 0 auto;
