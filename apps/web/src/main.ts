@@ -1614,7 +1614,7 @@ function renderRunPanel(): void {
   paintRunFilters();
   const host = $('run-panel');
   if (!runState.active) {
-    host.innerHTML = '<div class="empty">No backend run yet.<br /><span class="hint">Pick a backend and press Run.</span></div>';
+    host.innerHTML = '<div class="empty">No generation yet.</div>';
     return;
   }
   const activeTone = runStatusTone(runState.active.status);
