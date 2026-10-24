@@ -1,4 +1,5 @@
 import { validatePackage } from '../../../../packages/schema/src/index.mjs';
+import { provenanceBackend } from './provenance-backend.mjs';
 
 const MEDIA_FIELDS = [
   'width',
@@ -128,7 +129,14 @@ function buildPackage(pkg, assetId, take, { sanitize = false } = {}) {
 
   const gen = sanitize ? pickFields(take.gen, GEN_FIELDS) : clone(take.gen);
   if (gen === undefined) delete asset.gen;
-  else asset.gen = gen;
+  else {
+    // Normalize a bare factory id left by older ingest so existing takes can
+    // still be selected without re-running Google Colab.
+    const stamped = provenanceBackend(gen.backend, asset.gen?.backend);
+    if (stamped) gen.backend = stamped;
+    else delete gen.backend;
+    asset.gen = gen;
+  }
 
   if (isObject(asset.variants) && Object.hasOwn(asset.variants, 'upscaled')) {
     if (!sameSha(previousSha, take.sha256)) delete asset.variants.upscaled;

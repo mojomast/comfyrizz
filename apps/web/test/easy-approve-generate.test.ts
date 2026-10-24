@@ -68,19 +68,28 @@ function fakeApi(extra = {}) {
   const spendGate = new Promise((resolve) => {
     releaseSpend = resolve;
   });
+  let nextRevision = 4;
   const api = {
     async setSpendCap(id, body) {
       calls.push({ kind: 'spend-cap', id, body });
       if (extra.holdSpend) await spendGate;
-      return { ceiling: body.ceiling, revision: 4 };
+      assert.equal(body.expected.productionRevision, nextRevision);
+      nextRevision += 1;
+      return { ceiling: body.ceiling, revision: nextRevision };
     },
     async sendCommand(id, command) {
       calls.push({ kind: 'approve', id, command });
-      return { ok: true, revision: 5 };
+      assert.equal(command.expected.productionRevision, nextRevision);
+      nextRevision += 1;
+      return { ok: true, revision: nextRevision };
     },
     async dispatchAction(id, body) {
       calls.push({ kind: 'dispatch', id, body });
-      return { revision: 6 };
+      assert.equal(typeof body.commandId, 'string');
+      assert.equal(typeof body.idempotencyKey, 'string');
+      assert.deepEqual(body.expected, { productionRevision: nextRevision });
+      nextRevision += 1;
+      return { revision: nextRevision };
     },
     async startRun(body) {
       calls.push({ kind: 'run', body });
@@ -88,7 +97,7 @@ function fakeApi(extra = {}) {
     },
     async colabStatus() {
       calls.push({ kind: 'colab-status' });
-      return { backendId: 'colab:G4' };
+      return {};
     },
     async getProduction(id) {
       calls.push({ kind: 'refetch', id });
@@ -115,15 +124,20 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
   await approveAndGenerate(state, { api, store, snapshot: snapshot() });
   assert.deepEqual(kinds(calls), ['spend-cap', 'approve', 'dispatch', 'dispatch', 'run', 'run']);
   assert.equal(store.get().generate.status, 'running');
-  for (const call of calls.filter((item) => item.kind === 'run')) {
+  const runs = calls.filter((item) => item.kind === 'run');
+  assert.equal(runs.length, 2);
+  assert.deepEqual(
+    runs.map((call) => call.body.expected.productionRevision),
+    [7, 8],
+  );
+  for (const call of runs) {
     assert.equal(call.body.budgetUnits, 12);
     assert.equal(call.body.mode, 'take');
-    assert.equal(call.body.backendId, 'colab:G4');
+    assert.equal(call.body.backendId, 'colab');
     assert.equal(call.body.packageId, 'pkg_approve');
     assert.equal(call.body.authority.productionId, PRODUCTION_ID);
     assert.equal(call.body.authority.planId, 'plan_1');
     assert.equal(call.body.authority.planHash, PLAN_HASH);
-    assert.deepEqual(call.body.expected, { productionRevision: 6 });
   }
   assert.deepEqual(
     calls.filter((item) => item.kind === 'dispatch').map((item) => item.body.payload),
@@ -135,6 +149,7 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
   const spend = calls.find((item) => item.kind === 'spend-cap').body;
   assert.equal(spend.ceiling, 12);
   assert.deepEqual(spend.expected, { productionRevision: 4 });
+  assert.equal(calls.find((item) => item.kind === 'approve').command.expected.productionRevision, 5);
 });
 
 test('a stale card refetches, marks the plan stale, and does not dispatch', async () => {

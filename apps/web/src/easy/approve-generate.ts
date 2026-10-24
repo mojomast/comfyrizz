@@ -52,6 +52,19 @@ function snapshotOf(value: unknown): unknown {
   return value;
 }
 
+function freshId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${prefix}_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 10)}`;
+}
+
+/** Factory id the run controller understands (bare `colab`). Provenance stamps `colab:G4` separately. */
+function runBackendId(status: { backendId?: string } | null | undefined): string {
+  const raw = typeof status?.backendId === 'string' ? status.backendId.trim() : '';
+  return raw !== '' ? raw : 'colab';
+}
+
 async function markStale(deps: ApproveDeps, state: EasyState): Promise<string> {
   const id = productionId(state);
   if (id) await deps.api.getProduction(id);
@@ -76,30 +89,42 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
   if (colab && built.ok === false) return built.error;
 
   const id = productionId(state);
+  let revision = card.revision;
+
   if (colab && includeSpendCap) {
-    await deps.api.setSpendCap(id, {
+    const spend = await deps.api.setSpendCap(id, {
       ceiling: state.spendCap,
-      expected: { productionRevision: card.revision },
+      expected: { productionRevision: revision },
     });
+    revision = revisionOf(spend, revision);
   }
 
   if (built.ok === true && (colab || hasPlan(card))) {
-    await sendPlanApproval(
-      { sendCommand: (command) => deps.api.sendCommand(id, command) },
-      built,
+    const command = {
+      ...built.command,
+      expected: { productionRevision: revision },
+    };
+    const approved = await sendPlanApproval(
+      { sendCommand: (next) => deps.api.sendCommand(id, next) },
+      { ...built, command },
     );
+    revision = revisionOf(approved, revision);
   }
 
   if (colab && built.ok === true) {
     const status = await deps.api.colabStatus();
-    const backendId = typeof status?.backendId === 'string' ? status.backendId : '';
+    const backendId = runBackendId(status);
     const actions = card.actions.filter((action) => typeof action?.id === 'string' && action.id !== '');
-    const dispatched: Array<{ actionId: string; response: unknown }> = [];
+    const dispatched: Array<{ actionId: string; response: unknown; revision: number }> = [];
     for (const action of actions) {
       const response = await deps.api.dispatchAction(id, {
+        commandId: freshId('cmd_dispatch'),
+        idempotencyKey: freshId('idem_dispatch'),
+        expected: { productionRevision: revision },
         payload: { planId: card.planId, planRevision: card.proposalRevision, actionId: action.id },
       });
-      dispatched.push({ actionId: action.id, response });
+      revision = revisionOf(response, revision);
+      dispatched.push({ actionId: action.id, response, revision });
     }
     for (const item of dispatched) {
       await deps.api.startRun({
@@ -113,7 +138,7 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
           planHash: card.planHash,
           actionId: item.actionId,
         },
-        expected: { productionRevision: revisionOf(item.response, card.revision) },
+        expected: { productionRevision: item.revision },
       });
     }
   }

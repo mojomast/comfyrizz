@@ -93,11 +93,15 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     setSpendCap(id: any, body: { ceiling: any; expected?: { productionRevision?: number }; commandId?: string; idempotencyKey?: string }) {
       const commandId = typeof body.commandId === 'string' && body.commandId.trim() !== '' ? body.commandId : crypto.randomUUID();
       const idempotencyKey = typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim() !== '' ? body.idempotencyKey : commandId;
+      const productionRevision = body.expected?.productionRevision;
+      if (!Number.isSafeInteger(productionRevision) || (productionRevision as number) < 0) {
+        return Promise.reject(new EasyApiError(0, 'PRODUCTION_REVISION_REQUIRED', 'expected.productionRevision is required'));
+      }
       return request('POST', `/api/productions/${encodeURIComponent(id)}/spend-cap`, {
         commandId,
         idempotencyKey,
         ceiling: body.ceiling,
-        expected: { productionRevision: body.expected?.productionRevision },
+        expected: { productionRevision },
       });
     },
     dispatchAction(id: any, body: any) {
