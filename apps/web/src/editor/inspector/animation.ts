@@ -7,7 +7,7 @@ import {
   mountSceneAnimation,
   timingProvenance,
   type SceneAnimationSaveResult,
-} from '../../animation-settings';
+} from './animation-settings.ts';
 import type { Command } from '../commands.ts';
 import type { EditorExtras, EditorStore } from '../store.ts';
 

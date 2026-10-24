@@ -27,9 +27,9 @@ import {
 } from '../src/animation-controls.mjs';
 
 const source = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
-const settings = readFileSync(fileURLToPath(new URL('../src/animation-settings.ts', import.meta.url)), 'utf8');
+const settings = readFileSync(fileURLToPath(new URL('../src/editor/inspector/animation-settings.ts', import.meta.url)), 'utf8');
 const inspector = readFileSync(fileURLToPath(new URL('../src/editor/inspector/animation.ts', import.meta.url)), 'utf8');
-const css = readFileSync(fileURLToPath(new URL('../src/animation-settings.css', import.meta.url)), 'utf8');
+const css = readFileSync(fileURLToPath(new URL('../src/editor/inspector/animation-settings.css', import.meta.url)), 'utf8');
 
 test('animation catalogue: the editor and schema expose the same fixed recipe vocabulary', () => {
   assert.deepEqual([...RECIPE_IDS], [...ANIMATION_RECIPE_IDS]);

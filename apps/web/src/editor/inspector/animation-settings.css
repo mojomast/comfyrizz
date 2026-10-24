@@ -170,10 +170,6 @@
   margin-top: var(--space-2);
 }
 
-.animation-transition-reveal {
-  color: var(--text-2);
-}
-
 .animation-actions {
   display: flex;
   align-items: center;
@@ -191,16 +187,6 @@
 .animation-status {
   color: var(--text-3);
   font-size: var(--font-size-12);
-}
-
-.scene-lock {
-  border: var(--elevation-border-1);
-  border-color: var(--warn-border);
-  border-radius: var(--radius-pill);
-  color: var(--warn);
-  font-size: var(--font-size-12);
-  padding: var(--space-1) var(--space-2);
-  text-transform: uppercase;
 }
 
 @media (max-width: 760px) {

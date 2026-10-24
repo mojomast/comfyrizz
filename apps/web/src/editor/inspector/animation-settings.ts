@@ -1,5 +1,5 @@
-import type { PackageV1 } from '../../../packages/schema/types';
-import type { Command } from './editor/commands.ts';
+import type { PackageV1 } from '../../../../../packages/schema/types';
+import type { Command } from '../commands.ts';
 import './animation-settings.css';
 import {
   MORPH_SHAPES,
@@ -17,7 +17,7 @@ import {
   validFocus,
   validMorph,
   withRecipe,
-} from './animation-controls.mjs';
+} from '../../animation-controls.mjs';
 
 type FocusRect = { x: number; y: number; width: number; height: number };
 type Morph = { from?: string; to?: string };
