@@ -44,6 +44,27 @@ test('run controls live in settings, not a top-bar popover', () => {
   assert.match(indexHtml, /id="settings-open"/);
 });
 
+test('AI provider options use plain-language labels', () => {
+  const html = renderSettingsDialog('ai');
+  const options = [...html.matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)]
+    .filter(([, value]) => ['none', 'opencode-go', 'custom', 'openrouter'].includes(value))
+    .map(([, value, label]) => [value, label]);
+  assert.deepEqual(options, [
+    ['none', 'None (offline templates)'],
+    ['opencode-go', 'OpenCode Go'],
+    ['custom', 'Custom (OpenAI-compatible)'],
+    ['openrouter', 'OpenRouter'],
+  ]);
+  assert.equal(html.includes('local · scripted model'), false);
+  assert.equal(html.includes('Custom · OpenAI-compatible'), false);
+});
+
+test('agent setup is inlined with the provider field, not a standalone Agent settings button', () => {
+  const html = renderSettingsDialog('ai');
+  assert.equal(html.includes('>Agent settings<'), false);
+  assert.match(html, /<\/select><button[^>]*id="agent-settings-open"[^>]*>Manage connections<\/button>/);
+});
+
 test('every settings section has an h2', () => {
   const html = renderSettingsDialog('shortcuts');
   const headings = [...html.matchAll(/<h2>([^<]+)<\/h2>/g)].map((match) => match[1]);

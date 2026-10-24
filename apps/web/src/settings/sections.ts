@@ -23,15 +23,15 @@ function bodyFor(id: SettingsSectionId): string {
         '<div data-settings-agent></div>',
         '<label class="field-label" for="llm">AI provider</label>',
         '<select id="llm">',
-        '<option value="none">local · scripted model</option>',
+        '<option value="none">None (offline templates)</option>',
         '<option value="opencode-go">OpenCode Go</option>',
-        '<option value="custom">Custom · OpenAI-compatible</option>',
+        '<option value="custom">Custom (OpenAI-compatible)</option>',
         '<option value="openrouter">OpenRouter</option>',
         '</select>',
+        '<button type="button" id="agent-settings-open" class="btn btn-ghost btn-sm">Manage connections</button>',
         '<label class="field-label" for="agent-model">Model</label>',
         '<input id="agent-model" list="agent-model-options" placeholder="scripted" disabled maxlength="300" />',
         '<datalist id="agent-model-options"></datalist>',
-        '<button type="button" id="agent-settings-open" class="btn btn-secondary btn-sm">Agent settings</button>',
       ].join('');
     case 'colab':
       return [
