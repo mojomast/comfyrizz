@@ -15,7 +15,6 @@
 import { createReadStream, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { Worker } from 'node:worker_threads';
 import { buildVariants } from '../variant.mjs';
 import { runFrameQa } from '../qa.mjs';
 import { sceneAssetIds } from '../scene.mjs';
@@ -40,65 +39,37 @@ export const DELIVERY_ROUTE_PATHS = Object.freeze([
 const DELIVERY_ROUTE_SET = new Set(DELIVERY_ROUTE_PATHS);
 
 /**
- * `renderPackage` renders with `spawnSync`, which freezes this process until
- * Remotion exits. Other local calls (opening a project, the studio boot) then
- * sit unanswered. The real renderer runs on a worker; test doubles stay inline.
+ * Hand the renderer an AbortSignal. Production renderers run that work on a
+ * worker and kill the Remotion child when the signal aborts. A test double
+ * that ignores the signal stays on this thread. Which function it is does not
+ * matter: there is no name check.
  */
-function renderBlocksEventLoop(renderFn) {
-  return typeof renderFn === 'function' && renderFn.name === 'renderPackage';
-}
-
-function renderPackageOffThread(packagePath, outputPath, options = {}) {
-  const { onLog, ...rest } = options;
+function startRender(renderFn, packagePath, outputPath, options) {
+  const abort = new AbortController();
   let settled = false;
-  let worker = null;
-  let rejectPromise = () => {};
-  const promise = new Promise((resolve, reject) => {
-    rejectPromise = reject;
-    worker = new Worker(new URL('./render-task.mjs', import.meta.url), {
-      workerData: { packagePath, outputPath, options: rest },
-    });
-    const fail = (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    };
-    const succeed = (result) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-    };
-    worker.on('message', (message) => {
-      if (!message || typeof message !== 'object') return;
-      if (message.type === 'log') {
-        try { onLog?.(message.line); } catch { /* a log sink must not fail the render */ }
-        return;
+  const promise = Promise.resolve()
+    .then(() => renderFn(packagePath, outputPath, { ...options, signal: abort.signal }))
+    .then(result => {
+      if (abort.signal.aborted) {
+        const error = new Error('render cancelled');
+        error.code = 'RENDER_CANCELLED';
+        throw error;
       }
-      if (message.type === 'done') succeed(message.result);
-      if (message.type === 'error') fail(new Error(message.message || 'render failed'));
-    });
-    worker.on('error', fail);
-    worker.on('exit', (code) => {
-      if (!settled && code !== 0) fail(new Error(`render worker exited ${code}`));
-    });
-  });
+      return result;
+    })
+    .finally(() => { settled = true; });
   return {
     promise,
+    signal: abort.signal,
     cancel() {
       if (settled) return;
-      settled = true;
-      worker?.terminate().catch(() => {});
-      rejectPromise(new Error('render cancelled'));
+      abort.abort();
     },
   };
 }
 
-function startRender(renderFn, packagePath, outputPath, options) {
-  if (renderBlocksEventLoop(renderFn)) return renderPackageOffThread(packagePath, outputPath, options);
-  return {
-    promise: Promise.resolve().then(() => renderFn(packagePath, outputPath, options)),
-    cancel() {},
-  };
+function isCancelled(error, signal) {
+  return Boolean(signal?.aborted) || error?.code === 'RENDER_CANCELLED' || error?.message === 'render cancelled';
 }
 
 export function createRenderRoutes(options = {}) {
@@ -147,22 +118,46 @@ export function createRenderRoutes(options = {}) {
   const lastRendered = new Map();
 
   /**
-   * Take the shared slot for one request. The lease is released on every exit: an explicit
-   * release on the error paths, the response's finish/close events (a finished download or a
-   * client that went away) and the route's finally block.
+   * Take the shared slot for one request. Before a render starts, a client that
+   * goes away releases the slot. Once a render is running, close cancels that
+   * render and the slot stays taken until `release` (after the child exits).
    */
   function holdOperation(kind, id, response) {
     const lease = operations.tryAcquire(kind, id);
     if (lease.busy) return { busy: true, holder: lease.holder };
     let released = false;
+    let rendering = false;
+    let cancelRender = () => {};
     const release = () => {
       if (released) return;
       released = true;
+      rendering = false;
       lease.release();
     };
     response.once('finish', release);
-    response.once('close', release);
-    return { busy: false, holder: null, release };
+    response.once('close', () => {
+      if (released) return;
+      if (rendering) cancelRender();
+      else release();
+    });
+    return {
+      busy: false,
+      holder: null,
+      release,
+      endRender() { rendering = false; },
+      beginRender(cancel) {
+        // The request stream is destroyed once its body has been read. That is
+        // not the client going away; only the response closing is.
+        if (released || response.destroyed || response.writableEnded) {
+          release();
+          const error = new Error('render cancelled');
+          error.code = 'RENDER_CANCELLED';
+          throw error;
+        }
+        rendering = true;
+        cancelRender = typeof cancel === 'function' ? cancel : () => {};
+      },
+    };
   }
 
   function isPlainObject(value) {
@@ -397,6 +392,7 @@ export function createRenderRoutes(options = {}) {
       let pkg;
       let packagePath;
       let revision = null;
+      let abort = null;
       try {
         if (body.package && typeof body.package === 'object') {
           // C1 compatibility: an edited draft draft-exported without mutating the store.
@@ -430,6 +426,8 @@ export function createRenderRoutes(options = {}) {
         if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
 
         events.publish({ type: 'export.started', exportId, packageId: pkg.id, revision });
+        abort = new AbortController();
+        hold.beginRender(() => abort.abort());
         if (body.variants && typeof body.variants === 'object') {
           // L1: one bundle per language/aspect variant plus a variants.json manifest.
           const plan = buildVariants(pkg, body.variants);
@@ -438,6 +436,7 @@ export function createRenderRoutes(options = {}) {
             packagePath,
             variants: plan,
             force: body.force === true,
+            signal: abort.signal,
             onLog: line => events.publish({ type: 'export.log', exportId, line }),
             ...(body.mixAudio === false ? { mixAudio: false } : {}),
           });
@@ -464,6 +463,7 @@ export function createRenderRoutes(options = {}) {
           packagePath,
           revision,
           force: body.force === true,
+          signal: abort.signal,
           onLog: line => events.publish({ type: 'export.log', exportId, line }),
           ...(body.mixAudio === false ? { mixAudio: false } : {}),
         });
@@ -482,7 +482,15 @@ export function createRenderRoutes(options = {}) {
         });
         return sendJson(response, 200, { exportId, ...result, ...productionFields(admission) });
       } catch (error) {
-        events.publish({ type: 'export.failed', exportId, packageId: pkg?.id, message: error.message });
+        hold.endRender?.();
+        const cancelled = isCancelled(error, abort?.signal);
+        events.publish({
+          type: cancelled ? 'export.cancelled' : 'export.failed',
+          exportId,
+          packageId: pkg?.id,
+          message: error.message,
+        });
+        if (response.writableEnded || response.destroyed) return;
         return sendJson(response, error.status ?? 500, { error: error.message, exportId });
       }
     } finally {
@@ -545,15 +553,15 @@ export function createRenderRoutes(options = {}) {
       if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
 
       events.publish({ type: 'render.started', renderId, packageId: pkg.id, revision });
-      const job = startRender(render, packagePath, output, {
-        onLog: line => events.publish({ type: 'render.log', renderId, line }),
-        ...(body.mixAudio === false ? { mixAudio: false } : {}),
-      });
-      const cancelIfGone = () => job.cancel();
-      response.on('close', cancelIfGone);
+      let job;
       try {
+        hold.beginRender(() => job?.cancel());
+        job = startRender(render, packagePath, output, {
+          onLog: line => events.publish({ type: 'render.log', renderId, line }),
+          ...(body.mixAudio === false ? { mixAudio: false } : {}),
+        });
         const result = await job.promise;
-        response.removeListener('close', cancelIfGone);
+        hold.endRender();
         events.publish({
           type: 'render.finished',
           renderId,
@@ -587,9 +595,15 @@ export function createRenderRoutes(options = {}) {
         });
         createReadStream(result.output).pipe(response);
       } catch (error) {
-        response.removeListener('close', cancelIfGone);
-        if (response.writableEnded || response.destroyed || error?.message === 'render cancelled') return;
-        events.publish({ type: 'render.failed', renderId, packageId: pkg.id, message: error.message });
+        hold.endRender();
+        const cancelled = isCancelled(error, job?.signal);
+        events.publish({
+          type: cancelled ? 'render.cancelled' : 'render.failed',
+          renderId,
+          packageId: pkg.id,
+          message: error.message,
+        });
+        if (cancelled || response.writableEnded || response.destroyed) return;
         sendJson(response, 500, { error: error.message, renderId });
       }
     } finally {
@@ -643,12 +657,16 @@ export function createRenderRoutes(options = {}) {
       if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
 
       events.publish({ type: 'scene.render.started', renderId, packageId: target.pkg.id, revision: target.revision, sceneId: body.sceneId, assets });
+      let job;
       try {
-        const result = await renderScene(target.packagePath, output, {
+        hold.beginRender(() => job?.cancel());
+        job = startRender(renderScene, target.packagePath, output, {
           cacheDir,
           force: body.force === true,
           onLog: line => events.publish({ type: 'scene.render.log', renderId, sceneId: body.sceneId, line }),
         });
+        const result = await job.promise;
+        hold.endRender();
         events.publish({
           type: 'scene.render.finished',
           renderId,
@@ -681,7 +699,16 @@ export function createRenderRoutes(options = {}) {
         });
         createReadStream(result.output).pipe(response);
       } catch (error) {
-        events.publish({ type: 'scene.render.failed', renderId, packageId: target.pkg.id, sceneId: body.sceneId, message: error.message });
+        hold.endRender();
+        const cancelled = isCancelled(error, job?.signal);
+        events.publish({
+          type: cancelled ? 'scene.render.cancelled' : 'scene.render.failed',
+          renderId,
+          packageId: target.pkg.id,
+          sceneId: body.sceneId,
+          message: error.message,
+        });
+        if (cancelled || response.writableEnded || response.destroyed) return;
         sendJson(response, 500, { error: error.message, renderId });
       }
     } finally {
@@ -750,20 +777,26 @@ export function createRenderRoutes(options = {}) {
         full,
         reason: fullReason,
       });
+      let job;
       try {
+        hold.beginRender(() => job?.cancel());
+        job = startRender(
+          full ? render : renderScene,
+          target.packagePath,
+          output,
+          full
+            ? { onLog: line => events.publish({ type: 'edit.render.log', renderId, line }) }
+            : { cacheDir, force: false, onLog: line => events.publish({ type: 'edit.render.log', renderId, line }) },
+        );
         let result;
         let renderedSceneIds;
         let reusedSceneIds;
+        result = await job.promise;
+        hold.endRender();
         if (full) {
-          result = await render(target.packagePath, output, { onLog: line => events.publish({ type: 'edit.render.log', renderId, line }) });
           renderedSceneIds = (nextTimeline.scenes ?? []).map(scene => scene.id);
           reusedSceneIds = [];
         } else {
-          result = await renderScene(target.packagePath, output, {
-            cacheDir,
-            force: false,
-            onLog: line => events.publish({ type: 'edit.render.log', renderId, line }),
-          });
           const renderedKeys = new Set(result.rendered);
           const reusedKeys = new Set(result.reused);
           renderedSceneIds = result.segments.filter(segment => renderedKeys.has(segment.key)).map(segment => segment.sceneId);
@@ -804,7 +837,15 @@ export function createRenderRoutes(options = {}) {
         });
         createReadStream(result.output ?? output).pipe(response);
       } catch (error) {
-        events.publish({ type: 'edit.render.failed', renderId, packageId: target.pkg.id, message: error.message });
+        hold.endRender();
+        const cancelled = isCancelled(error, job?.signal);
+        events.publish({
+          type: cancelled ? 'edit.render.cancelled' : 'edit.render.failed',
+          renderId,
+          packageId: target.pkg.id,
+          message: error.message,
+        });
+        if (cancelled || response.writableEnded || response.destroyed) return;
         sendJson(response, 500, { error: error.message, renderId });
       }
     } finally {

@@ -36,8 +36,7 @@ import { listClips } from './takes/clips.mjs';
 import { finalGate } from './takes/gate.mjs';
 import { applySceneChip, sceneChipList } from '../../../packages/agent/dist/src/index.js';
 import { applyPresenterSet, presenterChips, presenterPresets } from '../../../packages/agent/dist/src/index.js';
-import { renderPackage as defaultRenderPackage, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
-import { renderPackageIncremental as defaultRenderScene } from '../../renderer/scripts/render-incremental.mjs';
+import { repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { compilePackage, measuredOptionsFromDir } from './compile-package.mjs';
 import { handleCompile } from './compile-route.mjs';
 import { handleMedia } from './media-route.mjs';
@@ -50,6 +49,7 @@ import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/t
 import { animationOptions } from './animation-options.mjs';
 import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
 import { createRenderRoutes } from './routes/render.mjs';
+import { createWorkerRenderer } from './routes/render-worker.mjs';
 import { createConversationRoutes } from './routes/conversations.mjs';
 import { createPackageRoutes } from './routes/packages.mjs';
 import { createProductionStore } from './productions/store.mjs';
@@ -199,8 +199,10 @@ export function createApp({
   runtimeDir = join(root, 'apps', 'server', '.runtime'),
   exportsDir = join(runtimeDir, 'out', 'export'),
   webDist = join(root, 'apps', 'web', 'dist'),
-  render = defaultRenderPackage,
-  renderScene = defaultRenderScene,
+  render,
+  renderScene,
+  renderModuleUrl,
+  sceneModuleUrl,
   agentRunner = null,
   providers = providerAvailability(),
   providerSettings = null,
@@ -218,6 +220,21 @@ export function createApp({
   auditionSynth = null,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
+  // Local Remotion renders run on a worker. Callers that pass their own render
+  // function (tests, a stub) stay on this thread. The choice is the argument,
+  // not the function's name.
+  if (typeof render !== 'function') {
+    render = createWorkerRenderer(
+      renderModuleUrl ?? new URL('../../renderer/scripts/render-package-lib.mjs', import.meta.url),
+      'renderPackageAsync',
+    );
+  }
+  if (typeof renderScene !== 'function') {
+    renderScene = createWorkerRenderer(
+      sceneModuleUrl ?? new URL('../../renderer/scripts/render-incremental.mjs', import.meta.url),
+      'renderPackageIncrementalAsync',
+    );
+  }
   mkdirSync(runtimeDir, { recursive: true });
   mkdirSync(mediaRoot, { recursive: true });
   const mediaTickets = createMediaTickets();

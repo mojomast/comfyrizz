@@ -393,7 +393,7 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
    *
    * `variants` items: `{ package, language, aspect, slug, isBase, narration? }`.
    */
-  async function exportVariantSet({ pkg, packagePath, variants, force = false, onLog = () => {}, generatedAt = new Date().toISOString(), mixAudio } = {}) {
+  async function exportVariantSet({ pkg, packagePath, variants, force = false, onLog = () => {}, generatedAt = new Date().toISOString(), mixAudio, signal } = {}) {
     if (!pkg || typeof pkg !== 'object') throw new Error('exportVariantSet needs a package');
     if (!packagePath) throw new Error('exportVariantSet needs a packagePath');
     if (!Array.isArray(variants) || variants.length === 0) throw new Error('exportVariantSet needs variants');
@@ -446,6 +446,7 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
           revision: variant.package.revision ?? null,
           force,
           onLog,
+          signal,
           ...(variant.narration !== undefined ? { narration: variant.narration } : {}),
           ...(mixAudio === false ? { mixAudio: false } : {}),
         });
