@@ -45,7 +45,12 @@ stops for you, or on your own ComfyUI. MIT licensed.
 
 ## Feature tour
 
-### Easy home and the seven-step flow
+### Super Easy, Easy home and the seven-step flow
+
+**Super Easy** is the default entry: type what your video is about and press **Generate**. It uses
+Draft for you and starts on **This computer**, so a first run needs no Google Colab. **I want more
+control** opens **Easy Studio** (the seven-step flow below), and **Open in editor** in Easy Studio
+opens **Advanced** for the full timeline. See [docs/ui/SUPER_EASY.md](docs/ui/SUPER_EASY.md).
 
 <table>
 <tr>
@@ -53,13 +58,13 @@ stops for you, or on your own ComfyUI. MIT licensed.
 <td width="50%"><img src="docs/media/ui-easy-idea.webp" alt="Easy Idea step: describe the video, pick a starting template, length, shape and look"></td>
 </tr>
 <tr>
-<td>A bare visit opens <b>Easy home</b>: <b>New video</b>, your recent videos and <b>Try the example</b>.</td>
+<td>A first bare visit opens <b>Super Easy</b>; <b>I want more control</b> opens <b>Easy home</b>: <b>New video</b>, your recent videos and <b>Try the example</b>.</td>
 <td>A new video walks through seven steps: <b>Idea</b>, <b>Characters</b>, <b>Iteration level</b>, <b>Plan</b>, <b>Generate</b>, <b>Review</b> and <b>Export</b>.</td>
 </tr>
 </table>
 
-Easy hides advanced controls; **Open in editor** (or **Ctrl/Cmd+Shift+A**) switches to the full
-studio. See [docs/features/interface.md](docs/features/interface.md).
+**Easy Studio** hides advanced controls; **Open in editor** (or **Ctrl/Cmd+Shift+A**) switches to
+**Advanced**. See [docs/features/interface.md](docs/features/interface.md).
 
 ### Iteration levels, chosen before anything is paid for
 
@@ -138,10 +143,11 @@ pnpm run doctor --offline
 cd apps/server && npm start
 ```
 
-Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). Easy home opens: choose
-**New video** and describe it, or **Try the example** to open Pip's Night Shift
-(`examples/pip-night-shift`). With the **local · scripted model** and the CPU backend you can plan,
-edit a headline or a chart value, then **Export MP4** or **Export bundle** with no GPU and no API key.
+Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). **Super Easy** opens: describe the
+video and press **Generate**. Choose **I want more control** for **Easy home**, where **New video**
+and **Try the example** (Pip's Night Shift, `examples/pip-night-shift`) live. With the **local ·
+scripted model** and the CPU backend you can plan, edit a headline or a chart value, then **Export
+MP4** or **Export bundle** with no GPU and no API key.
 
 > Use `pnpm run doctor`, not bare `pnpm doctor`: the bare form runs pnpm's own built-in command.
 
