@@ -226,6 +226,12 @@ export function isExportStale(pkg: unknown, exportedRevision: number | null | un
   return revision !== null && exported !== null && revision > exported;
 }
 
+export function isExportCurrent(pkg: unknown, exportedRevision: number | null | undefined): boolean {
+  const revision = numberOrNull(recordOf(pkg)?.revision);
+  const exported = numberOrNull(exportedRevision);
+  return revision !== null && exported !== null && revision === exported;
+}
+
 export const isStale = isExportStale;
 
 function normalizeProgress(value: unknown): number {
@@ -447,6 +453,19 @@ interface ExportController {
 
 let activeController: ExportController | null = null;
 
+interface CachedExport {
+  key: string;
+  blob: Blob;
+  qa: ExportQa | null;
+  captions: string | null;
+}
+
+let lastExport: CachedExport | null = null;
+
+function exportCacheKey(pkg: unknown, revision: unknown): string {
+  return `${String(recordOf(pkg)?.id ?? '')}:${String(revision ?? '')}`;
+}
+
 function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
   const doc = el.ownerDocument;
   let destroyed = false;
@@ -479,6 +498,14 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     } catch {
       return null;
     }
+  }
+
+  function cachedExportForCurrent(): CachedExport | null {
+    const state = ctx.store.get();
+    const pkg = currentPackage();
+    if (!isExportCurrent(pkg, state.exported.revision)) return null;
+    const key = exportCacheKey(pkg, state.exported.revision);
+    return lastExport && lastExport.key === key ? lastExport : null;
   }
 
   function doneOptions(): ExportDoneOptions {
@@ -545,9 +572,10 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
       if (blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
         blobUrl = URL.createObjectURL(blob);
       }
+      const revision = typeof result.revision === 'number' ? result.revision : null;
       ctx.store.patch({
         exported: {
-          revision: typeof result.revision === 'number' ? result.revision : null,
+          revision,
           at: new Date().toISOString(),
         },
       });
@@ -559,6 +587,14 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
         }
       }
       if (destroyed || run !== currentRun) return;
+      if (blob) {
+        lastExport = {
+          key: exportCacheKey(currentPackage(), revision),
+          blob,
+          qa: currentQa,
+          captions: bundleCaptions,
+        };
+      }
       paintDone();
     } catch (error) {
       if (destroyed || run !== currentRun) return;
@@ -653,7 +689,20 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
 
   const controller: ExportController = { destroy, primary };
   el.addEventListener('click', onClick);
-  void begin();
+  const cached = cachedExportForCurrent();
+  if (cached) {
+    blob = cached.blob;
+    if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+      blobUrl = URL.createObjectURL(blob);
+    }
+    currentQa = cached.qa;
+    bundleCaptions = cached.captions;
+    paintDone();
+  } else if (isExportCurrent(currentPackage(), ctx.store.get().exported.revision)) {
+    paintDone();
+  } else {
+    void begin();
+  }
   return controller;
 }
 
