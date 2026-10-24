@@ -1,5 +1,7 @@
 # Iteration levels
 
+![Iteration level picker](media/ui-iteration-levels.webp)
+
 Before a production spends anything on Google Colab, you choose how many versions to try. The choice is Draft, Balanced, Director, or Custom. Nothing is selected for you. Balanced is the highlighted recommendation when the production has no history.
 
 Choosing a level sets how many takes, rounds, and auditions the production may ask for. It is not spend approval. Every paid plan still needs its own approval, and the number that binds that approval is the plan's reservation ceiling.
