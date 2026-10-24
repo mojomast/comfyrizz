@@ -15,6 +15,7 @@ import {
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
 
 const PREVIEW_TITLE = 'Preview';
+const EMPTY_PREVIEW = 'Preview appears after you generate.';
 const NO_CAP = 'Set a spend cap to use Google Colab before you approve this plan.';
 const NO_CAP_REASON = NO_CAP;
 const PICKS_SHOT_VERSIONS = 'shot versions';
@@ -276,10 +277,20 @@ ${makesHtml}
 </section>`;
 }
 
-function renderPreview(): string {
+function hasPlayerContent(state: EasyState): boolean {
+  return state.generate.status === 'running'
+    || state.generate.status === 'stopping'
+    || state.generate.status === 'done'
+    || state.generate.status === 'stopped';
+}
+
+function renderPreview(state: EasyState): string {
+  const placeholder = hasPlayerContent(state)
+    ? ''
+    : `<p class="easy-plan-player-placeholder" data-easy-plan-preview-empty>${escapeHtml(EMPTY_PREVIEW)}</p>`;
   return `<section class="easy-plan-preview" aria-labelledby="easy-plan-preview-h">
 <h2 id="easy-plan-preview-h">${escapeHtml(PREVIEW_TITLE)}</h2>
-<div class="easy-plan-player" data-easy-player></div>
+<div class="easy-plan-player" data-easy-player>${placeholder}</div>
 </section>`;
 }
 
@@ -344,7 +355,7 @@ export function renderPlan(state: EasyState, _facts?: StepFacts, options: PlanRe
 ${offlineBanner(state)}
 <div class="easy-two-col easy-plan-grid">
 ${renderShots(state, card, scenes)}
-${renderPreview()}
+${renderPreview(state)}
 </div>
 ${decisionsHtml}
 ${renderCost(state, card)}

@@ -165,6 +165,20 @@ test('required decisions render as fieldsets with a checked default', () => {
   assert.match(html, /value="Warm"[^>]*checked/);
 });
 
+test('an empty player explains that the preview appears after generation', () => {
+  const html = renderPlan(readyState(), FACTS, { snapshot: snapshot(), package: PACKAGE });
+  assert.equal(html.includes('Preview appears after you generate.'), true);
+  assert.match(html, /data-easy-player[^>]*>[\s\S]*data-easy-plan-preview-empty/);
+  assert.match(html, /data-easy-plan-preview-empty[^>]*>Preview appears after you generate\.</);
+});
+
+test('a player with generated shots does not show the empty placeholder', () => {
+  const state = readyState({ generate: { status: 'done' } });
+  const html = renderPlan(state, FACTS, { snapshot: snapshot(), package: PACKAGE });
+  assert.equal(html.includes('Preview appears after you generate.'), false);
+  assert.equal(html.includes('data-easy-plan-preview-empty'), false);
+});
+
 test('the step module is registered as plan', () => {
   assert.equal(step.id, 'plan');
   assert.equal(step.heading, COPY.plan.heading);
