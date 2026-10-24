@@ -1,6 +1,10 @@
 import type { EasyState, StepFacts, StepId } from './types.ts';
 import { defaultEasyState } from './store.ts';
 import { deriveStep, reachable, readStepFromUrl, writeStepToUrl } from './steps.ts';
+import { readSuperEasyPrefs, type SuperEasyPrefs } from './super-easy/prefs.ts';
+
+/** The landing choice is separate from the global easy | advanced mode. */
+export type EasyRoutePrefs = Pick<SuperEasyPrefs, 'preferStudio'>;
 
 export interface EasyRoute {
   step: StepId;
@@ -16,7 +20,12 @@ function searchOf(search: string): string {
 }
 
 /** Where Easy opens. A requested step that is still locked falls back to the derived step. */
-export function initialRoute(search: string, state: EasyState | null | undefined, facts: StepFacts): EasyRoute {
+export function initialRoute(
+  search: string,
+  state: EasyState | null | undefined,
+  facts: StepFacts,
+  prefs?: EasyRoutePrefs | null,
+): EasyRoute {
   const query = searchOf(search);
   const params = new URLSearchParams(query.startsWith('?') ? query.slice(1) : query);
   const view = params.get('view') === 'editor' ? 'editor' : 'easy';
@@ -26,7 +35,8 @@ export function initialRoute(search: string, state: EasyState | null | undefined
   const packageId = params.get('package')?.trim() ?? '';
   const requestedStep = params.get('step')?.trim() ?? '';
   const home = view === 'easy' && packageId === '' && requestedStep === '';
-  return { step, view: home ? 'superEasy' : view, home };
+  const preferStudio = prefs === undefined ? readSuperEasyPrefs().preferStudio : prefs?.preferStudio === true;
+  return { step, view: home && !preferStudio ? 'superEasy' : view, home };
 }
 
 /** Next address bar value. `view=editor` is dropped because a step change stays in Easy. */
