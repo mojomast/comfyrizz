@@ -45,183 +45,81 @@ stops for you, or on your own ComfyUI. MIT licensed.
 
 ## Feature tour
 
-### Iterative production agent
-
-Work on a video scene by scene instead of in one shot. A **production** is a durable, journaled
-record: the agent reads it, proposes a **plan card**, and you approve or reject it. Only approved,
-scoped work is dispatched, by a deterministic production coordinator. The agent can never approve
-its own plan, select a take or spend: guardrails refuse approval and spend commands and any shot or
-line id outside the requested scope. Each production has its own budget ledger, and the
-**Google Colab spend cap is set by you per production** (there is no default cap, and you can turn it off;
-reservations and settlements are recorded either way). Behavioural evals replay a committed
-cassette against the real command and action modules. See
-[docs/features/production-agent.md](docs/features/production-agent.md).
-
-### Easy and Advanced modes
-
-The editor opens in **Easy** mode, which hides advanced controls; **Advanced** shows everything.
-Toggle with **Ctrl/Cmd+Shift+A**. A separate **density** setting (comfortable or compact) is saved
-with it. The brand identity is **Kinetic ZZ** ([`brand/`](brand/README.md)). See
-[docs/features/interface.md](docs/features/interface.md).
-
-### Voice and research
-
-Characters speak with the video model's **native voice** when the model declares that capability
-(for example MiniMax); otherwise they use a local **Kokoro** voice, which can be auditioned free.
-Voice cloning is not supported. For research, you choose **Use my URLs** or **Search for me**; the
-agent cannot choose for you, and fetched text is treated as untrusted data. See
-[voice](docs/features/voice.md) and [research](docs/features/research.md).
-
-### Chat agent and editor
-
-<img src="docs/media/ui-agent-editor.webp" alt="Comfyrizz web app: chat agent, brief, Remotion preview, timeline and run panel" width="880">
-
-The local app: chat on the left, the Remotion Player and frame-accurate timeline in the middle,
-backend runs, export and assets on the right. Captured offline with the **local · scripted model**
-and the CPU backend.
+### Easy home and the seven-step flow
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/ui-plan-questions.webp" alt="Plan mode asks up to three questions: length, look and data"></td>
-<td width="50%"><img src="docs/media/ui-look-picker.webp" alt="Editable brief with look tiles and the scene outline"></td>
+<td width="50%"><img src="docs/media/ui-easy-home.webp" alt="Easy home screen with New video, the bundled projects and Try the example"></td>
+<td width="50%"><img src="docs/media/ui-easy-idea.webp" alt="Easy Idea step: describe the video, pick a starting template, length, shape and look"></td>
 </tr>
 <tr>
-<td><b>Plan mode</b> asks up to three questions (length, look, real numbers) and builds nothing until you confirm.</td>
-<td><b>Editable brief</b>: pick a look, check the hook / point / proof / CTA outline and its timing, then build.</td>
+<td>A bare visit opens <b>Easy home</b>: <b>New video</b>, your recent videos and <b>Try the example</b>.</td>
+<td>A new video walks through seven steps: <b>Idea</b>, <b>Characters</b>, <b>Iteration level</b>, <b>Plan</b>, <b>Generate</b>, <b>Review</b> and <b>Export</b>.</td>
 </tr>
 </table>
 
-### Pip's Night Shift, the default project
+Easy hides advanced controls; **Open in editor** (or **Ctrl/Cmd+Shift+A**) switches to the full
+studio. See [docs/features/interface.md](docs/features/interface.md).
 
-<img src="docs/media/ui-pip-default.webp" alt="Pip's Night Shift open in the editor with motion-graphics scenes, text styles and a music bed on the timeline" width="880">
+### Iteration levels, chosen before anything is paid for
 
-The local editor opens Pip's Night Shift (`examples/pip-night-shift`) by default when the server
-starts. It is a finished motion-graphics project with styled text scenes and a generated CC0 music
-bed plus sound effects, so there is something real to play, edit and export before you write a
-brief. `examples/launch-demo` stays bundled and is still the package behind `render:example`. See
-[docs/DEFAULT_PROJECT.md](docs/DEFAULT_PROJECT.md).
+<img src="docs/media/ui-iteration-levels.webp" alt="Iteration level step: Draft, Balanced and Director cards with a Recommended card" width="880">
+
+Before a production can spend Google Colab units you pick **Draft**, **Balanced**, **Director** or
+**Custom**: how many scripts, voice and image options and shot takes to try. Each level shows a
+low/expected/high unit estimate. Choosing a level is **never spend approval**: every paid plan still
+needs its own approval against its reservation ceiling, and the agent can read the level but never
+set or raise it. See [docs/ITERATION_LEVELS.md](docs/ITERATION_LEVELS.md).
+
+### Studio: chat agent, preview and timeline
+
+<img src="docs/media/ui-studio.webp" alt="Studio: chat agent asking plan questions, Remotion preview, scene inspector, activity rail and frame-accurate timeline" width="880">
+
+The chat agent plans with you (up to three questions in **Plan** mode), writes the copy and
+storyboard, and edits the same project afterwards. The Remotion Player and frame-accurate timeline
+(scenes, narration, captions, presenter, music) sit in the middle; runs, files and jobs on the right.
+Work is journaled as a **production**: the agent proposes **plan cards**, you approve them, and only
+approved, scoped work is dispatched, under a per-production Google Colab spend cap you set. Every
+generated clip has **takes** you review, compare and approve before the final render. Captured
+offline with the **local · scripted model**. See
+[production agent](docs/features/production-agent.md),
+[chat agent](docs/features/chat-agent.md) and
+[timeline review](docs/features/timeline-review-and-export.md).
 
 ### Characters
 
-<img src="docs/media/character-library.webp" alt="Character library: cards for each saved character with role, revision and primary portrait" width="880">
+<img src="docs/media/ui-character-creator.webp" alt="Character library drawer with a new fictional character being created" width="880">
 
-Characters is a library for the people and mascots in your videos, reused across projects. Define a character once with a name,
-`@handle`, role, look, voice and bible, upload PNG, JPEG or WEBP reference images, then add a pinned
-snapshot to a project. Library edits never change an existing project: the cast chip offers **Update
-to vN**, and timeline review marks rebuilt clips **stale** instead of re-rendering silently.
+A library of people and mascots reused across projects: name, `@handle`, role, look, wardrobe,
+voice and bible, with reference images. Adding one to a project pins a revision; `@handle` in chat
+autocompletes to the project cast. The editor creates fictional characters only. See
+[docs/features/characters.md](docs/features/characters.md).
 
-<img src="docs/media/character-cast-mention.webp" alt="Project cast strip above the chat composer showing a pinned character and an @mention autocomplete" width="880">
+### Asset viewer
 
-The **Cast** strip above the chat composer shows each member and its pinned revision. `@handle` in
-the chat box autocompletes to the project cast id; an unknown handle is reported, never invented.
-The agent proposes placements, and only confirmed placements reach `scene.cast`.
+<img src="docs/media/ui-asset-viewer.webp" alt="Asset viewer dialog open on the music bed, with play, speed, Region, Iterate and Compare" width="880">
 
-<img src="docs/media/character-identity.webp" alt="Character look panel with a primary reference image, identity prompt, negative prompt and identity method" width="880">
+Open any image, video, audio or text asset from the file list, the timeline or a take. Scrub, step
+frames, mark a region or time range and ask the agent to iterate on just that element. Opening the
+viewer or selecting a region never approves work or spend. See
+[docs/ASSET_VIEWER.md](docs/ASSET_VIEWER.md).
 
-Identity defaults to Klein multi-reference editing with the primary image (or a ready turnaround
-sheet). For a fictional character you can choose PuLID when its models are present, or a trained LoRA
-asset; if that tier is unavailable the build falls back to the Klein reference workflow and the job
-plan shows which graph will run. **Generate sheet** runs one Klein reference edit for a front,
-three-quarter, side and back turnaround plus expression studies, with its own spend approval; the
-sheet is saved as a non-primary image.
+### Voice
 
-<img src="docs/media/character-speaker.webp" alt="Per-scene speaker picker assigning cast voices to scenes" width="880">
+Characters speak with the video model's **native voice** when its profile declares that capability
+(for example MiniMax); otherwise they use a local **Kokoro** voice, which can be auditioned free.
+Voice cloning is not supported. See [docs/features/voice.md](docs/features/voice.md).
 
-Each scene can name a cast **speaker**. The build resolves that character's voice and groups
-consecutive scenes into one TTS job per voice segment; scenes without a speaker use the narrator,
-then the package voice. A missing or voiceless speaker is reported and falls back rather than
-silently changing the voice.
+### More
 
-<img src="docs/media/character-real-consent.webp" alt="Real-person character form showing the likeness warning and required permission checkbox" width="880">
-
-A character can be **fictional** or a **real person**. The real-person path shows a likeness warning
-and requires a consent record (who gave permission, when, and the scope) before it will save; a
-fictional character keeps the simpler fictional-only checkbox. See
-[docs/CHARACTER_CREATOR.md](docs/CHARACTER_CREATOR.md).
-
-### References panel
-
-<img src="docs/media/ui-references.webp" alt="References panel with uploaded images and a video, each tagged with a role and usage note, plus proposed placements" width="880">
-
-Upload images (PNG, JPEG, WEBP, GIF) and videos (MP4, MOV, WEBM, up to 60 seconds), then give each
-file one role and a short usage note. The agent reads the manifest, asks when a note or role is
-ambiguous, and proposes a scene and slot. Only **confirmed** assignments are copied into the package
-as `a_ref_*` assets and passed to the Comfy workflows. Files stay local; the model sees the label,
-role, note and dimensions, not the pixels. See [docs/REFERENCE_ASSETS.md](docs/REFERENCE_ASSETS.md).
-
-### Timeline review
-
-<img src="docs/media/ui-timeline-review.webp" alt="Timeline review with a take strip, clip state chips and an n/m clips approved render bar" width="880">
-
-Every generated clip has **takes**. Preview them in the Player, A/B the old and new take, write a
-correction for one clip, and regenerate only that clip. Clip chips on the timeline show `planned`,
-`generating`, `review`, `approved`, `stale` and the rest. The final render is gated by
-`n/m clips approved`; a `stale` clip blocks it, and **Render anyway** needs a written 4–500
-character reason. See [docs/TIMELINE_REVIEW.md](docs/TIMELINE_REVIEW.md).
-
-### Google Colab progress, rates and cancel
-
-<img src="docs/media/colab-gauges-preview.webp" alt="Live Google Colab progress gauges in the editor for setup, sampler, nodes, render frames and encode" width="880">
-
-While a run is active the editor polls `/api/colab/progress` and draws the VM's own gauges: setup and
-model-download phases, sampler and per-node progress, render frames and encoding. Each run writes a
-per-run JSONL progress file, so the gauge data stays out of the job log.
-
-<img src="docs/media/ui-colab-spend.webp" alt="Google Colab spend card showing the accelerator rate, teardown reserve and account balance check" width="880">
-
-Allocation is priced **per accelerator** from the measured table (G4 8.90, L4 4.8, CPU 0.08 units/h);
-H100 and A100 are refused until a rate is configured. Admission, the watchdog deadlines and the
-balance check all include the same six-minute collect-and-stop reserve. `colab usage` is read
-before anything is allocated, and a balance that cannot be read refuses the run. **Cancel** during
-allocation aborts the allocation itself and stops any session it already created before the run is
-reported clean. See [docs/PIPELINE_OBSERVABILITY.md](docs/PIPELINE_OBSERVABILITY.md).
-
-### Quality checks before the render
-
-<img src="docs/media/qa-cli-preview.webp" alt="QA CLI flagging caption and Foley issues on fixtures" width="880">
-
-`node scripts/quality/cli.mjs` runs seven JSON-only passes: `beats`, `takes`, `continuity`, `edit`,
-`captions`, `sound` and `receipt`. They catch story beats that contradict their prompt, unreadable
-caption rates and splits, Foley and cue mismatches, and ducking that fills a deliberate pause. A
-blocking finding or a missing review exits `1`. The CLI never decodes media or edits a package. See
-[docs/QUALITY_PIPELINE.md](docs/QUALITY_PIPELINE.md).
-
-### 24 named style recipes
-
-<img src="docs/media/style-recipes.webp" alt="Twelve of the 24 style recipes rendered as SVG style frames" width="880">
-
-Each look is a `comfyrizz.recipe/v1` file that binds a palette, a type pairing, an easing
-personality, entries, a transition grammar, a background pattern and a finishing stack. The agent's
-motion-style skill lists, suggests and applies them (`style.list`, `style.suggest`, `style.apply`).
-A seeded variety engine avoids repeating recent looks, and a look score checks the result.
-
-<img src="docs/media/motion-gallery.webp" alt="The motion gallery: all 24 style recipes rendered as style-frame cards in their own palettes" width="880">
-
-The full gallery (`node scripts/motionkit/gallery.mjs` → [`docs/motion-gallery/index.html`](docs/motion-gallery/index.html))
-renders every recipe through the same `styleFrame` code the agent uses, with energy and finish filters.
-
-- **24 recipes** in [`scripts/motionkit/data/recipes/`](scripts/motionkit/data/recipes/), from Swiss grid and Blueprint to Cinematic noir, Risograph and VHS retro
-- **37 effects** ([`effects.json`](scripts/motionkit/data/effects.json)) and **25 transitions** ([`transitions.json`](scripts/motionkit/data/transitions.json)), each with a CPU fallback
-- **16 OFL-1.1 fonts** catalogued in [`assets.json`](scripts/motionkit/data/assets.json) and fetched with `node scripts/motionkit/fetch-assets.mjs`
-- A renderer finishing layer ([`look-layer.tsx`](apps/renderer/src/look-layer.tsx)) and a style gallery at [`docs/motion-gallery/index.html`](docs/motion-gallery/index.html)
-
-The frames above are `styleFrame()` output for 12 of the recipes. The full guide is
-[docs/MOTION_STYLES.md](docs/MOTION_STYLES.md).
-
-### Two-minute demo page
-
-<img src="docs/media/ui-demo-webapp.webp" alt="Comfyrizz live demo page in fixture mode" width="880">
-
-`apps/web/demo.html` walks the whole loop on one page: brief, storyboard, licence receipts, a spend
-estimate, the Google Colab run and iteration. Fixture mode (`?fixture=1`) needs no server, token, GPU
-or network. See [docs/DEMO_WEBAPP_RUNBOOK.md](docs/DEMO_WEBAPP_RUNBOOK.md).
-
-### Setup preflight
-
-<img src="docs/media/doctor-output.webp" alt="pnpm run doctor --offline on a fresh clone" width="760">
-
-`pnpm run doctor` checks every prerequisite in one screen and prints a fix command for each
-problem. It is read-only and never prints secret values. See [docs/DOCTOR.md](docs/DOCTOR.md).
+- **References panel**: upload images and short videos, give each a role and note, confirm placements ([guide](docs/REFERENCE_ASSETS.md)).
+- **Research**: **Use my URLs** or **Search for me**; fetched text is untrusted data ([research](docs/features/research.md)).
+- **Google Colab progress, rates and cancel**: live VM gauges, per-accelerator pricing, balance check and verified stop ([observability](docs/PIPELINE_OBSERVABILITY.md)).
+- **24 style recipes**, 37 effects and 25 transitions, with a [motion gallery](docs/motion-gallery/index.html) ([guide](docs/MOTION_STYLES.md)).
+- **Quality checks** before the render: `node scripts/quality/cli.mjs` ([guide](docs/QUALITY_PIPELINE.md)).
+- **Default project** Pip's Night Shift, a finished motion-graphics project to play and export ([guide](docs/DEFAULT_PROJECT.md)).
+- **Two-minute demo page** `apps/web/demo.html?fixture=1`, no server or GPU ([runbook](docs/DEMO_WEBAPP_RUNBOOK.md)).
+- **Setup preflight** `pnpm run doctor` ([guide](docs/DOCTOR.md)).
 
 ## Quick start
 
@@ -240,11 +138,10 @@ pnpm run doctor --offline
 cd apps/server && npm start
 ```
 
-Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). The editor opens Pip's
-Night Shift (`examples/pip-night-shift`) by default; `examples/launch-demo` stays bundled.
-Send a brief in **Plan** mode with the **local · scripted model**, edit a headline or a
-chart value, then **Export MP4** or **Export bundle**. This path needs no GPU and no API
-key.
+Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). Easy home opens: choose
+**New video** and describe it, or **Try the example** to open Pip's Night Shift
+(`examples/pip-night-shift`). With the **local · scripted model** and the CPU backend you can plan,
+edit a headline or a chart value, then **Export MP4** or **Export bundle** with no GPU and no API key.
 
 > Use `pnpm run doctor`, not bare `pnpm doctor`: the bare form runs pnpm's own built-in command.
 
@@ -261,8 +158,6 @@ The full clean-clone check is in [docs/RELEASE_CHECK.md](docs/RELEASE_CHECK.md).
 A cassette (`comfyrizz.cassette/v1`) records one agent session's LLM traffic with credentials
 redacted. Replay needs no key and no network, and because the request key ignores the model, the
 same session replays under any model.
-
-<img src="docs/media/cassette-replay.webp" alt="Validating, inspecting and replaying the sample cassette" width="760">
 
 ```bash
 node scripts/cassette/cli.mjs validate scripts/cassette/fixtures/launch-brief.cassette.json
@@ -396,10 +291,6 @@ GPU paths are tested against a fake `colab` CLI and a fake Comfy server, so no s
 runtime or spends anything. Backend and pipeline tests honour `COMFYRIZZ_PYTHON` for the pipeline
 interpreter and keep scratch files under `os.tmpdir()`. The motion library's tests are listed in
 [docs/MOTION_STYLES.md](docs/MOTION_STYLES.md#every-command).
-
-## In progress
-
-Not yet on `main`, so not documented here: iteration levels, an asset viewer and a UI revamp.
 
 ## Hackathon submission
 

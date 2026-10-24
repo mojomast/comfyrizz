@@ -117,7 +117,10 @@
 
 /* UI2-11: global style.css `main` is a 3-column grid, so Easy steps opt out. */
 .easy-main {
+  /* Also clear grid columns + background inherited from the editor main rule. */
   display: block;
+  grid-template-columns: none;
+  background: none;
   flex: 1 1 auto;
   width: 100%;
   min-height: 0;

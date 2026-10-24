@@ -2,16 +2,18 @@
 
 Start with the [project README](../README.md).
 
-## Features (current `main`)
+## Features
 
 - [Iterative production agent](features/production-agent.md): coordinator, plan cards and approvals, agent tools, guardrails, budget ledger and spend cap, evals
+- [Iteration levels](ITERATION_LEVELS.md): Draft, Balanced, Director or Custom, chosen before any paid generation; never spend approval
+- [Asset viewer](ASSET_VIEWER.md): thumbnails, filmstrips, region and time-range iteration
 - [Character creator](features/characters.md)
 - [Voice](features/voice.md): native model voice or Kokoro, no cloning
 - [Research sources](features/research.md): use my URLs or search for me
 - [Google Colab inference automation](features/google-colab.md)
 - [Model-agnostic chat agent](features/chat-agent.md)
 - [Timeline review and export](features/timeline-review-and-export.md)
-- [Interface: Easy and Advanced, density, Kinetic ZZ brand](features/interface.md)
+- [Interface: Easy home and steps, Easy and Advanced, density, Kinetic ZZ brand](features/interface.md)
 - [Testing](features/testing.md)
 
 ## Guides

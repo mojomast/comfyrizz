@@ -1,5 +1,7 @@
 # Asset viewer
 
+![Asset viewer](media/ui-asset-viewer.webp)
+
 Use thumbnails to scan assets, open an asset for review, and ask for an iteration on one element. Opening the viewer, choosing an element, and selecting a region or time range do not approve work or spend.
 
 ## Thumbnails and display modes

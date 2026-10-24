@@ -4,6 +4,8 @@ Characters live in a library outside any one project, so the same person or masc
 across projects. Code: `apps/server/src/characters/`, `apps/web/src/characters/`. Detailed guide:
 [CHARACTER_CREATOR.md](../CHARACTER_CREATOR.md).
 
+![Character creator](../media/ui-character-creator.webp)
+
 - **Define once.** Name, `@handle`, role, look, voice and bible, plus PNG, JPEG or WEBP references.
 - **Pinned snapshots.** Adding a character to a project pins a revision. Library edits never change
   an existing project; the cast chip offers **Update to vN**. Edits honour `If-Match`, so a stale
@@ -14,4 +16,6 @@ across projects. Code: `apps/server/src/characters/`, `apps/web/src/characters/`
   characters when available, with a visible fallback. **Generate sheet** makes a turnaround sheet
   behind its own spend approval.
 - **Speakers.** Each scene can name a cast speaker; see [voice](voice.md).
-- **Real people** need a consent record (who, when, scope) before saving.
+- **Fictional only in the editor.** The character editor creates fictional characters and says real
+  people and user photos are not supported. The server keeps a consent-record model
+  (`apps/server/src/characters/consent.mjs`) for a future real-person path.

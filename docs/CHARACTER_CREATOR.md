@@ -419,6 +419,10 @@ character agent tool sets `scene.speaker` in this checkout.
 
 ## 7. Authorized real-person characters
 
+> The web character editor currently creates fictional characters only and says real people and
+> user photos are not supported. The server-side consent model below exists, but the editor does
+> not expose a real-person path yet.
+
 ![Consent checkbox and likeness warning](media/character-real-consent.webp)
 
 ### 7.1 Character kind and consent record
