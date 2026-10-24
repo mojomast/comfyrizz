@@ -48,6 +48,14 @@ test('plan banner describes template scripts without jargon', () => {
   assert.equal(/planner/i.test(COPY.plan.offline), false);
 });
 
+test('export extras label names what the ZIP contains', () => {
+  assert.equal(COPY.export.extras, 'Download captions, credits and project files (ZIP)');
+  assert.equal(/extras/i.test(COPY.export.extras), false);
+  assert.match(COPY.export.extras, /captions/);
+  assert.match(COPY.export.extras, /credits/);
+  assert.match(COPY.export.extras, /project files/);
+});
+
 test('scanner finds no banned words in easy sources', () => {
   const easyDir = existsSync('src/easy') ? 'src/easy' : 'apps/web/src/easy';
   const entries = readdirSync(easyDir, { recursive: true });

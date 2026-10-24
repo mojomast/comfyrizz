@@ -266,7 +266,7 @@ export const COPY = Object.freeze({
     doneHeading: 'Your video is ready',
     meta: '{name} · {duration} · {aspect} · {size}',
     download: 'Download MP4',
-    extras: 'Download captions and extras (ZIP)',
+    extras: 'Download captions, credits and project files (ZIP)',
     qaPass: 'Quality check passed',
     qaNotes: 'Quality check found {n} notes',
     another: 'Make another version',
