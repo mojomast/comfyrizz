@@ -4,7 +4,8 @@ import { deriveStep, reachable, readStepFromUrl, writeStepToUrl } from './steps.
 
 export interface EasyRoute {
   step: StepId;
-  view: 'easy' | 'editor';
+  /** `superEasy` is the bare-visit landing. Studio steps and the editor keep their own views. */
+  view: 'easy' | 'editor' | 'superEasy';
   /** A visit with no video and no step. The studio steps stay behind New video. */
   home: boolean;
 }
@@ -25,7 +26,7 @@ export function initialRoute(search: string, state: EasyState | null | undefined
   const packageId = params.get('package')?.trim() ?? '';
   const requestedStep = params.get('step')?.trim() ?? '';
   const home = view === 'easy' && packageId === '' && requestedStep === '';
-  return { step, view, home };
+  return { step, view: home ? 'superEasy' : view, home };
 }
 
 /** Next address bar value. `view=editor` is dropped because a step change stays in Easy. */

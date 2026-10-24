@@ -19,6 +19,7 @@ test('a review link before the plan is approved opens the plan step', () => {
   state.packageId = 'p';
   const route = initialRoute('?package=p&step=review', state, blocked);
   assert.equal(route.step, 'plan');
+  assert.equal(route.view, 'easy');
 });
 
 test('view=editor opens the editor', () => {
@@ -32,6 +33,18 @@ test('view=editor opens the editor', () => {
   assert.deepEqual({ view: route.view }, { view: 'editor' });
 });
 
+test('view=editor stays the editor without a package or step', () => {
+  const route = initialRoute('?view=editor', null, {
+    hasPackage: false,
+    planApproved: false,
+    actionsActive: false,
+    allShotsKept: false,
+    exportCurrent: false,
+  });
+  assert.equal(route.view, 'editor');
+  assert.equal(route.home, false);
+});
+
 const fresh = {
   hasPackage: false,
   planApproved: false,
@@ -40,16 +53,20 @@ const fresh = {
   exportCurrent: false,
 };
 
-test('a bare visit opens the home screen, not a step', () => {
+test('a bare visit opens Super Easy, not a step', () => {
   const route = initialRoute('', null, fresh);
   assert.equal(route.home, true);
-  assert.equal(route.view, 'easy');
+  assert.equal(route.view, 'superEasy');
 });
 
-test('New video and a saved video leave home', () => {
+test('a studio step link opens the Easy studio', () => {
   const idea = initialRoute('?step=idea', null, fresh);
   assert.equal(idea.home, false);
+  assert.equal(idea.view, 'easy');
   assert.equal(idea.step, 'idea');
+  const review = initialRoute('?package=p&step=review', defaultEasyState(), blocked);
+  assert.equal(review.view, 'easy');
   const saved = initialRoute('?package=pkg_newer', defaultEasyState(), fresh);
   assert.equal(saved.home, false);
+  assert.equal(saved.view, 'easy');
 });
