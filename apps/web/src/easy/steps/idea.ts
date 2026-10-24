@@ -373,6 +373,7 @@ function bindEvents(view: IdeaView, ctx: EasyStepContext): () => void {
   };
 }
 
+// UI2-11: Wide single-column layout on wide screens (>=1000px) handled via .easy-main in easy.css.
 export const step: EasyStepModule = {
   id: 'idea',
   heading: COPY.idea.heading,
