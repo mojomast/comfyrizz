@@ -18,6 +18,8 @@ import { runCpuGenerate } from './cpu-path.ts';
 import { levelForState } from './steps/level.ts';
 import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-advanced.ts';
 import { openDialog } from './dialog.ts';
+import { mountSuperEasy } from './super-easy/mount.ts';
+import { setPreferStudio } from './super-easy/prefs.ts';
 
 import './easy.css';
 
@@ -59,6 +61,9 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
   let stopStepper: () => void = () => {};
   let shellReady = false;
   let homeTicket = 0;
+  let superEasy: ReturnType<typeof mountSuperEasy> | null = null;
+  let superEasySnapshot: unknown = null;
+  let superEasyTicket = 0;
   let primaryAction: () => void = () => host.openEditor();
   let cpuFlight: Promise<unknown> | null = null;
   let facts: StepFacts = {
@@ -94,6 +99,60 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     }
     const player = host.playerElement();
     if (player) adoptPlayer(slot, player);
+  }
+
+  function destroySuperEasy(): void {
+    superEasyTicket += 1;
+    superEasy?.destroy();
+    superEasy = null;
+  }
+
+  function refreshSuperEasySnapshot(): void {
+    const productionId = store.get().productionId;
+    if (!productionId) return;
+    const ticket = ++superEasyTicket;
+    void api.getProduction(productionId).then((snapshot) => {
+      if (ticket !== superEasyTicket) return;
+      superEasySnapshot = snapshot;
+      superEasy?.render();
+    }).catch(() => {
+      /* keep the last snapshot; the gauges stay at their last known state */
+    });
+  }
+
+  /** Super Easy first paint. The player stays with its owner; only the studio adopts it. */
+  function showSuperEasy(): void {
+    homeTicket += 1;
+    stopStep();
+    stopStepper();
+    shellReady = false;
+    shell?.destroy();
+    shell = null;
+    releasePlayer();
+    destroySuperEasy();
+    superEasySnapshot = null;
+    superEasy = mountSuperEasy({
+      root,
+      state: () => store.get(),
+      subscribe: (listener) => store.subscribe((next, previous) => {
+        listener();
+        if (next.productionId !== previous.productionId && next.productionId) refreshSuperEasySnapshot();
+      }),
+      snapshot: () => superEasySnapshot,
+      onMoreControl: () => openStudioFromSuperEasy(),
+    });
+    if (store.get().productionId) refreshSuperEasySnapshot();
+  }
+
+  /** More control lands on the existing studio at its Idea step. */
+  function openStudioFromSuperEasy(): void {
+    setPreferStudio(true);
+    const params = new URLSearchParams(search().replace(/^\?/, ''));
+    params.delete('view');
+    const query = params.toString();
+    view?.history?.pushState({}, '', nextUrl(query ? `?${query}` : '', 'idea'));
+    destroySuperEasy();
+    ensureShell();
   }
 
   function planNeedsUpdate(state: EasyState): StepId[] {
@@ -257,6 +316,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     stopStep();
     stopStepper();
     releasePlayer();
+    destroySuperEasy();
     root.innerHTML = renderHomeScreen([]);
     void loadHomeVideos((input) => host.apiFetch(input)).then((videos) => {
       if (ticket !== homeTicket) return;
@@ -273,6 +333,10 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       return;
     }
     if (getMode() !== 'easy') setMode('easy');
+    if (route.view === 'superEasy') {
+      showSuperEasy();
+      return;
+    }
     if (route.home) {
       showHomeScreen();
       return;
@@ -283,10 +347,15 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
 
   function ensureShell(): void {
     const route = initialRoute(search(), store.get(), factsFor());
+    if (route.view === 'superEasy') {
+      showSuperEasy();
+      return;
+    }
     if (route.home) {
       showHomeScreen();
       return;
     }
+    destroySuperEasy();
     homeTicket += 1;
     if (shellReady) {
       showStep(currentStep);
@@ -324,6 +393,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
       return;
     }
     if (html.dataset.shell === 'easy') delete html.dataset.shell;
+    destroySuperEasy();
     releasePlayer();
     root.hidden = true;
     if (app) {
@@ -356,6 +426,10 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     }
     // A saved editor session stays in the editor. Easy still resumes its step.
     if (getMode() !== 'easy') return;
+    if (boot.view === 'superEasy') {
+      if (!superEasy) showSuperEasy();
+      return;
+    }
     showStep(boot.step);
   });
 
@@ -366,6 +440,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
     stopStep();
     stopStepper();
     releasePlayer();
+    destroySuperEasy();
     shell?.destroy();
   };
 }
