@@ -116,3 +116,10 @@ test('idea and characters steps render inside container without restrictive max-
     assert.ok(w >= 1000, `If .easy-characters sets max-width, it should be >= 1000px, but was ${w}px`);
   }
 });
+
+test('easy-main opts out of the global main grid (UI2-11 root cause)', () => {
+  const baseBlock = easyCss.slice(0, easyCss.indexOf('@media'));
+  const baseProps = parseRuleProperties(baseBlock, '.easy-main');
+  assert.ok(baseProps, '.easy-main should be defined before media queries');
+  assert.equal(baseProps['display'], 'block');
+});

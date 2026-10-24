@@ -101,7 +101,9 @@
   padding-block: var(--space-3);
 }
 
+/* UI2-11: global style.css `main` is a 3-column grid, so Easy steps opt out. */
 .easy-main {
+  display: block;
   flex: 1 1 auto;
   width: 100%;
   min-height: 0;
