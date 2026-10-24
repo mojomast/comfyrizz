@@ -463,7 +463,7 @@ interface CachedExport {
 let lastExport: CachedExport | null = null;
 
 function exportCacheKey(pkg: unknown, revision: unknown): string {
-  return `${String(recordOf(pkg)?.id ?? '')}:${String(revision ?? '')}`;
+  return [recordOf(pkg)?.id ?? '', revision ?? ''].map(String).join(':');
 }
 
 function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
