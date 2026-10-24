@@ -189,8 +189,13 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
         void openDialog({
           title: COPY.ask.title,
           bodyHtml: `${note}<p>${escapeHtml(COPY.ask.noProvider)}</p>`,
-          actions: [{ label: COPY.ask.close, value: 'close', kind: 'secondary' }],
+          actions: [
+            { label: COPY.ask.close, value: 'close', kind: 'secondary' },
+            { label: COPY.ask.connect, value: 'connect', kind: 'secondary' },
+          ],
           opener,
+        }).then((value) => {
+          if (value === 'connect') host.openAgentSettings();
         });
       },
     };
