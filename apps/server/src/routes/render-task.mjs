@@ -5,11 +5,21 @@
  * outcome. It does not exit until that report is sent, so a cancel cannot
  * leave the child running with nobody waiting for it.
  */
+import { rmSync } from 'node:fs';
 import { parentPort, workerData } from 'node:worker_threads';
+import { signalRenderGroups } from '../../../renderer/scripts/cancellable-spawn.mjs';
+
+function removeRenderProps(outputPath) {
+  if (typeof outputPath !== 'string' || outputPath === '') return;
+  const propsPath = outputPath.replace(/\.(mp4|png|jpg)$/i, '.props.json');
+  if (propsPath === outputPath) return;
+  rmSync(propsPath, { force: true });
+}
 
 const abort = new AbortController();
 parentPort.on('message', message => {
   if (message?.type === 'cancel') abort.abort();
+  if (message?.type === 'kill') signalRenderGroups('SIGKILL');
 });
 
 const { moduleUrl, exportName, packagePath, outputPath, options } = workerData;
@@ -50,6 +60,7 @@ try {
   parentPort.postMessage({ type: 'done', result: plainResult(result) });
 } catch (error) {
   const cancelled = abort.signal.aborted || error?.code === 'RENDER_CANCELLED';
+  if (cancelled) removeRenderProps(outputPath);
   parentPort.postMessage({
     type: cancelled ? 'cancelled' : 'error',
     message: error instanceof Error ? error.message : String(error ?? 'render failed'),

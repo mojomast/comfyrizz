@@ -4,11 +4,13 @@
 // without a result fails the request.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createServer, request as httpRequest } from 'node:http';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, cpSync } from 'node:fs';
+import { connect as connectTcp } from 'node:net';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
 import { createApp } from '../src/app.mjs';
 import { spawnCancellable } from '../../renderer/scripts/cancellable-spawn.mjs';
@@ -286,7 +288,7 @@ test('cancel kills the render tree, emits render.cancelled, and frees the slot o
   rmSync(ctx.holdFile, { force: true });
   await delay(3200);
   assert.equal(alive(childPid), false);
-  const orphans = readdirSync(ctx.app.rendersDir).filter(name => name.endsWith('.mp4'));
+  const orphans = readdirSync(ctx.app.rendersDir).filter(name => name.endsWith('.mp4') || name.endsWith('.props.json'));
   assert.deepEqual(orphans, []);
   const next = await post({
     port: ctx.port,
@@ -322,6 +324,7 @@ test('a cancelled export emits export.cancelled and holds the slot until the chi
   rmSync(ctx.holdFile, { force: true });
   await delay(3200);
   assert.equal(alive(childPid), false);
+  assert.equal(existsSync(join(ctx.runtimeDir, 'out', 'export', seed.id, 'video.props.json')), false);
   const next = await post({
     port: ctx.port,
     path: '/api/render',
@@ -394,4 +397,98 @@ test('a render function named renderPackage still runs on the server thread', as
   });
   assert.equal(rendered.status, 200, rendered.text);
   assert.equal(readFileSync(marker, 'utf8'), 'main');
+});
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+function waitForTcp(port, ms = 15000) {
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const socket = connectTcp(port, '127.0.0.1');
+      const fail = () => {
+        socket.destroy();
+        if (Date.now() - start > ms) reject(new Error(`server did not listen on ${port}`));
+        else setTimeout(attempt, 40);
+      };
+      socket.once('connect', () => { socket.end(); resolve(); });
+      socket.once('error', fail);
+    };
+    attempt();
+  });
+}
+
+test('SIGTERM during a render kills the process tree, removes props, and exits 0', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'comfyrizz-shutdown-'));
+  const renderer = writeRenderer({ dir, termMs: 10000, hold: true });
+  const runtimeDir = join(dir, 'runtime');
+  const port = await freePort();
+  const indexPath = fileURLToPath(new URL('../src/index.mjs', import.meta.url));
+  let stderr = '';
+  const server = spawn(process.execPath, [indexPath], {
+    env: {
+      ...process.env,
+      COMFYRIZZ_PORT: String(port),
+      COMFYRIZZ_RUNTIME: runtimeDir,
+      COMFYRIZZ_TOKEN: TOKEN,
+      COMFYRIZZ_DEMO: 'launch',
+      COMFYRIZZ_RENDER_MODULE: renderer.file,
+      COMFYRIZZ_SCENE_MODULE: renderer.file,
+    },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  server.stderr.on('data', chunk => { stderr = `${stderr}${chunk.toString()}`.slice(-4000); });
+  const exitCode = new Promise(resolve => server.once('exit', code => resolve(code)));
+  t.after(() => {
+    killPid(renderer.pidFile);
+    killPid(renderer.grandFile);
+    if (server.exitCode == null) server.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  });
+  try {
+    await waitForTcp(port);
+  } catch (error) {
+    throw new Error(`${error.message}\n${stderr}`);
+  }
+  startPost({
+    port,
+    path: '/api/render',
+    body: { packageId: seed.id, override: { reason: REASON } },
+  });
+  const childPid = Number(await waitFor(() => {
+    try { return readFileSync(renderer.pidFile, 'utf8'); } catch { return ''; }
+  }, 8000));
+  const grandPid = Number(await waitFor(() => {
+    try { return readFileSync(renderer.grandFile, 'utf8'); } catch { return ''; }
+  }));
+  const rendersDir = join(runtimeDir, 'renders');
+  const propsBefore = readdirSync(rendersDir).filter(name => name.endsWith('.props.json'));
+  assert.equal(propsBefore.length, 1, propsBefore.join(','));
+  assert.equal(alive(childPid), true);
+  assert.equal(alive(grandPid), true);
+  const started = Date.now();
+  server.kill('SIGTERM');
+  const code = await Promise.race([
+    exitCode,
+    (async () => {
+      await delay(8000);
+      throw new Error(`server did not exit\n${stderr}`);
+    })(),
+  ]);
+  const elapsed = Date.now() - started;
+  assert.equal(code, 0, stderr);
+  assert.ok(elapsed < 7000, `shutdown took ${elapsed}ms`);
+  assert.equal(alive(childPid), false, 'the render child is killed before the server exits');
+  assert.equal(alive(grandPid), false, 'the grandchild is killed with the render group');
+  const left = readdirSync(rendersDir).filter(name => name.endsWith('.props.json') || name.endsWith('.mp4'));
+  assert.deepEqual(left, []);
 });

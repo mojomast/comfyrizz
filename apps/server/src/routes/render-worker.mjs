@@ -7,7 +7,21 @@
  * that child has exited. The worker is not terminated up front, because
  * terminate cannot interrupt a child that already left this thread.
  */
+import { rmSync } from 'node:fs';
 import { Worker } from 'node:worker_threads';
+
+const activeWorkers = new Set();
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function removeRenderProps(outputPath) {
+  if (typeof outputPath !== 'string' || outputPath === '') return;
+  const propsPath = outputPath.replace(/\.(mp4|png|jpg)$/i, '.props.json');
+  if (propsPath === outputPath) return;
+  rmSync(propsPath, { force: true });
+}
 
 function moduleHref(moduleUrl) {
   if (moduleUrl instanceof URL) return moduleUrl.href;
@@ -83,14 +97,45 @@ export function runRenderWorker({ moduleUrl, exportName, packagePath, outputPath
   });
   const stop = () => {
     if (settled) return;
+    removeRenderProps(outputPath);
     try { worker.postMessage({ type: 'cancel' }); } catch { /* the exit handler fails the request */ }
+  };
+  const kill = () => {
+    if (settled) return;
+    removeRenderProps(outputPath);
+    try { worker.postMessage({ type: 'kill' }); } catch { /* the worker is already gone */ }
   };
   if (options.signal) {
     if (options.signal.aborted) stop();
     else options.signal.addEventListener('abort', stop, { once: true });
   }
-  const job = promise.finally(() => options.signal?.removeEventListener('abort', stop));
-  return { promise: job, cancel: stop };
+  const record = { cancel: stop, kill, promise: null };
+  const job = promise.finally(() => {
+    options.signal?.removeEventListener('abort', stop);
+    activeWorkers.delete(record);
+  });
+  record.promise = job;
+  activeWorkers.add(record);
+  return { promise: job, cancel: stop, kill };
+}
+
+/**
+ * Cancel every render, export, scene and edited job in this process.
+ * Each job signals its process group, then any group still alive after
+ * `killAfterMs` is SIGKILLed (including descendants that left the group).
+ */
+export async function shutdownRenderWorkers({ killAfterMs = 2000 } = {}) {
+  const jobs = [...activeWorkers];
+  for (const job of jobs) job.cancel();
+  await Promise.race([
+    Promise.allSettled(jobs.map(job => job.promise)),
+    delay(killAfterMs),
+  ]);
+  for (const job of [...activeWorkers]) job.kill();
+  await Promise.race([
+    Promise.allSettled([...activeWorkers].map(job => job.promise)),
+    delay(1500),
+  ]);
 }
 
 /** A render function that loads `exportName` from `moduleUrl` on a worker. */

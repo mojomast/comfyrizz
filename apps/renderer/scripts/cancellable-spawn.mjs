@@ -7,6 +7,7 @@
  * after that group has exited.
  */
 import { spawn } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
 
 export function cancelledError() {
   const error = new Error('render cancelled');
@@ -14,14 +15,57 @@ export function cancelledError() {
   return error;
 }
 
-function killGroup(child, signalName) {
-  if (!child?.pid) return;
-  try {
-    if (process.platform === 'win32') child.kill(signalName);
-    else process.kill(-child.pid, signalName);
-  } catch {
-    // The group has already exited.
+const liveGroups = new Set();
+
+function descendantPids(rootPid) {
+  const byParent = new Map();
+  let names = [];
+  try { names = readdirSync('/proc'); } catch { return []; }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const stat = readFileSync(`/proc/${name}/stat`, 'utf8');
+      const end = stat.lastIndexOf(')');
+      if (end < 0) continue;
+      const fields = stat.slice(end + 2).trim().split(/\s+/);
+      const ppid = Number(fields[1]);
+      if (!byParent.has(ppid)) byParent.set(ppid, []);
+      byParent.get(ppid).push(Number(name));
+    } catch { /* the process exited while it was being listed */ }
   }
+  const out = [];
+  const seen = new Set();
+  const stack = [...(byParent.get(rootPid) ?? [])];
+  while (stack.length) {
+    const pid = stack.pop();
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    out.push(pid);
+    const kids = byParent.get(pid);
+    if (kids) stack.push(...kids);
+  }
+  return out;
+}
+
+function signalPid(pid, signalName) {
+  if (!pid) return;
+  try {
+    if (process.platform === 'win32') process.kill(pid, signalName);
+    else process.kill(-pid, signalName);
+  } catch { /* the group has already exited */ }
+  if (process.platform === 'win32') return;
+  for (const descendant of descendantPids(pid)) {
+    try { process.kill(descendant, signalName); } catch { /* already exited */ }
+  }
+}
+
+function killGroup(child, signalName) {
+  signalPid(child?.pid, signalName);
+}
+
+/** Signal every render process group this process still has open. */
+export function signalRenderGroups(signalName) {
+  for (const pid of [...liveGroups]) signalPid(pid, signalName);
 }
 
 /**
@@ -39,6 +83,7 @@ export function spawnCancellable(command, args, { cwd, env = process.env, signal
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    if (child.pid) liveGroups.add(child.pid);
     let stdout = '';
     let stderr = '';
     let killTimer = null;
@@ -53,6 +98,7 @@ export function spawnCancellable(command, args, { cwd, env = process.env, signal
     child.stderr?.on('data', chunk => { stderr = append(stderr, chunk); });
     const cleanup = () => {
       clearTimeout(killTimer);
+      if (child.pid) liveGroups.delete(child.pid);
       signal?.removeEventListener('abort', abort);
     };
     child.on('error', error => {

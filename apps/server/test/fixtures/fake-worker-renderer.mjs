@@ -18,6 +18,8 @@ export async function run(kind, packagePath, outputPath, options = {}, paths = {
   };
   note({ event: 'start' });
   if (isMainThread) throw new Error('renderer ran on the server thread');
+  const propsPath = outputPath.replace(/\.(mp4|png|jpg)$/i, '.props.json');
+  if (propsPath !== outputPath) writeFileSync(propsPath, '{}\n');
   const started = Date.now();
   try {
     await spawnCancellable(process.execPath, [CHILD], {
