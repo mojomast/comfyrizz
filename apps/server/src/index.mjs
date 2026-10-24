@@ -4,8 +4,9 @@ import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import * as nodeFs from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createApp } from './app.mjs';
+import { shutdownRenderWorkers } from './routes/render-worker.mjs';
 import { createCpuAgentRunner } from './agent-runner.mjs';
 import { createProviderSettings } from './provider-settings.mjs';
 import { seedDemoProject } from './seed-demo.mjs';
@@ -122,11 +123,17 @@ function startServer() {
   chmodSync(tokenPath, 0o600);
 
   const providerSettings = createProviderSettings({ runtimeDir });
+  const moduleUrlFromEnv = value => {
+    if (typeof value !== 'string' || value === '') return undefined;
+    return value.startsWith('file:') ? value : pathToFileURL(value).href;
+  };
   const app = createApp({
     root: repoRoot,
     token,
     runtimeDir,
     providerSettings,
+    renderModuleUrl: moduleUrlFromEnv(process.env.COMFYRIZZ_RENDER_MODULE),
+    sceneModuleUrl: moduleUrlFromEnv(process.env.COMFYRIZZ_SCENE_MODULE),
     agentRunner: createCpuAgentRunner({
       runtimeDir,
       resolveProviderConfig: providerSettings.resolve,
@@ -147,14 +154,29 @@ function startServer() {
     process.exit(1);
   });
 
-  function shutdown(signal) {
+  let stopping = false;
+  async function shutdown(signal) {
+    if (stopping) return;
+    stopping = true;
     console.log(`\n${signal}: closing`);
-    app.close();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(1), 3000).unref();
+    try {
+      // Cancel in-flight render, export, scene and edited jobs. Each one
+      // SIGTERMs its process group; anything still alive after about 2s is
+      // SIGKILLed before this process exits, so a detached Remotion tree
+      // cannot outlive the server.
+      await shutdownRenderWorkers({ killAfterMs: 2000 });
+      server.closeAllConnections();
+      await Promise.race([
+        new Promise(resolve => server.close(resolve)),
+        new Promise(resolve => setTimeout(resolve, 500)),
+      ]);
+      try { app.close(); } catch { /* listeners are already going away */ }
+    } finally {
+      process.exit(0);
+    }
   }
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => { shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 }
 
 const invokedDirectly = (() => {

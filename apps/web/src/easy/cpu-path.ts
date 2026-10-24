@@ -6,6 +6,56 @@ import type { EasyState, StepId } from './types.ts';
 
 export const CPU_PREVIEW_TIMEOUT_MS = 60_000;
 
+/** Generators that run without a GPU. Same set as the server final gate. */
+export const CPU_GENERATORS = new Set(['llm-svg']);
+
+export interface StudioClip {
+  clipId: string;
+  state?: string;
+  sceneId?: string;
+  assetId?: string;
+  takeCount?: number;
+}
+
+export interface StudioGate {
+  ok: boolean;
+  approved: number;
+  total: number;
+  blocking: Array<{ clipId: string; state: string; sceneId?: string }>;
+}
+
+/**
+ * The studio's review gate. A This-computer clip with no versions is kept.
+ * A clip that already has versions, and every other clip, still has to be kept.
+ */
+export function studioClipGate(
+  clips: readonly StudioClip[] | null | undefined,
+  assets: Record<string, { gen?: { generator?: string } | null }> | null | undefined,
+): StudioGate {
+  const list = Array.isArray(clips) ? clips : [];
+  const blocking: StudioGate['blocking'] = [];
+  let approved = 0;
+  for (const clip of list) {
+    if (!clip || typeof clip.clipId !== 'string') continue;
+    const generator = clip.assetId ? assets?.[clip.assetId]?.gen?.generator : undefined;
+    const takes = typeof clip.takeCount === 'number' ? clip.takeCount : 0;
+    if (typeof generator === 'string' && CPU_GENERATORS.has(generator) && takes === 0) {
+      approved += 1;
+      continue;
+    }
+    if (clip.state === 'approved') {
+      approved += 1;
+      continue;
+    }
+    blocking.push({
+      clipId: clip.clipId,
+      state: typeof clip.state === 'string' && clip.state ? clip.state : 'unknown',
+      ...(typeof clip.sceneId === 'string' && clip.sceneId ? { sceneId: clip.sceneId } : {}),
+    });
+  }
+  return { ok: blocking.length === 0, approved, total: list.length, blocking };
+}
+
 export interface CpuPreviewDerived {
   timeline?: unknown;
   compiledSequence?: number | null;

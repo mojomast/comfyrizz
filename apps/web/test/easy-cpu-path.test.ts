@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { COPY } from '../src/easy/copy.ts';
 import { createEasyStore } from '../src/easy/store.ts';
-import { isPreviewCompiled, runCpuGenerate } from '../src/easy/cpu-path.ts';
+import { isPreviewCompiled, runCpuGenerate, studioClipGate } from '../src/easy/cpu-path.ts';
 
 function memoryStorage() {
   const map = new Map();
@@ -141,4 +141,26 @@ test('isPreviewCompiled requires a fresh timeline', () => {
   assert.equal(isPreviewCompiled({ derived: { timeline: {}, compiledSequence: 2 }, doc: { editSequence: 2 } }), true);
   assert.equal(isPreviewCompiled({ derived: { timeline: null, compiledSequence: null }, doc: { editSequence: 2 } }), false);
   assert.equal(isPreviewCompiled({ derived: { timeline: {}, compiledSequence: 1 }, doc: { editSequence: 2 } }), false);
+});
+
+test('This computer clips with no versions are kept, and a GPU clip still blocks', () => {
+  const assets = {
+    a_svg: { gen: { generator: 'llm-svg' } },
+    a_gpu: { gen: { generator: 'flux3-klein' } },
+  };
+  const open = studioClipGate([
+    { clipId: 'c1', assetId: 'a_svg', state: 'planned', takeCount: 0, sceneId: 's1' },
+    { clipId: 'c2', assetId: 'a_gpu', state: 'planned', takeCount: 0, sceneId: 's2' },
+  ], assets);
+  assert.equal(open.ok, false);
+  assert.equal(open.approved, 1);
+  assert.equal(open.blocking.length, 1);
+  assert.equal(open.blocking[0].clipId, 'c2');
+
+  const kept = studioClipGate([
+    { clipId: 'c1', assetId: 'a_svg', state: 'planned', takeCount: 0 },
+    { clipId: 'c2', assetId: 'a_svg', state: 'approved', takeCount: 2 },
+  ], assets);
+  assert.equal(kept.ok, true);
+  assert.equal(kept.approved, 2);
 });

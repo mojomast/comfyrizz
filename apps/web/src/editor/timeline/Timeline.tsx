@@ -60,6 +60,8 @@ export interface SceneTimelineProps {
   thumbs?: ThumbsClient;
   /** Undefined is auto: filmstrip for clips when the chip is wide enough. */
   thumbMode?: 'filmstrip' | 'head' | 'off';
+  /** The top bar already shows save state. Hide this copy without dropping it. */
+  showSaveStatus?: boolean;
 }
 
 type OriginScene = { id: string; from: number; durationInFrames: number };
@@ -114,6 +116,7 @@ export function SceneTimeline({
   onClipOpen,
   thumbs,
   thumbMode,
+  showSaveStatus = true,
 }: SceneTimelineProps) {
   const [state, setState] = useState(() => store.getState());
   const [message, setMessage] = useState('');
@@ -873,7 +876,7 @@ export function SceneTimeline({
         </div>
 
         <span className="toolbar-spacer" />
-        <span className="tl-status badge" role="status" data-save-status={store.saveStatus()}>{store.statusText()}</span>
+        <span className="tl-status badge" role="status" hidden={showSaveStatus ? undefined : true} data-save-status={store.saveStatus()}>{store.statusText()}</span>
       </div>
       <div className="tl-body">
         <div className="tl-labels">

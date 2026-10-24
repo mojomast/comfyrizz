@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { spawnCancellable } from './cancellable-spawn.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline, measuredFromReport } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
@@ -141,7 +142,32 @@ export function preparePublicDir(pkg, packageDir) {
   return temp;
 }
 
-export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration, scale, mixAudio = true, normalizeLoudness = true } = {}) {
+function remotionArguments({ still, compositionId, outputPath, propsPath, publicDir, frame, scale }) {
+  const browser = `--browser-executable=${process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome'}`;
+  const scaleArg = scale ? [`--scale=${scale}`] : [];
+  if (still) {
+    return [
+      'remotion', 'still', 'src/index.ts', compositionId, outputPath,
+      `--props=${propsPath}`,
+      `--public-dir=${publicDir}`,
+      `--frame=${frame}`,
+      browser,
+      '--log=error',
+      ...scaleArg,
+    ];
+  }
+  return [
+    'remotion', 'render', 'src/index.ts', compositionId, outputPath,
+    `--props=${propsPath}`,
+    `--public-dir=${publicDir}`,
+    browser,
+    '--concurrency=2',
+    '--log=error',
+    ...scaleArg,
+  ];
+}
+
+function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration, scale, mixAudio = true, normalizeLoudness = true } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
   // A9: validate the package as stored — the base `file` and `variants` are checked (H12 variant
@@ -201,57 +227,69 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
       resolvedPublicDir = join(rendererDir, 'public');
     }
   }
+  return {
+    onLog, still, mixAudio, normalizeLoudness, pkg, timeline, applied, missingMedia, dimProblems, media, cleanupDir, propsPath,
+    args: remotionArguments({ still, compositionId, outputPath, propsPath, publicDir: resolvedPublicDir, frame, scale }),
+  };
+}
 
-  let render;
-  try {
-    render = spawnSync(
-      'npx',
-      still
-        ? [
-            'remotion', 'still', 'src/index.ts', compositionId, outputPath,
-            `--props=${propsPath}`,
-            `--public-dir=${resolvedPublicDir}`,
-            `--frame=${frame}`,
-            `--browser-executable=${process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome'}`,
-            '--log=error',
-            ...(scale ? [`--scale=${scale}`] : []),
-          ]
-        : [
-            'remotion', 'render', 'src/index.ts', compositionId, outputPath,
-            `--props=${propsPath}`,
-            `--public-dir=${resolvedPublicDir}`,
-            `--browser-executable=${process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome'}`,
-            '--concurrency=2',
-            '--log=error',
-            ...(scale ? [`--scale=${scale}`] : []),
-          ],
-      { cwd: rendererDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
-    );
-  } finally {
-    if (cleanupDir) rmSync(cleanupDir, { recursive: true, force: true });
-  }
-  if (render.status !== 0) {
-    throw new Error(`remotion render exited ${render.status}: ${(render.stderr || render.stdout || '').slice(-1200)}`);
-  }
+function finishPackageRender(staged, outputPath) {
   // M2: the sound design is mixed by Remotion; one ffmpeg pass brings the finished
   // file to the -16 LUFS master the narration already uses. Only packages with an
   // `audio` block are touched, so a silent video stays byte-identical.
   let mixLoudness = null;
-  if (!still && mixAudio && normalizeLoudness && pkg.audio) {
-    mixLoudness = normalizeMixLoudness(outputPath, { onLog });
+  if (!staged.still && staged.mixAudio && staged.normalizeLoudness && staged.pkg.audio) {
+    mixLoudness = normalizeMixLoudness(outputPath, { onLog: staged.onLog });
   }
   return {
     output: outputPath,
-    frames: still ? 1 : timeline.durationInFrames,
-    hash: timeline.hash,
+    frames: staged.still ? 1 : staged.timeline.durationInFrames,
+    hash: staged.timeline.hash,
     bytes: statSync(outputPath).size,
-    timeline,
-    package: pkg,
-    ...(still ? { still: true } : {}),
-    ...(applied ? { final: { width: applied.width, height: applied.height, upscaled: applied.used } } : {}),
+    timeline: staged.timeline,
+    package: staged.pkg,
+    ...(staged.still ? { still: true } : {}),
+    ...(staged.applied ? { final: { width: staged.applied.width, height: staged.applied.height, upscaled: staged.applied.used } } : {}),
     ...(mixLoudness ? { mixLoudness } : {}),
-    ...(missingMedia.length > 0 ? { missingMedia } : {}),
-    ...(dimProblems.length > 0 ? { dimProblems } : {}),
-    ...(media ? { media } : {}),
+    ...(staged.missingMedia.length > 0 ? { missingMedia: staged.missingMedia } : {}),
+    ...(staged.dimProblems.length > 0 ? { dimProblems: staged.dimProblems } : {}),
+    ...(staged.media ? { media: staged.media } : {}),
   };
+}
+
+function cleanupStaged(staged) {
+  if (staged.cleanupDir) rmSync(staged.cleanupDir, { recursive: true, force: true });
+}
+
+function remotionFailure(error) {
+  if (error?.code === 'RENDER_CANCELLED') throw error;
+  throw new Error(`remotion render exited ${error?.status}: ${(error?.stderr || error?.stdout || '').slice(-1200)}`);
+}
+
+export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), options = {}) {
+  const staged = stagePackageRender(packagePath, outputPath, options);
+  let render;
+  try {
+    render = spawnSync('npx', staged.args, { cwd: rendererDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  } finally {
+    cleanupStaged(staged);
+  }
+  if (render.status !== 0) {
+    throw new Error(`remotion render exited ${render.status}: ${(render.stderr || render.stdout || '').slice(-1200)}`);
+  }
+  return finishPackageRender(staged, outputPath);
+}
+
+/** Same render as `renderPackage`, but the Remotion process can be killed via `options.signal`. */
+export async function renderPackageAsync(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), options = {}) {
+  const staged = stagePackageRender(packagePath, outputPath, options);
+  try {
+    await spawnCancellable('npx', staged.args, { cwd: rendererDir, signal: options.signal });
+  } catch (error) {
+    if (error?.code === 'RENDER_CANCELLED') rmSync(outputPath, { force: true });
+    remotionFailure(error);
+  } finally {
+    cleanupStaged(staged);
+  }
+  return finishPackageRender(staged, outputPath);
 }

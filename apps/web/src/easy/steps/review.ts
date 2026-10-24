@@ -313,7 +313,7 @@ export function renderReview(view: ReviewView): string {
   const status = renderStatus(view);
   const edited = renderEditedLine(view);
   return `<section class="easy-review" data-easy-review>
-<div class="easy-review-player" data-easy-player aria-label="${escapeHtml(DEFAULT_PLAYER_LABEL)}"></div>
+<section class="easy-review-player" data-easy-player aria-label="${escapeHtml(DEFAULT_PLAYER_LABEL)}"></section>
 <div class="easy-review-strip">
 <h2 class="easy-review-shots-heading">${escapeHtml(COPY.review.shots)}</h2>
 ${strip}

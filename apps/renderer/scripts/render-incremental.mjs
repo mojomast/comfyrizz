@@ -19,7 +19,8 @@ import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
-import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir, renderPackage } from './render-package-lib.mjs';
+import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir, renderPackage, renderPackageAsync } from './render-package-lib.mjs';
+import { cancelledError, spawnCancellable } from './cancellable-spawn.mjs';
 import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 import { muxPackageAudio } from './incremental-audio.mjs';
 import { narrationAudio, narrationWarning } from '../src/audio-model.js';
@@ -268,6 +269,157 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
     throw new Error(`incremental export has ${frames} frames, compiled timeline has ${timeline.durationInFrames}`);
   }
 
+  return {
+    output: outputPath,
+    bytes: statSync(outputPath).size,
+    frames,
+    timelineHash: timeline.hash,
+    timeline,
+    package: pkg,
+    cacheDir: cache,
+    audio,
+    segments: segments.map(segment => ({ index: segment.index, sceneId: segment.sceneId, start: segment.start, end: segment.end, frames: segment.frames, key: segment.key })),
+    rendered: rendered.map(segment => segment.key),
+    reused: reused.map(segment => segment.key),
+  };
+}
+
+function throwIfCancelled(signal) {
+  if (signal?.aborted) throw cancelledError();
+}
+
+/**
+ * Same incremental render as `renderPackageIncremental`, but every Remotion
+ * segment and the concat run as an async child so cancel can kill the tree.
+ */
+export async function renderPackageIncrementalAsync(packagePath, outputPath, options = {}) {
+  const { cacheDir, onLog = () => {}, force = false, compositionId = 'PackageDemo', signal } = options;
+  const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
+  const validation = validatePackage(pkg);
+  if (!validation.valid) {
+    const detail = validation.errors.map(error => `${error.code} ${error.path}: ${error.message}`).join('; ');
+    throw new Error(`package invalid: ${detail}`);
+  }
+  const packageDir = dirname(packagePath);
+  if (loadCompositionManifest(packageDir, pkg)) {
+    const reason = 'compositions require a full render';
+    onLog(`full render: ${reason}`);
+    const result = await (options.renderFull ?? renderPackageAsync)(packagePath, outputPath, options);
+    const segments = planSegments(result.package, result.timeline);
+    return {
+      ...result,
+      full: true,
+      reason,
+      timelineHash: result.hash,
+      cacheDir: cacheDir ?? join(rendererDir, '.cache', pkg.id),
+      audio: result.mixLoudness ?? null,
+      segments,
+      rendered: segments.map(segment => segment.key),
+      reused: [],
+    };
+  }
+  const timelinePath = join(packageDir, 'timeline.json');
+  const timeline = existsSync(timelinePath) ? JSON.parse(readFileSync(timelinePath, 'utf8')) : compileTimeline(pkg);
+  const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
+  const missingMedia = missingMediaFiles(pkg, packageDir);
+  const mediaDims = collectMediaDims(pkg, packageDir);
+  const dimProblems = dimMismatches(pkg, mediaDims);
+  const scenes = mergeScenes(pkg, timeline);
+  const mediaPath = join(packageDir, 'media.json');
+  const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
+  const cache = cacheDir ?? join(rendererDir, '.cache', pkg.id);
+  mkdirSync(cache, { recursive: true });
+  const propsPath = join(cache, 'props.json');
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
+  onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
+  for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
+  for (const item of dimProblems) onLog(`warning: declared ${item.declared.width}x${item.declared.height} for ${item.id} (${item.file}) but the file is ${item.real.width}x${item.real.height}; using the real size`);
+  const narrationNote = narrationWarning(pkg);
+  if (narrationNote) onLog(`warning: ${narrationNote}`);
+
+  const segments = planSegments(pkg, timeline, { generatedAssets, media, compositionId, missingMedia, mediaDims });
+  const rendered = [];
+  const reused = [];
+  const ownsPublicDir = options.publicDir === undefined;
+  const publicDir = options.publicDir ?? preparePublicDir(pkg, packageDir);
+
+  try {
+    throwIfCancelled(signal);
+    for (const segment of segments) {
+      throwIfCancelled(signal);
+      const segmentPath = join(cache, `${segment.key}.mp4`);
+      if (!force && existsSync(segmentPath) && statSync(segmentPath).size > 0) {
+        reused.push(segment);
+        onLog(`reuse ${segment.sceneId} frames ${segment.start}-${segment.end} (${segment.key.slice(0, 8)})`);
+        continue;
+      }
+      rmSync(segmentPath, { force: true });
+      onLog(`render ${segment.sceneId} frames ${segment.start}-${segment.end} (${segment.key.slice(0, 8)})`);
+      try {
+        await spawnCancellable('npx', [
+          'remotion', 'render', 'src/index.ts', compositionId, segmentPath,
+          `--props=${propsPath}`,
+          `--public-dir=${publicDir}`,
+          `--frames=${segment.start}-${segment.end}`,
+          `--browser-executable=${BROWSER}`,
+          '--concurrency=2',
+          '--log=error',
+        ], { cwd: rendererDir, signal });
+      } catch (error) {
+        if (error?.code === 'RENDER_CANCELLED') {
+          rmSync(segmentPath, { force: true });
+          throw error;
+        }
+        throw new Error(`remotion segment ${segment.sceneId} exited ${error?.status}: ${(error?.stderr || error?.stdout || '').slice(-1200)}`);
+      }
+      if (!existsSync(segmentPath)) throw new Error(`segment ${segment.sceneId} was not written`);
+      rendered.push(segment);
+    }
+
+    throwIfCancelled(signal);
+    const listPath = join(cache, 'concat.txt');
+    writeFileSync(listPath, `${segments.map(segment => `file '${join(cache, `${segment.key}.mp4`).replace(/'/g, "'\\''")}'`).join('\n')}\n`);
+    const silentPath = join(cache, 'silent.mp4');
+    rmSync(silentPath, { force: true });
+    try {
+      await spawnCancellable('ffmpeg', ['-y', '-hide_banner', '-nostats', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', silentPath], { signal });
+    } catch (error) {
+      if (error?.code === 'RENDER_CANCELLED') throw error;
+      throw new Error(`concat failed: ${error?.stderr || error?.message}`);
+    }
+  } catch (error) {
+    if (error?.code === 'RENDER_CANCELLED') rmSync(outputPath, { force: true });
+    throw error;
+  } finally {
+    if (ownsPublicDir) rmSync(publicDir, { recursive: true, force: true });
+  }
+
+  const mixAudio = options.mixAudio !== false;
+  let audio = null;
+  const silentPath = join(cache, 'silent.mp4');
+  const hasMix = mixAudio && pkg.audio && (pkg.audio.music || pkg.audio.ambience || (pkg.audio.sfx ?? []).length > 0);
+  const narration = narrationAudio(pkg);
+  const narrationPath = narration ? join(packageDir, narration.file) : null;
+  const hasNarration = Boolean(narrationPath && existsSync(narrationPath));
+  if (narrationPath && !hasNarration) onLog(`warning: media not in this clone: ${narration.file}; exporting silent`);
+  if (hasMix || hasNarration) {
+    rmSync(outputPath, { force: true });
+    try {
+      audio = muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timeline, onLog, mixAudio })?.audio ?? null;
+    } catch (error) {
+      onLog(`warning: audio mix failed (${error.message}); exporting silent`);
+      copyFileSync(silentPath, outputPath);
+      audio = null;
+    }
+    if (!existsSync(outputPath)) copyFileSync(silentPath, outputPath);
+  } else {
+    copyFileSync(silentPath, outputPath);
+  }
+
+  const frames = ffprobeFrames(outputPath);
+  if (frames !== timeline.durationInFrames) {
+    throw new Error(`incremental export has ${frames} frames, compiled timeline has ${timeline.durationInFrames}`);
+  }
   return {
     output: outputPath,
     bytes: statSync(outputPath).size,

@@ -30,6 +30,8 @@ export function mountSceneTimeline(
     onClipSelect?: (chip: ClipChip) => void;
     onClipCycle?: (chip: ClipChip, delta: -1 | 1) => void;
     onClipApprove?: (chip: ClipChip) => void;
+    /** False keeps the toolbar Saved node for tests and hides it on screen. */
+    showSaveStatus?: boolean;
   },
 ): SceneTimelineHandle {
   if (store.getState().session.zoom === 1) store.setSession({ zoom: 2 });
@@ -53,6 +55,7 @@ export function mountSceneTimeline(
       onClipSelect={hooks.onClipSelect}
       onClipCycle={hooks.onClipCycle}
       onClipApprove={hooks.onClipApprove}
+      showSaveStatus={hooks.showSaveStatus}
     />,
   );
   render();

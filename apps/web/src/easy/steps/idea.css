@@ -165,6 +165,50 @@
   cursor: pointer;
 }
 
+.easy-question {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.easy-question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.easy-question-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-1);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.easy-question-option input {
+  position: absolute;
+  width: var(--space-1);
+  height: var(--space-1);
+  margin: 0;
+  opacity: 0;
+}
+
+.easy-question-option:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.easy-question-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--bg-2);
+}
+
 @media (max-width: 640px) {
   .easy-idea-segments {
     flex-direction: column;

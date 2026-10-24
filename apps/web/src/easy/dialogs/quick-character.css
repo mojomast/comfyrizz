@@ -65,7 +65,8 @@
 }
 
 .easy-quick-more a {
-  color: var(--accent, inherit);
+  color: var(--text-1);
+  text-decoration: underline;
 }
 
 .easy-quick-actions {

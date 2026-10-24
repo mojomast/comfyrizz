@@ -19,9 +19,12 @@ export function deriveStep(state: EasyState, facts: StepFacts): StepId {
 }
 
 export function reachable(step: StepId, state: EasyState, facts: StepFacts): boolean {
-  if (step === 'review' || step === 'export') {
-    if (!facts.planApproved) return false;
-  }
+  if (step === 'export' && !facts.planApproved) return false;
+  // Review stays listed after the words change. The plan step shows "Needs update".
+  // A finished This-computer generation keeps Review open even before the
+  // server journal has been read back.
+  if (step === 'generate' && (state.generate.status === 'running' || state.generate.status === 'done' || state.generate.status === 'stopping')) return true;
+  if (step === 'review') return facts.planApproved || state.generate.status === 'done';
   const derived = deriveStep(state, facts);
   if (STEPS.indexOf(step) <= STEPS.indexOf(derived)) return true;
   if ((step === 'characters' || step === 'level') && state.idea.text.trim().length >= 10) return true;

@@ -47,6 +47,7 @@ function tone(status: SceneFreshness | undefined): string {
 
 export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samples = demoSamples()): ScriptAudioPanelHandle {
   host.innerHTML = '';
+  const showSaveStatus = host.dataset.showSaveStatus !== 'false';
   const panel = document.createElement('section');
   panel.className = 'panel sa-panel';
   panel.setAttribute('aria-label', 'Script, audio and media');
@@ -62,7 +63,7 @@ export function mountScriptAudioPanel(host: HTMLElement, store: PanelStore, samp
     <div role="tabpanel" id="sa-section-script" aria-labelledby="sa-tab-script" data-inspector-panel="scene" class="tab-panel">
       <div class="sa-head panel-header">
         <h2>Script and audio</h2>
-        <p class="sa-status" data-testid="script-save-status" data-save-status role="status"></p>
+        <p class="sa-status" data-testid="script-save-status" data-save-status role="status"${showSaveStatus ? '' : ' hidden'}></p>
       </div>
       <div class="sa-row toolbar">
         <label class="field">Scene <select data-testid="scene-select" data-scene class="field-control"></select></label>

@@ -111,17 +111,16 @@ test('Easy at 390 stays Easy, keeps the rail hidden, and its actions are reachab
   await openEditor(page, 'easy');
 
   await expect(page.locator('#activity-pane')).toBeHidden();
-  await expect(page.locator('#easy-actions')).toBeVisible();
+  await expect(page.locator('#easy-root')).toBeVisible();
   await expect(page.locator('#run-settings-toggle')).toHaveCount(0);
 
-  await expectReachable(page, '#easy-generate');
-  await expectReachable(page, '#easy-preview');
-  await expectReachable(page, '#easy-advanced');
+  await expectReachable(page, '[data-easy-primary]');
+  await expectReachable(page, '[data-easy-open-editor]');
   await noHorizontalOverflow(page);
 
-  await page.locator('#easy-advanced').click();
+  await page.locator('[data-easy-open-editor]').click();
   await expect(page.locator('html')).toHaveAttribute('data-mode', 'advanced');
-  await expect(page.locator('#easy-actions')).toBeHidden();
+  await expect(page.locator('#easy-root')).toBeHidden();
   await expect(page.locator('#activity-pane')).toBeVisible();
 
   await expectRailTabs(page);
@@ -139,11 +138,11 @@ for (const width of [760, 1099] as const) {
     await expect(page.locator('#activity-pane')).toBeHidden();
     await expect(page.locator('.shell-splitter[data-split="right"]')).toBeHidden();
     await expect(page.locator('#run-settings-popover')).toHaveCount(0);
-    await expect(page.locator('#easy-actions')).toBeVisible();
-    await expectReachable(page, '#easy-advanced');
+    await expect(page.locator('#easy-root')).toBeVisible();
+    await expectReachable(page, '[data-easy-open-editor]');
     await noHorizontalOverflow(page);
 
-    await page.locator('#easy-advanced').click();
+    await page.locator('[data-easy-open-editor]').click();
     await expect(page.locator('html')).toHaveAttribute('data-mode', 'advanced');
     await expect(page.locator('#activity-pane')).toBeVisible();
   });

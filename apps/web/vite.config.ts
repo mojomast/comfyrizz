@@ -85,9 +85,14 @@ function apiProxy(): Plugin {
           upstreamResponse.pipe(res);
         });
         proxy.on('error', () => {
-          if (res.headersSent) return;
+          if (res.headersSent || res.writableEnded) return;
           res.statusCode = 502;
           res.end(JSON.stringify({ error: 'api proxy failed' }));
+        });
+        // A closed page must drop the upstream call. Otherwise a render keeps
+        // the server's single operation slot after the browser has gone.
+        res.on('close', () => {
+          if (!res.writableEnded) proxy.destroy();
         });
         req.pipe(proxy);
       });
