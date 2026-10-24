@@ -28,6 +28,7 @@ const BANNED = [
   /\bG4\b/i,
   /\bBYO\b/i,
   /\brevision\b/i,
+  /\bplanner\b/i,
 ];
 
 test('copy has no banned words', () => {
@@ -40,6 +41,11 @@ test('copy has no banned words', () => {
     const withoutGoogle = s.replace(/Google Colab/g, '');
     assert.equal(withoutGoogle.includes('Colab'), false, `Colab not preceded by Google in: ${s}`);
   }
+});
+
+test('plan banner describes template scripts without jargon', () => {
+  assert.equal(COPY.plan.offline, 'Written from templates. Connect an AI provider for a script written from your idea.');
+  assert.equal(/planner/i.test(COPY.plan.offline), false);
 });
 
 test('scanner finds no banned words in easy sources', () => {

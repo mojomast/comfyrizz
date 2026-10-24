@@ -174,7 +174,7 @@ export const COPY = Object.freeze({
     changed: 'The plan changed. Check it and approve again.',
     ideaChanged: 'Your idea changed. Update the plan?',
     updatePlan: 'Update plan',
-    offline: 'Written by the offline planner. Connect an AI provider for a script written from your idea.',
+    offline: 'Written from templates. Connect an AI provider for a script written from your idea.',
     connect: 'Connect',
     approve: 'Approve and generate',
     generate: 'Generate',
@@ -307,4 +307,4 @@ export function fill(template: string, values: Record<string, unknown> = {}): st
   return String(template).replace(/\{(\w+)\}/g, (m, key) => (Object.prototype.hasOwnProperty.call(values || {}, key) ? String(values[key]) : m));
 }
 
-export const BANNED_EASY_WORDS = Object.freeze(['package', 'take', 'clip', 'render', 'backend', 'LLM', 'GPU units', 'procedural', 'fallback', 'Kokoro', 'Qwen', 'Remotion', 'G4', 'BYO', 'revision', 'Colab']); // banned-ok
+export const BANNED_EASY_WORDS = Object.freeze(['package', 'take', 'clip', 'render', 'backend', 'LLM', 'GPU units', 'procedural', 'fallback', 'Kokoro', 'Qwen', 'Remotion', 'G4', 'BYO', 'revision', 'planner', 'Colab']); // banned-ok
