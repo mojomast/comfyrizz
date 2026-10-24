@@ -58,7 +58,19 @@ function bodyFor(id: SettingsSectionId): string {
     case 'appearance':
       return '<label>Density<select data-density-choice><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label><label><input data-reduced-motion type="checkbox"> Reduced motion</label>';
     case 'shortcuts':
-      return '<ul><li>Space — Play or pause</li><li>? — Keyboard shortcuts</li></ul>';
+      return [
+        '<ul>',
+        '<li>Space — Play or pause</li>',
+        '<li>? — Keyboard shortcuts</li>',
+        '<li>Tab / Shift+Tab — Move through the step</li>',
+        '<li>Enter — Activate the primary action; in a text area, insert a new line</li>',
+        '<li>Ctrl/Cmd+Enter — Run the primary action</li>',
+        '<li>Arrow keys — Move within choices, the shot strip and the version switcher</li>',
+        '<li>Alt+← / Alt+→ — Previous or next step</li>',
+        '<li>Esc — Close dialog</li>',
+        '<li>Ctrl/Cmd+Shift+A — Switch studio/editor</li>',
+        '</ul>',
+      ].join('');
     default:
       return '';
   }

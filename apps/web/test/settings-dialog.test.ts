@@ -65,6 +65,23 @@ test('agent setup is inlined with the provider field, not a standalone Agent set
   assert.match(html, /<\/select><button[^>]*id="agent-settings-open"[^>]*>Manage connections<\/button>/);
 });
 
+test('keyboard shortcuts list every documented shortcut', () => {
+  const html = renderSettingsDialog('shortcuts');
+  const panel = html.match(/data-settings-panel="shortcuts">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  const items = [...panel.matchAll(/<li>([^<]+)<\/li>/g)].map((match) => match[1]);
+  assert.deepEqual(items, [
+    'Space — Play or pause',
+    '? — Keyboard shortcuts',
+    'Tab / Shift+Tab — Move through the step',
+    'Enter — Activate the primary action; in a text area, insert a new line',
+    'Ctrl/Cmd+Enter — Run the primary action',
+    'Arrow keys — Move within choices, the shot strip and the version switcher',
+    'Alt+← / Alt+→ — Previous or next step',
+    'Esc — Close dialog',
+    'Ctrl/Cmd+Shift+A — Switch studio/editor',
+  ]);
+});
+
 test('every settings section has an h2', () => {
   const html = renderSettingsDialog('shortcuts');
   const headings = [...html.matchAll(/<h2>([^<]+)<\/h2>/g)].map((match) => match[1]);
