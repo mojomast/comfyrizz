@@ -7,7 +7,8 @@
  * starts a paid run, never asks for a Google Colab status and never dispatches
  * an action. The run stays on This computer (CPU).
  */
-import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { expect, test, type Page, type Route } from '@playwright/test';
 
 const PROMPT = 'A friendly robot who learns to bake bread';
 
@@ -289,4 +290,167 @@ test('one prompt shows progress, fills the gallery and ends on the final ready f
   expect(finished.calls.some((call) => call.method === 'dispatchAction')).toBe(false);
   expect(finished.calls.some((call) => call.method === 'colabStatus')).toBe(false);
   expect(external).toEqual([]);
+});
+
+const FULL_APP_PACKAGE = JSON.parse(readFileSync(new URL('../../../examples/pip-night-shift/package.json', import.meta.url), 'utf8'));
+const FULL_APP_TIMELINE = JSON.parse(readFileSync(new URL('../../../examples/pip-night-shift/timeline.json', import.meta.url), 'utf8'));
+const FULL_APP_PRODUCTION_ID = 'prod_super_easy_full_app_1';
+const FULL_APP_PACKAGE_ID = 'pkg_super_easy_full_app_1';
+const FULL_APP_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nGQAAAAASUVORK5CYII=';
+
+function fullAppBackend() {
+  const calls: string[] = [];
+  let revision = 3;
+  let iteration: Record<string, unknown> | null = null;
+  let approved = false;
+  const plans: Array<{ sequence: number; data: Record<string, unknown> }> = [];
+
+  function snapshot() {
+    const production: Record<string, unknown> = {
+      id: FULL_APP_PRODUCTION_ID,
+      revision,
+      briefVersionId: 'brief_full_app',
+      scriptVersionId: 'script_full_app',
+      shotIds: ['shot_1', 'shot_2'],
+      characterBindings: [
+        { characterId: 'char_mira', name: 'Mira' },
+        { characterId: 'char_bo', name: 'Bo' },
+      ],
+      iteration: iteration ?? undefined,
+    };
+    if (approved) {
+      production.characters = [
+        { id: 'char_mira', name: 'Mira', status: 'ready', imageUrl: FULL_APP_IMAGE },
+        { id: 'char_bo', name: 'Bo', status: 'running' },
+      ];
+      production.shots = [
+        { id: 'shot_1', status: 'approved', url: FULL_APP_IMAGE },
+        { id: 'shot_2', status: 'running' },
+      ];
+      production.voice = { status: 'starting' };
+      production.render = { status: 'running', fraction: 0.4 };
+    }
+    const events = [
+      ...plans,
+      ...(iteration === null
+        ? []
+        : [{
+            id: 'evt_full_app_iteration_1',
+            sequence: 5,
+            productionId: FULL_APP_PRODUCTION_ID,
+            type: 'iteration.set',
+            data: { policy: iteration.policy },
+          }]),
+    ].sort((left, right) => left.sequence - right.sequence);
+    return {
+      productionId: FULL_APP_PRODUCTION_ID,
+      production,
+      revision,
+      lastSequence: events.at(-1)?.sequence ?? 0,
+      events,
+      gap: false,
+      stale: false,
+    };
+  }
+
+  async function handle(route: Route): Promise<void> {
+    const request = route.request();
+    const method = request.method();
+    const path = new URL(request.url()).pathname;
+    const send = (body: unknown) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+
+    if (path === '/api/agent' && method === 'POST') {
+      calls.push('agent');
+      return send({
+        package: { ...FULL_APP_PACKAGE, id: FULL_APP_PACKAGE_ID },
+        timeline: FULL_APP_TIMELINE,
+        live: true,
+        generatedAssets: {},
+        svgAssets: [],
+        pendingGpu: [],
+      });
+    }
+    if (path === '/api/productions' && method === 'POST') {
+      calls.push('production');
+      return send({ productionId: FULL_APP_PRODUCTION_ID, production: { id: FULL_APP_PRODUCTION_ID, revision } });
+    }
+    if (/^\/api\/productions\/[^/]+\/easy-plan$/u.test(path) && method === 'POST') {
+      calls.push('plan');
+      revision += 1;
+      plans.push({
+        sequence: 3 + plans.length * 3,
+        data: {
+          id: `plan_full_app_${plans.length + 1}`,
+          productionId: FULL_APP_PRODUCTION_ID,
+          revision: 3 + plans.length * 3,
+          planHash: 'c'.repeat(64),
+          reservationCeiling: 0,
+          collectAndStopReserve: 0,
+          requiredDecisions: [],
+          actions: [],
+        },
+      });
+      return send({ revision });
+    }
+    if (/^\/api\/productions\/[^/]+$/u.test(path) && method === 'GET') {
+      calls.push('snapshot');
+      return send(snapshot());
+    }
+    if (/^\/api\/productions\/[^/]+\/events$/u.test(path) && method === 'GET') {
+      calls.push('events');
+      return send({ productionId: FULL_APP_PRODUCTION_ID, lastSequence: snapshot().lastSequence, events: [] });
+    }
+    if (/^\/api\/productions\/[^/]+\/commands$/u.test(path) && method === 'POST') {
+      const command = JSON.parse(request.postData() ?? '{}');
+      calls.push(`command:${String(command.kind ?? '')}`);
+      revision += 1;
+      if (command.kind === 'iteration.set') {
+        iteration = { policy: command.payload?.policy, level: 'draft', revision };
+      }
+      if (command.kind === 'plan.approve') approved = true;
+      return send({ revision });
+    }
+    if (path === '/api/run') {
+      calls.push('run');
+      return send({});
+    }
+    if (path.endsWith('/spend-cap')) {
+      calls.push('spend-cap');
+      return send({ revision });
+    }
+    if (path.endsWith('/actions')) {
+      calls.push('dispatch');
+      return send({ revision });
+    }
+    calls.push(`other:${path}`);
+    return send({});
+  }
+
+  return { handle, calls };
+}
+
+test('the full app starts at the bare visit and fills the progress view from the fake backend', async ({ page }) => {
+  test.setTimeout(90_000);
+  const backend = fullAppBackend();
+  await page.route('**/api/**', (route) => backend.handle(route));
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  await expect(page.locator('[data-super-easy-home]')).toBeVisible();
+  await page.locator('#super-easy-prompt').fill(PROMPT);
+  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+
+  await expect(page.locator('[data-super-easy-progress]')).toBeVisible();
+  await expect(page.locator('[data-super-easy-overall-gauge] [role="progressbar"]')).toBeVisible();
+  await expect(page.locator('[data-super-easy-stage]')).toHaveCount(5);
+  await expect(page.locator('[data-super-easy-gallery-item="character:char_mira"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-super-easy-gallery-item="shot:shot_1"]')).toBeVisible();
+
+  expect(backend.calls.some((call) => call === 'agent')).toBe(true);
+  expect(backend.calls.some((call) => call === 'plan')).toBe(true);
+  expect(backend.calls).toContain('command:iteration.set');
+  expect(backend.calls.some((call) => call === 'run' || call === 'dispatch' || call === 'spend-cap')).toBe(false);
 });

@@ -20,6 +20,8 @@ import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-ad
 import { openDialog } from './dialog.ts';
 import { mountSuperEasy } from './super-easy/mount.ts';
 import { setPreferStudio } from './super-easy/prefs.ts';
+import { createSuperEasySession, type SuperEasySession } from './super-easy/session.ts';
+import type { SuperEasyHost } from './super-easy/run.ts';
 
 import './easy.css';
 
@@ -42,7 +44,11 @@ function packageIdFrom(search: string): string | null {
   return id && id.length > 0 ? id : null;
 }
 
-export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
+export interface EasyStudioDeps {
+  createSession?: typeof createSuperEasySession;
+}
+
+export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStudioDeps = {}): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView;
   const search = (): string => view?.location?.search ?? '';
@@ -64,6 +70,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
   let superEasy: ReturnType<typeof mountSuperEasy> | null = null;
   let superEasySnapshot: unknown = null;
   let superEasyTicket = 0;
+  let superEasySession: SuperEasySession | null = null;
   let primaryAction: () => void = () => host.openEditor();
   let cpuFlight: Promise<unknown> | null = null;
   let facts: StepFacts = {
@@ -103,8 +110,54 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
 
   function destroySuperEasy(): void {
     superEasyTicket += 1;
+    superEasySession?.stop();
+    superEasySession = null;
     superEasy?.destroy();
     superEasy = null;
+  }
+
+  function superEasyRunHost(): SuperEasyHost {
+    return {
+      adoptBuiltPackage: (body) => host.adoptBuiltPackage(body),
+      aiSelection: () => host.aiSelection(),
+      editorStore: host.editorStore,
+      refreshClips: () => host.refreshClips(),
+      announce: (text) => shell?.setStatus(text),
+      rerender: () => superEasy?.render(),
+    };
+  }
+
+  function ensureSuperEasySession(): SuperEasySession {
+    if (superEasySession) return superEasySession;
+    const create = deps.createSession ?? createSuperEasySession;
+    superEasySession = create({
+      api: api as never,
+      host: superEasyRunHost(),
+      store: {
+        get: () => store.get(),
+        patch: (partial) => store.patch(partial),
+      },
+      go: () => {},
+      onProgress: (_html, snapshot) => {
+        superEasySnapshot = snapshot;
+        superEasy?.render();
+      },
+      onDone: (snapshot) => {
+        superEasySnapshot = snapshot;
+        superEasy?.render();
+      },
+      onError: (failure) => {
+        shell?.alert(failure.message);
+      },
+    });
+    return superEasySession;
+  }
+
+  function onSuperEasyGenerate(input: { prompt: string; compute: 'cpu' }): void {
+    const session = ensureSuperEasySession();
+    const status = session.status();
+    if (status === 'running' || status === 'stopping') return;
+    void session.generate({ prompt: input.prompt, compute: 'cpu' });
   }
 
   function refreshSuperEasySnapshot(): void {
@@ -139,6 +192,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost): () => void {
         if (next.productionId !== previous.productionId && next.productionId) refreshSuperEasySnapshot();
       }),
       snapshot: () => superEasySnapshot,
+      onGenerate: (input) => onSuperEasyGenerate(input),
       onMoreControl: () => openStudioFromSuperEasy(),
     });
     if (store.get().productionId) refreshSuperEasySnapshot();
