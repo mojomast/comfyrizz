@@ -238,3 +238,69 @@ test('UX21F R3: an incomplete plan slot is refused instead of defaulting to Goog
     && event.code === 'SLOT_INCOMPLETE'));
   assert.equal(env.launches.length, 0, 'no backend is started without a complete approved slot');
 });
+
+test('UX21F2 R1: action.cancel drains the cancelled action, not the latest slot', async (t) => {
+  const runtimeDir = tempRuntime();
+  const env = await mount(t, runtimeDir);
+  env.store = createProductionStore({ runtimeDir });
+  const pkg = onePackage();
+  env.app.store.seed(pkg);
+
+  const productionId = await createProduction(env, pkg, 'prod_cancel_latest');
+  await proposeAndApprove(env, productionId, 'prod_cancel_latest', { backendId: 'cpu' });
+  const dispatched = await dispatch(env, productionId, 'prod_cancel_latest');
+  assert.equal(dispatched.status, 202, dispatched.text);
+  await waitFor(() => env.launches.length === 1);
+
+  // A newer slot is dispatched with no backendId, so it is the latest action
+  // in the journal while its dispatch drain is refused SLOT_INCOMPLETE.
+  await proposeAndApprove(env, productionId, 'prod_cancel_newer', { upperBound: 2 });
+  const newerDispatched = await dispatch(env, productionId, 'prod_cancel_newer');
+  assert.equal(newerDispatched.status, 202, newerDispatched.text);
+  await waitFor(() => env.app.events.readAfter(0).events.some(event => event.type === 'production.execution_error'
+    && event.productionId === productionId
+    && event.code === 'SLOT_INCOMPLETE'));
+  assert.equal(env.launches.length, 1, 'the incomplete newer slot starts nothing');
+
+  const cancelled = await command(env, productionId, 'cancel_older', 'action.cancel', {
+    actionId: 'act_prod_cancel_latest',
+  });
+  assert.equal(cancelled.status, 200, cancelled.text);
+
+  await waitFor(() => !env.store.pending(productionId).some(entry => entry.type === 'action.cancel'));
+  assert.equal(env.launches.length, 1, 'the cancel commit does not start the pending incomplete dispatch');
+  assert.ok(env.store.pending(productionId).some(entry => entry.type === 'action.dispatch'
+    && entry.payload?.actionId === 'act_prod_cancel_newer'),
+  'a cancel commit never consumes the pending dispatch of another slot');
+  await waitFor(() => env.cancels.length > 0);
+  assert.deepEqual(env.cancels, [env.launches[0].specPath],
+    'the fake controller cancels the run of the action named by the command payload');
+});
+
+test('UX21F2 R1: action.cancel is acknowledged even when its slot is SLOT_INCOMPLETE', async (t) => {
+  const runtimeDir = tempRuntime();
+  const env = await mount(t, runtimeDir);
+  env.store = createProductionStore({ runtimeDir });
+  const pkg = onePackage();
+  env.app.store.seed(pkg);
+
+  const productionId = await createProduction(env, pkg, 'prod_cancel_incomplete');
+  await proposeAndApprove(env, productionId, 'prod_cancel_incomplete');
+  const dispatched = await dispatch(env, productionId, 'prod_cancel_incomplete');
+  assert.equal(dispatched.status, 202, dispatched.text);
+
+  await waitFor(() => env.app.events.readAfter(0).events.some(event => event.type === 'production.execution_error'
+    && event.productionId === productionId
+    && event.code === 'SLOT_INCOMPLETE'));
+  assert.equal(env.launches.length, 0, 'the incomplete slot starts no Google Colab or pipeline work');
+
+  const cancelled = await command(env, productionId, 'cancel_incomplete', 'action.cancel', {
+    actionId: 'act_prod_cancel_incomplete',
+  });
+  assert.equal(cancelled.status, 200, cancelled.text);
+
+  await waitFor(() => !env.store.pending(productionId).some(entry => entry.type === 'action.cancel'));
+  assert.equal(env.store.pending(productionId).filter(entry => entry.type === 'action.cancel').length, 0,
+    'the refused dispatch context does not leave the cancel entry pending');
+  assert.equal(env.launches.length, 0, 'cancelling an incomplete slot starts no pipeline work');
+});
