@@ -209,6 +209,8 @@ Record an entry-point matrix for all start, cancel, select, revert and export pa
 including legacy/internal queues. Define unbound-project compatibility explicitly.
 **Accept:** fixtures validate; packet write sets and old-record behavior are agreed;
 no duplicate private DTOs. No broad schema rewrite is a prerequisite for the P0 fixes.
+**Status:** component verified — see `docs/tasks/UX00_CONTRACTS_20261026.md` for the
+frozen contracts, entry-point matrix and Wave 1 leases.
 
 ### UX01 — Universal generation admission [M, P0]
 
