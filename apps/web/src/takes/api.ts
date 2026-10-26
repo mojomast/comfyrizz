@@ -218,6 +218,20 @@ export interface TicketResponse {
   url?: string;
 }
 
+/**
+ * A minted take ticket with its expiry. The URL is a short-lived bearer path,
+ * never the take file; `expiresAt` is preserved so a resolver can renew before
+ * a seek races expiry. A server that omits the timestamp yields `null`, which
+ * callers treat as an unknown ticket (use once, renew on the next error).
+ */
+export interface TakeTicket {
+  kind: 'ticket';
+  takeId: string | null;
+  ticket: string;
+  url: string;
+  expiresAt: string | null;
+}
+
 export type TakesApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export interface CreateTakesApiOptions {
@@ -237,6 +251,8 @@ export interface TakesApi {
     verdict: TakeVerdict,
     options?: { note?: string; takeId?: string },
   ): Promise<VerdictResult>;
+  /** Mint the take's ticket and keep its expiry metadata. */
+  takeTicket(packageId: string, clipId: string, takeId: string): Promise<TakeTicket>;
   takeUrl(packageId: string, clipId: string, takeId: string): Promise<string>;
 }
 
@@ -361,6 +377,33 @@ export function clipPath(packageId: string, clipId: string, suffix = ''): string
 
 export function takeTicketPath(packageId: string, clipId: string, takeId: string): string {
   return clipPath(packageId, clipId, `/takes/${encodeURIComponent(takeId)}/ticket`);
+}
+
+function normalizeTakeTicket(body: JsonObject, status: number): TakeTicket {
+  const ticket = textValue(body.ticket);
+  const url = textValue(body.url) || (ticket ? `/api/media/${encodeURIComponent(ticket)}` : '');
+  if (!MEDIA_URL_RE.test(url)) {
+    throw new TakesApiError('the media ticket did not return a media URL', status, 'INVALID_RESPONSE');
+  }
+  const expiresAt = textValue(body.expiresAt);
+  return {
+    kind: 'ticket',
+    takeId: textValue(body.takeId) || null,
+    ticket: ticket || url.slice(url.lastIndexOf('/') + 1),
+    url,
+    expiresAt: expiresAt || null,
+  };
+}
+
+async function mintTakeTicket(
+  apiFetch: TakesApiFetch,
+  packageId: string,
+  clipId: string,
+  takeId: string,
+): Promise<TakeTicket> {
+  const response = await apiFetch(takeTicketPath(packageId, clipId, takeId), { method: 'POST' });
+  const body = await jsonBody<JsonObject>(response);
+  return normalizeTakeTicket(body, response.status);
 }
 
 function isObject(value: unknown): value is JsonObject {
@@ -861,15 +904,12 @@ export function createTakesApi(options: CreateTakesApiOptions): TakesApi {
       return await jsonBody<VerdictResult>(response);
     },
 
+    async takeTicket(packageId, clipId, takeId) {
+      return await mintTakeTicket(apiFetch, packageId, clipId, takeId);
+    },
+
     async takeUrl(packageId, clipId, takeId) {
-      const response = await apiFetch(takeTicketPath(packageId, clipId, takeId), { method: 'POST' });
-      const body = await jsonBody<TicketResponse>(response);
-      const ticket = textValue(body.ticket);
-      const url = textValue(body.url) || (ticket ? `/api/media/${encodeURIComponent(ticket)}` : '');
-      if (!MEDIA_URL_RE.test(url)) {
-        throw new TakesApiError('the media ticket did not return a media URL', response.status, 'INVALID_RESPONSE');
-      }
-      return url;
+      return (await mintTakeTicket(apiFetch, packageId, clipId, takeId)).url;
     },
   };
 }
