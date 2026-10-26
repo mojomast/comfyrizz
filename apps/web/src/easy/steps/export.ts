@@ -328,7 +328,7 @@ export function renderExportDone(input: ExportDoneOptions | string | null = {}):
     : '';
   const download = parts.blobUrl
     ? `<a class="btn btn-primary" download="${escapeHtml(parts.fileName)}" href="${escapeHtml(parts.blobUrl)}" data-easy-export-download>${escapeHtml(COPY.export.download)}</a>`
-    : `<span class="btn btn-primary easy-is-disabled" aria-disabled="true">${escapeHtml(COPY.export.download)}</span>`;
+    : `<button type="button" class="btn btn-primary" data-easy-export-again>${escapeHtml(COPY.export.again)}</button>`;
   const colab = parts.colabStopped
     ? `<p class="easy-export-colab" data-easy-export-colab>${escapeHtml(COPY.colab.stopped)}</p>`
     : '';
@@ -541,7 +541,7 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     stopTimer();
     el.innerHTML = withNotice(renderExportDone(doneOptions()));
     setHeading(el, COPY.export.doneHeading, true);
-    ctx.shell.setPrimary({ label: COPY.export.download });
+    ctx.shell.setPrimary({ label: blobUrl ? COPY.export.download : COPY.export.again });
   }
 
   function paintError(reason: string): void {
@@ -646,6 +646,7 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
   function primary(): void {
     if (phase === 'done') {
       if (blobUrl) triggerDownload(doc, blobUrl, exportFileName(currentPackage()?.title));
+      else void begin();
       return;
     }
     if (phase === 'error') {
