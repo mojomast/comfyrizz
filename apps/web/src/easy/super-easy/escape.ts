@@ -108,16 +108,45 @@ export function isSuperEasyDone(snapshot: unknown): boolean {
   return buildGalleryModel(snapshot).final.state === 'ready';
 }
 
+export interface SuperEasyDoneActionsOptions {
+  /** The final video URL already present in the progress snapshot. */
+  finalUrl?: string | null;
+  /** Current package id, kept by the Studio escape. */
+  packageId?: string | null;
+  /** Current address, so unrelated query parameters survive the escapes. */
+  search?: string;
+}
+
+const DOWNLOAD_SCHEME = /^([a-z][a-z0-9+.-]*):/iu;
+
+function downloadUrlOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (text === '' || /[\u0000-\u001f\u007f]/u.test(text)) return null;
+  const scheme = DOWNLOAD_SCHEME.exec(text)?.[1]?.toLowerCase();
+  if (scheme === undefined) return text;
+  if (scheme === 'http' || scheme === 'https' || scheme === 'blob') return text;
+  if (scheme === 'data' && /^data:(?:video|audio)\//iu.test(text)) return text;
+  return null;
+}
+
 /**
  * The escape actions shown with the finished video.
  *
- * Open in editor keeps the package id because the mount knows the current
- * state; Make another returns to the bare landing. Both are ordinary buttons
- * so keyboard and screen-reader users get the same path.
+ * Download uses the final URL the progress view already has. Open in Studio
+ * keeps the package id, Make another returns to the bare landing, and Open in
+ * editor stays available as the secondary Advanced escape. A missing or
+ * unusable final URL drops Download rather than showing a dead control.
  */
-export function renderSuperEasyDoneActions(): string {
+export function renderSuperEasyDoneActions(options: SuperEasyDoneActionsOptions = {}): string {
+  const finalUrl = downloadUrlOf(options.finalUrl);
+  const download = finalUrl === null
+    ? ''
+    : `<a class="btn btn-primary super-easy-done-download" href="${escapeHtml(finalUrl)}" download data-super-easy-download>${escapeHtml(COPY.done.download)}</a>\n`;
+  const studioHref = escapeToStudio(options.search ?? '', options.packageId ?? null);
   return `<div class="super-easy-done-actions" data-super-easy-done-actions>
-<button type="button" class="btn btn-secondary" data-super-easy-open-editor>${escapeHtml(EASY_COPY.shell.openEditor)}</button>
+${download}<a class="btn btn-secondary" href="${escapeHtml(studioHref)}" data-super-easy-open-studio>${escapeHtml(COPY.done.openStudio)}</a>
 <button type="button" class="btn btn-secondary" data-super-easy-make-another>${escapeHtml(COPY.done.again)}</button>
+<button type="button" class="btn btn-secondary" data-super-easy-open-editor>${escapeHtml(EASY_COPY.shell.openEditor)}</button>
 </div>`;
 }

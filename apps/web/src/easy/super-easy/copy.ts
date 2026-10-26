@@ -47,6 +47,7 @@ export const COPY = deepFreeze({
   done: {
     title: 'Your video is ready!',
     download: 'Download',
+    openStudio: 'Open in Studio',
     again: 'Make another',
   },
   googleColab: {

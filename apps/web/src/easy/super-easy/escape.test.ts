@@ -130,13 +130,45 @@ test('the home more-control link carries the package id', () => {
   assert.match(plain, /href="\?step=idea"/u);
 });
 
-test('the done actions render Open in editor and Make another once', () => {
-  const html = renderSuperEasyDoneActions();
+test('the done actions put Download first and keep the editor escape secondary', () => {
+  const html = renderSuperEasyDoneActions({
+    finalUrl: 'https://example.test/final.mp4',
+    packageId: 'pkg_123',
+    search: '?package=pkg_123',
+  });
+
   assert.match(html, /data-super-easy-done-actions/u);
-  assert.match(html, /<button[^>]*data-super-easy-open-editor[^>]*>Open in editor<\/button>/u);
+
+  const download = html.match(/<a\b[^>]*data-super-easy-download[^>]*>([\s\S]*?)<\/a>/u);
+  assert.ok(download, 'Download uses the existing final URL');
+  assert.match(download[0], /href="https:\/\/example\.test\/final\.mp4"/u);
+  assert.match(download[0], /class="[^"]*\bbtn-primary\b[^"]*"/u);
+  assert.match(download[0], /\bdownload\b/u);
+  assert.equal(download[1], 'Download');
+
+  const studio = html.match(/<a\b[^>]*data-super-easy-open-studio[^>]*>([\s\S]*?)<\/a>/u);
+  assert.ok(studio, 'Open in Studio is present');
+  assert.match(studio[0], /href="\?package=pkg_123&amp;step=idea"/u);
+  assert.equal(studio[1], 'Open in Studio');
+
   assert.match(html, /<button[^>]*data-super-easy-make-another[^>]*>Make another<\/button>/u);
-  assert.equal((html.match(/data-super-easy-open-editor/g) ?? []).length, 1);
+  const editor = html.match(/<button\b[^>]*data-super-easy-open-editor[^>]*>([\s\S]*?)<\/button>/u);
+  assert.ok(editor, 'Open in editor remains available');
+  assert.match(editor[0], /class="[^"]*\bbtn-secondary\b[^"]*"/u);
+  assert.equal(editor[1], 'Open in editor');
+
+  assert.equal((html.match(/data-super-easy-download/g) ?? []).length, 1);
+  assert.equal((html.match(/data-super-easy-open-studio/g) ?? []).length, 1);
   assert.equal((html.match(/data-super-easy-make-another/g) ?? []).length, 1);
+  assert.equal((html.match(/data-super-easy-open-editor/g) ?? []).length, 1);
+});
+
+test('a done view without a usable final URL never shows a dead Download', () => {
+  const html = renderSuperEasyDoneActions({ packageId: 'pkg_123' });
+  assert.doesNotMatch(html, /data-super-easy-download/u);
+  assert.match(html, /data-super-easy-open-studio/u);
+  assert.match(html, /data-super-easy-make-another/u);
+  assert.match(html, /data-super-easy-open-editor/u);
 });
 
 test('the done snapshot is recognised from the final video', () => {
@@ -202,6 +234,41 @@ test('Open in editor hands the package to Advanced', () => {
 
   assert.equal(prevented, true);
   assert.deepEqual(opened, ['pkg_123']);
+  handle.destroy();
+});
+
+test('Open in Studio keeps the package before the studio opens', () => {
+  const { root } = fakeRoot();
+  const navigated = [];
+  const handed = [];
+  const handle = mountSuperEasy({
+    root,
+    state: () => state({
+      packageId: 'pkg_123',
+      productionId: 'prod_0123456789abcdef01234567',
+      generate: { status: 'done' },
+    }),
+    snapshot: () => doneSnapshot(),
+    navigate: (url) => {
+      navigated.push(url);
+    },
+    onMoreControl: (packageId) => {
+      handed.push(packageId);
+    },
+  });
+
+  assert.match(root.innerHTML, /data-super-easy-open-studio/u);
+  let prevented = false;
+  root.fire('click', {
+    target: clickTarget('[data-super-easy-open-studio]'),
+    preventDefault() {
+      prevented = true;
+    },
+  });
+
+  assert.equal(prevented, true);
+  assert.deepEqual(navigated, ['?package=pkg_123&step=idea']);
+  assert.deepEqual(handed, ['pkg_123']);
   handle.destroy();
 });
 
