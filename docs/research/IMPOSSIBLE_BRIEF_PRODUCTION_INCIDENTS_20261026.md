@@ -1,11 +1,12 @@
 # The Impossible Brief — production incidents and prevention proposals
 
-**Status:** living production report, October 26, 2026; film still in progress.
+**Status:** production delivered and technically verified, October 26, 2026;
+engineering prevention proposals remain open.
 Evidence root: retained private Impossible Brief production workspace (2026-10-26).
 User requested documenting encountered pitfalls and proposing recurrence prevention.
 This report distinguishes observed failures, local mitigations and unimplemented
-product fixes. No claim of completed film, subjective listening approval or resolved
-billing reconciliation is made here.
+product fixes. Delivery checks do not establish subjective listening approval or
+resolved billing attribution.
 
 Production uses the earlier workspace's backend/scripts from
 a temporary OpenCode FastH3 Omni checkout used for that production, with the deployed release's renderer packages
@@ -298,3 +299,24 @@ that exact input set. Check script syntax before dispatching long dependent work
 **Regression:** assembly exits nonzero with an older valid edit present; neither
 render nor publish may execute. A render receipt from older inputs must fail the
 publication freshness gate even if its dimensions/frame count are otherwise valid.
+
+## Delivery outcome
+
+The corrected fail-fast pipeline completed assembly, layout checks and 1080p render.
+Delivered **57.083 seconds / 1,370 frames / 15 sections / 12 caption cues** with a
+720p player, both MP4 downloads, captions and a private project/source archive.
+Ten selected dialogue excerpts passed independent retranscription after trimming;
+the complete mixed soundtrack also matched the selected words. Exported audio
+correlated with the checked mix at 0.9999878 after AAC encoding.
+
+The served player completed natural-speed muted playback: 1,370 frames, no dropped
+frames and no page errors. Download hashes, archive CRC, chapter seeking, 390px
+mobile layout and editor loading passed. All 120 protected existing documents
+remained unchanged at import. The app project contains finished clips for trimming
+and reordering; graphics/audio editing sources are in the archive.
+
+Last account check: **6.22 estimated credits used out of 15**, zero active
+assignments, zero hourly rate. The conservative **2.5-credit unresolved exposure
+hold** is retained separately; no attributed billing reconciliation is claimed.
+The delivered archive contains the report snapshot available during packaging;
+this PR holds the subsequent delivery outcome and verification record.
