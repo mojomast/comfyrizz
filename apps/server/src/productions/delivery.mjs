@@ -17,6 +17,7 @@ import * as fs from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const DELIVERY_SCHEMA = 'comfyrizz.delivery/v1';
+export const DELIVERY_BUNDLE_SCHEMA = 'comfyrizz.delivery-bundle/v1';
 
 const ARCHIVE_MODES = new Set(['private', 'redistributable']);
 const PIN_KEYS = ['packageRevision', 'editorRevision', 'productionRevision'];
@@ -663,6 +664,7 @@ export function createDeliveryStore(options = {}) {
   }
   const runtimeDir = resolve(options.runtimeDir);
   const clock = options.clock;
+  const writeBundleFile = typeof options.writeFile === 'function' ? options.writeFile : fs.writeFileSync;
   let tempSequence = 0;
 
   function pathsFor(productionId) {
@@ -678,6 +680,23 @@ export function createDeliveryStore(options = {}) {
       lock: join(deliveriesDir, '.lock'),
       versionDir: (version) => join(deliveriesDir, `v${versionNumber(version)}`),
       manifest: (version) => join(deliveriesDir, `v${versionNumber(version)}`, 'manifest.json'),
+    };
+  }
+
+  function bundlePathsFor(productionId) {
+    const id = assertSafeId(productionId, 'productionId');
+    const root = runtimeDir;
+    const productionDir = join(root, 'productions', id);
+    const bundlesDir = join(productionDir, 'bundles');
+    if (!insideOrEqual(root, bundlesDir)) fail('PATH_ESCAPE', 'delivery bundle path escapes the runtime directory');
+    return {
+      root,
+      productionDir,
+      bundlesDir,
+      deliveriesDir: bundlesDir,
+      lock: join(bundlesDir, '.lock'),
+      versionDir: (version) => join(bundlesDir, `v${versionNumber(version)}`),
+      manifest: (version) => join(bundlesDir, `v${versionNumber(version)}`, 'manifest.json'),
     };
   }
 
@@ -987,7 +1006,248 @@ export function createDeliveryStore(options = {}) {
     }
   }
 
-  return { pathsFor, publish, list, read, latest };
+
+  function readBundleManifestAt(dir) {
+    let raw;
+    try {
+      raw = fs.readFileSync(join(dir, 'manifest.json'), 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      fail('INVALID_MANIFEST', 'delivery bundle manifest cannot be read');
+    }
+    let manifest;
+    try {
+      manifest = JSON.parse(raw);
+    } catch {
+      fail('INVALID_MANIFEST', 'delivery bundle manifest is not valid JSON');
+    }
+    if (!isPlainObject(manifest) || manifest.schema !== DELIVERY_BUNDLE_SCHEMA || !Number.isSafeInteger(manifest.version)) {
+      fail('INVALID_MANIFEST', 'delivery bundle manifest is invalid');
+    }
+    return manifest;
+  }
+
+  function bundleVersionNumbers(paths) {
+    let entries;
+    try {
+      entries = fs.readdirSync(paths.bundlesDir, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+    return entries
+      .filter((dirent) => dirent.isDirectory())
+      .map((dirent) => /^v([1-9][0-9]*)$/.exec(dirent.name))
+      .filter(Boolean)
+      .map((match) => Number(match[1]))
+      .sort((left, right) => left - right);
+  }
+
+  function listBundles(productionId) {
+    const paths = bundlePathsFor(productionId);
+    const manifests = [];
+    for (const version of bundleVersionNumbers(paths)) {
+      const manifest = readBundleManifestAt(paths.versionDir(version));
+      if (manifest) manifests.push(manifest);
+    }
+    return manifests;
+  }
+
+  function readBundle(productionId, version) {
+    const paths = bundlePathsFor(productionId);
+    return readBundleManifestAt(paths.versionDir(version));
+  }
+
+  function latestBundle(productionId) {
+    const manifests = listBundles(productionId);
+    return manifests.length === 0 ? null : manifests[manifests.length - 1];
+  }
+
+  function normalizeBundleSnapshot(snapshot) {
+    if (!isPlainObject(snapshot)) fail('INVALID_SNAPSHOT', 'publishBundle needs the delivery snapshot');
+    const fingerprint = normalizeDigest(snapshot.fingerprint);
+    if (fingerprint === null) fail('INVALID_SNAPSHOT', 'snapshot.fingerprint must be a sha256 hex digest');
+    const packageId = snapshot.packageId;
+    if (typeof packageId !== 'string' || packageId.trim() === '') fail('INVALID_SNAPSHOT', 'snapshot.packageId is required');
+    const intent = snapshot.intent ?? 'final';
+    if (intent !== 'draft' && intent !== 'final') fail('INVALID_INTENT', "snapshot.intent must be 'draft' or 'final'");
+    const format = isPlainObject(snapshot.format)
+      ? {
+          width: snapshot.format.width,
+          height: snapshot.format.height,
+          ...(typeof snapshot.format.aspect === 'string' ? { aspect: snapshot.format.aspect } : {}),
+          ...(typeof snapshot.format.preserved === 'boolean' ? { preserved: snapshot.format.preserved } : {}),
+        }
+      : null;
+    return {
+      fingerprint,
+      packageId,
+      intent,
+      packageRevision: Number.isSafeInteger(snapshot.packageRevision) ? snapshot.packageRevision : null,
+      editorRevision: Number.isSafeInteger(snapshot.editorRevision) ? snapshot.editorRevision : null,
+      timelineHash: normalizeDigest(snapshot.timelineHash),
+      captionRevision: normalizeDigest(snapshot.captionRevision),
+      speechSha256: normalizeDigest(snapshot.speechSha256),
+      format,
+      archiveMode: snapshot.archiveMode === 'redistributable' ? 'redistributable' : 'private',
+    };
+  }
+
+  function normalizeBundleFiles(files) {
+    if (!Array.isArray(files) || files.length === 0) fail('INVALID_BUNDLE', 'publishBundle needs at least one file');
+    const entries = files.map((entry, index) => {
+      if (!isPlainObject(entry)) fail('INVALID_BUNDLE', `files[${index}] must be an object`);
+      const path = safeArchivePath(entry.path, `files[${index}].path`);
+      if (path === 'manifest.json') fail('INVALID_PATH', 'files cannot replace the bundle manifest');
+      const spec = entry.sourcePath !== undefined
+        ? { path: entry.sourcePath, sha256: entry.sha256, ...(entry.size === undefined ? {} : { size: entry.size }) }
+        : { bytes: entry.data !== undefined ? entry.data : entry.bytes, sha256: entry.sha256, ...(entry.size === undefined ? {} : { size: entry.size }) };
+      const file = materializeFile(spec, `files[${index}]`);
+      return {
+        path,
+        kind: typeof entry.kind === 'string' && entry.kind !== '' ? entry.kind : 'artifact',
+        data: file.data,
+        sha256: file.sha256,
+        bytes: file.bytes,
+      };
+    });
+    const seen = new Set();
+    for (const entry of entries) {
+      if (seen.has(entry.path)) fail('INVALID_PATH', `bundle path is duplicated: ${entry.path}`);
+      seen.add(entry.path);
+    }
+    return entries.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+  }
+
+  // Atomic, append-only export bundle publication. It shares the same version
+  // discipline as `publish`: bytes are materialized first, the manifest is
+  // written last, and only a complete temporary directory is renamed to vN.
+  function publishBundle(input) {
+    if (!isPlainObject(input)) fail('INVALID_DELIVERY', 'publishBundle takes one bundle input object');
+    assertNoTransient(input);
+    const productionId = assertSafeId(input.productionId, 'productionId');
+    const snapshot = normalizeBundleSnapshot(input.snapshot);
+    const files = normalizeBundleFiles(input.files);
+    let idempotencyKey = null;
+    if (input.idempotencyKey !== undefined && input.idempotencyKey !== null) {
+      idempotencyKey = assertGeneralId(input.idempotencyKey, 'idempotencyKey');
+    }
+    const metadata = input.metadata === undefined ? undefined : clone(input.metadata);
+    if (metadata !== undefined && !isPlainObject(metadata)) fail('INVALID_METADATA', 'metadata must be an object');
+
+    const content = {
+      schema: DELIVERY_BUNDLE_SCHEMA,
+      productionId,
+      snapshot,
+      files: files.map((file) => ({ path: file.path, kind: file.kind, sha256: file.sha256, bytes: file.bytes })),
+      ...(metadata === undefined ? {} : { metadata }),
+    };
+    const contentHash = hashText(canonicalJson(content));
+    const paths = bundlePathsFor(productionId);
+    const release = acquireLock(paths);
+    try {
+      const existing = listBundles(productionId);
+      if (idempotencyKey !== null) {
+        const prior = existing.find((manifest) => manifest.idempotencyKey === idempotencyKey);
+        if (prior) {
+          if (prior.contentHash !== contentHash) {
+            fail('IDEMPOTENCY_CONFLICT', 'idempotencyKey was reused with different bundle content');
+          }
+          return {
+            created: false,
+            duplicate: true,
+            version: prior.version,
+            bundleId: prior.bundleId,
+            dir: paths.versionDir(prior.version),
+            manifest: clone(prior),
+            contentHash: prior.contentHash,
+            manifestHash: prior.manifestHash,
+          };
+        }
+      }
+      const current = existing.length === 0 ? 0 : existing[existing.length - 1].version;
+      if (input.expectedVersion !== undefined) {
+        if (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0) {
+          fail('INVALID_VERSION', 'expectedVersion must be a non-negative integer');
+        }
+        if (input.expectedVersion !== current) {
+          fail('REVISION_CONFLICT', 'expectedVersion does not match the latest committed bundle', {
+            currentVersion: current,
+            expectedVersion: input.expectedVersion,
+          });
+        }
+      }
+      const version = current + 1;
+      const target = paths.versionDir(version);
+      if (fs.existsSync(target)) fail('VERSION_EXISTS', 'delivery bundle version already exists');
+      const previousManifest = existing.length === 0 ? null : existing[existing.length - 1];
+      const bundleId = `bnd_${hashText(`bundle\u0000${productionId}\u0000${version}\u0000${contentHash}`).slice(0, 24)}`;
+      const base = {
+        schema: DELIVERY_BUNDLE_SCHEMA,
+        version,
+        bundleId,
+        productionId,
+        packageId: snapshot.packageId,
+        createdAt: clockIso(clock),
+        ...(idempotencyKey === null ? {} : { idempotencyKey }),
+        intent: snapshot.intent,
+        snapshotFingerprint: snapshot.fingerprint,
+        packageRevision: snapshot.packageRevision,
+        editorRevision: snapshot.editorRevision,
+        timelineHash: snapshot.timelineHash,
+        captionRevision: snapshot.captionRevision,
+        speechSha256: snapshot.speechSha256,
+        format: snapshot.format,
+        archiveMode: snapshot.archiveMode,
+        ...(metadata === undefined ? {} : { metadata }),
+        files: content.files,
+        filePaths: content.files.map((file) => file.path),
+        previous: previousManifest === null ? null : {
+          version: previousManifest.version,
+          bundleId: previousManifest.bundleId,
+          manifestHash: previousManifest.manifestHash,
+          contentHash: previousManifest.contentHash,
+        },
+        contentHash,
+      };
+      const manifestHash = hashText(canonicalJson(base));
+      const manifest = { ...base, manifestHash };
+      tempSequence += 1;
+      const temp = join(paths.bundlesDir, `.tmp-${process.pid}-${tempSequence}`);
+      fs.mkdirSync(temp, { recursive: true, mode: 0o700 });
+      try {
+        for (const file of files) {
+          const targetFile = join(temp, file.path);
+          if (!insideOrEqual(temp, targetFile)) fail('PATH_ESCAPE', 'bundle file escapes the version directory');
+          fs.mkdirSync(dirname(targetFile), { recursive: true, mode: 0o700 });
+          writeBundleFile(targetFile, file.data, { mode: 0o600 });
+        }
+        writeBundleFile(join(temp, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+        fs.renameSync(temp, target);
+      } catch (error) {
+        try {
+          fs.rmSync(temp, { recursive: true, force: true });
+        } catch {
+          // Preserve the original failure.
+        }
+        throw error;
+      }
+      return {
+        created: true,
+        duplicate: false,
+        version,
+        bundleId,
+        dir: target,
+        manifest,
+        contentHash,
+        manifestHash,
+      };
+    } finally {
+      release();
+    }
+  }
+
+  return { pathsFor, publish, list, read, latest, bundlePathsFor, publishBundle, listBundles, readBundle, latestBundle };
 }
 
 export default createDeliveryStore;

@@ -95,14 +95,67 @@ export function preferUpscaledAssets(pkg, packageDir) {
   return { pkg: out, used };
 }
 
-/** A9: the package a final export renders — 1920×1080, upscaled media when present. */
+function gcd(left, right) {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+  while (b !== 0) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+function aspectOf(width, height) {
+  const divisor = gcd(width, height);
+  return `${width / divisor}:${height / divisor}`;
+}
+
+function even(value) {
+  const rounded = Math.max(2, Math.round(value));
+  return rounded % 2 === 0 ? rounded : rounded + 1;
+}
+
+/**
+ * A9/UX15: the final export format preserves the package's own aspect. With no
+ * explicit dimensions the longest edge is 1920 px (so a landscape 16:9 source is
+ * still 1920x1080 and a portrait 9:16 source is 1080x1920).
+ */
+export function finalRenderFormat(pkg, final = {}) {
+  const sourceWidth = Number.isSafeInteger(pkg?.format?.width) && pkg.format.width > 0 ? pkg.format.width : FINAL_WIDTH;
+  const sourceHeight = Number.isSafeInteger(pkg?.format?.height) && pkg.format.height > 0 ? pkg.format.height : FINAL_HEIGHT;
+  const explicitWidth = Number.isSafeInteger(final.width) && final.width > 0 ? final.width : null;
+  const explicitHeight = Number.isSafeInteger(final.height) && final.height > 0 ? final.height : null;
+  let width;
+  let height;
+  if (explicitWidth !== null && explicitHeight !== null) {
+    width = explicitWidth;
+    height = explicitHeight;
+  } else if (explicitWidth !== null) {
+    width = explicitWidth;
+    height = even((width * sourceHeight) / sourceWidth);
+  } else if (explicitHeight !== null) {
+    height = explicitHeight;
+    width = even((height * sourceWidth) / sourceHeight);
+  } else {
+    const longEdge = Number.isSafeInteger(final.longEdge) && final.longEdge > 0
+      ? final.longEdge
+      : Math.max(FINAL_WIDTH, FINAL_HEIGHT);
+    const scale = longEdge / Math.max(sourceWidth, sourceHeight);
+    width = even(sourceWidth * scale);
+    height = even(sourceHeight * scale);
+  }
+  return {
+    width,
+    height,
+    aspect: aspectOf(width, height),
+    preserved: width * sourceHeight === height * sourceWidth,
+  };
+}
+
+/** A9: the package a final export renders — aspect preserving, upscaled media when present. */
 export function applyFinalRender(pkg, packageDir, final = {}) {
-  const width = final.width ?? FINAL_WIDTH;
-  const height = final.height ?? FINAL_HEIGHT;
+  const format = finalRenderFormat(pkg, final);
   const base = structuredClone(pkg);
-  base.format = { ...(base.format ?? {}), width, height };
+  base.format = { ...(base.format ?? {}), width: format.width, height: format.height };
   const { pkg: withMedia, used } = final.preferUpscaled === false ? { pkg: base, used: [] } : preferUpscaledAssets(base, packageDir);
-  return { pkg: withMedia, used, width, height };
+  return { pkg: withMedia, used, width: format.width, height: format.height, format };
 }
 
 /**
@@ -169,7 +222,7 @@ function remotionArguments({ still, compositionId, outputPath, propsPath, public
   ];
 }
 
-function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration, scale, mixAudio = true, normalizeLoudness = true } = {}) {
+function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration, scale, mixAudio = true, normalizeLoudness = true, captionOverrides: explicitOverrides, editor = null } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
   // A9: validate the package as stored — the base `file` and `variants` are checked (H12 variant
@@ -185,7 +238,13 @@ function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicD
   // L1: a language variant has its own narration text, so callers pass the
   // variant's measured durations (or `{}` to re-estimate from the translated
   // `scene.narration`) instead of the base package's English durations.
-  const compileOptions = narration !== undefined ? narration : narrationOptions(packageDir);
+  const captionOverrides = Array.isArray(explicitOverrides)
+    ? explicitOverrides
+    : (Array.isArray(editor?.captionOverrides) ? editor.captionOverrides : []);
+  const compileOptions = {
+    ...(narration !== undefined ? narration : narrationOptions(packageDir)),
+    ...(captionOverrides.length === 0 ? {} : { captionOverrides }),
+  };
   let timeline = compileTimeline(pkg, compileOptions);
   if (loadCompositionManifest(packageDir, pkg)) {
     if (pkg.voice?.enabled && timeline.provisional) throw new Error('Composition narration timing is still provisional');

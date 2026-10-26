@@ -21,6 +21,8 @@ import { sceneAssetIds } from '../scene.mjs';
 import { packageTimeline, timingChangeReason } from '../edit.mjs';
 import { measuredOptionsFromDir } from '../compile-package.mjs';
 import { loadCompositionManifest } from '../../../../packages/compositions/src/index.mjs';
+import { createDeliverySnapshot, preflightDelivery } from '../productions/delivery-snapshot.mjs';
+import { readEditor, validateEditor } from '../editor-sidecar.mjs';
 
 /**
  * IP54: the one table of final-delivery callers owned by this module. A route
@@ -164,6 +166,55 @@ export function createRenderRoutes(options = {}) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   }
 
+  function intentFor(body) {
+    const value = body?.intent;
+    if (value === undefined || value === null) return 'final';
+    if (value !== 'draft' && value !== 'final') {
+      const error = new Error("intent must be 'draft' or 'final'");
+      error.status = 400;
+      error.code = 'INVALID_INTENT';
+      throw error;
+    }
+    return value;
+  }
+
+  function editorFor(pkg, body) {
+    let candidate;
+    if (body?.editor !== undefined) candidate = body.editor;
+    else if (body?.captionOverrides !== undefined) candidate = { version: 1, captionOverrides: body.captionOverrides };
+    else if (typeof runtimeDir === 'string' && runtimeDir !== '' && typeof pkg?.id === 'string' && pkg.id !== '') {
+      try {
+        candidate = readEditor(runtimeDir, pkg.id);
+      } catch {
+        candidate = null;
+      }
+    }
+    if (candidate === undefined || candidate === null) return { editor: null, captionOverrides: [] };
+    const checked = validateEditor(candidate);
+    if (checked.error) {
+      const error = new Error(checked.error);
+      error.status = 400;
+      error.code = 'INVALID_EDITOR';
+      throw error;
+    }
+    return { editor: checked.editor, captionOverrides: checked.editor?.captionOverrides ?? [] };
+  }
+
+  function deliverySnapshotFor(target, body, intent, editor) {
+    return createDeliverySnapshot({
+      pkg: target.pkg,
+      packageDir: dirname(target.packagePath),
+      editor,
+      editorRevision: body?.editorRevision,
+      selections: body?.selections,
+      intent,
+      format: isPlainObject(body?.format) ? body.format : null,
+      archiveMode: body?.archiveMode,
+      reviews: body?.reviews,
+      references: body?.references,
+    });
+  }
+
   function sendRouteError(response, error) {
     const status = Number.isSafeInteger(error?.status) ? error.status : 500;
     return sendJson(response, status, {
@@ -265,7 +316,11 @@ export function createRenderRoutes(options = {}) {
    * request journals nothing and never reaches a renderer, exporter or ledger.
    */
   async function admitRender({ pkg, body, pathname, revision, binding, alwaysGate = false, details = {} }) {
+    // UX15: an explicit final intent is gated even when no take sidecar exists.
+    // Legacy callers without an intent keep their existing admission path.
+    const explicitFinal = intentFor(body) === 'final' && body?.intent === 'final';
     const required = alwaysGate
+      || explicitFinal
       || Boolean(binding)
       || requireReadiness === true
       || typeof readiness === 'function'
@@ -410,7 +465,11 @@ export function createRenderRoutes(options = {}) {
         }
         let binding;
         let admission;
+        let intent;
+        let editorInfo;
         try {
+          intent = intentFor(body);
+          editorInfo = editorFor(pkg, body);
           binding = await productionBinding(pkg);
           admission = await admitRender({
             pkg,
@@ -438,6 +497,14 @@ export function createRenderRoutes(options = {}) {
             force: body.force === true,
             signal: abort.signal,
             onLog: line => events.publish({ type: 'export.log', exportId, line }),
+            intent,
+            editor: editorInfo.editor,
+            editorRevision: body.editorRevision,
+            selections: body.selections,
+            format: body.format,
+            archiveMode: body.archiveMode,
+            reviews: body.reviews,
+            references: body.references,
             ...(body.mixAudio === false ? { mixAudio: false } : {}),
           });
           events.publish({
@@ -465,6 +532,14 @@ export function createRenderRoutes(options = {}) {
           force: body.force === true,
           signal: abort.signal,
           onLog: line => events.publish({ type: 'export.log', exportId, line }),
+          intent,
+          editor: editorInfo.editor,
+          editorRevision: body.editorRevision,
+          selections: body.selections,
+          format: body.format,
+          archiveMode: body.archiveMode,
+          reviews: body.reviews,
+          references: body.references,
           ...(body.mixAudio === false ? { mixAudio: false } : {}),
         });
         events.publish({
@@ -479,6 +554,8 @@ export function createRenderRoutes(options = {}) {
           captions: result.captions,
           complete: result.complete,
           excluded: result.excluded,
+          intent: result.intent,
+          deliveryFingerprint: result.snapshot?.fingerprint ?? null,
         });
         return sendJson(response, 200, { exportId, ...result, ...productionFields(admission) });
       } catch (error) {
@@ -491,7 +568,20 @@ export function createRenderRoutes(options = {}) {
           message: error.message,
         });
         if (response.writableEnded || response.destroyed) return;
-        return sendJson(response, error.status ?? 500, { error: error.message, exportId });
+        const preflightCodes = new Set([
+          'UNKNOWN_CREATIVE_REVIEW',
+          'REJECTED_CREATIVE_REVIEW',
+          'DELIVERY_GATE_BLOCKED',
+          'DELIVERY_PREFLIGHT_BLOCKED',
+          'PROVISIONAL_TIMING',
+        ]);
+        const status = error.status ?? (preflightCodes.has(error.code) ? 409 : 500);
+        return sendJson(response, status, {
+          error: error.message,
+          exportId,
+          ...(typeof error.code === 'string' ? { code: error.code } : {}),
+          ...(error.preflight ? { preflight: error.preflight } : {}),
+        });
       }
     } finally {
       hold.release();
@@ -552,12 +642,45 @@ export function createRenderRoutes(options = {}) {
       }
       if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
 
-      events.publish({ type: 'render.started', renderId, packageId: pkg.id, revision });
+      let intent;
+      let editorInfo;
+      let snapshot;
+      let preflight;
+      try {
+        intent = intentFor(body);
+        editorInfo = editorFor(pkg, body);
+        snapshot = deliverySnapshotFor({ pkg, packagePath }, body, intent, editorInfo.editor);
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+      } catch (error) {
+        return sendRouteError(response, error);
+      }
+      if (!preflight.ok) {
+        return sendJson(response, 409, {
+          error: preflight.blockers[0].message,
+          code: preflight.blockers[0].code,
+          preflight,
+        });
+      }
+
+      events.publish({
+        type: 'render.started',
+        renderId,
+        packageId: pkg.id,
+        revision,
+        intent,
+        deliveryFingerprint: snapshot.fingerprint,
+      });
       let job;
       try {
         hold.beginRender(() => job?.cancel());
         job = startRender(render, packagePath, output, {
           onLog: line => events.publish({ type: 'render.log', renderId, line }),
+          intent,
+          deliveryFingerprint: snapshot.fingerprint,
+          ...(editorInfo.captionOverrides.length === 0 ? {} : {
+            captionOverrides: editorInfo.captionOverrides,
+            editor: editorInfo.editor,
+          }),
           ...(body.mixAudio === false ? { mixAudio: false } : {}),
         });
         const result = await job.promise;
@@ -570,6 +693,8 @@ export function createRenderRoutes(options = {}) {
           bytes: result.bytes,
           frames: result.frames,
           timeline_sha256: result.hash,
+          intent,
+          deliveryFingerprint: snapshot.fingerprint,
         });
         // MS4: the "look at your own frames" gate. Non-fatal: a QA failure is
         // reported, never a reason to lose a render the owner asked for.
@@ -590,6 +715,9 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-render-id': renderId,
           'x-comfyrizz-timeline-sha256': result.hash,
           'x-comfyrizz-frames': String(result.frames),
+          'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
+          'x-comfyrizz-export-intent': intent,
+          'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(revision == null ? {} : { 'x-comfyrizz-revision': String(revision) }),
           ...productionHeaders(admission),
         });
@@ -656,13 +784,48 @@ export function createRenderRoutes(options = {}) {
       }
       if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
 
-      events.publish({ type: 'scene.render.started', renderId, packageId: target.pkg.id, revision: target.revision, sceneId: body.sceneId, assets });
+      let intent;
+      let editorInfo;
+      let snapshot;
+      let preflight;
+      try {
+        intent = intentFor(body);
+        editorInfo = editorFor(target.pkg, body);
+        snapshot = deliverySnapshotFor(target, body, intent, editorInfo.editor);
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+      } catch (error) {
+        return sendRouteError(response, error);
+      }
+      if (!preflight.ok) {
+        return sendJson(response, 409, {
+          error: preflight.blockers[0].message,
+          code: preflight.blockers[0].code,
+          preflight,
+        });
+      }
+
+      events.publish({
+        type: 'scene.render.started',
+        renderId,
+        packageId: target.pkg.id,
+        revision: target.revision,
+        sceneId: body.sceneId,
+        assets,
+        intent,
+        deliveryFingerprint: snapshot.fingerprint,
+      });
       let job;
       try {
         hold.beginRender(() => job?.cancel());
         job = startRender(renderScene, target.packagePath, output, {
           cacheDir,
           force: body.force === true,
+          intent,
+          deliveryFingerprint: snapshot.fingerprint,
+          ...(editorInfo.captionOverrides.length === 0 ? {} : {
+            captionOverrides: editorInfo.captionOverrides,
+            editor: editorInfo.editor,
+          }),
           onLog: line => events.publish({ type: 'scene.render.log', renderId, sceneId: body.sceneId, line }),
         });
         const result = await job.promise;
@@ -680,6 +843,8 @@ export function createRenderRoutes(options = {}) {
           reused: result.reused,
           full: result.full ?? false,
           reason: result.reason ?? null,
+          intent,
+          deliveryFingerprint: snapshot.fingerprint,
         });
         response.writeHead(200, {
           'content-type': 'video/mp4',
@@ -694,6 +859,9 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-reused': String(result.reused.length),
           'x-comfyrizz-full-render': result.full ? '1' : '0',
           'x-comfyrizz-full-reason': result.reason ?? '',
+          'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
+          'x-comfyrizz-export-intent': intent,
+          'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
           ...productionHeaders(admission),
         });
@@ -760,6 +928,26 @@ export function createRenderRoutes(options = {}) {
       }
       if (admission.blocked) return sendJson(response, admission.blocked.status, admission.blocked.body);
 
+      let intent;
+      let editorInfo;
+      let snapshot;
+      let preflight;
+      try {
+        intent = intentFor(body);
+        editorInfo = editorFor(target.pkg, body);
+        snapshot = deliverySnapshotFor(target, body, intent, editorInfo.editor);
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+      } catch (error) {
+        return sendRouteError(response, error);
+      }
+      if (!preflight.ok) {
+        return sendJson(response, 409, {
+          error: preflight.blockers[0].message,
+          code: preflight.blockers[0].code,
+          preflight,
+        });
+      }
+
       const previous = lastRendered.get(target.pkg.id) ?? null;
       const nextTimeline = packageTimeline(target.packagePath, target.pkg);
       const fullReason = loadCompositionManifest(dirname(target.packagePath), target.pkg)
@@ -776,6 +964,8 @@ export function createRenderRoutes(options = {}) {
         previousRevision: previous?.revision ?? null,
         full,
         reason: fullReason,
+        intent,
+        deliveryFingerprint: snapshot.fingerprint,
       });
       let job;
       try {
@@ -784,9 +974,16 @@ export function createRenderRoutes(options = {}) {
           full ? render : renderScene,
           target.packagePath,
           output,
-          full
-            ? { onLog: line => events.publish({ type: 'edit.render.log', renderId, line }) }
-            : { cacheDir, force: false, onLog: line => events.publish({ type: 'edit.render.log', renderId, line }) },
+          {
+            ...(full ? {} : { cacheDir, force: false }),
+            intent,
+            deliveryFingerprint: snapshot.fingerprint,
+            ...(editorInfo.captionOverrides.length === 0 ? {} : {
+              captionOverrides: editorInfo.captionOverrides,
+              editor: editorInfo.editor,
+            }),
+            onLog: line => events.publish({ type: 'edit.render.log', renderId, line }),
+          },
         );
         let result;
         let renderedSceneIds;
@@ -817,6 +1014,8 @@ export function createRenderRoutes(options = {}) {
           timeline_sha256: timelineHash,
           rendered: renderedSceneIds,
           reused: reusedSceneIds,
+          intent,
+          deliveryFingerprint: snapshot.fingerprint,
         });
         response.writeHead(200, {
           'content-type': 'video/mp4',
@@ -832,6 +1031,9 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-reused-count': String(reusedSceneIds.length),
           'x-comfyrizz-timeline-sha256': String(timelineHash ?? ''),
           'x-comfyrizz-frames': String(result.frames),
+          'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
+          'x-comfyrizz-export-intent': intent,
+          'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
           ...productionHeaders(admission),
         });
