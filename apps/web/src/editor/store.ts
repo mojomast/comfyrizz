@@ -28,6 +28,7 @@ import {
   type ProjectDoc,
 } from './commands.ts';
 import type { AlignmentChunk } from './types.ts';
+import type { SaveState, SaveStateSource } from './save-state.ts';
 
 export type { Command, MeasuredInput, ProjectDoc, EditorSidecar };
 export type { CompiledTimeline };
@@ -76,7 +77,7 @@ export interface Result {
 
 export type SaveStatus = 'saved' | 'pending' | 'offline' | 'conflict' | 'rejected';
 
-export interface EditorStore {
+export interface EditorStore extends SaveStateSource {
   getState(): EditorSnapshot;
   subscribe(fn: () => void): () => void;
   dispatch(cmd: Command | Command[]): Result;
@@ -255,14 +256,50 @@ export function createEditorStore(options: {
   let derived: DerivedState = { timeline: null, inputHash: null, compiledSequence: null, diagnostics: [], mediaRanges: [] };
   let snapshot: EditorSnapshot = { doc: committed, derived, session };
   let acked = 0;
+  /** Server revision of the newest acknowledgement. Never part of undoable content. */
+  let acknowledgedRevision: number | null = null;
+  /** Server revision reported by the current conflict, or null. */
+  let conflictRevision: number | null = null;
   let phase: 'idle' | 'saving' | 'offline' | 'conflict' | 'rejected' = 'idle';
   let rejectionReason = '';
   const undoStack: HistoryEntry[] = [];
   const redoStack: HistoryEntry[] = [];
   const listeners = new Set<() => void>();
+  const saveStateListeners = new Set<(state: SaveState) => void>();
+  let lastSaveState: SaveState | null = null;
 
   function visible(): ProjectDoc {
     return preview?.doc ?? committed;
+  }
+
+  function withAcknowledgedRevision(pkg: EditablePackage): EditablePackage {
+    const next = structuredClone(pkg);
+    if (acknowledgedRevision !== null) next.revision = acknowledgedRevision;
+    return next;
+  }
+
+  function readSaveState(): SaveState {
+    const status = store.saveStatus();
+    return {
+      status: status === 'saved' && acknowledgedRevision === null ? 'offline' : status,
+      editSequence: committed.editSequence,
+      acknowledgedSequence: acked,
+      acknowledgedRevision,
+      currentRevision: status === 'conflict' ? conflictRevision : null,
+      error: status === 'rejected' ? rejectionReason : null,
+    };
+  }
+
+  function publishSaveState(): void {
+    const next = readSaveState();
+    if (lastSaveState && lastSaveState.status === next.status
+      && lastSaveState.editSequence === next.editSequence
+      && lastSaveState.acknowledgedSequence === next.acknowledgedSequence
+      && lastSaveState.acknowledgedRevision === next.acknowledgedRevision
+      && lastSaveState.currentRevision === next.currentRevision
+      && lastSaveState.error === next.error) return;
+    lastSaveState = next;
+    for (const listener of saveStateListeners) listener(next);
   }
 
   function recompute(): void {
@@ -293,6 +330,7 @@ export function createEditorStore(options: {
   function publish(): void {
     recompute();
     for (const listener of listeners) listener();
+    publishSaveState();
   }
 
   function compiles(doc: ProjectDoc): { ok: false; code: string; error: string } | null {
@@ -341,6 +379,11 @@ export function createEditorStore(options: {
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);
+    },
+    saveState: () => readSaveState(),
+    subscribeSaveState(listener) {
+      saveStateListeners.add(listener);
+      return () => saveStateListeners.delete(listener);
     },
     dispatch(cmd) {
       const commands = Array.isArray(cmd) ? cmd : [cmd];
@@ -401,7 +444,7 @@ export function createEditorStore(options: {
       const entry = undoStack.pop();
       if (!entry) return;
       redoStack.push(entry);
-      committed = { package: structuredClone(entry.before.package), editor: structuredClone(entry.before.editor), editSequence: committed.editSequence + 1 };
+      committed = { package: withAcknowledgedRevision(entry.before.package), editor: structuredClone(entry.before.editor), editSequence: committed.editSequence + 1 };
       session = { ...session, previewing: false, selectedSceneIds: entry.selectionBefore.slice() };
       publish();
     },
@@ -413,7 +456,7 @@ export function createEditorStore(options: {
       const entry = redoStack.pop();
       if (!entry) return;
       undoStack.push(entry);
-      committed = { package: structuredClone(entry.after.package), editor: structuredClone(entry.after.editor), editSequence: committed.editSequence + 1 };
+      committed = { package: withAcknowledgedRevision(entry.after.package), editor: structuredClone(entry.after.editor), editSequence: committed.editSequence + 1 };
       session = { ...session, previewing: false, selectedSceneIds: entry.selectionAfter.slice() };
       publish();
     },
@@ -460,6 +503,7 @@ export function createEditorStore(options: {
       }
       if (event.type === 'conflict') {
         phase = 'conflict';
+        conflictRevision = typeof event.currentRevision === 'number' ? event.currentRevision : null;
         rejectionReason = '';
         publish();
         return;
@@ -472,7 +516,9 @@ export function createEditorStore(options: {
         publish();
         return;
       }
-      if (typeof event.revision === 'number') {
+      const acknowledgement = typeof event.editSequence !== 'number' || event.editSequence >= acked;
+      if (typeof event.revision === 'number' && acknowledgement) {
+        acknowledgedRevision = event.revision;
         committed = { ...committed, package: { ...committed.package, revision: event.revision } };
         if (preview) preview = { ...preview, doc: { ...preview.doc, package: { ...preview.doc.package, revision: event.revision } } };
       }
@@ -507,6 +553,8 @@ export function createEditorStore(options: {
         editSequence: 0,
       };
       acked = 0;
+      acknowledgedRevision = null;
+      conflictRevision = null;
       phase = 'idle';
       rejectionReason = '';
       session = {

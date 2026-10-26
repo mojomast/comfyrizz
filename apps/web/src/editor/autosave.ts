@@ -88,7 +88,7 @@ export function createAutosave(store: Editor, options: {
     inFlight = true;
     const payload: SavePayload = {
       packageId: String(doc.package.id),
-      baseRevision: Number(doc.package.revision ?? 0),
+      baseRevision: store.saveState().acknowledgedRevision ?? Number(doc.package.revision ?? 0),
       package: structuredClone(doc.package),
       editor: structuredClone(doc.editor),
       editSequence: doc.editSequence,
