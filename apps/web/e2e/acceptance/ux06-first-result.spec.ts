@@ -12,7 +12,8 @@
  * stage "Waiting", no Review/Export handoff and no way out. These tests assert the
  * behavior UX06 must deliver and are marked as known defects until it lands.
  */
-import { expect, knownDefect, test, type Page } from './fixtures.ts';
+import type { Page } from '@playwright/test';
+import { expect, knownDefect, test } from './fixtures.ts';
 
 const PROMPT = 'A friendly robot who learns to bake bread';
 const SETTLE_MS = 20_000;

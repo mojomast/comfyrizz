@@ -34,7 +34,7 @@ const all: Project[] = [
 ];
 
 const wanted = (process.env.QA_BROWSERS ?? '').split(',').map(part => part.trim()).filter(Boolean);
-const projects = wanted.length ? all.filter(project => wanted.some(name => project.name.includes(name))) : all;
+const projects = wanted.length ? all.filter(project => wanted.some(name => (project.name ?? '').includes(name))) : all;
 
 export default defineConfig({
   testDir: '.',

@@ -10,6 +10,8 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "npm --prefix ../../packages/planner run build && npm --prefix ../../packages/agent run build && node --experimental-strip-types --test \"test/*.test.mjs\" \"test/editor/*.test.ts\" \"test/editing.test.ts\" \"test/*.test.ts\" \"src/**/*.test.ts\"",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "test:acceptance": "playwright test -c e2e/acceptance/playwright.config.ts",
+    "test:acceptance:browsers": "node e2e/acceptance/browser-report.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
