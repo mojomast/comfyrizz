@@ -1,0 +1,443 @@
+{
+  "contract": "UX00 entry-point matrix",
+  "base": "d427f9a (f16d188 + UX plan docs)",
+  "legend": {
+    "binding": "resolved = server resolves package->production; url = production id taken from the URL/envelope; unwired = binding code exists but app.mjs does not pass a binder; none = no binding lookup",
+    "authority": "journal = approved plan + queued action + reservation from the production journal; command = production command CAS/attribution; boolean = caller approved flag or in-memory approval set; gate = final-delivery/render gate only; none",
+    "idempotency": "action = one start per dispatched action (run-start:<planHash>:<actionId>); command = commandId/idempotencyKey + expected revision; revision = package baseRevision only; none"
+  },
+  "entries": [
+    {
+      "id": "start.run.bound",
+      "verb": "start",
+      "route": "POST /api/run",
+      "handler": { "file": "apps/server/src/run.mjs", "symbol": "function verifyBoundAuthority" },
+      "callers": [
+        { "file": "apps/web/src/easy/approve-generate.ts", "symbol": "deps.api.startRun" },
+        { "file": "apps/web/src/easy/api.ts", "symbol": "startRun(body: any)" }
+      ],
+      "admissionEntryPoint": "run.start",
+      "legacy": false,
+      "binding": "resolved",
+      "authority": "journal",
+      "idempotency": "action",
+      "owner": "UX01",
+      "gap": "verifyBoundAuthority never reads production intent: a paused or cancel_requested production with a queued action still starts."
+    },
+    {
+      "id": "start.run.unbound",
+      "verb": "start",
+      "route": "POST /api/run",
+      "handler": { "file": "apps/server/src/run.mjs", "symbol": "async function start(" },
+      "callers": [
+        { "file": "apps/web/src/easy/api.ts", "symbol": "'/api/run'" }
+      ],
+      "admissionEntryPoint": "run.start",
+      "legacy": true,
+      "binding": "resolved",
+      "authority": "boolean",
+      "idempotency": "none",
+      "owner": "UX01",
+      "gap": "Preserve: an unbound package keeps the approved flag, in-memory approvals and budgetUnits behaviour."
+    },
+    {
+      "id": "start.run.approve",
+      "verb": "start",
+      "route": "POST /api/run/approve",
+      "handler": { "file": "apps/server/src/app.mjs", "symbol": "PLAN_BOUND_TO_PRODUCTION" },
+      "callers": [
+        { "file": "apps/web/src/takes/api.ts", "symbol": "/api/run/approve" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": true,
+      "binding": "none",
+      "authority": "boolean",
+      "idempotency": "none",
+      "owner": "UX01",
+      "gap": "Approves an in-memory plan hash; already refuses journaled hashes. Does not start work itself."
+    },
+    {
+      "id": "start.pipeline",
+      "verb": "start",
+      "route": "POST /api/pipeline",
+      "handler": { "file": "apps/server/src/pipeline.mjs", "symbol": "async function start(pkg, input, sourceDir" },
+      "callers": [
+        { "file": "apps/web/src/voice-settings.ts", "symbol": "request('/api/pipeline', {" }
+      ],
+      "admissionEntryPoint": "pipeline.start",
+      "legacy": true,
+      "binding": "none",
+      "authority": "gate",
+      "idempotency": "revision",
+      "owner": "UX01",
+      "gap": "P0: a production-bound package starts the full pipeline with only the final-delivery gate and approvedPlanHash; no intent, approved action or reservation."
+    },
+    {
+      "id": "start.take.regenerate",
+      "verb": "start",
+      "route": "POST /api/package/:id/clips/:clipId/regenerate",
+      "handler": { "file": "apps/server/src/takes/routes.mjs", "symbol": "async function handleRegenerate(" },
+      "callers": [
+        { "file": "apps/web/src/takes/api.ts", "symbol": "'/regenerate'" }
+      ],
+      "admissionEntryPoint": "take.regenerate",
+      "legacy": true,
+      "binding": "unwired",
+      "authority": "boolean",
+      "idempotency": "none",
+      "owner": "UX01",
+      "gap": "createTakeRoutes is built without a production binder, so a bound package regenerates through the legacy run path. Error classification as queued/started stays with UX10."
+    },
+    {
+      "id": "start.take.regenerate_batch",
+      "verb": "start",
+      "route": "POST /api/package/:id/clips/regenerate-batch",
+      "handler": { "file": "apps/server/src/takes/routes.mjs", "symbol": "async function handleRegenerateBatch(" },
+      "callers": [],
+      "admissionEntryPoint": "take.regenerate_batch",
+      "legacy": true,
+      "binding": "unwired",
+      "authority": "boolean",
+      "idempotency": "none",
+      "owner": "UX01",
+      "gap": "No browser caller; mounted and reachable over HTTP with the same unwired binding."
+    },
+    {
+      "id": "start.take.queue_drain",
+      "verb": "start",
+      "route": "internal (after a run completes)",
+      "handler": { "file": "apps/server/src/app.mjs", "symbol": "async function drainOneQueued(" },
+      "callers": [
+        { "file": "apps/server/src/app.mjs", "symbol": "function scheduleQueuedDrain(" }
+      ],
+      "admissionEntryPoint": "take.queue_drain",
+      "legacy": true,
+      "binding": "none",
+      "authority": "boolean",
+      "idempotency": "none",
+      "owner": "UX01",
+      "gap": "Starts queued regenerations with only an in-memory plan-hash approval; must refuse bound packages with BOUND_ENTRY_UNSUPPORTED until UX03 provides journal authority. Wiring is coordinator-owned (app.mjs)."
+    },
+    {
+      "id": "start.chat.correction",
+      "verb": "start",
+      "route": "internal (confirmed chat correction)",
+      "handler": { "file": "apps/server/src/app.mjs", "symbol": "const chatRuns = {" },
+      "callers": [
+        { "file": "apps/server/src/agent-chat.mjs", "symbol": "result = await runs.start({" }
+      ],
+      "admissionEntryPoint": "chat.correction",
+      "legacy": false,
+      "binding": "resolved",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX01",
+      "gap": "Bound packages already return approvalRequired instead of starting; the lookup ignores pkg.productionId and should use resolveProductionBinding."
+    },
+    {
+      "id": "start.audition",
+      "verb": "start",
+      "route": "POST /api/characters/:id/audition",
+      "handler": { "file": "apps/server/src/characters/routes.mjs", "symbol": "async function handleAudition(" },
+      "callers": [
+        { "file": "apps/web/src/characters/api.ts", "symbol": "'/audition'" }
+      ],
+      "admissionEntryPoint": "audition.synthesize",
+      "legacy": false,
+      "binding": "url",
+      "authority": "journal",
+      "idempotency": "action",
+      "owner": "UX13",
+      "gap": "Paid modes require productionId+actionId; the browser never sends them, so only the free path is reachable. No paid path is enabled before M2."
+    },
+    {
+      "id": "start.production.dispatch",
+      "verb": "start",
+      "route": "POST /api/productions/:id/actions",
+      "handler": { "file": "apps/server/src/routes/productions.mjs", "symbol": "actions.dispatch({ productionId: id, body, context })" },
+      "callers": [
+        { "file": "apps/web/src/easy/approve-generate.ts", "symbol": "deps.api.dispatchAction" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "url",
+      "authority": "command",
+      "idempotency": "command",
+      "owner": "UX03",
+      "gap": "Reserves and journals an outbox effect but nothing drains it; the browser must call /api/run afterwards."
+    },
+    {
+      "id": "start.production.outbox",
+      "verb": "start",
+      "route": "internal (outbox drain -> pipeline adapter)",
+      "handler": { "file": "apps/server/src/productions/pipeline-adapter.mjs", "symbol": "export function createPipelineAdapter" },
+      "callers": [],
+      "admissionEntryPoint": "action.outbox",
+      "legacy": false,
+      "binding": "url",
+      "authority": "journal",
+      "idempotency": "action",
+      "owner": "UX03",
+      "gap": "Not mounted: app.mjs never calls drainOutbox or createPipelineAdapter."
+    },
+    {
+      "id": "start.production.take_request",
+      "verb": "start",
+      "route": "POST /api/productions/:id/commands (take.request, render.request)",
+      "handler": { "file": "apps/server/src/productions/commands.mjs", "symbol": "'take.request': 'take.requested'" },
+      "callers": [
+        { "file": "packages/agent/src/production-tools.ts", "symbol": "production_command" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "url",
+      "authority": "command",
+      "idempotency": "command",
+      "owner": "UX03",
+      "gap": "Journals the request only; it never reaches a backend. Must not be presented as started."
+    },
+    {
+      "id": "cancel.production",
+      "verb": "cancel",
+      "route": "POST /api/productions/:id/commands (production.cancel)",
+      "handler": { "file": "apps/server/src/productions/commands.mjs", "symbol": "case 'production.cancel':" },
+      "callers": [
+        { "file": "apps/web/src/productions/cards/progress.ts", "symbol": "export async function sendProgressControl(" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "url",
+      "authority": "command",
+      "idempotency": "command",
+      "owner": "UX03",
+      "gap": "Sets intent to cancel_requested only; running /api/run work is not aborted. Until UX03, UX01 makes the intent block new admissions."
+    },
+    {
+      "id": "cancel.action",
+      "verb": "cancel",
+      "route": "POST /api/productions/:id/commands (action.cancel)",
+      "handler": { "file": "apps/server/src/productions/commands.mjs", "symbol": "'action.cancel'" },
+      "callers": [],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "url",
+      "authority": "command",
+      "idempotency": "command",
+      "owner": "UX03",
+      "gap": "Journal-only: no state transition or abort is applied."
+    },
+    {
+      "id": "cancel.pipeline",
+      "verb": "cancel",
+      "route": "POST /api/pipeline/:runId/cancel",
+      "handler": { "file": "apps/server/src/pipeline.mjs", "symbol": "function cancel(runId)" },
+      "callers": [
+        { "file": "apps/web/src/voice-settings.ts", "symbol": "/cancel`" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": true,
+      "binding": "none",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX03",
+      "gap": "Independent of production intent; terminal runs return idempotently."
+    },
+    {
+      "id": "cancel.run",
+      "verb": "cancel",
+      "route": "none (no HTTP cancel for /api/run)",
+      "handler": { "file": "apps/server/src/run.mjs", "symbol": "signal: new AbortController().signal" },
+      "callers": [],
+      "admissionEntryPoint": null,
+      "legacy": true,
+      "binding": "none",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX03",
+      "gap": "Bound and unbound run records hold a fresh AbortController signal whose controller is not retained, so nothing can abort a running /api/run."
+    },
+    {
+      "id": "cancel.render",
+      "verb": "cancel",
+      "route": "client disconnect during /api/export or /api/render*",
+      "handler": { "file": "apps/server/src/routes/render.mjs", "symbol": "async function handleRender(" },
+      "callers": [],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "none",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX15",
+      "gap": "Aborts the local render child only; not a generation cancel."
+    },
+    {
+      "id": "select.clip",
+      "verb": "select",
+      "route": "POST /api/package/:id/clips/:clipId/select",
+      "handler": { "file": "apps/server/src/takes/routes.mjs", "symbol": "async function handleSelect(" },
+      "callers": [
+        { "file": "apps/web/src/takes/api.ts", "symbol": "'/select'" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": true,
+      "binding": "unwired",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX10",
+      "gap": "No caller revision/expected selection or command id; package and take sidecar written separately."
+    },
+    {
+      "id": "select.production",
+      "verb": "select",
+      "route": "POST /api/productions/:id/commands (take.select)",
+      "handler": { "file": "apps/server/src/productions/commands.mjs", "symbol": "'take.select'" },
+      "callers": [
+        { "file": "apps/web/src/takes/api.ts", "symbol": "createProductionReviewApi" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "url",
+      "authority": "command",
+      "idempotency": "command",
+      "owner": "UX10",
+      "gap": "Journals the selection but never changes the package's selected take."
+    },
+    {
+      "id": "select.auto_ingest",
+      "verb": "select",
+      "route": "internal (take-mode run completion)",
+      "handler": { "file": "apps/server/src/app.mjs", "symbol": "async function completeRun(" },
+      "callers": [],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "none",
+      "authority": "none",
+      "idempotency": "revision",
+      "owner": "UX10",
+      "gap": "System auto-selection; must never be recorded or displayed as human review."
+    },
+    {
+      "id": "select.chat",
+      "verb": "select",
+      "route": "internal (confirmed chat select proposal)",
+      "handler": { "file": "apps/server/src/agent-chat.mjs", "symbol": "selectTake(simCurrent, simDoc" },
+      "callers": [],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "none",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX10",
+      "gap": "Second selection writer outside the clip route; must share UX10 transaction semantics."
+    },
+    {
+      "id": "revert.clip",
+      "verb": "revert",
+      "route": "POST /api/package/:id/clips/:clipId/revert",
+      "handler": { "file": "apps/server/src/takes/routes.mjs", "symbol": "async function handleRevert(" },
+      "callers": [
+        { "file": "apps/web/src/takes/api.ts", "symbol": "'/revert'" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": true,
+      "binding": "none",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX10",
+      "gap": "No CAS, command id or production journal; a duplicate Revert reverts twice."
+    },
+    {
+      "id": "export.bundle",
+      "verb": "export",
+      "route": "POST /api/export",
+      "handler": { "file": "apps/server/src/routes/render.mjs", "symbol": "async function handleExport(" },
+      "callers": [
+        { "file": "apps/web/src/main.ts", "symbol": "async function exportBundle(" },
+        { "file": "apps/web/src/easy/api.ts", "symbol": "'/api/export'" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "unwired",
+      "authority": "gate",
+      "idempotency": "revision",
+      "owner": "UX15",
+      "gap": "Final 1920x1080 render ignores package aspect; reads live media; binding unwired so gate overrides are not journaled."
+    },
+    {
+      "id": "export.render",
+      "verb": "export",
+      "route": "POST /api/render",
+      "handler": { "file": "apps/server/src/routes/render.mjs", "symbol": "async function handleRender(" },
+      "callers": [
+        { "file": "apps/web/src/main.ts", "symbol": "async function renderExportBlob(" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "unwired",
+      "authority": "gate",
+      "idempotency": "revision",
+      "owner": "UX15",
+      "gap": "Working-resolution MP4 used by Easy export; caption overrides and aspect differ from /api/export."
+    },
+    {
+      "id": "export.scene_render",
+      "verb": "export",
+      "route": "POST /api/scene/render",
+      "handler": { "file": "apps/server/src/routes/render.mjs", "symbol": "async function handleSceneRender(" },
+      "callers": [
+        { "file": "apps/web/src/main.ts", "symbol": "'/api/scene/render'" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "unwired",
+      "authority": "gate",
+      "idempotency": "revision",
+      "owner": "UX15",
+      "gap": "Incremental render path shares the gate but not a delivery snapshot."
+    },
+    {
+      "id": "export.edited_render",
+      "verb": "export",
+      "route": "POST /api/render/edited",
+      "handler": { "file": "apps/server/src/routes/render.mjs", "symbol": "async function handleEditedRender(" },
+      "callers": [
+        { "file": "apps/web/src/main.ts", "symbol": "'/api/render/edited'" }
+      ],
+      "admissionEntryPoint": null,
+      "legacy": false,
+      "binding": "unwired",
+      "authority": "gate",
+      "idempotency": "revision",
+      "owner": "UX15",
+      "gap": "Same as scene render."
+    },
+    {
+      "id": "export.pipeline_files",
+      "verb": "export",
+      "route": "GET /api/pipeline/:runId/files/:name",
+      "handler": { "file": "apps/server/src/app.mjs", "symbol": "files\\/[^/]+" },
+      "callers": [],
+      "admissionEntryPoint": null,
+      "legacy": true,
+      "binding": "none",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX15",
+      "gap": "Pipeline-produced deliverables are served outside the /api/export snapshot and preflight."
+    },
+    {
+      "id": "export.run_video",
+      "verb": "export",
+      "route": "GET /api/run/:id/video",
+      "handler": { "file": "apps/server/src/app.mjs", "symbol": "runVideoMatch" },
+      "callers": [],
+      "admissionEntryPoint": null,
+      "legacy": true,
+      "binding": "none",
+      "authority": "none",
+      "idempotency": "none",
+      "owner": "UX15",
+      "gap": "Serves a completed run's MP4; not a delivery artifact identity."
+    }
+  ]
+}

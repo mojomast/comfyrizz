@@ -1,0 +1,59 @@
+{
+  "contract": "comfyrizz.media-ticket/v1",
+  "sources": {
+    "valid": [
+      { "name": "selected take", "value": { "kind": "take", "packageId": "pkg_ux00_demo", "clipId": "s_intro:a_host", "takeId": "tk_0123456789ab" } },
+      { "name": "artifact by id", "value": { "kind": "artifact", "artifactId": "art_delivery_v3" } },
+      { "name": "artifact by media id after restart", "value": { "kind": "artifact", "mediaId": "med_0123456789abcdef0123456789abcdef" } },
+      { "name": "legacy /api/media-ticket relative path", "value": { "kind": "package_media", "packageId": "pkg_ux00_demo", "path": "assets/a_host.mp4" } },
+      { "name": "thumbnail cache key", "value": { "kind": "thumb", "key": "filmstrip:pkg_ux00_demo:a_host:9f2c" } }
+    ],
+    "invalid": [
+      { "name": "expiring url used as identity", "value": { "kind": "take", "packageId": "pkg_ux00_demo", "clipId": "s_intro:a_host", "takeId": "tk_0123456789ab", "url": "/api/media/0123456789abcdef0123456789abcdef" }, "codes": ["EXPIRING_URL_AS_IDENTITY"] },
+      { "name": "thumb ticketUrl as identity", "value": { "kind": "thumb", "key": "k", "ticketUrl": "/api/media/0123456789abcdef0123456789abcdef" }, "codes": ["EXPIRING_URL_AS_IDENTITY"] },
+      { "name": "take without take id", "value": { "kind": "take", "packageId": "pkg_ux00_demo", "clipId": "s_intro:a_host" }, "codes": ["MISSING_ID"] },
+      { "name": "artifact with neither id", "value": { "kind": "artifact" }, "codes": ["MISSING_ID"] },
+      { "name": "malformed media id", "value": { "kind": "artifact", "mediaId": "med_xyz" }, "codes": ["INVALID_MEDIA_ID"] },
+      { "name": "absolute path", "value": { "kind": "package_media", "packageId": "pkg_ux00_demo", "path": "/srv/runtime/a.mp4" }, "codes": ["ABSOLUTE_PATH"] },
+      { "name": "traversal path", "value": { "kind": "package_media", "packageId": "pkg_ux00_demo", "path": "../other/a.mp4" }, "codes": ["LOCAL_PATH"] },
+      { "name": "unknown kind", "value": { "kind": "blob" }, "codes": ["UNKNOWN_MEDIA_SOURCE"] }
+    ]
+  },
+  "tickets": {
+    "valid": [
+      { "name": "POST /api/media-ticket body", "value": { "ticket": "0123456789abcdef0123456789abcdef", "expiresAt": "2026-10-26T12:10:00.000Z", "url": "/api/media/0123456789abcdef0123456789abcdef" } },
+      { "name": "take ticket route body", "value": { "kind": "ticket", "takeId": "tk_0123456789ab", "ticket": "0123456789abcdef0123456789abcdef", "expiresAt": "2026-10-26T12:10:00.000Z", "url": "/api/media/0123456789abcdef0123456789abcdef" } },
+      { "name": "createMediaTickets().mint result", "value": { "ticket": "0123456789abcdef0123456789abcdef", "expiresAt": "2026-10-26T12:10:00.000Z", "url": "/api/media/0123456789abcdef0123456789abcdef", "mediaId": "med_0123456789abcdef0123456789abcdef", "artifactId": null } }
+    ],
+    "invalid": [
+      { "name": "missing expiry", "value": { "ticket": "0123456789abcdef0123456789abcdef", "url": "/api/media/0123456789abcdef0123456789abcdef" }, "codes": ["INVALID_TIMESTAMP"] },
+      { "name": "url for a different ticket", "value": { "ticket": "0123456789abcdef0123456789abcdef", "expiresAt": "2026-10-26T12:10:00.000Z", "url": "/api/media/ffffffffffffffffffffffffffffffff" }, "codes": ["INVALID_TICKET_URL"] },
+      { "name": "uppercase ticket", "value": { "ticket": "0123456789ABCDEF0123456789ABCDEF", "expiresAt": "2026-10-26T12:10:00.000Z", "url": "/api/media/0123456789ABCDEF0123456789ABCDEF" }, "codes": ["INVALID_TICKET"] },
+      { "name": "thumb ready body is not a ticket", "value": { "status": "ready", "key": "k", "ticketUrl": "/api/media/0123456789abcdef0123456789abcdef", "width": 160, "height": 90 }, "codes": ["UNKNOWN_FIELD", "INVALID_TICKET"] }
+    ]
+  },
+  "expiry": [
+    { "name": "well before expiry", "ticket": { "expiresAt": "2026-10-26T12:10:00.000Z" }, "now": "2026-10-26T12:00:00.000Z", "state": "fresh" },
+    { "name": "inside the renewal window", "ticket": { "expiresAt": "2026-10-26T12:10:00.000Z" }, "now": "2026-10-26T12:09:45.000Z", "state": "renew" },
+    { "name": "exactly at expiry", "ticket": { "expiresAt": "2026-10-26T12:10:00.000Z" }, "now": "2026-10-26T12:10:00.000Z", "state": "expired" },
+    { "name": "idle tab long after expiry", "ticket": { "expiresAt": "2026-10-26T12:10:00.000Z" }, "now": "2026-10-26T14:00:00.000Z", "state": "expired" },
+    { "name": "legacy thumbs ticketUrl has no expiry", "ticket": { "expiresAt": null }, "now": "2026-10-26T12:00:00.000Z", "state": "unknown" },
+    { "name": "no ticket", "ticket": null, "now": "2026-10-26T12:00:00.000Z", "state": "unknown" }
+  ],
+  "sameKey": [
+    [
+      { "kind": "take", "packageId": "pkg_ux00_demo", "clipId": "s_intro:a_host", "takeId": "tk_0123456789ab" },
+      { "takeId": "tk_0123456789ab", "clipId": "s_intro:a_host", "kind": "take", "packageId": "pkg_ux00_demo" }
+    ]
+  ],
+  "differentKey": [
+    [
+      { "kind": "take", "packageId": "pkg_ux00_demo", "clipId": "s_intro:a_host", "takeId": "tk_0123456789ab" },
+      { "kind": "take", "packageId": "pkg_ux00_demo", "clipId": "s_outro:a_host", "takeId": "tk_0123456789ab" }
+    ],
+    [
+      { "kind": "artifact", "artifactId": "art_1" },
+      { "kind": "artifact", "mediaId": "med_0123456789abcdef0123456789abcdef" }
+    ]
+  ]
+}
