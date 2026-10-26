@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 9955e1847b7b9bc9d0a9cfaea77fb753bab1016a1e0b4aa8e077598a3a9094a1
+// Schema sha256: 111f9c46604e3a2f40d907112bf09f2275e2c5b45b6caf43efb0c0d8d11d82bc
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -258,6 +258,11 @@ export interface PackageMotion {
   }
 
 export interface PackageCaptions {
+  /**
+   * Split aligned captions into readable sentence phrases without changing speech or word timing.
+   * Existing cue overrides apply before splitting.
+   */
+  presentation?: "phrases";
   /**
    * K1: caption presentation. sentence is the default; when style is absent a 9:16 video defaults to
    * big-word and everything else to sentence.

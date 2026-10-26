@@ -135,11 +135,14 @@ test('POST /api/export requires the token', async () => {
   assert.equal(response.status, 401);
 });
 
-test('export renders launch-demo into all five bundle files', { timeout: 900_000 }, async () => {
+test('export renders launch-demo into the complete bundle including quality evidence', { timeout: 900_000 }, async () => {
   const response = await request({ method: 'POST', path: '/api/export', body: { packageId: 'pkg_launchdemo0001', force: true } });
   assert.equal(response.status, 200, response.text.slice(0, 500));
   const body = response.json;
   assert.deepEqual(body.files.map(file => file.name), EXPORT_FILE_NAMES);
+  assert.equal(body.quality.schema, 'comfyrizz.export-quality/v1');
+  assert.equal(body.quality.reviewBinding, 'not_reviewed');
+  assert.equal(body.quality.receipt.states.listeningReview, 'not_reviewed');
   assert.equal(body.reused, false);
   for (const file of body.files) {
     assert.ok(existsSync(file.path), `${file.name} should exist at ${file.path}`);

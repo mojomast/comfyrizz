@@ -189,7 +189,7 @@ export interface ComfyrizzPackage {
   datasets?: Record<string, unknown>;
   presenter?: Presenter;
   /** K1: caption presentation (sentence default; 9:16 defaults to big-word when absent). */
-  captions?: { style?: 'sentence' | 'karaoke' | 'word-pop' | 'big-word' };
+  captions?: { style?: 'sentence' | 'karaoke' | 'word-pop' | 'big-word'; presentation?: 'phrases' };
   [key: string]: unknown;
 }
 
@@ -228,6 +228,8 @@ export interface CaptionOverride {
 }
 
 export interface CompileOptions {
+  /** Opt-in measured phrase presentation; existing cue-index overrides apply before splitting. */
+  captionPresentation?: 'phrases';
   /** Measured Kokoro chunks per scene id. Absent while narration is provisional. */
   narration?: Record<string, NarrationChunk[]>;
   /** Fixed silence between narration chunks, in seconds. Default 0.15. */

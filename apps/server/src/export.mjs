@@ -14,8 +14,9 @@ import { buildSocialPack, SOCIAL_PIXEL_FILES } from './social.mjs';
 import { collectCapturedWorkflows } from './workflow.mjs';
 import { collectCompositionExtras, loadCompositionManifest, validateCompositionManifest, compileComposition } from '../../../packages/compositions/src/index.mjs';
 import { collectCompositionCacheExtras, materializeCompositions } from '../../renderer/scripts/composition-worker.mjs';
+import { exportQuality } from './export-quality.mjs';
 
-export const EXPORT_FILE_NAMES = ['video.mp4', 'captions.srt', 'captions.vtt', 'CREDITS.md', 'package.zip'];
+export const EXPORT_FILE_NAMES = ['video.mp4', 'captions.srt', 'captions.vtt', 'quality.json', 'CREDITS.md', 'package.zip'];
 
 async function hashFile(file) {
   const digest = createHash('sha256');
@@ -310,9 +311,20 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
     if (wordsVttText !== null) writeFileSync(wordsVttPath, wordsVttText);
 
     const generatedAt = new Date().toISOString();
+    let review;
+    const reviewFile = inputName(realpathSync(packageDir), 'quality-review.json');
+    if (await hashOptionalInput(realpathSync(packageDir), 'quality-review.json')) {
+      if (statSync(reviewFile).size > 1024 * 1024) throw new Error('Quality review exceeds 1 MiB');
+      try { review = JSON.parse(readFileSync(reviewFile, 'utf8')); }
+      catch { review = { invalid: true }; }
+    }
+    const quality = exportQuality({ fingerprint, timeline, pkg, review });
+    const qualityPath = join(dir, 'quality.json');
+    writeFileSync(qualityPath, JSON.stringify(quality, null, 2));
     const social = buildSocialPack({ mp4: videoPath, timeline, pkg, outDir: dir, onLog });
     const blocked = blockedSceneAsset(pkg);
     const extras = [...(narration === undefined ? collectNarrationExtras(pkg, packageDir) : []), ...compositionExtras, ...await collectCompositionCacheExtras(pkg, packageDir)];
+    extras.push({ path: 'quality.json', data: readFileSync(qualityPath) });
     const extraExcluded = [];
     for (const file of social) {
       const pixels = SOCIAL_PIXEL_FILES.includes(file.name);
@@ -352,6 +364,7 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
       { name: 'video.mp4', bytes: statSync(videoPath).size, path: videoPath },
       { name: 'captions.srt', bytes: statSync(srtPath).size, path: srtPath },
       { name: 'captions.vtt', bytes: statSync(vttPath).size, path: vttPath },
+      { name: 'quality.json', bytes: statSync(qualityPath).size, path: qualityPath },
       ...(hasWords ? [{ name: 'captions.words.vtt', bytes: statSync(wordsVttPath).size, path: wordsVttPath }] : []),
       { name: 'CREDITS.md', bytes: statSync(creditsPath).size, path: creditsPath },
       { name: 'package.zip', bytes: statSync(zipPath).size, path: zipPath },
@@ -367,6 +380,7 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
       reused,
       timelineHash: timeline.hash,
       captions: cues.length,
+      quality,
       social: social
         .filter(file => !extraExcluded.some(item => item.assetId === file.name))
         .map(file => ({ name: file.name, bytes: file.bytes, path: file.path })),
