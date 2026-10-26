@@ -2,6 +2,8 @@
 
 **Status:** production delivered and technically verified, October 26, 2026;
 engineering prevention proposals remain open.
+For the subsequent film-level analysis, see
+[end-product quality review and pipeline improvements](IMPOSSIBLE_BRIEF_END_PRODUCT_QUALITY_REVIEW_20261026.md).
 Evidence root: retained private Impossible Brief production workspace (2026-10-26).
 User requested documenting encountered pitfalls and proposing recurrence prevention.
 This report distinguishes observed failures, local mitigations and unimplemented
