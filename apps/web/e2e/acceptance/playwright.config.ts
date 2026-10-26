@@ -16,7 +16,8 @@
  * `node e2e/acceptance/browser-report.mjs` prints which engines launch on this host.
  */
 import { defineConfig, devices, type Project } from '@playwright/test';
-import { dirname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -38,14 +39,15 @@ const projects = wanted.length ? all.filter(project => wanted.some(name => proje
 export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.ts',
-  outputDir: '../.output/acceptance-results',
+  // Outside the Vite root: trace HTML written under it makes the dev server reload the page under test.
+  outputDir: join(tmpdir(), 'comfyrizz-acceptance-results'),
   fullyParallel: false,
   workers: 1,
   retries: 0,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   forbidOnly: Boolean(process.env.CI),
-  reporter: [['list'], ['json', { outputFile: '../.output/acceptance-report.json' }], ['html', { open: 'never', outputFolder: '../.output/acceptance-html' }]],
+  reporter: [['list'], ['json', { outputFile: '../.output/acceptance-report.json' }], ['html', { open: 'never', outputFolder: join(tmpdir(), 'comfyrizz-acceptance-html') }]],
   use: {
     baseURL: `http://127.0.0.1:${webPort}`,
     headless: true,

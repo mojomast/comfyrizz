@@ -88,3 +88,15 @@ export async function openEditor(page: import('@playwright/test').Page, env: Acc
   await expect(page.locator('#save-status')).toHaveText('Saved');
   await expect(page).not.toHaveURL(/token=/);
 }
+
+/**
+ * Mark the running test as a reproduction of an audited defect. It is expected
+ * to fail; Playwright then reports an unexpected pass once the fix lands, and
+ * the owning packet deletes this call. `QA_EXPECT_FIXED=UX05` (or `all`) runs
+ * the assertions unwrapped, so the failure message is visible.
+ */
+export function knownDefect(packet: string, reason: string): void {
+  const fixed = (process.env.QA_EXPECT_FIXED ?? '').split(',').map(item => item.trim());
+  const unwrapped = fixed.includes('all') || fixed.includes(packet);
+  test.fail(!unwrapped, `${packet}: ${reason}`);
+}

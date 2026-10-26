@@ -163,7 +163,7 @@ const server = spawn(process.execPath, ['apps/server/src/index.mjs'], { cwd: rep
 relay(server, 'qa-server');
 await waitFor(`http://127.0.0.1:${apiPort}/api/package/${PACKAGE_ID}`, { 'x-comfyrizz-token': token, origin: `http://127.0.0.1:${apiPort}` }, response => response.ok);
 
-const vite = spawn(process.execPath, [join(webRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'], {
+const vite = spawn(process.execPath, [join(webRoot, 'node_modules/vite/bin/vite.js'), '--config', join(here, 'vite.acceptance.config.ts'), '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'], {
   cwd: webRoot,
   env: { ...clean.env, NODE_OPTIONS: '', COMFYRIZZ_API: `http://127.0.0.1:${apiPort}` },
   stdio: ['ignore', 'pipe', 'pipe'],
