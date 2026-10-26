@@ -15,6 +15,7 @@ import {
 } from '../../../../packages/backends/src/colab-backend.mjs';
 import { nextJobUpperEstimate, rateForGpu } from '../../../../packages/backends/src/budget.mjs';
 import { canonicalJson } from './commands.mjs';
+import { sceneAssetIds } from '../../../../packages/agent/dist/src/scene-build.js';
 import { ITERATION_PRESETS, effectivePolicyForShot } from './iteration.mjs';
 
 // Generators that run without a GPU. The agent search `generator: '` finds
@@ -39,23 +40,10 @@ function normalizeNumber(value) {
   return Number.isInteger(value) ? value : Number(value.toPrecision(12));
 }
 
-function referencedAssetIds(scene) {
-  const ids = [];
-  if (typeof scene?.background?.asset === 'string') ids.push(scene.background.asset);
-  if (Array.isArray(scene?.foreground)) {
-    for (const item of scene.foreground) {
-      if (typeof item?.asset === 'string') ids.push(item.asset);
-    }
-  }
-  if (typeof scene?.narration_asset === 'string') ids.push(scene.narration_asset);
-  if (typeof scene?.presenter_asset === 'string') ids.push(scene.presenter_asset);
-  return ids;
-}
-
 function gpuAssetsForScene(pkg, scene) {
   const assets = isPlainObject(pkg?.assets) ? pkg.assets : {};
   const found = [];
-  for (const assetId of referencedAssetIds(scene)) {
+  for (const assetId of sceneAssetIds(scene)) {
     const asset = assets[assetId];
     const generator = asset?.gen?.generator;
     if (typeof generator !== 'string' || generator === '' || CPU_GENERATORS.has(generator)) continue;

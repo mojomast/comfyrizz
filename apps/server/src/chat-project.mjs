@@ -9,10 +9,14 @@ import { compilePackage } from './compile-package.mjs';
 import { toPackageInputs, validateAssignment } from './references/assign.mjs';
 import { applyCast } from './characters/build.mjs';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
+import { sceneAssetIds, visualForegroundItem } from '../../../packages/agent/dist/src/scene-build.js';
+import { durationConstraint, timingReportFor } from '../../../packages/agent/dist/src/timing-coverage.js';
 
 export function chatProjectResponse(pkg, runtimeDir) {
+  const timeline = compilePackage(pkg, join(runtimeDir, 'packages'));
   return {
-    package: pkg, revision: pkg.revision, timeline: compilePackage(pkg, join(runtimeDir, 'packages')),
+    package: pkg, revision: pkg.revision, timeline,
+    timing: timingReportFor(pkg, timeline),
     generatedAssets: inlineGeneratedAssets(pkg, join(runtimeDir, 'packages')),
     svgAssets: Object.entries(pkg.assets ?? {}).filter(([, asset]) => ['svg', 'vector-anim'].includes(asset.kind)).map(([id]) => id),
     pendingGpu: Object.entries(pkg.assets ?? {}).filter(([, asset]) => asset.status === 'pending' && ['flux3-klein', 'ltx25'].includes(asset.gen?.generator))
@@ -163,18 +167,6 @@ function referenceState(references) {
     refs: asList(refs).filter(ref => ref && typeof ref === 'object'),
     assignments: asList(assignments).filter(assignment => assignment && typeof assignment === 'object'),
   };
-}
-
-function sceneAssetIds(scene) {
-  const ids = [];
-  if (typeof scene?.background?.asset === 'string') ids.push(scene.background.asset);
-  for (const item of Array.isArray(scene?.foreground) ? scene.foreground : []) {
-    if (typeof item?.asset === 'string') ids.push(item.asset);
-  }
-  for (const plate of Array.isArray(scene?.media) ? scene.media : []) {
-    if (typeof plate?.asset === 'string') ids.push(plate.asset);
-  }
-  return [...new Set(ids)];
 }
 
 function generatedAssetsFor(assets, scene, slot) {
@@ -514,7 +506,7 @@ const ASPECTS = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080
 const DEFAULT_TRANSITION = { type: 'fade', frames: 12 };
 
 /** Compile model-authored content, merging revisions into the current project. */
-export async function buildChatProject({ plan: rawPlan, previous, previousPlan, brand, runtimeDir, signal, references, characters, cast, placements, characterFiles }) {
+export async function buildChatProject({ plan: rawPlan, previous, previousPlan, brand, runtimeDir, signal, references, characters, cast, placements, characterFiles, requestedDuration }) {
   signal?.throwIfAborted();
   const plan = conversationPlanSchema.parse(rawPlan);
   if (previous && !previousPlan) throw conflict('the last built plan is missing');
@@ -743,7 +735,13 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   // Use the natural timeline (including overlap and layout limits), so target
   // fitting cannot stretch manual timings or count deleted scenes.
   const naturalTimeline = compilePackage({ ...pkg, duration: { mode: 'flexible' } }, join(runtimeDir, 'packages'));
-  pkg.duration = { mode: 'target', targetFrames: naturalTimeline.durationInFrames };
+  const requested = requestedDuration ?? (previous ? null : { seconds: plan.scenes.reduce((total, scene) => total + scene.seconds, 0) });
+  if (requested) {
+    const constraint = durationConstraint(requested, fps);
+    pkg.duration = { mode: constraint.mode, targetFrames: constraint.requestedFrames, minFrames: constraint.minFrames, maxFrames: constraint.maxFrames };
+  } else {
+    pkg.duration = { mode: 'target', targetFrames: naturalTimeline.durationInFrames };
+  }
 
   signal?.throwIfAborted();
   const assetsDir = join(runtimeDir, 'packages', 'assets');
@@ -796,11 +794,11 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
       activeSvg = scene.svg;
       const result = await tools['assets.generate_svg'].run({ scene_id: scene.id, kind: 'diagram', intent: scene.visual });
       signal?.throwIfAborted();
-      generatedVisuals.set(scene.id, { foreground: [{ asset: result.asset.id, x: scene.layout === 'hero' ? 0.76 : 0.5, y: scene.layout === 'hero' ? 0.52 : 0.8, w: scene.layout === 'hero' ? 0.35 : 0.12, anim: 'fade-in' }] });
+      generatedVisuals.set(scene.id, { foreground: [visualForegroundItem(scene, result.asset.id)] });
     } else if (scene.mediaType === 'image') {
       const result = await tools['assets.generate_image'].run({ scene_id: scene.id, intent: scene.visual, kind: 'illustration', style: plan.stylePreset });
       signal?.throwIfAborted();
-      generatedVisuals.set(scene.id, { foreground: [{ asset: result.asset.id, x: 0.76, y: 0.5, w: 0.4, anim: 'fade-in' }] });
+      generatedVisuals.set(scene.id, { foreground: [visualForegroundItem(scene, result.asset.id)] });
     }
   }
   if (generatedVisuals.size) {
