@@ -2,7 +2,7 @@
 
 Checked 2026-10-26 against current primary model cards and installed workflows.
 Production scope: 120 seconds, three new characters, varied physical action,
-less uncanny faces, 20 Colab credits including retries and failures.
+less uncanny faces, 20 Google Colab credits including retries and failures.
 
 ## Model-specific findings
 
@@ -17,7 +17,7 @@ less uncanny faces, 20 Colab credits including retries and failures.
   Our graph uses two picture references, not fixed first/last frames. The no-clip
   graph still needs a runtime validation on its pinned revision. Existing NVFP4
   encoder weights require suitable Blackwell hardware. Published multi-GPU
-  throughput is not a single-Colab cost estimate.
+  throughput is not a single-Google Colab cost estimate.
 - **LTX-2.5** is a targeted alternative for action/control failures. Its distilled
   recipe is eight steps, CFG=1, frame count 8n+1, dimensions divisible by 32.
   Official first-frame/multishot capabilities must be checked in the actual graph;
@@ -106,3 +106,7 @@ do not establish motion quality. Next evidence: cart pushing, a lever lifting a
 wheel, and a restrained face/body reaction. Use the previously exercised audio
 graph with silent conditioning for the initial action pilot, rather than relying
 on the unvalidated no-clip graph; review any generated speech contamination.
+
+## Production package
+
+Executable package: [`productions/action-film-20261026/`](../../productions/action-film-20261026/README.md).

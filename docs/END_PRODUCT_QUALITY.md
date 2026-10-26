@@ -106,3 +106,11 @@ Perform those production steps against the plan, then cite their actual results.
 Model-duration/precision experiments need separate bounded evaluation with the
 approved voices and settings. Do not change the distilled sampler recipe simply
 to increase step count or infer quality from resolution alone.
+
+## Production package
+
+The two-minute action film follows [`productions/action-film-20261026/`](../productions/action-film-20261026/README.md):
+budget record (APPROVED 20-credit Google Colab envelope, no unattended retries), shot list,
+pilots, model checklist and runbook. A bespoke film renderer does not call the helpers
+above automatically; the package's [quality integration guide](../productions/action-film-20261026/QUALITY_INTEGRATION.md)
+and `tools/quality-gate.mjs` invoke them explicitly.
