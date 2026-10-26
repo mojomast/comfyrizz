@@ -78,7 +78,7 @@ is broken.
 | packet | where | what it reproduces today |
 | --- | --- | --- |
 | UX01 | `qa/tests/ux01-admission.baseline.test.mjs` | an active, paused or cancelled bound production still launches `/api/pipeline` (202, one launch) |
-| UX09 | `qa/tests/ux09-scope.baseline.test.mjs` | viewer `iterationScope` not propagated; named ids refused; paused/unrelated ordinary-tool mutation |
+| UX09 (fixed) | `qa/tests/ux09-scope.baseline.test.mjs` | landed in UX09 and unwrapped: viewer `iterationScope` propagated; named ids accepted; paused/unrelated/build-before-read ordinary-tool mutation refused with shared codes. Now ordinary regressions |
 | UX05 | `qa/tests/ux05-undo-save.baseline.test.mjs`, `apps/web/e2e/acceptance/ux05-undo-save.spec.ts` | edit, save, undo sends the stale CAS revision (browser: the undo is never saved) |
 | UX06 | `apps/web/e2e/acceptance/ux06-first-result.spec.ts` | Super Easy CPU build ends on "Making your video 0%": no Review/Export handoff, no escape control |
 | finding | `qa/tests/easy-steps-glob.baseline.test.mjs` | `easy/steps/index.ts` globs `*.test.ts` into the app (see Limitations) |
@@ -99,8 +99,9 @@ Converting a baseline when your packet lands:
    regression. Keep the CONTROL.
 3. Add your packet's own cases next to it. Extend the helpers rather than copying them.
 
-Verified now: `QA_EXPECT_FIXED=UX01` fails the 3 UX01 baselines, `UX09` fails 4,
-`UX05` fails 1 (node), and `all` fails 9 Node baselines. Unwrapped, the browser
+Verified now: `QA_EXPECT_FIXED=UX01` fails the 3 UX01 baselines,
+`UX05` fails 1 (node), and `all` fails 5 Node baselines. The 4 UX09 baselines were
+unwrapped when UX09 landed and now pass with or without `QA_EXPECT_FIXED=UX09`. Unwrapped, the browser
 UX05 and UX06 baselines fail for the audited reason (the undo is not saved; no
 handoff or escape control appears).
 
