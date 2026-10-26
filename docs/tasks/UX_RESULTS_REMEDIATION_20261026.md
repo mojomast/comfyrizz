@@ -1,9 +1,11 @@
 # UX and video-result remediation — subagent implementation plan
 
-**Status:** planning only; implementation has not started. October 26, 2026.
+**Status:** implementation in progress on `feat/ux-results` (Wave 0–1 landing). October 26, 2026.
 **Baseline:** audited upstream `f16d188` with deployment fix `2de992d`.
-**Inputs:** [current-code audit](../research/UX_RESULTS_AUDIT_20261026.md) and
-[outcome evaluation plan](../research/UX_RESULTS_EVALUATION_20261026.md).
+**Inputs:** [current-code audit](../research/UX_RESULTS_AUDIT_20261026.md),
+[outcome evaluation plan](../research/UX_RESULTS_EVALUATION_20261026.md), and
+[Impossible Brief production incidents](../research/IMPOSSIBLE_BRIEF_PRODUCTION_INCIDENTS_20261026.md)
+(PR #46 tip `c5ce32b`, cleaned/redacted).
 
 ## Objective and completion rule
 
@@ -221,9 +223,15 @@ Resolve production binding on the server; require current authorized action and
 active intent before any allocation for bound packages. Close direct pipeline and
 legacy bypasses. Preserve explicitly unbound behavior. Use precise refusal codes;
 unsupported bound entry points refuse rather than fall back to unguarded execution.
+**Also owns (PB02 admission half):** deadline-aware **next-job** admission — one
+end-to-end deadline covering setup + remaining work + drain/teardown reserve; refuse
+to start the next job when it cannot fit; preserve the hard shutdown backstop (never
+auto-extend beyond authorized liability). Incremental collection and preview promotion
+live in **PB-COLLECT** (`packages/backends` collect path), not this packet.
 **Accept:** actual mounted routes with fake launchers produce zero launches for
 exhausted/paused/cancelled/stale/rejected/missing authority; valid admitted request
-works, and a repeated command cannot allocate twice. Hand the `run.mjs` lease onward.
+works, and a repeated command cannot allocate twice; next-job admission refuses when
+the shared deadline cannot fit remaining work+drain. Hand the `run.mjs` lease onward.
 
 ### UX02 — Budget effects and recoverable accounting [L, P1]
 
@@ -237,10 +245,20 @@ from actual package duration and remaining allowance.
 **B:** durable reservation/effect identity, orphan-hold reconciliation and independent
 settlement/release retries. A terminal action must not hide unfinished accounting.
 Provide executor-facing APIs; `run.mjs` adoption/recovery wiring lands with UX03.
+**Also owns (PB03 stage liabilities):** stage-scoped reservation/action/execution
+receipts; measured/estimated/unknown settlement; discoverable pending liability after
+terminal failure (including failed Google Colab bootstrap). Show settled spend, held
+exposure and available authorization separately. Use attributed usage when supported;
+otherwise bound cost by recorded allocation duration/rate and retain uncertainty. Do
+not sum overlapping account deltas or silently double-charge a reconciled reservation.
+Admission must include unresolved liability; one demonstrated charge releases the
+matching hold once.
 **Accept:** fault after reserve-before-action, cap journal-before-ledger and failed
 settlement remains recoverable after repeated restart; no duplicate settlement or
 unexplained permanent hold. Unknown provider liability stays conservative. Both
 cap endpoints agree; recommendations vary correctly with reserved/spent allowance.
+Delayed settlement / unchanged balance / failed bootstrap fixtures surface pending
+exposure without inventing spend.
 
 ### UX03 — Server-owned execution, cancellation and restart [L, P1]
 
@@ -249,6 +267,9 @@ cap endpoints agree; recommendations vary correctly with reserved/spent allowanc
 coordinator mounts startup/event drain and updates the browser handoff with UX07.
 **A:** claim/fence outbox effects, bind one action→execution identity, adopt existing
 attributed work and recover dropped acknowledgments. Do not resubmit uncertain work.
+**Also covers (PB07 with UX04/UX21):** resume from authoritative job state after
+transport loss; compact durable stage receipts and stable command identity; never
+infer generation failure from a dropped tool response alone.
 **B:** durable cancel fan-out, retained abort handles, pre-start intent recheck and
 settlement retry independent of terminal action state. Pause stops future admissions;
 make active-work semantics explicit. Cancel is not proof of compute shutdown.
@@ -384,6 +405,12 @@ audio/video on demand with visible loading/errors.
 one audible monitored take, honest/persistent favorite semantics, media-relative
 annotations under zoom/letterbox. Preserve button Space/Enter and modifier keys;
 sync audio/video playing/pause/end/error state and destroy media on close.
+**Also covers (PB05 exact-line speech QA with UX11/UX18):** word-level comparison
+with raw transcript preserved; detect repetitions/tails; distinguish spelling-only
+normalization from semantic changes; bind accepted text to selected media range;
+offer local trim or targeted retry with cost/scope consequences. Caption-only
+correction cannot make wrongly spoken words pass. Keep acting/accent/lip-sync
+review separate from transcript checks.
 **Accept:** older historical take correction uses exact IDs; rapid cross-shot
 navigation never submits another shot's take. 3s/5s clips at 1s both show 1s;
 focus does not reset playback. Keyboard actions work, same image feature maps to
@@ -412,6 +439,10 @@ voice-mode/reference UI and casting docs; shared schema amendments through UX00.
 **A:** portable approved reference asset with checksum/provenance, language, delivery
 direction, explicit selection/rejection and missing-byte states. Inspect actual
 backend capability; do not promise a modality because a label exists.
+**Also covers (PB04 reference roles with UX17):** typed shot intent
+(character/ensemble/environment/product); explicit reference roles and an actual-use
+receipt so a person-containing board may guide palette without becoming identity
+conditioning on empty-environment jobs.
 **B:** one native transfer test tied to exact recording/model/workflow/conditioning
 inputs and a separate human verdict. Changed dependencies invalidate acceptance.
 Returning characters reuse their own references; appearance-only edits preserve
@@ -458,6 +489,10 @@ same snapshot/preflight facts and preserve the intended aspect and caption revis
 `productions/plan-from-package.mjs`, relevant compiler helpers/tests by explicit lease.
 **A:** bounded visual role/placement and canonical asset traversal including
 `scene.media`; compiled diagrams/jokes must not shrink to decorative thumbnails.
+**Also covers (PB04 with UX14):** compose style from material/light/palette rather
+than a hidden universal person template; validate contradictory character counts /
+removal requests before spend; environment prompts from a character project must
+assemble zero portrait/identity inputs (test the effective prompt, not fragments).
 **B:** typed requested duration, overlap-aware compiled runtime and structured
 estimated/measured/stale timing/coverage. Evaluate post-update revision before build,
 including batched tool calls; preserve intentional holds and point-edit boundaries.
@@ -525,6 +560,72 @@ milestone evidence is recorded, compatibility/rollback is exercised on fixtures,
 and the final report separates code, browser and human review. Stage a candidate
 release only after the applicable gate; live deployment is a separate operation.
 
+
+### PB-BOOTSTRAP — Actionable model-download failures [M, P1]
+
+**Owner:** Google Colab bootstrap lane. **Depends:** none (independent of Wave 1
+leases). **Maps:** Impossible Brief **PB01**.
+**Own:** `colab/bootstrap.py` download/verify path; new
+`colab/test_bootstrap_downloads.py` (or packages/backends test harness calling the
+pure helpers); optional shared download-error classifier module under `colab/`.
+Do **not** edit `apps/server/src/app.mjs` or `apps/web/src/main.ts`.
+Propagate structured repository/file/HTTP-status failures **before** verifying or
+linking weights; preserve the original cause (HF 429 must not become a misleading
+`FileNotFoundError`). Respect Retry-After where available; bounded backoff/jitter
+and concurrency reduction within a shared remaining-time/spend allowance — no
+unlimited retry. Resume verified partial downloads on the same VM when safe and
+budgeted; fail promptly for invalid pins, denied access (401/403) or checksum
+mismatch. Retain the `COMFYRIZZ_OK bootstrap` completion-marker check: cell exit
+zero is not proof of success.
+**Accept:** fake downloader produces 429 then success — retry retains pins, backs
+off within deadline, verifies hashes. Exhausted retries, missing file, 401/403,
+wrong hash, and cell exit 0 with traceback all refuse inference and leave a useful
+structured error. Tests make **no** Hugging Face or GPU calls.
+**Wave:** eligible from Wave 1 onward in a free slot (write set does not collide
+with UX01/UX05/UX06/UX09). Prefer DeepSeek bee or local executor; no paid Google Colab.
+
+### PB-COLLECT — Incremental collection and preview promotion [M, P0]
+
+**Owner:** backends collection lane. **Depends:** UX00 soft; coordinate with **UX01**
+(admission/deadline half of PB02 — do not steal UX01 write set while Sonnet cloud
+owns it). **Maps:** Impossible Brief **PB02** collection/recovery half.
+**Own:** `packages/backends/src/colab-backend.mjs` collect/recovery path,
+`packages/backends/src/live-previews.mjs`, and focused tests under
+`packages/backends/test/` (extend `colab-collect.test.mjs` / `colab-recover.test.mjs`
+or add `colab-pb-collect.test.mjs`). Do **not** edit pipeline admission, `run.mjs`,
+`app.mjs`, or `main.ts`.
+Collect completed artifacts **incrementally** with atomic per-job manifests and
+checksums; final drain when a job completes rather than relying solely on the next
+poll. Promote complete, verified live-preview artifacts through a first-class
+recovery path. Record `generation_complete` / `collection_incomplete` /
+`partial_recovered` separately; avoid rerunning successful recovered jobs.
+**Accept:** fake clock crosses deadline during last job and during download —
+recover earlier verified artifacts, retain uncertain/missing for others, dispatch
+no duplicate inference, never claim complete delivery, stop compute within the
+authorized hard bound. Include torn preview manifests and bad hashes. No live
+Google Colab.
+**Wave:** may start while UX01 is held-cloud (disjoint write set). Parent merges
+admission+collection contract at UX01 land + this packet.
+
+### PB-SCRATCH — Scratch-space preflight and atomic export [M, P1]
+
+**Owner:** rendering/runtime lane. **Depends:** coordinate with UX15 export staging.
+**Maps:** Impossible Brief **PB06**.
+**Own:** renderer scratch/cache policy helpers (prefer NEW module under
+`apps/renderer/scripts/` or `packages/` + tests); consumers in
+`scripts/render-package-lib.mjs` only by explicit lease after UX15-A or with
+coordinator approval. Inspect capacity and writable paths for bundle cache, browser
+profile, frame/audio intermediates, final outputs and archive copies separately.
+Estimate peak use with headroom; one explicit scratch policy propagated to
+dependencies. Disable optional Webpack filesystem caching safely when needed;
+essential-output ENOSPC is a hard recoverable failure. Clean only owned, expired
+intermediates — never source media or user edits.
+**Accept:** injected cache-only ENOSPC still renders with caching disabled;
+required-output ENOSPC preserves prior complete export and reports required space.
+Test differing cache/TMPDIR mounts and interrupted temporary-directory cleanup.
+**Wave:** Wave 4 alongside UX15; status **held** until UX15-A write set is free
+(prefer extending UX15 lease over parallel writers).
+
 ## Ownership lanes and serialization
 
 | Shared surface | Lease order / standing owner |
@@ -545,6 +646,9 @@ release only after the applicable gate; live deployment is a separate operation.
 | `chat-project.mjs`, composition/coverage helpers | UX17; coordinate compiler edits with UX15 before lease |
 | Easy/shell responsive CSS and toast | UX19; component-specific accessibility remains each component's owner |
 | New cross-system/browser acceptance and config | UX20; component regressions remain packet-owned |
+| `colab/bootstrap.py` download/verify | PB-BOOTSTRAP |
+| `packages/backends` collect / live-previews | PB-COLLECT; UX01 must not edit while this lease is active |
+| Renderer scratch/cache policy | PB-SCRATCH → hand off staging hooks to UX15 |
 
 ## Launch schedule and milestone gates
 
@@ -555,10 +659,10 @@ remove hard dependencies for mounted acceptance. Do not launch all 22 at once.
 | Wave | Eligible assignments | Coordinator/reviewer gate |
 | --- | --- | --- |
 | 0 | UX00 + UX20 fixture baseline; UX21 active | Pin base, map entry points, first contracts, exact write sets and isolated execution |
-| 1 | UX01, UX05, UX06, UX09 in parallel | **M1 first-result/trust:** rejection starts zero work; CPU success/error usable; undo/save sound; scoped tools cannot expand edits |
-| 2 | UX02, UX07-A, UX10-A, UX11 initial resolver/decoding; rotate slots as dependencies permit | Preserve clean project identity, reference freshness and actual-media identity; contract-level consumers ready |
+| 1 | UX01, UX05, UX06, UX09 in parallel; **PB-BOOTSTRAP** / **PB-COLLECT** in free slots (disjoint write sets; do not steal UX01/UX09 leases) | **M1 first-result/trust:** rejection starts zero work; CPU success/error usable; undo/save sound; scoped tools cannot expand edits; PB01 structured download errors; PB02 collection half recoverable |
+| 2 | UX02 (incl. PB03 liabilities), UX07-A, UX10-A, UX11 initial resolver/decoding; rotate slots as dependencies permit | Preserve clean project identity, reference freshness and actual-media identity; contract-level consumers ready; pending exposure visible after failed setup |
 | 3 | UX03 after UX02; UX10-B; UX08 after UX07-A/UX05; UX12 after UX11; UX13-A can take a free slot | **M2 durable execution:** UX03 + UX07-B + UX04 accepted together; browser/server cannot double-start; cancel/restart/settlement and snapshot recovery pass |
-| 4 | UX15 after UX05/UX10; UX13-B → UX14; UX17 → UX18; UX19 in free slots | **M3 faithful correction/delivery:** UX10/11/12/15/16 plus UX08/09; exact scope, unchanged unrelated work, caption/aspect/archive parity and reload download |
+| 4 | UX15 after UX05/UX10 (+ **PB-SCRATCH** when UX15-A free); UX13-B → UX14 (PB04 refs); UX17 → UX18 (PB04 prompts + PB05 speech with UX12); UX19 in free slots | **M3 faithful correction/delivery:** UX10/11/12/15/16 plus UX08/09; exact scope, unchanged unrelated work, caption/aspect/archive parity and reload download; scratch ENOSPC safe; typed environment boards |
 | 5 | Finish UX16, UX14, UX17/18/19; UX20 cross-browser/full journey and UX21 docs | **M4 quality/continuity:** preserved voice references, explicit native approval, evidence/timing/rendered fixtures, accessibility and reviewed capability docs |
 
 UX04 starts as soon as UX03 is merged, even if other Wave 3 tasks remain. UX16
@@ -571,13 +675,16 @@ execution and cancellation/accounting integration passes.
 ### Essential dependency chains
 
 ```text
-UX00 → UX01 → UX03 ← UX02
-UX06 → UX07-A → UX07-B ← UX03 → UX04
+UX00 → UX01 (PB02 admission) → UX03 ← UX02 (PB03 liabilities)
+PB-COLLECT (PB02 collection) ∥ UX01  → merge contract at land
+PB-BOOTSTRAP (PB01) independent from Wave 1
+UX06 → UX07-A → UX07-B ← UX03 → UX04 (PB07 resume with UX21)
 UX05 + UX07-A + UX09 → UX08
 UX00 → UX10-A/B → UX15 → UX16
-UX00 → UX11 → UX12 ← UX10 + UX09
-UX11 → UX13-A/B → UX14 ← UX03 + UX10
-UX09 → UX17 → UX18
+PB-SCRATCH ∥ UX15-A (Wave 4)
+UX00 → UX11 → UX12 (PB05) ← UX10 + UX09
+UX11 → UX13-A/B → UX14 (PB04) ← UX03 + UX10
+UX09 → UX17 (PB04) → UX18
 UX07-A + UX08 + UX11 → UX19
 UX20 verifies each mounted slice; UX21 integrates throughout.
 ```
@@ -615,6 +722,21 @@ than deleting findings during implementation.
 | Obscuring mobile footer/advisory; per-frame DOM work; disappearing actionable toast | UX19 |
 | Chromium-only/static/axe-only coverage; real-device and AT limitations | UX20 |
 | Contradictory default mode/iteration/voice/quality docs | UX14, UX21 |
+
+### Impossible Brief production findings (PB01–PB07)
+
+Living evidence: [IMPOSSIBLE_BRIEF_PRODUCTION_INCIDENTS_20261026.md](../research/IMPOSSIBLE_BRIEF_PRODUCTION_INCIDENTS_20261026.md).
+Prevention order is product priority; wave placement still obeys file leases.
+
+| Finding | Packet(s) | Notes |
+| --- | --- | --- |
+| PB01 HF 429 → misleading missing-file | **PB-BOOTSTRAP** | New; fake downloader only |
+| PB02 deadline vs collection race | **UX01** (admission) + **PB-COLLECT** (collection/preview promote) | Split while UX01 Sonnet cloud holds admission lease |
+| PB03 balance lag / failed-setup liability | **UX02** (extended) | Wave 2; do not invent parallel ledger packet |
+| PB04 empty-env vs person template | **UX14** + **UX17** (extended) | Typed shot intent + effective-prompt tests |
+| PB05 speech repeats / wording drift | **UX11**–**UX12** + **UX18** (UX12 extended) | Transcript ≠ acting approval |
+| PB06 ENOSPC / scratch policy | **PB-SCRATCH** (coord with UX15) | Held until UX15-A free |
+| PB07 fragmented progress / transport drop | **UX03** / **UX04** / **UX21** (extended) | Resume from authoritative state |
 
 ## First implementation dispatch
 
