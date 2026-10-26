@@ -11,7 +11,8 @@
 //   * the reserve formula gates every admission, warn at 80%            -> admit()
 //   * a wall-clock cap applies even if metering is stale                 -> admit()
 //   * unknown comfyrizz-* sessions are offered, never auto-stopped       -> orphans()
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { withRunPackage, verifyAgainstManifest } from "./run-package.mjs";
 import { createLivePreviewCollector } from './live-previews.mjs';
 import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
@@ -1468,7 +1469,7 @@ export function createColabBackend({
     return { ok: fetched + skipped === entries.length, files: entries.length, fetched, skipped, missing, entries };
   }
 
-  async function collectOut({ onEvent = null, expectComplete = true } = {}) {
+  async function collectOut({ onEvent = null, expectComplete = true, jobsDoc = null } = {}) {
     const localOut = join(scratch, "out");
     const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent, remember: state.downloaded });
     const manifestPath = join(localOut, "manifest.json");
@@ -1481,7 +1482,27 @@ export function createColabBackend({
     const attempts = existsSync(attemptsPath)
       ? readdirSync(attemptsPath).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(readFileSync(join(attemptsPath, name), "utf8")))
       : [];
-    const verification = manifest ? verifyAgainstManifest(manifest, localOut) : { verified: false, problems: [] };
+    let verification = manifest ? verifyAgainstManifest(manifest, localOut) : { verified: false, problems: [] };
+    // PB-COLLECT: when final collect is incomplete, promote hash-verified live-preview artifacts
+    // rather than treating a remote success as total loss.
+    let previewPromoted = [];
+    if (!verification.verified || (result.missing ?? []).length > 0 || manifest?.complete !== true) {
+      previewPromoted = promoteVerifiedLivePreviews({
+        previewDir: join(scratch, "live-previews"),
+        finalOut: localOut,
+        jobsDoc,
+      });
+      if (previewPromoted.length && manifest) {
+        verification = verifyAgainstManifest(manifest, localOut);
+      }
+    }
+    const outcome = classifyCollectionOutcome({
+      manifest,
+      verified: verification.verified,
+      missing: result.missing ?? [],
+      problems: verification.problems,
+      previewPromoted,
+    });
     emit(onEvent, {
       type: "collect",
       complete: manifest?.complete === true,
@@ -1495,6 +1516,10 @@ export function createColabBackend({
       skipped: result.skipped ?? 0,
       missing: result.missing ?? [],
       manifest: manifest ? "collected" : "missing",
+      outcome: outcome.status,
+      generationComplete: outcome.generationComplete,
+      collectionComplete: outcome.collectionComplete,
+      recoveredJobs: outcome.recoveredJobs,
     });
     return {
       ok: result.ok,
@@ -1507,6 +1532,11 @@ export function createColabBackend({
       files: result.files ?? 0,
       fetched: result.fetched ?? 0,
       skipped: result.skipped ?? 0,
+      outcome: outcome.status,
+      generationComplete: outcome.generationComplete,
+      collectionComplete: outcome.collectionComplete,
+      recoveredJobs: outcome.recoveredJobs,
+      previewPromoted,
     };
   }
 
@@ -1536,6 +1566,112 @@ export function createColabBackend({
  * said `{succeeded: 2}` for the plates while three finished stills were gone. Later entries win per
  * job; `complete` is about the whole plan, not about the file it came from.
  */
+
+/**
+ * PB02 collection half: classify host-side collect relative to remote generation (PB-COLLECT).
+ *
+ * generation_complete — remote jobs settled (manifest complete / all succeeded|cached)
+ * collection_incomplete — generation looks done (or partial) but local bytes/verification missing
+ * partial_recovered — some verified live-preview artifacts were promoted into the final out dir
+ */
+export function classifyCollectionOutcome({
+  manifest = null,
+  verified = false,
+  missing = [],
+  problems = [],
+  previewPromoted = [],
+} = {}) {
+  const jobs = Array.isArray(manifest?.jobs) ? manifest.jobs : [];
+  const settledOk = (entry) => entry && (entry.status === "succeeded" || entry.status === "cached");
+  const generationComplete =
+    manifest?.complete === true || (jobs.length > 0 && jobs.every(settledOk));
+  const collectionGaps =
+    !verified ||
+    (Array.isArray(missing) && missing.length > 0) ||
+    (Array.isArray(problems) && problems.length > 0);
+  const promoted = Array.isArray(previewPromoted)
+    ? previewPromoted.filter((id) => typeof id === "string" && id)
+    : [];
+
+  if (generationComplete && !collectionGaps) {
+    return {
+      status: "generation_complete",
+      generationComplete: true,
+      collectionComplete: true,
+      recoveredJobs: [],
+    };
+  }
+  if (promoted.length > 0) {
+    return {
+      status: "partial_recovered",
+      generationComplete,
+      collectionComplete: false,
+      recoveredJobs: promoted,
+    };
+  }
+  return {
+    status: "collection_incomplete",
+    generationComplete,
+    collectionComplete: false,
+    recoveredJobs: [],
+  };
+}
+
+/**
+ * Promote complete, hash-verified live-preview artifacts into the final collect directory.
+ * Never invents bytes: only copies files whose sha256 matches the preview manifest entry.
+ * Returns job ids that were promoted (for classifyCollectionOutcome / events).
+ */
+export function promoteVerifiedLivePreviews({
+  previewDir,
+  finalOut,
+  jobsDoc = null,
+} = {}) {
+  if (!previewDir || !finalOut || !existsSync(previewDir)) return [];
+  const previewManifestPath = join(previewDir, "manifest.preview.json");
+  if (!existsSync(previewManifestPath)) return [];
+  let previewManifest;
+  try {
+    previewManifest = JSON.parse(readFileSync(previewManifestPath, "utf8"));
+  } catch {
+    return [];
+  }
+  if (jobsDoc) {
+    if (typeof jobsDoc.hash === "string" && jobsDoc.hash && previewManifest.jobsHash !== jobsDoc.hash) {
+      return [];
+    }
+    if (
+      typeof jobsDoc.packageId === "string" &&
+      typeof previewManifest.packageId === "string" &&
+      previewManifest.packageId !== jobsDoc.packageId
+    ) {
+      return [];
+    }
+  }
+  mkdirSync(finalOut, { recursive: true });
+  const promoted = [];
+  for (const entry of Array.isArray(previewManifest.jobs) ? previewManifest.jobs : []) {
+    if (!["succeeded", "cached"].includes(entry?.status)) continue;
+    const output = entry.outputs?.[0];
+    const rel = output?.relative;
+    const expectSha = typeof output?.sha256 === "string" ? output.sha256.toLowerCase() : "";
+    if (typeof rel !== "string" || !rel || !/^[a-f0-9]{64}$/i.test(expectSha)) continue;
+    const source = join(previewDir, rel);
+    if (!existsSync(source)) continue;
+    const bytes = readFileSync(source);
+    if (Number.isSafeInteger(output.bytes) && output.bytes !== bytes.length) continue;
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    if (actual !== expectSha) continue;
+    const destination = join(finalOut, rel);
+    mkdirSync(dirname(destination), { recursive: true });
+    const temporary = `${destination}.partial`;
+    writeFileSync(temporary, bytes);
+    renameSync(temporary, destination);
+    promoted.push(entry.job);
+  }
+  return promoted;
+}
+
 export function mergeBatchManifests(manifests, jobs = []) {
   const byJob = new Map();
   for (const manifest of manifests) for (const entry of manifest?.jobs || []) byJob.set(entry.job, entry);

@@ -50,6 +50,77 @@ HEARTBEAT_SECONDS = 20
 #: a download that is quiet for a minute is indistinguishable from a hung one.
 DOWNLOAD_PROGRESS_SECONDS = 15
 
+
+def classify_download_stderr(stderr: str, returncode: int) -> dict:
+    """Turn a failed `hf download` into a structured failure (PB01).
+
+    The host must see the actionable network/status cause, not a later missing-file
+    exception from hash verification. No network I/O here — tests pass synthetic stderr.
+    """
+    text = str(stderr or "")
+    lower = text.lower()
+    status = None
+    retry_after = None
+    if "429" in text or "too many requests" in lower:
+        status = 429
+    elif "401" in text or "unauthorized" in lower:
+        status = 401
+    elif "403" in text or "forbidden" in lower or "access denied" in lower:
+        status = 403
+    elif "404" in text or "not found" in lower:
+        status = 404
+    # Retry-After: N (seconds) when present
+    import re as _re
+    match = _re.search(r"retry[- ]after[:\s]+(\d+)", text, flags=_re.IGNORECASE)
+    if match:
+        retry_after = int(match.group(1))
+    kind = {
+        429: "rate_limited",
+        401: "unauthorized",
+        403: "forbidden",
+        404: "not_found",
+    }.get(status, "download_failed" if returncode else "ok")
+    return {
+        "kind": kind,
+        "status": status,
+        "retryAfterSeconds": retry_after,
+        "returncode": returncode,
+        "detail": text[-400:],
+    }
+
+
+def require_successful_downloads(results: dict) -> None:
+    """Refuse bootstrap before hash verification when any host download failed (PB01).
+
+    Raises SystemExit with a single-line JSON payload the host log can surface. Does not
+    open weight files — incomplete downloads must not become FileNotFoundError here.
+    """
+    failures = []
+    for name, entry in (results or {}).items():
+        rc = int(entry.get("rc") or 0)
+        if rc == 0:
+            continue
+        classified = classify_download_stderr(entry.get("error") or "", rc)
+        failures.append(
+            {
+                "host": name,
+                "repo": entry.get("repo"),
+                "revision": entry.get("revision"),
+                "files": entry.get("files"),
+                **classified,
+            }
+        )
+    if not failures:
+        return
+    payload = {
+        "error": "model_download_failed",
+        "message": "one or more Hugging Face model downloads failed before weight verification",
+        "failures": failures,
+    }
+    raise SystemExit(json.dumps(payload, separators=(",", ":")))
+
+
+
 #: The Python packages Comfyrizz adds on top of ComfyUI's own requirements (GPU test 5, G5-4).
 #:
 #: GPU test 5 found the VM without any of them: `pip` installed ComfyUI's requirements,
@@ -289,6 +360,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"INSTALL {json.dumps(install)}", flush=True)
     token = read_token()
     download = download_models(token, plan, lock)
+    require_successful_downloads(download)
     # the token is used and then removed; it is never exported to ComfyUI or to a node
     TOKEN.unlink(missing_ok=True)
     print("token file removed:", not TOKEN.exists(), flush=True)
@@ -437,4 +509,8 @@ def _run() -> None:
     print("COMFYRIZZ_OK bootstrap", flush=True)
 
 
-_run()
+
+# Unit tests set COMFYRIZZ_BOOTSTRAP_IMPORT_ONLY=1 so helpers can be imported without
+# starting a Google Colab bootstrap cell. The real cell/CLI leaves the env unset.
+if os.environ.get("COMFYRIZZ_BOOTSTRAP_IMPORT_ONLY") != "1":
+    _run()
