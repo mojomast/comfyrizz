@@ -1,0 +1,74 @@
+/* EX07: Review preview placeholder and shot version loading states. */
+
+.easy-review-player-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  text-align: center;
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+}
+
+.easy-review-player-placeholder-label {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--font-size-15);
+  font-weight: var(--font-weight-600);
+}
+
+.easy-review-player-placeholder-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.easy-shot-versions-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.easy-shot-versions-skeleton {
+  flex: 0 0 auto;
+  width: 84px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-2), var(--bg-1), var(--bg-2));
+  background-size: 200% 100%;
+  animation: easy-shot-versions-shimmer 1.4s ease-in-out infinite;
+}
+
+.easy-shot-versions-text {
+  min-width: 0;
+}
+
+.easy-shot-versions-status.is-error {
+  color: var(--text-2);
+}
+
+.easy-shot-versions-retry {
+  min-height: 44px;
+}
+
+@keyframes easy-shot-versions-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .easy-shot-versions-skeleton {
+    animation: none;
+  }
+}
