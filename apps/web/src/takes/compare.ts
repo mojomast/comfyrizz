@@ -1,11 +1,13 @@
 /**
- * IL19: side-by-side take comparison.
+ * IL19 / UX12: side-by-side take comparison.
  *
- * Two to four takes are compared with one shared play/scrub state, a difference
- * overlay and a safe-area overlay. "Keep" is the only action that writes a
- * selection and it goes through the existing takes select API exactly once;
- * "Keep both for later" only pins a take in this view. Nothing here is modal
- * state on the server and no new route is introduced.
+ * Two to four takes are compared with one shared seconds/frame position, one
+ * audible monitored take, a difference overlay and a safe-area overlay. "Keep"
+ * is the only action that writes a selection and it goes through the existing
+ * takes select API exactly once, using the exact shot/clip/take target captured
+ * when the gesture started. "Favorite for later" is an honest, persisted local
+ * favorite and never writes a selection. Nothing here is modal state on the
+ * server and no new route is introduced.
  */
 import {
   isMediaTicketUrl,
@@ -42,6 +44,23 @@ export interface CompareShot {
   selected?: string | null;
 }
 
+/** The exact write target; frozen so navigation cannot rewrite an in-flight Keep. */
+export interface CompareTarget {
+  readonly packageId: string;
+  readonly shotId: string;
+  readonly clipId: string;
+  readonly takeId: string;
+}
+
+export interface CompareFavoriteStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export const COMPARE_END_BEHAVIOR = 'clamp-each-take';
+export const COMPARE_FAVORITES_KEY = 'comfyrizz.compare.favorites.v1';
+const FALLBACK_FPS = 24;
+
 export interface CompareControllerOptions {
   api: Pick<TakesApi, 'select'> & Partial<Pick<TakesApi, 'takeUrl'>>;
   packageId: string;
@@ -50,22 +69,100 @@ export interface CompareControllerOptions {
   takes: readonly ClipTake[];
   selected?: string | null;
   shots?: readonly CompareShot[];
+  storage?: CompareFavoriteStorage | null;
+  favoritesKey?: string;
   onClose?: () => void;
   onAnnounce?: (message: string) => void;
   onShotChange?: (shot: CompareShot) => void;
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/** A take's duration in seconds, from the media summary without guessing. */
+export function takeDurationSeconds(take: ClipTake | null | undefined): number {
+  const media = take?.media;
+  const duration = finiteNumber(media?.durationInSeconds);
+  if (duration > 0) return duration;
+  const fps = finiteNumber(media?.fps);
+  const frames = finiteNumber(media?.frames);
+  return fps > 0 && frames > 0 ? frames / fps : 0;
+}
+
+export function takeFps(take: ClipTake | null | undefined): number {
+  const fps = finiteNumber(take?.media?.fps);
+  return fps > 0 ? fps : FALLBACK_FPS;
+}
+
+/**
+ * One shared position in seconds mapped onto one take. A shorter take stops at
+ * its own end while a longer take keeps the shared second, which is the
+ * explicit end behaviour of the comparison.
+ */
+export function takeTimeAtSeconds(
+  take: ClipTake | null | undefined,
+  seconds: unknown,
+): { seconds: number; frame: number; atEnd: boolean } {
+  const duration = takeDurationSeconds(take);
+  const requested = Math.max(0, finiteNumber(seconds));
+  const clamped = duration > 0 ? Math.min(duration, requested) : requested;
+  return {
+    seconds: clamped,
+    frame: Math.round(clamped * takeFps(take)),
+    atEnd: duration > 0 && clamped >= duration,
+  };
+}
+
+function makeTarget(
+  packageId: string,
+  shotId: string,
+  clipId: string,
+  takeId: string | null | undefined,
+): CompareTarget | null {
+  if (typeof takeId !== 'string' || !takeId) return null;
+  return Object.freeze({ packageId, shotId, clipId, takeId });
+}
+
+function sharedDuration(takes: readonly ClipTake[]): number {
+  let duration = 0;
+  for (const take of takes) duration = Math.max(duration, takeDurationSeconds(take));
+  return duration;
+}
+
+function resolveFavoriteStorage(
+  storage: CompareFavoriteStorage | null | undefined,
+): CompareFavoriteStorage | null {
+  if (storage !== undefined) return storage;
+  try {
+    const candidate = (globalThis as { localStorage?: CompareFavoriteStorage }).localStorage;
+    if (candidate && typeof candidate.getItem === 'function' && typeof candidate.setItem === 'function') {
+      return candidate;
+    }
+  } catch {
+    /* storage can be fenced by the browser; favorites then stay in-session */
+  }
+  return null;
 }
 
 export interface CompareState {
   packageId: string;
   clipId: string;
   shotId: string;
+  target: CompareTarget | null;
   takes: ClipTake[];
   focusIndex: number;
   playing: boolean;
   position: number;
+  positionSeconds: number;
+  positionFrame: number;
+  durationSeconds: number;
+  endBehavior: typeof COMPARE_END_BEHAVIOR;
+  monitoredTakeId: string | null;
   showDifference: boolean;
   showSafeArea: boolean;
   pinned: Set<string>;
+  favoritePersistent: boolean;
   selected: string | null;
   keepError: string | null;
   liveMessage: string;
@@ -184,6 +281,8 @@ export class CompareController {
   state: CompareState;
   listeners: Set<CompareListener>;
   destroyed: boolean;
+  storage: CompareFavoriteStorage | null;
+  favoritesKey: string;
   onClose?: () => void;
   onAnnounce?: (message: string) => void;
   onShotChange?: (shot: CompareShot) => void;
@@ -214,32 +313,85 @@ export class CompareController {
 
     this.api = options.api;
     this.packageId = options.packageId;
+    this.storage = resolveFavoriteStorage(options.storage);
+    this.favoritesKey = options.favoritesKey || COMPARE_FAVORITES_KEY;
     this.onClose = options.onClose;
     this.onAnnounce = options.onAnnounce;
     this.onShotChange = options.onShotChange;
     this.listeners = new Set();
     this.destroyed = false;
+    const activeTakes = takes;
+    const focused = activeTakes[0] ?? null;
     this.state = {
       packageId: options.packageId,
       clipId: active.clipId,
       shotId: active.shotId,
-      takes,
+      target: makeTarget(options.packageId, active.shotId, active.clipId, focused?.takeId),
+      takes: activeTakes,
       focusIndex: 0,
       playing: false,
       position: 0,
+      positionSeconds: 0,
+      positionFrame: 0,
+      durationSeconds: sharedDuration(activeTakes),
+      endBehavior: COMPARE_END_BEHAVIOR,
+      monitoredTakeId: focused?.takeId ?? null,
       showDifference: false,
       showSafeArea: false,
-      pinned: new Set(),
+      pinned: this.loadFavorites(),
+      favoritePersistent: this.storage !== null,
       selected: typeof options.selected === 'string' ? options.selected : active.selected ?? null,
       keepError: null,
-      liveMessage: takes.length > 0
-        ? takeCompareLabel(1, Math.max(1, takes.length), active.shotId)
+      liveMessage: activeTakes.length > 0
+        ? takeCompareLabel(1, Math.max(1, activeTakes.length), active.shotId)
         : 'Compare needs at least two takes.',
       busy: false,
       closed: false,
       shots,
       shotIndex,
     };
+  }
+
+  private loadFavorites(): Set<string> {
+    if (!this.storage) return new Set();
+    try {
+      const raw = this.storage.getItem(this.favoritesKey);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(parsed.filter((value: unknown) => typeof value === 'string' && value));
+    } catch {
+      return new Set();
+    }
+  }
+
+  private saveFavorites(): boolean {
+    if (!this.storage) {
+      this.state.favoritePersistent = false;
+      return false;
+    }
+    try {
+      this.storage.setItem(this.favoritesKey, JSON.stringify(Array.from(this.state.pinned)));
+      this.state.favoritePersistent = true;
+      return true;
+    } catch {
+      this.state.favoritePersistent = false;
+      return false;
+    }
+  }
+
+  private syncTarget(): void {
+    const focused = this.focusedTake;
+    this.state.target = makeTarget(
+      this.state.packageId,
+      this.state.shotId,
+      this.state.clipId,
+      focused?.takeId,
+    );
+  }
+
+  canKeep(): boolean {
+    return stateCanKeep(this.state);
   }
 
   subscribe(listener: CompareListener): () => void {
@@ -268,6 +420,8 @@ export class CompareController {
     const next = Math.floor(index);
     if (next < 0 || next >= this.state.takes.length) return false;
     this.state.focusIndex = next;
+    this.state.monitoredTakeId = this.state.takes[next]?.takeId ?? null;
+    this.syncTarget();
     this.announce(takeCompareLabel(next + 1, this.state.takes.length, this.state.shotId));
     this.notify('focus');
     return true;
@@ -294,11 +448,37 @@ export class CompareController {
     this.notify('play');
   }
 
+  private applyPosition(seconds: number): void {
+    const duration = this.state.durationSeconds;
+    const clamped = Math.max(0, Math.min(duration > 0 ? duration : 0, finiteNumber(seconds)));
+    this.state.positionSeconds = clamped;
+    this.state.position = duration > 0 ? clamped / duration : 0;
+    this.state.positionFrame = Math.round(clamped * this.referenceFps());
+  }
+
+  private referenceFps(): number {
+    return takeFps(this.focusedTake ?? this.state.takes[0]);
+  }
+
   /** One shared position in 0..1 keeps every take on the same frame. */
   scrubTo(value: unknown): number {
     this.state.position = clampPosition(value);
+    this.applyPosition(this.state.position * this.state.durationSeconds);
     this.notify('play');
     return this.state.position;
+  }
+
+  /** One shared position in seconds; each take clamps to its own end. */
+  setPositionSeconds(value: unknown): number {
+    this.applyPosition(finiteNumber(value));
+    this.notify('play');
+    return this.state.positionSeconds;
+  }
+
+  takeTime(takeId: string): { seconds: number; frame: number; atEnd: boolean } | null {
+    const take = this.state.takes.find(item => item.takeId === takeId);
+    if (!take) return null;
+    return takeTimeAtSeconds(take, this.state.positionSeconds);
   }
 
   private overlayMessage(): string {
@@ -322,18 +502,29 @@ export class CompareController {
     return true;
   }
 
-  /** Keep both for later is local: it pins and never writes a selection. */
+  /**
+   * Favorites are local and persisted; they never write a selection. If the
+   * browser cannot persist them, the message says they last only this session
+   * instead of claiming they were saved.
+   */
   pinFocused(): boolean {
     const take = this.focusedTake;
     if (!take || this.state.busy) return false;
     const label = takeCompareLabel(this.state.focusIndex + 1, this.state.takes.length, this.state.shotId);
+    let removing = false;
     if (this.state.pinned.has(take.takeId)) {
       this.state.pinned.delete(take.takeId);
-      this.announce(`Unpinned ${label} for later`);
+      removing = true;
     } else {
       this.state.pinned.add(take.takeId);
-      this.announce(`Pinned ${label} for later`);
     }
+    const persisted = this.saveFavorites();
+    const scope = persisted ? 'saved' : 'saved for this session only';
+    this.announce(
+      removing
+        ? `Removed ${label} from favorites (${scope})`
+        : `Favorited ${label} (${scope})`,
+    );
     this.notify('pin');
     return true;
   }
@@ -345,13 +536,21 @@ export class CompareController {
    */
   async keepFocused(): Promise<boolean> {
     if (this.state.busy) return false;
-    const take = this.focusedTake;
-    if (!take) return false;
-    const label = takeCompareLabel(this.state.focusIndex + 1, this.state.takes.length, this.state.shotId);
+    if (!this.canKeep()) return false;
+    const take = this.focusedTake!;
+    const target = this.state.target!;
+    const label = takeCompareLabel(this.state.focusIndex + 1, this.state.takes.length, target.shotId);
     this.state.busy = true;
     this.notify('all');
     try {
-      const result = await this.api.select(this.state.packageId, this.state.clipId, take.takeId) as SelectResult | undefined;
+      const result = await this.api.select(target.packageId, target.clipId, target.takeId) as SelectResult | undefined;
+      if (this.state.target?.takeId !== target.takeId || this.state.target?.clipId !== target.clipId) {
+        const message = 'Keep was not applied: the compare selection changed while it was in flight.';
+        this.state.keepError = message;
+        this.announce(message);
+        this.notify('keep');
+        return false;
+      }
       const confirmed = typeof result?.takeId === 'string' && result.takeId ? result.takeId : '';
       if (!confirmed) {
         const message = 'Keep failed: the server did not confirm the take';
@@ -385,14 +584,15 @@ export class CompareController {
     this.state.shotIndex = nextIndex;
     this.state.shotId = shot.shotId;
     this.state.clipId = shot.clipId;
-    if (Array.isArray(shot.takes)) {
-      this.state.takes = compareVisibleTakes(shot.takes);
-      this.state.selected = typeof shot.selected === 'string' ? shot.selected : null;
-    }
+    this.state.takes = compareVisibleTakes(shot.takes);
+    this.state.selected = typeof shot.selected === 'string' ? shot.selected : null;
     this.state.focusIndex = 0;
-    this.state.position = 0;
     this.state.playing = false;
     this.state.keepError = null;
+    this.state.durationSeconds = sharedDuration(this.state.takes);
+    this.state.monitoredTakeId = this.state.takes[0]?.takeId ?? null;
+    this.applyPosition(0);
+    this.syncTarget();
     this.announce(takeCompareLabel(1, Math.max(1, this.state.takes.length), shot.shotId));
     this.onShotChange?.(shot);
     this.notify('shot');
@@ -442,13 +642,29 @@ function statusAttribute(take: ClipTake, state: CompareState): string {
   return 'idle';
 }
 
-function renderMedia(take: ClipTake): string {
+function stateCanKeep(state: CompareState): boolean {
+  const focused = state.takes[state.focusIndex] ?? null;
+  const target = state.target;
+  return (
+    !state.busy &&
+    state.takes.length >= COMPARE_MIN_TAKES &&
+    target !== null &&
+    focused !== null &&
+    target.shotId === state.shotId &&
+    target.clipId === state.clipId &&
+    target.takeId === focused.takeId &&
+    Boolean(target.packageId)
+  );
+}
+
+function renderMedia(take: ClipTake, state: CompareState): string {
   const poster = takePosterMediaUrl(take);
   const image = takeLooksLikeImage(take);
   const id = escapeHtml(take.takeId);
+  const monitored = take.takeId === state.monitoredTakeId;
   const media = image
-    ? `<img class="compare-media-el compare-poster" data-compare-media="${id}" data-media-kind="image" alt="" loading="lazy" decoding="async"${poster ? ` src="${escapeHtml(poster)}"` : ''} />`
-    : `<video class="compare-media-el" data-compare-media="${id}" data-media-kind="video" muted playsinline preload="metadata"${poster ? ` poster="${escapeHtml(poster)}"` : ''}></video>`;
+    ? `<img class="compare-media-el compare-poster" data-compare-media="${id}" data-media-kind="image" data-monitored="false" alt="" loading="lazy" decoding="async"${poster ? ` src="${escapeHtml(poster)}"` : ''} />`
+    : `<video class="compare-media-el" data-compare-media="${id}" data-media-kind="video" data-monitored="${monitored ? 'true' : 'false'}"${monitored ? '' : ' muted'} playsinline preload="metadata"${poster ? ` poster="${escapeHtml(poster)}"` : ''}></video>`;
   return `<div class="compare-media" aria-hidden="true">
     <span class="compare-media-frame"></span>
     ${media}
@@ -471,8 +687,9 @@ function renderTake(take: ClipTake, index: number, state: CompareState): string 
     kept ? 'Kept' : '',
     pinned ? 'Pinned' : '',
   ].filter(Boolean);
-  return `<li class="${classes}" data-compare-take="${escapeHtml(take.takeId)}" data-take-index="${index}" data-compare-status="${statusAttribute(take, state)}" data-focused="${focused ? 'true' : 'false'}" data-pinned="${pinned ? 'true' : 'false'}" tabindex="${focused ? '0' : '-1'}" role="group" aria-label="${escapeHtml(label)}"${focused ? ' aria-current="true"' : ''}>
-    ${renderMedia(take)}
+  const time = takeTimeAtSeconds(take, state.positionSeconds);
+  return `<li class="${classes}" data-compare-take="${escapeHtml(take.takeId)}" data-take-index="${index}" data-compare-status="${statusAttribute(take, state)}" data-focused="${focused ? 'true' : 'false'}" data-pinned="${pinned ? 'true' : 'false'}" data-take-seconds="${Number(time.seconds.toFixed(3))}" data-take-frame="${time.frame}" data-take-at-end="${time.atEnd ? 'true' : 'false'}" tabindex="${focused ? '0' : '-1'}" role="group" aria-label="${escapeHtml(label)}"${focused ? ' aria-current="true"' : ''}>
+    ${renderMedia(take, state)}
     <div class="compare-take-bar">
       <span class="compare-take-label">${escapeHtml(label)}</span>
       <span class="compare-take-flags">${flags.map(flag => `<span class="compare-state-text" data-state="${flag.toLowerCase()}">${escapeHtml(flag)}</span>`).join('')}</span>
@@ -488,7 +705,9 @@ export function renderCompare(state: CompareState): string {
     : `shot ${state.shotId}`;
   const takes = state.takes.map((take, index) => renderTake(take, index, state)).join('');
   const playLabel = state.playing ? 'Pause all' : 'Play all';
-  return `<section class="compare-view" data-compare-view role="dialog" aria-modal="true" aria-labelledby="compare-title" aria-describedby="compare-keys" data-compare-shot="${escapeHtml(state.shotId)}" data-compare-position="${state.position}"${state.closed ? ' hidden' : ''}>
+  const favoriteLabel = focused && state.pinned.has(focused.takeId) ? 'Remove favorite' : 'Favorite for later';
+  const keepEnabled = stateCanKeep(state);
+  return `<section class="compare-view" data-compare-view role="dialog" aria-modal="true" aria-labelledby="compare-title" aria-describedby="compare-keys" data-compare-shot="${escapeHtml(state.shotId)}" data-compare-position="${state.position}" data-compare-seconds="${Number(state.positionSeconds.toFixed(3))}" data-compare-frame="${state.positionFrame}" data-compare-duration="${Number(state.durationSeconds.toFixed(3))}" data-compare-end="${state.endBehavior}" data-compare-monitored="${escapeHtml(state.monitoredTakeId ?? '')}"${state.closed ? ' hidden' : ''}>
     <header class="compare-head">
       <div class="compare-head-main">
         <h2 id="compare-title" class="compare-title">Compare takes</h2>
@@ -500,13 +719,13 @@ export function renderCompare(state: CompareState): string {
       <button type="button" class="btn btn-secondary btn-sm" data-compare-play aria-pressed="${state.playing ? 'true' : 'false'}" aria-keyshortcuts="Space">${playLabel}</button>
       <button type="button" class="btn btn-secondary btn-sm" data-compare-difference aria-pressed="${state.showDifference ? 'true' : 'false'}">Difference</button>
       <button type="button" class="btn btn-secondary btn-sm" data-compare-safe-area aria-pressed="${state.showSafeArea ? 'true' : 'false'}">Safe area</button>
-      <button type="button" class="btn btn-secondary btn-sm" data-compare-pin aria-pressed="${focused && state.pinned.has(focused.takeId) ? 'true' : 'false'}"${focused && !state.busy ? '' : ' disabled'}>Keep both for later</button>
-      <button type="button" class="btn btn-primary primary btn-sm" data-compare-keep${focused && !state.busy ? '' : ' disabled'}>Keep</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-compare-pin aria-pressed="${focused && state.pinned.has(focused.takeId) ? 'true' : 'false'}"${focused && !state.busy ? '' : ' disabled'}>${escapeHtml(favoriteLabel)}</button>
+      <button type="button" class="btn btn-primary primary btn-sm" data-compare-keep${keepEnabled ? '' : ' disabled'}>Keep</button>
     </div>
     <div class="compare-stage" data-difference="${state.showDifference ? 'on' : 'off'}" data-safe-area="${state.showSafeArea ? 'on' : 'off'}">
       <ol class="compare-takes" aria-label="${escapeHtml(`Takes for shot ${state.shotId}`)}" aria-keyshortcuts="1 2 3 4"${state.busy ? ' aria-busy="true"' : ''}>${takes}</ol>
-      ${state.showDifference ? '<span class="compare-overlay compare-overlay-difference" aria-hidden="true">Difference overlay</span>' : ''}
-      ${state.showSafeArea ? '<span class="compare-overlay compare-overlay-safe-area" aria-hidden="true">Safe area</span>' : ''}
+      <span class="compare-overlay compare-overlay-difference" aria-hidden="true"${state.showDifference ? '' : ' hidden'}>Difference overlay</span>
+      <span class="compare-overlay compare-overlay-safe-area" aria-hidden="true"${state.showSafeArea ? '' : ' hidden'}>Safe area</span>
     </div>
     <div class="compare-scrub">
       <label class="compare-scrub-field" for="compare-scrub">Position for all takes</label>
@@ -550,6 +769,13 @@ function isEditable(target: EventTarget | null): boolean {
   return element.isContentEditable === true;
 }
 
+function isActivationControl(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  if (!element) return false;
+  const tag = String(element.tagName ?? '').toLowerCase();
+  return tag === 'button' || tag === 'a' || tag === 'summary';
+}
+
 function mediaElements(root: HTMLElement): HTMLMediaElement[] {
   return Array.from(root.querySelectorAll<HTMLMediaElement>('audio, video'));
 }
@@ -571,7 +797,7 @@ export function mountCompare(host: HTMLElement, options: CompareMountOptions): C
   let destroyed = false;
   let focusBeforeRender = '';
 
-  const paint = (focusNew = false): void => {
+  const paintFull = (focusNew = false): void => {
     if (destroyed) return;
     if (focusNew) {
       focusBeforeRender = '';
@@ -590,17 +816,156 @@ export function mountCompare(host: HTMLElement, options: CompareMountOptions): C
       ? `[data-compare-take="${focusBeforeRender.replace(/"/g, '\\"')}"]`
       : '[data-compare-take][tabindex="0"]';
     host.querySelector<HTMLElement>(selector)?.focus();
+    bindMediaEvents();
     void hydrateMedia();
   };
 
+  /**
+   * Focus, play, pin, overlay and keep changes patch the existing nodes so the
+   * players (and their buffered media) stay the same elements. Only a shot
+   * change replaces the markup, because it replaces the take set itself.
+   */
+  const patch = (): void => {
+    if (destroyed) return;
+    const state = controller.state;
+    const view = host.querySelector<HTMLElement>('[data-compare-view]');
+    if (!view) {
+      paintFull(false);
+      return;
+    }
+    view.setAttribute('data-compare-shot', state.shotId);
+    view.setAttribute('data-compare-position', String(state.position));
+    view.setAttribute('data-compare-seconds', String(Number(state.positionSeconds.toFixed(3))));
+    view.setAttribute('data-compare-frame', String(state.positionFrame));
+    view.setAttribute('data-compare-duration', String(Number(state.durationSeconds.toFixed(3))));
+    view.setAttribute('data-compare-monitored', state.monitoredTakeId ?? '');
+    view.toggleAttribute('hidden', state.closed);
+
+    for (const row of Array.from(host.querySelectorAll<HTMLElement>('[data-compare-take]'))) {
+      const takeId = row.getAttribute('data-compare-take');
+      const index = state.takes.findIndex(take => take.takeId === takeId);
+      const take = index >= 0 ? state.takes[index] : null;
+      if (!take) continue;
+      const focused = index === state.focusIndex;
+      const pinned = state.pinned.has(take.takeId);
+      const kept = take.takeId === state.selected;
+      row.className = [
+        'compare-take',
+        focused ? 'is-focused' : '',
+        pinned ? 'is-pinned' : '',
+        kept ? 'is-kept' : '',
+      ].filter(Boolean).join(' ');
+      row.setAttribute('data-compare-status', statusAttribute(take, state));
+      row.setAttribute('data-focused', focused ? 'true' : 'false');
+      row.setAttribute('data-pinned', pinned ? 'true' : 'false');
+      row.setAttribute('tabindex', focused ? '0' : '-1');
+      if (focused) row.setAttribute('aria-current', 'true');
+      else row.removeAttribute('aria-current');
+      const time = takeTimeAtSeconds(take, state.positionSeconds);
+      row.setAttribute('data-take-seconds', String(Number(time.seconds.toFixed(3))));
+      row.setAttribute('data-take-frame', String(time.frame));
+      row.setAttribute('data-take-at-end', time.atEnd ? 'true' : 'false');
+    }
+
+    for (const media of Array.from(host.querySelectorAll<HTMLElement>('[data-compare-media]'))) {
+      const takeId = media.getAttribute('data-compare-media');
+      const monitored = takeId === state.monitoredTakeId;
+      if (media.getAttribute('data-media-kind') === 'video' || media.tagName === 'VIDEO') {
+        media.setAttribute('data-monitored', monitored ? 'true' : 'false');
+      }
+      (media as HTMLMediaElement).muted = !monitored;
+    }
+
+    const play = host.querySelector<HTMLButtonElement>('[data-compare-play]');
+    if (play) {
+      play.textContent = state.playing ? 'Pause all' : 'Play all';
+      play.setAttribute('aria-pressed', state.playing ? 'true' : 'false');
+    }
+    const focused = state.takes[state.focusIndex];
+    const pin = host.querySelector<HTMLButtonElement>('[data-compare-pin]');
+    if (pin) {
+      pin.setAttribute('aria-pressed', focused && state.pinned.has(focused.takeId) ? 'true' : 'false');
+      pin.textContent = focused && state.pinned.has(focused.takeId) ? 'Remove favorite' : 'Favorite for later';
+      pin.disabled = !focused || state.busy;
+    }
+    const keep = host.querySelector<HTMLButtonElement>('[data-compare-keep]');
+    if (keep) keep.disabled = !stateCanKeep(state);
+    const difference = host.querySelector<HTMLElement>('[data-compare-difference]');
+    if (difference) difference.setAttribute('aria-pressed', state.showDifference ? 'true' : 'false');
+    const safe = host.querySelector<HTMLElement>('[data-compare-safe-area]');
+    if (safe) safe.setAttribute('aria-pressed', state.showSafeArea ? 'true' : 'false');
+    const stage = host.querySelector<HTMLElement>('[data-difference]');
+    if (stage) stage.setAttribute('data-difference', state.showDifference ? 'on' : 'off');
+    const safeStage = host.querySelector<HTMLElement>('[data-safe-area]');
+    if (safeStage) safeStage.setAttribute('data-safe-area', state.showSafeArea ? 'on' : 'off');
+    const overlayDifference = host.querySelector<HTMLElement>('.compare-overlay-difference');
+    if (overlayDifference) overlayDifference.toggleAttribute('hidden', !state.showDifference);
+    const overlaySafe = host.querySelector<HTMLElement>('.compare-overlay-safe-area');
+    if (overlaySafe) overlaySafe.toggleAttribute('hidden', !state.showSafeArea);
+    const live = host.querySelector<HTMLElement>('[data-compare-live]');
+    if (live) live.textContent = state.liveMessage;
+    const error = host.querySelector<HTMLElement>('[data-compare-error]');
+    if (error) {
+      error.textContent = state.keepError ?? '';
+      error.toggleAttribute('hidden', !state.keepError);
+    }
+    const scrub = host.querySelector<HTMLInputElement>('[data-compare-scrub]');
+    if (scrub) scrub.value = String(Math.round(state.position * 100));
+    const timeLabel = host.querySelector<HTMLElement>('[data-compare-time]');
+    if (timeLabel) timeLabel.textContent = `${Math.round(state.positionSeconds * 10) / 10}s`;
+    const current = host.querySelector<HTMLElement>('[data-compare-current]');
+    if (current) {
+      current.textContent = focused
+        ? takeCompareLabel(state.focusIndex + 1, state.takes.length, state.shotId)
+        : `shot ${state.shotId}`;
+    }
+  };
+
+  const paint = (change: CompareChange): void => {
+    if (destroyed) return;
+    if (change === 'shot' || change === 'close') {
+      paintFull(change === 'shot');
+    } else {
+      patch();
+    }
+  };
+
   const mediaUrls = new Map<string, string>();
+  const boundMedia = new WeakSet<HTMLMediaElement>();
   let mediaToken = 0;
+
+  const bindMediaEvents = (): void => {
+    for (const media of mediaElements(host)) {
+      if (boundMedia.has(media)) continue;
+      boundMedia.add(media);
+      const takeId = media.getAttribute('data-compare-media') ?? '';
+      media.addEventListener('ended', () => {
+        if (takeId !== controller.state.monitoredTakeId) return;
+        const time = controller.takeTime(takeId);
+        if (time) controller.setPositionSeconds(time.seconds);
+        if (controller.state.playing) controller.pause();
+      });
+      media.addEventListener('play', () => {
+        if (takeId !== controller.state.monitoredTakeId) return;
+        if (!controller.state.playing) controller.play();
+      });
+      media.addEventListener('pause', () => {
+        if (takeId !== controller.state.monitoredTakeId) return;
+        if (controller.state.playing) controller.pause();
+      });
+      media.addEventListener('error', () => {
+        if (takeId !== controller.state.monitoredTakeId) return;
+        if (controller.state.playing) controller.pause();
+      });
+    }
+  };
 
   /**
    * Media tickets are minted by the existing takes API. The controller and the
    * tests work without takeUrl; when it is present each take gets one ticket.
    */
   const hydrateMedia = async (): Promise<void> => {
+    bindMediaEvents();
     const takeUrl = controller.api.takeUrl;
     if (typeof takeUrl !== 'function') return;
     const token = ++mediaToken;
@@ -621,6 +986,7 @@ export function mountCompare(host: HTMLElement, options: CompareMountOptions): C
       if (destroyed || token !== mediaToken) return;
       if (element.getAttribute('src') !== url) element.setAttribute('src', url);
     }
+    bindMediaEvents();
     applyMedia();
   };
 
@@ -629,16 +995,20 @@ export function mountCompare(host: HTMLElement, options: CompareMountOptions): C
     const key = event.key;
     if (compareKeyCommand(key).kind === 'none') return;
     if (isEditable(event.target)) return;
+    if ((key === ' ' || key === 'Enter') && isActivationControl(event.target)) return;
     event.preventDefault();
     void controller.handleKey(key);
   };
 
   const applyMedia = (): void => {
-    const { playing, position } = controller.state;
+    const { playing, monitoredTakeId } = controller.state;
     for (const media of mediaElements(host)) {
       try {
-        const duration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : 0;
-        if (duration > 0) media.currentTime = position * duration;
+        const takeId = media.getAttribute('data-compare-media') ?? '';
+        const take = controller.state.takes.find(item => item.takeId === takeId);
+        const time = takeTimeAtSeconds(take, controller.state.positionSeconds);
+        media.muted = takeId !== monitoredTakeId;
+        media.currentTime = time.seconds;
         if (playing) {
           const result = media.play();
           if (result && typeof result.catch === 'function') result.catch(() => undefined);
@@ -682,14 +1052,14 @@ export function mountCompare(host: HTMLElement, options: CompareMountOptions): C
   };
 
   const unsubscribe = controller.subscribe((_state, change) => {
-    const focusNew = change === 'focus' || change === 'shot';
-    paint(focusNew);
-    if (change === 'play') applyMedia();
+    paint(change);
+    if (change === 'play' || change === 'focus' || change === 'shot') applyMedia();
   });
 
   host.addEventListener('click', onClick);
   host.addEventListener('input', onInput);
   host.addEventListener('keydown', onKeyDown);
+  bindMediaEvents();
   host.querySelector<HTMLElement>('[data-compare-take][tabindex="0"]')?.focus();
   void hydrateMedia();
 
@@ -700,7 +1070,7 @@ export function mountCompare(host: HTMLElement, options: CompareMountOptions): C
     controller,
     focusTake(index: number) {
       const focused = controller.focusTake(index);
-      paint();
+      paint('focus');
       return focused;
     },
     destroy() {
@@ -710,6 +1080,14 @@ export function mountCompare(host: HTMLElement, options: CompareMountOptions): C
       host.removeEventListener('click', onClick);
       host.removeEventListener('input', onInput);
       host.removeEventListener('keydown', onKeyDown);
+      for (const media of mediaElements(host)) {
+        try {
+          media.pause();
+          media.removeAttribute('src');
+        } catch {
+          /* a detached media element has nothing to release */
+        }
+      }
       host.innerHTML = '';
     },
   };

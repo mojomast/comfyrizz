@@ -2,16 +2,19 @@ import {
   KIND_CAPABILITIES,
   clampRegion,
   clampTime,
+  displayedToMediaRegion,
   handleKey,
   nextViewer,
   openViewer,
   prevViewer,
+  viewerTarget,
 } from './model.ts';
 import type {
   Annotation,
   Region,
   ViewerItem,
   ViewerState,
+  ViewerTarget,
 } from './model.ts';
 import { mountCompare } from '../takes/compare.ts';
 import type { CompareMountOptions } from '../takes/compare.ts';
@@ -29,16 +32,17 @@ interface ViewerMediaEntry {
 
 type CompareConfig = Omit<CompareMountOptions, 'onClose' | 'onAnnounce' | 'onShotChange'>;
 
-interface IterateTarget {
-  packageId?: string;
-  shotId?: string;
-  clipId?: string;
-  assetId?: string;
+interface IteratePayload {
+  target: ViewerTarget;
+  annotation: Annotation;
 }
 
-interface IteratePayload {
-  target: IterateTarget;
-  annotation: Annotation;
+export interface ViewerSource {
+  src?: string;
+  posterUrl?: string;
+  peaks?: number[];
+  duration?: number;
+  fps?: number;
 }
 
 interface AssetViewerOptions {
@@ -49,6 +53,7 @@ interface AssetViewerOptions {
   opener: HTMLElement;
   compare?: CompareConfig;
   media?: Record<string, ViewerMediaEntry>;
+  resolveSource?: (item: ViewerItem, signal: AbortSignal) => Promise<ViewerSource | null>;
   onIterate?: (payload: IteratePayload) => void;
   onClose?: () => void;
   reducedMotion?: boolean;
@@ -69,8 +74,8 @@ function isIdentifier(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== '';
 }
 
-function durationOf(item: ViewerItem | null): number {
-  const duration = item?.duration;
+function itemDuration(item: ViewerItem | null, source?: ViewerSource | null): number {
+  const duration = source?.duration ?? item?.duration;
   return typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : 0;
 }
 
@@ -151,6 +156,11 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
   let playElement: HTMLButtonElement | null = null;
   let regionElement: HTMLElement | null = null;
 
+  const resolvedSources = new Map<string, ViewerSource>();
+  const sourceErrors = new Map<string, string>();
+  let sourceController: AbortController | null = null;
+  let sourceToken = 0;
+
   const dialog = document.createElement('dialog');
   dialog.className = 'asset-viewer';
   dialog.setAttribute('data-viewer', '');
@@ -211,6 +221,7 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
 
   const mediaError = document.createElement('p');
   mediaError.className = 'viewer-error';
+  mediaError.setAttribute('data-viewer-error', '');
   mediaError.setAttribute('role', 'alert');
   mediaError.hidden = true;
   dialog.appendChild(mediaError);
@@ -343,22 +354,29 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     if (imageElement) imageElement.style.transform = `scale(${zoom})`;
   };
 
+  const currentSource = (): ViewerSource | null => {
+    if (!state.item) return null;
+    return resolvedSources.get(state.item.id) ?? null;
+  };
+
+  const currentDuration = (): number => itemDuration(state.item, currentSource());
+
   const syncScrub = (): void => {
     if (!scrubElement) return;
-    const time = clampTime(state.time, durationOf(state.item));
+    const time = clampTime(state.time, currentDuration());
     scrubElement.value = String(Number(time.toFixed(3)));
     scrubElement.setAttribute('value', scrubElement.value);
   };
 
   const syncMediaTime = (): void => {
-    const time = clampTime(state.time, durationOf(state.item));
+    const time = clampTime(state.time, currentDuration());
     if (videoElement) videoElement.currentTime = time;
     if (audioElement) audioElement.currentTime = time;
     syncScrub();
   };
 
   const showMediaError = (error: unknown): void => {
-    mediaError.textContent = mediaErrorText(error);
+    mediaError.textContent = typeof error === 'string' && error ? error : mediaErrorText(error);
     mediaError.hidden = false;
   };
 
@@ -411,7 +429,7 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     if (!scrubElement) return;
     const value = Number(scrubElement.value);
     if (!Number.isFinite(value)) return;
-    state = { ...state, time: clampTime(value, durationOf(state.item)) };
+    state = { ...state, time: clampTime(value, currentDuration()) };
     syncMediaTime();
   };
 
@@ -420,7 +438,7 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     scrub.type = 'range';
     scrub.className = 'viewer-scrub';
     scrub.min = '0';
-    scrub.max = String(durationOf(state.item));
+    scrub.max = String(currentDuration());
     scrub.step = '0.01';
     scrub.value = String(Number(state.time.toFixed(3)));
     scrub.setAttribute('data-viewer-scrub', '');
@@ -430,7 +448,93 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     return scrub;
   };
 
-  const renderItem = (): void => {
+  const updatePlayLabel = (): void => {
+    if (!playElement) return;
+    playElement.textContent = state.playing ? 'Pause' : 'Play';
+    playElement.setAttribute('aria-pressed', state.playing ? 'true' : 'false');
+  };
+
+  const bindMediaElement = (media: HTMLMediaElement): void => {
+    media.addEventListener('timeupdate', () => {
+      if (closed || destroyed) return;
+      state = { ...state, time: clampTime(media.currentTime, currentDuration()) };
+      syncScrub();
+    });
+    media.addEventListener('play', () => {
+      if (closed || destroyed) return;
+      state = { ...state, playing: true };
+      updatePlayLabel();
+    });
+    media.addEventListener('pause', () => {
+      if (closed || destroyed) return;
+      state = { ...state, playing: false };
+      updatePlayLabel();
+    });
+    media.addEventListener('ended', () => {
+      if (closed || destroyed) return;
+      state = { ...state, playing: false, time: currentDuration() };
+      syncScrub();
+      updatePlayLabel();
+    });
+    media.addEventListener('error', () => {
+      if (closed || destroyed) return;
+      showMediaError(media.error?.message ?? 'The media could not play.');
+    });
+  };
+
+  const renderLoading = (item: ViewerItem, loading: HTMLElement, hasSource: boolean): void => {
+    if (hasSource || item.kind === 'text') {
+      loading.hidden = true;
+      return;
+    }
+
+    const failure = sourceErrors.get(item.id);
+    if (failure) {
+      loading.hidden = true;
+      showMediaError(failure);
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'btn btn-secondary btn-sm viewer-retry';
+      retry.setAttribute('data-viewer-retry', '');
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', () => {
+        sourceErrors.delete(item.id);
+        resolvedSources.delete(item.id);
+        renderItem(false);
+      });
+      mediaHost.appendChild(retry);
+      return;
+    }
+
+    const resolver = options.resolveSource;
+    if (!resolver) {
+      loading.hidden = true;
+      return;
+    }
+    loading.hidden = false;
+    sourceController = new AbortController();
+    const token = sourceToken;
+    resolver(item, sourceController.signal).then(source => {
+      if (destroyed || closed || token !== sourceToken || state.item?.id !== item.id) return;
+      if (!source || (!source.src && item.kind !== 'text')) {
+        throw new Error('Media unavailable');
+      }
+      resolvedSources.set(item.id, source);
+      sourceErrors.delete(item.id);
+      renderItem(false);
+    }).catch((error: unknown) => {
+      if (destroyed || closed || token !== sourceToken || state.item?.id !== item.id) return;
+      sourceErrors.set(item.id, mediaErrorText(error));
+      renderItem(false);
+    });
+  };
+
+  const renderItem = (invalidate = true): void => {
+    if (invalidate) {
+      sourceToken += 1;
+      sourceController?.abort();
+      sourceController = null;
+    }
     zoom = MIN_ZOOM;
     imageElement = null;
     videoElement = null;
@@ -446,6 +550,9 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     const item = state.item;
     if (item) {
       const media = options.media?.[item.id];
+      const source = resolvedSources.get(item.id) ?? null;
+      const src = source?.src ?? item.src;
+      const hasSource = src !== undefined && src !== '';
       if (item.kind === 'image') {
         const image = document.createElement('img');
         image.className = 'viewer-image';
@@ -456,7 +563,7 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
           image.setAttribute('width', String(width));
           image.setAttribute('height', String(height));
         }
-        if (item.src !== undefined) image.src = item.src;
+        if (hasSource) image.src = src as string;
         imageElement = image;
         mediaHost.appendChild(image);
       } else if (item.kind === 'video') {
@@ -464,13 +571,10 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
         video.className = 'viewer-video';
         video.preload = 'metadata';
         video.playsInline = true;
-        if (item.src !== undefined) video.src = item.src;
-        if (media?.posterUrl !== undefined) video.poster = media.posterUrl;
-        video.addEventListener('timeupdate', () => {
-          if (!videoElement) return;
-          state = { ...state, time: clampTime(videoElement.currentTime, durationOf(state.item)) };
-          syncScrub();
-        });
+        if (hasSource) video.src = src as string;
+        const poster = source?.posterUrl ?? media?.posterUrl;
+        if (poster !== undefined) video.poster = poster;
+        bindMediaElement(video);
         videoElement = video;
         mediaHost.appendChild(video);
 
@@ -489,7 +593,8 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
         const audio = document.createElement('audio');
         audio.className = 'viewer-audio';
         audio.preload = 'metadata';
-        if (item.src !== undefined) audio.src = item.src;
+        if (hasSource) audio.src = src as string;
+        bindMediaElement(audio);
         audioElement = audio;
         mediaHost.appendChild(audio);
 
@@ -497,7 +602,7 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
         waveform.className = 'viewer-waveform';
         waveform.setAttribute('role', 'img');
         waveform.setAttribute('aria-label', 'Audio waveform');
-        const peaks = media?.peaks;
+        const peaks = source?.peaks ?? media?.peaks;
         if (Array.isArray(peaks)) {
           const maximum = peaks.reduce((value, peak) => Math.max(value, Number.isFinite(peak) ? peak : 0), 0);
           for (const peak of peaks) {
@@ -520,7 +625,17 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
         text.textContent = item.title ?? item.id;
         mediaHost.appendChild(text);
       }
+
     }
+
+    const loading = document.createElement('p');
+    loading.className = 'viewer-loading';
+    loading.setAttribute('data-viewer-loading', '');
+    loading.setAttribute('role', 'status');
+    loading.textContent = 'Loading media…';
+    loading.hidden = true;
+    mediaHost.appendChild(loading);
+    if (item) renderLoading(item, loading, resolvedSources.has(item.id) || (item.src !== undefined && item.src !== ''));
 
     const region = document.createElement('div');
     region.className = 'viewer-region-box';
@@ -544,38 +659,51 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     applyZoom();
   };
 
+  const pointerToMedia = (event: PointerEvent): { x: number; y: number } | null => {
+    if (!state.item) return null;
+    const rect = mediaHost.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    const width = state.item.width ?? imageElement?.naturalWidth ?? 0;
+    const height = state.item.height ?? imageElement?.naturalHeight ?? 0;
+    const mapped = displayedToMediaRegion(
+      { x, y, w: 0, h: 0 },
+      rect,
+      { width, height },
+      state.item.kind === 'image' ? zoom : 1,
+    );
+    return { x: mapped.x, y: mapped.y };
+  };
+
   const showRegionFromPointer = (event: PointerEvent): void => {
     if (!state.regionMode || !state.item) return;
     if (KIND_CAPABILITIES[state.item.kind].region !== true) return;
-    const rect = mediaHost.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return;
-    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    const point = pointerToMedia(event);
+    if (!point) return;
     state = {
       ...state,
-      annotation: { ...state.annotation, region: clampRegion({ x, y, w: 0, h: 0 }) },
+      annotation: { ...state.annotation, region: clampRegion({ x: point.x, y: point.y, w: 0, h: 0 }) },
     };
-    drawStartX = x;
-    drawStartY = y;
+    drawStartX = point.x;
+    drawStartY = point.y;
     drawing = true;
     updateRegion();
   };
 
   const resizeRegionFromPointer = (event: PointerEvent): void => {
     if (!drawing) return;
-    const rect = mediaHost.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return;
-    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    const point = pointerToMedia(event);
+    if (!point) return;
     state = {
       ...state,
       annotation: {
         ...state.annotation,
         region: clampRegion({
-          x: Math.min(drawStartX, x),
-          y: Math.min(drawStartY, y),
-          w: Math.abs(x - drawStartX),
-          h: Math.abs(y - drawStartY),
+          x: Math.min(drawStartX, point.x),
+          y: Math.min(drawStartY, point.y),
+          w: Math.abs(point.x - drawStartX),
+          h: Math.abs(point.y - drawStartY),
         }),
       },
     };
@@ -596,7 +724,7 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     const rect = mediaHost.getBoundingClientRect();
     if (!rect || rect.width <= 0) return;
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const tile = nearestTile(filmstrip.tiles, ratio * durationOf(state.item));
+    const tile = nearestTile(filmstrip.tiles, ratio * currentDuration());
     hoverElement.hidden = false;
     hoverElement.style.backgroundImage = `url("${filmstrip.ticketUrl}")`;
     hoverElement.style.backgroundPosition = `${-tile.x}px ${-tile.y}px`;
@@ -617,15 +745,11 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     showHoverFrame(event);
   };
 
-  const targetForIterate = (): IterateTarget => {
-    const target: IterateTarget = {};
+  const targetForIterate = (): ViewerTarget => {
+    const target: ViewerTarget = { ...viewerTarget(state.item, options.compare?.packageId) };
     const compare = options.compare;
-    if (compare) {
-      if (isIdentifier(compare.packageId)) target.packageId = compare.packageId;
-      if (isIdentifier(compare.shotId)) target.shotId = compare.shotId;
-      if (isIdentifier(compare.clipId)) target.clipId = compare.clipId;
-    }
-    if (state.item) target.assetId = state.item.id;
+    if (!state.item?.target?.shotId && isIdentifier(compare?.shotId)) target.shotId = compare!.shotId;
+    if (!state.item?.target?.clipId && isIdentifier(compare?.clipId)) target.clipId = compare!.clipId;
     return target;
   };
 
@@ -661,6 +785,8 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
       takes: compare.takes,
       ...(compare.selected !== undefined ? { selected: compare.selected } : {}),
       ...(compare.shots !== undefined ? { shots: compare.shots } : {}),
+      ...(compare.storage !== undefined ? { storage: compare.storage } : {}),
+      ...(compare.favoritesKey !== undefined ? { favoritesKey: compare.favoritesKey } : {}),
       onClose: () => { closeCompare(); },
     };
 
@@ -683,13 +809,28 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     }
   };
 
+  const releaseMedia = (): void => {
+    sourceToken += 1;
+    sourceController?.abort();
+    sourceController = null;
+    for (const media of [videoElement, audioElement]) {
+      if (!media) continue;
+      try {
+        media.pause();
+        media.removeAttribute('src');
+        media.removeAttribute('poster');
+      } catch {
+        /* a detached player has nothing left to release */
+      }
+    }
+  };
+
   const closeViewer = (): void => {
     if (closed) return;
     closed = true;
     closeCompare();
     state = { ...state, open: false, playing: false };
-    if (videoElement) videoElement.pause();
-    if (audioElement) audioElement.pause();
+    releaseMedia();
     dialog.close();
     opener.focus();
     options.onClose?.();
@@ -717,9 +858,11 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     if (destroyed || closed) return;
     if (compareOpen) return;
     if (event.defaultPrevented) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
 
     const key = event.key;
     if (isEditableTarget(event.target) && key !== 'Escape') return;
+    if ((key === ' ' || key === 'Enter') && isControlTarget(event.target)) return;
 
     if (key === '+' || key === '=') {
       if (state.item?.kind === 'image') {
@@ -798,6 +941,7 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
     closed = true;
     closeCompare();
     state = { ...state, open: false, playing: false };
+    releaseMedia();
     opener.focus();
     options.onClose?.();
   };
@@ -851,6 +995,7 @@ export function mountAssetViewer(options: AssetViewerOptions): AssetViewerHandle
       if (destroyed) return;
       destroyed = true;
       closeCompare();
+      releaseMedia();
       dialog.removeEventListener('keydown', onKeyDown, true);
       dialog.removeEventListener('cancel', onCancel);
       dialog.removeEventListener('close', onDialogClose);

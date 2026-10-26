@@ -1,5 +1,13 @@
 export type ViewerKind = 'image' | 'video' | 'audio' | 'text';
 
+export interface ViewerTarget {
+  packageId?: string;
+  shotId?: string;
+  clipId?: string;
+  takeId?: string;
+  assetId?: string;
+}
+
 export interface ViewerItem {
   id: string;
   kind: ViewerKind;
@@ -9,6 +17,7 @@ export interface ViewerItem {
   fps?: number;
   width?: number;
   height?: number;
+  target?: ViewerTarget;
 }
 
 export interface ViewerCapabilities {
@@ -114,6 +123,31 @@ export const KIND_CAPABILITIES: Record<ViewerKind, ViewerCapabilities> = {
 export const REGION_STEP = 0.01;
 export const SEEK_STEP = 5;
 export const REGION_DEFAULT: Region = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+
+function identifier(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}
+
+/**
+ * The immutable target of one viewer item. An asset id is always the item id;
+ * shot, clip and take come only from the item's own metadata, so navigating the
+ * viewer can never borrow the target of the asset that opened it.
+ */
+export function viewerTarget(
+  item: ViewerItem | null,
+  packageId?: string,
+): ViewerTarget {
+  const target: ViewerTarget = {};
+  const declared = item?.target;
+  const pkg = identifier(declared?.packageId) ?? identifier(packageId);
+  if (pkg) target.packageId = pkg;
+  if (identifier(declared?.shotId)) target.shotId = declared!.shotId;
+  if (identifier(declared?.clipId)) target.clipId = declared!.clipId;
+  if (identifier(declared?.takeId)) target.takeId = declared!.takeId;
+  const assetId = identifier(declared?.assetId) ?? identifier(item?.id);
+  if (assetId) target.assetId = assetId;
+  return Object.freeze(target);
+}
 
 const MIN_TIME_GAP = 0.001;
 const FALLBACK_FPS = 30;
@@ -364,7 +398,12 @@ export function resizeRegion(region: Region, dw: number, dh: number): Region {
   };
 }
 
-export function displayedToMediaRegion(region: Region, display: Rect, media: Size): Region {
+export function displayedToMediaRegion(
+  region: Region,
+  display: Rect,
+  media: Size,
+  zoom = 1,
+): Region {
   const selected = clampRegion(region);
   if (
     !Number.isFinite(display.width) ||
@@ -378,21 +417,29 @@ export function displayedToMediaRegion(region: Region, display: Rect, media: Siz
   ) {
     return selected;
   }
+  const originX = finite(display.x);
+  const originY = finite(display.y);
   const scale = Math.min(display.width / media.width, display.height / media.height);
   const boxWidth = media.width * scale;
   const boxHeight = media.height * scale;
-  const boxX = display.x + (display.width - boxWidth) / 2;
-  const boxY = display.y + (display.height - boxHeight) / 2;
+  const boxX = originX + (display.width - boxWidth) / 2;
+  const boxY = originY + (display.height - boxHeight) / 2;
 
-  const left = display.x + selected.x * display.width;
-  const top = display.y + selected.y * display.height;
-  const right = display.x + (selected.x + selected.w) * display.width;
-  const bottom = display.y + (selected.y + selected.h) * display.height;
+  const left = originX + selected.x * display.width;
+  const top = originY + selected.y * display.height;
+  const right = originX + (selected.x + selected.w) * display.width;
+  const bottom = originY + (selected.y + selected.h) * display.height;
 
-  const x = clamp((left - boxX) / boxWidth, 0, 1);
-  const y = clamp((top - boxY) / boxHeight, 0, 1);
-  const x2 = clamp((right - boxX) / boxWidth, 0, 1);
-  const y2 = clamp((bottom - boxY) / boxHeight, 0, 1);
+  const factor = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const pin = (value: number, origin: number, size: number): number => {
+    const contained = clamp((value - origin) / size, 0, 1);
+    return clamp(0.5 + (contained - 0.5) / factor, 0, 1);
+  };
+
+  const x = pin(left, boxX, boxWidth);
+  const y = pin(top, boxY, boxHeight);
+  const x2 = pin(right, boxX, boxWidth);
+  const y2 = pin(bottom, boxY, boxHeight);
 
   return {
     x,
