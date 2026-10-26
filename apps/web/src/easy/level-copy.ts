@@ -1,5 +1,5 @@
 import { ITERATION_PRESETS } from '../../../server/src/productions/iteration.mjs';
-import type { Level } from './types.ts';
+import type { Compute, Level, StepId } from './types.ts';
 import { COPY } from './copy.ts';
 
 interface Stage {
@@ -19,6 +19,14 @@ const BEST_VERSION = ' You pick the best version.';
 const PICKED_FOR_YOU = ' Picked for you.';
 
 const PRESETS = ITERATION_PRESETS as Record<'draft' | 'balanced' | 'director', Preset>;
+
+export function levelIntro(compute: Compute): string {
+  return compute === 'colab' ? COPY.level.introColab : COPY.level.intro;
+}
+
+export function compactStepName(step: StepId): string {
+  return step === 'level' ? COPY.level.compactName : COPY.steps[step];
+}
 
 export function describeLevel(preset: Preset): string {
   const stages = preset.stages;
