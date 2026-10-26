@@ -6,6 +6,7 @@
 
 import { COPY, fill } from '../copy.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
+import { loadSyncnetBanner } from '../syncnet-notice.ts';
 import { defaultEasyState } from '../store.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
 
@@ -470,6 +471,8 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
   const doc = el.ownerDocument;
   let destroyed = false;
   let phase: 'working' | 'done' | 'error' = 'working';
+  let syncnetNotice = '';
+  let errorReason = DEFAULT_REASON;
   let progress = WORKING_STEP;
   let timer: ReturnType<typeof setInterval> | null = null;
   let blob: Blob | null = null;
@@ -523,8 +526,12 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     };
   }
 
+  function withNotice(html: string): string {
+    return syncnetNotice ? `${syncnetNotice}${html}` : html;
+  }
+
   function paintWorking(): void {
-    el.innerHTML = renderExportWorking(progress);
+    el.innerHTML = withNotice(renderExportWorking(progress));
     setHeading(el, COPY.export.heading, false);
     ctx.shell.setPrimary({ label: COPY.export.working, disabled: true });
   }
@@ -532,15 +539,16 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
   function paintDone(): void {
     phase = 'done';
     stopTimer();
-    el.innerHTML = renderExportDone(doneOptions());
+    el.innerHTML = withNotice(renderExportDone(doneOptions()));
     setHeading(el, COPY.export.doneHeading, true);
     ctx.shell.setPrimary({ label: COPY.export.download });
   }
 
   function paintError(reason: string): void {
     phase = 'error';
+    errorReason = reason;
     stopTimer();
-    el.innerHTML = renderExportError(reason);
+    el.innerHTML = withNotice(renderExportError(reason));
     setHeading(el, COPY.export.heading, false);
     ctx.shell.setPrimary({ label: COPY.export.retry });
   }
@@ -550,7 +558,7 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     timer = setInterval(() => {
       if (destroyed || phase !== 'working') return;
       progress = Math.min(WORKING_LIMIT, progress + WORKING_STEP);
-      if (phase === 'working') el.innerHTML = renderExportWorking(progress);
+      if (phase === 'working') el.innerHTML = withNotice(renderExportWorking(progress));
     }, WORKING_EVERY_MS);
   }
 
@@ -613,7 +621,7 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
       const captions = captionUrlFrom(result);
       if (captions && phase === 'done') {
         bundleCaptions = captions;
-        el.innerHTML = renderExportDone(doneOptions());
+        el.innerHTML = withNotice(renderExportDone(doneOptions()));
       }
     } catch (error) {
       ctx.shell.alert(error instanceof Error ? error.message : String(error ?? DEFAULT_REASON));
@@ -689,6 +697,14 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
 
   const controller: ExportController = { destroy, primary };
   el.addEventListener('click', onClick);
+  void loadSyncnetBanner(ctx).then((html) => {
+    if (html === null || destroyed) return;
+    syncnetNotice = html;
+    ctx.shell.setBanner(html);
+    if (phase === 'working') paintWorking();
+    else if (phase === 'done') paintDone();
+    else paintError(errorReason);
+  });
   const cached = cachedExportForCurrent();
   if (cached) {
     blob = cached.blob;

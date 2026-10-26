@@ -179,14 +179,45 @@ test('a ready uploaded portrait is kept without a take', () => {
   assert.deepEqual(gate.blocking.map((entry) => entry.clipId), ['s2:a_gpu']);
 });
 
-test('a ready LTX presenter clip is kept without a take', () => {
+test('only ready still images from upload or stock are kept without a version', () => {
+  const assets = {
+    a_upload: { kind: 'image', origin: 'upload', status: 'ready' },
+    a_stock: { kind: 'image', origin: 'stock', status: 'ready' },
+    a_video: { kind: 'video', origin: 'upload', status: 'ready' },
+    a_audio: { kind: 'audio', origin: 'stock', status: 'ready' },
+    a_pending: { kind: 'image', origin: 'upload', status: 'pending' },
+  };
+  const gate = studioClipGate([
+    { clipId: 's1:a_upload', assetId: 'a_upload', state: 'planned', takeCount: 0, sceneId: 's1' },
+    { clipId: 's2:a_stock', assetId: 'a_stock', state: 'planned', takeCount: 0, sceneId: 's2' },
+    { clipId: 's3:a_video', assetId: 'a_video', state: 'planned', takeCount: 0, sceneId: 's3' },
+    { clipId: 's4:a_audio', assetId: 'a_audio', state: 'planned', takeCount: 0, sceneId: 's4' },
+    { clipId: 's5:a_pending', assetId: 'a_pending', state: 'planned', takeCount: 0, sceneId: 's5' },
+  ], assets);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.approved, 2);
+  assert.deepEqual(gate.blocking.map((entry) => entry.clipId), [
+    's3:a_video',
+    's4:a_audio',
+    's5:a_pending',
+  ]);
+});
+
+test('a ready LTX presenter clip still needs a keep', () => {
   const assets = {
     a_presenter: { kind: 'video', status: 'ready', gen: { generator: 'ltx25-a2v' } },
   };
-  const gate = studioClipGate([
+  const open = studioClipGate([
     { clipId: 's1:a_presenter', assetId: 'a_presenter', state: 'planned', takeCount: 0, sceneId: 's1' },
   ], assets);
-  assert.equal(gate.ok, true);
-  assert.equal(gate.approved, 1);
-  assert.deepEqual(gate.blocking, []);
+  assert.equal(open.ok, false);
+  assert.equal(open.approved, 0);
+  assert.deepEqual(open.blocking.map((entry) => entry.clipId), ['s1:a_presenter']);
+
+  const kept = studioClipGate([
+    { clipId: 's1:a_presenter', assetId: 'a_presenter', state: 'approved', takeCount: 1, sceneId: 's1' },
+  ], assets);
+  assert.equal(kept.ok, true);
+  assert.equal(kept.approved, 1);
+  assert.deepEqual(kept.blocking, []);
 });

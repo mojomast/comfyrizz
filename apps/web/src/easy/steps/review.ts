@@ -23,6 +23,7 @@ import {
   type ReviewShot,
   type ReviewShotState,
 } from '../shot-strip.ts';
+import { loadSyncnetBanner } from '../syncnet-notice.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
 
 export interface ReviewBlocker {
@@ -69,6 +70,7 @@ export interface ReviewView {
   gate: ReviewGate;
   package?: PackageRecord | null;
   editorStore?: EditorFlagSource | null;
+  syncnetNotice?: string;
 }
 
 const NO_GATE: ReviewGate = { ok: false, approved: 0, total: 0, blocking: [] };
@@ -333,7 +335,9 @@ export function renderReview(view: ReviewView): string {
   const strip = renderShotStrip(shots, selectedId);
   const status = renderStatus(view);
   const edited = renderEditedLine(view);
+  const notice = typeof view.syncnetNotice === 'string' ? view.syncnetNotice : '';
   return `<section class="easy-review" data-easy-review>
+${notice}
 <section class="easy-review-player" data-easy-player aria-label="${escapeHtml(DEFAULT_PLAYER_LABEL)}"></section>
 <div class="easy-review-strip">
 <h2 class="easy-review-shots-heading">${escapeHtml(COPY.review.shots)}</h2>
@@ -385,6 +389,7 @@ export const step: EasyStepModule = {
     let shots = reviewShotsFromPackage(pkg, gate);
     let selectedId = resolvedShotId(shots, ctx.state.review.shotId);
     let disposed = false;
+    let syncnetNotice = '';
     let stopClips: (() => void) | null = null;
     let stopWords: (() => void) | null = null;
     let card: ShotCardController | null = null;
@@ -512,6 +517,7 @@ export const step: EasyStepModule = {
         gate,
         package: packageRecord,
         editorStore: ctx.host.editorStore ?? null,
+        syncnetNotice,
       };
       el.innerHTML = renderReview(view);
       applyPrimary();
@@ -568,6 +574,12 @@ export const step: EasyStepModule = {
     });
     // Clips may still be loading when Review opens; a later store update repaints.
     if (ctx.host.clips().length === 0) void ctx.host.refreshClips();
+    void loadSyncnetBanner(ctx).then((html) => {
+      if (html === null || disposed) return;
+      syncnetNotice = html;
+      ctx.shell.setBanner(html);
+      paint();
+    });
     paint();
     const initial = reviewShotAt(shots, selectedId);
     if (initial) ctx.host.seekToScene(sceneIdOf(initial));

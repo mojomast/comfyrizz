@@ -12,6 +12,7 @@ import {
   readPlanCard,
   type PlanCard,
 } from '../../productions/cards/plan-card.ts';
+import { loadSyncnetBanner } from '../syncnet-notice.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
 
 const PREVIEW_TITLE = 'Preview';
@@ -36,6 +37,7 @@ const PLAN_ERROR_COPY: Record<'agent' | 'production' | 'proposal', string> = {
 export interface PlanRenderOptions {
   snapshot?: unknown;
   package?: unknown;
+  syncnetNotice?: string;
 }
 
 export interface PlanPrimary {
@@ -351,7 +353,9 @@ export function renderPlan(state: EasyState, _facts?: StepFacts, options: PlanRe
     ? `<section class="easy-plan-decisions" aria-label="Plan choices">${decisions}</section>`
     : '';
 
+  const notice = typeof options.syncnetNotice === 'string' ? options.syncnetNotice : '';
   return `<div class="easy-plan" data-easy-plan>
+${notice}
 ${offlineBanner(state)}
 <div class="easy-two-col easy-plan-grid">
 ${renderShots(state, card, scenes)}
@@ -525,6 +529,23 @@ export const step: EasyStepModule = {
       markWordsChanged();
       syncPrimary();
     }
+
+    void loadSyncnetBanner(ctx).then((html) => {
+      if (html === null || disposed) return;
+      ctx.shell.setBanner(html);
+      const root = el.querySelector<HTMLElement>('[data-easy-plan]') ?? el;
+      let slot = root.querySelector<HTMLElement>('[data-easy-syncnet-slot]');
+      if (!html) {
+        slot?.remove();
+        return;
+      }
+      if (!slot) {
+        slot = el.ownerDocument.createElement('div');
+        slot.setAttribute('data-easy-syncnet-slot', '');
+        root.prepend(slot);
+      }
+      slot.innerHTML = html;
+    });
 
     el.addEventListener('click', onClick);
     el.addEventListener('input', onInput);

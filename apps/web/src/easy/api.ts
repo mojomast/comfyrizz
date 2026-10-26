@@ -136,6 +136,9 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     colabStatus() {
       return request('GET', '/api/colab/status');
     },
+    pipelineDiagnostics() {
+      return request('GET', '/api/pipeline/diagnostics');
+    },
     exportBundle(body: any) {
       return request('POST', '/api/export', body);
     },

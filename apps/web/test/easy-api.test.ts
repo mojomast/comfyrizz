@@ -243,6 +243,15 @@ test('network failure throws OFFLINE', async () => {
   });
 });
 
+test('pipelineDiagnostics reads the SyncNet status', async () => {
+  const { fetchImpl, calls } = makeFetch([{ status: 200, body: { syncnet: { configured: false, code: 'SYNCNET_UNAVAILABLE' } } }]);
+  const api = createEasyApi(fetchImpl);
+  const body = await api.pipelineDiagnostics();
+  assert.equal(calls[0].init.method, 'GET');
+  assert.equal(calls[0].input, '/api/pipeline/diagnostics');
+  assert.equal(body.syncnet.configured, false);
+});
+
 test('setSpendCap refuses a missing productionRevision before the request', async () => {
   const { fetchImpl, calls } = makeFetch([{ status: 200, body: {} }]);
   const api = createEasyApi(fetchImpl);

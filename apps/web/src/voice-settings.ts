@@ -29,7 +29,8 @@ type Options = {
   /** Repaint after external edits (undo/redo) without stealing focus. */
   subscribe?: (listener: () => void) => () => void;
 };
-type Plan = { ready: boolean; requiresApproval: boolean; planHash: string; issues: { message: string; action: string }[] };
+type PlanWarning = { code?: string; message?: string; action?: string };
+type Plan = { ready: boolean; requiresApproval: boolean; planHash: string; issues: { message: string; action: string }[]; warnings?: PlanWarning[] };
 type Run = { runId: string; status: string; baseRevision: number; currentStage?: string; stages: { id: string; label: string; status: string; progress?: { completed?: number; total?: number; unit?: string } }[]; error?: string | { message?: string }; result?: { files: { name: string; url: string }[] } };
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const option = (value: string, label: string, current?: string) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`;
@@ -68,6 +69,15 @@ let restored = false;
 const groupState = new Map<string, boolean>();
 const groupOpen = (key: string, fallback: boolean): boolean => groupState.get(key) ?? fallback;
 const active = () => Boolean(run && ['running', 'cancelling', 'reconciling'].includes(run.status));
+const SYNCNET_SKIP_CODES = new Set(['SYNCNET_UNAVAILABLE', 'SYNCNET_SKIPPED']);
+
+function syncnetWarnings(value: Plan | null | undefined): PlanWarning[] {
+  return (value?.warnings ?? []).filter((warning) => typeof warning?.code === 'string' && SYNCNET_SKIP_CODES.has(warning.code) && typeof warning.message === 'string' && warning.message.trim() !== '');
+}
+
+function warningLines(value: Plan | null | undefined): string[] {
+  return (value?.warnings ?? []).map((warning) => [warning.message, warning.action].filter(Boolean).join(' ')).filter((line) => line.trim() !== '');
+}
 
 async function request(path: string, body?: unknown) {
   if (!options) throw new Error('Voice settings are not connected.');
@@ -214,6 +224,7 @@ function render() {
     <details class="form-group voice-group voice-production" data-group="production"${groupOpen('production', false) ? ' open' : ''}>
       <summary>Generate narrated video</summary>
       <div class="form-group-body">
+        ${syncnetWarnings(plan?.value).map((warning) => `<p class="voice-warning" data-syncnet-warning role="status">${esc(warning.message)}${warning.action ? ` ${esc(warning.action)}` : ''}</p>`).join('')}
         <div class="voice-actions toolbar"><button type="button" data-save class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>Save voice settings</button><button type="button" data-plan class="btn btn-secondary btn-sm" ${busy || active() ? 'disabled' : ''}>Check generation plan</button>${active() ? '<button type="button" data-cancel class="btn btn-danger btn-sm">Cancel generation</button>' : ''}</div>
         <p class="hint field-hint">${renderLocation === 'colab' ? 'Google Colab makes the final video, then stops. If that fails, this machine makes it instead.' : 'The final video is made on this machine.'}</p>
         <div data-voice-status role="status" aria-live="polite">${esc(message)}</div>
@@ -298,7 +309,9 @@ function render() {
     };
     const value = await request('/api/pipeline/plan', body) as Plan;
     plan = { value, body, snapshot };
-    message = value.ready ? (value.requiresApproval ? `Ready. Total ceiling ${budget} units; Qwen portion ${mode !== 'kokoro' && runtime === 'colab' ? narrationUnits : 0}. This is a limit, not an estimated charge.` : 'Ready to generate on the selected runtime.') : value.issues.map(i => `${i.message} ${i.action}`).join('\n');
+    const summary = value.ready ? (value.requiresApproval ? `Ready. Total ceiling ${budget} units; Qwen portion ${mode !== 'kokoro' && runtime === 'colab' ? narrationUnits : 0}. This is a limit, not an estimated charge.` : 'Ready to generate on the selected runtime.') : value.issues.map(i => `${i.message} ${i.action}`).join('\n');
+    const warnings = warningLines(value);
+    message = [summary, ...warnings].filter(Boolean).join('\n');
   }));
   host.querySelector('[data-start]')?.addEventListener('click', () => perform(async () => {
     if (!plan || plan.snapshot !== JSON.stringify(packageValue())) { plan = null; throw Error('Project changed. Check a fresh generation plan.'); }

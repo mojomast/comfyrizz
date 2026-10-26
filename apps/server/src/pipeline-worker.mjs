@@ -12,7 +12,7 @@ import { renderPipeline } from '../../renderer/scripts/render-pipeline.mjs';
 import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { json, writeJson, preparePresenterInputs, correctPresenters, presenterScenes } from './pipeline-media.mjs';
-import { summarizeJobs } from './pipeline-contract.mjs';
+import { summarizeJobs, syncnetConfigured, SYNCNET_RUNTIME_SKIP_CODE, SYNCNET_SKIP_MESSAGE } from './pipeline-contract.mjs';
 import { assessBudget, nextJobUpperEstimate, rateForGpu, reserveUnitsFor, spendingMinutes, COLLECT_AND_STOP_RESERVE_MINUTES } from '../../../packages/backends/src/budget.mjs';
 import { decideRenderFallback } from '../../../packages/backends/src/colab-render-plan.mjs';
 import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
@@ -85,8 +85,7 @@ async function releaseHeld(reason) {
 
 async function main() {
   let pkg = json(packagePath), renderResult;
-  const syncnetReady = existsSync(process.env.COMFYRIZZ_SYNCNET_PYTHON ?? '')
-    && existsSync(join(process.env.COMFYRIZZ_SYNCNET_DIR ?? '', 'syncnet_v2.model'));
+  const syncnetReady = syncnetConfigured(process.env);
   const remoteRender = plan.remoteRender === true && plan.options?.backendId === 'colab' && plan.options?.renderLocation === 'colab';
   await stage('preflight', async () => {
     const validation = validatePackage(pkg);
@@ -145,7 +144,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
 
   await stage('presenter_inputs', () => presenterPreparation(workDir, { signal, onEvent: sourceEvent }), !plan.presenters);
   if (plan.presenters && !syncnetReady) {
-    send({ kind: 'warning', stageId: 'presenter_inputs', code: 'SYNCNET_SKIPPED', message: 'Presenter lip-sync verification is not configured; the LTX presenter clips will render without the extra SyncNet check.' });
+    send({ kind: 'warning', stageId: 'presenter_inputs', code: SYNCNET_RUNTIME_SKIP_CODE, message: SYNCNET_SKIP_MESSAGE });
   }
   pkg = json(packagePath);
   const jobs = planJobs(pkg).jobs;
@@ -260,7 +259,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       await heldBackend.downloadListed(files, workDir, { onEvent: sourceEvent });
     }
     if (!syncnetReady) {
-      send({ kind: 'warning', stageId, code: 'SYNCNET_SKIPPED', message: 'SyncNet is not configured; using the LTX presenter clips without the extra lip-sync correction.' });
+      send({ kind: 'warning', stageId, code: SYNCNET_RUNTIME_SKIP_CODE, message: SYNCNET_SKIP_MESSAGE });
       return [];
     }
     return presenterCorrection(workDir, runDir, { signal, onEvent: event => {

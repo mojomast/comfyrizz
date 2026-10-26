@@ -33,8 +33,9 @@ export interface StudioGate {
 
 /**
  * The studio's review gate. A This-computer clip with no versions is kept, and
- * a ready uploaded/stock still is already the chosen source. A clip that
- * already has versions, and every other clip, still has to be kept.
+ * a ready uploaded or stock still image is already the chosen source. Ready
+ * uploaded or stock video and audio are not, and a talking-head clip is not.
+ * A clip that already has versions, and every other clip, still has to be kept.
  */
 export function studioClipGate(
   clips: readonly StudioClip[] | null | undefined,
@@ -48,9 +49,10 @@ export function studioClipGate(
     const asset = clip.assetId ? assets?.[clip.assetId] : undefined;
     const generator = asset?.gen?.generator;
     const takes = typeof clip.takeCount === 'number' ? clip.takeCount : 0;
-    const importedSource = asset?.status === 'ready' && (asset.origin === 'upload' || asset.origin === 'stock');
-    const presenterClip = asset?.kind === 'video' && generator === 'ltx25-a2v' && asset.status === 'ready';
-    if ((importedSource || presenterClip || (typeof generator === 'string' && CPU_GENERATORS.has(generator))) && takes === 0) {
+    const importedStill = asset?.kind === 'image'
+      && asset.status === 'ready'
+      && (asset.origin === 'upload' || asset.origin === 'stock');
+    if ((importedStill || (typeof generator === 'string' && CPU_GENERATORS.has(generator))) && takes === 0) {
       approved += 1;
       continue;
     }
