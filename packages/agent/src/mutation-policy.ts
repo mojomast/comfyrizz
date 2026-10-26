@@ -230,7 +230,7 @@ export function targetSetRefusal(state: Pick<PolicyState, 'shots' | 'targets'>):
   }
   const missing = unresolvedTargets(state.targets, state.shots);
   if (missing.length) {
-    return refusal('SCOPE_UNRESOLVED', `the requested target ${missing[0]} is not a shot or line of this production`);
+    return refusal('SCOPE_UNRESOLVED', `the requested target ${missing[0]} is not a shot or line of this production; it is outside the production state or the requested scope`);
   }
   return undefined;
 }
