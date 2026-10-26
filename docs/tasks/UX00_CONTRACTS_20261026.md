@@ -614,6 +614,169 @@ Base for bees remains `963d9c1` content; tip after lease docs is current
 
 No path appears in two Wave 3 write sets. UX21 and PB-SCRATCH stay held.
 
+## Wave 4 write sets and leases
+
+Each lease is granted against base `2e94994` (feat/ux-results tip after Wave 3
+landed: UX03@755755f, UX17@1b751d3, UX10@8eb243b, UX08@3fe514d, UX13@2e94994).
+A worker edits only its leased paths and creates new files only where listed. UX00
+contract modules and fixtures stay read-only. `apps/server/src/app.mjs`,
+`apps/web/src/main.ts` and root tooling stay coordinator-owned (UX21).
+
+**Still exclusive / do not touch:** UX21 held-coordinator write set (`app.mjs`,
+`main.ts`, integration/docs). UX16 stays **held** until UX15 merges (Easy export
+UI). PB-SCRATCH stays **held** until UX15 merges (prefer extending UX15 over
+parallel writers on export/delivery). Merged Wave 1–3 exclusives that Wave 4 must
+not reopen: UX05 editor save/autosave; UX06 Super Easy CPU/progress; UX07 Easy
+journey (`home`, `plan-writer`, `approve-generate`, `steps/idea`, `steps/plan`,
+`store` identity helpers); UX08 Ask/settings/header (`easy/mount.ts`,
+`ask-drawer`, `agent-settings`, `project-name`, `shell-save`); UX09 agent-chat /
+`packages/agent` scope modules (`agent-chat.mjs`, `conversation.ts`,
+`production-tools.ts`, `production-planner.ts`, `mutation-policy.ts`); UX01
+admission helpers; UX03 `run.mjs` / pipeline-adapter / outbox-execution /
+actions/commands; UX10 server `takes/*`; UX11 web takes/media/timeline; UX13
+characters editor/audition/mount + server audition/routes; UX17 compile/timing
+helpers (`chat-project.mjs`, `plan-from-package.mjs`, `scene-build.ts`,
+`timing-coverage.ts`).
+
+**NOTES (overlap resolutions):**
+- No Wave 4 packet receives `app.mjs` or `main.ts` (UX21).
+- UX16 and PB-SCRATCH are **not** leased or unlocked in this wave even though
+  UX15's deps are met for those dependents — wait for UX15 merge first.
+- UX12 plan_tier marks complex / historically agy-cua; Wave 4 dispatch is
+  **deepseek-v4.1-flash** (Kyle unlock 2026-10-26 ~5:36 PM ET); stay leased to
+  the assigned viewer/compare write set.
+- UX14 voice/native-transfer files are disjoint from merged UX13 editor/audition.
+- UX18 `brief.ts` / `evidence.ts` are disjoint from UX17 timing helpers and UX09
+  scope modules (do not reopen `agent-chat.mjs`).
+- UX19 CSS/toast shell is disjoint from UX08 Ask/settings mount files.
+- PB-SCRATCH (`scratch-preflight.mjs`) is disjoint from UX15 delivery/export paths
+  but remains held to avoid parallel export-adjacent writers.
+
+### UX04 — Hydrated recovery and event reset
+
+- **Write:**
+  - `apps/server/src/events.mjs`
+  - `apps/server/src/productions/snapshot.mjs`
+  - `apps/web/src/productions/client.ts`
+  - `apps/web/src/easy/events.ts`
+- **Tests:**
+  - `apps/server/test/productions/snapshot-recovery.test.mjs`
+  - `apps/web/src/productions/client.test.ts`
+  - `apps/web/src/easy/events.test.ts`
+- **Read-only:**
+  - UX00 contract modules/fixtures
+  - UX02 ledger/budget modules; UX03 executor/outbox (consume APIs)
+  - `apps/server/src/app.mjs` (UX21 wires event drain / snapshot mount)
+- **Coordinator wiring in `app.mjs`:** mount hydrated snapshot / event-reset
+  adapters once UX04 exports them. Do not edit `app.mjs` here.
+
+### UX12 — Exact-target audible and accessible review
+
+- **Write:**
+  - `apps/web/src/viewer/asset-viewer.ts`
+  - `apps/web/src/viewer/model.ts`
+  - `apps/web/src/viewer/viewer.css`
+  - `apps/web/src/takes/compare.ts`
+- **Tests:**
+  - `apps/web/src/viewer/asset-viewer.test.ts`
+  - `apps/web/src/takes/compare.test.ts`
+- **Read-only:**
+  - UX11 `takes/api.ts`, media ticket/thumbnail clients (consume)
+  - UX10 server take routes (consume)
+  - UX00 media fixtures
+  - `apps/web/src/main.ts` (UX21 mounts viewer/compare)
+- **Model note:** complex tier / leased write set; Wave 4 bee is
+  deepseek-v4.1-flash (not agy-cua) unless a later brief explicitly re-escalates.
+- **Coordinator wiring in `main.ts`:** viewer/compare mount once UX12 exports
+  adapters.
+
+### UX14 — Approved recording and native-transfer continuity
+
+- **Write:**
+  - `apps/web/src/characters/voice-mode.ts`
+  - `apps/web/src/characters/voice-reference.ts`
+  - `apps/server/src/productions/native-test.mjs`
+  - `apps/server/src/characters/voice-projection.mjs`
+  - `docs/CASTING_VOICE_CONTINUITY.md`
+- **Tests:**
+  - `apps/web/src/characters/voice-reference.test.ts`
+  - `apps/server/test/characters/native-transfer.test.mjs`
+- **Read-only / do not reopen UX13 exclusives:**
+  - `apps/web/src/characters/{editor,audition-panel,mount}.ts`
+  - `apps/server/src/characters/{audition,routes}.mjs`
+  - UX10 takes; UX03 executor (native paid paths stay gated)
+  - `apps/server/src/app.mjs` / `apps/web/src/main.ts` (UX21)
+- **Coordinator wiring:** production/model context for native-transfer once UX14
+  exports adapters; paid native dispatch remains gated.
+
+### UX15 — Canonical immutable export and publication
+
+- **Write:**
+  - `apps/server/src/export.mjs`
+  - `apps/server/src/routes/render.mjs`
+  - `apps/server/src/productions/delivery.mjs`
+  - `apps/server/src/productions/delivery-snapshot.mjs`
+  - `apps/renderer/scripts/render-package-lib.mjs`
+- **Tests:**
+  - `apps/server/test/export-immutable.test.mjs`
+  - `apps/server/test/productions/delivery-snapshot.test.mjs`
+- **Read-only:**
+  - UX00 export/delivery fixtures; UX05 editor save (consume package identity)
+  - UX10 take selection (consume)
+  - UX16 Easy export UI files (not leased yet)
+  - PB-SCRATCH `apps/renderer/scripts/scratch-preflight.mjs` (held)
+  - `apps/server/src/app.mjs` (UX21 mounts export/delivery routes)
+- **Downstream hold:** UX16 and PB-SCRATCH unlock only after this packet merges.
+- **Coordinator wiring in `app.mjs`:** export/delivery route mount once UX15
+  exports adapters.
+
+### UX18 — Evidence-backed briefs and useful scaffolds
+
+- **Write:**
+  - `packages/agent/src/brief.ts`
+  - `packages/agent/src/evidence.ts`
+  - `apps/server/src/brief.mjs`
+- **Tests:**
+  - `packages/agent/test/evidence-briefs.test.ts`
+  - `apps/server/test/brief-evidence.test.mjs`
+- **Read-only / do not reopen UX09 / UX17 exclusives:**
+  - `apps/server/src/agent-chat.mjs` and UX09 scope modules
+  - UX17 `chat-project.mjs`, `plan-from-package.mjs`, `scene-build.ts`,
+    `timing-coverage.ts` (consume compiled timing/fidelity outputs)
+  - UX00 fixtures
+- **Coordinator wiring:** none in `app.mjs`/`main.ts` for this packet.
+
+### UX19 — Non-obstructing shell and interaction efficiency
+
+- **Write:**
+  - `apps/web/src/easy/easy.css`
+  - `apps/web/src/easy/easy-mobile.css`
+  - `apps/web/src/shell/toast.ts`
+  - `apps/web/src/shell/toast.css`
+- **Tests:**
+  - `apps/web/src/shell/toast.test.ts`
+  - `apps/web/src/easy/shell-efficiency.test.ts`
+- **Read-only / do not reopen UX07 / UX08 exclusives:**
+  - `apps/web/src/easy/mount.ts`, Ask/settings/header modules (UX08)
+  - UX07 journey files; UX06 Super Easy CPU/progress
+  - UX11 media clients (consume)
+  - `apps/web/src/main.ts` (UX21)
+- **Coordinator wiring in `main.ts`:** toast/shell efficiency hooks once UX19
+  exports adapters.
+
+### Overlap check (Wave 4 vs held / merged)
+
+| Packet | Collides UX21 `app.mjs`/`main.ts`? | Collides other Wave 4? | Collides held/merged exclusives? |
+| --- | --- | --- | --- |
+| UX04 | No — adapters only | No | No — snapshot/events only |
+| UX12 | No | No — viewer/compare only | UX11/UX10 consume-only |
+| UX14 | No | No — voice/native only | UX13 editor/audition omitted |
+| UX15 | No | No — server export/delivery | UX16 + PB-SCRATCH deliberately not leased |
+| UX18 | No | No | agent-chat / UX17 helpers omitted |
+| UX19 | No | No — CSS/toast only | UX08 mount/Ask read-only |
+
+No path appears in two Wave 4 write sets. UX16, UX21, and PB-SCRATCH stay held.
+
 ## Verification
 
 All checks are local, use isolated temporary runtimes, and make no network,
