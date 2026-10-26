@@ -66,7 +66,7 @@ function doneSnapshot() {
   return { finalVideo: { status: 'done', url: 'https://example.test/final.mp4' } };
 }
 
-test('opening the package in Studio keeps its id and lands on Idea', () => {
+test('opening a package in Studio without run state keeps its id and falls back to Idea', () => {
   assert.equal(
     escapeToStudio('?package=pkg_123&view=editor&step=plan', 'pkg_123'),
     '?package=pkg_123&step=idea',
@@ -201,7 +201,8 @@ test('I want more control keeps the package in the address before the studio ope
   });
 
   assert.equal(prevented, true);
-  assert.deepEqual(navigated, ['?package=pkg_123&step=idea']);
+  assert.equal(navigated.length, 1);
+  assert.match(navigated[0], /[?&]package=pkg_123(?:&|$)/u);
   assert.deepEqual(handed, ['pkg_123']);
   handle.destroy();
 });
@@ -267,7 +268,8 @@ test('Open in Studio keeps the package before the studio opens', () => {
   });
 
   assert.equal(prevented, true);
-  assert.deepEqual(navigated, ['?package=pkg_123&step=idea']);
+  assert.equal(navigated.length, 1);
+  assert.match(navigated[0], /[?&]package=pkg_123(?:&|$)/u);
   assert.deepEqual(handed, ['pkg_123']);
   handle.destroy();
 });
@@ -333,4 +335,134 @@ test('escape code never mentions Google Colab without its first word', () => {
   for (const match of done.matchAll(/Colab/g)) {
     assert.ok(done.slice(0, match.index).endsWith('Google '));
   }
+});
+
+test('escaping with a mid-plan package opens Plan instead of Idea', () => {
+  const current = state({
+    packageId: 'pkg_123',
+    productionId: 'prod_0123456789abcdef01234567',
+    idea: { ...defaultEasyState().idea, text: 'A friendly robot learns to skate' },
+    plan: { ...defaultEasyState().plan, status: 'writing' },
+  });
+
+  assert.equal(
+    escapeToStudio('?package=pkg_123&step=idea', 'pkg_123', current),
+    '?package=pkg_123&step=plan',
+  );
+
+  const resumed = state({
+    packageId: 'pkg_123',
+    productionId: 'prod_0123456789abcdef01234567',
+    plan: { ...defaultEasyState().plan, status: 'writing' },
+  });
+  assert.equal(
+    escapeToStudio('?step=idea', 'pkg_123', resumed),
+    '?package=pkg_123&step=plan',
+    'a short or empty local prompt does not send a packaged video back to Idea',
+  );
+});
+
+test('escaping after a finished generation opens Review', () => {
+  const current = state({
+    packageId: 'pkg_123',
+    productionId: 'prod_0123456789abcdef01234567',
+    plan: { ...defaultEasyState().plan, status: 'ready' },
+    generate: { status: 'done' },
+  });
+
+  assert.equal(
+    escapeToStudio('?package=pkg_123&step=idea', 'pkg_123', current),
+    '?package=pkg_123&step=review',
+  );
+});
+
+test('escaping after an export opens Export', () => {
+  const current = state({
+    packageId: 'pkg_123',
+    productionId: 'prod_0123456789abcdef01234567',
+    plan: { ...defaultEasyState().plan, status: 'ready' },
+    generate: { status: 'done' },
+    exported: { revision: 4, at: '2026-10-26T15:00:00.000Z' },
+  });
+
+  assert.equal(
+    escapeToStudio('?package=pkg_123&step=idea', 'pkg_123', current),
+    '?package=pkg_123&step=export',
+  );
+});
+
+test('escaping after a reload with an exported revision still opens Export', () => {
+  const current = state({
+    packageId: 'pkg_123',
+    productionId: 'prod_0123456789abcdef01234567',
+    plan: { ...defaultEasyState().plan, status: 'ready' },
+    exported: { revision: 4, at: '2026-10-26T15:00:00.000Z' },
+  });
+
+  assert.equal(
+    escapeToStudio('?package=pkg_123', 'pkg_123', current),
+    '?package=pkg_123&step=export',
+  );
+});
+
+test('escaping while generation runs opens Generate', () => {
+  const current = state({
+    packageId: 'pkg_123',
+    productionId: 'prod_0123456789abcdef01234567',
+    plan: { ...defaultEasyState().plan, status: 'ready' },
+    generate: { status: 'running' },
+  });
+
+  assert.equal(
+    escapeToStudio('?package=pkg_123&step=export', 'pkg_123', current),
+    '?package=pkg_123&step=generate',
+  );
+});
+
+test('escaping without a package stays on Idea even with a full idea', () => {
+  const current = state({
+    idea: { ...defaultEasyState().idea, text: 'A friendly robot learns to skate' },
+    questions: [{ id: 'q1', field: 'tone', prompt: 'Tone?', options: ['warm'], decide: 'warm' }],
+    questionsAsked: true,
+  });
+
+  assert.equal(escapeToStudio('?step=plan', null, current), '?step=idea');
+});
+
+test('caller-supplied facts drive the same derived escape', () => {
+  const current = state({
+    packageId: 'pkg_123',
+    productionId: 'prod_0123456789abcdef01234567',
+    plan: { ...defaultEasyState().plan, status: 'ready' },
+    generate: { status: 'done' },
+  });
+
+  assert.equal(
+    escapeToStudio('?package=pkg_123', 'pkg_123', current, {
+      hasPackage: true,
+      planApproved: true,
+      actionsActive: false,
+      allShotsKept: false,
+      exportCurrent: false,
+    }),
+    '?package=pkg_123&step=review',
+  );
+});
+
+test('the done Studio escape follows the finished package to Review', () => {
+  const current = state({
+    packageId: 'pkg_123',
+    productionId: 'prod_0123456789abcdef01234567',
+    plan: { ...defaultEasyState().plan, status: 'ready' },
+    generate: { status: 'done' },
+  });
+  const html = renderSuperEasyDoneActions({
+    finalUrl: 'https://example.test/final.mp4',
+    packageId: 'pkg_123',
+    search: '?package=pkg_123',
+    state: current,
+  });
+  const studio = html.match(/<a\b[^>]*data-super-easy-open-studio[^>]*>/u);
+  assert.ok(studio, 'Open in Studio is present');
+  assert.match(studio[0], /href="\?package=pkg_123&amp;step=review"/u);
 });
