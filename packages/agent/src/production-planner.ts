@@ -5,6 +5,21 @@
 // requested lines, and never copy an id, revision, or command out of an
 // untrusted note. Guardrails in the tool runner use the same scope rules.
 
+import {
+  EMPTY_SET,
+  ITERATION_EXCEEDED,
+  UNSCOPED_SET,
+  normalizeTargetSet,
+  refusal,
+  effectiveStageLimit,
+  remainingStageCapacity,
+  shotOfId,
+  targetSetAllows,
+  unresolvedTargets,
+  type MutationRefusal,
+  type TargetSet,
+} from './mutation-policy.js';
+
 const ID_MENTION_PATTERNS: ReadonlyArray<{
   re: RegExp;
   ids: (match: RegExpMatchArray) => string[];
@@ -46,6 +61,15 @@ export interface ProductionShotState {
 export interface ProductionAgentState {
   intent?: string;
   shots?: ProductionShotState[];
+  /**
+   * UX00 requested target set: `{ shotIds?, lineIds? }`. Absent means the whole
+   * production (unscoped); `{ shotIds: [], lineIds: [] }` means nothing may
+   * change. Takes precedence over the legacy requested id lists below.
+   */
+  targets?: unknown;
+  /** Shots the production has locked against change. */
+  lockedShotIds?: string[];
+  /** Legacy: absent means unscoped, present and both empty means nothing may change. */
   requestedShotIds?: string[];
   requestedLineIds?: string[];
 }
@@ -125,14 +149,6 @@ function parseRequestedTakes(message: string): number | undefined {
   return undefined;
 }
 
-function effectiveStageLimit(policy: any, shotId: string, stage: string): number {
-  const override = policy?.shotOverrides?.[shotId];
-  const stagePolicy = override?.stages?.[stage] ?? policy?.stages?.[stage];
-  const takes = typeof stagePolicy?.takes === "number" ? stagePolicy.takes : 1;
-  const rounds = typeof stagePolicy?.rounds === "number" ? stagePolicy.rounds : 1;
-  return takes * rounds;
-}
-
 export interface ProductionEdit {
   shotId: string;
   lineId: string;
@@ -154,18 +170,33 @@ export interface ProductionTurnPlan {
   };
 }
 
-interface Scope {
+export interface Scope {
   shotIds: Set<string>;
   lineIds: Set<string>;
+  /** Shots whose ids may be named: requested shots plus the shot of each requested line. */
   scopeShots: Set<string>;
+  /** The requested lines when any line was requested, else null. */
   scopeLines: Set<string> | null;
+  /** Shots every line of which may change. */
+  wholeShots: Set<string>;
+  targets: TargetSet;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function idMentions(text: string): Set<string> {
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Ids named in free text. Numeric ids (`s4`, `shot 4 line 2`) are recognised by
+ * shape. Named ids such as `s_intro:l2` carry no recognisable shape in prose,
+ * so they are recognised only when they are real ids of the production
+ * (`knownIds`), with word boundaries.
+ */
+export function idMentions(text: string, knownIds?: Iterable<string>): Set<string> {
   const ids = new Set<string>();
   if (text === '') return ids;
   for (const { re, ids: toIds } of ID_MENTION_PATTERNS) {
@@ -174,46 +205,89 @@ export function idMentions(text: string): Set<string> {
       for (const id of toIds(match)) ids.add(id);
     }
   }
+  if (knownIds) {
+    for (const id of knownIds) {
+      if (ids.has(id) || !text.includes(id)) continue;
+      if (new RegExp(`(?<![A-Za-z0-9_.:-])${escapeRegExp(id)}(?![A-Za-z0-9_-]|:[A-Za-z0-9])`).test(text)) ids.add(id);
+    }
+  }
   return ids;
 }
 
 function shotOf(lineId: string): string {
-  return lineId.split(':')[0] ?? lineId;
+  return shotOfId(lineId);
 }
 
-export function scopeFromState(state: ProductionAgentState, snapshot?: ProductionReadSnapshot): Scope {
+/** The production's shots: the state's list restricted to the read snapshot's shot ids when it has them. */
+export function shotsFromState(state: ProductionAgentState, snapshot?: ProductionReadSnapshot): ProductionShotState[] {
   const listed = Array.isArray(state.shots) ? state.shots : [];
   const snapshotShots = Array.isArray(snapshot?.shotIds)
     ? snapshot.shotIds.filter(id => typeof id === 'string' && id !== '')
     : undefined;
-  const shots = snapshotShots && snapshotShots.length
+  return snapshotShots && snapshotShots.length
     ? listed.filter(shot => snapshotShots.includes(shot.id)).concat(
       snapshotShots.filter(id => !listed.some(shot => shot.id === id)).map(id => ({ id, lines: [] as string[] })),
     )
     : listed;
+}
+
+/**
+ * The requested target set a state carries. `targets` wins. The legacy
+ * requested id lists are read the same way: neither present is unscoped, both
+ * empty is empty, requested lines narrow to those lines, requested shots alone
+ * permit those shots whole. A malformed target list authorizes nothing.
+ */
+export function targetsFromState(state: ProductionAgentState): { set: TargetSet; refusal?: MutationRefusal } {
+  if (state.targets !== undefined && state.targets !== null) {
+    try {
+      return { set: normalizeTargetSet(state.targets) };
+    } catch (error) {
+      return { set: EMPTY_SET, refusal: refusal('SCOPE_UNRESOLVED', `the requested targets are not valid ids: ${(error as Error).message}`) };
+    }
+  }
+  if (state.requestedShotIds === undefined && state.requestedLineIds === undefined) return { set: UNSCOPED_SET };
+  const shotIds = Array.isArray(state.requestedShotIds) ? [...new Set(state.requestedShotIds)] : [];
+  const lineIds = Array.isArray(state.requestedLineIds) ? [...new Set(state.requestedLineIds)] : [];
+  if (shotIds.length === 0 && lineIds.length === 0) return { set: EMPTY_SET };
+  return { set: lineIds.length ? { mode: 'scoped', shotIds: [], lineIds } : { mode: 'scoped', shotIds, lineIds: [] } };
+}
+
+export function scopeFromTargets(targets: TargetSet, shots: readonly ProductionShotState[]): Scope {
   const shotIds = new Set(shots.map(shot => shot.id));
   const lineIds = new Set<string>();
   for (const shot of shots) {
     for (const line of shot.lines ?? []) lineIds.add(line);
   }
-  const requestedShots = state.requestedShotIds;
-  const requestedLines = Array.isArray(state.requestedLineIds) ? state.requestedLineIds : [];
-  const scopeShots = new Set(Array.isArray(requestedShots) ? requestedShots : [...shotIds]);
-  const scopeLines = requestedLines.length ? new Set(requestedLines) : null;
-  for (const line of requestedLines) {
+  if (targets.mode === 'unscoped') {
+    return { shotIds, lineIds, scopeShots: new Set(shotIds), scopeLines: null, wholeShots: new Set(shotIds), targets };
+  }
+  if (targets.mode === 'empty') {
+    return { shotIds, lineIds, scopeShots: new Set(), scopeLines: null, wholeShots: new Set(), targets };
+  }
+  const scopeShots = new Set<string>(targets.shotIds);
+  for (const line of targets.lineIds) {
     const shot = shotOf(line);
     if (shot) scopeShots.add(shot);
   }
-  return { shotIds, lineIds, scopeShots, scopeLines };
+  return {
+    shotIds,
+    lineIds,
+    scopeShots,
+    scopeLines: targets.lineIds.length ? new Set(targets.lineIds) : null,
+    wholeShots: new Set(targets.shotIds),
+    targets,
+  };
+}
+
+export function scopeFromState(state: ProductionAgentState, snapshot?: ProductionReadSnapshot, override?: TargetSet): Scope {
+  return scopeFromTargets(override ?? targetsFromState(state).set, shotsFromState(state, snapshot));
 }
 
 function idInScope(id: string, scope: Scope): boolean {
   if (scope.shotIds.has(id)) return scope.scopeShots.has(id);
   if (scope.lineIds.has(id)) {
     const shot = shotOf(id);
-    if (!scope.scopeShots.has(shot)) return false;
-    if (scope.scopeLines && !scope.scopeLines.has(id)) return false;
-    return true;
+    return targetSetAllows(scope.targets, { shotId: shot, lineId: id });
   }
   return false;
 }
@@ -233,18 +307,47 @@ function addStructuredIds(value: unknown, out: Set<string>): void {
   }
 }
 
-function addMentionedIds(value: unknown, out: Set<string>): void {
+function addMentionedIds(value: unknown, out: Set<string>, known: Iterable<string>): void {
   if (typeof value === 'string') {
-    for (const id of idMentions(value)) out.add(id);
+    for (const id of idMentions(value, known)) out.add(id);
     return;
   }
   if (Array.isArray(value)) {
-    for (const entry of value) addMentionedIds(entry, out);
+    for (const entry of value) addMentionedIds(entry, out, known);
     return;
   }
   if (isPlainObject(value)) {
-    for (const entry of Object.values(value)) addMentionedIds(entry, out);
+    for (const entry of Object.values(value)) addMentionedIds(entry, out, known);
   }
+}
+
+export interface ScopeViolation {
+  id: string;
+  code: 'SCOPE_UNRESOLVED' | 'SCOPE_EXPANSION' | 'SCOPE_EMPTY';
+}
+
+/**
+ * Ids named by a payload that the production does not have (SCOPE_UNRESOLVED)
+ * or that sit outside the requested targets (SCOPE_EXPANSION, SCOPE_EMPTY when
+ * nothing was requested). Structured ids are read from shotId/lineId/targetId
+ * fields; every string is also scanned for real ids of the production.
+ */
+export function scopeViolationDetails(
+  value: unknown,
+  state: ProductionAgentState,
+  snapshot?: ProductionReadSnapshot,
+  override?: TargetSet,
+): ScopeViolation[] {
+  const scope = scopeFromState(state, snapshot, override);
+  const ids = new Set<string>();
+  addStructuredIds(value, ids);
+  addMentionedIds(value, ids, [...scope.shotIds, ...scope.lineIds]);
+  const violations: ScopeViolation[] = [];
+  for (const id of ids) {
+    if (!scope.shotIds.has(id) && !scope.lineIds.has(id)) violations.push({ id, code: 'SCOPE_UNRESOLVED' });
+    else if (!idInScope(id, scope)) violations.push({ id, code: scope.targets.mode === 'empty' ? 'SCOPE_EMPTY' : 'SCOPE_EXPANSION' });
+  }
+  return violations;
 }
 
 /** Ids that are not in the production's shots and lines, or that sit outside the requested scope. */
@@ -252,16 +355,14 @@ export function scopeViolations(
   value: unknown,
   state: ProductionAgentState,
   snapshot?: ProductionReadSnapshot,
+  override?: TargetSet,
 ): string[] {
-  const scope = scopeFromState(state, snapshot);
-  const ids = new Set<string>();
-  addStructuredIds(value, ids);
-  addMentionedIds(value, ids);
-  const violations: string[] = [];
-  for (const id of ids) {
-    if (!idInScope(id, scope)) violations.push(id);
-  }
-  return violations;
+  return scopeViolationDetails(value, state, snapshot, override).map(violation => violation.id);
+}
+
+/** Target ids of a production that do not resolve against the production's shots and lines. */
+export function unresolvedRequestedTargets(state: ProductionAgentState, snapshot?: ProductionReadSnapshot, override?: TargetSet): string[] {
+  return unresolvedTargets(override ?? targetsFromState(state).set, shotsFromState(state, snapshot));
 }
 
 const PLAN_KEYS = new Set([
@@ -290,28 +391,35 @@ const PAID_SLOT_KINDS = new Set(['render', 'take', 'audition', 'generate', 'imag
 
 /**
  * Paid slots have to fit the iteration policy the read returned: no locked
- * shot, and no stage over takes × rounds once slots already used are counted.
+ * shot, and no stage over takes x rounds once slots already used are counted.
+ * Text edits may not touch a locked shot either.
  */
-export function iterationSlotViolation(
+export function iterationSlotRefusal(
   plan: unknown,
   iteration?: ProductionReadSnapshot['iteration'],
-): string | undefined {
-  if (!iteration || !isPlainObject(plan) || !Array.isArray(plan.actions)) return undefined;
+): MutationRefusal | undefined {
+  if (!iteration || !isPlainObject(plan)) return undefined;
   const locked = new Set(iteration.lockedShotIds ?? []);
+  if (Array.isArray(plan.edits)) {
+    for (const edit of plan.edits) {
+      if (!isPlainObject(edit)) continue;
+      const shot = typeof edit.shotId === 'string' ? edit.shotId : (typeof edit.lineId === 'string' ? shotOf(edit.lineId) : '');
+      if (shot !== '' && locked.has(shot)) return refusal('ITERATION_SHOT_LOCKED', `edit on locked shot ${shot}`);
+    }
+  }
+  if (!Array.isArray(plan.actions)) return undefined;
   const counts = new Map<string, Map<string, number>>();
   for (const slot of plan.actions) {
     if (!isPlainObject(slot) || typeof slot.kind !== 'string' || !PAID_SLOT_KINDS.has(slot.kind)) continue;
     if (iteration.policy && slot.kind === 'video') {
-      return 'action kind video is a policy stage, not a render/take slot; use render or take';
+      return { message: 'action kind video is a policy stage, not a render/take slot; use render or take' };
     }
     const targetId = typeof slot.targetId === 'string' ? slot.targetId : '';
     const shot = targetId.includes(':') ? (targetId.split(':')[0] ?? '') : targetId;
-    if (shot === '') return 'paid slot has no resolvable shot';
-    if (locked.has(shot)) return `paid slot on locked shot ${shot}`;
+    if (shot === '') return { message: 'paid slot has no resolvable shot' };
+    if (locked.has(shot)) return refusal('ITERATION_SHOT_LOCKED', `paid slot on locked shot ${shot}`);
     if (!iteration.policy) continue;
     const stage = slot.kind === 'audition' ? 'voice' : 'video';
-    const usedCount = iteration.used?.[shot]?.[stage];
-    const used = typeof usedCount === 'number' && Number.isFinite(usedCount) ? usedCount : 0;
     let stageCounts = counts.get(shot);
     if (!stageCounts) {
       stageCounts = new Map();
@@ -319,11 +427,18 @@ export function iterationSlotViolation(
     }
     const next = (stageCounts.get(stage) ?? 0) + 1;
     stageCounts.set(stage, next);
-    if (used + next > effectiveStageLimit(iteration.policy, shot, stage)) {
-      return `shot ${shot} exceeds ${stage} take limit ${effectiveStageLimit(iteration.policy, shot, stage)}`;
+    if (next > remainingStageCapacity(iteration.policy, iteration.used, shot, stage)) {
+      return refusal(ITERATION_EXCEEDED, `shot ${shot} exceeds ${stage} take limit ${effectiveStageLimit(iteration.policy, shot, stage)}`);
     }
   }
   return undefined;
+}
+
+export function iterationSlotViolation(
+  plan: unknown,
+  iteration?: ProductionReadSnapshot['iteration'],
+): string | undefined {
+  return iterationSlotRefusal(plan, iteration)?.message;
 }
 
 /** The closed plan shape the scope-safety scorer accepts. Anything else is refused. */
@@ -364,34 +479,50 @@ export function commandShapeViolation(kind: string, payload: unknown): string | 
 
 const VISUAL_SLOT_KINDS = new Set(['render', 'take', 'generate', 'image', 'video']);
 
+const VISUAL_PRESERVE = ['character', 'background', 'motion', 'framing', 'lighting'];
+
 /**
  * An element-scoped plan may carry one slot, and that slot has to match the
  * element: an audition of the scoped line, or a visual slot of the scoped shot.
- * An empty actions array stays valid for a text edit inside the same scope.
+ * An empty actions array stays valid for a text edit inside the same scope. A
+ * slot that would change something the scope says to preserve is
+ * PRESERVE_VIOLATION; one aimed at another shot or line is SCOPE_EXPANSION.
  */
-export function elementScopeViolation(plan: unknown, scope?: IterationScopeInput): string | undefined {
+export function elementScopeRefusal(plan: unknown, scope?: IterationScopeInput): MutationRefusal | undefined {
   if (!scope || !isPlainObject(plan)) return undefined;
+  const preserve = Array.isArray(scope.preserve) ? scope.preserve : [];
+  const audio = scope.element === 'voice_line' || scope.element === 'audio';
   const actions = Array.isArray(plan.actions) ? plan.actions : [];
-  if (actions.length > 1) return 'an element scope allows one action slot';
+  if (actions.length > 1) return refusal('SCOPE_EXPANSION', 'an element scope allows one action slot');
   if (actions.length === 0) return undefined;
   const slot = actions[0];
-  if (!isPlainObject(slot)) return 'action slot is not an object';
-  const audio = scope.element === 'voice_line' || scope.element === 'audio';
+  if (!isPlainObject(slot)) return { message: 'action slot is not an object' };
   const shotId = typeof scope.target?.shotId === 'string' ? scope.target.shotId : undefined;
   const lineId = typeof scope.elementRef?.lineId === 'string' ? scope.elementRef.lineId : undefined;
   if (audio) {
-    if (slot.kind !== 'audition') return 'a voice line scope uses an audition slot';
-    if (lineId !== undefined && slot.targetId !== lineId) return `audio slot must target line ${lineId}`;
+    if (slot.kind !== 'audition') {
+      return preserve.some(key => VISUAL_PRESERVE.includes(key))
+        ? refusal('PRESERVE_VIOLATION', 'a voice line scope uses an audition slot; a visual slot would change preserved elements')
+        : refusal('SCOPE_EXPANSION', 'a voice line scope uses an audition slot');
+    }
+    if (lineId !== undefined && slot.targetId !== lineId) return refusal('SCOPE_EXPANSION', `audio slot must target line ${lineId}`);
     return undefined;
   }
+  if (slot.kind === 'audition' && preserve.includes('voice')) {
+    return refusal('PRESERVE_VIOLATION', `a ${scope.element ?? 'scoped'} change preserves the voice, so an audition slot is outside the scope`);
+  }
   if (typeof slot.kind !== 'string' || !VISUAL_SLOT_KINDS.has(slot.kind)) {
-    return 'an element scope uses a visual slot';
+    return refusal('SCOPE_EXPANSION', 'an element scope uses a visual slot');
   }
   if (typeof slot.targetId === 'string' && slot.targetId.includes(':')) {
-    return `visual slot must target shot ${shotId ?? ''}`.trim();
+    return refusal('SCOPE_EXPANSION', `visual slot must target shot ${shotId ?? ''}`.trim());
   }
-  if (shotId !== undefined && slot.targetId !== shotId) return `slot must target shot ${shotId}`;
+  if (shotId !== undefined && slot.targetId !== shotId) return refusal('SCOPE_EXPANSION', `slot must target shot ${shotId}`);
   return undefined;
+}
+
+export function elementScopeViolation(plan: unknown, scope?: IterationScopeInput): string | undefined {
+  return elementScopeRefusal(plan, scope)?.message;
 }
 
 /** Text-edit plans carry no action slots. A slot kind is never a command name. */
@@ -415,7 +546,7 @@ function statedCap(message: string): number | undefined {
 }
 
 function messageInScope(message: string, scope: Scope): boolean {
-  for (const id of idMentions(message)) {
+  for (const id of idMentions(message, [...scope.shotIds, ...scope.lineIds])) {
     if (!idInScope(id, scope)) return false;
   }
   return true;
@@ -487,12 +618,15 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
     }
 
     const stage = audioScope ? 'voice' : 'video';
+    if (input.iteration?.lockedShotIds?.includes(targetShotId)) {
+      return {
+        readFirst: true,
+        reply: `Shot ${targetShotId} is locked, so I will not propose a new ${stage} take for it.`,
+      };
+    }
     const policy = input.iteration?.policy;
     if (policy) {
-      const limit = effectiveStageLimit(policy, targetShotId, stage);
-      const used = input.iteration?.used?.[targetShotId]?.[stage];
-      const usedCount = typeof used === 'number' && Number.isFinite(used) ? used : 0;
-      if (usedCount >= limit) {
+      if (remainingStageCapacity(policy, input.iteration?.used, targetShotId, stage) === 0) {
         return {
           readFirst: true,
           reply: `The current iteration level (${policy.level ?? 'draft'}) allows no further ${stage} take for ${targetShotId}. Would you like to change the iteration level?`,
@@ -530,7 +664,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
       const lockedShots = new Set(input.iteration.lockedShotIds ?? []);
       const requestedShots = input.requestedShotIds && input.requestedShotIds.length > 0
         ? input.requestedShotIds
-        : [...idMentions(input.userMessage)].filter(id => !id.includes(":"));
+        : [...idMentions(input.userMessage, (input.shots ?? []).map(shot => shot.id))].filter(id => !id.includes(":"));
       const allShots = (input.shots ?? []).map(s => s.id);
       const targetShots = requestedShots.length > 0 ? requestedShots : allShots;
 
@@ -542,7 +676,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
           : "";
         let totalCapacity = 0;
         for (const shot of unlockedShots) {
-          totalCapacity += effectiveStageLimit(policy, shot, 'video');
+          totalCapacity += remainingStageCapacity(policy, input.iteration?.used, shot, 'video');
         }
 
         if (requestedTakes > totalCapacity) {
@@ -561,7 +695,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
         while (allocated < requestedTakes && unlockedShots.length > 0) {
           const shot = unlockedShots[idx % unlockedShots.length];
           const count = shotCounts.get(shot) ?? 0;
-          const limit = effectiveStageLimit(policy, shot, 'video');
+          const limit = remainingStageCapacity(policy, input.iteration?.used, shot, 'video');
           if (count < limit) {
             shotCounts.set(shot, count + 1);
             actions.push({
@@ -604,7 +738,7 @@ export function planProductionTurn(input: ProductionTurnInput): ProductionTurnPl
           };
         }
 
-        const limit = effectiveStageLimit(policy, shotId, 'video');
+        const limit = remainingStageCapacity(policy, input.iteration?.used, shotId, 'video');
         if (requestedTakes > limit) {
           return {
             readFirst: true,

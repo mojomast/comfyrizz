@@ -2,14 +2,28 @@ import { createHash } from 'node:crypto';
 import {
   actionSlotViolation,
   commandShapeViolation,
-  elementScopeViolation,
-  iterationSlotViolation,
+  elementScopeRefusal,
+  iterationSlotRefusal,
   planShapeViolation,
-  scopeViolations,
+  scopeViolationDetails,
+  shotsFromState,
+  targetsFromState,
   PRODUCTION_TURN_PROCEDURE,
   type ProductionAgentState,
   type ProductionReadSnapshot,
 } from './production-planner.js';
+import {
+  EMPTY_SET,
+  checkDraftChange,
+  diffDraft,
+  intentRefusal,
+  intersectTargetSets,
+  refusal,
+  targetSetFromIterationScope,
+  targetSetRefusal,
+  type MutationRefusal,
+  type TargetSet,
+} from './mutation-policy.js';
 import type { ToolDef } from './types.js';
 
 export const AGENT_COMMAND_KINDS = [
@@ -158,6 +172,14 @@ export interface ProductionToolContext {
    * of the turn scope; no other location is consulted.
    */
   iterationScope?: IterationScope;
+  /**
+   * The plan the current package was last built from. A build changes exactly
+   * the shots that differ between it and the draft. When the host leaves it
+   * out, the draft at the start of the turn stands in.
+   */
+  builtPlan?: unknown;
+  /** Set by the host when the turn scope was authored against a package revision that is no longer current. */
+  scopeStale?: string;
 }
 
 export interface ProductionToolCall {
@@ -191,6 +213,10 @@ function cloneJson<T>(value: T): T {
 
 function errorResult(message: string, code?: string): ProductionToolResult {
   return code === undefined ? { ok: false, error: message } : { ok: false, error: message, code };
+}
+
+function refusedResult(refused: MutationRefusal): ProductionToolResult {
+  return errorResult(refused.message, refused.code);
 }
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
@@ -561,31 +587,149 @@ function forgetRead(ctx: ProductionToolContext, productionId: string): void {
   readsByContext.get(ctx)?.delete(productionId);
 }
 
+/**
+ * The target set this turn may change: what the viewer iteration scope and the
+ * explicitly requested targets both permit, so the narrower of the two wins.
+ * With only one of them it stands alone, and with neither the turn is
+ * unscoped. A stale or unresolvable scope authorizes
+ * nothing and says why.
+ */
+function effectiveTargets(ctx: ProductionToolContext): { set: TargetSet; refusal?: MutationRefusal } {
+  const state = ctx.productionState;
+  if (!state) return { set: EMPTY_SET };
+  const requested = targetsFromState(state);
+  if (requested.refusal) return requested;
+  if (typeof ctx.scopeStale === 'string' && ctx.scopeStale !== '') {
+    return { set: EMPTY_SET, refusal: refusal('SCOPE_STALE', ctx.scopeStale) };
+  }
+  if (ctx.iterationScope === undefined) return requested;
+  const fromScope = targetSetFromIterationScope(ctx.iterationScope);
+  if (fromScope.unresolved !== undefined) {
+    return {
+      set: EMPTY_SET,
+      refusal: refusal('SCOPE_UNRESOLVED', `the iteration scope does not name a shot or line this production can resolve (${fromScope.unresolved})`),
+    };
+  }
+  if (requested.set.mode === 'empty') return requested;
+  const both = intersectTargetSets(fromScope.set, requested.set);
+  if (both.mode === 'empty') {
+    return { set: EMPTY_SET, refusal: refusal('SCOPE_EXPANSION', 'the iteration scope and the requested targets share no shot or line') };
+  }
+  return { set: both };
+}
+
+function iterationWithLocks(ctx: ProductionToolContext, memory: ProductionReadSnapshot | undefined): ProductionReadSnapshot['iteration'] | undefined {
+  const fromState = Array.isArray(ctx.productionState?.lockedShotIds) ? ctx.productionState!.lockedShotIds! : [];
+  const iteration = memory?.iteration;
+  if (!iteration && fromState.length === 0) return undefined;
+  return { ...(iteration ?? {}), lockedShotIds: [...new Set([...(iteration?.lockedShotIds ?? []), ...fromState])] };
+}
+
 function enforceProductionState(
   ctx: ProductionToolContext,
   productionId: string,
   revision: number,
   payload: Record<string, unknown>,
+  kind?: string,
 ): ProductionToolResult | undefined {
   if (!ctx.productionState) return undefined;
   const memory = rememberedRead(ctx, productionId);
   if (!memory) {
-    return errorResult('call production_read before any mutation and cite the revision it returned');
+    return errorResult('call production_read before any mutation and cite the revision it returned', 'READ_REQUIRED');
   }
   if (memory.revision !== revision) {
-    return errorResult(`expected_revision ${revision} does not match the revision ${memory.revision} from production_read`);
+    return errorResult(`expected_revision ${revision} does not match the revision ${memory.revision} from production_read`, 'REVISION_CONFLICT');
   }
-  const intent = memory.intent ?? ctx.productionState.intent;
-  if (intent && intent !== 'active') {
-    return errorResult(`the production is ${intent}; do not propose or command until the user changes that intent`);
-  }
+  const intent = intentRefusal(memory.intent ?? ctx.productionState.intent);
+  if (intent) return refusedResult(intent);
   const slot = actionSlotViolation(payload);
   if (slot) return errorResult(slot);
-  const ids = scopeViolations(payload, ctx.productionState, memory);
-  if (ids.length) {
-    return errorResult(`rejected id ${ids[0]} because it is outside the production state or the requested scope; name only the requested shot and line`);
+  if (kind === 'production.pause') return undefined;
+
+  const targets = effectiveTargets(ctx);
+  if (targets.refusal) return refusedResult(targets.refusal);
+  const shots = shotsFromState(ctx.productionState, memory);
+  const unresolved = targetSetRefusal({ shots, targets: targets.set });
+  if (unresolved) return refusedResult(unresolved);
+  const violations = scopeViolationDetails(payload, ctx.productionState, memory, targets.set);
+  if (violations.length) {
+    return errorResult(
+      `rejected id ${violations[0].id} because it is outside the production state or the requested scope; name only the requested shot and line`,
+      violations[0].code,
+    );
   }
   return undefined;
+}
+
+export type OrdinaryMutationTool = 'project_update_plan' | 'project_patch_plan' | 'project_build';
+
+export interface OrdinaryMutation {
+  tool: OrdinaryMutationTool;
+  /** The draft before the call. */
+  before: unknown;
+  /** The draft the call would leave, or the current draft for a build. */
+  after: unknown;
+  /** The draft at the start of the turn, used for a build when the host gives no `builtPlan`. */
+  turnStart?: unknown;
+}
+
+/**
+ * The same mutation policy for the ordinary project tools. A turn on a
+ * production-bound project may edit or build only inside the requested target
+ * set, never while the production is not active, never on a locked shot, and a
+ * build also needs a production_read in the same turn with the production
+ * unchanged since. A context without productionState is an unbound project and
+ * is not restricted here. Returns the refusal, or undefined when allowed.
+ */
+export async function guardOrdinaryMutation(
+  ctx: ProductionToolContext | null | undefined,
+  mutation: OrdinaryMutation,
+): Promise<MutationRefusal | undefined> {
+  if (!ctx?.productionState) return undefined;
+  const build = mutation.tool === 'project_build';
+  const productionId = typeof ctx.productionId === 'string' ? ctx.productionId : undefined;
+  const memory = productionId ? rememberedRead(ctx, productionId) : undefined;
+  let intent = memory?.intent ?? ctx.productionState.intent;
+  let revisionMemory = memory;
+
+  if (build) {
+    if (!memory || !productionId) {
+      return refusal('READ_REQUIRED', 'call production_read in this turn before project_build; a build changes the project');
+    }
+    if (typeof ctx.read === 'function') {
+      let fresh: ProductionReadState | null | undefined;
+      try {
+        fresh = await ctx.read(productionId);
+      } catch {
+        return refusal('READ_REQUIRED', 'the production could not be read again before the build; call production_read');
+      }
+      const snapshot = resolveSnapshot(fresh);
+      if (snapshot.error || snapshot.revision === undefined) {
+        return refusal('READ_REQUIRED', 'the production could not be read again before the build; call production_read');
+      }
+      if (snapshot.revision !== memory.revision) {
+        return refusal('REVISION_CONFLICT', `the production moved from revision ${memory.revision} to ${snapshot.revision} since production_read; read it again before building`);
+      }
+      const freshIntent = isPlainObject(snapshot.production) && typeof snapshot.production.intent === 'string' ? snapshot.production.intent : undefined;
+      if (freshIntent !== undefined) intent = freshIntent;
+    }
+  }
+
+  const targets = effectiveTargets(ctx);
+  if (targets.refusal) return targets.refusal;
+  const baseline = build ? (ctx.builtPlan !== undefined ? ctx.builtPlan : mutation.turnStart) : mutation.before;
+  // With no baseline there is nothing built or drafted yet to protect, so the
+  // first draft is a project-wide change (refused under a scope) that names no
+  // existing shot (so no lock applies).
+  const change = baseline === null || baseline === undefined
+    ? { shotIds: [], structural: true, global: true }
+    : diffDraft(baseline as any, mutation.after as any);
+  return checkDraftChange({
+    intent,
+    shots: shotsFromState(ctx.productionState, revisionMemory),
+    targets: targets.set,
+    lockedShotIds: iterationWithLocks(ctx, revisionMemory)?.lockedShotIds,
+  }, change, { build });
 }
 
 const ITERATION_STAGE_NAMES = ['script', 'voice', 'keyframe', 'video'] as const;
@@ -719,7 +863,7 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
   if (turnScope !== undefined) {
     if (hasPlanScope) {
       if (canonicalJson(plan.scope) !== canonicalJson(turnScope)) {
-        return errorResult('plan.scope mismatch with the turn iteration scope');
+        return errorResult('plan.scope mismatch with the turn iteration scope', 'SCOPE_EXPANSION');
       }
     }
     const targetShotId = turnScope.target?.shotId;
@@ -729,12 +873,12 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
       for (const edit of edits) {
         if (!isPlainObject(edit)) continue;
         if (typeof edit.shotId === 'string' && edit.shotId !== targetShotId) {
-          return errorResult('never touch other shots');
+          return errorResult('never touch other shots', 'SCOPE_EXPANSION');
         }
         if (typeof edit.lineId === 'string') {
           const shot = edit.lineId.split(':')[0];
           if (shot !== '' && shot !== targetShotId) {
-            return errorResult('never touch other shots');
+            return errorResult('never touch other shots', 'SCOPE_EXPANSION');
           }
         }
       }
@@ -744,24 +888,24 @@ async function proposePlan(args: Record<string, unknown>, ctx: ProductionToolCon
         if (typeof slot.targetId === 'string') {
           const shot = slot.targetId.includes(':') ? slot.targetId.split(':')[0] : slot.targetId;
           if (shot !== '' && shot !== targetShotId) {
-            return errorResult('never touch other shots');
+            return errorResult('never touch other shots', 'SCOPE_EXPANSION');
           }
         }
       }
     }
   } else if (hasPlanScope) {
-    return errorResult('plan.scope is not allowed in an unscoped turn');
+    return errorResult('plan.scope is not allowed in an unscoped turn', 'SCOPE_EXPANSION');
   }
 
-  const element = elementScopeViolation(payload, turnScope);
-  if (element) return errorResult(element);
+  const element = elementScopeRefusal(payload, turnScope);
+  if (element) return refusedResult(element);
 
   const checkPayload = { ...payload };
   delete checkPayload.scope;
   const refused = enforceProductionState(ctx, productionId.value!, revision.value!, checkPayload);
   if (refused) return refused;
-  const iterationProblem = iterationSlotViolation(payload, rememberedRead(ctx, productionId.value!)?.iteration);
-  if (iterationProblem) return errorResult(iterationProblem);
+  const iterationProblem = iterationSlotRefusal(payload, iterationWithLocks(ctx, rememberedRead(ctx, productionId.value!)));
+  if (iterationProblem) return refusedResult(iterationProblem);
 
 
   const dispatched = await dispatchCommand(ctx, {
@@ -816,7 +960,7 @@ async function issueCommand(args: Record<string, unknown>, ctx: ProductionToolCo
     const shape = commandShapeViolation(kind, payload);
     if (shape) return errorResult(shape);
   }
-  const refused = enforceProductionState(ctx, productionId.value!, revision.value!, payload);
+  const refused = enforceProductionState(ctx, productionId.value!, revision.value!, payload, kind);
   if (refused) return refused;
 
   const dispatched = await dispatchCommand(ctx, {

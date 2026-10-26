@@ -10,11 +10,13 @@ import { CHARACTER_RULES, CHARACTER_TOOLS, isCharacterToolName, runCharacterTool
 import type { CharacterToolContext } from './character-tools.js';
 import {
   PRODUCTION_SYSTEM_PROMPT,
+  guardOrdinaryMutation,
   isProductionToolName,
   productionToolsFor,
   runProductionTool,
 } from './production-tools.js';
 import type { ProductionToolContext } from './production-tools.js';
+import { targetsFromState } from './production-planner.js';
 
 export const CONVERSATION_LIMITS = {
   headline: 64, sub: 120, body: 240, item: 72, narration: 600, visual: 512, svg: 16000,
@@ -538,7 +540,7 @@ const historyTool: ToolDef = {
 };
 export type ConversationTrace = {
   promptVersion: string; skills: Array<{ id: string; version: string }>; steps: number; repairs: number;
-  usage: { input: number; output: number }; tools: Array<{ name: string; ok: boolean; error?: string }>;
+  usage: { input: number; output: number }; tools: Array<{ name: string; ok: boolean; error?: string; code?: string }>;
   omittedMessages: number; elapsedMs: number; stop: string;
 };
 
@@ -588,13 +590,16 @@ export async function runConversationTurn(options: {
   const characterBlock = typeof characters?.block === 'string' ? characters.block.trim() : '';
   const production = options.production ?? null;
   const productionTools = production ? productionToolsFor(production) : [];
+  const requestedTargets = production?.productionState ? targetsFromState(production.productionState).set : undefined;
   const productionBlock = production
     ? dataJson({
       productionId: production.productionId ?? null,
       intent: production.productionState?.intent ?? null,
       shots: Array.isArray(production.productionState?.shots) ? production.productionState.shots : [],
-      requestedShotIds: Array.isArray(production.productionState?.requestedShotIds) ? production.productionState.requestedShotIds : [],
-      requestedLineIds: Array.isArray(production.productionState?.requestedLineIds) ? production.productionState.requestedLineIds : [],
+      // unscoped: any shot or line of the production; empty: nothing may change; scoped: only the listed ids.
+      targetMode: requestedTargets?.mode ?? 'unscoped',
+      requestedShotIds: requestedTargets ? [...requestedTargets.shotIds] : [],
+      requestedLineIds: requestedTargets ? [...requestedTargets.lineIds] : [],
     })
     : '';
   const started = Date.now();
@@ -604,6 +609,13 @@ export async function runConversationTurn(options: {
   let repairs = 0;
   let built = false;
   let changed = false;
+  const turnStartPlan = plan;
+  // A policy refusal is a decision, not a malformed call: it carries its shared
+  // code into the trace and does not spend the repair budget.
+  const refuseOrdinary = async (tool: 'project_update_plan' | 'project_patch_plan' | 'project_build', before: unknown, after: unknown) => {
+    const refused = await guardOrdinaryMutation(production, { tool, before, after, turnStart: turnStartPlan });
+    if (refused) throw Object.assign(new Error(refused.message), { policyRefusal: true, ...(refused.code ? { code: refused.code } : {}) });
+  };
   const finish = (reply: string, stop = 'final', warning?: string) => {
     trace.repairs = repairs; trace.elapsedMs = Date.now() - started; trace.stop = stop;
     return { reply, plan, built, trace, ...(warning ? { warning } : {}) };
@@ -665,7 +677,11 @@ export async function runConversationTurn(options: {
         }
         else if (production && isProductionToolName(call.name)) {
           const productionResult = await runProductionTool({ id: call.id, name: call.name, args: call.args }, production);
-          if (!productionResult.ok) throw new Error(productionResult.error ?? `${call.name} failed`);
+          if (!productionResult.ok) {
+            throw Object.assign(new Error(productionResult.error ?? `${call.name} failed`), {
+              ...(productionResult.code ? { code: productionResult.code, policyRefusal: true } : {}),
+            });
+          }
           result = productionResult;
         }
         else if (call.name === 'conversation_read_history' && history.omitted) {
@@ -673,17 +689,22 @@ export async function runConversationTurn(options: {
           result = { source: 'historical conversation data', start, total: options.messages.length, messages: options.messages.slice(start, start + limit) };
         }
         else if (call.name === 'project_update_plan') {
-          plan = conversationPlanSchema.parse(call.args);
+          const next = conversationPlanSchema.parse(call.args);
+          await refuseOrdinary('project_update_plan', plan, next);
+          plan = next;
           changed = true;
           result = { ok: true, saved: 'draft', title: plan.title, scenes: plan.scenes.length, seconds: plan.scenes.reduce((sum, scene) => sum + scene.seconds, 0), warnings: conversationPlanWarnings(plan) };
         } else if (call.name === 'project_patch_plan') {
           if (!plan) throw new Error('No draft exists yet; use project_update_plan first');
-          plan = patchConversationPlan(plan, call.args);
+          const patched = patchConversationPlan(plan, call.args);
+          await refuseOrdinary('project_patch_plan', plan, patched);
+          plan = patched;
           changed = true;
           result = { ok: true, saved: 'draft', plan, warnings: conversationPlanWarnings(plan) };
         } else if (call.name === 'project_build') {
           if (!call.args || typeof call.args !== 'object' || Array.isArray(call.args) || Object.keys(call.args).length) throw new Error('project_build takes an empty object');
           if (!plan) throw new Error('Write a complete draft with project_update_plan before building');
+          await refuseOrdinary('project_build', plan, plan);
           options.signal.throwIfAborted();
           const buildResult = await options.build(plan);
           result = { ok: true, ...buildResult };
@@ -691,11 +712,16 @@ export async function runConversationTurn(options: {
         } else throw new Error(`Unknown tool: ${call.name}`);
         trace.tools.push({ name: call.name, ok: true });
       } catch (error) {
-        trace.tools.push({ name: call.name, ok: false, error: (error as Error).message.slice(0, 1200) });
+        const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : undefined;
+        trace.tools.push({ name: call.name, ok: false, error: (error as Error).message.slice(0, 1200), ...(code && (error as { policyRefusal?: boolean }).policyRefusal ? { code } : {}) });
         if ((error as { status?: number }).status === 409) throw error;
-        repairs += 1;
-        if (repairs > 2) throw new Error(`The agent could not create a valid draft: ${(error as Error).message}`);
-        result = { error: (error as Error).message, instruction: 'Repair the arguments and retry. Do not claim the failed operation succeeded.' };
+        if ((error as { policyRefusal?: boolean }).policyRefusal) {
+          result = { error: (error as Error).message, ...(code ? { code } : {}), instruction: 'This was refused by policy, not a mistake in the arguments. Do not retry it or work around it. Tell the user what was refused and why, and ask how to proceed. Do not claim the operation succeeded.' };
+        } else {
+          repairs += 1;
+          if (repairs > 2) throw new Error(`The agent could not create a valid draft: ${(error as Error).message}`);
+          result = { error: (error as Error).message, instruction: 'Repair the arguments and retry. Do not claim the failed operation succeeded.' };
+        }
       }
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
     }
