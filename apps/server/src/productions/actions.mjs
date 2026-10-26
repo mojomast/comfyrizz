@@ -1132,5 +1132,65 @@ export function createActionCoordinator(options = {}) {
     return { action };
   }
 
-  return Object.freeze({ propose, dispatch, getAction });
+  /**
+   * UX03 executor-facing cancellation. The command handler owns the durable
+   * action transition and the outbox effect; this wrapper only supplies the
+   * action command identity and returns the action projection.
+   */
+  function cancel({ productionId, body, context }) {
+    const { commandId, idempotencyKey } = requireCommand(body);
+    if (!isPlainObject(body.payload) || !isIdentifier(body.payload.actionId)) {
+      throw new ActionError('INVALID_COMMAND', 'action.cancel requires payload.actionId', 400);
+    }
+    requireContext(context);
+    const result = handler.execute({
+      commandId,
+      idempotencyKey,
+      productionId,
+      kind: 'action.cancel',
+      expected: body.expected,
+      payload: body.payload,
+    }, context);
+    return {
+      duplicate: result.duplicate === true,
+      committed: true,
+      productionId,
+      revision: result.revision,
+      action: result.action,
+      events: result.events,
+      outboxIds: result.outboxIds,
+    };
+  }
+
+  /**
+   * UX03 executor-facing restart. It never revives uncertain work: only a
+   * blocked action, or an interrupted action that never got an attributed run,
+   * returns to the queue.
+   */
+  function restart({ productionId, body, context }) {
+    const { commandId, idempotencyKey } = requireCommand(body);
+    if (!isPlainObject(body.payload) || !isIdentifier(body.payload.actionId)) {
+      throw new ActionError('INVALID_COMMAND', 'action.retry requires payload.actionId', 400);
+    }
+    requireContext(context);
+    const result = handler.execute({
+      commandId,
+      idempotencyKey,
+      productionId,
+      kind: 'action.retry',
+      expected: body.expected,
+      payload: body.payload,
+    }, context);
+    return {
+      duplicate: result.duplicate === true,
+      committed: true,
+      productionId,
+      revision: result.revision,
+      action: result.action,
+      events: result.events,
+      outboxIds: result.outboxIds,
+    };
+  }
+
+  return Object.freeze({ propose, dispatch, cancel, restart, getAction });
 }

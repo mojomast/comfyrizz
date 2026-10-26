@@ -278,7 +278,7 @@ export function createPipelineAdapter(options = {}) {
 
   function commitState(productionId, action, reason) {
     const commandId = `pipe_${createHash('sha256')
-      .update(`pipeline.adapter\u0000${productionId}\u0000${action.id}\u0000${action.state}\u0000${action.runId ?? ''}\u0000${action.attemptId ?? ''}\u0000${action.lastError?.code ?? ''}\u0000${reason ?? ''}`)
+      .update(`pipeline.adapter\u0000${productionId}\u0000${action.id}\u0000${action.state}\u0000${action.runId ?? ''}\u0000${action.attemptId ?? ''}\u0000${action.claimId ?? ''}\u0000${action.lastError?.code ?? ''}\u0000${reason ?? ''}`)
       .digest('hex')
       .slice(0, 32)}`;
     const prior = store.findCommit(productionId, { commandId, idempotencyKey: commandId });
@@ -418,10 +418,18 @@ export function createPipelineAdapter(options = {}) {
     const run = runForAction(productionId, action.id, action);
     if (run) {
       controller.cancel(run.runId);
+      // A cancel request is not proof that the compute stopped. The run's own
+      // terminal fact decides the action target; an unconfirmed managed
+      // shutdown stays cancel_requested and is reported for reconciliation.
+      const status = mapPipelineStatus(run, { intent: 'cancel_requested' });
+      let target = actionStateForPipelineStatus(status);
+      if (status === 'shutdown_unconfirmed') target = 'cancel_requested';
+      if (status === 'interrupted') target = 'cancelled';
+      if (target === null) target = 'cancel_requested';
       const applied = applyActionState(
         productionId,
         action,
-        'cancel_requested',
+        target,
         { runId: run.runId },
         'cancel_requested',
       );
@@ -429,35 +437,35 @@ export function createPipelineAdapter(options = {}) {
         cancelled: true,
         started: false,
         changed: applied.changed,
-        status: 'cancel_requested',
+        status,
         actionState: applied.action.state,
         action: applied.action,
         run: clone(run),
       };
     }
-    if (action.state === 'dispatching') {
-      // Review fix-up: a dispatch intent with no run yet may be an in-flight
-      // controller.start. Claiming 'cancelled' here would let that run proceed
-      // unattended; record the request and let admit cancel the run it gets.
-      const requested = applyActionState(productionId, action, 'cancel_requested', {}, 'cancel_during_dispatch');
+    if (action.state === 'queued' || action.state === 'planned'
+      || action.state === 'awaiting_decision' || action.state === 'blocked') {
+      const applied = applyActionState(productionId, action, 'cancelled', {}, 'cancelled_before_start');
       return {
         cancelled: true,
         started: false,
-        changed: requested.changed,
-        status: 'cancel_requested',
-        actionState: requested.action.state,
-        action: requested.action,
+        changed: applied.changed,
+        status: 'cancelled',
+        actionState: applied.action.state,
+        action: applied.action,
         run: null,
       };
     }
-    const applied = applyActionState(productionId, action, 'cancelled', {}, 'cancelled_before_start');
+    // Any state that claims an attempt without an attributed run is uncertain:
+    // record the request but never claim the compute already stopped.
+    const requested = applyActionState(productionId, action, 'cancel_requested', {}, 'cancel_without_attribution');
     return {
       cancelled: true,
       started: false,
-      changed: applied.changed,
-      status: 'cancelled',
-      actionState: applied.action.state,
-      action: applied.action,
+      changed: requested.changed,
+      status: 'cancel_requested',
+      actionState: requested.action.state,
+      action: requested.action,
       run: null,
     };
   }
@@ -499,14 +507,23 @@ export function createPipelineAdapter(options = {}) {
     return result;
   }
 
-  async function admitOnce({ productionId, actionId, pkg, input, sourceDir } = {}) {
+  async function admitOnce({ productionId, actionId, pkg, input, sourceDir, claimId } = {}) {
     requireIdentifier(productionId, 'productionId');
     requireIdentifier(actionId, 'actionId');
+    const claim = claimId === undefined || claimId === null ? null : requireIdentifier(claimId, 'claimId');
     const production = store.read(productionId);
     if (!production) {
       throw new PipelineAdapterError('NOT_FOUND', 'production does not exist', 404, { productionId });
     }
-    const action = requireAction(productionId, actionId);
+    let action = requireAction(productionId, actionId);
+    // A pause that landed after the dispatch intent was journaled leaves the
+    // action blocked with no backend. A resume makes the same durable action
+    // startable again without inventing a second action record.
+    if (action.state === 'blocked'
+      && action.lastError?.code === 'PRODUCTION_PAUSED'
+      && production.intent === 'active') {
+      action = applyActionState(productionId, action, 'queued', { lastError: null }, 'resume_after_pause').action;
+    }
 
     if (production.intent === 'paused' || production.intent === 'archived') {
       // Nothing is admitted and no store write happens: the outbox dispatch
@@ -589,10 +606,81 @@ export function createPipelineAdapter(options = {}) {
       productionId,
       action,
       'dispatching',
-      { attemptId },
+      { attemptId, ...(claim === null ? {} : { claimId: claim }) },
       'dispatch_intent',
     );
     let current = dispatching.action;
+
+    // A different worker may have claimed this action while this process was
+    // writing the intent. A stale claimant backs off; it never starts a run.
+    const claimed = readAction(productionId, actionId);
+    if (claim !== null && claimed?.claimId && claimed.claimId !== claim) {
+      return {
+        admitted: false,
+        started: false,
+        duplicate: true,
+        changed: false,
+        claimLost: true,
+        status: claimed.state ?? 'dispatching',
+        reason: 'claim_lost',
+        actionState: claimed.state ?? 'dispatching',
+        action: clone(claimed),
+        run: null,
+      };
+    }
+    if (claimed && claimed.state !== 'dispatching') {
+      if (claimed.state === 'cancel_requested') {
+        return { admitted: false, duplicate: true, ...cancelAction(productionId, claimed) };
+      }
+      return {
+        admitted: false,
+        started: false,
+        duplicate: true,
+        changed: false,
+        status: claimed.state,
+        reason: 'not_startable',
+        actionState: claimed.state,
+        action: clone(claimed),
+        run: null,
+      };
+    }
+
+    // The intent can change while the estimate and dispatch intent are written
+    // (for example a pause or cancel command). Re-read immediately before the
+    // worker is asked to allocate anything.
+    const beforeStart = store.read(productionId);
+    if (!beforeStart) {
+      throw new PipelineAdapterError('NOT_FOUND', 'production does not exist', 404, { productionId });
+    }
+    if (beforeStart.intent !== 'active') {
+      if (beforeStart.intent === 'cancel_requested') {
+        const cancelled = cancelAction(productionId, current);
+        return { admitted: false, duplicate: false, ...cancelled };
+      }
+      const paused = applyActionState(
+        productionId,
+        current,
+        'blocked',
+        {
+          lastError: {
+            code: 'PRODUCTION_PAUSED',
+            message: 'the production intent changed before the pipeline was asked to start',
+          },
+        },
+        'intent_changed_before_start',
+      );
+      return {
+        admitted: false,
+        started: false,
+        duplicate: false,
+        changed: paused.changed,
+        status: beforeStart.intent,
+        reason: beforeStart.intent === 'paused' ? 'production_paused' : 'production_archived',
+        actionState: paused.action.state,
+        action: paused.action,
+        run: null,
+      };
+    }
 
     // A different worker may have submitted while this process was writing the
     // intent. Look again before spending anything.

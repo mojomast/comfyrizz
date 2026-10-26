@@ -36,7 +36,7 @@ function isMetered(costVisibility) {
  * configuration/capability problem, not a server fault: the HTTP layer reports it
  * as a clear 4xx instead of masking it as an unexpected 500. The CPU slice is
  * export/timeline work only; it has no media runner, so clip takes need Google
- * Colab or the user's own ComfyUI.
+ * Google Colab or the user's own ComfyUI.
  */
 export class BackendUnavailableError extends Error {
   constructor(backendId, { message = null, cause = undefined } = {}) {
@@ -235,6 +235,8 @@ const SUBMISSION_UNKNOWN = Object.freeze({
     message: 'the run is no longer in this process and its record is not finished; reconcile before starting it again',
   }),
 });
+
+const TERMINAL_ACTION_STATES = new Set(['completed', 'failed', 'cancelled']);
 
 /** Latest durable record of one action, following its state events. */
 function durableAction(events, planHash, actionId) {
@@ -803,8 +805,20 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         return ledger;
       };
       for (const action of actions.values()) {
-        if (action.state !== 'running' && action.state !== 'dispatching' && action.state !== 'cancel_requested') continue;
         const runId = typeof action.runId === 'string' && action.runId !== '' ? action.runId : null;
+        // UX03: settlement is independent of the action's terminal state. A
+        // crash after the run record was written but before the ledger settled
+        // must not leave a permanent hold just because the action is already
+        // failed, cancelled or completed. The settle is idempotent.
+        if (TERMINAL_ACTION_STATES.has(action.state) && runId) {
+          const finished = readRunRecord(runId);
+          if (finished?.finished === true && isPlainObject(finished.settlement)) {
+            try {
+              settleRecordedRun(finished, ensureLedger());
+            } catch { /* the next controller start retries */ }
+          }
+        }
+        if (action.state !== 'running' && action.state !== 'dispatching' && action.state !== 'cancel_requested') continue;
         // Only this controller's runs are repaired here. A pipeline action's
         // run record lives elsewhere and must not be mistaken for an unknown
         // legacy submission.
@@ -1374,6 +1388,53 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
             budget: preview.budget,
           });
         }
+        // UX03: the estimate can be slow. A pause, cancel or another mutation
+        // may have landed since the first authority check. Re-read the durable
+        // intent and action immediately before consuming the slot, so a paused
+        // production never allocates and a cancelling action is not revived.
+        const beforeConsume = productionStore.read(verdict.productionId);
+        if (!beforeConsume) {
+          return admissionRefusal('PRODUCTION_NOT_FOUND', 'the production no longer exists', {
+            entryPoint,
+            productionId: verdict.productionId,
+          });
+        }
+        if (beforeConsume.intent !== 'active') {
+          return admissionRefusal('PRODUCTION_NOT_ACTIVE', `the production is ${beforeConsume.intent}; no new work is admitted`, {
+            entryPoint,
+            productionId: verdict.productionId,
+            intent: beforeConsume.intent,
+          });
+        }
+        let latestAction;
+        try {
+          latestAction = durableAction(
+            productionStore.readEvents(verdict.productionId),
+            verdict.planHash,
+            verdict.actionId,
+          );
+        } catch {
+          return admissionRefusal('BOUND_AUTHORITY_UNAVAILABLE', 'the production journal could not be read', {
+            entryPoint,
+            productionId: verdict.productionId,
+          });
+        }
+        if (!latestAction || latestAction.state !== 'queued') {
+          return admissionRefusal('ACTION_CONSUMED', 'this action authority was already consumed or cancelled', {
+            entryPoint,
+            productionId: verdict.productionId,
+            planHash: verdict.planHash,
+            actionId: verdict.actionId,
+          });
+        }
+        if (beforeConsume.revision !== expected.productionRevision) {
+          return admissionRefusal('REVISION_CONFLICT', 'the production changed while the run was being estimated', {
+            entryPoint,
+            productionId: verdict.productionId,
+            currentRevision: beforeConsume.revision,
+            baseRevision: expected.productionRevision,
+          });
+        }
         const runMode = mode === 'take' ? 'take' : 'final';
         const runCorrections = corrections && typeof corrections === 'object' && !Array.isArray(corrections) ? corrections : null;
         const runId = runIdFor(preview.planHash);
@@ -1546,26 +1607,56 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   function get(runId) {
     const record = runs.get(runId);
     if (!record) return null;
-    return { ...record, done: undefined, signal: undefined, abort: undefined };
+    return {
+      ...record,
+      cancelState: cancellationPhase(record),
+      done: undefined,
+      signal: undefined,
+      abort: undefined,
+    };
   }
 
   /**
-   * UX01: stop a run. The abort handle is retained on the record, so the signal
-   * the backend received is the one that fires; before a backend exists the run
-   * simply never starts it. Repeated cancels are harmless, and a run that has
-   * already finished is reported as such. Durable fan-out to the action
-   * journal is UX03's.
+   * UX03: cancellation has three honest phases. `requested` means the abort
+   * signal was delivered but compute may still be winding down; `stopped` means
+   * the run's own terminal fact (or a run that never started) proves no media
+   * work is using the slot; `unconfirmed` means a managed runtime could not
+   * confirm shutdown. The abort handle is retained on the record, so the signal
+   * the backend received is the one that fires.
    */
+  function cancellationPhase(record) {
+    if (record.status === 'stop_unconfirmed' || record.teardown?.state === 'stop_unconfirmed') return 'unconfirmed';
+    if (record.status === 'cancelled' || record.status === 'failed') return 'stopped';
+    if (record.status === 'done' || record.status === 'idle' || record.status === 'completed') return 'stopped';
+    if (record.status === 'starting') return record.startedAt ? 'requested' : 'stopped';
+    return record.abort?.signal.aborted === true ? 'requested' : 'stopped';
+  }
+
   function cancel(runId) {
     const record = runs.get(runId);
     if (!record) return null;
-    const finished = !['starting', 'running'].includes(record.status);
-    if (finished) return { runId, cancelRequested: false, status: record.status };
+    const finished = !['starting', 'running', 'rendering'].includes(record.status);
+    if (finished) {
+      return {
+        runId,
+        cancelRequested: false,
+        status: record.status,
+        runStatus: record.status,
+        phase: cancellationPhase(record),
+      };
+    }
     if (!record.abort.signal.aborted) {
       record.abort.abort(Object.assign(new Error('the run was cancelled'), { name: 'AbortError', code: 'CANCELLED' }));
+      record.cancelState = 'requested';
       publish({ type: 'run.cancel_requested', runId, backendId: record.backendId });
     }
-    return { runId, cancelRequested: true, status: record.status };
+    return {
+      runId,
+      cancelRequested: true,
+      status: record.status,
+      runStatus: record.status,
+      phase: cancellationPhase(record),
+    };
   }
 
   function status() {
@@ -1593,5 +1684,19 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
 
   recoverBoundActions();
 
-  return { estimate, approve, start, cancel, get, status, wait, runs, _reset: () => { approvals.clear(); spentEstimate = 0; runs.clear(); activeRunId = null; admissionPending = false; } };
+  return {
+    estimate,
+    approve,
+    start,
+    cancel,
+    get,
+    status,
+    wait,
+    runs,
+    recover: () => {
+      recoverBoundActions();
+      return status();
+    },
+    _reset: () => { approvals.clear(); spentEstimate = 0; runs.clear(); activeRunId = null; admissionPending = false; },
+  };
 }

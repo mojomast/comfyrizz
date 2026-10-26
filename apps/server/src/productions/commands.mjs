@@ -22,7 +22,9 @@ import { createHash } from 'node:crypto';
 import {
   ITERATION_SHOT_LOCKED,
   PRODUCTION_SCHEMA,
+  ACTION_TRANSITIONS,
   RECORDED_ACTORS,
+  canTransition,
   validateCommandEnvelope,
   validateProduction,
   validateRecordedCommand,
@@ -113,6 +115,40 @@ const LOCKED_ACTION_STATES = new Set([
 
 // One spelling: an action record or a take event names its shot with
 // `shotId` (the package scene id). No other key is read and no id is guessed.
+function latestActionRecord(events, actionId) {
+  let action = null;
+  for (const event of events) {
+    if (event.type !== 'action.state_changed' || !isPlainObject(event.data)) continue;
+    if (event.data.id !== actionId) continue;
+    action = { ...(action ?? {}), ...event.data };
+  }
+  return action;
+}
+
+function actionTransitionPath(from, to) {
+  if (from === to) return [];
+  const queue = [{ state: from, path: [] }];
+  const seen = new Set([from]);
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const next of Object.keys(ACTION_TRANSITIONS)) {
+      if (seen.has(next) || !canTransition(current.state, next)) continue;
+      const path = [...current.path, next];
+      if (next === to) return path;
+      seen.add(next);
+      queue.push({ state: next, path });
+    }
+  }
+  return null;
+}
+
+function actionOutboxId(commandId, actionId, kind) {
+  return `act_${createHash('sha256')
+    .update(`${kind}\u0000${commandId}\u0000${actionId}`)
+    .digest('hex')
+    .slice(0, 32)}`;
+}
+
 function shotIdOf(data) {
   return typeof data.shotId === 'string' && data.shotId !== '' ? data.shotId : null;
 }
@@ -617,6 +653,8 @@ export function createCommandHandler(options = {}) {
     }
 
     let next;
+    let events;
+    let outbox;
     let eventPayload = recorded.payload;
     let lockedShotIds = [];
     if (recorded.kind === 'iteration.set') {
@@ -632,10 +670,72 @@ export function createCommandHandler(options = {}) {
         policy: applied.requestedPolicy,
         ...(recorded.payload?.scope === undefined ? {} : { scope: clone(recorded.payload.scope) }),
       };
+      events = [buildEvent(recorded.kind, eventPayload, recorded, next)];
+    } else if (recorded.kind === 'action.cancel' || recorded.kind === 'action.retry') {
+      // UX03: these commands carry an action identity, not a production
+      // projection. They change only the action record and append the durable
+      // effect the outbox executor drains.
+      const actionId = isPlainObject(recorded.payload) ? recorded.payload.actionId : undefined;
+      if (typeof actionId !== 'string' || actionId === '') {
+        throw new CommandError('INVALID_COMMAND', 'action.cancel and action.retry require payload.actionId', 400);
+      }
+      const action = latestActionRecord(store.readEvents(productionId), actionId);
+      if (!action) {
+        throw new CommandError('UNKNOWN_ACTION', 'action does not exist', 404, { actionId });
+      }
+      next = current;
+      let target;
+      if (recorded.kind === 'action.cancel') {
+        if (action.state === 'completed') {
+          throw new CommandError('ACTION_TERMINAL', 'a completed action cannot be cancelled', 409, { actionId });
+        }
+        target = actionTransitionPath(action.state, 'cancel_requested') ? 'cancel_requested' : 'cancelled';
+      } else {
+        if (action.state !== 'blocked' && !(action.state === 'interrupted' && !action.runId)) {
+          throw new CommandError(
+            'ACTION_NOT_RETRYABLE',
+            'only a blocked action, or an interrupted action with no attributed run, may be restarted',
+            409,
+            { actionId, state: action.state },
+          );
+        }
+        target = 'queued';
+      }
+      const path = actionTransitionPath(action.state, target);
+      if (path === null) {
+        throw new CommandError('ACTION_TRANSITION_REFUSED', `an action in ${action.state} cannot move to ${target}`, 409, {
+          actionId,
+          state: action.state,
+        });
+      }
+      events = path.map((state) => ({
+        type: 'action.state_changed',
+        data: state === target
+          ? (target === 'queued'
+            ? { ...action, state, attemptId: null, jobId: null, runId: null, lastError: null }
+            : { ...action, state })
+          : { ...action, state },
+        ...(recorded.userEventId === undefined ? {} : { userEventId: recorded.userEventId }),
+        ...(recorded.at === undefined ? {} : { at: recorded.at }),
+      }));
+      const outboxType = recorded.kind === 'action.cancel' ? 'action.cancel' : 'action.dispatch';
+      outbox = [{
+        id: actionOutboxId(recorded.commandId, actionId, recorded.kind),
+        type: outboxType,
+        payload: {
+          productionId,
+          actionId,
+          planId: action.planId,
+          planHash: action.planHash,
+          commandId: recorded.commandId,
+          ...(action.reservationId === undefined ? {} : { reservationId: action.reservationId }),
+          ...(action.runId === undefined || action.runId === null ? {} : { runId: action.runId }),
+        },
+      }];
     } else {
       next = applyCommand(current, recorded.kind, recorded.payload);
+      events = [buildEvent(recorded.kind, eventPayload, recorded, next)];
     }
-    const event = buildEvent(recorded.kind, eventPayload, recorded, next);
 
     let committed;
     try {
@@ -644,7 +744,8 @@ export function createCommandHandler(options = {}) {
         idempotencyKey: recorded.idempotencyKey ?? recorded.commandId,
         baseRevision: recorded.expected.productionRevision,
         production: next,
-        events: [event],
+        events,
+        ...(outbox === undefined ? {} : { outbox }),
         requestHash,
       });
     } catch (error) {
@@ -652,6 +753,16 @@ export function createCommandHandler(options = {}) {
     }
     const result = newResult(productionId, recorded, committed);
     if (recorded.kind === 'iteration.set') result.lockedShotIds = lockedShotIds;
+    if (recorded.kind === 'action.cancel' || recorded.kind === 'action.retry') {
+      const actionId = recorded.payload.actionId;
+      let action = null;
+      for (const event of result.events ?? []) {
+        if (event.type === 'action.state_changed' && event.data?.id === actionId) {
+          action = { ...(action ?? {}), ...event.data };
+        }
+      }
+      result.action = action ?? latestActionRecord(store.readEvents(productionId), actionId);
+    }
     return result;
   }
 
