@@ -2,6 +2,52 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  min-width: 0;
+}
+
+.easy-idea-layout {
+  align-items: start;
+  min-width: 0;
+}
+
+.easy-idea-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.easy-idea-tip {
+  display: none;
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg-1);
+}
+
+.easy-idea-tip-title {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-12);
+  font-weight: var(--font-weight-600);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.easy-idea-tip-example {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--font-size-15);
+  line-height: var(--line-height-base);
+  overflow-wrap: anywhere;
+}
+
+.easy-idea-tip-text {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
 }
 
 .easy-idea-field {
@@ -221,6 +267,20 @@
 .easy-question-option:has(input:checked) {
   border-color: var(--accent);
   background: var(--bg-2);
+}
+
+@media (min-width: 1024px) {
+  .easy-two-col.easy-idea-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  }
+
+  .easy-idea-tip {
+    position: sticky;
+    top: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
 }
 
 @media (max-width: 640px) {
