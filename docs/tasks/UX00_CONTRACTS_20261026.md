@@ -777,6 +777,76 @@ helpers (`chat-project.mjs`, `plan-from-package.mjs`, `scene-build.ts`,
 
 No path appears in two Wave 4 write sets. UX16, UX21, and PB-SCRATCH stay held.
 
+## Wave 5 write sets and leases
+
+Each lease is granted against base `a7380a4` (feat/ux-results tip after Wave 4
+landed: UX04@5fb6b2b, UX15@e9cd1fe, UX12@1b76f13, UX18@a7380a4, plus UX14/UX19).
+A worker edits only its leased paths and creates new files only where listed. UX00
+contract modules and fixtures stay read-only. `apps/server/src/app.mjs`,
+`apps/web/src/main.ts` and root tooling stay coordinator-owned (UX21).
+
+**Still exclusive / do not touch:** UX21 held-coordinator write set (`app.mjs`,
+`main.ts`, integration/docs). Merged Wave 1–4 exclusives that Wave 5 must not
+reopen: UX05 editor save/autosave; UX06 Super Easy CPU/progress; UX07 Easy
+journey; UX08 Ask/settings/header (`easy/mount.ts`, `ask-drawer`,
+`agent-settings`, `project-name`, `shell-save`); UX09 agent-chat / `packages/agent`
+scope modules; UX01 admission helpers; UX03 `run.mjs` / pipeline-adapter /
+outbox-execution / actions/commands; UX10 server `takes/*`; UX11 web
+takes/media/timeline; UX12 viewer/compare; UX13 characters editor/audition/mount;
+UX14 voice/native-transfer; UX15 server export/delivery (`export.mjs`,
+`routes/render.mjs`, `productions/delivery*.mjs`, `render-package-lib.mjs`);
+UX17 compile/timing helpers; UX18 evidence briefs; UX19 CSS/toast shell.
+
+**NOTES (overlap resolutions):**
+- No Wave 5 packet receives `app.mjs` or `main.ts` (UX21).
+- UX16 owns Easy export UI only; it consumes UX15 server export/delivery APIs
+  and must not edit UX15 write-set paths.
+- PB-SCRATCH owns renderer scratch/cache preflight only; it must not edit
+  UX15 `render-package-lib.mjs` / delivery paths (handoff via exported helpers
+  later, or coordinator). Disjoint from UX16 web files.
+- Kyle unlock 2026-10-26 ~6:01 PM ET (widget: Also unlock PB-SCRATCH); UX21 stays
+  held. Dispatch model: **deepseek-v4.1-flash**.
+
+### UX16 — Reopenable export and honest delivery UI
+
+- **Write:**
+  - `apps/web/src/easy/steps/export.ts`
+  - `apps/web/src/easy/export-artifacts.ts`
+- **Tests:**
+  - `apps/web/src/easy/steps/export.test.ts`
+  - `apps/web/src/easy/export-artifacts.test.ts`
+- **Read-only:**
+  - UX15 server export/delivery modules (consume snapshot/preflight/facts)
+  - UX08 Ask/settings/header mount files; UX07 journey; UX05 editor save
+  - UX00 export/delivery fixtures
+  - `apps/server/src/app.mjs` / `apps/web/src/main.ts` (UX21)
+- **Coordinator wiring in `main.ts`:** Easy export step / artifact recovery once
+  UX16 exports adapters. Do not edit `main.ts` here.
+
+### PB-SCRATCH — Scratch-space preflight and atomic export
+
+- **Write:**
+  - `apps/renderer/scripts/scratch-preflight.mjs`
+- **Tests:**
+  - `apps/renderer/test/scratch-preflight.test.mjs`
+- **Read-only:**
+  - UX15 `apps/renderer/scripts/render-package-lib.mjs` and delivery/export
+    server paths (do not reopen; staging hooks are a later handoff)
+  - UX16 Easy export UI files (disjoint)
+  - `apps/server/src/app.mjs` / `apps/web/src/main.ts` (UX21)
+- **Coordinator wiring:** consumers may call scratch-preflight from
+  render-package-lib / export paths later under UX21 or an explicit follow-up
+  lease — not in this packet.
+
+### Overlap check (Wave 5 vs held / merged)
+
+| Packet | Collides UX21 `app.mjs`/`main.ts`? | Collides other Wave 5? | Collides held/merged exclusives? |
+| --- | --- | --- | --- |
+| UX16 | No — Easy export UI only | No — web Easy only | UX15 server export consume-only; UX08 mount read-only |
+| PB-SCRATCH | No | No — renderer scratch only | UX15 render-package-lib / delivery omitted |
+
+No path appears in two Wave 5 write sets. UX21 stays held-coordinator.
+
 ## Verification
 
 All checks are local, use isolated temporary runtimes, and make no network,
