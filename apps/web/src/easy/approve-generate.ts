@@ -3,6 +3,28 @@ import type { EasyState } from './types.ts';
 import { approvePlan, readPlanCard, sendPlanApproval } from '../productions/cards/plan-card.ts';
 
 let locked = false;
+let lastFailure: { message: string } | null = null;
+
+/** The most recent approval failure, consumed once by the plan surface. */
+export function takeApprovalFailure(): { message: string } | null {
+  const failure = lastFailure;
+  lastFailure = null;
+  return failure;
+}
+
+function recordFailure(message: string | undefined): string | undefined {
+  lastFailure = typeof message === 'string' && message !== '' ? { message } : null;
+  return message;
+}
+
+async function runApproval(run: () => Promise<string | undefined>): Promise<string | undefined> {
+  try {
+    return recordFailure(await run());
+  } catch (error) {
+    lastFailure = { message: COPY.plan.approveFailed };
+    throw error;
+  }
+}
 
 export function approveButtonLabel(idle = COPY.plan.approve): string {
   return locked ? COPY.plan.approving : idle;
@@ -152,7 +174,7 @@ export async function approveAndGenerate(state: EasyState, deps: ApproveDeps): P
   if (locked) return COPY.plan.approving;
   locked = true;
   try {
-    return await approveBody(state, deps, deps.snapshot, true);
+    return await runApproval(() => approveBody(state, deps, deps.snapshot, true));
   } finally {
     locked = false;
   }
@@ -182,7 +204,7 @@ export async function retryShot(
       if (locked) return COPY.plan.approving;
       locked = true;
       try {
-        return await approveBody(state, deps, snapshot, false);
+        return await runApproval(() => approveBody(state, deps, snapshot, false));
       } finally {
         locked = false;
       }

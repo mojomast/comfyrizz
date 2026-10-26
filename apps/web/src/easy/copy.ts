@@ -186,6 +186,7 @@ export const COPY = Object.freeze({
     approve: 'Approve and generate',
     generate: 'Generate',
     approving: 'Approving…',
+    approveFailed: "We couldn't start making this video. Check your connection and try again.",
   },
   generate: {
     heading: 'Making your video',
