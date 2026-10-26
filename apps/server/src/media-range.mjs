@@ -16,9 +16,9 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { serveStaticFile } from './static-file.mjs';
+import { MEDIA_ID_PATTERN as MEDIA_ID_RE } from './productions/contract.mjs';
 
 const TICKET_TTL_MS = 10 * 60 * 1000;
-const MEDIA_ID_RE = /^med_[a-f0-9]{32}$/;
 
 /**
  * Stable opaque media id for an artifact id (or a file when no artifact
