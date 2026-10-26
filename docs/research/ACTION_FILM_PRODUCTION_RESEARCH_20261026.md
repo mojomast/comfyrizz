@@ -156,3 +156,17 @@ the selected lock locally before allocation. This narrow guard is not a general
 graph dependency resolver. Do not disable the smoke test to hide this failure.
 The corrected attempt is separately staged and capped at 3 credits. The HTTP
 success shows this attempt downloaded successfully, not that 429 cannot recur.
+
+The corrected attempt completed all three action jobs and collected/hash-verified
+and decoded them locally. Chronological sample sheets show the climb progressing
+to the landing, the switch moving down and remaining down, and crank rotation
+followed by the empty platform rising. These are edit candidates, not blanket
+perceptual approval: the crank gripper changes shape at contact, platform travel
+continues after release, and switch geometry simplifies. Natural-speed and audible
+review remain separate. The lift is empty; it cannot prove lens transport.
+Estimated cumulative spend after this successful batch: 6.99 credits.
+
+Proceed with remaining story coverage using the actual observed states. Board
+rejections include a lens already loaded instead of held above a cart, a missing
+wheel obstruction, and a differently supported ramp. Keep those missing narrative
+obligations explicit rather than substituting attractive but unrelated footage.
