@@ -135,6 +135,7 @@ export const COPY = Object.freeze({
   },
   compute: {
     legend: 'Where should we make it?',
+    checking: 'Checking Google Colab…',
     cpuTitle: 'This computer',
     cpuBody: 'Free. Motion graphics, charts and text. No AI video.',
     colabTitle: 'Google Colab',
@@ -148,6 +149,9 @@ export const COPY = Object.freeze({
     soFar: 'So far: {spent} units. You approve every spend before it starts.',
     capError: 'Enter a cap between 0.5 and 500 units.',
     blockNotConnected: 'Connect Google Colab or choose This computer.',
+  },
+  syncnet: {
+    skipped: 'SyncNet is not configured, so lip-sync will not be checked. Keep a version of every talking-head shot before you export.',
   },
   plan: {
     heading: 'Your plan',

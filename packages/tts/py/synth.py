@@ -206,7 +206,7 @@ def main() -> int:
             "gapSeconds": gap_seconds,
             "paddingSeconds": args.padding,
             "seconds": round(read_wav_seconds(scene_path), 4),
-            "file": str(scene_path.relative_to(args.out.parent)),
+            "file": scene_path.relative_to(args.out.parent).as_posix(),
         }
         print(json.dumps({"event": "voice_scene_done", "sceneId": scene["id"], "completed": scene_index + 1, "total": len(scenes)}), flush=True)
         full.append(scene_audio)

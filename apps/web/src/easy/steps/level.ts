@@ -1,10 +1,34 @@
 import { COPY, fill } from '../copy.ts';
 import { escapeHtml } from '../components.ts';
+import { mountCompute, renderCompute, type ComputeColabStatus } from '../compute-choice.ts';
 import { summaryForLevel } from '../level-copy.ts';
 import { mountEasyLevelPicker } from '../level-picker.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, Level, StepFacts } from '../types.ts';
 
 export const LEVEL_SLOT = 'iteration-level-picker';
+const COLAB_STATUS_TTL_MS = 10_000;
+
+let colabStatusCache: { at: number; value: ComputeColabStatus } | null = null;
+let colabStatusInFlight: Promise<ComputeColabStatus | null> | null = null;
+
+async function readColabStatus(ctx: EasyStepContext, force = false): Promise<ComputeColabStatus | null> {
+  if (!force && colabStatusCache && Date.now() - colabStatusCache.at < COLAB_STATUS_TTL_MS) {
+    return colabStatusCache.value;
+  }
+  if (colabStatusInFlight) return colabStatusInFlight;
+  colabStatusInFlight = (async () => {
+    try {
+      const value = await ctx.api.colabStatus() as ComputeColabStatus;
+      colabStatusCache = { at: Date.now(), value };
+      return value;
+    } catch {
+      return null;
+    } finally {
+      colabStatusInFlight = null;
+    }
+  })();
+  return colabStatusInFlight;
+}
 
 export function defaultLevel(compute: EasyState['compute']): Level {
   return compute === 'colab' ? 'balanced' : 'draft';
@@ -24,7 +48,7 @@ export function capProblem(value: unknown): string | null {
 
 export function levelBlockReason(
   state: EasyState,
-  colabStatus: { signedIn?: boolean } | null | undefined,
+  colabStatus: { signedIn?: boolean | null } | null | undefined,
 ): string | null {
   if (state.compute !== 'colab') return null;
   if (colabStatus?.signedIn !== true) return COPY.compute.blockNotConnected;
@@ -44,6 +68,16 @@ function fallbackHtml(state: EasyState): string {
   }))}</p>${editorLink()}`;
 }
 
+function computeHtml(state: EasyState, status: ComputeColabStatus | null, checking: boolean): string {
+  return renderCompute({
+    compute: state.compute,
+    colabStatus: status,
+    spendCap: state.spendCap,
+    spent: 0,
+    checking,
+  });
+}
+
 export interface RenderLevelOptions {
   hasPicker?: boolean;
 }
@@ -51,8 +85,8 @@ export interface RenderLevelOptions {
 export function renderLevel(state: EasyState, options: RenderLevelOptions = {}): string {
   const pickerContent = options.hasPicker ? '' : fallbackHtml(state);
   return `<div class="easy-level" data-easy-level>
+<div class="easy-level-compute" data-easy-compute>${computeHtml(state, null, true)}</div>
 <div class="easy-level-picker" data-il-slot="${LEVEL_SLOT}">${pickerContent}</div>
-<div class="easy-level-compute" data-easy-compute></div>
 </div>`;
 }
 
@@ -88,27 +122,49 @@ export const step: EasyStepModule = {
 
   bind(el: HTMLElement, ctx: EasyStepContext) {
     const slot = el.querySelector<HTMLElement>(`[data-il-slot="${LEVEL_SLOT}"]`);
+    const computeHost = el.querySelector<HTMLElement>('[data-easy-compute]');
     const picker = slot ? mountPicker(slot, ctx) : null;
     let live = true;
+    let statusLoaded = false;
+    let colabStatus: ComputeColabStatus | null = null;
 
-    async function syncPrimary(): Promise<void> {
+    function paintCompute(): void {
+      if (!computeHost || !live) return;
+      computeHost.innerHTML = computeHtml(ctx.store.get(), colabStatus, !statusLoaded);
+    }
+
+    function syncPrimary(): void {
       const state = ctx.store.get();
-      let status: { signedIn?: boolean } | null = null;
-      if (state.compute === 'colab') {
-        try {
-          status = await ctx.api.colabStatus();
-        } catch {
-          status = null;
-        }
-      }
-      if (!live) return;
-      const reason = levelBlockReason(state, status);
+      const reason = state.compute === 'colab' && !statusLoaded
+        ? COPY.compute.checking
+        : levelBlockReason(state, colabStatus);
       ctx.shell.setPrimary({
         label: COPY.level.writePlan,
         disabled: reason !== null,
         reason,
       });
     }
+
+    const stopCompute = computeHost ? mountCompute(computeHost, {
+      apiFetch: ctx.host.apiFetch,
+      colabStatus: () => ctx.api.colabStatus(),
+      onChange(patch) {
+        ctx.store.patch(patch);
+        if (patch.compute !== undefined) {
+          // The default level follows the compute choice until the user picks one.
+          ctx.rerender();
+          return;
+        }
+        syncPrimary();
+      },
+      onStatus(next) {
+        colabStatus = next && typeof next === 'object' ? next as ComputeColabStatus : null;
+        statusLoaded = true;
+        if (colabStatus) colabStatusCache = { at: Date.now(), value: colabStatus };
+        paintCompute();
+        syncPrimary();
+      },
+    }) : null;
 
     function onClick(event: Event): void {
       const target = event.target;
@@ -119,11 +175,20 @@ export const step: EasyStepModule = {
     }
 
     el.addEventListener('click', onClick);
-    void syncPrimary();
+    paintCompute();
+    syncPrimary();
+    void readColabStatus(ctx).then((next) => {
+      if (!live) return;
+      colabStatus = next;
+      statusLoaded = true;
+      paintCompute();
+      syncPrimary();
+    });
 
     return () => {
       live = false;
       el.removeEventListener('click', onClick);
+      stopCompute?.();
       picker?.destroy?.();
     };
   },
@@ -131,12 +196,7 @@ export const step: EasyStepModule = {
   async onPrimary(ctx: EasyStepContext) {
     const state = ctx.store.get();
     if (state.compute === 'colab') {
-      let status: { signedIn?: boolean } | null = null;
-      try {
-        status = await ctx.api.colabStatus();
-      } catch {
-        status = null;
-      }
+      const status = await readColabStatus(ctx);
       const reason = levelBlockReason(state, status);
       if (reason !== null) {
         ctx.shell.setPrimary({ label: COPY.level.writePlan, disabled: true, reason });
@@ -145,7 +205,19 @@ export const step: EasyStepModule = {
     }
     const level = levelForState(state);
     if (level !== state.level) ctx.store.patch({ level });
-    await ctx.writePlan?.();
-    if (ctx.store.get().plan.status === 'ready') ctx.go('plan');
+    const pending = ctx.writePlan?.();
+    if (!pending) return;
+    // Keep the click visible while the plan is written, then show the plan
+    // screen even on failure so its error state and Try again action appear.
+    ctx.shell.setStatus(COPY.plan.writing);
+    ctx.shell.setPrimary({ label: COPY.level.writePlan, disabled: true });
+    await pending;
+    const next = ctx.store.get();
+    if (next.plan.status === 'ready' || next.plan.status === 'error') {
+      ctx.go('plan');
+      return;
+    }
+    ctx.shell.setPrimary({ label: COPY.level.writePlan });
+    ctx.shell.setStatus('');
   },
 };

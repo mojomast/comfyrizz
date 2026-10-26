@@ -24,6 +24,14 @@ test('pipeline HTTP contract: revisions, responsive status, durable replay, prot
   const base = `http://127.0.0.1:${server.address().port}`;
   const request = (path, body, headers = {}) => fetch(base + path, { method: body ? 'POST' : 'GET', headers: { origin: base, 'x-comfyrizz-token': token, 'content-type': 'application/json', ...headers }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const body = { packageId: pkg.id, baseRevision: pkg.revision, backendId: 'cpu' };
+  const diagnostics = await (await request('/api/pipeline/diagnostics')).json();
+  assert.equal(typeof diagnostics.syncnet.configured, 'boolean');
+  if (diagnostics.syncnet.configured === false) {
+    assert.equal(diagnostics.syncnet.code, 'SYNCNET_UNAVAILABLE');
+    assert.match(diagnostics.syncnet.message, /SyncNet is not configured/);
+  } else {
+    assert.equal(diagnostics.syncnet.code, undefined);
+  }
   assert.equal((await request('/api/pipeline', { ...body, baseRevision: 999 })).status, 409);
   const plan = await (await request('/api/pipeline/plan', body)).json(); assert.equal(plan.ready, true);
   const start = await request('/api/pipeline', body); assert.equal(start.status, 202);

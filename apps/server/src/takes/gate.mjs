@@ -18,7 +18,10 @@ function isObject(value) {
  * Evaluate every reviewable clip against its selected take.
  *
  * A CPU clip with zero takes is approved without a review (`autoApproved`).
- * A CPU clip that has takes, and every GPU clip, is judged by `deriveClipState`.
+ * A ready uploaded or stock still image with zero takes is too: it is already
+ * the chosen source. Ready uploaded or stock video and audio are not, and a
+ * ready LTX presenter clip is not. Those, a CPU clip that has takes, and every
+ * other clip are judged by `deriveClipState`.
  *
  * @param {object} pkg package document
  * @param {object|null} takeDoc `comfyrizz.takes/v1` sidecar
@@ -41,7 +44,14 @@ export function finalGate(pkg, takeDoc, clips) {
     const generator = isObject(asset?.gen) && typeof asset.gen.generator === 'string'
       ? asset.gen.generator
       : null;
-    if (generator && CPU_GENERATORS.has(generator) && takes.length === 0) {
+    // A ready uploaded or stock still (a character portrait, a supplied chart)
+    // is already the chosen source. Video and audio from those origins, and
+    // ready LTX presenter clips, still need an approved take.
+    const importedStill = isObject(asset)
+      && asset.kind === 'image'
+      && asset.status === 'ready'
+      && (asset.origin === 'upload' || asset.origin === 'stock');
+    if (takes.length === 0 && (importedStill || (generator && CPU_GENERATORS.has(generator)))) {
       approved += 1;
       autoApproved += 1;
       continue;

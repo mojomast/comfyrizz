@@ -6,6 +6,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { spawnCancellable } from './cancellable-spawn.mjs';
+import { remotionCli } from './remotion-cli.mjs';
+import { resolveBrowserExecutable } from './browser-executable.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline, measuredFromReport } from '../../../packages/planner/dist/src/index.js';
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
@@ -143,11 +145,11 @@ export function preparePublicDir(pkg, packageDir) {
 }
 
 function remotionArguments({ still, compositionId, outputPath, propsPath, publicDir, frame, scale }) {
-  const browser = `--browser-executable=${process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome'}`;
+  const browser = `--browser-executable=${resolveBrowserExecutable()}`;
   const scaleArg = scale ? [`--scale=${scale}`] : [];
   if (still) {
     return [
-      'remotion', 'still', 'src/index.ts', compositionId, outputPath,
+      'still', 'src/index.ts', compositionId, outputPath,
       `--props=${propsPath}`,
       `--public-dir=${publicDir}`,
       `--frame=${frame}`,
@@ -157,7 +159,7 @@ function remotionArguments({ still, compositionId, outputPath, propsPath, public
     ];
   }
   return [
-    'remotion', 'render', 'src/index.ts', compositionId, outputPath,
+    'render', 'src/index.ts', compositionId, outputPath,
     `--props=${propsPath}`,
     `--public-dir=${publicDir}`,
     browser,
@@ -261,16 +263,27 @@ function cleanupStaged(staged) {
   if (staged.cleanupDir) rmSync(staged.cleanupDir, { recursive: true, force: true });
 }
 
+function outputDetail(error) {
+  const raw = String(error?.stderr || error?.stdout || '').trim();
+  // The CLI colours errors; a JSON API error should be readable.
+  const clean = raw.replace(/\u001b\[[0-9;]*m/g, '');
+  if (clean.length <= 2400) return clean;
+  return `${clean.slice(0, 1200)}\n…\n${clean.slice(-1200)}`;
+}
+
 function remotionFailure(error) {
   if (error?.code === 'RENDER_CANCELLED') throw error;
-  throw new Error(`remotion render exited ${error?.status}: ${(error?.stderr || error?.stdout || '').slice(-1200)}`);
+  const detail = error?.status === undefined
+    ? (error?.message ?? String(error))
+    : outputDetail(error);
+  throw new Error(`remotion render failed${error?.status === undefined ? '' : ` with code ${error.status}`}: ${detail}`);
 }
 
 export function renderPackage(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), options = {}) {
   const staged = stagePackageRender(packagePath, outputPath, options);
   let render;
   try {
-    render = spawnSync('npx', staged.args, { cwd: rendererDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    render = spawnSync(process.execPath, [remotionCli, ...staged.args], { cwd: rendererDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   } finally {
     cleanupStaged(staged);
   }
@@ -284,7 +297,7 @@ export function renderPackage(packagePath, outputPath = packagePath.replace(/\.j
 export async function renderPackageAsync(packagePath, outputPath = packagePath.replace(/\.json$/, '.mp4'), options = {}) {
   const staged = stagePackageRender(packagePath, outputPath, options);
   try {
-    await spawnCancellable('npx', staged.args, { cwd: rendererDir, signal: options.signal });
+    await spawnCancellable(process.execPath, [remotionCli, ...staged.args], { cwd: rendererDir, signal: options.signal });
   } catch (error) {
     if (error?.code === 'RENDER_CANCELLED') rmSync(outputPath, { force: true });
     remotionFailure(error);

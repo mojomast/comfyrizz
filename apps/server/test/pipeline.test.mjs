@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPipelineController } from '../src/pipeline.mjs';
-import { planPipeline, selectedPresenterScenes } from '../src/pipeline-contract.mjs';
+import { planPipeline, selectedPresenterScenes, syncnetConfigured, syncnetDiagnostics } from '../src/pipeline-contract.mjs';
 import { correctionFor } from '../src/pipeline-media.mjs';
 import { progressLines } from '../../../packages/backends/src/progress-lines.mjs';
 
@@ -271,4 +271,41 @@ test('a heartbeat updates the record without appending a journal line every ten 
   assert.ok(f.controller.get(run.runId).lastHeartbeatAt, 'but the record still says the worker is alive');
   assert.equal(f.controller.get(run.runId).heartbeatStage, 'render');
   f.exit(1);
+});
+
+test('presenter plans warn when SyncNet is unset and do not block on that warning', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../../../examples/presenter-demo/package.json', import.meta.url)));
+  assert.equal(syncnetConfigured({}), false);
+  const skipped = syncnetDiagnostics({});
+  assert.equal(skipped.syncnet.configured, false);
+  assert.equal(skipped.syncnet.code, 'SYNCNET_UNAVAILABLE');
+  assert.match(skipped.syncnet.message, /SyncNet is not configured/);
+  assert.equal(Object.hasOwn(skipped.syncnet, 'path'), false);
+
+  const plan = planPipeline(pkg, { backendId: 'cpu' }, { env: {} });
+  const warning = plan.warnings.find((entry) => entry.code === 'SYNCNET_UNAVAILABLE');
+  assert.ok(warning, JSON.stringify(plan.warnings));
+  assert.match(warning.message, /SyncNet is not configured/);
+  assert.match(warning.message, /Keep or Reject/);
+  assert.equal(plan.issues.some((issue) => /SYNCNET/.test(issue.code)), false);
+  assert.equal(plan.ready, plan.issues.length === 0);
+});
+
+test('a configured SyncNet install omits the presenter skip warning', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../../../examples/presenter-demo/package.json', import.meta.url)));
+  const dir = mkdtempSync(join(tmpdir(), 'syncnet-ready-'));
+  try {
+    const python = join(dir, 'python');
+    const modelDir = join(dir, 'syncnet');
+    mkdirSync(modelDir);
+    writeFileSync(python, '');
+    writeFileSync(join(modelDir, 'syncnet_v2.model'), '');
+    const env = { COMFYRIZZ_SYNCNET_PYTHON: python, COMFYRIZZ_SYNCNET_DIR: modelDir };
+    assert.equal(syncnetConfigured(env), true);
+    assert.deepEqual(syncnetDiagnostics(env), { syncnet: { configured: true } });
+    const plan = planPipeline(pkg, { backendId: 'cpu' }, { env });
+    assert.equal(plan.warnings.some((entry) => entry.code === 'SYNCNET_UNAVAILABLE'), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

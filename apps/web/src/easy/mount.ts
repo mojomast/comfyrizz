@@ -7,7 +7,7 @@ import { STEPS, stepIndex } from './steps.ts';
 import { initialRoute, nextUrl } from './router.ts';
 import { loadHomeVideos, renderHomeScreen } from './home.ts';
 import { mountStepper, renderStepper } from './stepper.ts';
-import { adoptPlayer, releasePlayer } from './preview-slot.ts';
+import { adoptPlayer, currentPlayer, holdPlayer, releasePlayer } from './preview-slot.ts';
 import { STEP_MODULES } from './steps/index.ts';
 import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, StepId } from './types.ts';
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
@@ -104,7 +104,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
       releasePlayer();
       return;
     }
-    const player = host.playerElement();
+    const player = host.playerElement() ?? currentPlayer();
     if (player) adoptPlayer(slot, player);
   }
 
@@ -316,6 +316,8 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
 
   function showStep(step: StepId): void {
     if (!shell) return;
+    const livePlayer = host.playerElement();
+    if (livePlayer) holdPlayer(livePlayer);
     stopStep();
     stopStepper();
     currentStep = step;

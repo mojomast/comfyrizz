@@ -1,6 +1,5 @@
 import './settings.css';
 import { mountSettingsCard } from '../colab-card.ts';
-import { mountColabHistory } from '../colab-history.ts';
 import { apiFetch } from '../editor/api.ts';
 import { setDensity, type UiDensity } from '../ui/prefs.ts';
 import { readRenderLocation, writeRenderLocation } from '../voice-settings.ts';
@@ -34,7 +33,7 @@ export function mountSettingsDialog(root: ParentNode = document.body): { open: (
     }
     const history = dialog.querySelector<HTMLElement>('[data-settings-colab-history]');
     if (history && history.childElementCount === 0) {
-      mountColabHistory(history, { runs: [] });
+      history.innerHTML = '<p class="hint">No Google Colab runs recorded yet.</p>';
     }
   };
 

@@ -38,6 +38,26 @@ test('buildVideo', async () => {
   assert.deepEqual(JSON.parse(calls[0].init.body), { brief: 'b', provider: 'p' });
 });
 
+test('buildVideo flattens an Agent settings selection for /api/agent', async () => {
+  const { fetchImpl, calls } = makeFetch([
+    { status: 200, body: {} },
+    { status: 200, body: {} },
+  ]);
+  const api = createEasyApi(fetchImpl);
+  await api.buildVideo({
+    brief: 'b',
+    provider: { provider: 'opencode-go', model: 'deepseek-v4.1-flash' },
+  });
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    brief: 'b',
+    provider: 'opencode-go',
+    model: 'deepseek-v4.1-flash',
+  });
+
+  await api.buildVideo({ brief: 'b', provider: { provider: 'none', model: '' } });
+  assert.deepEqual(JSON.parse(calls[1].init.body), { brief: 'b' });
+});
+
 test('createConversation', async () => {
   const { fetchImpl, calls } = makeFetch([{ status: 200, body: { chatId: 'c' } }]);
   const api = createEasyApi(fetchImpl);
@@ -221,6 +241,15 @@ test('network failure throws OFFLINE', async () => {
     assert.equal(err.code, 'OFFLINE');
     return true;
   });
+});
+
+test('pipelineDiagnostics reads the SyncNet status', async () => {
+  const { fetchImpl, calls } = makeFetch([{ status: 200, body: { syncnet: { configured: false, code: 'SYNCNET_UNAVAILABLE' } } }]);
+  const api = createEasyApi(fetchImpl);
+  const body = await api.pipelineDiagnostics();
+  assert.equal(calls[0].init.method, 'GET');
+  assert.equal(calls[0].input, '/api/pipeline/diagnostics');
+  assert.equal(body.syncnet.configured, false);
 });
 
 test('setSpendCap refuses a missing productionRevision before the request', async () => {

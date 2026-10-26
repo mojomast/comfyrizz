@@ -21,6 +21,8 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir, renderPackage, renderPackageAsync } from './render-package-lib.mjs';
 import { cancelledError, spawnCancellable } from './cancellable-spawn.mjs';
+import { remotionCli } from './remotion-cli.mjs';
+import { resolveBrowserExecutable } from './browser-executable.mjs';
 import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 import { muxPackageAudio } from './incremental-audio.mjs';
 import { narrationAudio, narrationWarning } from '../src/audio-model.js';
@@ -32,7 +34,7 @@ export { mergeScenes };
 /** Bump when a renderer change can alter rendered frames. */
 export const RENDERER_VERSION = 8;
 
-const BROWSER = process.env.REMOTION_BROWSER ?? '/usr/bin/google-chrome';
+const BROWSER = resolveBrowserExecutable();
 
 function pick(record, ids) {
   if (!record) return undefined;
@@ -197,9 +199,9 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
 
   const render = renderSegment ?? ((segment, segmentPath) => {
     const result = spawnSync(
-      'npx',
+      process.execPath,
       [
-        'remotion', 'render', 'src/index.ts', compositionId, segmentPath,
+        remotionCli, 'render', 'src/index.ts', compositionId, segmentPath,
         `--props=${propsPath}`,
         `--public-dir=${publicDir}`,
         `--frames=${segment.start}-${segment.end}`,
@@ -356,8 +358,8 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
       rmSync(segmentPath, { force: true });
       onLog(`render ${segment.sceneId} frames ${segment.start}-${segment.end} (${segment.key.slice(0, 8)})`);
       try {
-        await spawnCancellable('npx', [
-          'remotion', 'render', 'src/index.ts', compositionId, segmentPath,
+        await spawnCancellable(process.execPath, [
+          remotionCli, 'render', 'src/index.ts', compositionId, segmentPath,
           `--props=${propsPath}`,
           `--public-dir=${publicDir}`,
           `--frames=${segment.start}-${segment.end}`,
@@ -370,7 +372,13 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
           rmSync(segmentPath, { force: true });
           throw error;
         }
-        throw new Error(`remotion segment ${segment.sceneId} exited ${error?.status}: ${(error?.stderr || error?.stdout || '').slice(-1200)}`);
+        const detail = error?.status === undefined
+          ? (error?.message ?? String(error))
+          : String(error?.stderr || error?.stdout || '')
+            .trim()
+            .replace(/\u001b\[[0-9;]*m/g, '')
+            .slice(0, 2400);
+        throw new Error(`remotion segment ${segment.sceneId} failed${error?.status === undefined ? '' : ` with code ${error.status}`}: ${detail}`);
       }
       if (!existsSync(segmentPath)) throw new Error(`segment ${segment.sceneId} was not written`);
       rendered.push(segment);

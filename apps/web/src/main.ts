@@ -949,6 +949,7 @@ function brandPayload(): Record<string, unknown> | null {
 }
 
 let player: PlayerRef | null = null;
+let pendingPreviewFrame: number | null = null;
 let scrub: HTMLInputElement;
 
 type RunEvent = { type?: string; event?: string; [key: string]: unknown };
@@ -2469,7 +2470,13 @@ function adoptBuiltPackage(body: any): void {
 function seekToScene(sceneId: string): void {
   const scene = timeline.scenes.find(item => item.id === sceneId);
   if (!scene) return;
-  editorApi?.followFrame(scene.from); player?.seekTo(scene.from);
+  // Some scenes fade in from an empty first frame. Open a third of a second in
+  // so the review shows the shot instead of a black card.
+  const offset = Math.min(10, Math.max(0, scene.durationInFrames - 1));
+  const frame = Math.min(scene.from + offset, timeline.durationInFrames - 1);
+  editorApi?.followFrame(frame);
+  if (player) player.seekTo(frame);
+  else pendingPreviewFrame = frame;
 }
 
 async function runBrief(brief: string): Promise<void> {
@@ -2636,6 +2643,11 @@ function init(opened: OpenedProject): void {
   let boundPlayer: PlayerRef | null = null;
   mountPreview($('player'), withTakePreview(pkg), timeline, ref => {
     player = ref;
+    if (pendingPreviewFrame !== null) {
+      const frame = pendingPreviewFrame;
+      pendingPreviewFrame = null;
+      ref.seekTo(frame);
+    }
     if (boundPlayer === ref) return;
     boundPlayer = ref;
     const onFrame = () => {
@@ -2658,6 +2670,7 @@ function init(opened: OpenedProject): void {
   if (easyRoot) mountEasyStudio(easyRoot, {
     apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
     hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: () => renderExportBlob(),
+    clips: () => clipStore.all(), subscribeClips: (listener) => clipStore.subscribe(() => listener()), takesApi,
     clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
     openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
     openEditor: () => { setMode('advanced'); }, playerElement: () => $('player'),

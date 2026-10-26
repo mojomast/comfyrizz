@@ -12,7 +12,7 @@ import { renderPipeline } from '../../renderer/scripts/render-pipeline.mjs';
 import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { json, writeJson, preparePresenterInputs, correctPresenters, presenterScenes } from './pipeline-media.mjs';
-import { summarizeJobs } from './pipeline-contract.mjs';
+import { summarizeJobs, syncnetConfigured, SYNCNET_RUNTIME_SKIP_CODE, SYNCNET_SKIP_MESSAGE } from './pipeline-contract.mjs';
 import { assessBudget, nextJobUpperEstimate, rateForGpu, reserveUnitsFor, spendingMinutes, COLLECT_AND_STOP_RESERVE_MINUTES } from '../../../packages/backends/src/budget.mjs';
 import { decideRenderFallback } from '../../../packages/backends/src/colab-render-plan.mjs';
 import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
@@ -85,6 +85,7 @@ async function releaseHeld(reason) {
 
 async function main() {
   let pkg = json(packagePath), renderResult;
+  const syncnetReady = syncnetConfigured(process.env);
   const remoteRender = plan.remoteRender === true && plan.options?.backendId === 'colab' && plan.options?.renderLocation === 'colab';
   await stage('preflight', async () => {
     const validation = validatePackage(pkg);
@@ -93,7 +94,7 @@ async function main() {
     if (plan.voiced) await command(process.env.COMFYRIZZ_PYTHON || 'python3', ['-c', 'import numpy']);
     if (!remoteRender && !existsSync(process.env.REMOTION_BROWSER || '/usr/bin/google-chrome') && render === renderPipeline) throw new Error('Configure REMOTION_BROWSER with an installed headless browser before starting generation.');
     cpSync(join(repoRoot, 'workflows'), join(workDir, 'workflows'), { recursive: true });
-    if (plan.presenters) await command(process.env.COMFYRIZZ_SYNCNET_PYTHON, ['-c', 'import cv2, torch, numpy; assert hasattr(cv2, "CascadeClassifier")']);
+    if (plan.presenters && syncnetReady) await command(process.env.COMFYRIZZ_SYNCNET_PYTHON, ['-c', 'import cv2, torch, numpy; assert hasattr(cv2, "CascadeClassifier")']);
     if (plan.voiced && !plan.remoteVoice) {
       const qwen = pkg.voice.engine === 'qwen3-tts';
       await command(qwen ? process.env.COMFYRIZZ_QWEN_TTS_PYTHON || process.env.COMFYRIZZ_PYTHON || 'python3' : process.env.COMFYRIZZ_PYTHON || 'python3', ['-c', qwen ? 'import qwen_tts, soundfile' : 'import kokoro_onnx, numpy']);
@@ -142,6 +143,9 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   }, !plan.voiced);
 
   await stage('presenter_inputs', () => presenterPreparation(workDir, { signal, onEvent: sourceEvent }), !plan.presenters);
+  if (plan.presenters && !syncnetReady) {
+    send({ kind: 'warning', stageId: 'presenter_inputs', code: SYNCNET_RUNTIME_SKIP_CODE, message: SYNCNET_SKIP_MESSAGE });
+  }
   pkg = json(packagePath);
   const jobs = planJobs(pkg).jobs;
   await stage('media', async () => {
@@ -253,6 +257,10 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       const files = presenterScenes(current).map((scene) => current.assets?.[scene.presenter_asset]?.file).filter((file) => typeof file === 'string');
       progress('Collecting presenter clips for timing correction', { mode: 'measured', completed: 0, total: files.length, unit: 'files' });
       await heldBackend.downloadListed(files, workDir, { onEvent: sourceEvent });
+    }
+    if (!syncnetReady) {
+      send({ kind: 'warning', stageId, code: SYNCNET_RUNTIME_SKIP_CODE, message: SYNCNET_SKIP_MESSAGE });
+      return [];
     }
     return presenterCorrection(workDir, runDir, { signal, onEvent: event => {
       progress(event.phase, event.total ? { mode: 'measured', completed: event.completed, total: event.total, unit: 'presenters' } : null, { sceneId: event.sceneId });

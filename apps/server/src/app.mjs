@@ -43,6 +43,7 @@ import { handleMedia } from './media-route.mjs';
 import { readEditor, validateEditor, writeEditor } from './editor-sidecar.mjs';
 import { serveStaticFile } from './static-file.mjs';
 import { createPipelineController } from './pipeline.mjs';
+import { syncnetDiagnostics } from './pipeline-contract.mjs';
 import { stagePipelineInputs } from './pipeline-media.mjs';
 import { createOperationCoordinator } from './operations.mjs';
 import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/tts/voices.mjs';
@@ -1124,6 +1125,9 @@ export function createApp({
     }
 
     // Full-production API. Existing /api/run remains the media-only API.
+    if (url.pathname === '/api/pipeline/diagnostics' && request.method === 'GET') {
+      return sendJson(response, 200, syncnetDiagnostics());
+    }
     if (['/api/pipeline/plan', '/api/pipeline'].includes(url.pathname) && request.method === 'POST') {
       const body = await readJson(request);
       const pkg = body.packageId ? store.read(body.packageId) : null;

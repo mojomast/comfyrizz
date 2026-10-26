@@ -19,6 +19,58 @@ import { assertNoSecrets, redactForLog } from "./colab-plan.mjs";
 
 const WORKER = fileURLToPath(new URL("./job-worker.mjs", import.meta.url));
 
+const WINDOWS_ENV_KEYS = [
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "SystemDrive",
+  "windir",
+  "COMSPEC",
+  "PATHEXT",
+  "TEMP",
+  "TMP",
+  "NUMBER_OF_PROCESSORS",
+  "OS",
+  "PROCESSOR_ARCHITECTURE",
+  "PROCESSOR_IDENTIFIER",
+  "PROGRAMDATA",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+  "COMMONPROGRAMFILES",
+  "PUBLIC",
+  "ALLUSERSPROFILE",
+];
+
+function windowsEnvironment(bin) {
+  if (process.platform !== "win32") return {};
+  const env = {};
+  for (const key of WINDOWS_ENV_KEYS) {
+    if (typeof process.env[key] === "string") env[key] = process.env[key];
+  }
+  env.TMPDIR = os.tmpdir();
+  const root = process.env.SystemRoot || process.env.SYSTEMROOT || process.env.windir || "C:\\Windows";
+  const pieces = [];
+  const cut = Math.max(String(bin).lastIndexOf("/"), String(bin).lastIndexOf("\\"));
+  if (cut > 0) pieces.push(String(bin).slice(0, cut));
+  for (const part of [
+    join(root, "System32"),
+    root,
+    join(root, "System32", "Wbem"),
+    join(root, "System32", "WindowsPowerShell", "v1.0"),
+  ]) {
+    if (!pieces.includes(part)) pieces.push(part);
+  }
+  for (const part of String(process.env.PATH || "").split(";")) {
+    if (part && !pieces.includes(part)) pieces.push(part);
+  }
+  env.PATH = pieces.join(";");
+  return env;
+}
+
 export class ColabCliError extends Error {
   constructor(message, detail = {}) {
     super(message);
@@ -36,7 +88,7 @@ export class ColabCli {
    * @param {boolean} [opts.detached] run steps through job-worker.mjs (survives a restart)
    * @param {Function} [opts.onLog]  (text, meta) => void for live progress
    */
-  constructor({ bin = "colab", home = process.env.HOME || os.homedir(), logDir = null, detached = false, onLog = null, extraEnv = {} } = {}) {
+  constructor({ bin = "colab", home = process.env.HOME || process.env.USERPROFILE || os.homedir(), logDir = null, detached = false, onLog = null, extraEnv = {} } = {}) {
     this.bin = bin;
     this.home = home;
     this.logDir = logDir || join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${process.pid}`);
@@ -56,7 +108,7 @@ export class ColabCli {
         throw new ColabCliError(`extraEnv key ${key} looks like a credential; Comfyrizz never passes credentials to the CLI environment.`);
       }
     }
-    return { ...colabEnvironment(this.bin, this.home), ...this.extraEnv };
+    return { ...colabEnvironment(this.bin, this.home), ...windowsEnvironment(this.bin), ...this.extraEnv };
   }
 
   /**

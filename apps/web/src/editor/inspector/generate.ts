@@ -15,6 +15,7 @@ export interface GenerateModel {
     colabStatus: { signedIn?: boolean | null };
     spendCap: number;
     spent: number;
+    idPrefix?: string;
   }) => string;
 }
 
@@ -32,6 +33,7 @@ function computeMarkup(model: GenerateModel): string {
     colabStatus: model.colabStatus ?? { signedIn: null },
     spendCap: model.spendCap,
     spent: model.spent ?? 0,
+    idPrefix: 'easy-inspector',
   });
 }
 

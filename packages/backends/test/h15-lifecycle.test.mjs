@@ -65,6 +65,17 @@ test("the colab binary is resolved from the setting, the user's install, then PA
   assert.throws(() => resolveColabBinary({ env: { COMFYRIZZ_COLAB_BIN: "/nope/colab" }, home: "/home/kyle", exists }), /does not exist/);
 });
 
+test("a pip --user CLI under %APPDATA% is found on Windows without PATH (G4-2)", { skip: process.platform !== "win32" }, () => {
+  const appData = "C:\\Users\\kyle\\AppData\\Roaming";
+  const bin = `${appData}\\Python\\Python313\\Scripts\\colab.exe`;
+  const exists = (path) => path === bin;
+  const readdir = (path) => (path === `${appData}\\Python` ? ["Python313"] : []);
+  assert.deepEqual(
+    resolveColabBinary({ env: { APPDATA: appData }, home: "C:\\Users\\kyle", exists, readdir }),
+    { bin, source: "user install" },
+  );
+});
+
 test("a backend with no injected CLI finds a user-installed colab at ~/.local/bin (G4-2)", async () => {
   const { work, token, fake } = setup();
   // a `~/.local/bin/colab` the resolver finds, pointed at the same fake state

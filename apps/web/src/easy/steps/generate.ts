@@ -9,6 +9,7 @@ import { COPY, fill } from '../copy.ts';
 import { escapeHtml } from '../components.ts';
 import { confirmDialog } from '../dialog.ts';
 import { renderColabBanner } from '../colab-banner.ts';
+import { loadSyncnetBanner } from '../syncnet-notice.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
 import {
   PROGRESS_ANNOUNCE_INTERVAL_MS,
@@ -83,6 +84,7 @@ export interface GenerateViewOptions extends GenerateOptions {
   shots?: unknown;
   production?: unknown;
   teardown?: unknown;
+  syncnetNotice?: string;
 }
 
 export interface TakeCounts {
@@ -331,7 +333,9 @@ export function renderGenerate(
   const cpu = state.compute === 'cpu'
     ? `<p class="easy-generate-cpu" data-easy-generate-cpu>${escapeHtml(state.generate?.status === 'done' ? COPY.generate.cpuReady : COPY.generate.cpuWorking)}</p>`
     : '';
+  const notice = typeof options.syncnetNotice === 'string' ? options.syncnetNotice : '';
   return `<div class="easy-generate" data-easy-generate>
+${notice}
 <div class="easy-generate-grid easy-two-col">
 <section class="easy-generate-list" aria-label="${escapeHtml(COPY.generate.heading)}">
 <h2 class="easy-generate-subhead">${escapeHtml(COPY.generate.heading)}</h2>
@@ -407,6 +411,7 @@ export async function mountEasyGenerate(el: HTMLElement, ctx: EasyStepContext): 
   let destroyed = false;
   let snapshot: unknown = (ctx.state as EasyState & { generateView?: unknown }).generateView ?? { shots: [] };
   let dismissed = false;
+  let syncnetNotice = '';
   const announcer = createGenerateAnnouncer({
     onAnnounce: (message) => {
       const live = el.querySelector<HTMLElement>('[data-easy-generate-live]');
@@ -417,15 +422,16 @@ export async function mountEasyGenerate(el: HTMLElement, ctx: EasyStepContext): 
 
   function paintBanner(): void {
     if (destroyed) return;
-    ctx.shell.setBanner(dismissed ? '' : renderColabBanner(
+    const colab = dismissed ? '' : renderColabBanner(
       isRecord(snapshot) ? snapshot.teardown ?? (isRecord(snapshot.production) ? snapshot.production.teardown : null) : null,
       isRecord(snapshot) ? snapshot.usage ?? snapshot.colab ?? snapshot.session : null,
-    ));
+    );
+    ctx.shell.setBanner(`${syncnetNotice}${colab}`);
   }
 
   function paint(): void {
     if (destroyed) return;
-    el.innerHTML = renderGenerate(ctx.store.get(), DEFAULT_FACTS, { snapshot });
+    el.innerHTML = renderGenerate(ctx.store.get(), DEFAULT_FACTS, { snapshot, syncnetNotice });
     const primary = generatePrimary(snapshotInput(snapshot));
     ctx.shell.setPrimary({ label: primary.label, disabled: primary.disabled, reason: primary.reason });
     paintBanner();
@@ -511,6 +517,11 @@ export async function mountEasyGenerate(el: HTMLElement, ctx: EasyStepContext): 
   el.addEventListener('click', onClick);
   shellRoot.addEventListener('click', onBannerClick);
   paint();
+  void loadSyncnetBanner(ctx).then((html) => {
+    if (html === null || destroyed) return;
+    syncnetNotice = html;
+    paint();
+  });
   void refresh();
 
   return () => {

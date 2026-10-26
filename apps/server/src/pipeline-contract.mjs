@@ -26,6 +26,32 @@ export function canonical(value) {
 }
 export const fingerprint = value => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 
+/** Plan and worker warning when presenter lip-sync cannot be checked. It never blocks a render. */
+export const SYNCNET_SKIP_CODE = 'SYNCNET_UNAVAILABLE';
+export const SYNCNET_RUNTIME_SKIP_CODE = 'SYNCNET_SKIPPED';
+export const SYNCNET_SKIP_MESSAGE = 'SyncNet is not configured, so presenter lip-sync will not be checked. Talking-head clips can still render, and each clip still needs a Keep or Reject before export.';
+export const SYNCNET_SKIP_ACTION = 'Configure COMFYRIZZ_SYNCNET_PYTHON and COMFYRIZZ_SYNCNET_DIR to enable the lip-sync check.';
+
+/** True when the SyncNet interpreter and the pinned model file are both present. */
+export function syncnetConfigured(env = process.env) {
+  const python = typeof env?.COMFYRIZZ_SYNCNET_PYTHON === 'string' ? env.COMFYRIZZ_SYNCNET_PYTHON : '';
+  const dir = typeof env?.COMFYRIZZ_SYNCNET_DIR === 'string' ? env.COMFYRIZZ_SYNCNET_DIR : '';
+  if (!python || !dir) return false;
+  return existsSync(python) && existsSync(join(dir, 'syncnet_v2.model'));
+}
+
+/** Read-only SyncNet status for Easy Studio. Paths and credentials are not included. */
+export function syncnetDiagnostics(env = process.env) {
+  if (syncnetConfigured(env)) return { syncnet: { configured: true } };
+  return {
+    syncnet: {
+      configured: false,
+      code: SYNCNET_SKIP_CODE,
+      message: SYNCNET_SKIP_MESSAGE,
+    },
+  };
+}
+
 export function selectedPresenterScenes(pkg) {
   if (pkg.presenter?.enabled !== true) return [];
   const coverage = pkg.presenter.scenes ?? 'bookends';
@@ -80,7 +106,9 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   const remoteVoice = voiced && pkg.voice.engine === 'qwen3-tts' && options.narrationRuntime === 'colab';
   const gpuMedia = jobs.length > 0 || presenters;
   const issues = [];
+  const warnings = [];
   const issue = (code, message, action) => issues.push({ code, message, action });
+  const warn = (code, message, action) => warnings.push({ code, message, action });
   if (remoteVoice && pkg.voice.strict !== true) issue('STRICT_QWEN_REQUIRED', 'Remote Qwen requires strict voice selection.', 'Set voice.strict to true.');
   if (remoteVoice && options.narrationUnits < 0.5) issue('VOICE_BUDGET_REQUIRED', 'A Qwen allocation needs at least 0.5 units of headroom.', 'Increase narrationUnits and the total budget.');
   const mediaUnits = options.budgetUnits - (remoteVoice ? options.narrationUnits : 0);
@@ -91,7 +119,9 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   if (presenters && !voiced) issue('PRESENTER_VOICE_REQUIRED', 'Presenter generation needs measured narration.', 'Enable narration for presenter scenes.');
   if (presenters && selectedPresenterScenes(pkg).some(scene => !scene.narration?.trim())) issue('PRESENTER_SCENE_SILENT', 'A selected presenter scene has no narration.', 'Add narration or turn the presenter off for that scene.');
   if (presenters && !pkg.assets?.[presenterPortrait(pkg)]) issue('PRESENTER_PORTRAIT_REQUIRED', 'The presenter has no portrait asset.', 'Choose a portrait.');
-  if (presenters && (!existsSync(env.COMFYRIZZ_SYNCNET_PYTHON ?? '') || !existsSync(join(env.COMFYRIZZ_SYNCNET_DIR ?? '', 'syncnet_v2.model')))) issue('SYNCNET_UNAVAILABLE', 'Presenter diagnostics are not configured on this server.', 'Configure COMFYRIZZ_SYNCNET_PYTHON and COMFYRIZZ_SYNCNET_DIR.');
+  if (presenters && !syncnetConfigured(env)) {
+    warn(SYNCNET_SKIP_CODE, SYNCNET_SKIP_MESSAGE, SYNCNET_SKIP_ACTION);
+  }
   const remote = remoteRenderDecision({ renderLocation: options.renderLocation, backendId: options.backendId, gpuMedia });
   if (remote.issue) issue(remote.issue.code, remote.issue.message, remote.issue.action);
   const stages = PIPELINE_STAGES.map(stage => ({ ...stage, status: 'pending', progress: null }));
@@ -106,6 +136,6 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
     jobs: summarizeJobs(pkg, jobs),
     reusableAssets: Object.entries(pkg.assets ?? {}).filter(([, asset]) => asset.file && ['ready', 'candidate'].includes(asset.status)).map(([assetId, asset]) => ({ assetId, kind: asset.kind, status: asset.status, verification: 'checked_when_staging' })),
     budget: { ceilingUnits: options.budgetUnits, narrationCeilingUnits: remoteVoice ? options.narrationUnits : 0, mediaCeilingUnits: options.backendId === 'colab' && gpuMedia ? Math.max(0, mediaUnits) : 0, estimateUnits: null, estimateNote },
-    requiresApproval, issues, ready: issues.length === 0,
+    requiresApproval, issues, warnings, ready: issues.length === 0,
   };
 }

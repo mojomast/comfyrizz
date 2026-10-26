@@ -349,6 +349,76 @@ test('UR31: a flux3-klein asset with no takes still blocks', () => {
   assert.deepEqual(gate.blocking, [{ clipId: 's1:a_0', state: 'planned' }]);
 });
 
+test('UR31: a ready uploaded still with no takes is approved', () => {
+  const pkg = { assets: { a_kevin: { kind: 'image', origin: 'upload', status: 'ready', file: 'assets/kevin.jpg' } } };
+  const gate = finalGate(pkg, null, [{ clipId: 's1:a_kevin', assetId: 'a_kevin' }]);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.autoApproved, 1);
+  assert.equal(gate.approved, 1);
+  assert.deepEqual(gate.blocking, []);
+});
+
+test('UR31: a ready stock still with no takes is approved', () => {
+  const pkg = { assets: { a_chart: { kind: 'image', origin: 'stock', status: 'ready', file: 'assets/chart.png' } } };
+  const gate = finalGate(pkg, null, [{ clipId: 's1:a_chart', assetId: 'a_chart' }]);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.autoApproved, 1);
+  assert.equal(gate.approved, 1);
+  assert.deepEqual(gate.blocking, []);
+});
+
+test('UR31: ready uploaded or stock video and audio are not auto-approved', () => {
+  const pkg = {
+    assets: {
+      a_video: { kind: 'video', origin: 'upload', status: 'ready', file: 'assets/clip.mp4' },
+      a_audio: { kind: 'audio', origin: 'stock', status: 'ready', file: 'assets/bed.wav' },
+      a_pending: { kind: 'image', origin: 'upload', status: 'pending' },
+    },
+  };
+  const gate = finalGate(pkg, null, [
+    { clipId: 's1:a_video', assetId: 'a_video' },
+    { clipId: 's1:a_audio', assetId: 'a_audio' },
+    { clipId: 's1:a_pending', assetId: 'a_pending' },
+  ]);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.autoApproved, 0);
+  assert.equal(gate.approved, 0);
+  assert.deepEqual(gate.blocking, [
+    { clipId: 's1:a_video', state: 'planned' },
+    { clipId: 's1:a_audio', state: 'planned' },
+    { clipId: 's1:a_pending', state: 'planned' },
+  ]);
+});
+
+test('UR31: a ready LTX presenter clip with no takes still needs a take', () => {
+  const pkg = { assets: { a_presenter: { kind: 'video', origin: 'generated', status: 'ready', gen: { generator: 'ltx25-a2v' } } } };
+  const gate = finalGate(pkg, null, [{ clipId: 's1:a_presenter', assetId: 'a_presenter' }]);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.autoApproved, 0);
+  assert.equal(gate.approved, 0);
+  assert.deepEqual(gate.blocking, [{ clipId: 's1:a_presenter', state: 'planned' }]);
+});
+
+test('UR31: a ready LTX presenter clip with an approved take passes the gate', () => {
+  const gen = { generator: 'ltx25-a2v', inputs: { prompt: 'a presenter' } };
+  const take = {
+    takeId: 'tk_kept00000001',
+    n: 1,
+    gen,
+    verdict: 'approved',
+    createdAt: '2026-10-20T12:00:00.000Z',
+  };
+  const pkg = { assets: { a_presenter: { kind: 'video', origin: 'generated', status: 'ready', gen } } };
+  const gate = finalGate(pkg, {
+    schema: 'comfyrizz.takes/v1',
+    clips: { a_presenter: { selected: take.takeId, takes: [take] } },
+  }, [{ clipId: 's1:a_presenter', assetId: 'a_presenter' }]);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.autoApproved, 0);
+  assert.equal(gate.approved, 1);
+  assert.deepEqual(gate.blocking, []);
+});
+
 test('UR31: an llm-svg asset with a rejected take still blocks', () => {
   const gen = { generator: 'llm-svg', inputs: { prompt: 'a title card' } };
   const pkg = { assets: { a_svg: { gen } } };

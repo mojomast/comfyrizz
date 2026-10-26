@@ -163,7 +163,7 @@ export function normalizeEasyState(raw: unknown): EasyState {
   const level = (LEVELS as readonly string[]).includes(raw.level as string) ? (raw.level as EasyState['level']) : d.level;
   const levelTouched = typeof raw.levelTouched === 'boolean' ? raw.levelTouched : d.levelTouched;
   const compute = (COMPUTES as readonly string[]).includes(raw.compute as string) ? (raw.compute as EasyState['compute']) : d.compute;
-  const spendCap = typeof raw.spendCap === 'number' && Number.isFinite(raw.spendCap) ? raw.spendCap : d.spendCap;
+  const spendCap = raw.spendCap === null || (typeof raw.spendCap === 'number' && Number.isFinite(raw.spendCap)) ? raw.spendCap : d.spendCap;
   const planHash = raw.planHash === null || typeof raw.planHash === 'string' ? (raw.planHash as string | null) : d.planHash;
   const packageId = raw.packageId === null || typeof raw.packageId === 'string' ? (raw.packageId as string | null) : d.packageId;
   const chatId = raw.chatId === null || typeof raw.chatId === 'string' ? (raw.chatId as string | null) : d.chatId;
