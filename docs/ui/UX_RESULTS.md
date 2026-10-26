@@ -29,7 +29,7 @@ not turn a technical pass or an automatic selection into a human verdict.
 | --- | --- | --- |
 | Generation admission | A package owned by a production starts only from the approved production action. A bound regenerate, batch, queue drain or chat correction refuses instead of falling back to legacy execution. | Mounted |
 | Run cancellation | `POST /api/run/:runId/cancel` asks the controller to abort the run. Requested, stopped and unconfirmed shutdown remain separate. | Mounted |
-| Production execution | A committed action dispatch is drained by the server-owned outbox executor. Startup reconciles actions that already claimed execution; a merely queued action waits for its dispatch. | Mounted |
+| Production execution | A committed action dispatch is drained by the server-owned outbox executor. A committed production/action cancel reaches that executor from the command boundary, not from an EventLog hook. Startup reconciles actions that already claimed execution; a merely queued action waits for its dispatch. Background executor and preflight failures surface as `production.execution_error`, and a plan slot that lacks a backend or finite ceiling is refused instead of defaulted. | Mounted |
 | Budget and cap | The production spend cap and budget summary are served by the existing production routes. A level choice is not spend approval. | Mounted |
 | Snapshot and reset | The production snapshot, event sequence and new-project reset are served by the existing production routes. | Mounted |
 | Save truth | The editor header reads the save-state snapshot. A revision appears only after the server acknowledges the current edit; offline, conflict and rejected stay distinct. | Mounted |

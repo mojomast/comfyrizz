@@ -351,7 +351,7 @@ const assetThumbsClient: ThumbsClient = {
 let assetThumbsHandle: AssetThumbsHandle | null = null;
 let activeViewer: ViewerHandle | null = null;
 let iteratePanel: IteratePanelHandle | null = null;
-let pendingIterationScope: { scope: IterationScope; note: string; at: number } | null = null;
+let pendingIterationScope: { scope: IterationScope; note: string } | null = null;
 let clipViewerToken = 0;
 // UX19: the player updates the active scene on every frame. Cache the cards and
 // only touch the class list when the active scene actually changes.
@@ -545,7 +545,18 @@ async function openClipViewer(clip: ClipSummary, opener: HTMLElement, takeId?: s
   const duration = take?.media.durationInSeconds ?? asset?.media?.durationSeconds
     ?? (typeof frames === 'number' && typeof fps === 'number' && fps > 0 ? frames / fps : undefined);
   const itemId = take?.takeId ?? clip.assetId;
-  const item: ViewerItem = { id: itemId, kind, title: clip.clipId };
+  const item: ViewerItem = {
+    id: itemId,
+    kind,
+    title: clip.clipId,
+    target: {
+      packageId,
+      ...(clip.sceneId ? { shotId: clip.sceneId } : {}),
+      clipId: clip.clipId,
+      ...(take ? { takeId: take.takeId } : {}),
+      assetId: clip.assetId,
+    },
+  };
   if (src) item.src = src;
   if (typeof duration === 'number' && Number.isFinite(duration)) item.duration = duration;
   if (typeof fps === 'number' && Number.isFinite(fps)) item.fps = fps;
@@ -627,7 +638,7 @@ function showIteratePanel(payload: ViewerIteratePayload, viewer: ViewerHandle): 
 function submitIteration(scope: IterationScope): void {
   const bound = lookupBoundProductionId();
   if (bound) {
-    pendingIterationScope = { scope, note: scope.note, at: Date.now() };
+    pendingIterationScope = { scope, note: scope.note };
     void projectChat.send(scope.note, 'plan');
   } else {
     const prompt = document.getElementById('prompt') as HTMLTextAreaElement | null;
@@ -648,7 +659,7 @@ function exportArtifactStorage(): Storage | null {
 
 function activeTurnContext(): { clip: { clipId: string; sceneId: string; assetId: string } } | null {
   const state = activeViewer?.state;
-  const clipId = state?.open ? state.item?.title ?? '' : '';
+  const clipId = state?.open ? state.item?.target?.clipId ?? '' : '';
   const clip = clipId ? clipStore.get(clipId) : null;
   if (!clip) return null;
   return { clip: { clipId: clip.clipId, sceneId: clip.sceneId, assetId: clip.assetId } };
@@ -661,13 +672,13 @@ function targetsForTurnContext(chips: unknown): { shotIds: string[]; lineIds: st
   const shotIds = new Set<string>();
   for (const chip of chips) {
     if (!chip || typeof chip !== 'object') continue;
-    const entry = chip as { id?: unknown; kind?: unknown; value?: unknown };
+    const entry = chip as { id?: unknown; kind?: unknown };
     if (entry.kind !== 'clip') continue;
-    const rawId = typeof entry.id === 'string' && entry.id.startsWith('clip:')
+    // The chip builder in project-chat.ts is the only id source: `clip:<clipId>`.
+    const clipId = typeof entry.id === 'string' && entry.id.startsWith('clip:')
       ? entry.id.slice('clip:'.length)
       : '';
-    const rawValue = typeof entry.value === 'string' ? entry.value.split('·').pop()?.trim() ?? '' : '';
-    const clip = clipStore.get(rawId || rawValue);
+    const clip = clipId ? clipStore.get(clipId) : null;
     if (clip?.sceneId) shotIds.add(clip.sceneId);
   }
   if (shotIds.size === 0) return null;
@@ -693,14 +704,11 @@ function chatApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise
       const targets = targetsForTurnContext(body.turnContext);
       if (targets) next.targets = targets;
       else delete next.targets;
-      if (pending && Date.now() - pending.at > 60_000) pendingIterationScope = null;
       return apiFetch(input, { ...init, body: JSON.stringify(next) });
     } catch {
-      if (pending && Date.now() - pending.at > 60_000) pendingIterationScope = null;
       return apiFetch(input, init);
     }
   }
-  if (pending && Date.now() - pending.at > 60_000) pendingIterationScope = null;
   return apiFetch(input, init);
 }
 

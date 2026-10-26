@@ -462,6 +462,14 @@ export function createApp({
   // facade. The handler is created here, before the chat, so a bound package's
   // turn can dispatch agent-attributed commands through the one command path.
   const productionCommands = createCommandHandler({ store: productionStore });
+  // UX21F: every surface hands commands to this one handler object. Its
+  // post-commit hook (defined below, once the outbox executor exists) wakes the
+  // executor from the commit that produced the event, not from EventLog.
+  const commandHandler = {
+    execute(envelope, attribution) {
+      return executeProductionCommand(envelope, attribution);
+    },
+  };
   const runs = createRunController({
     backendFactory: effectiveBackendFactory,
     events,
@@ -484,17 +492,14 @@ export function createApp({
   // request.
   // UX01: resolve the owner through the frozen contract, including an inline
   // pkg.productionId. The production object stays the shape the chat adapter
-  // already consumes; the decision is never a second store scan.
+  // already consumes; the decision is never a second store scan. UX21F: a
+  // journal failure refuses with productionBindingFor's typed 503 instead of
+  // silently looking unbound, so chat cannot fall through to a paid run.
   const findBoundProduction = (pkgOrId) => {
     const pkg = typeof pkgOrId === 'string' ? { id: pkgOrId } : pkgOrId;
     if (!pkg || typeof pkg.id !== 'string' || pkg.id === '') return null;
-    let binding;
-    try {
-      binding = admission.binding(pkg);
-    } catch {
-      return null;
-    }
-    if (!binding || binding.state === 'unbound' || typeof binding.productionId !== 'string') return null;
+    const binding = productionBindingFor(pkg);
+    if (!binding) return null;
     return productionStore.read(binding.productionId) ?? null;
   };
   const chatRunController = admission.guardRuns(runs, 'chat.correction');
@@ -521,7 +526,7 @@ export function createApp({
     production: {
       findBound: findBoundProduction,
       read: productionId => productionStore.read(productionId),
-      command: (envelope, attribution) => productionCommands.execute(envelope, attribution),
+      command: (envelope, attribution) => commandHandler.execute(envelope, attribution),
     },
   });
   // UX10/UX15: a package owned by a production reaches take, select, revert and
@@ -554,7 +559,7 @@ export function createApp({
     return {
       productionId: binding.productionId,
       context: { actor: 'user', userEventId: `ue_${randomUUID()}` },
-      handler: productionCommands,
+      handler: commandHandler,
     };
   }
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
@@ -874,7 +879,7 @@ export function createApp({
   // in the ledger; dispatch only reserves.
   const productionActions = createActionCoordinator({
     store: productionStore,
-    handler: productionCommands,
+    handler: commandHandler,
     ledgerFor: (production) => createBudgetLedger({
       runtimeDir,
       ledgerId: production.budgetLedgerId,
@@ -909,62 +914,130 @@ export function createApp({
     }),
   });
   /**
+   * One stable surface for an outbox failure: the operator log carries a single
+   * prefix, and the EventLog carries a typed event the activity panel can show.
+   */
+  function reportExecutionFailure(productionId, code, error) {
+    const message = typeof error === 'string'
+      ? error
+      : typeof error?.message === 'string' && error.message !== ''
+        ? error.message
+        : 'outbox execution failed';
+    const resolvedCode = typeof code === 'string' && code !== ''
+      ? code
+      : typeof error?.code === 'string' && error.code !== ''
+        ? error.code
+        : 'OUTBOX_EXECUTION_FAILED';
+    console.error('[ux03-outbox]', productionId, message);
+    try {
+      events.publish({
+        type: 'production.execution_error',
+        productionId,
+        code: resolvedCode,
+        message,
+      });
+    } catch (publishError) {
+      console.error('[ux03-outbox]', productionId, publishError?.message ?? 'event publish failed');
+    }
+  }
+
+  /**
    * The executor needs the pipeline input the production approved. It is
    * derived from the latest trusted plan slot, never from a caller-supplied
-   * body. The pipeline's own plan hash is recomputed by the controller, so the
-   * approved production slot supplies the one matching approval.
+   * body. A slot that does not name its backend and finite ceiling is refused
+   * instead of being filled with Google Colab defaults.
    */
   function pipelineDrainContext(productionId, actionId = null) {
     const production = productionStore.read(productionId);
-    if (!production) return null;
+    if (!production) return { refused: 'PRODUCTION_UNAVAILABLE' };
     const pkg = packageForProduction(production);
-    if (!pkg) return null;
-    let events = [];
-    try { events = productionStore.readEvents(productionId); } catch { return null; }
+    if (!pkg) return { refused: 'PACKAGE_UNAVAILABLE' };
+    let journal;
+    try {
+      journal = productionStore.readEvents(productionId);
+    } catch (error) {
+      return { refused: 'JOURNAL_UNAVAILABLE', error };
+    }
     let action = null;
-    for (const event of events) {
+    for (const event of journal) {
       if (event.type !== 'action.state_changed' || !event.data?.id) continue;
       if (actionId && event.data.id !== actionId) continue;
       action = action && action.id === event.data.id ? { ...action, ...event.data } : event.data;
     }
-    if (!action) return null;
+    if (!action) return { refused: 'ACTION_UNAVAILABLE' };
     let slot = null;
-    for (const event of events) {
+    for (const event of journal) {
       if (event.type !== 'plan.proposed' || !Array.isArray(event.data?.actions)) continue;
       if (event.data.id !== action.planId && event.data.planHash !== action.planHash) continue;
       slot = event.data.actions.find(candidate => candidate?.id === action.id) ?? slot;
     }
-    const input = {
-      backendId: typeof slot?.backendId === 'string' && slot.backendId ? slot.backendId : 'colab',
-      budgetUnits: Number.isFinite(slot?.upperBound) ? slot.upperBound : 0,
-    };
-    try {
-      const plan = planPipeline(pkg, input, { env: process.env });
-      if (plan.ready && plan.requiresApproval) input.approvedPlanHash = plan.planHash;
-    } catch {
-      // The adapter records its own typed refusal; a preflight failure is not a
-      // second execution path.
+    if (!slot || typeof slot.backendId !== 'string' || slot.backendId === '' || !Number.isFinite(slot.upperBound)) {
+      return { refused: 'SLOT_INCOMPLETE' };
+    }
+    // Input comes only from the approved slot. There is no request-body or
+    // environment fallback here.
+    const input = { backendId: slot.backendId, budgetUnits: slot.upperBound };
+    // Spend authority was consumed by the IP20 coordinator before this drain
+    // (see productions/pipeline-adapter.mjs). The hash is redeemed only for an
+    // action that dispatch already moved out of planning.
+    if (action.state === 'queued' || action.state === 'dispatching') {
+      try {
+        const plan = planPipeline(pkg, input, { env: process.env });
+        if (plan.ready && plan.requiresApproval) input.approvedPlanHash = plan.planHash;
+      } catch (error) {
+        // The drain still runs; the adapter records the typed refusal. The
+        // preflight reason is reported by the caller so it is not swallowed.
+        return {
+          pkg,
+          input,
+          sourceDir: dirname(store.path(pkg.id)),
+          preflightError: error?.message ?? 'pipeline preflight failed',
+        };
+      }
     }
     return { pkg, input, sourceDir: dirname(store.path(pkg.id)) };
   }
-  // A cancellation intent fans out to every attributed run. New work is started
-  // by its own dispatch, never by an unrelated terminal event (which would carry
-  // the wrong per-action input).
-  const publishBeforeOutbox = events.publish.bind(events);
-  events.publish = (event) => {
-    const entry = publishBeforeOutbox(event);
-    if (event?.type === 'production.cancelled'
-      || (event?.type === 'production.intent_changed' && event.data?.intent === 'cancel_requested')) {
-      Promise.resolve(outboxExecutor.onEvent(event)).catch(() => {});
+
+  /**
+   * UX21F: the one post-commit hook at the command boundary. Production
+   * commands commit to the production journal and never publish to EventLog,
+   * so the commit result is the only reliable wake-up. Duplicates replay a
+   * recorded commit and must not drain or fan out a second time.
+   */
+  function executeProductionCommand(envelope, attribution) {
+    const result = productionCommands.execute(envelope, attribution);
+    if (!result || result.committed !== true || result.duplicate === true) return result;
+    const productionId = result.productionId;
+    for (const event of result.events ?? []) {
+      if (event?.type === 'production.cancelled'
+        || (event?.type === 'production.intent_changed' && event.data?.intent === 'cancel_requested')) {
+        Promise.resolve(outboxExecutor.onEvent({ ...event, productionId }))
+          .catch(error => reportExecutionFailure(productionId, 'CANCEL_FANOUT_FAILED', error));
+      }
     }
-    return entry;
-  };
+    const outboxIds = Array.isArray(result.outboxIds) ? result.outboxIds : [];
+    if (outboxIds.length > 0) {
+      const context = pipelineDrainContext(productionId, result.action?.id ?? null);
+      if (context.refused) {
+        reportExecutionFailure(productionId, context.refused, context.error ?? `outbox drain refused: ${context.refused}`);
+      } else {
+        if (context.preflightError) {
+          reportExecutionFailure(productionId, 'PLAN_PREFLIGHT_FAILED', context.preflightError);
+        }
+        Promise.resolve(outboxExecutor.drainProduction(productionId, context))
+          .catch(error => reportExecutionFailure(productionId, 'OUTBOX_DRAIN_FAILED', error));
+      }
+    }
+    return result;
+  }
+
   // Startup recovery: reconcile actions that already claimed execution. A
   // queued action is started by its dispatch or a later production event, not
   // by merely opening the app, so a restart cannot spend without a live claim.
   setImmediate(() => {
     for (const production of productionStore.list()) {
-      Promise.resolve(outboxExecutor.reconcileProduction({ productionId: production.id })).catch(() => {});
+      Promise.resolve(outboxExecutor.reconcileProduction({ productionId: production.id }))
+        .catch(error => reportExecutionFailure(production.id, 'RECONCILE_FAILED', error));
     }
   });
 
@@ -1009,7 +1082,7 @@ export function createApp({
   const productionCoordinator = createProductionCoordinator({
     store: productionStore,
     actions: productionActions,
-    handler: productionCommands,
+    handler: commandHandler,
     pkg: packageForProduction,
     characters: charactersForProduction,
   });
@@ -1021,11 +1094,22 @@ export function createApp({
     getAction: (args) => productionActions.getAction(args),
     dispatch: (args) => {
       const result = productionCoordinator.dispatch(args);
-      // UX03: a committed dispatch is immediately owned by the server. The
-      // drain is asynchronous so the HTTP response still reports the admission.
+      // UX03/UX21F: actions.dispatch commits its outbox entry inside the action
+      // coordinator, so this is the one drain trigger for a dispatch. Command
+      // commits reached through commandHandler are drained by its post-commit
+      // hook instead; there is no second path for either kind.
       if (result && typeof args?.productionId === 'string') {
         const context = pipelineDrainContext(args.productionId, result?.action?.id ?? null);
-        if (context) void outboxExecutor.drainProduction(args.productionId, context).catch(() => {});
+        if (context.refused) {
+          reportExecutionFailure(args.productionId, context.refused,
+            context.error ?? `outbox drain refused: ${context.refused}`);
+        } else {
+          if (context.preflightError) {
+            reportExecutionFailure(args.productionId, 'PLAN_PREFLIGHT_FAILED', context.preflightError);
+          }
+          Promise.resolve(outboxExecutor.drainProduction(args.productionId, context))
+            .catch(error => reportExecutionFailure(args.productionId, 'OUTBOX_DRAIN_FAILED', error));
+        }
       }
       return result;
     },
@@ -1064,7 +1148,7 @@ export function createApp({
   });
   const productionRoutes = createProductionRoutes({
     store: productionStore,
-    handler: productionCommands,
+    handler: commandHandler,
     actions: productionRouteActions,
     contextFor: () => ({
       actor: 'user',

@@ -93,9 +93,11 @@ offline with the **local · scripted model**. See
 [timeline review](docs/features/timeline-review-and-export.md).
 
 **What is actually mounted.** [UX-RESULTS capability status](docs/ui/UX_RESULTS.md) keeps generated,
-auto-selected, technically checked and human-reviewed results separate. It also names the features
-that are component-only (native-transfer continuity and reopened export after reload) so they are
-not read as finished journeys.
+auto-selected, technically checked and human-reviewed results separate. The mounted production
+executor drains a committed dispatch and reaches the same executor from a committed production or
+action cancel; background failures surface as `production.execution_error`. The page also names the
+features that are component-only (native-transfer continuity and reopened export after reload) so
+they are not read as finished journeys.
 
 ### Characters
 
