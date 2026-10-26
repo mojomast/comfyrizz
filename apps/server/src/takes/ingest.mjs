@@ -253,6 +253,8 @@ function resolveRetrySource(outputDir, produced) {
  * @param {boolean} [input.autoSelect=true] let the store select a new take when allowed; pass
  *   false when the caller must decide selection itself (IP11 rebase), which still snapshots
  *   every take and restores the selection the clip had before this ingest
+ * @param {object|Map|null} [input.references] reference index used for the source fingerprint;
+ *   defaults to the package, whose assets are the direct/transitive reference inputs
  * @returns {{takes: object[], selected: Record<string, string>, failed: object[]}}
  */
 
@@ -292,7 +294,7 @@ function warmThumbs(thumbs, source) {
   }
 }
 
-export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, corrections = {}, runId = null, backend = null, retry = null, autoSelect = true, thumbs = null } = {}) {
+export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, corrections = {}, runId = null, backend = null, retry = null, autoSelect = true, thumbs = null, references = null } = {}) {
   if (!isObject(pkg) || typeof pkg.id !== 'string' || pkg.id === '') {
     throw new TypeError('ingestRun needs a package with an id');
   }
@@ -306,6 +308,7 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
   if (!store || typeof store.addTake !== 'function') throw new TypeError('ingestRun needs a take store');
 
   const pkgId = pkg.id;
+  const refs = references ?? pkg;
   const effectiveRunId = effectiveRunIdOf(runId);
   const updatedAt = typeof manifest.updatedAt === 'string' ? manifest.updatedAt : undefined;
   const jobs = new Map(((Array.isArray(jobsDoc?.jobs) ? jobsDoc.jobs : [])).filter(isObject).map((job) => [job.id, job]));
@@ -379,7 +382,7 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
         bytes: item.bytes ?? output?.bytes,
         media,
         gen,
-        sourceGenFingerprint: genFingerprint(asset.gen),
+        sourceGenFingerprint: genFingerprint(asset.gen, refs),
         correction,
         runId: effectiveRunId,
         createdAt: updatedAt,
@@ -447,6 +450,7 @@ export async function ingestRunWithRetries(input = {}) {
   const runId = effectiveRunIdOf(rest.runId);
   const updatedAt = typeof rest.manifest?.updatedAt === 'string' ? rest.manifest.updatedAt : undefined;
   const jobs = new Map(((Array.isArray(rest.jobsDoc?.jobs) ? rest.jobsDoc.jobs : [])).filter(isObject).map((job) => [job.id, job]));
+  const refs = rest.references ?? pkg;
 
   // a clip that already landed a take in this run is never retried
   const landed = new Set(result.takes.filter(take => isObject(take) && take.runId === runId).map(take => take.assetId));
@@ -539,6 +543,7 @@ export async function ingestRunWithRetries(input = {}) {
         bytes: produced.bytes,
         media,
         gen,
+        sourceGenFingerprint: genFingerprint(asset.gen, refs),
         correction,
         runId,
         createdAt: updatedAt,

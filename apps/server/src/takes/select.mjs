@@ -151,7 +151,17 @@ function validated(next) {
   return result.valid ? next : null;
 }
 
-function applySelection(pkg, assetId, take) {
+/**
+ * Apply one take's file, hash and metadata to the package asset, trimming take-only
+ * fields only when the package schema would reject them. Exported so the route can
+ * repair a package that already accepted a selection whose sidecar write crashed.
+ *
+ * @param {object} pkg package document
+ * @param {string} assetId
+ * @param {object} take a validated take record
+ * @returns {object} the next package document (never mutates `pkg`)
+ */
+export function applyTakeToPackage(pkg, assetId, take) {
   const direct = buildPackage(pkg, assetId, take);
   if (validated(direct)) return direct;
 
@@ -163,11 +173,30 @@ function applySelection(pkg, assetId, take) {
   throw new TakeSelectionError('INVALID_PACKAGE', `selected take would not validate: ${details}`);
 }
 
+/**
+ * The take a Revert would select, or null when the clip has no usable history.
+ * Kept pure so a route can compare-and-swap before mutating the sidecar.
+ *
+ * @param {object|null} entry one clip's takes entry
+ * @returns {string|null}
+ */
+export function previousTakeId(entry) {
+  const history = readHistory(entry);
+  while (history.length > 0) {
+    const candidate = history.pop();
+    if (candidate === entry?.selected) continue;
+    if (Array.isArray(entry?.takes) && entry.takes.some(item => isObject(item) && item.takeId === candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 export function selectTake(pkg, takeDoc, assetId, takeId) {
   assetFor(pkg, assetId);
   const entry = entryFor(takeDoc, assetId);
   const take = takeFor(entry, assetId, takeId);
-  const next = applySelection(pkg, assetId, take);
+  const next = applyTakeToPackage(pkg, assetId, take);
 
   const previous = typeof entry.selected === 'string' ? entry.selected : null;
   const history = readHistory(entry);
@@ -184,24 +213,18 @@ export function revertTake(pkg, takeDoc, assetId) {
   assetFor(pkg, assetId);
   const entry = entryFor(takeDoc, assetId);
   const history = readHistory(entry);
-
-  let previousId = null;
-  while (history.length > 0) {
-    const candidate = history.pop();
-    if (candidate === entry.selected) continue;
-    if (entry.takes.some(item => isObject(item) && item.takeId === candidate)) {
-      previousId = candidate;
-      break;
-    }
-  }
+  const previousId = previousTakeId(entry);
 
   if (!previousId) {
     throw new TakeSelectionError('NO_PREVIOUS_TAKE', `asset ${JSON.stringify(assetId)} has no previous take`);
   }
 
   const take = takeFor(entry, assetId, previousId);
-  const next = applySelection(pkg, assetId, take);
+  const next = applyTakeToPackage(pkg, assetId, take);
 
+  // previousTakeId already consumed exactly the candidates revertTake used.
+  while (history.length > 0 && history.at(-1) !== previousId) history.pop();
+  if (history.at(-1) === previousId) history.pop();
   entry.history = history;
   entry.selected = previousId;
   return next;

@@ -545,7 +545,13 @@ function verdictState(take, takes, assetGen, refs) {
     if (stale) return 'stale';
   }
 
-  if (selected.verdict === 'approved') return 'approved';
+  if (selected.verdict === 'approved') {
+    // UX10: an approved legacy take with no generation evidence cannot be proven
+    // fresh against the current references. Leave its recorded evidence untouched,
+    // but do not turn the unknown into an approval.
+    if (refs && !isPlainObject(selected.gen)) return 'stale';
+    return 'approved';
+  }
   if (selected.verdict === 'rejected') {
     const newer = Array.isArray(takes) ? takes.find((candidate) => isNewer(candidate, selected)) : null;
     if (newer) return verdictState(newer, takes, assetGen, refs);

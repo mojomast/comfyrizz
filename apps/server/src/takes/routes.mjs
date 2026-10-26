@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { listClips } from './clips.mjs';
 import { buildCorrection } from './correction.mjs';
 import { MAX_NOTE_CHARS, TAKES_SCHEMA, VERDICTS, deriveClipState } from './model.mjs';
-import { revertTake, selectTake } from './select.mjs';
+import { applyTakeToPackage, previousTakeId, revertTake, selectTake } from './select.mjs';
 import { redactForLog } from '../../../../packages/backends/src/colab-plan.mjs';
 
 const ROUTE_RE = /^\/api\/package\/([^/]+)\/clips(?:\/(.*))?$/;
@@ -13,11 +13,12 @@ const MAX_BODY = 2 * 1024 * 1024;
 const MAX_BATCH_ITEMS = 50;
 
 class RouteError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, details) {
     super(message);
     this.name = 'RouteError';
     this.status = status;
     this.code = code;
+    if (isPlainObject(details)) Object.assign(this, details);
   }
 }
 
@@ -51,12 +52,31 @@ function statusFor(error) {
       return 404;
     case 'NO_PREVIOUS_TAKE':
     case 'CONFLICT':
+    case 'REVISION_CONFLICT':
+    case 'SELECTION_CONFLICT':
+    case 'IDEMPOTENCY_CONFLICT':
+    case 'SCOPE_EMPTY':
+    case 'SCOPE_UNRESOLVED':
+    case 'ITERATION_SHOT_LOCKED':
+    case 'PRODUCTION_NOT_ACTIVE':
+    case 'PRODUCTION_MISMATCH':
+    case 'PRODUCTION_NOT_FOUND':
+    case 'BOUND_ENTRY_UNSUPPORTED':
+    case 'RUN_REFUSED':
       return 409;
     case 'PATH_ESCAPE':
+    case 'CALLER_AUTHORITY_FORBIDDEN':
+    case 'FORBIDDEN':
+    case 'NOT_AUTHORIZED':
       return 403;
     case 'BACKEND_UNAVAILABLE':
       return 422;
+    case 'RUN_IDENTITY_REQUIRED':
+      return 502;
     case 'INVALID_BODY':
+    case 'INVALID_EXPECTED':
+    case 'INVALID_SELECTION':
+    case 'INVALID_REVISION':
     case 'INVALID_CHANGE':
     case 'INVALID_TEXT':
     case 'INVALID_SEED':
@@ -96,6 +116,7 @@ function respondError(response, error) {
   const body = { error: message, code };
   if (Number.isSafeInteger(error?.currentRevision)) body.currentRevision = error.currentRevision;
   if (Number.isSafeInteger(error?.baseRevision)) body.baseRevision = error.baseRevision;
+  if (error && Object.hasOwn(error, 'currentSelection')) body.currentSelection = error.currentSelection;
   if (Array.isArray(error?.errors)) body.errors = error.errors;
   return sendJson(response, status, body);
 }
@@ -174,12 +195,44 @@ function boundIdentity(body) {
   };
 }
 
+function validateExpected(expected) {
+  if (expected.packageRevision !== undefined
+    && (!Number.isSafeInteger(expected.packageRevision) || expected.packageRevision < 0)) {
+    throw new RouteError(400, 'INVALID_REVISION', 'expected.packageRevision must be a non-negative integer');
+  }
+  if (Object.hasOwn(expected, 'selected')
+    && expected.selected !== null
+    && typeof expected.selected !== 'string') {
+    throw new RouteError(400, 'INVALID_SELECTION', 'expected.selected must be a take id or null');
+  }
+  return expected;
+}
+
 function boundExpected(body) {
   const expected = isPlainObject(body.expected) ? body.expected : {};
   if (!Number.isSafeInteger(expected.productionRevision) || expected.productionRevision < 0) {
     throw new RouteError(400, 'PRODUCTION_REVISION_REQUIRED', 'expected.productionRevision is required on a production-bound request');
   }
-  return expected;
+  return validateExpected(expected);
+}
+
+function callerExpected(body) {
+  if (body.expected !== undefined && !isPlainObject(body.expected)) {
+    throw new RouteError(400, 'INVALID_EXPECTED', 'expected must be an object');
+  }
+  return validateExpected(isPlainObject(body.expected) ? body.expected : {});
+}
+
+function selectionIdentity(body) {
+  const commandId = typeof body.commandId === 'string' && body.commandId.trim() !== '' ? body.commandId : null;
+  const idempotencyKey = typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim() !== ''
+    ? body.idempotencyKey
+    : null;
+  if (!commandId && !idempotencyKey) return null;
+  return {
+    commandId: commandId ?? idempotencyKey,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  };
 }
 
 function boundEnvelope(binding, identity, expected, kind, payload) {
@@ -238,6 +291,7 @@ function clipView(pkg, clip, doc) {
     clip: isPlainObject(asset) ? asset : clip,
     takes: entry ?? { selected: null, takes: [] },
     assetGen: isPlainObject(asset?.gen) ? asset.gen : undefined,
+    refs: pkg,
   });
   return {
     ...clip,
@@ -278,16 +332,45 @@ function recordStarted(takeStore, pkgId, entries, result) {
 }
 
 function isBusyResult(result) {
-  return result?.status === 409 || result?.error === 'run busy';
+  if (!isPlainObject(result)) return false;
+  if (result.code === 'RUN_BUSY') return true;
+  if (typeof result.error === 'string' && /run busy/i.test(result.error)) return true;
+  return result.status === 409 && result.code === undefined && result.refused !== true;
 }
 
 function isBusyError(error) {
-  return error?.status === 409 || error?.code === 'RUN_BUSY' || /run busy/i.test(error?.message ?? '');
+  if (!isPlainObject(error)) return false;
+  if (error.code === 'RUN_BUSY') return true;
+  if (error.status === 409 && error.code === undefined) return true;
+  return /run busy/i.test(error.message ?? '');
+}
+
+function refusalCode(result) {
+  if (!isPlainObject(result)) return null;
+  if (typeof result.code === 'string' && result.code !== 'RUN_BUSY') return result.code;
+  if (result.refused === true) return 'RUN_REFUSED';
+  if (result.error !== undefined && Number.isInteger(result.status) && result.status >= 400) return 'RUN_REFUSED';
+  return null;
+}
+
+function refusalStatus(result) {
+  const status = Number.isInteger(result?.status) ? result.status : 409;
+  return status >= 400 && status < 500 ? status : 409;
 }
 
 function savePackage(store, pkg, next) {
-  if (typeof store.save === 'function') return store.save(pkg.id, next, pkg.revision);
-  if (typeof store.write === 'function') return store.write(next);
+  try {
+    if (typeof store.save === 'function') return store.save(pkg.id, next, pkg.revision);
+    if (typeof store.write === 'function') return store.write(next);
+  } catch (error) {
+    if (Number.isSafeInteger(error?.currentRevision)) {
+      throw new RouteError(409, 'REVISION_CONFLICT', 'the package revision changed before the selection was saved', {
+        currentRevision: error.currentRevision,
+        baseRevision: pkg.revision,
+      });
+    }
+    throw error;
+  }
   throw new RouteError(500, 'STORE_UNAVAILABLE', 'package store cannot save');
 }
 
@@ -353,6 +436,78 @@ export function createTakeRoutes(options = {}) {
     return { clip, clips };
   }
 
+  function takeById(entry, takeId) {
+    return activeTakes(entry).find(take => take.takeId === takeId) ?? null;
+  }
+
+  function packageCarriesTake(pkg, assetId, take) {
+    const asset = isPlainObject(pkg?.assets?.[assetId]) ? pkg.assets[assetId] : null;
+    if (!asset || !take) return false;
+    if (asset.file !== take.file) return false;
+    return typeof asset.sha256 === 'string'
+      && typeof take.sha256 === 'string'
+      && asset.sha256.toLowerCase() === take.sha256.toLowerCase();
+  }
+
+  function selectionCommandFor(entry, commandId) {
+    if (typeof commandId !== 'string' || commandId === '') return null;
+    const record = isPlainObject(entry?.selectionCommand) ? entry.selectionCommand : null;
+    return record && record.commandId === commandId ? record : null;
+  }
+
+  function assertSelectionExpected({ pkg, entry, assetId, take, expected, skip = false }) {
+    if (skip) return;
+    if (expected.packageRevision !== undefined && pkg?.revision !== expected.packageRevision) {
+      // A retry after a crash may legitimately find the package already holding the
+      // requested take while the sidecar still lags. That is repairable, not a conflict.
+      if (!packageCarriesTake(pkg, assetId, take)) {
+        throw new RouteError(409, 'REVISION_CONFLICT', 'the package revision changed since it was read', {
+          currentRevision: pkg.revision,
+          baseRevision: expected.packageRevision,
+        });
+      }
+    }
+    if (Object.hasOwn(expected, 'selected')) {
+      const current = effectiveSelected(entry);
+      if (current !== expected.selected) {
+        throw new RouteError(409, 'SELECTION_CONFLICT', 'the clip selection changed since it was read', {
+          currentSelection: current,
+          ...(Number.isSafeInteger(pkg?.revision) ? { currentRevision: pkg.revision } : {}),
+        });
+      }
+    }
+  }
+
+  function ensurePackageSelection(pkg, assetId, take) {
+    if (packageCarriesTake(pkg, assetId, take)) return pkg;
+    const next = applyTakeToPackage(pkg, assetId, take);
+    return savePackage(store, pkg, next);
+  }
+
+  function applySelectionTransaction({ pkg, pkgId, doc, entry, assetId, kind, take, commandId, duplicate }) {
+    const from = effectiveSelected(entry);
+    const next = kind === 'select'
+      ? selectTake(pkg, doc, assetId, take.takeId)
+      : revertTake(pkg, doc, assetId);
+    const packageChanged = JSON.stringify(next) !== JSON.stringify(pkg);
+    const saved = packageChanged ? savePackage(store, pkg, next) : pkg;
+    if (commandId) {
+      entry.selectionCommand = {
+        commandId,
+        kind,
+        takeId: take.takeId,
+        from,
+        packageRevision: Number.isSafeInteger(saved.revision) ? saved.revision : (pkg.revision ?? 0),
+      };
+    }
+    takeStore.write(pkgId, doc);
+    return { saved, takeId: take.takeId, duplicate };
+  }
+
+  function duplicateSelection({ pkg, assetId, take }) {
+    return { saved: ensurePackageSelection(pkg, assetId, take), takeId: take.takeId, duplicate: true };
+  }
+
   async function startTakeRun({ pkg, assetIds, corrections, backendId, approved, budgetUnits }) {
     let result;
     try {
@@ -383,8 +538,11 @@ export function createTakeRoutes(options = {}) {
     if (result?.approvalRequired || (result?.requiresApproval && result?.approved === false)) {
       return { kind: 'approval_required', result };
     }
-    if (result?.refused) return { kind: 'refused', result };
-    return { kind: 'started', result: result ?? {} };
+    if (refusalCode(result)) return { kind: 'refused', result };
+    if (typeof result?.runId !== 'string' || result.runId.trim() === '') {
+      throw new RouteError(502, 'RUN_IDENTITY_REQUIRED', 'the run controller returned no run identity');
+    }
+    return { kind: 'started', result };
   }
 
   async function handleList(response, pkgId) {
@@ -498,8 +656,9 @@ export function createTakeRoutes(options = {}) {
     }
 
     if (outcome.kind === 'refused') {
-      return sendJson(response, 409, {
+      return sendJson(response, refusalStatus(outcome.result), {
         kind: 'refused',
+        code: refusalCode(outcome.result) ?? 'RUN_REFUSED',
         ...common,
         planHash: outcome.result?.planHash ?? null,
         budget: outcome.result?.budget ?? null,
@@ -637,8 +796,9 @@ export function createTakeRoutes(options = {}) {
     }
 
     if (outcome.kind === 'refused') {
-      return sendJson(response, 409, {
+      return sendJson(response, refusalStatus(outcome.result), {
         kind: 'refused',
+        code: refusalCode(outcome.result) ?? 'RUN_REFUSED',
         items: publicItems,
         planHash: outcome.result?.planHash ?? null,
         budget: outcome.result?.budget ?? null,
@@ -672,74 +832,145 @@ export function createTakeRoutes(options = {}) {
     const pkg = readPackage(pkgId);
     const binding = await productionBinding(pkg);
     const { clip } = await clipFor(pkg, clipId);
-    const identity = binding ? boundIdentity(body) : null;
-    const expected = binding ? boundExpected(body) : null;
+    const identity = binding ? boundIdentity(body) : selectionIdentity(body);
+    const expected = binding ? boundExpected(body) : callerExpected(body);
     const doc = takeStore.read(pkgId);
     if (!doc) throw new RouteError(404, 'NOT_FOUND', 'takes document does not exist');
     const entry = isPlainObject(doc.clips?.[clip.assetId]) ? doc.clips[clip.assetId] : null;
-    const take = activeTakes(entry).find(candidate => candidate.takeId === body.takeId);
+    const take = takeById(entry, body.takeId);
     if (!take) throw new RouteError(404, 'UNKNOWN_TAKE', 'take is not in this clip');
+
+    const commandId = identity?.commandId ?? null;
+    const record = selectionCommandFor(entry, commandId);
+    if (record && record.kind !== 'select') {
+      throw new RouteError(409, 'IDEMPOTENCY_CONFLICT', 'command id was already used for a different selection command');
+    }
+    if (record && record.takeId !== take.takeId) {
+      throw new RouteError(409, 'IDEMPOTENCY_CONFLICT', 'command id was already used for a different take');
+    }
+
+    // Check the caller's revision/selection before the production journal so a
+    // stale tab can never journal a command that its package has already rejected.
+    assertSelectionExpected({ pkg, entry, assetId: clip.assetId, take, expected, skip: Boolean(record) });
 
     const result = binding
       ? binding.handler.execute(
         boundEnvelope(binding, identity, expected, 'take.select', {
           clipId,
           assetId: clip.assetId,
-          takeId: body.takeId,
+          takeId: take.takeId,
         }),
         binding.context,
       )
       : null;
 
-    const docBefore = binding ? JSON.stringify(doc) : null;
-    const next = selectTake(pkg, doc, clip.assetId, body.takeId);
-    let saved;
-    if (binding) {
-      const packageChanged = JSON.stringify(next) !== JSON.stringify(pkg);
-      const documentChanged = JSON.stringify(doc) !== docBefore;
-      saved = packageChanged ? savePackage(store, pkg, next) : pkg;
-      if (documentChanged) takeStore.write(pkgId, doc);
-    } else {
-      saved = savePackage(store, pkg, next);
-      takeStore.write(pkgId, doc);
+    const duplicate = binding ? Boolean(result?.duplicate) : Boolean(record);
+    const fastPath = duplicate && Boolean(record);
+    const applied = fastPath
+      ? duplicateSelection({ pkg, assetId: clip.assetId, take })
+      : applySelectionTransaction({
+        pkg,
+        pkgId,
+        doc,
+        entry,
+        assetId: clip.assetId,
+        kind: 'select',
+        take,
+        commandId,
+        duplicate,
+      });
+
+    if (!fastPath) {
+      publish(events, {
+        type: 'clip.take.selected', packageId: pkgId, clipId, assetId: clip.assetId, takeId: applied.takeId,
+      });
     }
-    publish(events, {
-      type: 'clip.take.selected', packageId: pkgId, clipId, assetId: clip.assetId, takeId: body.takeId,
-    });
     const selected = {
       kind: 'selected',
       packageId: pkgId,
-      revision: saved.revision ?? null,
-      clip: clipView(saved, clip, doc),
-      takeId: body.takeId,
+      revision: applied.saved.revision ?? null,
+      clip: clipView(applied.saved, clip, doc),
+      takeId: applied.takeId,
     };
     if (binding) {
       selected.productionId = binding.productionId;
       selected.productionRevision = result.revision;
       selected.commandId = identity.commandId;
-      if (result.duplicate) selected.duplicate = true;
     }
+    if (applied.duplicate) selected.duplicate = true;
     return sendJson(response, 200, selected);
   }
 
   async function handleRevert(request, response, pkgId, clipId) {
+    const body = await readJson(request);
+    if (!isPlainObject(body)) throw new RouteError(400, 'INVALID_BODY', 'body must be an object');
     const pkg = readPackage(pkgId);
     const { clip } = await clipFor(pkg, clipId);
+    const identity = selectionIdentity(body);
+    const expected = callerExpected(body);
     const doc = takeStore.read(pkgId);
     if (!doc) throw new RouteError(404, 'NOT_FOUND', 'takes document does not exist');
-    const next = revertTake(pkg, doc, clip.assetId);
-    const saved = savePackage(store, pkg, next);
-    takeStore.write(pkgId, doc);
-    const takeId = effectiveSelected(doc.clips?.[clip.assetId]);
-    publish(events, {
-      type: 'clip.take.selected', packageId: pkgId, clipId, assetId: clip.assetId, takeId,
-    });
+    const entry = isPlainObject(doc.clips?.[clip.assetId]) ? doc.clips[clip.assetId] : null;
+    const commandId = identity?.commandId ?? null;
+    const record = selectionCommandFor(entry, commandId);
+    if (record && record.kind !== 'revert') {
+      throw new RouteError(409, 'IDEMPOTENCY_CONFLICT', 'command id was already used for a different selection command');
+    }
+
+    let take = record ? takeById(entry, record.takeId) : null;
+    if (record && !take) {
+      throw new RouteError(409, 'IDEMPOTENCY_CONFLICT', 'the recorded Revert target is no longer in this clip');
+    }
+    if (!take) {
+      const previous = previousTakeId(entry);
+      if (!previous) {
+        if (expected.packageRevision !== undefined && pkg?.revision !== expected.packageRevision) {
+          throw new RouteError(409, 'REVISION_CONFLICT', 'the package revision changed since it was read', {
+            currentRevision: pkg.revision,
+            baseRevision: expected.packageRevision,
+          });
+        }
+        if (Object.hasOwn(expected, 'selected') && effectiveSelected(entry) !== expected.selected) {
+          throw new RouteError(409, 'SELECTION_CONFLICT', 'the clip selection changed since it was read', {
+            currentSelection: effectiveSelected(entry),
+            ...(Number.isSafeInteger(pkg?.revision) ? { currentRevision: pkg.revision } : {}),
+          });
+        }
+        throw new RouteError(409, 'NO_PREVIOUS_TAKE', 'the clip has no previous take');
+      }
+      take = takeById(entry, previous);
+      if (!take) throw new RouteError(409, 'NO_PREVIOUS_TAKE', 'the clip has no previous take');
+    }
+
+    assertSelectionExpected({ pkg, entry, assetId: clip.assetId, take, expected, skip: Boolean(record) });
+
+    const fastPath = Boolean(record);
+    const applied = fastPath
+      ? duplicateSelection({ pkg, assetId: clip.assetId, take })
+      : applySelectionTransaction({
+        pkg,
+        pkgId,
+        doc,
+        entry,
+        assetId: clip.assetId,
+        kind: 'revert',
+        take,
+        commandId,
+        duplicate: false,
+      });
+
+    if (!fastPath) {
+      publish(events, {
+        type: 'clip.take.selected', packageId: pkgId, clipId, assetId: clip.assetId, takeId: applied.takeId,
+      });
+    }
     return sendJson(response, 200, {
       kind: 'reverted',
       packageId: pkgId,
-      revision: saved.revision ?? null,
-      clip: clipView(saved, clip, doc),
-      takeId,
+      revision: applied.saved.revision ?? null,
+      clip: clipView(applied.saved, clip, doc),
+      takeId: applied.takeId,
+      ...(applied.duplicate ? { duplicate: true } : {}),
     });
   }
 

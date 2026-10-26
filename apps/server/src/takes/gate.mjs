@@ -27,10 +27,13 @@ function isObject(value) {
  * @param {object|null} takeDoc `comfyrizz.takes/v1` sidecar
  * @param {Array<{clipId: string, assetId: string}>} [clips] clips from TR03;
  *   derived from the package when omitted
+ * @param {{references?: object|Map|Array|Function|null}} [options] reference index for
+ *   freshness; defaults to the package, whose assets are the direct/transitive inputs
  * @returns {{ok: boolean, approved: number, total: number, blocking: Array<{clipId: string, state: string}>, autoApproved: number}}
  */
-export function finalGate(pkg, takeDoc, clips) {
+export function finalGate(pkg, takeDoc, clips, options = {}) {
   const list = Array.isArray(clips) ? clips : listClips(isObject(pkg) ? pkg : {});
+  const refs = isObject(options) && options.references !== undefined ? options.references : pkg;
   const blocking = [];
   let approved = 0;
   let autoApproved = 0;
@@ -60,6 +63,7 @@ export function finalGate(pkg, takeDoc, clips) {
       clip: isObject(asset) ? asset : clip,
       takes: isObject(entry) ? entry : { selected: null, takes: [] },
       assetGen: isObject(asset?.gen) ? asset.gen : undefined,
+      refs,
     });
     if (state === 'approved') approved += 1;
     else blocking.push({ clipId: clip.clipId, state });
