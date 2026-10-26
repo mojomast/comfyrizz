@@ -17,6 +17,13 @@ import {
   missingQuestions,
   stylePresets,
 } from '../../../packages/agent/dist/src/index.js';
+import {
+  buildClaimLedger,
+  claimResolutionOptions,
+  researchContext,
+  serverConsent,
+  validatedClaims,
+} from '../../../packages/agent/dist/src/evidence.js';
 
 export const MAX_QUESTIONS = 3;
 
@@ -29,15 +36,68 @@ function normalizeMode(mode) {
   return mode === 'express' ? 'express' : 'plan';
 }
 
+function asEvidenceObject(input) {
+  return input?.evidence && typeof input.evidence === 'object' ? input.evidence : {};
+}
+
+/**
+ * UX18: validate claims only against supplied excerpts and include only claims
+ * the server has separately consented to. Claim-level `approved`/`consent`
+ * fields are never read; research stays an untrusted data block.
+ */
+function evidenceFor(input) {
+  const nested = asEvidenceObject(input);
+  const excerpts = Array.isArray(input.excerpts) ? input.excerpts : Array.isArray(nested.excerpts) ? nested.excerpts : [];
+  const claims = Array.isArray(input.claims) ? input.claims : Array.isArray(nested.claims) ? nested.claims : [];
+  if (excerpts.length === 0 && claims.length === 0) return null;
+
+  const ledger = buildClaimLedger(claims, excerpts);
+  const consent = serverConsent(input.consent ?? nested.consent);
+  const granted = new Set(consent.filter(record => record.status === 'granted').map(record => record.claimId));
+  const facts = validatedClaims(ledger)
+    .filter(entry => granted.has(entry.id))
+    .map(entry => ({
+      claim: entry.excerpt ?? entry.claim,
+      source: entry.source ?? entry.sourceId ?? 'supplied source',
+      ...(entry.excerpt ? { excerpt: entry.excerpt } : {}),
+      ...(entry.date ? { date: entry.date } : {}),
+      ...(entry.qualification ? { qualification: entry.qualification } : {}),
+    }));
+
+  return {
+    claims: ledger,
+    consent,
+    facts,
+    research: researchContext(excerpts),
+    options: ledger.map(entry => ({
+      claimId: entry.id,
+      status: entry.status,
+      options: claimResolutionOptions(entry),
+    })),
+  };
+}
+
+function withEvidence(draft, evidence) {
+  if (!evidence) return draft;
+  return { ...draft, facts: evidence.facts };
+}
+
+function attachEvidence(result, evidence) {
+  return evidence ? { ...result, evidence } : result;
+}
+
 /** B1: a normalised brand kit overrides the brief's palette and font. */
 function styleFor(draft, brand) {
   return brand ? brandBriefStyle(draft.style ?? {}, brand) : undefined;
 }
 
 /** Complete a draft and attach its outline. */
-function finished(mode, draft, brand) {
-  const brief = completeBrief(draft, styleFor(draft, brand));
-  return { mode, complete: true, questions: [], brief, outline: buildOutline(brief), presets: stylePresets() };
+function finished(mode, draft, brand, evidence) {
+  const brief = completeBrief(withEvidence(draft, evidence), styleFor(draft, brand));
+  return attachEvidence(
+    { mode, complete: true, questions: [], brief, outline: buildOutline(brief), presets: stylePresets() },
+    evidence,
+  );
 }
 
 /**
@@ -53,6 +113,7 @@ export function planBrief(input = {}) {
   const mode = normalizeMode(input.mode);
   const brand = input.brand ?? null;
   const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+  const evidence = evidenceFor(input);
   const draft = extractBrief(prompt, { mode, attachments: input.attachments });
   const options = draftKeyMessages(prompt);
 
@@ -62,20 +123,26 @@ export function planBrief(input = {}) {
     // One round of at most three questions (research §2.4): once the user has
     // answered them, the agent decides anything still open.
     if (input.askMore !== true || remaining.length === 0 || mode === 'express') {
-      return finished(mode, answered, brand);
+      return finished(mode, answered, brand, evidence);
     }
-    return { mode, complete: false, questions: remaining, brief: answered, presets: stylePresets() };
+    return attachEvidence(
+      { mode, complete: false, questions: remaining, brief: answered, presets: stylePresets() },
+      evidence,
+    );
   }
 
   if (mode === 'express') {
-    return finished(mode, draft, brand);
+    return finished(mode, draft, brand, evidence);
   }
 
   const questions = missingQuestions(draft, MAX_QUESTIONS, options);
   if (questions.length === 0) {
-    return finished(mode, draft, brand);
+    return finished(mode, draft, brand, evidence);
   }
-  return { mode, complete: false, questions, brief: draft, presets: stylePresets() };
+  return attachEvidence(
+    { mode, complete: false, questions, brief: draft, presets: stylePresets() },
+    evidence,
+  );
 }
 
 /**
@@ -87,6 +154,10 @@ export function planBrief(input = {}) {
 export function refreshBrief(input = {}) {
   const draft = input.brief && typeof input.brief === 'object' ? input.brief : {};
   const mode = normalizeMode(draft.mode);
-  const brief = completeBrief({ ...draft, mode }, styleFor(draft, input.brand));
-  return { mode, complete: true, questions: [], brief, outline: buildOutline(brief), presets: stylePresets() };
+  const evidence = evidenceFor(input);
+  const brief = completeBrief(withEvidence({ ...draft, mode }, evidence), styleFor(draft, input.brand));
+  return attachEvidence(
+    { mode, complete: true, questions: [], brief, outline: buildOutline(brief), presets: stylePresets() },
+    evidence,
+  );
 }

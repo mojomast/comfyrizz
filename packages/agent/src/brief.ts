@@ -13,6 +13,14 @@
  *   - `Brief`       — a completed, schema-validated brief (what gets built).
  */
 import { z } from 'zod';
+import {
+  FIELD_PROVENANCE,
+  isStatisticClaim,
+  type FieldProvenance,
+} from './evidence.js';
+
+export { FIELD_PROVENANCE };
+export type { FieldProvenance };
 
 export const BRIEF_GOALS = ['launch', 'explain', 'teach', 'pitch', 'recap'] as const;
 export const BRIEF_MODES = ['plan', 'express'] as const;
@@ -65,14 +73,26 @@ export const briefSchema = z.object({
     engine: z.enum(['kokoro', 'qwen3-tts', 'voxcpm2', 'chatterbox']),
     persona: z.string().max(200).optional(),
     lang: z.enum(BRIEF_LANGUAGES),
+    /** True when the user asked for an on-screen-only brief. */
+    silent: z.boolean().optional(),
   }),
   music: z.object({ mood: z.string().max(120).optional(), enabled: z.boolean() }),
   must_include: z.array(z.string()),
   avoid: z.array(z.string()),
-  facts: z.array(z.object({ claim: z.string().min(1), source: z.string().min(1) })),
+  facts: z.array(z.object({
+    claim: z.string().min(1),
+    source: z.string().min(1),
+    excerpt: z.string().min(1).optional(),
+    date: z.string().min(1).optional(),
+    qualification: z.string().min(1).optional(),
+  })),
   mode: z.enum(BRIEF_MODES),
-  /** Question ids the agent answered itself ("Decide for me" or a skipped ask). */
+  /** Question ids answered in the chip flow; `field_provenance` says who chose. */
   decided_by_agent: z.array(z.string()),
+  /** Who chose each field: the user, an inference, a default, or unresolved. */
+  field_provenance: z.record(z.enum(FIELD_PROVENANCE)).optional(),
+  /** The original prompt, kept so scaffolds can stay on topic. */
+  source_prompt: z.string().optional(),
 });
 export type Brief = z.infer<typeof briefSchema>;
 
@@ -84,10 +104,19 @@ export interface StyleDraft {
   references?: string[];
   attributes?: string;
 }
-export interface VoiceDraft { engine?: Brief['voice']['engine']; persona?: string; lang?: (typeof BRIEF_LANGUAGES)[number] }
+export interface VoiceDraft { engine?: Brief['voice']['engine']; persona?: string; lang?: (typeof BRIEF_LANGUAGES)[number]; silent?: boolean }
 export interface MusicDraft { mood?: string; enabled?: boolean }
+export type BriefFieldProvenance = Partial<Record<string, FieldProvenance>>;
 
 /** What the extractor produced; missing fields are simply absent. */
+export interface BriefFact {
+  claim: string;
+  source: string;
+  excerpt?: string;
+  date?: string;
+  qualification?: string;
+}
+
 export interface BriefDraft {
   goal?: Brief['goal'];
   key_message?: string;
@@ -102,10 +131,11 @@ export interface BriefDraft {
   music?: MusicDraft;
   must_include?: string[];
   avoid?: string[];
-  facts?: { claim: string; source: string }[];
+  facts?: BriefFact[];
   mode?: Brief['mode'];
   decided_by_agent?: string[];
   source_prompt?: string;
+  field_provenance?: BriefFieldProvenance;
 }
 
 export interface Question {
@@ -253,6 +283,52 @@ function detectList(text: string, keyword: string): string[] {
   return match[1].split(',').map(part => part.trim()).filter(Boolean);
 }
 
+const STYLE_PATTERNS: [StylePreset, RegExp][] = [
+  ['paper-cut', /\bpaper[- ]?cut\b/i],
+  ['editorial-flat', /\beditorial(?:[- ]flat)?\b/i],
+  ['isometric-tech', /\bisometric(?:[- ]tech)?\b/i],
+  ['cinematic-dark', /\bcinematic(?:[- ]dark)?\b|\bdark\s+cinematic\b/i],
+  ['glass', /\bglass(?:morphism)?\b/i],
+  ['clay', /\bclay(?:mation)?\b/i],
+];
+
+function detectStylePreset(text: string): StylePreset | undefined {
+  for (const [preset, pattern] of STYLE_PATTERNS) if (pattern.test(text)) return preset;
+  return undefined;
+}
+
+interface VoiceChoice { persona?: string; silent: boolean; explicit: boolean }
+
+function detectVoiceChoice(text: string): VoiceChoice {
+  const silent = /\b(?:no|without|skip)\s+(?:narration|voice ?over|voice|speech|audio)\b|\bsilent\b|\btext[- ]only\b|\bcaptions?[- ]only\b|\bon[- ]screen text only\b/i.test(text);
+  if (silent) return { silent: true, explicit: true };
+  if (/\b(authoritative|authority|documentary|newsreader|gravitas)\b/i.test(text)) {
+    return { persona: 'authoritative narrator, measured pace', silent: false, explicit: true };
+  }
+  if (/\b(energetic|upbeat|high[- ]energy)\b/i.test(text)) {
+    return { persona: 'energetic narrator', silent: false, explicit: true };
+  }
+  if (/\b(warm|friendly|conversational)\b/i.test(text)) {
+    return { persona: 'warm narrator, measured pace', silent: false, explicit: true };
+  }
+  if (/\b(calm|measured|soothing)\s+(?:narrator|voice)\b/i.test(text)) {
+    return { persona: 'calm narrator, measured pace', silent: false, explicit: true };
+  }
+  return { silent: false, explicit: false };
+}
+
+interface LanguageChoice { language: (typeof BRIEF_LANGUAGES)[number]; explicit: boolean }
+
+function detectLanguage(text: string): LanguageChoice {
+  if (/\b(fran[çc]ais|french|en fran[çc]ais)\b/i.test(text)) return { language: 'fr', explicit: true };
+  if (/\b(english|en anglais)\b/i.test(text)) return { language: 'en', explicit: true };
+  return { language: 'en', explicit: false };
+}
+
+function setProvenance(map: BriefFieldProvenance, field: string, provenance: FieldProvenance): void {
+  map[field] = provenance;
+}
+
 export interface ExtractBriefOptions {
   mode?: Brief['mode'];
   /** Extra attachment text (notes, PDF/MD text, a pasted CSV header) appended for detection only. */
@@ -268,57 +344,127 @@ export interface ExtractBriefOptions {
  */
 export function extractBrief(prompt: string, options: ExtractBriefOptions = {}): BriefDraft {
   const text = `${prompt}\n${options.attachments ?? ''}`.trim();
-  const draft: BriefDraft = { mode: options.mode ?? 'plan', decided_by_agent: [...(options.decidedByAgent ?? [])], source_prompt: options.sourcePrompt ?? prompt };
+  const draft: BriefDraft = {
+    mode: options.mode ?? 'plan',
+    decided_by_agent: [...(options.decidedByAgent ?? [])],
+    source_prompt: options.sourcePrompt ?? prompt,
+    field_provenance: {},
+  };
   const decided = draft.decided_by_agent as string[];
+  const provenance = draft.field_provenance as BriefFieldProvenance;
 
   const goal = detectGoal(text);
-  if (goal) draft.goal = goal;
-  else { draft.goal = 'launch'; decided.push('goal'); }
+  if (goal) {
+    draft.goal = goal;
+    setProvenance(provenance, 'goal', 'inferred');
+  } else {
+    draft.goal = 'launch';
+    decided.push('goal');
+    setProvenance(provenance, 'goal', 'defaulted');
+  }
 
   const message = firstSentence(prompt);
-  if (message) draft.key_message = message;
+  if (message) {
+    draft.key_message = message;
+    setProvenance(provenance, 'key_message', 'explicit');
+  } else {
+    setProvenance(provenance, 'key_message', 'unresolved');
+  }
 
   const who = detectAudience(prompt);
-  if (who) draft.audience = { who };
+  if (who) {
+    draft.audience = { who };
+    setProvenance(provenance, 'audience.who', 'inferred');
+  } else {
+    setProvenance(provenance, 'audience.who', 'unresolved');
+  }
 
   const length = detectLengthSeconds(prompt);
-  if (length !== undefined) draft.length_s = length;
+  if (length !== undefined) {
+    draft.length_s = length;
+    setProvenance(provenance, 'length_s', 'explicit');
+  } else {
+    setProvenance(provenance, 'length_s', 'unresolved');
+  }
 
   const aspect = detectAspect(prompt);
-  if (aspect) draft.aspect = aspect;
-  else { draft.aspect = '16:9'; decided.push('aspect'); }
+  if (aspect) {
+    draft.aspect = aspect;
+    setProvenance(provenance, 'aspect', 'explicit');
+  } else {
+    draft.aspect = '16:9';
+    decided.push('aspect');
+    setProvenance(provenance, 'aspect', 'defaulted');
+  }
 
   // C-pres: the presenter is opt-in; detect an explicit ask and otherwise leave it off.
   const presenter = detectPresenter(text);
   draft.presenter = presenter ?? 'none';
+  setProvenance(provenance, 'presenter', presenter ? 'explicit' : 'defaulted');
   if (!presenter) decided.push('presenter');
 
-  const tone = detectTone(prompt);
+  const detectedTone = detectTone(prompt);
+  const tone = [...detectedTone];
   const toneDefaults = ['clear', 'confident', 'calm'];
   for (const word of toneDefaults) {
     if (tone.length >= 3) break;
     if (!tone.includes(word)) tone.push(word);
   }
   draft.tone = tone.slice(0, 3);
-  if (draft.tone.some(word => !detectTone(prompt).includes(word))) decided.push('tone');
+  setProvenance(provenance, 'tone', detectedTone.length >= draft.tone.length ? 'explicit' : 'inferred');
+  if (draft.tone.some(word => !detectedTone.includes(word))) decided.push('tone');
 
-  const language = /\b(fran[çc]ais|french|en fran[çc]ais)\b/i.test(text) ? 'fr' : 'en';
+  const style = detectStylePreset(text);
+  if (style) {
+    draft.style = { preset: style };
+    setProvenance(provenance, 'style.preset', 'explicit');
+  } else {
+    setProvenance(provenance, 'style.preset', 'unresolved');
+  }
+
+  const languageChoice = detectLanguage(text);
+  const language = languageChoice.language;
   draft.audience = { ...(draft.audience ?? {}), language };
+  setProvenance(provenance, 'audience.language', languageChoice.explicit ? 'explicit' : 'defaulted');
   if (draft.audience.who === undefined) delete draft.audience.who;
 
   const mustInclude = detectList(text, 'must[- ]include');
   const avoid = detectList(text, 'avoid');
-  if (mustInclude.length) draft.must_include = mustInclude;
-  if (avoid.length) draft.avoid = avoid;
+  if (mustInclude.length) {
+    draft.must_include = mustInclude;
+    setProvenance(provenance, 'must_include', 'explicit');
+  }
+  if (avoid.length) {
+    draft.avoid = avoid;
+    setProvenance(provenance, 'avoid', 'explicit');
+  }
 
   const cta = /\b(star[- _]the[- _]repo|star us|book a demo|sign up|join the (?:beta|waitlist)|subscribe)\b/i.exec(text);
-  if (cta) draft.cta = cta[1].replace(/[-_]+/g, ' ').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (cta) {
+    draft.cta = cta[1].replace(/[-_]+/g, ' ').toLowerCase().replace(/\s+/g, ' ').trim();
+    setProvenance(provenance, 'cta', 'explicit');
+  } else {
+    setProvenance(provenance, 'cta', 'unresolved');
+  }
 
-  const wantsNarration = !/\b(no|without)\s+(?:narration|voice ?over|vo)\b/i.test(text);
+  const voice = detectVoiceChoice(text);
   draft.voice = { engine: 'kokoro', lang: language };
   decided.push('voice');
-  if (wantsNarration) draft.voice.persona = 'warm narrator, measured pace';
-  draft.music = { enabled: /\b(music|soundtrack|score|music bed)\b/i.test(text) };
+  if (voice.silent) {
+    draft.voice.silent = true;
+    setProvenance(provenance, 'voice.silent', 'explicit');
+    setProvenance(provenance, 'voice.persona', 'explicit');
+  } else if (voice.persona) {
+    draft.voice.persona = voice.persona;
+    setProvenance(provenance, 'voice.persona', 'explicit');
+  } else {
+    draft.voice.persona = 'warm narrator, measured pace';
+    setProvenance(provenance, 'voice.persona', 'defaulted');
+  }
+
+  const music = /\b(music|soundtrack|score|music bed)\b/i.test(text);
+  draft.music = { enabled: music };
+  setProvenance(provenance, 'music.enabled', music ? 'explicit' : 'defaulted');
   if (draft.music.enabled === false) decided.push('music');
 
   return draft;
@@ -388,41 +534,58 @@ function parseLength(value: string | number | undefined, fallback: string): numb
 export function applyDecisions(draft: BriefDraft, decisions: BriefDecisions): BriefDraft {
   const next: BriefDraft = structuredClone(draft);
   next.decided_by_agent = [...(next.decided_by_agent ?? [])];
+  next.field_provenance = { ...(next.field_provenance ?? {}) };
+  const provenance = next.field_provenance;
   for (const question of QUESTION_BANK) {
     if (!(question.id in decisions)) continue;
     const raw = decisions[question.id];
-    const value = raw === undefined || raw === '' ? question.decide : raw;
+    const explicit = raw !== undefined && raw !== '';
+    const value = explicit ? raw : question.decide;
     switch (question.id) {
       case 'key_message':
         next.key_message = String(value).slice(0, 200);
+        setProvenance(provenance, 'key_message', explicit ? 'explicit' : 'defaulted');
         break;
       case 'audience':
         next.audience = { ...(next.audience ?? {}), who: String(value).toLowerCase(), language: next.audience?.language ?? 'en' };
+        setProvenance(provenance, 'audience.who', explicit ? 'explicit' : 'defaulted');
         break;
       case 'length':
         next.length_s = parseLength(value, question.decide);
+        setProvenance(provenance, 'length_s', explicit ? 'explicit' : 'defaulted');
         break;
       case 'look': {
         const preset = (STYLE_PRESETS as readonly string[]).includes(String(value)) ? (value as StylePreset) : 'cinematic-dark';
         next.style = { ...(next.style ?? {}), preset };
+        setProvenance(provenance, 'style.preset', explicit ? 'explicit' : 'defaulted');
         break;
       }
       case 'voice': {
         const none = /^none$/i.test(String(value));
         next.voice = { ...(next.voice ?? { engine: 'kokoro', lang: 'en' }), persona: none ? undefined : String(value) };
-        if (none) delete next.voice.persona;
+        if (none) {
+          delete next.voice.persona;
+          next.voice.silent = true;
+        } else {
+          delete next.voice.silent;
+        }
+        setProvenance(provenance, 'voice.persona', explicit ? 'explicit' : 'defaulted');
+        setProvenance(provenance, 'voice.silent', explicit ? 'explicit' : 'defaulted');
         break;
       }
       case 'data':
         next.facts = next.facts ?? [];
+        setProvenance(provenance, 'facts', explicit ? 'explicit' : 'defaulted');
         break;
       case 'cta':
         if (/^none$/i.test(String(value))) delete next.cta;
         else next.cta = String(value);
+        setProvenance(provenance, 'cta', explicit ? 'explicit' : 'defaulted');
         break;
       case 'presenter': {
         const text = String(value).toLowerCase();
         next.presenter = text.includes('all') ? 'all' : text.includes('intro') || text.includes('outro') || text.includes('bookend') ? 'bookends' : 'none';
+        setProvenance(provenance, 'presenter', explicit ? 'explicit' : 'defaulted');
         break;
       }
       default:
@@ -440,6 +603,21 @@ export function completeBrief(draft: BriefDraft, style?: Partial<StyleDraft>): B
   const presetDefaults = STYLE_PRESET_DEFAULTS[preset];
   const language = draft.audience?.language ?? 'en';
   const tone = (draft.tone && draft.tone.length >= 3 ? draft.tone.slice(0, 3) : [...(draft.tone ?? []), 'clear', 'confident', 'calm']).slice(0, 3);
+  const provenance: BriefFieldProvenance = { ...(draft.field_provenance ?? {}) };
+  const ensure = (field: string, value: FieldProvenance): void => {
+    if (!provenance[field] || provenance[field] === 'unresolved') provenance[field] = value;
+  };
+  ensure('goal', draft.goal ? 'inferred' : 'defaulted');
+  ensure('key_message', draft.key_message ? 'explicit' : 'defaulted');
+  ensure('audience.who', draft.audience?.who ? 'inferred' : 'defaulted');
+  ensure('audience.language', draft.audience?.language ? 'explicit' : 'defaulted');
+  ensure('aspect', draft.aspect ? 'explicit' : 'defaulted');
+  ensure('presenter', draft.presenter ? 'explicit' : 'defaulted');
+  ensure('tone', draft.tone && draft.tone.length >= 3 ? 'explicit' : 'defaulted');
+  ensure('style.preset', draft.style?.preset ? 'explicit' : style?.preset ? 'explicit' : 'defaulted');
+  ensure('voice.persona', draft.voice?.persona ? 'explicit' : 'defaulted');
+  ensure('music.enabled', draft.music?.enabled !== undefined ? 'explicit' : 'defaulted');
+
   return briefSchema.parse({
     goal: draft.goal ?? 'launch',
     key_message: draft.key_message ?? 'One clear idea the viewer can repeat after one watch.',
@@ -456,13 +634,20 @@ export function completeBrief(draft: BriefDraft, style?: Partial<StyleDraft>): B
       ...(mergedStyle.references ? { references: mergedStyle.references } : {}),
       attributes: mergedStyle.attributes ?? presetDefaults.attributes,
     },
-    voice: { engine: draft.voice?.engine ?? 'kokoro', ...(draft.voice?.persona ? { persona: draft.voice.persona } : {}), lang: draft.voice?.lang ?? language },
+    voice: {
+      engine: draft.voice?.engine ?? 'kokoro',
+      ...(draft.voice?.persona ? { persona: draft.voice.persona } : {}),
+      ...(draft.voice?.silent ? { silent: true } : {}),
+      lang: draft.voice?.lang ?? language,
+    },
     music: { ...(draft.music?.mood ? { mood: draft.music.mood } : {}), enabled: draft.music?.enabled ?? false },
     must_include: draft.must_include ?? [],
     avoid: draft.avoid ?? [],
     facts: draft.facts ?? [],
     mode: draft.mode ?? 'plan',
     decided_by_agent: draft.decided_by_agent ?? [],
+    field_provenance: provenance,
+    ...(draft.source_prompt ? { source_prompt: draft.source_prompt } : {}),
   });
 }
 
@@ -487,6 +672,89 @@ const GOAL_OPENERS: Record<Brief['goal'], string> = {
   recap: "Here's the recap.",
 };
 
+const FRENCH_OPENERS: Record<Brief['goal'], string> = {
+  launch: 'Voici ce qui est nouveau.',
+  explain: 'Voici comment ça marche.',
+  teach: 'Voici comment faire.',
+  pitch: 'Voici l’idée.',
+  recap: 'Voici le récapitulatif.',
+};
+
+interface ScaffoldCopy {
+  openers: Record<Brief['goal'], string>;
+  madeFor: string;
+  fictionFrame: string;
+  pointWith: string;
+  pointIdea: string;
+  proofLead: string;
+  proofPlaceholder: string;
+  proofHeadline: string;
+  fictionHeadline: string;
+  fictionNarration: string;
+  ctaLead: string;
+  ctaClose: string;
+  thanks: string;
+  silentNote: string;
+  fictionNote: string;
+  noFactsNote: string;
+  noCtaNote: string;
+  lookNote: (preset: string, palette: string, font: string) => string;
+  voiceNote: (persona: string, lang: string) => string;
+  scaffoldNarrated: string;
+  scaffoldSilent: string;
+}
+
+function scaffoldCopy(language: Brief['audience']['language']): ScaffoldCopy {
+  if (language === 'fr') {
+    return {
+      openers: FRENCH_OPENERS,
+      madeFor: 'Conçu pour',
+      fictionFrame: 'C’est une histoire fictive.',
+      pointWith: 'Nous couvrons',
+      pointIdea: 'Tout se résume à une idée :',
+      proofLead: 'Et la preuve :',
+      proofPlaceholder: 'La preuve reste visuelle jusqu’à ce que le brief ait une source.',
+      proofHeadline: 'Ajoutez une source ou gardez cette preuve visuelle',
+      fictionHeadline: 'Histoire fictive',
+      fictionNarration: 'C’est une histoire fictive : il n’y a pas de fait réel à prouver.',
+      ctaLead: 'Si cela vous intéresse,',
+      ctaClose: 'C’est toute l’idée.',
+      thanks: 'Merci d’avoir regardé',
+      silentNote: 'Aucune narration dans le brief ; les plans sont du texte à l’écran.',
+      fictionNote: 'Fiction : ce canevas traite le sujet comme fictif ; aucune statistique réelle n’est sous-entendue.',
+      noFactsNote: 'Aucune source ; la preuve affiche un emplacement visible.',
+      noCtaNote: 'Aucun appel à l’action ; la fin ferme simplement.',
+      lookNote: (preset, palette, font) => `Look: ${preset} (${palette}${font ? ` on ${font}` : ''}).`,
+      voiceNote: (persona, lang) => `Voice: ${persona} (${lang}).`,
+      scaffoldNarrated: 'Canevas : structure déterministe à modifier avant la construction.',
+      scaffoldSilent: 'Canevas : plans à l’écran, aucune narration générée.',
+    };
+  }
+  return {
+    openers: GOAL_OPENERS,
+    madeFor: 'Made for',
+    fictionFrame: 'This is a fictional story.',
+    pointWith: 'Along the way we cover',
+    pointIdea: 'It comes down to one thing:',
+    proofLead: 'And the proof:',
+    proofPlaceholder: 'The proof stays visual until the brief has a source.',
+    proofHeadline: 'Add a source or keep this beat visual',
+    fictionHeadline: 'Fiction, not data',
+    fictionNarration: 'This is a fictional story, so there is no real-world claim to prove.',
+    ctaLead: 'If that sounds useful,',
+    ctaClose: 'That is the whole idea.',
+    thanks: 'Thanks for watching',
+    silentNote: 'No narration in the brief; the beats are on-screen text only.',
+    fictionNote: 'Fiction: this scaffold treats the topic as fictional; no real-world statistic is implied.',
+    noFactsNote: 'No source facts; the proof beat shows a visible placeholder.',
+    noCtaNote: 'No CTA in the brief; the outro just closes.',
+    lookNote: (preset, palette, font) => `Look: ${preset} (${palette}${font ? ` on ${font}` : ''}).`,
+    voiceNote: (persona, lang) => `Voice: ${persona} (${lang}).`,
+    scaffoldNarrated: 'Scaffold: deterministic beats; edit them before building.',
+    scaffoldSilent: 'Scaffold: silent on-screen beats; no narration is generated.',
+  };
+}
+
 /** One script beat; `id` matches the package scene the build will reuse. */
 export interface OutlineBeat {
   id: string;
@@ -498,6 +766,13 @@ export interface OutlineBeat {
   seconds: number;
   /** True when the beat shows a visible placeholder because a fact is missing. */
   placeholder: boolean;
+}
+
+export interface OutlineScaffold {
+  kind: 'narrated' | 'silent';
+  fiction: boolean;
+  proof: 'sourced' | 'placeholder' | 'fiction';
+  label: string;
 }
 
 /** The script-first outline shown in the editable Brief card (research §2.2 step 5). */
@@ -515,6 +790,7 @@ export interface Outline {
   voice: Brief['voice'];
   music: Brief['music'];
   language: Brief['audience']['language'];
+  scaffold: OutlineScaffold;
 }
 
 export interface OutlineOptions {
@@ -532,62 +808,105 @@ function trimHeadline(text: string, max = 48): string {
   return `${(space > 24 ? cut.slice(0, space) : cut).trim()}…`;
 }
 
+function briefText(brief: Brief): string {
+  return [brief.source_prompt, brief.key_message, brief.must_include.join(' '), brief.avoid.join(' ')]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** Fiction is signalled by the user's topic, never inferred from a missing fact. */
+function isFictionBrief(brief: Brief): boolean {
+  return /\b(ficti(?:on|ve|onal)|story|stories|tale|myth|fable|fantasy|imaginary|made[- ]up|novel)\b/i.test(briefText(brief));
+}
+
+function isSilentBrief(brief: Brief): boolean {
+  return brief.voice.silent === true || !brief.voice.persona?.trim();
+}
+
+function hasRelevantNumbers(text: string): boolean {
+  const withoutDurations = text.replace(/\b\d+(?:\.\d+)?\s*-?\s*(?:s|sec|secs|second|seconds|min|mins|minute|minutes)\b/gi, '');
+  return isStatisticClaim(withoutDurations);
+}
+
+function hasNumericContext(brief: Brief): boolean {
+  if (brief.facts.length > 0) return true;
+  if (hasRelevantNumbers(brief.key_message)) return true;
+  return brief.source_prompt ? hasRelevantNumbers(brief.source_prompt) : false;
+}
+
 /**
- * Turn a completed brief into a script-first outline with estimated seconds. Pure
- * and deterministic: it never invents facts, and a missing CTA or dataset becomes
- * an honest note plus a visible placeholder instead of made-up copy.
+ * Turn a completed brief into a script-first outline with estimated seconds. The
+ * scaffold follows the chosen language, look and voice; a silent brief emits no
+ * narration, and a fictional or non-numeric brief never gains a spoken statistic.
  */
 export function buildOutline(brief: Brief, options: OutlineOptions = {}): Outline {
   const language = brief.audience.language;
+  const copy = scaffoldCopy(language);
   const gapSeconds = options.gapSeconds ?? 0.4;
   const maxBeats = Math.max(3, options.maxBeats ?? 4);
   const who = brief.audience.who;
   const keyMessage = brief.key_message.replace(/\s+/g, ' ').trim();
+  const silent = isSilentBrief(brief);
+  const fiction = isFictionBrief(brief);
   const beats: OutlineBeat[] = [];
 
-  const hook = `${GOAL_OPENERS[brief.goal]} ${keyMessage} Made for ${who}.`;
+  const hook = `${copy.openers[brief.goal]} ${keyMessage}${fiction ? ` ${copy.fictionFrame}` : ''} ${copy.madeFor} ${who}.`;
   beats.push({
     id: 's_title',
     role: 'hook',
     layout: 'title',
     headline: trimHeadline(keyMessage),
-    narration: hook,
-    seconds: estimateNarrationSeconds(hook, language),
+    narration: silent ? '' : hook,
+    seconds: silent ? 0 : estimateNarrationSeconds(hook, language),
     placeholder: false,
   });
 
-  const points = brief.must_include.length > 0 ? `Along the way we cover ${brief.must_include.join(', ')}.` : `It comes down to one thing: ${keyMessage}`;
+  const points = brief.must_include.length > 0 ? `${copy.pointWith} ${brief.must_include.join(', ')}.` : `${copy.pointIdea} ${keyMessage}`;
   beats.push({
     id: 's_point',
     role: 'point',
     layout: brief.must_include.length > 0 ? 'list' : 'hero',
     headline: trimHeadline(brief.must_include[0] ?? keyMessage),
-    narration: points,
-    seconds: estimateNarrationSeconds(points, language),
+    narration: silent ? '' : points,
+    seconds: silent ? 0 : estimateNarrationSeconds(points, language),
     placeholder: false,
   });
 
   const fact = brief.facts[0];
-  const proof = fact ? `And the proof: ${fact.claim} (${fact.source}).` : 'The numbers go here once the brief has a source.';
-  beats.push({
-    id: 's_proof',
-    role: 'proof',
-    layout: 'stat',
-    headline: trimHeadline(fact ? fact.claim : 'Add a source for the numbers'),
-    narration: proof,
-    seconds: estimateNarrationSeconds(proof, language),
-    placeholder: !fact,
-  });
+  let proofMode: OutlineScaffold['proof'] = fact ? 'sourced' : 'placeholder';
+  if (fiction) {
+    proofMode = 'fiction';
+    beats.push({
+      id: 's_fiction',
+      role: 'point',
+      layout: 'hero',
+      headline: trimHeadline(copy.fictionHeadline),
+      narration: silent ? '' : copy.fictionNarration,
+      seconds: silent ? 0 : estimateNarrationSeconds(copy.fictionNarration, language),
+      placeholder: false,
+    });
+  } else {
+    const proof = fact ? `${copy.proofLead} ${fact.claim} (${fact.source}).` : copy.proofPlaceholder;
+    beats.push({
+      id: 's_proof',
+      role: 'proof',
+      layout: fact || hasNumericContext(brief) ? 'stat' : 'hero',
+      headline: trimHeadline(fact ? fact.claim : copy.proofHeadline),
+      narration: silent ? '' : proof,
+      seconds: silent ? 0 : estimateNarrationSeconds(proof, language),
+      placeholder: !fact,
+    });
+  }
 
   if (maxBeats >= 4) {
-    const ctaLine = brief.cta ? `If that sounds useful, ${brief.cta}.` : 'That is the whole idea.';
+    const ctaLine = brief.cta ? `${copy.ctaLead} ${brief.cta}.` : copy.ctaClose;
     beats.push({
       id: 's_outro',
       role: 'cta',
       layout: 'title',
-      headline: trimHeadline(brief.cta ?? 'Thanks for watching'),
-      narration: ctaLine,
-      seconds: estimateNarrationSeconds(ctaLine, language),
+      headline: trimHeadline(brief.cta ?? copy.thanks),
+      narration: silent ? '' : ctaLine,
+      seconds: silent ? 0 : estimateNarrationSeconds(ctaLine, language),
       placeholder: false,
     });
   }
@@ -598,16 +917,26 @@ export function buildOutline(brief: Brief, options: OutlineOptions = {}): Outlin
   const lower = targetSeconds * 0.85;
   const upper = targetSeconds * 1.15;
   const fit: Outline['fit'] = estimatedSeconds < lower ? 'short' : estimatedSeconds > upper ? 'long' : 'on-target';
+  const scaffold: OutlineScaffold = {
+    kind: silent ? 'silent' : 'narrated',
+    fiction,
+    proof: proofMode,
+    label: silent ? copy.scaffoldSilent : copy.scaffoldNarrated,
+  };
 
-  const notes = [`Look: ${brief.style.preset} (${(brief.style.palette ?? []).join(' ')}${brief.style.font ? ` on ${brief.style.font}` : ''}).`];
-  if (brief.voice.persona) notes.push(`Voice: ${brief.voice.persona} (${brief.voice.lang}).`);
-  else notes.push('No narration in the brief; the beats are on-screen text only.');
-  if (!brief.cta) notes.push('No CTA in the brief; the outro just closes.');
+  const notes = [
+    copy.lookNote(brief.style.preset, (brief.style.palette ?? []).join(' '), brief.style.font ?? ''),
+  ];
+  if (silent) notes.push(copy.silentNote);
+  else if (brief.voice.persona) notes.push(copy.voiceNote(brief.voice.persona, brief.voice.lang));
+  if (!brief.cta) notes.push(copy.noCtaNote);
   if (brief.avoid.length > 0) notes.push(`Avoid: ${brief.avoid.join(', ')}.`);
-  if (!brief.facts.length) notes.push('No source facts; the proof beat shows a visible placeholder.');
+  if (fiction) notes.push(copy.fictionNote);
+  else if (!brief.facts.length) notes.push(copy.noFactsNote);
   if (brief.presenter !== 'none') notes.push(`Presenter: ${brief.presenter === 'all' ? 'every scene' : 'intro and outro'} (opt-in; clips are planned, not run).`);
   if (fit === 'short') notes.push(`About ${(targetSeconds - estimatedSeconds).toFixed(1)} s of headroom left; add a beat or slow the pace.`);
   if (fit === 'long') notes.push(`About ${(estimatedSeconds - targetSeconds).toFixed(1)} s over; trim the point or drop the proof.`);
+  notes.push(scaffold.label);
 
   return {
     beats,
@@ -620,5 +949,6 @@ export function buildOutline(brief: Brief, options: OutlineOptions = {}): Outlin
     voice: brief.voice,
     music: brief.music,
     language,
+    scaffold,
   };
 }
