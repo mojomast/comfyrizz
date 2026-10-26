@@ -6,7 +6,8 @@ import './productions/cards/iteration-card.css';
 import './productions/cards/iteration-advanced.css';
 import { initShellLayout } from './ui/splitter';
 import { mountPalette } from './ui/palette.ts';
-import { toast } from './ui/toast.ts';
+import { createShellToastController } from './shell/toast.ts';
+import './shell/toast.css';
 import { registerCommand } from './editor/commands.ts';
 import { MODE_CHANGE_EVENT, mountModeToggle, setMode } from './ui/mode';
 import { getPrefs } from './ui/prefs';
@@ -45,7 +46,7 @@ import {
   restoreRecovery,
   type RecoveryOffer,
 } from './editor/recovery.ts';
-import { createEditorStore } from './editor/store.ts';
+import { createEditorStore, saveStatusText } from './editor/store.ts';
 import { mountAnimationInspector } from './editor/inspector/animation.ts';
 import { mountVoiceSettings, readRenderLocation, writeRenderLocation } from './voice-settings';
 import type { PlayerRef } from '@remotion/player';
@@ -126,14 +127,19 @@ function settleStatusChip(): void {
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 const editorStore = createEditorStore({ package: pkg as never });
+const shellToasts = createShellToastController();
 const saveStatusEl = document.getElementById('save-status');
-const paintSaveStatus = () => {
+// UX05: the header reads the save-state snapshot, not just a local boolean. A
+// revision only appears after the server acknowledged the current edit.
+const paintSaveStatus = (state = editorStore.saveState()) => {
   if (!saveStatusEl) return;
-  const status = editorStore.saveStatus();
-  saveStatusEl.textContent = editorStore.statusText();
-  saveStatusEl.dataset.state = status;
+  saveStatusEl.textContent = saveStatusText(state.status, state.error ?? undefined);
+  saveStatusEl.dataset.state = state.status;
+  saveStatusEl.dataset.editSequence = String(state.editSequence);
+  saveStatusEl.dataset.acknowledgedSequence = String(state.acknowledgedSequence);
+  saveStatusEl.dataset.revision = state.acknowledgedRevision == null ? '' : String(state.acknowledgedRevision);
 };
-editorStore.subscribe(paintSaveStatus);
+editorStore.subscribeSaveState(paintSaveStatus);
 paintSaveStatus();
 const drafts = typeof indexedDB === 'undefined' ? createMemoryDraftStore() : createIndexedDbDraftStore();
 let autosave: ReturnType<typeof createAutosave> | null = null;
@@ -347,6 +353,25 @@ let activeViewer: ViewerHandle | null = null;
 let iteratePanel: IteratePanelHandle | null = null;
 let pendingIterationScope: { scope: IterationScope; note: string; at: number } | null = null;
 let clipViewerToken = 0;
+// UX19: the player updates the active scene on every frame. Cache the cards and
+// only touch the class list when the active scene actually changes.
+let sceneCardCache: HTMLElement[] = [];
+let activeSceneCardId: string | null = null;
+
+function resetSceneCardCache(): void {
+  sceneCardCache = [];
+  activeSceneCardId = null;
+}
+
+function setActiveSceneCard(sceneId: string | null | undefined): void {
+  const next = sceneId ?? null;
+  if (next === activeSceneCardId) return;
+  if (sceneCardCache.length === 0) {
+    sceneCardCache = Array.from(document.querySelectorAll<HTMLElement>('.scene-card'));
+  }
+  for (const card of sceneCardCache) card.classList.toggle('active', card.dataset.sceneId === next);
+  activeSceneCardId = next;
+}
 
 function thumbKey(packageId: string, ref: string, kind: string): string {
   return `${packageId}\u0000${ref}\u0000${kind}`;
@@ -613,22 +638,65 @@ function submitIteration(scope: IterationScope): void {
   }
 }
 
+function exportArtifactStorage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function activeTurnContext(): { clip: { clipId: string; sceneId: string; assetId: string } } | null {
+  const state = activeViewer?.state;
+  const clipId = state?.open ? state.item?.title ?? '' : '';
+  const clip = clipId ? clipStore.get(clipId) : null;
+  if (!clip) return null;
+  return { clip: { clipId: clip.clipId, sceneId: clip.sceneId, assetId: clip.assetId } };
+}
+
+// UX12: a turn carries explicit targets only when the visible chips name a
+// clip. An empty selection omits `targets` entirely (UX00 target-set contract).
+function targetsForTurnContext(chips: unknown): { shotIds: string[]; lineIds: string[] } | null {
+  if (!Array.isArray(chips)) return null;
+  const shotIds = new Set<string>();
+  for (const chip of chips) {
+    if (!chip || typeof chip !== 'object') continue;
+    const entry = chip as { id?: unknown; kind?: unknown; value?: unknown };
+    if (entry.kind !== 'clip') continue;
+    const rawId = typeof entry.id === 'string' && entry.id.startsWith('clip:')
+      ? entry.id.slice('clip:'.length)
+      : '';
+    const rawValue = typeof entry.value === 'string' ? entry.value.split('·').pop()?.trim() ?? '' : '';
+    const clip = clipStore.get(rawId || rawValue);
+    if (clip?.sceneId) shotIds.add(clip.sceneId);
+  }
+  if (shotIds.size === 0) return null;
+  return { shotIds: [...shotIds], lineIds: [] };
+}
+
 function chatApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const pending = pendingIterationScope;
+  let pending = pendingIterationScope;
   if (
-    pending
-    && typeof input === 'string'
+    typeof input === 'string'
     && input === '/api/agent/chat'
     && (init.method ?? '').toUpperCase() === 'POST'
     && typeof init.body === 'string'
   ) {
-    pendingIterationScope = null;
     try {
       const body = JSON.parse(init.body) as Record<string, unknown>;
-      if (body.message === pending.note) {
-        return apiFetch(input, { ...init, body: JSON.stringify({ ...body, iterationScope: pending.scope }) });
+      const next: Record<string, unknown> = { ...body };
+      if (pending && body.message === pending.note) {
+        next.iterationScope = pending.scope;
+        pendingIterationScope = null;
+        pending = null;
       }
+      const targets = targetsForTurnContext(body.turnContext);
+      if (targets) next.targets = targets;
+      else delete next.targets;
+      if (pending && Date.now() - pending.at > 60_000) pendingIterationScope = null;
+      return apiFetch(input, { ...init, body: JSON.stringify(next) });
     } catch {
+      if (pending && Date.now() - pending.at > 60_000) pendingIterationScope = null;
       return apiFetch(input, init);
     }
   }
@@ -1106,6 +1174,7 @@ function mixBar(): string {
 
 function renderStoryboard(): void {
   const host = $('storyboard');
+  resetSceneCardCache();
   host.innerHTML = presenterBar() + mixBar() + pkg.scenes
     .map((scene, index) => {
       const copy = (scene.copy ?? {}) as Record<string, unknown>;
@@ -1170,7 +1239,7 @@ function renderStoryboard(): void {
       const scene = timeline.scenes.find(item => item.id === sceneId);
       if (!scene) return;
       player?.seekTo(scene.from);
-      for (const other of host.querySelectorAll('.scene-card')) other.classList.toggle('active', other === card);
+      setActiveSceneCard(sceneId);
       card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
   });
@@ -1829,7 +1898,7 @@ async function exportBundle(): Promise<void> {
   } catch (error) {
     exportState.label = `export failed: ${(error as Error).message}`;
     logActivity(`Export bundle failed: ${(error as Error).message}`);
-    toast({ tone: 'danger', text: `Export failed. ${(error as Error).message}` });
+    shellToasts.show({ tone: 'danger', text: `Export failed. ${(error as Error).message}`, action: { label: 'Retry export', onSelect: () => { void exportBundle(); } } });
   } finally {
     exportState.running = false;
     renderExportPanel();
@@ -2203,7 +2272,7 @@ async function exportMp4(overrideReason?: string): Promise<void> {
     state.dirty = false;
     $('draft').textContent = 'exported MP4 · timeline recompiled by the server';
     logActivity('Export finished: H.264 MP4 downloaded');
-    toast({ tone: 'ok', text: 'Export finished.' });
+    shellToasts.show({ tone: 'ok', text: 'Export finished.' });
   } catch (error) {
     const blocked = error as RenderExportError;
     if (overrideReason === undefined && blocked.code === 'RENDER_GATE_BLOCKED') {
@@ -2217,7 +2286,7 @@ async function exportMp4(overrideReason?: string): Promise<void> {
     }
     label.textContent = `export failed: ${(error as Error).message}`;
     logActivity(`Export failed: ${(error as Error).message}`);
-    toast({ tone: 'danger', text: `Export failed. ${(error as Error).message}` });
+    shellToasts.show({ tone: 'danger', text: `Export failed. ${(error as Error).message}`, action: { label: 'Retry export', onSelect: () => { void exportMp4(overrideReason); } } });
   } finally {
     if (button.dataset.exporting === 'true') delete button.dataset.exporting;
     syncExportButton();
@@ -2656,7 +2725,7 @@ function init(opened: OpenedProject): void {
       scrub.value = String(frame);
       $('time').textContent = `${formatTime(frame, timeline.fps)} / ${formatTime(timeline.durationInFrames, timeline.fps)}`;
       const active = timeline.scenes.find(scene => frame >= scene.from && frame < scene.from + scene.durationInFrames)?.id;
-      document.querySelectorAll('.scene-card').forEach(card => card.classList.toggle('active', card.getAttribute('data-scene-id') === active));
+      setActiveSceneCard(active);
     };
     ref.addEventListener('frameupdate', onFrame);
     editorApi?.followFrame(ref.getCurrentFrame());
@@ -2667,14 +2736,22 @@ function init(opened: OpenedProject): void {
   });
 
   const easyRoot = document.getElementById('easy-root');
-  if (easyRoot) mountEasyStudio(easyRoot, {
-    apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
-    hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: () => renderExportBlob(),
-    clips: () => clipStore.all(), subscribeClips: (listener) => clipStore.subscribe(() => listener()), takesApi,
-    clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
-    openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
-    openEditor: () => { setMode('advanced'); }, playerElement: () => $('player'),
-  });
+  if (easyRoot) {
+    // UX16F: the Easy export step persists only the canonical delivery record
+    // (name and bytes). A stable artifact resolver is not mounted because UX15
+    // exposes no artifact lookup route; the step reports "not connected" rather
+    // than pretending a saved download is recoverable.
+    const easyHost = {
+      apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
+      hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: () => renderExportBlob(),
+      clips: () => clipStore.all(), subscribeClips: (listener: () => void) => clipStore.subscribe(() => listener()), takesApi,
+      clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
+      openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+      openEditor: () => { setMode('advanced'); }, playerElement: () => $('player'),
+      exportArtifactStorage: exportArtifactStorage(),
+    };
+    mountEasyStudio(easyRoot, easyHost);
+  }
 
   $('assets').addEventListener('click', event => {
     const target = event.target as HTMLElement;
@@ -2907,7 +2984,7 @@ function init(opened: OpenedProject): void {
       }
       if (exportState.refused.length === 0 && Array.isArray(data.excluded)) exportState.refused = data.excluded;
       renderExportPanel();
-      toast({ tone: 'ok', text: 'Export finished.' });
+      shellToasts.show({ tone: 'ok', text: 'Export finished.' });
     });
     stream.addEventListener('export.failed', event => {
       const data = JSON.parse((event as MessageEvent).data) as { message: string };
@@ -2915,7 +2992,7 @@ function init(opened: OpenedProject): void {
       exportState.label = `export failed: ${data.message}`;
       renderExportPanel();
       logActivity(`Export bundle failed: ${data.message}`);
-      toast({ tone: 'danger', text: `Export failed. ${data.message}` });
+      shellToasts.show({ tone: 'danger', text: `Export failed. ${data.message}` });
     });
     stream.addEventListener('run.started', event => {
       const data = JSON.parse((event as MessageEvent).data) as { runId: string; backendId: string };
@@ -2967,7 +3044,7 @@ function init(opened: OpenedProject): void {
     stream.addEventListener('run.refused', event => {
       const data = JSON.parse((event as MessageEvent).data) as { budget?: { message?: string } };
       logActivity(`Server refused the run: ${data.budget?.message ?? 'budget too small'}`);
-      toast({ tone: 'danger', text: `Run refused. ${data.budget?.message ?? 'The budget is too small.'}` });
+      shellToasts.show({ tone: 'danger', text: `Run refused. ${data.budget?.message ?? 'The budget is too small.'}` });
     });
     // C11: the per-scene re-render's progress lines arrive over SSE; the card for the scene
     // being rebuilt shows the last two.
@@ -3034,6 +3111,7 @@ function init(opened: OpenedProject): void {
 
   projectChat = mountProjectChat({
     apiFetch: chatApiFetch,
+    getTurnContext: activeTurnContext,
     ...(opened.source === 'requested' ? {
       initialConversationId: opened.chatId,
       restoreSaved: false,

@@ -43,7 +43,7 @@ import { handleMedia } from './media-route.mjs';
 import { readEditor, validateEditor, writeEditor } from './editor-sidecar.mjs';
 import { serveStaticFile } from './static-file.mjs';
 import { createPipelineController } from './pipeline.mjs';
-import { syncnetDiagnostics } from './pipeline-contract.mjs';
+import { planPipeline, syncnetDiagnostics } from './pipeline-contract.mjs';
 import { stagePipelineInputs } from './pipeline-media.mjs';
 import { createOperationCoordinator } from './operations.mjs';
 import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/tts/voices.mjs';
@@ -54,6 +54,9 @@ import { createWorkerRenderer } from './routes/render-worker.mjs';
 import { createConversationRoutes } from './routes/conversations.mjs';
 import { createPackageRoutes } from './routes/packages.mjs';
 import { createProductionStore } from './productions/store.mjs';
+import { createProductionAdmission } from './productions/admission.mjs';
+import { createPipelineAdapter } from './productions/pipeline-adapter.mjs';
+import { createOutboxExecutor } from './productions/outbox-execution.mjs';
 import { createCommandHandler } from './productions/commands.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
 import { createActionCoordinator } from './productions/actions.mjs';
@@ -449,6 +452,9 @@ export function createApp({
   // the /api/productions facade, so a bound package can only start from the
   // action slot that was dispatched for it.
   const productionStore = createProductionStore({ runtimeDir });
+  // UX01/UX10: one server-resolved binding and one guard for every entry point
+  // that can allocate generation work. The production journal is the authority.
+  const admission = createProductionAdmission({ store: productionStore });
   const characterStore = createCharacterStore({ rootDir: runtimeDir });
   const preferencesStore = createPreferencesStore({ runtimeDir });
   const iterationRoutes = createIterationRoutes({ store: productionStore, preferences: preferencesStore });
@@ -476,16 +482,29 @@ export function createApp({
   // hash approval: the production plan card dispatches the IP20 action slot.
   // The binding is resolved here from the production journal, never from the
   // request.
-  const findBoundProduction = (packageId) => (typeof packageId === 'string' && packageId !== ''
-    ? productionStore.list().find((production) => production.packageId === packageId) ?? null
-    : null);
+  // UX01: resolve the owner through the frozen contract, including an inline
+  // pkg.productionId. The production object stays the shape the chat adapter
+  // already consumes; the decision is never a second store scan.
+  const findBoundProduction = (pkgOrId) => {
+    const pkg = typeof pkgOrId === 'string' ? { id: pkgOrId } : pkgOrId;
+    if (!pkg || typeof pkg.id !== 'string' || pkg.id === '') return null;
+    let binding;
+    try {
+      binding = admission.binding(pkg);
+    } catch {
+      return null;
+    }
+    if (!binding || binding.state === 'unbound' || typeof binding.productionId !== 'string') return null;
+    return productionStore.read(binding.productionId) ?? null;
+  };
+  const chatRunController = admission.guardRuns(runs, 'chat.correction');
   const chatRuns = {
     estimate: (...args) => runs.estimate(...args),
     status: (...args) => runs.status(...args),
     start: async (options = {}) => {
-      const bound = findBoundProduction(options?.pkg?.id);
+      const bound = findBoundProduction(options?.pkg);
       if (bound) return { approvalRequired: true, planHash: null, productionId: bound.id };
-      return runs.start(options);
+      return chatRunController.start(options);
     },
   };
   // IP26 (A01): chat gets the run controller, takes, events and measured options
@@ -505,6 +524,39 @@ export function createApp({
       command: (envelope, attribution) => productionCommands.execute(envelope, attribution),
     },
   });
+  // UX10/UX15: a package owned by a production reaches take, select, revert and
+  // export through the production command path. A conflict or a claimed but
+  // missing production refuses instead of falling back to legacy execution.
+  function productionBindingFor(pkg) {
+    let binding;
+    try {
+      binding = admission.binding(pkg);
+    } catch (error) {
+      const refusal = new Error('the production journal is not available');
+      refusal.status = 503;
+      refusal.code = 'BOUND_AUTHORITY_UNAVAILABLE';
+      refusal.cause = error;
+      throw refusal;
+    }
+    if (!binding || binding.state === 'unbound') return null;
+    if (binding.state === 'conflict') {
+      const refusal = new Error('the package names a different production than the one that owns it');
+      refusal.status = 409;
+      refusal.code = 'PRODUCTION_MISMATCH';
+      throw refusal;
+    }
+    if (typeof binding.productionId !== 'string' || productionStore.read(binding.productionId) === null) {
+      const refusal = new Error('production not found');
+      refusal.status = 409;
+      refusal.code = 'PRODUCTION_NOT_FOUND';
+      throw refusal;
+    }
+    return {
+      productionId: binding.productionId,
+      context: { actor: 'user', userEventId: `ue_${randomUUID()}` },
+      handler: productionCommands,
+    };
+  }
   // A9: the export bundle is the final render — 1920×1080 and, when the package carries x2
   // upscaled variants (H12), the variant files. The Player preview and /api/render keep the
   // package's working resolution.
@@ -719,6 +771,10 @@ export function createApp({
     return change;
   }
 
+  // UX01: the queue drain is one named entry point. A bound package refuses
+  // there instead of starting an unguarded paid run.
+  const queuedRunController = admission.guardRuns(runs, 'take.queue_drain');
+
   async function drainOneQueued(runId) {
     const found = findQueued(runPackages.get(runId) ?? null);
     if (!found) return false;
@@ -739,7 +795,7 @@ export function createApp({
     const approvals = runs.status().approvals ?? [];
     let result;
     try {
-      result = await runs.start({
+      result = await queuedRunController.start({
         backendId: typeof queue.backendId === 'string' && queue.backendId ? queue.backendId : 'colab',
         pkg: built.package,
         assets: [found.assetId],
@@ -797,7 +853,10 @@ export function createApp({
   const takeRoutes = createTakeRoutes({
     store,
     takeStore,
-    runs,
+    // UX01: an unbound regeneration still runs through the controller; a bound
+    // one is dispatched as a take.request command by the production binding.
+    runs: admission.guardRuns(runs, 'take.regenerate'),
+    production: productionBindingFor,
     events,
     mediaTickets,
     measuredFor: pkg => measuredOptionsFromDir(dirname(store.path(pkg.id))),
@@ -834,6 +893,80 @@ export function createApp({
       return null;
     }
   };
+
+  // UX03: the outbox is the only path from a dispatched action to the pipeline.
+  // Durable attempt identity lives in the adapter; the executor claims each
+  // entry, adopts an attributed run before dispatching, and never contacts
+  // Google Colab itself.
+  const pipelineAdapter = createPipelineAdapter({ store: productionStore, controller: pipelines });
+  const outboxExecutor = createOutboxExecutor({
+    store: productionStore,
+    adapter: pipelineAdapter,
+    packageFor: packageForProduction,
+    ledgerFor: (production) => createBudgetLedger({
+      runtimeDir,
+      ledgerId: production.budgetLedgerId,
+    }),
+  });
+  /**
+   * The executor needs the pipeline input the production approved. It is
+   * derived from the latest trusted plan slot, never from a caller-supplied
+   * body. The pipeline's own plan hash is recomputed by the controller, so the
+   * approved production slot supplies the one matching approval.
+   */
+  function pipelineDrainContext(productionId, actionId = null) {
+    const production = productionStore.read(productionId);
+    if (!production) return null;
+    const pkg = packageForProduction(production);
+    if (!pkg) return null;
+    let events = [];
+    try { events = productionStore.readEvents(productionId); } catch { return null; }
+    let action = null;
+    for (const event of events) {
+      if (event.type !== 'action.state_changed' || !event.data?.id) continue;
+      if (actionId && event.data.id !== actionId) continue;
+      action = action && action.id === event.data.id ? { ...action, ...event.data } : event.data;
+    }
+    if (!action) return null;
+    let slot = null;
+    for (const event of events) {
+      if (event.type !== 'plan.proposed' || !Array.isArray(event.data?.actions)) continue;
+      if (event.data.id !== action.planId && event.data.planHash !== action.planHash) continue;
+      slot = event.data.actions.find(candidate => candidate?.id === action.id) ?? slot;
+    }
+    const input = {
+      backendId: typeof slot?.backendId === 'string' && slot.backendId ? slot.backendId : 'colab',
+      budgetUnits: Number.isFinite(slot?.upperBound) ? slot.upperBound : 0,
+    };
+    try {
+      const plan = planPipeline(pkg, input, { env: process.env });
+      if (plan.ready && plan.requiresApproval) input.approvedPlanHash = plan.planHash;
+    } catch {
+      // The adapter records its own typed refusal; a preflight failure is not a
+      // second execution path.
+    }
+    return { pkg, input, sourceDir: dirname(store.path(pkg.id)) };
+  }
+  // A cancellation intent fans out to every attributed run. New work is started
+  // by its own dispatch, never by an unrelated terminal event (which would carry
+  // the wrong per-action input).
+  const publishBeforeOutbox = events.publish.bind(events);
+  events.publish = (event) => {
+    const entry = publishBeforeOutbox(event);
+    if (event?.type === 'production.cancelled'
+      || (event?.type === 'production.intent_changed' && event.data?.intent === 'cancel_requested')) {
+      Promise.resolve(outboxExecutor.onEvent(event)).catch(() => {});
+    }
+    return entry;
+  };
+  // Startup recovery: reconcile actions that already claimed execution. A
+  // queued action is started by its dispatch or a later production event, not
+  // by merely opening the app, so a restart cannot spend without a live claim.
+  setImmediate(() => {
+    for (const production of productionStore.list()) {
+      Promise.resolve(outboxExecutor.reconcileProduction({ productionId: production.id })).catch(() => {});
+    }
+  });
 
   const conversationCastFor = (conversationId) => {
     if (typeof conversationId !== 'string' || conversationId === '') return [];
@@ -886,7 +1019,16 @@ export function createApp({
   const productionRouteActions = Object.freeze({
     propose: (args) => productionActions.propose(args),
     getAction: (args) => productionActions.getAction(args),
-    dispatch: (args) => productionCoordinator.dispatch(args),
+    dispatch: (args) => {
+      const result = productionCoordinator.dispatch(args);
+      // UX03: a committed dispatch is immediately owned by the server. The
+      // drain is asynchronous so the HTTP response still reports the admission.
+      if (result && typeof args?.productionId === 'string') {
+        const context = pipelineDrainContext(args.productionId, result?.action?.id ?? null);
+        if (context) void outboxExecutor.drainProduction(args.productionId, context).catch(() => {});
+      }
+      return result;
+    },
   });
 
   // IP45K: one free Kokoro path for the app's lifetime. The probe is lazy and
@@ -949,6 +1091,9 @@ export function createApp({
     operations,
     renderGate: finalDeliveryGate,
     runtimeDir,
+    // UX15/UX10: bound delivery takes the production command path instead of
+    // the legacy export route.
+    production: productionBindingFor,
     reviewStarted: pkg => {
       try {
         return takeStore.read(pkg.id) != null;
@@ -1498,6 +1643,22 @@ export function createApp({
 
     if (url.pathname === '/api/run' && request.method === 'GET') {
       return sendJson(response, 200, runs.status());
+    }
+
+    // UX01/UX03: cancellation is the run controller's retained abort handle.
+    // A terminal or unknown run answers idempotently; a bound run's action is
+    // settled by the controller, not by a second cancel path.
+    const runCancelMatch = /^\/api\/run\/([^/]+)\/cancel$/.exec(url.pathname);
+    if (runCancelMatch && request.method === 'POST') {
+      let runId;
+      try {
+        runId = decodeURIComponent(runCancelMatch[1]);
+      } catch {
+        return sendJson(response, 400, { error: 'bad run id', code: 'INVALID_RUN_ID' });
+      }
+      const result = runs.cancel(runId);
+      if (!result) return sendJson(response, 404, { error: 'run not found', code: 'RUN_NOT_FOUND' });
+      return sendJson(response, 200, result);
     }
 
     if (url.pathname === '/api/run/approve' && request.method === 'POST') {

@@ -85,11 +85,17 @@ storyboard, and edits the same project afterwards. The Remotion Player and frame
 (scenes, narration, captions, presenter, music) sit in the middle; runs, files and jobs on the right.
 Work is journaled as a **production**: the agent proposes **plan cards**, you approve them, and only
 approved, scoped work is dispatched, under a per-production Google Colab spend cap you set. Every
-generated clip has **takes** you review, compare and approve before the final render. Captured
+generated clip becomes a **take**: automatic selection and technical checks stay separate from the
+human review verdict, and the final gate keeps an unreviewed take visible as unreviewed. Captured
 offline with the **local · scripted model**. See
 [production agent](docs/features/production-agent.md),
 [chat agent](docs/features/chat-agent.md) and
 [timeline review](docs/features/timeline-review-and-export.md).
+
+**What is actually mounted.** [UX-RESULTS capability status](docs/ui/UX_RESULTS.md) keeps generated,
+auto-selected, technically checked and human-reviewed results separate. It also names the features
+that are component-only (native-transfer continuity and reopened export after reload) so they are
+not read as finished journeys.
 
 ### Characters
 
@@ -121,7 +127,7 @@ Voice cloning is not supported. See [docs/features/voice.md](docs/features/voice
 - **Research**: **Use my URLs** or **Search for me**; fetched text is untrusted data ([research](docs/features/research.md)).
 - **Google Colab progress, rates and cancel**: live VM gauges, per-accelerator pricing, balance check and verified stop ([observability](docs/PIPELINE_OBSERVABILITY.md)).
 - **24 style recipes**, 37 effects and 25 transitions, with a [motion gallery](docs/motion-gallery/index.html) ([guide](docs/MOTION_STYLES.md)).
-- **Quality checks** before the render: `node scripts/quality/cli.mjs` ([guide](docs/QUALITY_PIPELINE.md)).
+- **Quality checks** before the render: `node scripts/quality/cli.mjs` ([guide](docs/QUALITY_PIPELINE.md)) — technical evidence, never a substitute for human review ([capability status](docs/ui/UX_RESULTS.md)).
 - **Default project** Pip's Night Shift, a finished motion-graphics project to play and export ([guide](docs/DEFAULT_PROJECT.md)).
 - **Two-minute demo page** `apps/web/demo.html?fixture=1`, no server or GPU ([runbook](docs/DEMO_WEBAPP_RUNBOOK.md)).
 - **Setup preflight** `pnpm run doctor` ([guide](docs/DOCTOR.md)).
