@@ -144,16 +144,59 @@
   gap: var(--space-2);
   color: var(--text-1);
   font-weight: 600;
+  cursor: pointer;
 }
 
-.easy-narration-toggle input {
-  width: 1.15rem;
-  height: 1.15rem;
+.easy-narration-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
 }
 
-.easy-narration-toggle input:focus-visible {
+.easy-narration-toggle:focus-within .easy-narration-switch {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+.easy-narration-switch {
+  display: inline-flex;
+  align-items: center;
+  width: 2.5rem;
+  height: 1.4rem;
+  padding: 0.15rem;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius-pill);
+  background: var(--bg-2);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.easy-narration-thumb {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.easy-narration-input:checked + .easy-narration-switch {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.easy-narration-input:checked + .easy-narration-switch .easy-narration-thumb {
+  transform: translateX(1.1rem);
+  background: var(--bg-0, #fff);
+}
+
+.easy-narration-state {
+  min-width: 2ch;
+  color: var(--text-2);
+}
+
+.easy-narration-input:checked ~ .easy-narration-state {
+  color: var(--text-1);
 }
 
 .easy-narration-voice {

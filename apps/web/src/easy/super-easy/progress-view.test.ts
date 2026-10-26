@@ -133,6 +133,44 @@ test('a ready final video brings the overall gauge to 100 percent and the done c
   assert.equal(COPY.making.overall, 'All done');
 });
 
+test('a ready final video offers Download, Open in Studio, Make another and a secondary editor escape', () => {
+  const html = renderSuperEasyProgress(completeSnapshot(), {
+    packageId: 'pkg_123',
+    search: '?package=pkg_123&from=shared',
+  });
+
+  const download = html.match(/<a\b[^>]*data-super-easy-download[^>]*>([\s\S]*?)<\/a>/u);
+  assert.ok(download, 'Download is an anchor so the existing final URL is used');
+  assert.match(download[0], /href="\/media\/final\.mp4"/u);
+  assert.match(download[0], /class="[^"]*\bbtn-primary\b[^"]*"/u);
+  assert.match(download[0], /\bdownload\b/u);
+  assert.equal(download[1], COPY.done.download);
+  assert.equal(COPY.done.download, 'Download');
+
+  const studio = html.match(/<a\b[^>]*data-super-easy-open-studio[^>]*>([\s\S]*?)<\/a>/u);
+  assert.ok(studio, 'Open in Studio keeps the package');
+  assert.match(studio[0], /href="\?package=pkg_123&amp;from=shared&amp;step=idea"/u);
+  assert.equal(studio[1], COPY.done.openStudio);
+  assert.equal(COPY.done.openStudio, 'Open in Studio');
+
+  assert.match(html, /<button[^>]*data-super-easy-make-another[^>]*>Make another<\/button>/u);
+  assert.match(html, /<button[^>]*class="[^"]*\bbtn-secondary\b[^"]*"[^>]*data-super-easy-open-editor[^>]*>Open in editor<\/button>/u);
+  assert.equal((html.match(/data-super-easy-download/g) ?? []).length, 1);
+  assert.equal((html.match(/data-super-easy-open-studio/g) ?? []).length, 1);
+  assert.equal((html.match(/data-super-easy-make-another/g) ?? []).length, 1);
+  assert.equal((html.match(/data-super-easy-open-editor/g) ?? []).length, 1);
+
+  const order = ['data-super-easy-download', 'data-super-easy-open-studio', 'data-super-easy-make-another', 'data-super-easy-open-editor']
+    .map((hook) => html.indexOf(hook));
+  assert.deepEqual(order, order.slice().sort((left, right) => left - right), 'Download comes first and the editor escape last');
+});
+
+test('done actions stay away until the final video is ready', () => {
+  const html = renderSuperEasyProgress(partialSnapshot());
+  assert.doesNotMatch(html, /data-super-easy-done-actions/u);
+  assert.doesNotMatch(html, /data-super-easy-download/u);
+});
+
 test('stage errors are visible text and never hidden behind a done gauge', () => {
   const html = renderSuperEasyProgress({
     plan: { status: 'done' },

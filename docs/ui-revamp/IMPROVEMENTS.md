@@ -2,30 +2,34 @@
 
 *Source: [AUDIT-2.md](AUDIT-2.md). Base: `feat/iteration-levels` at `743f80c`. All items scope to `apps/web` unless noted.*
 
+*Status checked on `feat/easy-ux` during the EASY-UX wave. ✅ Fixed means the desired outcome is implemented on the branch; where an item has a unit test, the test file is named in the item. All 14 items are fixed.*
+
 ## Item table
 
-| Id | P | Size | Summary |
-|---|---|---|---|
-| UI2-01 | P0 | M | Export step re-renders on re-entry from editor |
-| UI2-02 | P0 | S | Editor run-panel empty state says "Pick a backend and press Run" |
-| UI2-03 | P1 | S | Plan banner says "offline planner" — replace with plain language |
-| UI2-04 | P1 | M | Template chips on Idea step are buttons; convert to a radio group |
-| UI2-05 | P1 | S | Editor status bar spend meter still shows "GPU units (est.)" outside diagnostics |
-| UI2-06 | P1 | S | Editor Jobs tab hint says "fallbacks active until approved" |
-| UI2-07 | P1 | S | "Ask for changes" dialog missing a Connect button to Settings |
-| UI2-08 | P1 | S | Editor player aria-label says "Remotion preview" |
-| UI2-09 | P1 | S | Settings AI-provider section uses raw technical labels |
-| UI2-10 | P1 | S | Export extras button label is unclear |
-| UI2-11 | P2 | M | Early Easy steps waste the right side of the screen |
-| UI2-12 | P2 | S | Settings keyboard-shortcuts section is incomplete |
-| UI2-13 | P2 | S | Plan step preview is a blank frame with no explanation |
-| UI2-14 | P2 | S | Three header buttons in Easy look identical |
+| Id | P | Size | Status | Summary |
+|---|---|---|---|---|
+| UI2-01 | P0 | M | ✅ Fixed | Export step re-renders on re-entry from editor |
+| UI2-02 | P0 | S | ✅ Fixed | Editor run-panel empty state says "Pick a backend and press Run" |
+| UI2-03 | P1 | S | ✅ Fixed | Plan banner says "offline planner" — replace with plain language |
+| UI2-04 | P1 | M | ✅ Fixed | Template chips on Idea step are buttons; convert to a radio group |
+| UI2-05 | P1 | S | ✅ Fixed | Editor status bar spend meter still shows "GPU units (est.)" outside diagnostics |
+| UI2-06 | P1 | S | ✅ Fixed | Editor Jobs tab hint says "fallbacks active until approved" |
+| UI2-07 | P1 | S | ✅ Fixed | "Ask for changes" dialog missing a Connect button to Settings |
+| UI2-08 | P1 | S | ✅ Fixed | Editor player aria-label says "Remotion preview" |
+| UI2-09 | P1 | S | ✅ Fixed | Settings AI-provider section uses raw technical labels |
+| UI2-10 | P1 | S | ✅ Fixed | Export extras button label is unclear |
+| UI2-11 | P2 | M | ✅ Fixed | Early Easy steps waste the right side of the screen |
+| UI2-12 | P2 | S | ✅ Fixed | Settings keyboard-shortcuts section is incomplete |
+| UI2-13 | P2 | S | ✅ Fixed | Plan step preview is a blank frame with no explanation |
+| UI2-14 | P2 | S | ✅ Fixed | Three header buttons in Easy look identical |
 
 ## Items
 
 ---
 
 ### UI2-01 · Export step re-renders on re-entry from editor
+
+**Status:** ✅ Fixed — a matching cached export restores the done screen with Download and does not call the renderer again. `src/easy/steps/export.test.ts` covers the editor round trip.
 
 **Problem.** Switching to the editor after exporting, then pressing "Back to studio", re-enters the Export step and starts a new render instead of restoring the done screen.
 
@@ -41,6 +45,8 @@
 
 ### UI2-02 · Editor run-panel empty state says "Pick a backend and press Run"
 
+**Status:** ✅ Fixed — the run panel starts with "No generation yet." and mentions no backend or Run button.
+
 **Problem.** The editor's Activity → Run panel says "No backend run yet. Pick a backend and press Run." There is no "Run" button anymore; generation is started from the Generate inspector tab.
 
 **Desired outcome.** The empty state reads "No generation yet." with no mention of a backend or a Run button.
@@ -55,6 +61,8 @@
 
 ### UI2-03 · Plan banner says "offline planner" — replace with plain language
 
+**Status:** ✅ Fixed — the banner reads "Written from templates. Connect an AI provider for a script written from your idea." and Easy copy bans the word "planner".
+
 **Problem.** The Plan step shows "Written by the offline planner. Connect an AI provider for a script written from your idea." The phrase "offline planner" is developer jargon.
 
 **Desired outcome.** The banner reads "Written from templates. Connect an AI provider for a script written from your idea." or similar plain copy.
@@ -68,6 +76,8 @@
 ---
 
 ### UI2-04 · Template chips on Idea step are buttons; convert to a radio group
+
+**Status:** ✅ Fixed — templates render inside a fieldset as named radio inputs, so the group contributes one tab stop and arrow keys move between chips.
 
 **Problem.** The four "Start from" template chips (Product launch, Explainer, Brand teaser, Lesson recap) are `<button>` elements, each a separate tab stop. They add 4 tab stops to the path from the heading to Continue. The spec target is ≤5 total tab stops.
 
@@ -84,6 +94,8 @@
 
 ### UI2-05 · Editor status bar spend meter still shows "GPU units (est.)" outside diagnostics
 
+**Status:** ✅ Fixed — the spend meter sits inside the Diagnostics panel and is no longer shown in the always-visible status bar.
+
 **Problem.** The `#spend` element in the status bar (`index.html:159`) sits outside the Diagnostics disclosure and shows "0.0 GPU units (est.)" to every user, including first-time users who have no Google Colab connection.
 
 **Desired outcome.** The spend meter moves inside the `#diagnostics-panel` alongside the other telemetry, or is hidden when no run is active and the mode is not advanced.
@@ -98,6 +110,8 @@
 
 ### UI2-06 · Editor Jobs tab hint says "fallbacks active until approved"
 
+**Status:** ✅ Fixed — the Jobs header now reads "Pending and completed jobs" with no pipeline jargon.
+
 **Problem.** The Jobs panel header in the right rail says "fallbacks active until approved" — pipeline jargon that survived the vocabulary cleanup.
 
 **Desired outcome.** The hint reads "Pending and completed jobs" or is removed entirely.
@@ -110,6 +124,8 @@
 ---
 
 ### UI2-07 · "Ask for changes" dialog missing a Connect button to Settings
+
+**Status:** ✅ Fixed — the no-provider dialog and the Ask drawer both offer **Connect**, which opens AI provider settings and returns focus to the opener.
 
 **Problem.** Without an AI provider, the "Ask for changes" action opens a dialog saying "Connect an AI provider…" but offers only a Close button. The `COPY.ask.connect` string ("Connect") is defined but never rendered as a button.
 
@@ -124,6 +140,8 @@
 
 ### UI2-08 · Editor player aria-label says "Remotion preview"
 
+**Status:** ✅ Fixed — the player is labelled "Video preview", and the Easy review player uses the same plain label.
+
 **Problem.** The `<div id="player">` has `aria-label="Remotion preview"`. "Remotion" is an internal library name.
 
 **Desired outcome.** The label reads "Video preview".
@@ -136,6 +154,8 @@
 ---
 
 ### UI2-09 · Settings AI-provider section uses raw technical labels
+
+**Status:** ✅ Fixed — options read "None (offline templates)", "OpenCode Go", "Custom (OpenAI-compatible)" and "OpenRouter"; the old Agent settings button is now **Manage connections**.
 
 **Problem.** The AI provider `<select>` in Settings shows "local · scripted model", "OpenCode Go", "Custom · OpenAI-compatible", "OpenRouter". The "Agent settings" button reopens the old agent-settings dialog.
 
@@ -150,6 +170,8 @@
 
 ### UI2-10 · Export extras button label is unclear
 
+**Status:** ✅ Fixed — the button reads "Download captions, credits and project files (ZIP)".
+
 **Problem.** "Download captions and extras (ZIP)" doesn't tell users what "extras" includes.
 
 **Desired outcome.** The label reads "Download captions, credits and project files (ZIP)" or "Download all files (ZIP)".
@@ -162,6 +184,8 @@
 ---
 
 ### UI2-11 · Early Easy steps waste the right side of the screen
+
+**Status:** ✅ Fixed — `.easy-main` widens to 1040px and then 1120px on wide screens, so Idea and Characters use the available width.
 
 **Problem.** On the Idea and Characters steps at ≥1024px, the content sits in a max-880px centred column with the right ~40% of the viewport blank. The two-column layout (`.easy-two-col`) is available but only used from Plan onward.
 
@@ -177,6 +201,8 @@
 
 ### UI2-12 · Settings keyboard-shortcuts section is incomplete
 
+**Status:** ✅ Fixed — the section lists Tab, Enter, Ctrl/Cmd+Enter, arrow keys, Alt+←/Alt+→, Esc and Ctrl/Cmd+Shift+A alongside Space and ?.
+
 **Problem.** The Keyboard shortcuts section lists only "Space — Play or pause" and "? — Keyboard shortcuts". It misses Ctrl/Cmd+Shift+A (mode toggle), Ctrl/Cmd+Enter (primary action), Alt+← / Alt+→ (step navigation), and Esc (close dialog).
 
 **Desired outcome.** All documented shortcuts from the spec (SPEC §10) are listed.
@@ -189,6 +215,8 @@
 ---
 
 ### UI2-13 · Plan step preview is a blank frame with no explanation
+
+**Status:** ✅ Fixed — an empty preview shows "Preview appears after you generate." inside the player slot.
 
 **Problem.** The Plan step shows a `[data-easy-player]` slot on the right column, but the preview renders a black rectangle. There is no label explaining that visuals appear after generation.
 
@@ -203,6 +231,8 @@
 ---
 
 ### UI2-14 · Three header buttons in Easy look identical
+
+**Status:** ✅ Fixed — Help and Settings stay secondary, while **Open in editor** is a ghost button after a divider.
 
 **Problem.** Help, Settings, and "Open in editor" all use the same `btn btn-secondary` style. "Open in editor" is a navigation action and deserves visual distinction.
 

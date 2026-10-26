@@ -11,9 +11,7 @@ import {
   escapeToEditor,
   escapeToHome,
   escapeToStudio,
-  isSuperEasyDone,
   makeAnotherState,
-  renderSuperEasyDoneActions,
 } from './escape.ts';
 import {
   SUPER_EASY_MIN_PROMPT_CHARS,
@@ -136,7 +134,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
-    if (closest('[data-super-easy-more-control]')) {
+    if (closest('[data-super-easy-more-control]') || closest('[data-super-easy-open-studio]')) {
       event.preventDefault();
       const packageId = options.state().packageId;
       replaceUrl(escapeToStudio(currentSearch(), packageId));
@@ -184,10 +182,12 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     current = next;
     if (next === 'progress') {
       const snapshot = options.snapshot?.() ?? null;
-      const doneActions = isSuperEasyDone(snapshot) ? renderSuperEasyDoneActions() : '';
+      const state = options.state();
       root.innerHTML = renderSuperEasyProgress(snapshot, {
         ...(options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion }),
-      }) + doneActions;
+        packageId: state.packageId,
+        search: currentSearch(),
+      });
     } else {
       const state = options.state();
       root.innerHTML = renderSuperEasyHome({

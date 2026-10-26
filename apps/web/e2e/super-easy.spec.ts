@@ -9,6 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { assertNoPaidCalls, loadEnv, watchPaidCalls } from './easy-helpers.ts';
 
 const PROMPT = 'A friendly robot who learns to bake bread';
 
@@ -227,6 +228,20 @@ async function openHarness(page: Page): Promise<string[]> {
   return external;
 }
 
+/**
+ * The Easy studio eagerly imports every step module. The base app's glob also
+ * picks up the colocated node:test files, whose bare `test(...)` calls throw in
+ * a browser. Stub only those test modules so the full app can boot; no step
+ * implementation is replaced.
+ */
+async function stubStudioStepTests(page: Page): Promise<void> {
+  await page.route(/\/src\/easy\/steps\/[^/]+\.test\.ts(?:\?.*)?$/u, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: 'export {};',
+  }));
+}
+
 test('one prompt shows progress, fills the gallery and ends on the final ready fixture', async ({ page }) => {
   const external = await openHarness(page);
 
@@ -277,6 +292,11 @@ test('one prompt shows progress, fills the gallery and ends on the final ready f
   await expect(page.locator('[data-super-easy-gallery-item="final"] video')).toBeVisible();
   await expect(page.locator('[data-super-easy-overall-value]')).toHaveText('All done');
   await expect(page.locator('[data-super-easy-done-actions]')).toBeVisible();
+  const download = page.getByRole('link', { name: 'Download', exact: true });
+  await expect(download).toBeVisible();
+  await expect(download).toHaveAttribute('download');
+  await expect(download).toHaveAttribute('href', /^data:video\/mp4/);
+  await expect(page.getByRole('link', { name: 'Open in Studio' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open in editor' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Make another' })).toBeVisible();
 
@@ -435,6 +455,7 @@ function fullAppBackend() {
 
 test('the full app starts at the bare visit and fills the progress view from the fake backend', async ({ page }) => {
   test.setTimeout(90_000);
+  await stubStudioStepTests(page);
   const backend = fullAppBackend();
   await page.route('**/api/**', (route) => backend.handle(route));
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -453,4 +474,73 @@ test('the full app starts at the bare visit and fills the progress view from the
   expect(backend.calls.some((call) => call === 'plan')).toBe(true);
   expect(backend.calls).toContain('command:iteration.set');
   expect(backend.calls.some((call) => call === 'run' || call === 'dispatch' || call === 'spend-cap')).toBe(false);
+});
+
+test('the Studio escape for a ready package lands past Idea', async ({ page }) => {
+  test.setTimeout(90_000);
+  const env = loadEnv();
+  watchPaidCalls(page);
+  await stubStudioStepTests(page);
+  await page.addInitScript((pkg: string) => {
+    const state = {
+      version: 1,
+      packageId: pkg,
+      chatId: null,
+      productionId: 'prod_ex14_ready_0000000000000000',
+      offline: false,
+      idea: {
+        text: 'A short film about a bakery window at dawn, warm and quiet.',
+        lengthS: 30,
+        aspect: '16:9',
+        look: 'clay',
+        sound: true,
+      },
+      questions: [],
+      questionsAsked: true,
+      answers: {},
+      cast: [],
+      narration: { on: true, voiceId: null },
+      level: 'draft',
+      levelTouched: true,
+      compute: 'cpu',
+      spendCap: 15,
+      planHash: null,
+      plan: { status: 'ready', error: null, errorAt: null, wordsChanged: false },
+      generate: { status: 'done' },
+      review: { shotId: null },
+      exported: { revision: null, at: null },
+    };
+    localStorage.setItem('comfyrizz.super-easy', JSON.stringify({ preferStudio: false, seenSuperEasy: true }));
+    localStorage.setItem('comfyrizz.easy.new', JSON.stringify(state));
+    localStorage.setItem(`comfyrizz.easy.${pkg}`, JSON.stringify(state));
+  }, env.packageId);
+
+  await page.goto(`/#token=${encodeURIComponent(env.token)}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#easy-root')).toBeVisible({ timeout: 30_000 });
+
+  // The more-control link uses this shared escape builder once the package is
+  // ready. It must target the step the package reached, never a fresh Idea.
+  const target = await page.evaluate(async (pkg: string) => {
+    const { escapeToStudio } = await import('/src/easy/super-easy/escape.ts');
+    const { defaultEasyState } = await import('/src/easy/store.ts');
+    const state = {
+      ...defaultEasyState(),
+      packageId: pkg,
+      productionId: 'prod_ex14_ready_0000000000000000',
+      idea: {
+        ...defaultEasyState().idea,
+        text: 'A short film about a bakery window at dawn, warm and quiet.',
+      },
+      plan: { ...defaultEasyState().plan, status: 'ready' as const },
+      generate: { status: 'done' as const },
+    };
+    return escapeToStudio('', pkg, state);
+  }, env.packageId);
+
+  expect(target).toContain('step=review');
+  expect(target).not.toContain('step=idea');
+
+  await page.goto(`/${target}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('[data-easy-heading]')).toHaveText('Review your video', { timeout: 30_000 });
+  assertNoPaidCalls();
 });

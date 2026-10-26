@@ -22,7 +22,37 @@
 
   .easy-actions {
     position: fixed;
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
     padding-inline: var(--space-3);
+  }
+
+  .easy-back {
+    order: 0;
+  }
+
+  .easy-status {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .easy-primary {
+    order: 2;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .easy-reason {
+    flex: 1 1 100%;
+    order: 3;
+    max-width: none;
+    overflow-wrap: anywhere;
+    text-align: start;
   }
 
   .easy-choice-grid {

@@ -20,6 +20,8 @@ import type {
 
 const LOAD_ERROR_TEXT = "Couldn't load the characters for this video.";
 const CHARACTER_FALLBACK_NAME = 'Character';
+const NARRATION_ON = 'On';
+const NARRATION_OFF = 'Off';
 
 type CharactersState = Pick<EasyState, 'cast' | 'narration'>;
 
@@ -102,8 +104,9 @@ export function renderAddTile(): string {
 
 export function renderNarration(state: Pick<EasyState, 'narration'>): string {
   const on = state?.narration?.on !== false;
+  const label = escapeHtml(COPY.characters.narration);
   return `<div class="easy-narration">
-<label class="easy-narration-toggle"><input type="checkbox" data-easy-narration${on ? ' checked' : ''} /> ${escapeHtml(COPY.characters.narration)}</label>
+<label class="easy-narration-toggle"><span class="easy-narration-label">${label}</span><input type="checkbox" role="switch" class="easy-narration-input" data-easy-narration aria-label="${label}" aria-checked="${on ? 'true' : 'false'}"${on ? ' checked' : ''} /><span class="easy-narration-switch" aria-hidden="true"><span class="easy-narration-thumb"></span></span><span class="easy-narration-state" data-easy-narration-state aria-hidden="true">${on ? NARRATION_ON : NARRATION_OFF}</span></label>
 <div class="easy-narration-voice" data-easy-voice="narrator"></div>
 </div>`;
 }
@@ -355,6 +358,9 @@ export const step: EasyStepModule = {
     function onChange(event: Event): void {
       const input = event.target as HTMLInputElement | null;
       if (!input || !input.matches('[data-easy-narration]')) return;
+      input.setAttribute('aria-checked', input.checked ? 'true' : 'false');
+      const stateLabel = input.closest('.easy-narration')?.querySelector<HTMLElement>('[data-easy-narration-state]');
+      if (stateLabel) stateLabel.textContent = input.checked ? NARRATION_ON : NARRATION_OFF;
       const state = currentState();
       ctx.store.patch({
         narration: { ...state.narration, on: input.checked },

@@ -76,6 +76,16 @@ export interface ReviewView {
 const NO_GATE: ReviewGate = { ok: false, approved: 0, total: 0, blocking: [] };
 
 const DEFAULT_PLAYER_LABEL = 'Video preview';
+const PLAYER_PLACEHOLDER_HINT = 'Your video will play here.';
+
+function renderPlayerSlot(): string {
+  return `<section class="easy-review-player" data-easy-player aria-label="${escapeHtml(DEFAULT_PLAYER_LABEL)}">
+<div class="easy-review-player-placeholder" data-easy-player-placeholder>
+<p class="easy-review-player-placeholder-label">${escapeHtml(DEFAULT_PLAYER_LABEL)}</p>
+<p class="easy-review-player-placeholder-hint">${escapeHtml(PLAYER_PLACEHOLDER_HINT)}</p>
+</div>
+</section>`;
+}
 const EDITED_FLAGS: Record<'timing' | 'transitions' | 'motion', readonly string[]> = {
   timing: ['timing', 'customTiming', 'preferredFrames'],
   transitions: ['transitions', 'customTransition', 'customTransitions'],
@@ -338,7 +348,7 @@ export function renderReview(view: ReviewView): string {
   const notice = typeof view.syncnetNotice === 'string' ? view.syncnetNotice : '';
   return `<section class="easy-review" data-easy-review>
 ${notice}
-<section class="easy-review-player" data-easy-player aria-label="${escapeHtml(DEFAULT_PLAYER_LABEL)}"></section>
+${renderPlayerSlot()}
 <div class="easy-review-strip">
 <h2 class="easy-review-shots-heading">${escapeHtml(COPY.review.shots)}</h2>
 ${strip}
@@ -401,7 +411,12 @@ export const step: EasyStepModule = {
       return isRecord(pkg) && typeof pkg.id === 'string' ? pkg.id : '';
     }
 
-    function shotModel(shot: ReviewShot, clip: ClipSummary | null, data: TakesResponse | null): ShotCardModel {
+    function shotModel(
+      shot: ReviewShot,
+      clip: ClipSummary | null,
+      data: TakesResponse | null,
+      versionsStatus: ShotCardModel['versionsStatus'] = null,
+    ): ShotCardModel {
       const versions: ShotCardVersion[] = (data?.takes ?? [])
         .filter((take) => !take.purged)
         .map((take) => ({ takeId: take.takeId, n: take.n, verdict: take.verdict }));
@@ -423,6 +438,7 @@ export const step: EasyStepModule = {
         cap: current.spendCap,
         kept: clip?.state === 'approved'
           || versions.some((version) => version.takeId === selected && version.verdict === 'approved'),
+        versionsStatus,
       };
     }
 
@@ -447,18 +463,41 @@ export const step: EasyStepModule = {
       });
     }
 
+    function loadVersions(
+      host: HTMLElement,
+      shot: ReviewShot,
+      clip: ClipSummary,
+      controller: ShotCardController,
+    ): Promise<void> {
+      const request = ++cardRequest;
+      controller.update(shotModel(shot, clip, null, 'loading'));
+      mountWords(host, shot);
+      return ctx.host.takesApi.getTakes(packageId(), clip.clipId).then((data) => {
+        if (disposed || request !== cardRequest || controller !== card) return;
+        controller.update(shotModel(shot, clip, data));
+        mountWords(host, shot);
+      }).catch(() => {
+        if (disposed || request !== cardRequest || controller !== card) return;
+        controller.update(shotModel(shot, clip, null, 'error'));
+        mountWords(host, shot);
+      });
+    }
+
     function mountShotPanel(): void {
       destroyShotPanel();
       const host = el.querySelector<HTMLElement>('[data-easy-shot-host]');
       const shot = reviewShotAt(shots, selectedId);
       if (!host || !shot) return;
       const clip = clipForShot(ctx.host.clips(), shot);
-      card = mountShotCard(host, shotModel(shot, clip, null), {
+      card = mountShotCard(host, shotModel(shot, clip, null, clip ? 'loading' : null), {
         host: ctx.host,
         packageId: packageId(),
         takesApi: ctx.host.takesApi,
         il: ctx.il,
         retryShot: ctx.retryShot,
+        reloadVersions: () => {
+          if (clip && card) return loadVersions(host, shot, clip, card);
+        },
         openAsk: ctx.openAsk,
         status: (text) => ctx.shell.setStatus(text),
         alert: (text) => {
@@ -468,14 +507,7 @@ export const step: EasyStepModule = {
       });
       mountWords(host, shot);
       if (!clip) return;
-      const request = ++cardRequest;
-      void ctx.host.takesApi.getTakes(packageId(), clip.clipId).then((data) => {
-        if (disposed || request !== cardRequest) return;
-        card?.update(shotModel(shot, clip, data));
-        mountWords(host, shot);
-      }).catch(() => {
-        // Keep the scene card usable without versions.
-      });
+      void loadVersions(host, shot, clip, card);
     }
 
     function applyPrimary(): void {

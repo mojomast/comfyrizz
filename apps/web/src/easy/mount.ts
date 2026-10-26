@@ -20,6 +20,7 @@ import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-ad
 import { openDialog } from './dialog.ts';
 import { mountSuperEasy } from './super-easy/mount.ts';
 import { setPreferStudio } from './super-easy/prefs.ts';
+import { escapeToHome } from './super-easy/escape.ts';
 import { createSuperEasySession, type SuperEasySession } from './super-easy/session.ts';
 import type { SuperEasyHost } from './super-easy/run.ts';
 
@@ -363,6 +364,17 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     showStep(step);
   }
 
+  function makeItSimple(): void {
+    setPreferStudio(false);
+    const url = escapeToHome(search());
+    view?.history?.pushState({}, '', url === '' ? './' : url);
+    showSuperEasy();
+  }
+
+  function bindMakeItSimple(): void {
+    root.querySelector<HTMLElement>('[data-easy-make-simple]')?.addEventListener('click', makeItSimple);
+  }
+
   function showHomeScreen(): void {
     homeTicket += 1;
     const ticket = homeTicket;
@@ -374,9 +386,11 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     releasePlayer();
     destroySuperEasy();
     root.innerHTML = renderHomeScreen([]);
+    bindMakeItSimple();
     void loadHomeVideos((input) => host.apiFetch(input)).then((videos) => {
       if (ticket !== homeTicket) return;
       root.innerHTML = renderHomeScreen(videos);
+      bindMakeItSimple();
     });
   }
 

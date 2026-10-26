@@ -13,6 +13,7 @@ import {
   type PlanCard,
 } from '../../productions/cards/plan-card.ts';
 import { loadSyncnetBanner } from '../syncnet-notice.ts';
+import { takeApprovalFailure } from '../approve-generate.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
 
 const PREVIEW_TITLE = 'Preview';
@@ -38,6 +39,7 @@ export interface PlanRenderOptions {
   snapshot?: unknown;
   package?: unknown;
   syncnetNotice?: string;
+  approvalError?: string | null;
 }
 
 export interface PlanPrimary {
@@ -57,6 +59,7 @@ const snapshots = new Map<string, unknown>();
 const loadedSnapshots = new Set<string>();
 let fallbackSnapshot: unknown = null;
 let registeredPackage: unknown = null;
+let planApprovalError: string | null = null;
 
 export function setPlanSnapshot(snapshot: unknown, productionId?: string | null): void {
   if (typeof productionId === 'string' && productionId) snapshots.set(productionId, snapshot);
@@ -317,6 +320,17 @@ ${renderSkeleton(4, message)}
 </div>`;
 }
 
+function approvalErrorHtml(message: string): string {
+  return `<div class="easy-plan-approve-error" data-easy-approve-error>${renderErrorState({
+    what: message,
+    action: {
+      label: COPY.errors.tryAgain,
+      kind: 'secondary',
+      data: { 'data-easy-approve-retry': '' },
+    },
+  })}</div>`;
+}
+
 function errorHtml(state: EasyState): string {
   const errorAt = state.plan.errorAt ?? 'agent';
   return `<div class="easy-plan easy-plan-error" data-easy-plan>
@@ -354,8 +368,15 @@ export function renderPlan(state: EasyState, _facts?: StepFacts, options: PlanRe
     : '';
 
   const notice = typeof options.syncnetNotice === 'string' ? options.syncnetNotice : '';
+  const approvalError = Object.prototype.hasOwnProperty.call(options, 'approvalError')
+    ? options.approvalError
+    : planApprovalError;
+  const approvalErrorBlock = typeof approvalError === 'string' && approvalError !== ''
+    ? approvalErrorHtml(approvalError)
+    : '';
   return `<div class="easy-plan" data-easy-plan>
 ${notice}
+${approvalErrorBlock}
 ${offlineBanner(state)}
 <div class="easy-two-col easy-plan-grid">
 ${renderShots(state, card, scenes)}
@@ -390,6 +411,20 @@ export function planPrimary(state: EasyState, snapshot: unknown): PlanPrimary {
   return { label, disabled: false, reason: null };
 }
 
+async function attemptApproval(ctx: EasyStepContext): Promise<void> {
+  takeApprovalFailure();
+  planApprovalError = null;
+  ctx.shell.setStatus(COPY.plan.approving);
+  try {
+    await ctx.approveAndGenerate?.();
+  } catch {
+    planApprovalError = COPY.plan.approveFailed;
+  }
+  const failure = takeApprovalFailure();
+  if (failure) planApprovalError = failure.message;
+  if (planApprovalError) ctx.rerender();
+}
+
 export const step: EasyStepModule = {
   id: 'plan',
   heading: COPY.plan.heading,
@@ -400,7 +435,7 @@ export const step: EasyStepModule = {
   },
 
   render(state: EasyState, facts: StepFacts) {
-    return renderPlan(state, facts);
+    return renderPlan(state, facts, { approvalError: planApprovalError });
   },
 
   bind(el: HTMLElement, ctx: EasyStepContext) {
@@ -477,6 +512,12 @@ export const step: EasyStepModule = {
     function onClick(event: Event): void {
       const target = event.target;
       if (!(target instanceof Element)) return;
+      if (target.closest('[data-easy-approve-retry]')) {
+        const button = target.closest<HTMLButtonElement>('[data-easy-approve-retry]');
+        if (button) button.disabled = true;
+        void attemptApproval(ctx);
+        return;
+      }
       if (target.closest('[data-easy-plan-retry]')) {
         retryPlan();
         return;
@@ -551,6 +592,9 @@ export const step: EasyStepModule = {
     el.addEventListener('input', onInput);
     el.addEventListener('change', onChange);
     syncPrimary();
+    if (planApprovalError) {
+      el.querySelector<HTMLButtonElement>('[data-easy-approve-retry]')?.focus();
+    }
     // A finished plan is not rewritten. An error waits for the user's retry,
     // and every other state resumes or starts the state machine.
     if (state.plan.status !== 'ready' && state.plan.status !== 'error') writeOnce();
@@ -570,6 +614,6 @@ export const step: EasyStepModule = {
       ctx.shell.setPrimary(primary);
       return;
     }
-    await ctx.approveAndGenerate?.();
+    await attemptApproval(ctx);
   },
 };

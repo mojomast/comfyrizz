@@ -13,6 +13,8 @@ import type { TakesApi, TakeVerdict } from '../takes/api.ts';
 
 export const SHOT_CARD_CHIP_IDS = ['warmer', 'calmer-motion', 'more-depth', 'less-busy'] as const;
 export const SHOT_CARD_SOMETHING_ELSE = 'something-else';
+export const SHOT_CARD_VERSIONS_LOADING = 'Loading versions…';
+export const SHOT_CARD_VERSIONS_ERROR = "We couldn't load versions for this shot.";
 export const NO_CAP_REASON = 'Set a Google Colab spend cap before trying this shot again.';
 
 export interface ShotCardVersion {
@@ -34,6 +36,8 @@ export interface ShotCardShot {
   [key: string]: unknown;
 }
 
+export type ShotCardVersionsStatus = 'loading' | 'error';
+
 export interface ShotCardModel {
   shot: ShotCardShot;
   versions: readonly ShotCardVersion[];
@@ -43,6 +47,7 @@ export interface ShotCardModel {
   cap?: number | string | null;
   retryCost?: number | null;
   kept?: boolean;
+  versionsStatus?: ShotCardVersionsStatus | null;
 }
 
 export interface RetryCostInput {
@@ -72,6 +77,7 @@ export interface ShotCardDeps {
   takesApi?: ShotCardTakesApi;
   il?: { openCompare?: (shotId: string) => void };
   retryShot?: (shotId: string, chip?: string) => Promise<void> | void;
+  reloadVersions?: () => Promise<void> | void;
   openAsk?: (prefill?: string) => void;
   status?: (text: string) => void;
   alert?: (text: string) => void;
@@ -194,6 +200,26 @@ function versionSwitcher(model: ShotCardModel, versions: readonly ShotCardVersio
 </div>`;
 }
 
+function versionsStatusHtml(
+  model: Pick<ShotCardModel, 'versionsStatus'>,
+  hasVersions: boolean,
+): string {
+  if (hasVersions) return '';
+  if (model.versionsStatus === 'loading') {
+    return `<div class="easy-shot-versions-status is-loading" data-easy-shot-versions="loading" role="status" aria-live="polite">
+<span class="easy-shot-versions-skeleton" aria-hidden="true"></span>
+<span class="easy-shot-versions-text">${escapeHtml(SHOT_CARD_VERSIONS_LOADING)}</span>
+</div>`;
+  }
+  if (model.versionsStatus === 'error') {
+    return `<div class="easy-shot-versions-status is-error" data-easy-shot-versions="error" role="alert">
+<span class="easy-shot-versions-text">${escapeHtml(SHOT_CARD_VERSIONS_ERROR)}</span>
+<button type="button" class="btn btn-secondary easy-shot-versions-retry" data-easy-shot-action="reload-versions">${escapeHtml(COPY.errors.tryAgain)}</button>
+</div>`;
+  }
+  return '';
+}
+
 function chipButton(
   id: string,
   label: string,
@@ -246,6 +272,7 @@ export function renderShotCard(model: ShotCardModel): string {
 <h2 class="easy-shot-card-title" id="${escapeHtml(titleId)}">${escapeHtml(fill(COPY.review.shotTitle, { n, title }))}</h2>
 ${versionSwitcher(model, versions, index)}
 </header>
+${versionsStatusHtml(model, versions.length > 0)}
 <div class="easy-shot-card-actions">
 <button type="button" class="btn btn-primary easy-shot-card-keep" data-easy-shot-action="keep" data-easy-version-id="${escapeHtml(versionId)}"${keepState}>${escapeHtml(keepLabel)}</button>
 ${compare}
@@ -481,9 +508,32 @@ export function mountShotCard(
     }
   }
 
+  async function reloadVersions(): Promise<void> {
+    if (current.versionsStatus === 'loading') return;
+    if (!deps.reloadVersions) {
+      alert(SHOT_CARD_VERSIONS_ERROR);
+      return;
+    }
+    current = { ...current, versionsStatus: 'loading' };
+    paint();
+    try {
+      await deps.reloadVersions();
+    } catch (error) {
+      const why = messageOf(error);
+      current = { ...current, versionsStatus: 'error' };
+      paint();
+      alert(why || SHOT_CARD_VERSIONS_ERROR);
+    }
+  }
+
   async function onClick(event: Event): Promise<void> {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+    const reloadButton = target.closest<HTMLElement>('[data-easy-shot-action="reload-versions"]');
+    if (reloadButton && el.contains(reloadButton)) {
+      await reloadVersions();
+      return;
+    }
     const versionButton = target.closest<HTMLElement>('[data-easy-version]');
     if (versionButton && el.contains(versionButton)) {
       await preview(versionButton.getAttribute('data-easy-version') === 'prev' ? -1 : 1);

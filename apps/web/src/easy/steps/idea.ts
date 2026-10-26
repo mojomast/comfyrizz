@@ -105,7 +105,15 @@ function lookCards(state: EasyState): string {
 
 function moreOptions(state: EasyState): string {
   const checked = state.idea.sound ? ' checked' : '';
-  return `<details class="easy-idea-more"><summary class="easy-idea-more-summary">${escapeHtml(COPY.idea.more)}</summary><div class="easy-idea-more-body"><label class="easy-idea-toggle" for="easy-idea-sound"><input type="checkbox" id="easy-idea-sound" name="easy-idea-sound"${checked} /><span>${escapeHtml(COPY.idea.sound)}</span></label><div class="easy-idea-references" data-easy-references></div></div></details>`;
+  return `<details class="easy-idea-more"><summary class="easy-idea-more-summary">${escapeHtml(COPY.idea.more)}</summary><div class="easy-idea-more-body">${lookCards(state)}<label class="easy-idea-toggle" for="easy-idea-sound"><input type="checkbox" id="easy-idea-sound" name="easy-idea-sound"${checked} /><span>${escapeHtml(COPY.idea.sound)}</span></label><div class="easy-idea-references" data-easy-references></div></div></details>`;
+}
+
+function ideaTip(): string {
+  return `<aside class="easy-idea-tip" data-easy-idea-tip>
+  <p class="easy-idea-tip-title">Example</p>
+  <p class="easy-idea-tip-example">${escapeHtml(COPY.idea.placeholder)}</p>
+  <p class="easy-idea-tip-text">${escapeHtml(COPY.help.lines[0])}</p>
+</aside>`;
 }
 
 function looksEnabled(value: unknown): value is Look {
@@ -373,7 +381,6 @@ function bindEvents(view: IdeaView, ctx: EasyStepContext): () => void {
   };
 }
 
-// UI2-11: Wide single-column layout on wide screens (>=1000px) handled via .easy-main in easy.css.
 export const step: EasyStepModule = {
   id: 'idea',
   heading: COPY.idea.heading,
@@ -389,20 +396,24 @@ export const step: EasyStepModule = {
     const errorText = tooShort ? escapeHtml(COPY.idea.tooShort) : '';
     const busy = state.questionsAsked && state.questions.length > 0 ? ' data-easy-idea-waiting="1"' : '';
     return `<div class="easy-idea"${busy}>
-  <div class="easy-idea-field">
-    <label class="easy-idea-label" for="easy-idea">${escapeHtml(COPY.idea.label)}</label>
-    <textarea class="easy-idea-input" id="easy-idea" name="idea" rows="4" placeholder="${escapeAttr(COPY.idea.placeholder)}" aria-describedby="easy-idea-too-short">${textareaValue}</textarea>
-    <p class="easy-idea-error" id="easy-idea-too-short" role="alert">${errorText}</p>
+  <div class="easy-two-col easy-idea-layout">
+    <div class="easy-idea-form">
+      <div class="easy-idea-field">
+        <label class="easy-idea-label" for="easy-idea">${escapeHtml(COPY.idea.label)}</label>
+        <textarea class="easy-idea-input" id="easy-idea" name="idea" rows="4" placeholder="${escapeAttr(COPY.idea.placeholder)}" aria-describedby="easy-idea-too-short">${textareaValue}</textarea>
+        <p class="easy-idea-error" id="easy-idea-too-short" role="alert">${errorText}</p>
+      </div>
+      ${templateChips()}
+      <div class="easy-idea-segments">
+        ${lengthSegments(state)}
+        ${shapeSegments(state)}
+      </div>
+      <div class="easy-idea-error-host" data-easy-idea-error></div>
+      <div class="easy-idea-questions" data-easy-questions></div>
+      ${moreOptions(state)}
+    </div>
+    ${ideaTip()}
   </div>
-  ${templateChips()}
-  <div class="easy-idea-segments">
-    ${lengthSegments(state)}
-    ${shapeSegments(state)}
-  </div>
-  ${lookCards(state)}
-  <div class="easy-idea-error-host" data-easy-idea-error></div>
-  <div class="easy-idea-questions" data-easy-questions></div>
-  ${moreOptions(state)}
 </div>`;
   },
 

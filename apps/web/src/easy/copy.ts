@@ -121,7 +121,9 @@ export const COPY = Object.freeze({
   },
   level: {
     heading: 'How many versions should we try?',
-    intro: 'More versions give you more to choose from and use more Google Colab.',
+    intro: 'More versions give you more to choose from. Each one takes a little longer on this computer.',
+    introColab: 'More versions give you more to choose from and use more Google Colab units.',
+    compactName: 'Level',
     names: { draft: 'Draft', balanced: 'Balanced', director: 'Director', custom: 'Custom' },
     summaries: {
       draft: 'One version of everything. Fastest. Picked for you.',
@@ -151,7 +153,8 @@ export const COPY = Object.freeze({
     blockNotConnected: 'Connect Google Colab or choose This computer.',
   },
   syncnet: {
-    skipped: 'SyncNet is not configured, so lip-sync will not be checked. Keep a version of every talking-head shot before you export.',
+    skipped: 'Lip-sync will not be checked on this setup. Keep a version of every talking shot before you export.',
+    dismiss: 'Dismiss',
   },
   plan: {
     heading: 'Your plan',
@@ -183,6 +186,7 @@ export const COPY = Object.freeze({
     approve: 'Approve and generate',
     generate: 'Generate',
     approving: 'Approving…',
+    approveFailed: "We couldn't start making this video. Check your connection and try again.",
   },
   generate: {
     heading: 'Making your video',

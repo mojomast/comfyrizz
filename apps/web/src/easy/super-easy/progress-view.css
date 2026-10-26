@@ -25,6 +25,37 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+.super-easy-done-actions,
+.super-easy-done-actions *,
+.super-easy-done-actions *::before,
+.super-easy-done-actions *::after {
+  box-sizing: border-box;
+}
+
+.super-easy-done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 720px;
+  margin-inline: auto;
+  padding: var(--space-4) var(--space-5) var(--space-6);
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-15);
+  line-height: var(--line-height-base);
+}
+
+.super-easy-done-actions .btn {
+  min-height: 44px;
+}
+
+.super-easy-done-download {
+  flex: 0 0 auto;
+}
+
 .super-easy-progress-title {
   margin: 0;
   font-size: var(--font-size-24);
@@ -260,5 +291,21 @@
 @media (min-width: 640px) {
   .super-easy-progress-overall {
     padding: var(--space-5);
+  }
+}
+
+@media (max-width: 640px) {
+  .super-easy-progress {
+    padding: var(--space-4);
+  }
+
+  .super-easy-done-actions {
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--space-3) var(--space-4) var(--space-6);
+  }
+
+  .super-easy-done-actions .btn {
+    width: 100%;
   }
 }

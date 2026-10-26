@@ -1,7 +1,7 @@
 import { COPY, fill } from '../copy.ts';
 import { escapeHtml } from '../components.ts';
 import { mountCompute, renderCompute, type ComputeColabStatus } from '../compute-choice.ts';
-import { summaryForLevel } from '../level-copy.ts';
+import { levelIntro, summaryForLevel } from '../level-copy.ts';
 import { mountEasyLevelPicker } from '../level-picker.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, Level, StepFacts } from '../types.ts';
 
@@ -121,6 +121,8 @@ export const step: EasyStepModule = {
   },
 
   bind(el: HTMLElement, ctx: EasyStepContext) {
+    const introHost = el.closest('[data-easy-step]')?.querySelector<HTMLElement>('[data-easy-intro]');
+    if (introHost) introHost.textContent = levelIntro(ctx.store.get().compute);
     const slot = el.querySelector<HTMLElement>(`[data-il-slot="${LEVEL_SLOT}"]`);
     const computeHost = el.querySelector<HTMLElement>('[data-easy-compute]');
     const picker = slot ? mountPicker(slot, ctx) : null;

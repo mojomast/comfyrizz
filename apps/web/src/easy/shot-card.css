@@ -143,3 +143,19 @@
     width: 100%;
   }
 }
+
+@media (max-width: 480px) {
+  .easy-shot-card-versions {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .easy-shot-card-retry {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .easy-shot-card-chip {
+    width: 100%;
+  }
+}

@@ -17,11 +17,21 @@ export function currentPlayer(): HTMLElement | null {
   return parked?.player ?? null;
 }
 
+function clearPlaceholder(slot: HTMLElement): void {
+  if (typeof slot.querySelector !== 'function') return;
+  slot.querySelector('[data-easy-player-placeholder]')?.remove();
+}
+
 /** Move the existing player node into the Easy slot. The same element keeps its React root. */
 export function adoptPlayer(slot: HTMLElement, player: HTMLElement): void {
-  if (!slot || !player || player.parentElement === slot) return;
+  if (!slot || !player) return;
+  if (player.parentElement === slot) {
+    clearPlaceholder(slot);
+    return;
+  }
   holdPlayer(player);
   slot.append(player);
+  clearPlaceholder(slot);
 }
 
 /** Put the player back where it was before Easy borrowed it. */

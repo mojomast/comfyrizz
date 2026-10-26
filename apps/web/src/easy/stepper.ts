@@ -2,6 +2,7 @@ import type { EasyState, StepFacts, StepId } from './types.ts';
 import { COPY, fill } from './copy.ts';
 import { STEPS, lockReason, stepIndex } from './steps.ts';
 import { escapeHtml } from './components.ts';
+import { compactStepName } from './level-copy.ts';
 
 export interface StepperModel {
   current: StepId;
@@ -57,7 +58,7 @@ export function renderStepper({ current, state, facts, needsUpdate = [] }: Stepp
   const compact = fill(COPY.stepper.compact, {
     n: stepIndex(current) + 1,
     total: STEPS.length,
-    name: COPY.steps[current],
+    name: compactStepName(current),
   });
   return `<nav aria-label="Steps"><ol class="stepper-list">${items}</ol><button type="button" class="stepper-compact" aria-expanded="false">${escapeHtml(compact)}</button></nav>`;
 }

@@ -5,6 +5,7 @@
 // shared copy. There is no DOM access, no clock and no network here.
 
 import { COPY, fill } from './copy.ts';
+import { renderSuperEasyDoneActions } from './escape.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
 import {
   readStages,
@@ -26,6 +27,10 @@ export interface SuperEasyProgressViewOptions {
   liveText?: string;
   /** Force the reduced-motion class even when the OS does not ask for it. */
   reducedMotion?: boolean;
+  /** Current package id, kept by the done-view Studio escape. */
+  packageId?: string | null;
+  /** Current address, so the done-view escapes keep unrelated parameters. */
+  search?: string;
 }
 
 const VIDEO_URL = /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/iu;
@@ -146,6 +151,13 @@ export function renderSuperEasyProgress(
   const rootClasses = ['super-easy-progress'];
   if (reducedMotion) rootClasses.push('super-easy-progress-reduced-motion');
   const reducedAttribute = reducedMotion ? ' data-reduced-motion="true"' : '';
+  const doneActions = finalReady
+    ? renderSuperEasyDoneActions({
+        finalUrl: gallery.final.url,
+        packageId: options.packageId ?? null,
+        search: options.search ?? '',
+      })
+    : '';
 
   return `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress aria-labelledby="super-easy-progress-title">
 <h1 class="super-easy-progress-title" id="super-easy-progress-title">${escapeHtml(COPY.making.title)}</h1>
@@ -169,5 +181,5 @@ ${stages.stages.map(stageMarkup).join('\n')}
 ${gallery.items.map(slotMarkup).join('\n')}
 </ul>
 </section>
-</section>`;
+</section>${doneActions}`;
 }
