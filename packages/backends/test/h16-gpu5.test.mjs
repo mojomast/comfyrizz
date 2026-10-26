@@ -110,7 +110,7 @@ test("the bootstrap heartbeats well inside the host's silence window (G5-2)", ()
   const cell = [
     "import contextlib, io, time",
     "src = open('colab/bootstrap.py').read()",
-    "src = src[: src.rindex('\\n_run()')]",
+    "src = src[: src.rindex('\\nif os.environ.get(\"COMFYRIZZ_BOOTSTRAP_IMPORT_ONLY\")')]",
     "ns = {'__name__': 'bootstrap_under_test'}",
     "exec(compile(src, 'colab/bootstrap.py', 'exec'), ns)",
     "ns['HEARTBEAT_SECONDS'] = 1",
@@ -241,7 +241,7 @@ test("the packages Comfyrizz adds reach the VM, and the VM list cannot drift (G5
   const cell = [
     "import json",
     "src = open('colab/bootstrap.py').read()",
-    "src = src[: src.rindex('\\n_run()')]",
+    "src = src[: src.rindex('\\nif os.environ.get(\"COMFYRIZZ_BOOTSTRAP_IMPORT_ONLY\")')]",
     "ns = {'__name__': 'bootstrap_under_test'}",
     "exec(compile(src, 'colab/bootstrap.py', 'exec'), ns)",
     "print('VM_EXTRAS', json.dumps(list(ns['VM_EXTRAS'])))",
@@ -478,7 +478,7 @@ test("both model hosts download at the same time, not one after the other (G5-11
   const cell = [
     "import json, subprocess as real, time",
     "src = open('colab/bootstrap.py').read()",
-    "src = src[: src.rindex('\\n_run()')]",
+    "src = src[: src.rindex('\\nif os.environ.get(\"COMFYRIZZ_BOOTSTRAP_IMPORT_ONLY\")')]",
     "ns = {'__name__': 'bootstrap_under_test'}",
     "exec(compile(src, 'colab/bootstrap.py', 'exec'), ns)",
     "started_seen = []",
