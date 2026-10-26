@@ -1,14 +1,14 @@
 # The Impossible Brief — production incidents and prevention proposals
 
 **Status:** living production report, October 26, 2026; film still in progress.
-Evidence root: `/home/mojo/comfyrizz-gpu-tests/comfyrizz-impossible-brief-20261026/`.
+Evidence root: retained private Impossible Brief production workspace (2026-10-26).
 User requested documenting encountered pitfalls and proposing recurrence prevention.
 This report distinguishes observed failures, local mitigations and unimplemented
 product fixes. No claim of completed film, subjective listening approval or resolved
 billing reconciliation is made here.
 
-Production uses the earlier workspace's backend/scripts at
-`/tmp/opencode/comfyrizz-fasth3-omni`, with the deployed release's renderer packages
+Production uses the earlier workspace's backend/scripts from
+a temporary OpenCode FastH3 Omni checkout used for that production, with the deployed release's renderer packages
 and web delivery directory. Code references below refer to those actual paths;
 port fixes against current main only after checking for existing upstream changes.
 
@@ -25,7 +25,7 @@ evidence paths identify retained private artifacts; they are not public download
 **Observed:** `native-tests-v1/runtime/logs/bootstrap-394a29e5.log` records an HF
 Xet CDN **429 Too Many Requests** and download exit 1. Bootstrap proceeded to hash
 the incomplete files and raised `FileNotFoundError` for the FastH3 text encoder.
-The Colab cell command returned exit 0, but the missing `COMFYRIZZ_OK bootstrap`
+The Google Colab cell command returned exit 0, but the missing `COMFYRIZZ_OK bootstrap`
 marker correctly caused the host to reject setup. No video inference began.
 
 **Impact:** paid setup time, no usable video, and a secondary exception obscuring
@@ -85,7 +85,7 @@ margin is a mitigation, not a transactional collection fix.
   start if it cannot fit; collect completed outputs and stop instead.
 - Preserve the hard shutdown backstop. Never extend it automatically beyond the
   user's authorized liability or disable it to finish a download.
-- `packages/backends/src/colab-backend.mjs:786–909`: collect completed artifacts
+- `packages/backends/src/colab-backend.mjs` (collection/recovery path): collect completed artifacts
   incrementally with atomic per-job manifests and checksums; perform a final drain
   when a job completes rather than relying solely on the next polling interval.
 - Promote complete, verified live-preview artifacts through a first-class recovery
