@@ -151,7 +151,8 @@ export const COPY = Object.freeze({
     blockNotConnected: 'Connect Google Colab or choose This computer.',
   },
   syncnet: {
-    skipped: 'SyncNet is not configured, so lip-sync will not be checked. Keep a version of every talking-head shot before you export.',
+    skipped: 'Lip-sync will not be checked on this setup. Keep a version of every talking shot before you export.',
+    dismiss: 'Dismiss',
   },
   plan: {
     heading: 'Your plan',
