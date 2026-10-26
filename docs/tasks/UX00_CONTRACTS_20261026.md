@@ -390,6 +390,90 @@ every UX06 write is under `apps/web/src/easy/`. The two test write sets are disj
 directories and file names. The only shared inputs are the read-only UX00
 modules and fixtures.
 
+## Wave 2 write sets and leases
+
+Each lease is granted against base `f7f5387` (feat/ux-results tip after PB-BOOTSTRAP
+follow-up; includes merged UX00/UX05/UX06/UX09/UX20 and PB-BOOTSTRAP/PB-COLLECT).
+A worker edits only its leased paths and creates new files only where listed. UX00
+contract modules and fixtures stay read-only. `apps/server/src/app.mjs`,
+`apps/web/src/main.ts` and root tooling stay coordinator-owned (UX21).
+
+**Still exclusive / do not touch:** UX01 held-cloud write set
+(`pipeline.mjs`, admission portions of `run.mjs`, `productions/admission.mjs` and
+its UX01 tests); UX05 merged editor save/autosave paths except as listed for UX11
+media adapters; UX06 Super Easy CPU/progress modules except the explicit
+`easy/mount.ts` / `easy/store.ts` handoff to UX07; UX09 agent-chat / packages/agent
+scope modules; PB-SCRATCH remains held until UX15.
+
+### UX02 — Budget effects and recoverable accounting (incl. PB03)
+
+- **Write:**
+  - `apps/server/src/productions/ledger.mjs`
+  - new `apps/server/src/productions/budget-effects.mjs` (cap effect, orphan-hold
+    reconciliation, settlement/release retries, PB03 stage liabilities)
+  - `apps/server/src/routes/productions.mjs` (budget/cap surfaces only)
+  - `apps/server/src/productions/iteration-routes.mjs` (budget exposure only)
+  - `apps/server/src/productions/actions.mjs` and `commands.mjs` (lease before UX03;
+    accounting identity and effect APIs only — no admission/pipeline)
+- **Tests:**
+  - new `apps/server/test/productions/budget-effects.test.mjs`
+  - ledger / productions route tests under the same write set as needed
+- **Read-only:**
+  - `apps/server/src/pipeline.mjs`, `run.mjs`, `productions/admission.mjs` (UX01)
+  - UX00 contract modules/fixtures
+- **Coordinator wiring in `app.mjs`:** mount budget/cap routes once UX02 exports
+  adapters; UX03 adopts executor-facing APIs into `run.mjs` after this merges.
+
+### UX07 — Project identity, replanning and approval handoff (Easy escape follow-ons)
+
+- **Write (prefer Easy UI outside UX06-exclusive Super Easy CPU/progress files):**
+  - `apps/web/src/easy/mount.ts` (lease transferred from merged UX06 → UX07 → UX08)
+  - `apps/web/src/easy/store.ts` (identity/session helpers only; lease from UX06)
+  - `apps/web/src/easy/home.ts`
+  - `apps/web/src/easy/plan-writer.ts`
+  - `apps/web/src/easy/approve-generate.ts`
+  - `apps/web/src/easy/steps/idea.ts`, `apps/web/src/easy/steps/plan.ts`
+- **Tests:**
+  - new `apps/web/src/easy/project-identity.test.ts` (and `ux07-*` as needed)
+- **Read-only / do not reopen UX06 exclusives:**
+  - `apps/web/src/easy/cpu-path.ts`
+  - `apps/web/src/easy/super-easy/{session,mount,progress-view}.ts` and their tests
+  - `apps/web/src/easy/types.ts`, `session-contract.ts` (UX00)
+  - `apps/web/src/easy/steps/export.ts` (UX16)
+- **Lease order:** `easy/mount.ts` continues UX06 → **UX07** → UX08. Extend
+  carefully: no parallel writers on Super Easy CPU/progress modules.
+
+### UX11 — Media access, real narration and timeline hydration
+
+- **Write:**
+  - `apps/web/src/takes/api.ts`
+  - new `apps/web/src/media/ticket-resolver.ts`
+  - new `apps/web/src/media/thumbnail-client.ts`
+  - new `apps/web/src/editor/audio/preview.ts` (real narration decode; not UX05
+    save/autosave)
+  - new `apps/web/src/editor/timeline/hydrate.ts` (timeline mount adapter)
+- **Tests:**
+  - new `apps/web/src/media/ticket-resolver.test.ts`
+  - new `apps/web/src/editor/timeline/hydrate.test.ts`
+  - `ux11-*` as needed
+- **Read-only:**
+  - UX00 media contract fixtures
+  - UX05 `editor/store.ts`, `autosave.ts`, save-status paths
+  - server take routes (UX10) — consume frozen fixtures until UX10 merges
+- **Coordinator wiring in `main.ts`:** thumbnail/open hooks and timeline mount
+  once UX11 exports adapters.
+
+### Overlap check (Wave 2 vs in-flight / merged Wave 1)
+
+| Packet | Collides UX01 held-cloud? | Collides UX05/06/09 exclusives? |
+| --- | --- | --- |
+| UX02 | No — ledger/budget/actions/commands only | No |
+| UX07 | No | Only intentional `mount.ts`/`store.ts` handoff; Super Easy CPU/progress left read-only |
+| UX11 | No | No — new media/timeline/audio preview modules |
+
+No path appears in two Wave 2 write sets. UX17 (deps met via UX09) is **not**
+unlocked in this wave slot without its own lease table entry.
+
 ## Verification
 
 All checks are local, use isolated temporary runtimes, and make no network,
