@@ -496,6 +496,12 @@ UX09 agent-chat / `packages/agent` scope modules (`agent-chat.mjs`,
 - `apps/server/src/productions/{actions,commands}.mjs`: UX02 → **UX03**.
 - `apps/web/src/easy/mount.ts`: UX07 → **UX08** (continues UX06 → UX07 → UX08).
 
+**NOTES (amendment):** A parallel docs commit (`61afc5a`) briefly duplicated this
+Wave 3 table without the `actions.mjs`/`commands.mjs` → UX03 and `easy/mount.ts` →
+UX08 transfers. That duplicate section was removed; this table is authoritative.
+Base for bees remains `963d9c1` content; tip after lease docs is current
+`feat/ux-results` HEAD.
+
 ### UX03 — Server-owned execution, cancellation and restart (incl. PB07 half)
 
 - **Write:**
@@ -607,80 +613,6 @@ UX09 agent-chat / `packages/agent` scope modules (`agent-chat.mjs`,
 | UX17 | No | No | agent-chat / UX09 scope modules deliberately omitted |
 
 No path appears in two Wave 3 write sets. UX21 and PB-SCRATCH stay held.
-
-## Wave 3 write sets and leases
-
-Each lease is granted against base `963d9c1` (feat/ux-results tip after Wave 2:
-UX02/UX07/UX11 merged; UX00/UX01/UX05/UX06/UX09/UX20 and PB-BOOTSTRAP/PB-COLLECT
-already in). Kyle approved the Wave 3 unlock on 2026-10-26 ~17:11 America/Toronto.
-A worker edits only its leased paths and creates new files only where listed. UX00
-contract modules and fixtures stay read-only. `apps/server/src/app.mjs`,
-`apps/web/src/main.ts` and root tooling stay coordinator-owned (UX21, still held).
-All merged Wave 1/2 modules are read-only unless listed below.
-
-### UX03 — Durable execution and restart (run.mjs executor adoption of UX01/UX02 APIs)
-
-- **Write (exclusive this wave):**
-  - `apps/server/src/run.mjs`
-  - `apps/server/src/productions/pipeline-adapter.mjs`
-  - `apps/server/src/productions/outbox-execution.mjs`
-  - `apps/server/test/productions/execution-restart.test.mjs`
-  - `apps/server/test/run-execution.test.mjs`
-- **Deps (merged):** UX01, UX02
-
-### UX08 — Easy shell: ask drawer, agent settings, project name, save
-
-- **Write (exclusive this wave):**
-  - `apps/web/src/easy/ask-drawer.ts`
-  - `apps/web/src/easy/agent-settings.ts`
-  - `apps/web/src/easy/project-name.ts`
-  - `apps/web/src/easy/shell-save.ts`
-  - `apps/web/src/easy/ask-drawer.test.ts`
-  - `apps/web/src/easy/shell-save.test.ts`
-- **Deps (merged):** UX05, UX07, UX09
-
-### UX10 — Takes selection CAS and reference freshness
-
-- **Write (exclusive this wave):**
-  - `apps/server/src/takes/model.mjs`
-  - `apps/server/src/takes/gate.mjs`
-  - `apps/server/src/takes/select.mjs`
-  - `apps/server/src/takes/routes.mjs`
-  - `apps/server/src/takes/ingest.mjs`
-  - `apps/server/test/takes/selection-cas.test.mjs`
-  - `apps/server/test/takes/reference-freshness.test.mjs`
-- **Deps (merged):** UX00, UX01
-
-### UX13 — Honest character audition
-
-- **Write (exclusive this wave):**
-  - `apps/web/src/characters/editor.ts`
-  - `apps/web/src/characters/audition-panel.ts`
-  - `apps/web/src/characters/mount.ts`
-  - `apps/server/src/characters/audition.mjs`
-  - `apps/server/src/characters/routes.mjs`
-  - `apps/web/src/characters/audition-panel.test.ts`
-  - `apps/server/test/characters/audition-honest.test.mjs`
-- **Deps (merged):** UX00, UX11
-
-### UX17 — Chat-project fidelity and timing coverage
-
-- **Write (exclusive this wave):**
-  - `apps/server/src/chat-project.mjs`
-  - `apps/server/src/productions/plan-from-package.mjs`
-  - `packages/agent/src/scene-build.ts`
-  - `packages/agent/src/timing-coverage.ts`
-  - `packages/agent/test/timing-coverage.test.ts`
-  - `apps/server/test/chat-project-fidelity.test.mjs`
-- **Deps (merged):** UX09
-
-### Overlap check (Wave 3)
-
-No path appears in two Wave 3 write sets: UX03 owns server run/pipeline-adapter/outbox
-execution, UX08 Easy shell UI files, UX10 `takes/*`, UX13 `characters/*`, UX17
-chat-project / plan-from-package / packages/agent timing. UX01 and UX02 are merged, so
-UX03 may now edit `run.mjs`. Mounting `pipeline-adapter.mjs` into `app.mjs` stays with
-the UX21 coordinator.
 
 ## Verification
 
