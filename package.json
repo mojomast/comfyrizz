@@ -13,6 +13,8 @@
     "test:py": "cd pipeline-py && node ../scripts/py.mjs -m pytest -q",
     "test:scan": "node --test scripts/release-scan.test.mjs && node scripts/release-scan.mjs",
     "test:browser": "pnpm -C apps/web test:e2e",
+    "test:qa": "node --experimental-strip-types --test \"qa/tests/*.test.mjs\"",
+    "test:acceptance": "pnpm -C apps/web test:acceptance",
     "check": "pnpm test && pnpm -C apps/web typecheck && pnpm test:scan",
     "test:all": "pnpm test && pnpm run test:py && pnpm run test:scan",
     "build:libs": "pnpm -r --filter './packages/**' --if-present run build"
