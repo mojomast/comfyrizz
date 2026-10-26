@@ -20,6 +20,7 @@
 .easy-shell :focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+  scroll-margin-block: var(--space-6);
 }
 
 .easy-header {
@@ -127,8 +128,9 @@
   overflow: auto;
   max-width: 880px;
   margin-inline: auto;
-  padding-block: var(--space-6) 88px;
+  padding-block: var(--space-6) calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
   padding-inline: var(--space-5);
+  scroll-padding-block-end: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
 }
 
 .easy-step {
@@ -139,6 +141,7 @@
 }
 
 .easy-step-heading {
+  order: 0;
   margin: 0;
   color: var(--text-1);
   font-size: var(--font-size-32);
@@ -151,6 +154,7 @@
 }
 
 .easy-step-intro {
+  order: 1;
   max-width: 68ch;
   margin: 0;
   color: var(--text-2);
@@ -158,24 +162,27 @@
 }
 
 .easy-step-body {
+  order: 2;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
 .easy-actions {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 4;
+  position: static;
+  order: 3;
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0;
   min-height: 64px;
-  padding-block: var(--space-2);
-  padding-inline: var(--space-5);
+  margin-block-start: auto;
+  padding-block: var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+  padding-inline:
+    max(var(--space-5), env(safe-area-inset-left, 0px))
+    max(var(--space-5), env(safe-area-inset-right, 0px));
   border-top: 1px solid var(--border);
   background: var(--bg-1);
 }
@@ -186,17 +193,22 @@
 
 .easy-status {
   flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   color: var(--text-2);
   font-size: var(--font-size-12);
+  overflow-wrap: anywhere;
   text-align: center;
 }
 
 .easy-reason {
-  max-width: 34ch;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: min(34ch, 100%);
   margin: 0;
   color: var(--warn);
   font-size: var(--font-size-12);
+  overflow-wrap: anywhere;
   text-align: right;
 }
 
@@ -206,6 +218,7 @@
 
 .easy-primary {
   flex: 0 0 auto;
+  max-width: 100%;
   min-height: 44px;
   white-space: nowrap;
 }
@@ -272,5 +285,19 @@
 
   .easy-two-col {
     grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .easy-shell {
+    scroll-behavior: auto;
+  }
+
+  .easy-shell .easy-main {
+    scroll-behavior: auto;
+  }
+
+  .easy-shell :where(button, a[href], input, select, textarea, summary) {
+    transition: none;
   }
 }

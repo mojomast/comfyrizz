@@ -1,0 +1,101 @@
+.shell-toast-region {
+  position: fixed;
+  z-index: 90;
+  inset-inline-start: max(16px, env(safe-area-inset-left, 0px));
+  inset-inline-end: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(16px + var(--shell-toast-offset, 0px) + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: min(420px, 100%);
+  pointer-events: none;
+}
+
+.shell-toast {
+  pointer-events: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #2a3140);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-1, #171b24);
+  color: var(--text-1, #f4f6fb);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  overflow-wrap: anywhere;
+  transition:
+    opacity var(--transition-fast, 120ms) linear,
+    transform var(--transition-fast, 120ms) linear;
+}
+
+.shell-toast[data-tone="danger"] {
+  border-color: var(--danger, #e5484d);
+}
+
+.shell-toast[data-tone="warn"] {
+  border-color: var(--warn, #f5a524);
+}
+
+.shell-toast[data-tone="ok"] {
+  border-color: var(--ok, #30a46c);
+}
+
+.shell-toast-message {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.shell-toast-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.shell-toast .btn {
+  flex: 0 0 auto;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.shell-toast .btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset, 2px);
+}
+
+@media (max-width: 30rem) {
+  .shell-toast-region {
+    inset-inline-start: max(8px, env(safe-area-inset-left, 0px));
+    inset-inline-end: max(8px, env(safe-area-inset-right, 0px));
+    max-width: none;
+  }
+
+  .shell-toast {
+    width: 100%;
+  }
+
+  .shell-toast-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-toast-region {
+    scroll-behavior: auto;
+  }
+
+  .shell-toast {
+    transition: none;
+    animation: none;
+  }
+}

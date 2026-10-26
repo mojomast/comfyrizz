@@ -21,10 +21,13 @@
   }
 
   .easy-actions {
-    position: fixed;
+    position: static;
     flex-wrap: wrap;
     row-gap: var(--space-2);
-    padding-inline: var(--space-3);
+    padding-block-end: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+    padding-inline:
+      max(var(--space-3), env(safe-area-inset-left, 0px))
+      max(var(--space-3), env(safe-area-inset-right, 0px));
   }
 
   .easy-back {
@@ -96,5 +99,53 @@
     min-width: 0;
     aspect-ratio: 16 / 9;
     background: var(--bg-0);
+  }
+}
+
+@media (max-width: 30rem) {
+  .easy-status {
+    flex: 1 1 100%;
+    order: 1;
+    text-align: start;
+  }
+
+  .easy-reason {
+    flex: 1 1 100%;
+    order: 2;
+    text-align: start;
+  }
+
+  .easy-primary {
+    order: 3;
+  }
+
+  .easy-back {
+    order: 0;
+  }
+}
+
+@media (max-width: 20rem) {
+  .easy-shell .easy-main {
+    padding-inline: var(--space-2);
+  }
+
+  .easy-shell .easy-step {
+    gap: var(--space-3);
+  }
+
+  .easy-shell .easy-primary,
+  .easy-shell .easy-back {
+    flex: 1 1 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .easy-shell .easy-actions {
+    scroll-behavior: auto;
+  }
+
+  .easy-shell .easy-primary,
+  .easy-shell .easy-back {
+    transition: none;
   }
 }
