@@ -474,6 +474,140 @@ scope modules; PB-SCRATCH remains held until UX15.
 No path appears in two Wave 2 write sets. UX17 (deps met via UX09) is **not**
 unlocked in this wave slot without its own lease table entry.
 
+## Wave 3 write sets and leases
+
+Each lease is granted against base `963d9c1` (feat/ux-results tip after Wave 2
+landed: UX02@978b76e, UX11@44c1113, UX07@963d9c1). A worker edits only its leased
+paths and creates new files only where listed. UX00 contract modules and fixtures
+stay read-only. `apps/server/src/app.mjs`, `apps/web/src/main.ts` and root tooling
+stay coordinator-owned (UX21).
+
+**Still exclusive / do not touch:** UX21 held-coordinator write set (`app.mjs`,
+`main.ts`, integration/docs). PB-SCRATCH remains held until UX15. Merged Wave 1/2
+exclusives that Wave 3 must not reopen: UX05 editor save/autosave; UX06 Super Easy
+CPU/progress modules (`easy/cpu-path.ts`, `easy/super-easy/{session,mount,progress-view}.ts`);
+UX09 agent-chat / `packages/agent` scope modules (`agent-chat.mjs`,
+`conversation.ts`, `production-tools.ts`, `production-planner.ts`,
+`mutation-policy.ts`); UX01 admission helpers (`pipeline.mjs`,
+`productions/admission.mjs`) except as UX03 adopts the transferred `run.mjs` lease.
+
+**Lease transfers into this wave:**
+- `apps/server/src/run.mjs`: UX01 → **UX03** (on UX01 merge).
+- `apps/server/src/productions/{actions,commands}.mjs`: UX02 → **UX03**.
+- `apps/web/src/easy/mount.ts`: UX07 → **UX08** (continues UX06 → UX07 → UX08).
+
+### UX03 — Server-owned execution, cancellation and restart (incl. PB07 half)
+
+- **Write:**
+  - `apps/server/src/run.mjs` (lease transferred from merged UX01; executor cancel /
+    restart / adopt / settlement — not a second admission writer)
+  - new `apps/server/src/productions/pipeline-adapter.mjs`
+  - new `apps/server/src/productions/outbox-execution.mjs`
+  - `apps/server/src/productions/actions.mjs` and `commands.mjs` (lease transferred
+    from merged UX02; executor-facing cancel/restart APIs only — no budget rewrite)
+- **Tests:**
+  - new `apps/server/test/productions/execution-restart.test.mjs`
+  - new `apps/server/test/run-execution.test.mjs`
+- **Read-only:**
+  - `apps/server/src/pipeline.mjs`, `productions/admission.mjs` (UX01 merged)
+  - UX00 contract modules/fixtures
+  - `apps/server/src/app.mjs` (UX21 mounts startup/event drain and cancel route)
+- **Coordinator wiring in `app.mjs`:** mount pipeline adapter / outbox drain and
+  `/api/run` cancel → `runs.cancel` once UX03 exports adapters (UX01 handoff notes).
+  Cancel route wiring stays UX21; pipeline adapter/outbox drain is UX03 work product.
+
+### UX08 — Ask, visible settings and truthful Studio header
+
+- **Write:**
+  - `apps/web/src/easy/mount.ts` (lease transferred from merged UX07; shell/Ask/
+    header mount only — do not reopen Super Easy CPU/progress)
+  - `apps/web/src/easy/ask-drawer.ts`
+  - `apps/web/src/easy/agent-settings.ts`
+  - `apps/web/src/easy/project-name.ts`
+  - `apps/web/src/easy/shell-save.ts`
+- **Tests:**
+  - `apps/web/src/easy/ask-drawer.test.ts`
+  - `apps/web/src/easy/shell-save.test.ts`
+  - new `ux08-*` as needed
+- **Read-only / do not reopen:**
+  - `apps/web/src/easy/cpu-path.ts`
+  - `apps/web/src/easy/super-easy/{session,mount,progress-view}.ts` and their tests
+  - `apps/web/src/easy/store.ts`, `home.ts`, `plan-writer.ts`, `approve-generate.ts`,
+    `steps/idea.ts`, `steps/plan.ts` (UX07 merged)
+  - `apps/web/src/editor/store.ts`, `autosave.ts` (UX05 — consume save-state API)
+  - `apps/web/src/easy/types.ts`, `session-contract.ts` (UX00)
+  - `apps/web/src/easy/steps/export.ts` (UX16)
+- **Lease order:** `easy/mount.ts` completes UX06 → UX07 → **UX08**.
+- **Coordinator wiring in `main.ts`:** Ask/settings/header mount once UX08 exports
+  adapters.
+
+### UX10 — Take selection transactions and reference freshness
+
+- **Write:**
+  - `apps/server/src/takes/model.mjs`
+  - `apps/server/src/takes/gate.mjs`
+  - `apps/server/src/takes/select.mjs`
+  - `apps/server/src/takes/routes.mjs`
+  - `apps/server/src/takes/ingest.mjs`
+- **Tests:**
+  - new `apps/server/test/takes/selection-cas.test.mjs`
+  - new `apps/server/test/takes/reference-freshness.test.mjs`
+- **Read-only:**
+  - UX00 take/media contract fixtures
+  - `apps/web/src/takes/api.ts` and media clients (UX11 merged — consume server contract)
+  - `apps/server/src/pipeline.mjs`, `productions/admission.mjs` (UX01)
+  - `apps/server/src/app.mjs` (UX21 wires production binding into take routes)
+- **Coordinator wiring in `app.mjs`:** production binding / guardRuns into
+  `createTakeRoutes` once UX10 exports adapters (shared with UX01 handoff).
+
+### UX13 — Honest auditions and accessible character editor
+
+- **Write:**
+  - `apps/web/src/characters/editor.ts`
+  - `apps/web/src/characters/audition-panel.ts`
+  - `apps/web/src/characters/mount.ts` (characters surface — **not** `easy/mount.ts`)
+  - `apps/server/src/characters/audition.mjs`
+  - `apps/server/src/characters/routes.mjs`
+- **Tests:**
+  - `apps/web/src/characters/audition-panel.test.ts`
+  - new `apps/server/test/characters/audition-honest.test.mjs`
+  - new `ux13-*` as needed
+- **Read-only:**
+  - UX00 media/ticket fixtures; UX11 media resolver / thumbnail clients (consume)
+  - paid/native audition dispatch activation waits UX03 + UX21 wiring — do not edit
+    `app.mjs` / `main.ts`
+- **Coordinator wiring in `app.mjs` / `main.ts`:** production/model context for
+  auditions once UX13 exports adapters. Paid prompt/native dispatch stays gated.
+
+### UX17 — Compiled visual fidelity, timing and duration (incl. PB04 half)
+
+- **Write:**
+  - `apps/server/src/chat-project.mjs`
+  - `apps/server/src/productions/plan-from-package.mjs`
+  - `packages/agent/src/scene-build.ts`
+  - new `packages/agent/src/timing-coverage.ts`
+- **Tests:**
+  - new `packages/agent/test/timing-coverage.test.ts`
+  - new `apps/server/test/chat-project-fidelity.test.mjs`
+- **Read-only / amendment note:**
+  - `apps/server/src/agent-chat.mjs` and UX09 scope modules remain read-only
+    (merged UX09 exclusives). Remediation mentions agent-chat context — **do not**
+    reopen that file in Wave 3; compile/timing work stays in the leased helpers.
+  - UX00 fixtures; UX15 export snapshot inputs (coordinate later; no UX15 files here)
+- **Coordinator wiring:** none in `app.mjs`/`main.ts` for this packet.
+
+### Overlap check (Wave 3 vs held / merged)
+
+| Packet | Collides UX21 `app.mjs`/`main.ts`? | Collides other Wave 3? | Collides held/merged exclusives? |
+| --- | --- | --- | --- |
+| UX03 | No — adapters only | No | No — `run.mjs`/actions/commands transferred; admission stays UX01 |
+| UX08 | No | No — `easy/mount.ts` only (not characters mount) | Super Easy CPU/progress + UX07 journey files read-only |
+| UX10 | No | No — server `takes/*` only | No — UX11 web takes/media read-only |
+| UX13 | No | No — `characters/mount.ts` ≠ `easy/mount.ts` | UX11 media consume-only; paid dispatch gated |
+| UX17 | No | No | agent-chat / UX09 scope modules deliberately omitted |
+
+No path appears in two Wave 3 write sets. UX21 and PB-SCRATCH stay held.
+
 ## Verification
 
 All checks are local, use isolated temporary runtimes, and make no network,
