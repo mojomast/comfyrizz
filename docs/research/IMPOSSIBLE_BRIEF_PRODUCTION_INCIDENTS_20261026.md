@@ -245,3 +245,35 @@ These proposals complement the UX remediation plan; they are not assertions that
 the application fixes have landed. Production-local mitigations are explicitly
 identified above. Append subsequent native/render/export findings and final spending
 reconciliation before marking this report complete.
+
+## Production follow-up — final native batch and editorial recovery
+
+The ten-job production batch completed, all ten artifacts were collected, and
+`production-native-v1/teardown.json` confirms stopped compute. A subsequent account
+check at 20:50 UTC showed **6.22 credits estimated cumulative spend**, zero active
+assignments and zero hourly rate. The 2.5-credit unresolved-exposure hold remains
+separate from confirmed spend; no additional generation is currently needed.
+
+Full decoding and hash checks passed. ASR flagged repeated/altered phrases in five
+of the seven speaking shots, despite technically usable exact-line conditioning.
+This reinforces PB05: conditioning accuracy does not guarantee native transcript
+accuracy. All ten temporal contact sheets were inspected for face stability,
+identity and scene continuity; this is visual evidence, not listening approval.
+
+Editorial recovery uses natural-speed ranges: the clean second sentence from
+Rillets' world shot; Dunk's cast introduction followed by the clean closing phrase
+over the ensemble reveal; Boobie's first iteration/timeline phrases; and Dunk's
+"Your idea. Your cast." ending. Original faulty takes and raw ASR remain preserved.
+Independent transcription of the actual trimmed dialogue is a delivery gate.
+No wrong words are repaired merely by changing captions or dubbing the footage.
+
+The iris's empty expected transcript produced an ASR phrase, "Thanks for watching!".
+Whether that is generated speech or an ASR hallucination is not established.
+Environment-source audio is excluded from the mix by design; the final soundtrack
+uses selected dialogue, original score and authored Foley only. Add a regression
+that verifies rejected/unused source audio cannot leak through rendered video.
+
+The optional Webpack cache warning recurred despite the local cache override.
+Layout stills completed, but the override therefore cannot be described as a proven
+cache fix. Persistent scratch storage and final output verification remain required;
+trace the actual dependency cache configuration before closing PB06.
