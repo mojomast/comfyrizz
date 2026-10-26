@@ -11,10 +11,22 @@ export interface AskDrawerView {
   error?: string | null;
 }
 
+/** The live project conversation a drawer instance is allowed to talk to. */
+export type AskScope = Pick<EasyState, 'chatId' | 'packageId'> & {
+  productionId?: string | null;
+};
+
+export type AskStateSource = AskScope | (() => AskScope);
+
 export interface AskDrawerOptions {
   root: HTMLElement;
-  state: Pick<EasyState, 'chatId' | 'packageId'>;
+  state: AskStateSource;
   host: EasyHost;
+  /** Opens the visible AI settings surface; falls back to the host trigger. */
+  openSettings?: () => void | Promise<void>;
+  /** Store subscription used to tear the chat down when the project changes. */
+  subscribe?: (listener: () => void) => () => void;
+  createChat?: typeof createProjectChat;
   log?: (message: string) => void;
   onError?: (error: unknown) => void;
 }
@@ -22,10 +34,21 @@ export interface AskDrawerOptions {
 export interface AskDrawerController {
   openAsk(prefill?: string): Promise<void>;
   close(): void;
+  refreshScope(): void;
+  destroy(): void;
 }
 
 type ProjectChat = ReturnType<typeof createProjectChat>;
 type AiSelection = Awaited<ReturnType<EasyHost['aiSelection']>>;
+
+/**
+ * A chat is canonical only for the conversation and package it was opened
+ * against. Any id change makes the previous chat stale, including a change
+ * from project A to an unbound new video.
+ */
+export function askScopeKey(scope: AskScope): string {
+  return JSON.stringify([scope.chatId ?? null, scope.packageId ?? null, scope.productionId ?? null]);
+}
 
 export function renderAskDrawer({
   hasProvider,
@@ -40,7 +63,7 @@ export function renderAskDrawer({
   return `<aside class="easy-ask-drawer" data-easy-ask-drawer aria-labelledby="easy-ask-title"><header class="easy-ask-header"><h2 class="easy-ask-title" id="easy-ask-title">${escapeHtml(COPY.ask.title)}</h2><button type="button" class="btn btn-ghost easy-ask-close" data-easy-ask-close>${escapeHtml(COPY.ask.close)}</button></header><div class="easy-ask-body">${body}</div></aside>`;
 }
 
-function connectedProvider(selection: AiSelection): { provider: string; model: string } | null {
+export function connectedProvider(selection: AiSelection): { provider: string; model: string } | null {
   if (!selection || typeof selection.provider !== 'string') return null;
   const provider = selection.provider.trim();
   if (!provider || provider === 'none') return null;
@@ -54,11 +77,34 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
   let chat: ProjectChat | null = null;
   let opener: HTMLElement | null = null;
   let operation = 0;
+  let openScope: string | null = null;
+
+  function readScope(): AskScope {
+    const value = typeof options.state === 'function' ? options.state() : options.state;
+    return {
+      chatId: value?.chatId ?? null,
+      packageId: value?.packageId ?? null,
+      productionId: value?.productionId ?? null,
+    };
+  }
 
   function requiredElement<T extends HTMLElement>(selector: string): T {
     const element = aside?.querySelector<T>(selector);
     if (!element) throw new Error(ASK_OPEN_ERROR);
     return element;
+  }
+
+  async function openSettings(): Promise<void> {
+    try {
+      const opened = options.openSettings ? options.openSettings() : options.host.openAgentSettings();
+      if (opened && typeof (opened as Promise<void>).then === 'function') {
+        await opened;
+        // Settings may have connected a provider; ask again for the same project.
+        if (aside && !chat) await openAsk();
+      }
+    } catch (error) {
+      showError(error);
+    }
   }
 
   function onClick(event: Event): void {
@@ -81,11 +127,7 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
     if (connect && aside.contains(connect)) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      try {
-        options.host.openAgentSettings();
-      } catch (error) {
-        showError(error);
-      }
+      void openSettings();
     }
   }
 
@@ -108,7 +150,10 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
       aside = null;
     }
     opener = null;
-    if (restoreFocus && hadDrawer) previousOpener?.focus();
+    openScope = null;
+    if (restoreFocus && hadDrawer && previousOpener && (previousOpener as { isConnected?: boolean }).isConnected !== false) {
+      previousOpener.focus();
+    }
   }
 
   function close(): void {
@@ -124,9 +169,9 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
       previous.removeEventListener('click', onClick, true);
       previous.removeEventListener('keydown', onKeyDown);
     }
-    const template = document.createElement('template');
-    template.innerHTML = renderAskDrawer(view);
-    const next = template.content.firstElementChild;
+    const holder = document.createElement('div');
+    holder.innerHTML = renderAskDrawer(view);
+    const next = holder.firstElementChild;
     if (!(next instanceof HTMLElement) || next.tagName !== 'ASIDE') throw new Error(ASK_OPEN_ERROR);
     aside = next;
     aside.addEventListener('click', onClick, true);
@@ -158,11 +203,18 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
   }
 
   async function openAsk(prefill = ''): Promise<void> {
+    const scope = readScope();
+    const scopeKey = askScopeKey(scope);
+
     if (aside && chat) {
-      focusComposer(prefill);
-      return;
+      if (openScope === scopeKey) {
+        focusComposer(prefill);
+        return;
+      }
+      removeDrawer(false);
     }
     if (aside) removeDrawer(false);
+
     const active = document.activeElement;
     opener = active instanceof HTMLElement ? active : null;
     const current = ++operation;
@@ -173,22 +225,31 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
       if (current === operation) showError(error);
       return;
     }
-    if (current !== operation) return;
+    // A project switch while the provider lookup was in flight must not paint
+    // or open a conversation for the project that is no longer current.
+    if (current !== operation || askScopeKey(readScope()) !== scopeKey) return;
     try {
       paint({ hasProvider: selection !== null });
+      openScope = scopeKey;
       if (!selection) {
         requiredElement<HTMLButtonElement>('[data-easy-ask-connect]').focus();
         return;
       }
       const chatHost = requiredElement<HTMLElement>('[data-easy-ask-chat]');
-      chat = createProjectChat(chatHost, {
+      const createChat = options.createChat ?? createProjectChat;
+      chat = createChat(chatHost, {
         apiFetch: (input, init) => options.host.apiFetch(input, init),
-        applyProject: (project) => options.host.adoptBuiltPackage(project),
+        applyProject: (project) => {
+          // A late reply from the previous project must never replace the
+          // project the user switched to while the turn was in flight.
+          if (askScopeKey(readScope()) !== scopeKey) return;
+          options.host.adoptBuiltPackage(project);
+        },
         provider: providerForChat,
         log: (message) => options.log?.(message),
         restoreSaved: false,
-        ...(options.state.chatId ? { initialConversationId: options.state.chatId } : {}),
-        ...(options.state.packageId ? { expectedPackageId: options.state.packageId } : {}),
+        ...(scope.chatId ? { initialConversationId: scope.chatId } : {}),
+        ...(scope.packageId ? { expectedPackageId: scope.packageId } : {}),
       });
       focusComposer(prefill);
     } catch (error) {
@@ -196,5 +257,23 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
     }
   }
 
-  return { openAsk, close };
+  function refreshScope(): void {
+    if (!aside || openScope === null) return;
+    if (openScope === askScopeKey(readScope())) return;
+    operation += 1;
+    removeDrawer(true);
+  }
+
+  const stopScope = options.subscribe?.(() => refreshScope()) ?? null;
+
+  return {
+    openAsk,
+    close,
+    refreshScope,
+    destroy(): void {
+      operation += 1;
+      stopScope?.();
+      removeDrawer(false);
+    },
+  };
 }

@@ -17,12 +17,15 @@ import { approveAndGenerate, resetPlanDecisionAnswers, retryShot } from './appro
 import { runCpuGenerate } from './cpu-path.ts';
 import { levelForState } from './steps/level.ts';
 import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-advanced.ts';
-import { openDialog } from './dialog.ts';
 import { mountSuperEasy } from './super-easy/mount.ts';
 import { setPreferStudio } from './super-easy/prefs.ts';
 import { escapeToHome } from './super-easy/escape.ts';
 import { createSuperEasySession, type SuperEasySession } from './super-easy/session.ts';
 import type { SuperEasyHost } from './super-easy/run.ts';
+import { createAskDrawer, type AskDrawerController } from './ask-drawer.ts';
+import { mountEasyAgentSettings } from './agent-settings.ts';
+import { mountProjectName, type ProjectNameController } from './project-name.ts';
+import { mountShellSave, type ShellSaveController } from './shell-save.ts';
 
 import './easy.css';
 
@@ -49,9 +52,17 @@ export interface EasyStudioDeps {
   createSession?: typeof createSuperEasySession;
 }
 
-export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStudioDeps = {}): () => void {
+export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: EasyStudioDeps = {}): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView;
+  let settings: ReturnType<typeof mountEasyAgentSettings> | null = null;
+  const host: EasyHost = {
+    ...baseHost,
+    // Easy owns one visible settings surface. Planning and Ask read the same
+    // server-backed selection instead of the editor inspector's local copy.
+    aiSelection: () => settings ? settings.selection() : baseHost.aiSelection(),
+    openAgentSettings: () => { void settings?.open(); },
+  };
   const search = (): string => view?.location?.search ?? '';
   const requestedPackage = packageIdFrom(search());
   const store = createEasyStore({ key: storageKey(requestedPackage) });
@@ -74,6 +85,9 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
   let superEasySession: SuperEasySession | null = null;
   let primaryAction: () => void = () => host.openEditor();
   let cpuFlight: Promise<unknown> | null = null;
+  let projectName: ProjectNameController | null = null;
+  let shellSave: ShellSaveController | null = null;
+  let ask: AskDrawerController | null = null;
   let facts: StepFacts = {
     hasPackage: false,
     planApproved: false,
@@ -81,6 +95,37 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     allShotsKept: false,
     exportCurrent: false,
   };
+
+  settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
+  ask = createAskDrawer({
+    root,
+    state: () => store.get(),
+    host,
+    openSettings: () => settings?.open(),
+    subscribe: (listener) => store.subscribe(() => listener()),
+  });
+
+  function videoTitle(): string {
+    const state = store.get();
+    if (!state.packageId) return COPY.shell.untitled;
+    const pkg = host.getPackage();
+    if (!pkg || (typeof pkg.id === 'string' && pkg.id && pkg.id !== state.packageId)) return COPY.shell.untitled;
+    const title = typeof pkg.title === 'string' ? pkg.title.trim() : '';
+    return title || COPY.shell.untitled;
+  }
+
+  function refreshVideoName(): void {
+    const name = videoTitle();
+    shell?.setVideoName(name);
+    projectName?.setName(name);
+  }
+
+  function destroyShellChrome(): void {
+    shellSave?.destroy();
+    shellSave = null;
+    projectName?.destroy();
+    projectName = null;
+  }
 
   async function loadFacts(): Promise<StepFacts> {
     facts = await resumeFacts({ api, host, state: store.get() });
@@ -183,11 +228,14 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
   /** Super Easy first paint. The player stays with its owner; only the studio adopts it. */
   function showSuperEasy(): void {
     homeTicket += 1;
+    ask?.close();
+    settings?.close();
     stopStep();
     stopStepper();
     shellReady = false;
     shell?.destroy();
     shell = null;
+    destroyShellChrome();
     releasePlayer();
     destroySuperEasy();
     superEasySnapshot = null;
@@ -327,19 +375,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
         if (typeof message === 'string' && message) shell?.alert(message);
       },
       openAsk: (prefill) => {
-        const note = typeof prefill === 'string' && prefill.trim() !== '' ? `<p>${escapeHtml(prefill)}</p>` : '';
-        const opener = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
-        void openDialog({
-          title: COPY.ask.title,
-          bodyHtml: `${note}<p>${escapeHtml(COPY.ask.noProvider)}</p>`,
-          actions: [
-            { label: COPY.ask.close, value: 'close', kind: 'secondary' },
-            { label: COPY.ask.connect, value: 'connect', kind: 'secondary' },
-          ],
-          opener,
-        }).then((value) => {
-          if (value === 'connect') host.openAgentSettings();
-        });
+        void ask?.openAsk(prefill);
       },
     };
   }
@@ -357,10 +393,8 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     const heading = mod?.heading ?? COPY.steps[step];
     const intro = mod?.intro ?? '';
     const bodyHtml = mod ? mod.render(state, facts) : `<p>${escapeHtml(COPY.shell.comingSoon)}</p>`;
-    const livePackage = host.getPackage();
-    const liveTitle = typeof livePackage?.title === 'string' && livePackage.title ? livePackage.title : '';
-    shell.setVideoName(liveTitle || (typeof loaded?.title === 'string' && loaded.title ? loaded.title : COPY.shell.untitled));
     shell.setStep({ id: step, heading, intro, bodyHtml });
+    refreshVideoName();
     shell.setBack(stepIndex(step) > 0);
     const ctx = makeCtx();
     if (mod) {
@@ -408,6 +442,7 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     event.preventDefault();
     resetPlanDecisionAnswers();
     store.startNew();
+    refreshVideoName();
     go('idea');
   }
 
@@ -418,9 +453,12 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
   function showHomeScreen(): void {
     homeTicket += 1;
     const ticket = homeTicket;
+    ask?.close();
+    settings?.close();
     shellReady = false;
     shell?.destroy();
     shell = null;
+    destroyShellChrome();
     stopStep();
     stopStepper();
     releasePlayer();
@@ -473,9 +511,8 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
       showStep(currentStep);
       return;
     }
-    const pkg = host.getPackage();
     root.innerHTML = renderShell({
-      videoName: typeof pkg?.title === 'string' && pkg.title ? pkg.title : COPY.shell.untitled,
+      videoName: videoTitle(),
       saveStatus: COPY.shell.saved,
     });
     shell = mountShell(root, {
@@ -484,9 +521,25 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
         if (index > 0) go(STEPS[index - 1]);
       },
       onPrimary: () => primaryAction(),
-      onSettings: () => host.openAgentSettings(),
+      onSettings: () => { void settings?.open(); },
       onOpenEditor: () => host.openEditor(),
     });
+    const nameHost = root.querySelector<HTMLElement>('[data-easy-name]');
+    if (nameHost) {
+      projectName = mountProjectName(nameHost, {
+        host: {
+          apiFetch: (input, init) => host.apiFetch(input, init),
+          getPackage: () => host.getPackage(),
+          editorStore: host.editorStore,
+        },
+        onRename: (name) => {
+          shell?.setVideoName(name);
+          projectName?.setName(name);
+        },
+      });
+    }
+    const saveHost = root.querySelector<HTMLElement>('[data-easy-save]');
+    if (saveHost) shellSave = mountShellSave(saveHost, host.editorStore);
     shellReady = true;
     showStep(route.step);
   }
@@ -505,6 +558,8 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
       return;
     }
     if (html.dataset.shell === 'easy') delete html.dataset.shell;
+    ask?.close();
+    settings?.close();
     destroySuperEasy();
     releasePlayer();
     root.hidden = true;
@@ -514,7 +569,8 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     }
   }
 
-  const stopStore = store.subscribe(() => {
+  const stopStore = store.subscribe((next, previous) => {
+    if (next.packageId !== previous.packageId) refreshVideoName();
     const stepperHost = root.querySelector<HTMLElement>('[data-easy-stepper]');
     if (!shellReady || !stepperHost) return;
     stopStepper();
@@ -553,6 +609,9 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     stopStepper();
     releasePlayer();
     destroySuperEasy();
+    ask?.destroy();
+    settings?.destroy();
+    destroyShellChrome();
     shell?.destroy();
   };
 }

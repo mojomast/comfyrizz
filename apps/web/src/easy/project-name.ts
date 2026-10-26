@@ -17,6 +17,12 @@ export interface ProjectNameController {
   destroy(): void;
 }
 
+export interface ProjectNameOptions {
+  host: ProjectNameHost;
+  /** Called after a successful save so the shell title and document title agree. */
+  onRename?: (name: string) => void;
+}
+
 export function normalizeName(value: unknown): string | null {
   const text = String(value ?? '').trim().slice(0, MAX_NAME_LENGTH);
   return text.length > 0 ? text : null;
@@ -78,7 +84,8 @@ async function saveTitle(host: ProjectNameHost, title: string): Promise<void> {
   if (Number.isFinite(revision)) pkg.revision = revision;
 }
 
-export function mountProjectName(el: HTMLElement, { host }: { host: ProjectNameHost }): ProjectNameController {
+export function mountProjectName(el: HTMLElement, options: ProjectNameOptions): ProjectNameController {
+  const { host } = options;
   let current = displayName(host.getPackage()?.title);
   let editing = false;
   let busy = false;
@@ -127,6 +134,7 @@ export function mountProjectName(el: HTMLElement, { host }: { host: ProjectNameH
       try {
         await saveTitle(host, next);
         current = displayName(host.getPackage()?.title ?? next);
+        if (current !== previous) options.onRename?.(current);
       } catch {
         current = previous;
       } finally {
