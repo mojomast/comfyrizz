@@ -140,6 +140,12 @@ function evidenceValue(value) {
   return undefined;
 }
 
+function metadataValue(value) {
+  if (value === undefined || value === null) return undefined;
+  if (!isPlainObject(value)) fail('INVALID_METADATA', 'metadata must be a JSON object');
+  return evidenceValue(value);
+}
+
 function expectedRevisionValue(value) {
   if (value === undefined) return undefined;
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -356,6 +362,11 @@ export function createBudgetLedger(options = {}) {
           collectAndStopReserve: nonNegativeNumber(entry.collectAndStopReserve ?? 0, 'collectAndStopReserve'),
           hold,
           reservedAt: entry.at,
+          ...(entry.effectId === undefined ? {} : { effectId: entry.effectId }),
+          ...(entry.actionId === undefined ? {} : { actionId: entry.actionId }),
+          ...(entry.stage === undefined ? {} : { stage: entry.stage }),
+          ...(entry.executionId === undefined ? {} : { executionId: entry.executionId }),
+          ...(entry.metadata === undefined ? {} : { metadata: clone(entry.metadata) }),
         });
         continue;
       }
@@ -398,6 +409,7 @@ export function createBudgetLedger(options = {}) {
       ceiling: derived.ceiling,
       capped: derived.ceiling !== null,
       spent: derived.spent,
+      reserved: derived.committed,
       committed: derived.committed,
       available: derived.ceiling === null
         ? null
@@ -490,6 +502,11 @@ export function createBudgetLedger(options = {}) {
     const userEventId = optionalId(input.userEventId, 'INVALID_USER_EVENT', 'userEventId');
     const actor = optionalId(input.actor, 'INVALID_ACTOR', 'actor');
     const evidence = evidenceValue(input.evidence);
+    const effectId = optionalId(input.effectId, 'INVALID_EFFECT_ID', 'effectId');
+    const actionId = optionalId(input.actionId, 'INVALID_ACTION_ID', 'actionId');
+    const stage = optionalId(input.stage, 'INVALID_STAGE', 'stage');
+    const executionId = optionalId(input.executionId, 'INVALID_EXECUTION_ID', 'executionId');
+    const metadata = metadataValue(input.metadata);
 
     return commit({
       idempotencyKey,
@@ -503,6 +520,11 @@ export function createBudgetLedger(options = {}) {
         userEventId,
         actor,
         evidence,
+        effectId,
+        actionId,
+        stage,
+        executionId,
+        metadata,
       }),
       build: (record) => {
         const derived = derive(record);
@@ -514,7 +536,9 @@ export function createBudgetLedger(options = {}) {
           if (normalizeNumber(derived.spent + derived.committed + hold) > derived.ceiling) {
             fail('BUDGET_EXCEEDED', 'reservation would exceed the user-set spend ceiling', {
               ceiling: derived.ceiling,
+              unit: record.unit,
               spent: derived.spent,
+              reserved: derived.committed,
               committed: derived.committed,
               upperBound,
               collectAndStopReserve,
@@ -532,6 +556,11 @@ export function createBudgetLedger(options = {}) {
           ...(userEventId === undefined ? {} : { userEventId }),
           ...(actor === undefined ? {} : { actor }),
           ...(evidence === undefined ? {} : { evidence }),
+          ...(effectId === undefined ? {} : { effectId }),
+          ...(actionId === undefined ? {} : { actionId }),
+          ...(stage === undefined ? {} : { stage }),
+          ...(executionId === undefined ? {} : { executionId }),
+          ...(metadata === undefined ? {} : { metadata }),
         };
       },
     });
@@ -568,6 +597,10 @@ export function createBudgetLedger(options = {}) {
     const userEventId = optionalId(input.userEventId, 'INVALID_USER_EVENT', 'userEventId');
     const actor = optionalId(input.actor, 'INVALID_ACTOR', 'actor');
     const evidence = evidenceValue(input.evidence);
+    const effectId = optionalId(input.effectId, 'INVALID_EFFECT_ID', 'effectId');
+    const actionId = optionalId(input.actionId, 'INVALID_ACTION_ID', 'actionId');
+    const stage = optionalId(input.stage, 'INVALID_STAGE', 'stage');
+    const executionId = optionalId(input.executionId, 'INVALID_EXECUTION_ID', 'executionId');
 
     return commit({
       idempotencyKey,
@@ -582,6 +615,10 @@ export function createBudgetLedger(options = {}) {
         userEventId,
         actor,
         evidence,
+        effectId,
+        actionId,
+        stage,
+        executionId,
       }),
       build: (record) => {
         const derived = derive(record);
@@ -603,6 +640,10 @@ export function createBudgetLedger(options = {}) {
           ...(userEventId === undefined ? {} : { userEventId }),
           ...(actor === undefined ? {} : { actor }),
           ...(evidence === undefined ? {} : { evidence }),
+          ...(effectId === undefined ? {} : { effectId }),
+          ...(actionId === undefined ? {} : { actionId }),
+          ...(stage === undefined ? {} : { stage }),
+          ...(executionId === undefined ? {} : { executionId }),
         };
       },
     });
@@ -618,6 +659,10 @@ export function createBudgetLedger(options = {}) {
     const userEventId = optionalId(input.userEventId, 'INVALID_USER_EVENT', 'userEventId');
     const actor = optionalId(input.actor, 'INVALID_ACTOR', 'actor');
     const reason = optionalText(input.reason, 'reason');
+    const effectId = optionalId(input.effectId, 'INVALID_EFFECT_ID', 'effectId');
+    const actionId = optionalId(input.actionId, 'INVALID_ACTION_ID', 'actionId');
+    const stage = optionalId(input.stage, 'INVALID_STAGE', 'stage');
+    const executionId = optionalId(input.executionId, 'INVALID_EXECUTION_ID', 'executionId');
 
     return commit({
       idempotencyKey,
@@ -629,6 +674,10 @@ export function createBudgetLedger(options = {}) {
         reason,
         userEventId,
         actor,
+        effectId,
+        actionId,
+        stage,
+        executionId,
       }),
       build: (record) => {
         const derived = derive(record);
@@ -644,6 +693,10 @@ export function createBudgetLedger(options = {}) {
           ...(reason === undefined ? {} : { reason }),
           ...(userEventId === undefined ? {} : { userEventId }),
           ...(actor === undefined ? {} : { actor }),
+          ...(effectId === undefined ? {} : { effectId }),
+          ...(actionId === undefined ? {} : { actionId }),
+          ...(stage === undefined ? {} : { stage }),
+          ...(executionId === undefined ? {} : { executionId }),
         };
       },
     });

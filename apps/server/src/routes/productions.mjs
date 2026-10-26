@@ -17,6 +17,12 @@
 import { randomUUID } from 'node:crypto';
 
 import { ActionError } from '../productions/actions.mjs';
+import {
+  BudgetEffectError,
+  applyCapEffect,
+  budgetSummary,
+  reconcileCapEffects,
+} from '../productions/budget-effects.mjs';
 import { CommandError } from '../productions/commands.mjs';
 import { ProductionLedgerError } from '../productions/ledger.mjs';
 import { planFromPackage } from '../productions/plan-from-package.mjs';
@@ -44,6 +50,16 @@ const ERROR_DETAIL_KEYS = Object.freeze([
   'planHash',
   'actionId',
   'reservationId',
+  'effectId',
+  'ceiling',
+  'unit',
+  'spent',
+  'reserved',
+  'committed',
+  'requested',
+  'available',
+  'hold',
+  'budget',
 ]);
 
 class RouteError extends Error {
@@ -91,6 +107,16 @@ function mapError(error) {
     return {
       status: Number.isSafeInteger(error.status) ? error.status : 500,
       code: typeof error.code === 'string' ? error.code : 'INTERNAL',
+      message: error.message,
+      details: safeDetails(error),
+    };
+  }
+  if (error instanceof BudgetEffectError) {
+    const code = typeof error.code === 'string' ? error.code : 'BUDGET_EFFECT_ERROR';
+    const conflict = code === 'EFFECT_NOT_OPEN' || code === 'EFFECT_ALREADY_RESERVED';
+    return {
+      status: conflict ? 409 : 400,
+      code,
       message: error.message,
       details: safeDetails(error),
     };
@@ -430,6 +456,44 @@ export function createProductionRoutes(options = {}) {
     });
   }
 
+  function ledgerForProduction(production) {
+    if (typeof ledgerFor !== 'function') {
+      throw new RouteError('LEDGER_UNAVAILABLE', 'the spend ledger is not configured', 500);
+    }
+    const ledger = ledgerFor(production);
+    if (!ledger
+      || typeof ledger.setCeiling !== 'function'
+      || typeof ledger.status !== 'function'
+      || typeof ledger.entries !== 'function') {
+      throw new RouteError('LEDGER_UNAVAILABLE', 'the spend ledger is not configured', 500);
+    }
+    return ledger;
+  }
+
+  function sendSpendCap(response, { production, budget, revision, requested }) {
+    sendJson(response, 200, {
+      ceiling: budget.ceiling,
+      ledgerRevision: budget.revision,
+      revision,
+      ...(requested === undefined ? {} : { requested }),
+      budget,
+    });
+  }
+
+  function handleSpendCapRead(response, id) {
+    const production = store.read(id);
+    if (!production) throw new RouteError('NOT_FOUND', 'production does not exist', 404);
+    const ledger = ledgerForProduction(production);
+    // Repair a cap command whose journal commit succeeded before a crash and
+    // whose ledger write did not. Reconciliation is idempotent on every read.
+    const reconciled = reconcileCapEffects(ledger, store.readEvents(id));
+    sendSpendCap(response, {
+      production,
+      budget: reconciled.budget,
+      revision: production.revision,
+    });
+  }
+
   async function handleSpendCap(request, response, id) {
     if (typeof ledgerFor !== 'function') {
       throw new RouteError('LEDGER_UNAVAILABLE', 'the spend ledger is not configured', 500);
@@ -450,21 +514,17 @@ export function createProductionRoutes(options = {}) {
     }
     const production = store.read(id);
     if (!production) throw new RouteError('NOT_FOUND', 'production does not exist', 404);
-    const ledger = ledgerFor(production);
-    if (!ledger || typeof ledger.setCeiling !== 'function') {
-      throw new RouteError('LEDGER_UNAVAILABLE', 'the spend ledger is not configured', 500);
-    }
-    const recorded = ledger.setCeiling({
-      actor: 'user',
-      userEventId: event.id,
-      ceiling: body.ceiling,
-      idempotencyKey: body.idempotencyKey,
-    });
-    const ceiling = recorded?.status?.ceiling ?? body.ceiling;
-    sendJson(response, 200, {
-      ceiling,
-      ledgerRevision: recorded.revision,
+    const ledger = ledgerForProduction(production);
+    // The journal event is the durable effect identity. A crash after the
+    // command commit leaves this write to the next POST or GET, and replaying
+    // the same event is a duplicate rather than a second authorization.
+    applyCapEffect(ledger, event);
+    const reconciled = reconcileCapEffects(ledger, store.readEvents(id));
+    sendSpendCap(response, {
+      production,
+      budget: reconciled.budget,
       revision: result.revision,
+      requested: body.ceiling,
     });
   }
 
@@ -606,6 +666,10 @@ export function createProductionRoutes(options = {}) {
       }
 
       if (action === 'spend-cap') {
+        if (method === 'GET' || method === 'HEAD') {
+          handleSpendCapRead(response, id);
+          return true;
+        }
         if (method !== 'POST') {
           throw new RouteError('METHOD_NOT_ALLOWED', 'method not allowed', 405);
         }

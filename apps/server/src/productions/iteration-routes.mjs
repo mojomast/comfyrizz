@@ -15,6 +15,7 @@
 // `characters` is the production's characterBindings length, including zero:
 // a production with no characters is estimated as such, not as one.
 
+import { budgetSummary } from './budget-effects.mjs';
 import { ITERATION_PRESETS, validateIterationPolicy } from './iteration.mjs';
 import { estimateIteration } from './iteration-estimate.mjs';
 import { recommendIteration } from './iteration-recommend.mjs';
@@ -133,7 +134,18 @@ function prefillPolicy(preferences, production) {
   return validateIterationPolicy(value);
 }
 
-function durationSecondsFor(production, searchParams) {
+function packageDurationSeconds(pkg) {
+  if (!isPlainObject(pkg)) return null;
+  const duration = isPlainObject(pkg.duration) ? pkg.duration : null;
+  const format = isPlainObject(pkg.format) ? pkg.format : null;
+  const fps = format?.fps;
+  if (!duration || typeof fps !== 'number' || !Number.isFinite(fps) || fps <= 0) return null;
+  const frames = duration.mode === 'target' ? duration.targetFrames : duration.maxFrames;
+  if (typeof frames !== 'number' || !Number.isFinite(frames) || frames < 0) return null;
+  return frames / fps;
+}
+
+function durationSecondsFor(production, searchParams, pkg) {
   if (production.durationSeconds !== undefined && production.durationSeconds !== null) {
     const stored = production.durationSeconds;
     if (typeof stored !== 'number' || !Number.isFinite(stored) || stored < 0) {
@@ -145,6 +157,9 @@ function durationSecondsFor(production, searchParams) {
     }
     return stored;
   }
+
+  const fromPackage = packageDurationSeconds(pkg);
+  if (fromPackage !== null) return fromPackage;
 
   const raw = searchParams?.get?.('durationSeconds');
   if (raw === null || raw === undefined) return 0;
@@ -159,8 +174,12 @@ function durationSecondsFor(production, searchParams) {
   return value;
 }
 
-function shotList(production, durationSeconds) {
-  const ids = Array.isArray(production.shotIds) ? production.shotIds : [];
+function shotList(production, durationSeconds, pkg) {
+  const stored = Array.isArray(production.shotIds) ? production.shotIds : [];
+  const packageShots = isPlainObject(pkg) && Array.isArray(pkg.scenes)
+    ? pkg.scenes.filter((scene) => isPlainObject(scene) && typeof scene.id === 'string' && scene.id !== '').map((scene) => scene.id)
+    : [];
+  const ids = stored.length > 0 ? stored : packageShots;
   if (ids.length === 0) return [];
   const perShot = durationSeconds / ids.length;
   return ids.map((id) => ({ id, durationSeconds: perShot }));
@@ -170,30 +189,31 @@ function characterCount(production) {
   return Array.isArray(production.characterBindings) ? production.characterBindings.length : 0;
 }
 
-function estimatesFor(policy, shots, characters) {
+function estimatesFor(policy, shots, characters, ceiling) {
   const estimates = {};
   for (const level of PRESET_LEVELS) {
     estimates[level] = estimateIteration({
       policy: ITERATION_PRESETS[level],
       shots,
       characters,
+      ceiling,
     });
   }
   if (policy !== null && policy.level === 'custom') {
-    estimates.custom = estimateIteration({ policy, shots, characters });
+    estimates.custom = estimateIteration({ policy, shots, characters, ceiling });
   }
   return estimates;
 }
 
-function recommendationFor({ durationSeconds, shots, characters, userDefault }) {
+function recommendationFor({ durationSeconds, shots, characters, userDefault, ceiling }) {
   return recommendIteration({
     durationSeconds,
     shotCount: shots.length,
     characterCount: characters,
     newCharacterCount: 0,
-    ceiling: null,
+    ceiling,
     userDefault,
-    estimate: (policy) => estimateIteration({ policy, shots, characters }),
+    estimate: (policy) => estimateIteration({ policy, shots, characters, ceiling }),
   });
 }
 
@@ -214,12 +234,36 @@ export function createIterationRoutes(options = {}) {
   if (!isPlainObject(options)) {
     throw new TypeError('createIterationRoutes options must be an object');
   }
-  const { store, preferences } = options;
+  const { store, preferences, ledgerFor = null, readPackage = null } = options;
   if (!store || typeof store.read !== 'function' || typeof store.readEvents !== 'function') {
     throw new TypeError('createIterationRoutes requires a production store');
   }
   if (!preferences || typeof preferences.expose !== 'function') {
     throw new TypeError('createIterationRoutes requires a preferences store');
+  }
+  if (ledgerFor !== null && typeof ledgerFor !== 'function') {
+    throw new TypeError('createIterationRoutes ledgerFor must be a function when supplied');
+  }
+  if (readPackage !== null && typeof readPackage !== 'function') {
+    throw new TypeError('createIterationRoutes readPackage must be a function when supplied');
+  }
+
+  function packageFor(production) {
+    if (readPackage === null || typeof production.packageId !== 'string' || production.packageId === '') return null;
+    try {
+      return readPackage(production.packageId) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  function budgetFor(production) {
+    if (ledgerFor === null) return null;
+    const ledger = ledgerFor(production);
+    if (!ledger || typeof ledger.status !== 'function' || typeof ledger.entries !== 'function') {
+      throw new IterationRouteError('LEDGER_UNAVAILABLE', 'the production budget ledger is not available', 500);
+    }
+    return budgetSummary(ledger);
   }
 
   function read(response, id, searchParams) {
@@ -232,20 +276,30 @@ export function createIterationRoutes(options = {}) {
     const level = policy === null ? null : policy.level;
     const prefill = prefillPolicy(preferences, production);
     const characters = characterCount(production);
-    const durationSeconds = durationSecondsFor(production, searchParams);
-    const shots = shotList(production, durationSeconds);
+    const pkg = packageFor(production);
+    const durationSeconds = durationSecondsFor(production, searchParams, pkg);
+    const shots = shotList(production, durationSeconds, pkg);
+    const budget = budgetFor(production);
+    // The remaining authorization, not the original ceiling, is what a new
+    // estimate can consume. An uncapped ledger stays `null` (no block).
+    const remaining = budget === null || budget.available === null
+      ? null
+      : Math.max(0, budget.available);
 
     sendJson(response, 200, {
       policy,
       level,
-      estimates: estimatesFor(policy, shots, characters),
+      durationSeconds,
+      estimates: estimatesFor(policy, shots, characters, remaining),
       recommendation: recommendationFor({
         durationSeconds,
         shots,
         characters,
         userDefault: prefill,
+        ceiling: remaining,
       }),
       prefill,
+      budget,
       lockedShotIds: lockedShotIdsFor(production, store.readEvents(id)),
       revision: production.revision,
     });
