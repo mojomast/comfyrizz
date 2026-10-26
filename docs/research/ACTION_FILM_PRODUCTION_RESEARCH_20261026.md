@@ -170,3 +170,23 @@ Proceed with remaining story coverage using the actual observed states. Board
 rejections include a lens already loaded instead of held above a cart, a missing
 wheel obstruction, and a differently supported ramp. Keep those missing narrative
 obligations explicit rather than substituting attractive but unrelated footage.
+
+### Main-batch admission and orphan teardown
+
+The first fourteen-shot main batch completed setup and health checks, but the
+runtime budget gate refused its 6.119-credit estimate against a 5.5-credit stage
+cap before any inference. The runner then surfaced a missing-manifest error.
+Read the earlier refusal event: a missing manifest here does not mean generated
+clips were lost. No batch upload/run logs or output clips existed.
+
+Named teardown lost its local session mapping while one unnamed assignment
+remained billable. The sole matching orphan was explicitly unassigned through
+the authenticated Colab client; a subsequent assignment listing was empty and
+usage was zero per hour. Estimated cumulative spend was 9.23 credits. An orphan
+must not be reported stopped merely because `colab stop -s name` says not found.
+
+The revised batch shortens seven establishing/reaction sources from 209 to 175
+frames, preserving the longer contact actions. Its stage cap is 6 credits with
+2 credits for correction and the separate 2.5-credit prior exposure hold. Total
+authorization remains 20. Source prompts were also corrected to describe observed
+paw placement and the actual two-piece brace, not rejected board intentions.
