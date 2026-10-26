@@ -246,7 +246,7 @@
       "id": "cancel.run",
       "verb": "cancel",
       "route": "none (no HTTP cancel for /api/run)",
-      "handler": { "file": "apps/server/src/run.mjs", "symbol": "signal: new AbortController().signal" },
+      "handler": { "file": "apps/server/src/run.mjs", "symbol": "function cancel(runId)" },
       "callers": [],
       "admissionEntryPoint": null,
       "legacy": true,
@@ -254,7 +254,7 @@
       "authority": "none",
       "idempotency": "none",
       "owner": "UX03",
-      "gap": "Bound and unbound run records hold a fresh AbortController signal whose controller is not retained, so nothing can abort a running /api/run."
+      "gap": "UX01 retains each run's AbortController and exposes run controller cancel(runId). No HTTP route mounts it yet (coordinator), and durable cancel fan-out to the action journal is UX03."
     },
     {
       "id": "cancel.render",

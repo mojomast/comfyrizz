@@ -12,7 +12,8 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync
 import { dirname, join } from 'node:path';
 import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PER_HOUR, DEFAULT_GPU } from '../../../packages/backends/src/budget.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
-import { canTransition } from './productions/contract.mjs';
+import { admissionRefusal, canTransition } from './productions/contract.mjs';
+import { createProductionAdmission } from './productions/admission.mjs';
 
 /** Kept as the exported name earlier code and tests reference; the value is the shared default (PO-3). */
 export const G4_RATE_PER_HOUR = DEFAULT_RATE_PER_HOUR;
@@ -279,37 +280,35 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
 
   const publish = (event) => events?.publish?.(event);
 
-  /** The production a package belongs to, if any: an explicit package binding or a production's packageId. */
-  function boundProductionFor(pkg) {
-    if (!productionStore) return null;
-    if (typeof pkg?.productionId === 'string' && pkg.productionId.trim() !== '') return pkg.productionId.trim();
-    if (typeof pkg?.id === 'string' && typeof productionStore.list === 'function') {
-      const matches = productionStore.list().filter((production) => production.packageId === pkg.id);
-      if (matches.length > 0) return [...matches].sort((left, right) => left.id.localeCompare(right.id))[0].id;
-    }
-    return null;
-  }
+  const productionAdmission = createProductionAdmission({ store: productionStore });
 
   /**
    * IP24: a bound start is authorized only by the journal, never by a boolean.
-   * The plan must be proposed with that hash, approved by a user (rejection
-   * wins), and its action must still be queued with an open slot reservation.
+   * UX01: binding, intent and caller-supplied authority are decided by the
+   * admission adapter before any plan, action or ledger is read. The plan must
+   * be proposed with that hash, approved by a user (rejection wins), and its
+   * action must still be queued with an open slot reservation.
    */
-  function verifyBoundAuthority({ pkg, authority, expected }) {
-    const boundProductionId = boundProductionFor(pkg);
-    if (!boundProductionId) return { bound: false };
+  function verifyBoundAuthority({ pkg, authority, expected, caller = {}, entryPoint = 'run.start' }) {
+    if (!productionStore) return { bound: false };
+    const gate = productionAdmission.preflight(pkg, entryPoint);
+    if (!gate.bound) return { bound: false };
+    if (gate.refusal) return { bound: true, response: gate.refusal };
+    const boundProductionId = gate.binding.productionId;
     if (!isPlainObject(authority)) {
       return { bound: true, response: { error: 'a production-bound run requires its dispatched action authority', code: 'BOUND_AUTHORITY_REQUIRED', status: 400 } };
     }
     if (!isPlainObject(expected) || !Number.isSafeInteger(expected.productionRevision) || expected.productionRevision < 0) {
       return { bound: true, response: { error: 'expected.productionRevision is required for a production-bound run', code: 'BOUND_AUTHORITY_REQUIRED', status: 400 } };
     }
+    const forbidden = productionAdmission.callerAuthorityRefusal({ authority, expected, caller }, entryPoint);
+    if (forbidden) return { bound: true, response: forbidden };
     const productionId = authority.productionId;
     if (typeof productionId !== 'string' || productionId === '') {
       return { bound: true, response: { error: 'authority.productionId is required', code: 'BOUND_AUTHORITY_REQUIRED', status: 400 } };
     }
     if (productionId !== boundProductionId) {
-      return { bound: true, response: { error: 'the authority production does not own this package', code: 'PRODUCTION_MISMATCH', status: 403 } };
+      return { bound: true, response: admissionRefusal('PRODUCTION_MISMATCH', 'the authority production does not own this package', { entryPoint, productionId: boundProductionId }) };
     }
     const planId = authority.planId;
     const planHash = authority.planHash;
@@ -401,7 +400,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   }
 
   /** Consume the IP20 slot durably before any paid backend work; a restart cannot re-run it. */
-  function consumeBoundAction(verdict, runId, expectedRevision, userEventId) {
+  function consumeBoundAction(verdict, runId, expectedRevision) {
     const action = {
       ...verdict.action,
       state: 'dispatching',
@@ -418,7 +417,6 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         events: [{
           type: 'action.state_changed',
           data: action,
-          ...(typeof userEventId === 'string' && userEventId !== '' ? { userEventId } : {}),
         }],
       });
       const recorded = (committed.events ?? []).find((event) => event.type === 'action.state_changed')?.data ?? action;
@@ -432,6 +430,11 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       }
       throw error;
     }
+  }
+
+  /** A cancel arrived through the controller's abort handle or the action's journal. */
+  function cancelRequested(record) {
+    return record?.abort?.signal.aborted === true || currentBoundAction(record)?.state === 'cancel_requested';
   }
 
   /** The durable state of the action this run consumed, read from the journal. */
@@ -1148,7 +1151,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         // A cancel that landed while dispatching wins over the factory failure:
         // no backend exists, so nothing was allocated and the action is closed
         // as cancelled rather than failed.
-        if (currentBoundAction(record)?.state === 'cancel_requested') {
+        if (cancelRequested(record)) {
           record.status = 'cancelled';
           record.error = 'the run was cancelled before the backend was created';
           if (record.productionId) record.errorCode = 'CANCELLED';
@@ -1170,7 +1173,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       // IP24C: a cancel may have been journaled while the backend factory was
       // awaited. It is checked before `running` is claimed, so runPackage is
       // never called and the slot settles as no_allocation.
-      if (currentBoundAction(record)?.state === 'cancel_requested') {
+      if (cancelRequested(record)) {
         record.status = 'cancelled';
         record.error = 'the run was cancelled before any backend work';
         if (record.productionId) record.errorCode = 'CANCELLED';
@@ -1183,7 +1186,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       commitBoundRunning(record);
       // A cancel can also land between the check above and the running commit;
       // in that case the commit refuses and the run must still stop here.
-      if (currentBoundAction(record)?.state === 'cancel_requested') {
+      if (cancelRequested(record)) {
         record.status = 'cancelled';
         record.error = 'the run was cancelled before any backend work';
         if (record.productionId) record.errorCode = 'CANCELLED';
@@ -1278,16 +1281,18 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       });
     } catch (error) {
       const partial = error.runPackage ?? null;
-      record.status = 'failed';
-      record.error = error.message;
+      // An abort the controller asked for is a cancellation, not a backend failure.
+      const aborted = record.abort?.signal.aborted === true;
+      record.status = aborted ? 'cancelled' : 'failed';
+      record.error = aborted ? 'the run was cancelled' : error.message;
       if (record.productionId) {
-        record.errorCode = typeof error?.code === 'string' ? error.code : 'RUN_FAILED';
+        record.errorCode = aborted ? 'CANCELLED' : typeof error?.code === 'string' ? error.code : 'RUN_FAILED';
       }
       record.teardown = partial?.teardown ?? record.teardown;
       record.manifest = partial?.manifest ?? record.manifest;
       record.counts = partial?.counts ?? record.counts;
-      emit({ v: 1, event: 'error', message: error.message, teardown: record.teardown?.state ?? null });
-      publish({ type: 'run.failed', runId: record.runId, backendId, message: error.message, teardown: record.teardown ?? null });
+      emit({ v: 1, event: 'error', message: record.error, teardown: record.teardown?.state ?? null });
+      publish({ type: aborted ? 'run.cancelled' : 'run.failed', runId: record.runId, backendId, message: record.error, teardown: record.teardown ?? null });
       const actual = readSpend(instance, [
         partial?.spend, partial?.usage,
         error.spend, error.usage,
@@ -1327,7 +1332,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     }
   }
 
-  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null, productionId = null, userEventId = undefined, actor = undefined, idempotencyKey = undefined, authority = undefined, expected = undefined }) {
+  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null, productionId = null, userEventId = undefined, actor = undefined, idempotencyKey = undefined, authority = undefined, expected = undefined, entryPoint = 'run.start' }) {
     if (mode !== 'final' && mode !== 'take') throw new Error("mode must be 'final' or 'take'");
     if (activeRunId) return { error: 'run busy', runId: activeRunId, status: 409 };
     // IP08: claim the one-start guard synchronously, before the first await, so
@@ -1342,7 +1347,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     try {
       // IP24: the production journal is the only authority for a bound package.
       // Nothing is consumed until the estimate is inside the approved slot.
-      const verdict = verifyBoundAuthority({ pkg, authority, expected });
+      const verdict = verifyBoundAuthority({ pkg, authority, expected, entryPoint, caller: { approved, actor, userEventId } });
       if (verdict.bound) {
         if (verdict.response) return verdict.response;
         ledger = await ledgerForBound(verdict);
@@ -1350,23 +1355,29 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         const preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
         if (!preview.budget.allowed) {
           publish({ type: 'run.refused', ...preview });
-          return { ...preview, refused: true, productionId: verdict.productionId };
+          return admissionRefusal('BUDGET_EXCEEDED', preview.budget.message ?? 'the run would exceed the budget', {
+            entryPoint,
+            productionId: verdict.productionId,
+            planHash: verdict.planHash,
+            actionId: verdict.actionId,
+            budget: preview.budget,
+          });
         }
         const increment = incrementOf(preview);
         if (increment > verdict.upperBound) {
-          return {
-            ...preview,
-            error: 'the run estimate exceeds the approved action slot',
-            code: 'SLOT_BOUND_EXCEEDED',
-            status: 409,
+          return admissionRefusal('SLOT_BOUND_EXCEEDED', 'the run estimate exceeds the approved action slot', {
+            entryPoint,
             productionId: verdict.productionId,
+            planHash: verdict.planHash,
+            actionId: verdict.actionId,
             slot: { actionId: verdict.actionId, upperBound: verdict.upperBound },
-          };
+            budget: preview.budget,
+          });
         }
         const runMode = mode === 'take' ? 'take' : 'final';
         const runCorrections = corrections && typeof corrections === 'object' && !Array.isArray(corrections) ? corrections : null;
         const runId = runIdFor(preview.planHash);
-        const consumed = consumeBoundAction(verdict, runId, expected.productionRevision, userEventId);
+        const consumed = consumeBoundAction(verdict, runId, expected.productionRevision);
         if (consumed.response) return consumed.response;
         const workDir = join(runsDir, runId, 'work');
         const outputDir = join(runsDir, runId, 'out');
@@ -1378,6 +1389,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           closeBoundReservation(ledger, verdict.reservationId, 'prepare_failed');
           throw error;
         }
+        const abort = new AbortController();
         const record = {
           runId,
           backendId,
@@ -1399,7 +1411,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           actionPlanHash: verdict.planHash,
           reservationId: verdict.reservationId,
           startedAt: new Date().toISOString(),
-          signal: new AbortController().signal,
+          abort,
+          signal: abort.signal,
         };
         runs.set(runId, record);
         activeRunId = runId;
@@ -1486,6 +1499,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         if (runReserved) closeRunReservation(ledger, runId, 'prepare_failed');
         throw error;
       }
+      const abort = new AbortController();
       const record = {
         runId,
         backendId,
@@ -1503,7 +1517,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         mode: runMode,
         corrections: runCorrections,
         startedAt: new Date().toISOString(),
-        signal: new AbortController().signal,
+        abort,
+        signal: abort.signal,
       };
       runs.set(runId, record);
       activeRunId = runId;
@@ -1531,7 +1546,26 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
   function get(runId) {
     const record = runs.get(runId);
     if (!record) return null;
-    return { ...record, done: undefined, signal: undefined };
+    return { ...record, done: undefined, signal: undefined, abort: undefined };
+  }
+
+  /**
+   * UX01: stop a run. The abort handle is retained on the record, so the signal
+   * the backend received is the one that fires; before a backend exists the run
+   * simply never starts it. Repeated cancels are harmless, and a run that has
+   * already finished is reported as such. Durable fan-out to the action
+   * journal is UX03's.
+   */
+  function cancel(runId) {
+    const record = runs.get(runId);
+    if (!record) return null;
+    const finished = !['starting', 'running'].includes(record.status);
+    if (finished) return { runId, cancelRequested: false, status: record.status };
+    if (!record.abort.signal.aborted) {
+      record.abort.abort(Object.assign(new Error('the run was cancelled'), { name: 'AbortError', code: 'CANCELLED' }));
+      publish({ type: 'run.cancel_requested', runId, backendId: record.backendId });
+    }
+    return { runId, cancelRequested: true, status: record.status };
   }
 
   function status() {
@@ -1559,5 +1593,5 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
 
   recoverBoundActions();
 
-  return { estimate, approve, start, get, status, wait, runs, _reset: () => { approvals.clear(); spentEstimate = 0; runs.clear(); activeRunId = null; admissionPending = false; } };
+  return { estimate, approve, start, cancel, get, status, wait, runs, _reset: () => { approvals.clear(); spentEstimate = 0; runs.clear(); activeRunId = null; admissionPending = false; } };
 }
