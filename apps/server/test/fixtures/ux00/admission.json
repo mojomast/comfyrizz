@@ -1,0 +1,177 @@
+{
+  "contract": "comfyrizz.admission/v1",
+  "boundAdmission": {
+    "valid": [
+      {
+        "name": "live approve-generate.ts start body",
+        "value": {
+          "authority": { "productionId": "prod_ux00", "planId": "plan_ux00", "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actionId": "act_ux00" },
+          "expected": { "productionRevision": 7 }
+        }
+      },
+      {
+        "name": "expected may also pin the package revision",
+        "value": {
+          "authority": { "productionId": "prod_ux00", "planId": "plan_ux00", "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actionId": "act_ux00" },
+          "expected": { "productionRevision": 7, "packageRevision": 3 }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "bare approved boolean is not authority",
+        "value": { "approved": true, "expected": { "productionRevision": 7 } },
+        "codes": ["CALLER_AUTHORITY_FORBIDDEN", "BOUND_AUTHORITY_REQUIRED"]
+      },
+      {
+        "name": "authority cannot carry server-owned attribution",
+        "value": {
+          "authority": { "productionId": "prod_ux00", "planId": "plan_ux00", "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actionId": "act_ux00", "userEventId": "ue_forged", "reservationId": "res_forged" },
+          "expected": { "productionRevision": 7 }
+        },
+        "codes": ["CALLER_AUTHORITY_FORBIDDEN"]
+      },
+      {
+        "name": "missing action id",
+        "value": {
+          "authority": { "productionId": "prod_ux00", "planId": "plan_ux00", "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+          "expected": { "productionRevision": 7 }
+        },
+        "codes": ["BOUND_AUTHORITY_REQUIRED"]
+      },
+      {
+        "name": "missing expected revision",
+        "value": {
+          "authority": { "productionId": "prod_ux00", "planId": "plan_ux00", "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actionId": "act_ux00" }
+        },
+        "codes": ["BOUND_AUTHORITY_REQUIRED"]
+      },
+      {
+        "name": "negative production revision",
+        "value": {
+          "authority": { "productionId": "prod_ux00", "planId": "plan_ux00", "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actionId": "act_ux00" },
+          "expected": { "productionRevision": -1 }
+        },
+        "codes": ["INVALID_REVISION"]
+      },
+      {
+        "name": "unknown authority field",
+        "value": {
+          "authority": { "productionId": "prod_ux00", "planId": "plan_ux00", "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actionId": "act_ux00", "budgetUnits": 100 },
+          "expected": { "productionRevision": 7 }
+        },
+        "codes": ["UNKNOWN_FIELD"]
+      }
+    ]
+  },
+  "refusals": {
+    "valid": [
+      { "name": "existing run.mjs missing authority", "value": { "error": "a production-bound run requires its dispatched action authority", "code": "BOUND_AUTHORITY_REQUIRED", "status": 400 } },
+      { "name": "existing run.mjs revision conflict", "value": { "error": "revision conflict", "code": "REVISION_CONFLICT", "status": 409, "currentRevision": 8, "baseRevision": 7 } },
+      { "name": "existing run.mjs consumed action", "value": { "error": "this action authority was already consumed", "code": "ACTION_CONSUMED", "status": 409, "planHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actionId": "act_ux00" } },
+      { "name": "new paused production refusal", "value": { "error": "the production is paused; no new work is admitted", "code": "PRODUCTION_NOT_ACTIVE", "status": 409, "entryPoint": "pipeline.start", "productionId": "prod_ux00", "intent": "paused" } },
+      { "name": "new unsupported bound entry", "value": { "error": "this entry point cannot verify production authority", "code": "BOUND_ENTRY_UNSUPPORTED", "status": 409, "entryPoint": "take.queue_drain", "productionId": "prod_ux00" } },
+      { "name": "run busy names the other run separately", "value": { "error": "run busy", "code": "RUN_BUSY", "status": 409, "activeRunId": "run_other" } }
+    ],
+    "invalid": [
+      { "name": "refusal claiming a started run", "value": { "error": "revision conflict", "code": "REVISION_CONFLICT", "status": 409, "runId": "run_ux00" }, "codes": ["REFUSAL_CLAIMS_START"] },
+      { "name": "refusal claiming queued work", "value": { "error": "the plan was rejected", "code": "PLAN_REJECTED", "status": 409, "queued": true }, "codes": ["REFUSAL_CLAIMS_START"] },
+      { "name": "status disagrees with code", "value": { "error": "production not found", "code": "PRODUCTION_NOT_FOUND", "status": 400 }, "codes": ["REFUSAL_STATUS_MISMATCH"] },
+      { "name": "untyped refusal", "value": { "error": "pipeline busy", "status": 409 }, "codes": ["UNKNOWN_REFUSAL_CODE"] },
+      { "name": "not-active without its intent", "value": { "error": "the production is paused", "code": "PRODUCTION_NOT_ACTIVE", "status": 409 }, "codes": ["INVALID_INTENT"] },
+      { "name": "active is not a refusing intent", "value": { "error": "x", "code": "PRODUCTION_NOT_ACTIVE", "status": 409, "intent": "active" }, "codes": ["INVALID_INTENT"] },
+      { "name": "unknown entry point", "value": { "error": "x", "code": "BOUND_ENTRY_UNSUPPORTED", "status": 409, "entryPoint": "api.run" }, "codes": ["UNKNOWN_ENTRY_POINT"] },
+      { "name": "local path leaked in details", "value": { "error": "x", "code": "LEDGER_UNAVAILABLE", "status": 500, "productionId": "/srv/runtime/prod" }, "codes": ["ABSOLUTE_PATH"] }
+    ],
+    "legacyBudget": [
+      { "name": "run.mjs ledgerBudgetRefusal on an unbound run", "value": { "error": "budget exceeded", "code": "BUDGET_EXCEEDED", "refused": true, "budget": { "allowed": false, "remaining": 0 } }, "legacy": true },
+      { "name": "bound budget refusal is typed", "value": { "error": "budget exceeded", "code": "BUDGET_EXCEEDED", "status": 409 }, "legacy": false },
+      { "name": "a legacy refusal cannot carry a run id", "value": { "error": "budget exceeded", "code": "BUDGET_EXCEEDED", "refused": true, "runId": "run_ux00" }, "legacy": false }
+    ]
+  },
+  "binding": [
+    {
+      "name": "no production owns the package",
+      "pkg": { "id": "pkg_ux00_free" },
+      "productions": [{ "id": "prod_a", "packageId": "pkg_other", "intent": "active", "revision": 2 }],
+      "expected": { "state": "unbound" },
+      "refusal": null
+    },
+    {
+      "name": "production with no package yet binds nothing",
+      "pkg": { "id": "pkg_ux00_free" },
+      "productions": [{ "id": "prod_a", "packageId": null, "intent": "active", "revision": 0 }],
+      "expected": { "state": "unbound" },
+      "refusal": null
+    },
+    {
+      "name": "active owner admits",
+      "pkg": { "id": "pkg_ux00" },
+      "productions": [{ "id": "prod_a", "packageId": "pkg_ux00", "intent": "active", "revision": 4 }],
+      "expected": { "state": "bound", "productionId": "prod_a", "source": "store", "intent": "active", "revision": 4 },
+      "refusal": null
+    },
+    {
+      "name": "lowest production id wins, matching run.mjs and the sorted store list",
+      "pkg": { "id": "pkg_ux00" },
+      "productions": [
+        { "id": "prod_b", "packageId": "pkg_ux00", "intent": "active", "revision": 1 },
+        { "id": "prod_a", "packageId": "pkg_ux00", "intent": "paused", "revision": 9 }
+      ],
+      "expected": { "state": "bound", "productionId": "prod_a", "source": "store", "intent": "paused", "revision": 9 },
+      "refusal": "PRODUCTION_NOT_ACTIVE"
+    },
+    {
+      "name": "paused owner still binds and refuses",
+      "pkg": { "id": "pkg_ux00" },
+      "productions": [{ "id": "prod_a", "packageId": "pkg_ux00", "intent": "paused", "revision": 4 }],
+      "expected": { "state": "bound", "productionId": "prod_a", "source": "store", "intent": "paused", "revision": 4 },
+      "refusal": "PRODUCTION_NOT_ACTIVE"
+    },
+    {
+      "name": "cancel_requested owner refuses",
+      "pkg": { "id": "pkg_ux00" },
+      "productions": [{ "id": "prod_a", "packageId": "pkg_ux00", "intent": "cancel_requested", "revision": 4 }],
+      "expected": { "state": "bound", "productionId": "prod_a", "source": "store", "intent": "cancel_requested", "revision": 4 },
+      "refusal": "PRODUCTION_NOT_ACTIVE"
+    },
+    {
+      "name": "archiving does not unbind",
+      "pkg": { "id": "pkg_ux00" },
+      "productions": [{ "id": "prod_a", "packageId": "pkg_ux00", "intent": "archived", "revision": 4 }],
+      "expected": { "state": "bound", "productionId": "prod_a", "source": "store", "intent": "archived", "revision": 4 },
+      "refusal": "PRODUCTION_NOT_ACTIVE"
+    },
+    {
+      "name": "inline productionId binds an otherwise unbound package (legacy-run-closure fixture shape)",
+      "pkg": { "id": "pkg_http_bound", "productionId": "prod_http_bound" },
+      "productions": [],
+      "expected": { "state": "bound", "productionId": "prod_http_bound", "source": "package", "intent": null, "revision": null },
+      "refusal": "PRODUCTION_NOT_FOUND"
+    },
+    {
+      "name": "inline productionId naming an existing production",
+      "pkg": { "id": "pkg_ux00", "productionId": "prod_a" },
+      "productions": [{ "id": "prod_a", "packageId": null, "intent": "active", "revision": 3 }],
+      "expected": { "state": "bound", "productionId": "prod_a", "source": "package", "intent": "active", "revision": 3 },
+      "refusal": null
+    },
+    {
+      "name": "inline productionId cannot move a stored binding",
+      "pkg": { "id": "pkg_ux00", "productionId": "prod_mine" },
+      "productions": [
+        { "id": "prod_owner", "packageId": "pkg_ux00", "intent": "active", "revision": 4 },
+        { "id": "prod_mine", "packageId": null, "intent": "active", "revision": 1 }
+      ],
+      "expected": { "state": "conflict", "productionId": "prod_owner", "packageProductionId": "prod_mine" },
+      "refusal": "PRODUCTION_MISMATCH"
+    },
+    {
+      "name": "inline productionId agreeing with the store",
+      "pkg": { "id": "pkg_ux00", "productionId": "prod_a" },
+      "productions": [{ "id": "prod_a", "packageId": "pkg_ux00", "intent": "active", "revision": 4 }],
+      "expected": { "state": "bound", "productionId": "prod_a", "source": "store", "intent": "active", "revision": 4 },
+      "refusal": null
+    }
+  ]
+}

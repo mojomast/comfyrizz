@@ -1,0 +1,89 @@
+{
+  "contract": "comfyrizz.iteration-scope/v1 (UX00 amendment: sourceRevision, target sets, id kinds)",
+  "ids": [
+    { "id": "s_intro", "kind": "shot" },
+    { "id": "s1", "kind": "shot" },
+    { "id": "s", "kind": "shot" },
+    { "id": "s_intro:l2", "kind": "line" },
+    { "id": "s1:l1", "kind": "line" },
+    { "id": "s_intro:a_logo", "kind": "clip" },
+    { "id": "s1:a1", "kind": "clip" },
+    { "id": "a_logo", "kind": "asset" },
+    { "id": "tk_0123456789ab", "kind": "take" },
+    { "id": "chr_0123456789abcdef", "kind": "character" },
+    { "id": "c_host", "kind": "cast" },
+    { "id": "pkg_ux00_demo", "kind": "package" },
+    { "id": "s_intro:l0", "kind": null },
+    { "id": "s_intro:line2", "kind": null },
+    { "id": "intro", "kind": null },
+    { "id": "shot 1", "kind": null },
+    { "id": "tk_0123", "kind": null },
+    { "id": "s1:a1:extra", "kind": null },
+    { "id": "", "kind": null },
+    { "id": "pkg_ux", "kind": null }
+  ],
+  "targetSets": [
+    {
+      "name": "absent means unscoped",
+      "absent": true,
+      "mode": "unscoped",
+      "allows": [{ "target": { "shotId": "s_intro" }, "expected": true }, { "target": { "shotId": "s2", "lineId": "s2:l1" }, "expected": true }]
+    },
+    {
+      "name": "explicit empty set permits nothing",
+      "value": { "shotIds": [], "lineIds": [] },
+      "mode": "empty",
+      "allows": [{ "target": { "shotId": "s_intro" }, "expected": false }]
+    },
+    {
+      "name": "empty shot list alone is still explicit empty",
+      "value": { "shotIds": [] },
+      "mode": "empty",
+      "allows": [{ "target": { "shotId": "s1" }, "expected": false }]
+    },
+    {
+      "name": "named shot scope",
+      "value": { "shotIds": ["s_intro"] },
+      "mode": "scoped",
+      "allows": [
+        { "target": { "shotId": "s_intro" }, "expected": true },
+        { "target": { "shotId": "s_intro", "lineId": "s_intro:l3" }, "expected": true },
+        { "target": { "shotId": "s_outro" }, "expected": false }
+      ]
+    },
+    {
+      "name": "line scope permits only that line",
+      "value": { "lineIds": ["s_intro:l2"] },
+      "mode": "scoped",
+      "allows": [
+        { "target": { "shotId": "s_intro", "lineId": "s_intro:l2" }, "expected": true },
+        { "target": { "shotId": "s_intro", "lineId": "s_intro:l1" }, "expected": false },
+        { "target": { "shotId": "s_intro" }, "expected": false }
+      ]
+    },
+    { "name": "object without either list is not a spelling of unscoped", "value": {}, "error": "targets" },
+    { "name": "line id in the shot list", "value": { "shotIds": ["s_intro:l2"] }, "error": "targets.shotIds[0]" },
+    { "name": "shot id in the line list", "value": { "lineIds": ["s_intro"] }, "error": "targets.lineIds[0]" },
+    { "name": "duplicate shot", "value": { "shotIds": ["s1", "s1"] }, "error": "targets.shotIds[1]" },
+    { "name": "unknown key", "value": { "shotIds": ["s1"], "clipIds": ["s1:a1"] }, "error": "targets.clipIds" }
+  ],
+  "iterationScopes": {
+    "valid": [
+      {
+        "name": "old record without sourceRevision is unchanged",
+        "value": { "target": { "packageId": "pkg_ux00_demo", "shotId": "s_intro" }, "element": "framing", "note": "tighter on the host" },
+        "normalized": { "target": { "packageId": "pkg_ux00_demo", "shotId": "s_intro" }, "element": "framing", "note": "tighter on the host", "preserve": ["character", "voice", "background", "motion", "lighting", "audio", "timing"] }
+      },
+      {
+        "name": "scope pinned to the package and production revisions it was authored against",
+        "value": { "target": { "packageId": "pkg_ux00_demo", "clipId": "s_intro:a_host", "takeId": "tk_0123456789ab" }, "element": "voice_line", "elementRef": { "lineId": "s_intro:l2" }, "note": "drop the repeated tail", "preserve": ["character", "timing"], "sourceRevision": { "packageRevision": 12, "productionRevision": 30 } },
+        "normalized": { "target": { "packageId": "pkg_ux00_demo", "clipId": "s_intro:a_host", "takeId": "tk_0123456789ab" }, "element": "voice_line", "elementRef": { "lineId": "s_intro:l2" }, "note": "drop the repeated tail", "preserve": ["character", "timing"], "sourceRevision": { "packageRevision": 12, "productionRevision": 30 } }
+      }
+    ],
+    "invalid": [
+      { "name": "empty sourceRevision", "value": { "target": { "packageId": "pkg_ux00_demo" }, "element": "other", "note": "x", "sourceRevision": {} }, "field": "sourceRevision" },
+      { "name": "package revision zero", "value": { "target": { "packageId": "pkg_ux00_demo" }, "element": "other", "note": "x", "sourceRevision": { "packageRevision": 0 } }, "field": "sourceRevision.packageRevision" },
+      { "name": "unknown sourceRevision key", "value": { "target": { "packageId": "pkg_ux00_demo" }, "element": "other", "note": "x", "sourceRevision": { "editorRevision": 2 } }, "field": "sourceRevision.editorRevision" }
+    ]
+  }
+}

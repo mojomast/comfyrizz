@@ -1,0 +1,34 @@
+{
+  "contract": "comfyrizz.easy-session/v1",
+  "readiness": [
+    { "name": "nothing compiled", "evidence": { "previewCompiled": false, "finalArtifact": null, "packageRevision": 3 }, "expect": "none" },
+    { "name": "compiled preview only", "evidence": { "previewCompiled": true, "finalArtifact": null, "packageRevision": 3 }, "expect": "preview_ready" },
+    { "name": "final artifact for the current revision", "evidence": { "previewCompiled": true, "finalArtifact": { "artifactId": "art_final_1", "revision": 3 }, "packageRevision": 3 }, "expect": "export_ready" },
+    { "name": "final artifact without a preview still exports", "evidence": { "previewCompiled": false, "finalArtifact": { "artifactId": "art_final_1", "revision": 3 }, "packageRevision": 3 }, "expect": "export_ready" },
+    { "name": "stale final artifact falls back to preview", "evidence": { "previewCompiled": true, "finalArtifact": { "artifactId": "art_final_1", "revision": 2 }, "packageRevision": 3 }, "expect": "preview_ready" },
+    { "name": "artifact before the package exists", "evidence": { "previewCompiled": false, "finalArtifact": { "artifactId": "art_final_1", "revision": 1 }, "packageRevision": null }, "expect": "none" },
+    { "name": "empty artifact id is not evidence", "evidence": { "previewCompiled": true, "finalArtifact": { "artifactId": "", "revision": 3 }, "packageRevision": 3 }, "expect": "preview_ready" }
+  ],
+  "sessions": [
+    { "name": "same generation, same ids",
+      "started": { "generation": 2, "packageId": "pkg_aaaa", "chatId": "chat_a", "productionId": "prod_a" },
+      "current": { "generation": 2, "packageId": "pkg_aaaa", "chatId": "chat_a", "productionId": "prod_a" },
+      "expect": true },
+    { "name": "ids filled in after the start was tagged",
+      "started": { "generation": 2, "packageId": null, "chatId": null, "productionId": null },
+      "current": { "generation": 2, "packageId": "pkg_aaaa", "chatId": "chat_a", "productionId": null },
+      "expect": true },
+    { "name": "late project A result after Start New",
+      "started": { "generation": 2, "packageId": "pkg_aaaa", "chatId": "chat_a", "productionId": "prod_a" },
+      "current": { "generation": 3, "packageId": null, "chatId": null, "productionId": null },
+      "expect": false },
+    { "name": "same generation, different package",
+      "started": { "generation": 2, "packageId": "pkg_aaaa", "chatId": null, "productionId": null },
+      "current": { "generation": 2, "packageId": "pkg_bbbb", "chatId": null, "productionId": null },
+      "expect": false },
+    { "name": "same generation, different production",
+      "started": { "generation": 2, "packageId": "pkg_aaaa", "chatId": "chat_a", "productionId": "prod_a" },
+      "current": { "generation": 2, "packageId": "pkg_aaaa", "chatId": "chat_a", "productionId": "prod_b" },
+      "expect": false }
+  ]
+}
