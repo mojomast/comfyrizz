@@ -142,3 +142,17 @@ download subprocess and a motion-only lock excluding unused Klein weights.
 Checkpoint revisions, model hashes, sampler, prompts and seeds remain unchanged.
 This is an experimental transport mitigation, not a demonstrated rate-limit fix.
 Preserve the failed stage and retry separately; do not reset the spending baseline.
+
+The HTTP-path retry completed bootstrap, then failed the mandatory smoke test
+with HTTP 422. Inspection identified a mistake in the production optimization:
+`colab/smoke.api.json` loads Klein's diffusion model, text encoder and VAE even
+for an H3-only workload. Removing the Klein host therefore removed health-test
+dependencies. No inference jobs ran. Runtime stopped; cumulative estimated usage
+was 5.15 credits, including approximately 0.92 for this attempt.
+
+Restore the complete previously exercised lock while retaining the HTTP transport
+change. The production runner now checks the known Klein smoke dependency against
+the selected lock locally before allocation. This narrow guard is not a general
+graph dependency resolver. Do not disable the smoke test to hide this failure.
+The corrected attempt is separately staged and capped at 3 credits. The HTTP
+success shows this attempt downloaded successfully, not that 429 cannot recur.
