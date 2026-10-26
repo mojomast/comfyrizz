@@ -1,9 +1,64 @@
 import { COPY } from './copy.ts';
 import type { EasyState } from './types.ts';
-import { approvePlan, readPlanCard, sendPlanApproval } from '../productions/cards/plan-card.ts';
+import { approvePlan, readPlanCard, sendPlanApproval, type PlanCard } from '../productions/cards/plan-card.ts';
 
 let locked = false;
 let lastFailure: { message: string } | null = null;
+
+export interface PlanProposalIdentity {
+  productionId: string;
+  planId: string;
+  planHash: string;
+  proposalRevision: number;
+}
+
+let decisionBinding: { key: string; answers: Record<string, string> } | null = null;
+
+function proposalIdentity(card: PlanCard): PlanProposalIdentity | null {
+  if (!card
+    || typeof card.productionId !== 'string' || card.productionId === ''
+    || typeof card.planId !== 'string' || card.planId === ''
+    || typeof card.planHash !== 'string' || card.planHash === ''
+    || !Number.isSafeInteger(card.proposalRevision)) {
+    return null;
+  }
+  return {
+    productionId: card.productionId,
+    planId: card.planId,
+    planHash: card.planHash,
+    proposalRevision: card.proposalRevision as number,
+  };
+}
+
+function proposalKey(identity: PlanProposalIdentity): string {
+  return JSON.stringify([
+    identity.productionId,
+    identity.planId,
+    identity.planHash,
+    identity.proposalRevision,
+  ]);
+}
+
+export function bindPlanDecision(card: PlanCard, decisionId: string, optionId: string): void {
+  const identity = proposalIdentity(card);
+  if (!identity || typeof decisionId !== 'string' || decisionId === '') return;
+  const key = proposalKey(identity);
+  const answers = decisionBinding?.key === key ? { ...decisionBinding.answers } : {};
+  if (typeof optionId === 'string' && optionId !== '') answers[decisionId] = optionId;
+  else delete answers[decisionId];
+  decisionBinding = { key, answers };
+}
+
+export function planDecisionAnswers(card: PlanCard): Record<string, string> {
+  const identity = proposalIdentity(card);
+  if (!identity) return {};
+  const key = proposalKey(identity);
+  return decisionBinding?.key === key ? { ...decisionBinding.answers } : {};
+}
+
+export function resetPlanDecisionAnswers(): void {
+  decisionBinding = null;
+}
 
 /** The most recent approval failure, consumed once by the plan surface. */
 export function takeApprovalFailure(): { message: string } | null {
@@ -34,7 +89,7 @@ type Go = (step: 'generate') => void;
 
 interface ApproveDeps {
   api: {
-    setSpendCap: (id: string, body: { ceiling: number | null; expected: { productionRevision: number } }) => Promise<unknown>;
+    setSpendCap: (id: string, body: { ceiling: number | null; expected: { productionRevision: number }; commandId?: string; idempotencyKey?: string }) => Promise<unknown>;
     sendCommand: (id: string, command: unknown) => Promise<unknown>;
     dispatchAction: (id: string, body: unknown) => Promise<unknown>;
     startRun: (body: unknown) => Promise<unknown>;
@@ -74,11 +129,26 @@ function snapshotOf(value: unknown): unknown {
   return value;
 }
 
-function freshId(prefix: string): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+function stableId(prefix: string, parts: readonly unknown[]): string {
+  const source = JSON.stringify(parts);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  return `${prefix}_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 10)}`;
+  return `${prefix}_${hash.toString(16).padStart(8, '0')}`;
+}
+
+function errorCode(error: unknown): string {
+  if (error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string') {
+    return (error as { code: string }).code;
+  }
+  return error instanceof Error ? error.message : '';
+}
+
+function alreadyStarted(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === 'ACTION_CONSUMED' || code === 'SLOT_CONSUMED';
 }
 
 /** Factory id the run controller understands (bare `colab`). Provenance stamps `colab:G4` separately. */
@@ -104,26 +174,43 @@ async function finish(deps: ApproveDeps): Promise<void> {
 
 async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknown, includeSpendCap: boolean): Promise<string | undefined> {
   const card = readPlanCard(snapshot);
-  const built = approvePlan(card, deps.context ?? {});
+  const decisions = planDecisionAnswers(card);
+  const id = productionId(state);
+  const identity = [id, card.planId, card.planHash, card.proposalRevision];
+  const decisionIdentity = Object.keys(decisions).sort().map((key) => [key, decisions[key]]);
+  const approvalIdentity = [id, card.planId, card.planHash, card.proposalRevision, decisionIdentity];
+  const alreadyApproved = card.approval === 'approved';
+  const approvalCommand = stableId('cmd_plan_approve', approvalIdentity);
+  const built = approvePlan(card, {
+    ...(deps.context ?? {}),
+    commandId: approvalCommand,
+    idempotencyKey: approvalCommand,
+  });
   if (built.ok === false && built.code === 'STALE_VIEW') return markStale(deps, state);
 
   const colab = state.compute === 'colab';
   if (colab && built.ok === false) return built.error;
 
-  const id = productionId(state);
   let revision = card.revision;
 
-  if (colab && includeSpendCap) {
+  if (colab && includeSpendCap && !alreadyApproved) {
+    const commandId = stableId('cmd_spend', [...identity, card.revision]);
     const spend = await deps.api.setSpendCap(id, {
       ceiling: state.spendCap,
       expected: { productionRevision: revision },
+      commandId,
+      idempotencyKey: commandId,
     });
     revision = revisionOf(spend, revision);
   }
 
-  if (built.ok === true && (colab || hasPlan(card))) {
+  if (built.ok === true && (colab || hasPlan(card)) && !alreadyApproved) {
     const command = {
       ...built.command,
+      payload: {
+        ...built.command.payload,
+        ...(Object.keys(decisions).length > 0 ? { decisions } : {}),
+      },
       expected: { productionRevision: revision },
     };
     const approved = await sendPlanApproval(
@@ -139,29 +226,40 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
     const actions = card.actions.filter((action) => typeof action?.id === 'string' && action.id !== '');
     const dispatched: Array<{ actionId: string; response: unknown; revision: number }> = [];
     for (const action of actions) {
-      const response = await deps.api.dispatchAction(id, {
-        commandId: freshId('cmd_dispatch'),
-        idempotencyKey: freshId('idem_dispatch'),
-        expected: { productionRevision: revision },
-        payload: { planId: card.planId, planRevision: card.proposalRevision, actionId: action.id },
-      });
+      const commandId = stableId('cmd_dispatch', [...identity, action.id, revision]);
+      let response: unknown;
+      try {
+        response = await deps.api.dispatchAction(id, {
+          commandId,
+          idempotencyKey: stableId('idem_dispatch', [...identity, action.id, revision]),
+          expected: { productionRevision: revision },
+          payload: { planId: card.planId, planRevision: card.proposalRevision, actionId: action.id },
+        });
+      } catch (error) {
+        if (errorCode(error) !== 'SLOT_CONSUMED') throw error;
+        response = null;
+      }
       revision = revisionOf(response, revision);
       dispatched.push({ actionId: action.id, response, revision });
     }
     for (const item of dispatched) {
-      await deps.api.startRun({
-        packageId: state.packageId,
-        backendId,
-        mode: 'take',
-        budgetUnits: state.spendCap,
-        authority: {
-          productionId: id,
-          planId: card.planId,
-          planHash: card.planHash,
-          actionId: item.actionId,
-        },
-        expected: { productionRevision: item.revision },
-      });
+      try {
+        await deps.api.startRun({
+          packageId: state.packageId,
+          backendId,
+          mode: 'take',
+          budgetUnits: state.spendCap,
+          authority: {
+            productionId: id,
+            planId: card.planId,
+            planHash: card.planHash,
+            actionId: item.actionId,
+          },
+          expected: { productionRevision: item.revision },
+        });
+      } catch (error) {
+        if (!alreadyStarted(error)) throw error;
+      }
     }
   }
 

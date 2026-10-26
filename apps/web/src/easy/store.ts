@@ -1,3 +1,4 @@
+import { NEW_PROJECT_CARRY, type ProjectSessionRef } from './session-contract.ts';
 import type { EasyState } from './types.ts';
 
 const LOOKS = ['clay', 'glass', 'editorial-flat', 'isometric-tech', 'paper-cut', 'cinematic-dark'] as const;
@@ -199,6 +200,20 @@ export function storageKey(packageId: string | null | undefined): string {
   return `comfyrizz.easy.${packageId}`;
 }
 
+export function newProjectState(previous: EasyState): EasyState {
+  const fresh = defaultEasyState() as unknown as Record<string, unknown>;
+  for (const field of NEW_PROJECT_CARRY) {
+    fresh[field] = previous[field as keyof EasyState];
+  }
+  return fresh as unknown as EasyState;
+}
+
+export function preserveUnsentPrompt(state: EasyState, prompt: string): EasyState {
+  const text = typeof prompt === 'string' ? prompt.trim() : '';
+  if (text === '' || state.idea.text === text) return state;
+  return { ...state, idea: { ...state.idea, text } };
+}
+
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) {
@@ -239,16 +254,21 @@ export interface EasyStore {
   patch(partial: Partial<EasyState>): EasyState;
   replace(next: unknown): EasyState;
   reset(): EasyState;
+  startNew(): EasyState;
+  invalidateSession(): number;
+  generation(): number;
+  sessionRef(): ProjectSessionRef;
   subscribe(listener: (next: EasyState, previous: EasyState) => void): () => void;
   flush(): void;
 }
 
 export function createEasyStore(options: { storage?: any; key: string }): EasyStore {
   const storage = options?.storage ?? (globalThis as any).localStorage;
-  const key = options.key;
+  let key = options.key;
   const listeners = new Set<(next: EasyState, previous: EasyState) => void>();
 
   let state: EasyState = loadInitial(storage, key);
+  let generation = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   function loadInitial(st: any, k: string): EasyState {
@@ -338,9 +358,35 @@ export function createEasyStore(options: { storage?: any; key: string }): EasySt
   function reset(): EasyState {
     const previous = clone(state);
     state = defaultEasyState();
+    generation += 1;
     scheduleWrite();
     notify(state, previous);
     return clone(state);
+  }
+
+  function startNew(): EasyState {
+    const previous = clone(state);
+    writeNow();
+    state = newProjectState(previous);
+    key = storageKey(null);
+    generation += 1;
+    writeNow();
+    notify(state, previous);
+    return clone(state);
+  }
+
+  function invalidateSession(): number {
+    generation += 1;
+    return generation;
+  }
+
+  function sessionRef(): ProjectSessionRef {
+    return {
+      generation,
+      packageId: state.packageId,
+      chatId: state.chatId,
+      productionId: state.productionId,
+    };
   }
 
   function subscribe(listener: (next: EasyState, previous: EasyState) => void): () => void {
@@ -357,5 +403,16 @@ export function createEasyStore(options: { storage?: any; key: string }): EasySt
   const page = globalThis as { addEventListener?: (type: string, listener: () => void) => void };
   if (typeof page.addEventListener === 'function') page.addEventListener('pagehide', flush);
 
-  return { get, patch, replace, reset, subscribe, flush };
+  return {
+    get,
+    patch,
+    replace,
+    reset,
+    startNew,
+    invalidateSession,
+    generation: () => generation,
+    sessionRef,
+    subscribe,
+    flush,
+  };
 }

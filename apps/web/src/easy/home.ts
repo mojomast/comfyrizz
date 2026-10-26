@@ -72,7 +72,7 @@ export function renderHomeScreen(videos: readonly HomeVideo[]): string {
 }
 
 export function renderHome(videos: readonly HomeVideo[]): string {
-  const start = `<a href="${escapeHtml(ideaHref())}">${escapeHtml(NEW_VIDEO)}</a>`;
+  const start = `<a href="${escapeHtml(ideaHref())}" data-easy-new-video>${escapeHtml(NEW_VIDEO)}</a>`;
   const example = `<a href="${escapeHtml(exampleHref())}">${escapeHtml(COPY.recent.example)}</a>`;
   const makeItSimple = `<button type="button" class="btn btn-secondary easy-home-simple" data-easy-make-simple>${escapeHtml(MAKE_IT_SIMPLE)}</button>`;
   if (videos.length === 0) {

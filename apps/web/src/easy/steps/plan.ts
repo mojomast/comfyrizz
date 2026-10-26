@@ -13,7 +13,7 @@ import {
   type PlanCard,
 } from '../../productions/cards/plan-card.ts';
 import { loadSyncnetBanner } from '../syncnet-notice.ts';
-import { takeApprovalFailure } from '../approve-generate.ts';
+import { bindPlanDecision, planDecisionAnswers, takeApprovalFailure } from '../approve-generate.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
 
 const PREVIEW_TITLE = 'Preview';
@@ -180,7 +180,7 @@ function overCap(state: EasyState, card: PlanCard): { active: boolean; n: number
   return { active: ceiling > cap, n: ceiling, cap };
 }
 
-function renderDecision(raw: unknown, index: number): string {
+function renderDecision(raw: unknown, index: number, answers: Record<string, string> = {}): string {
   const record = asRecord(raw) ?? {};
   const id = textOf(record.id) || `decision-${index + 1}`;
   const prompt = textOf(record.prompt)
@@ -203,7 +203,8 @@ function renderDecision(raw: unknown, index: number): string {
     const label = textOf(option.label) || textOf(option.title) || value;
     return { value, label };
   });
-  const preferred = textOf(record.default) || textOf(record.selected);
+  const bound = typeof answers[id] === 'string' ? answers[id] : '';
+  const preferred = bound || textOf(record.default) || textOf(record.selected);
   const fallback = options.length > 0 ? options[0].value : 'yes';
   const name = `easy-plan-decision-${id}`;
   const fieldOptions = options.length > 0
@@ -362,7 +363,8 @@ export function renderPlan(state: EasyState, _facts?: StepFacts, options: PlanRe
     ? options.package
     : registeredPackage;
   const scenes = scenesOf(packageSource);
-  const decisions = card.requiredDecisions.map(renderDecision).join('');
+  const answers = planDecisionAnswers(card);
+  const decisions = card.requiredDecisions.map((decision, index) => renderDecision(decision, index, answers)).join('');
   const decisionsHtml = decisions
     ? `<section class="easy-plan-decisions" aria-label="Plan choices">${decisions}</section>`
     : '';
@@ -506,7 +508,7 @@ export const step: EasyStepModule = {
 
     function markWordsChanged(): void {
       const current = ctx.store.get();
-      ctx.store.patch({ plan: { ...current.plan, wordsChanged: true } });
+      ctx.store.patch({ plan: { ...current.plan, status: 'stale', wordsChanged: true } });
     }
 
     function onClick(event: Event): void {
@@ -555,6 +557,14 @@ export const step: EasyStepModule = {
 
     function onChange(event: Event): void {
       const target = event.target;
+      if (target instanceof HTMLInputElement) {
+        const decision = target.closest<HTMLElement>('[data-easy-plan-decision]');
+        const decisionId = decision?.getAttribute('data-easy-plan-decision');
+        if (!decisionId) return;
+        const current = ctx.store.get();
+        bindPlanDecision(cardFrom(snapshotFor(current.productionId)), decisionId, target.value);
+        return;
+      }
       if (!(target instanceof HTMLTextAreaElement)) return;
       const sceneId = target.getAttribute('data-easy-plan-narration');
       if (!sceneId) return;

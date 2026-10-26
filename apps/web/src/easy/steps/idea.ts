@@ -155,16 +155,30 @@ function normalizeQuestions(result: unknown): EasyQuestion[] {
   return questions;
 }
 
+export function ideaChangePatch(state: EasyState, patch: Partial<EasyState['idea']>): Partial<EasyState> {
+  const textChanged = typeof patch.text === 'string' && patch.text !== state.idea.text;
+  const briefChanged = textChanged || Object.keys(patch).some((key) => key !== 'text');
+  const planned = state.planHash !== null || state.plan.status !== 'none';
+  const next: Partial<EasyState> = { idea: { ...state.idea, ...patch } };
+  if (briefChanged && planned) {
+    next.plan = { ...state.plan, status: 'stale', wordsChanged: false };
+  }
+  if (textChanged) {
+    next.questions = [];
+    next.questionsAsked = false;
+    next.answers = {};
+    next.productionId = null;
+    next.planHash = null;
+  }
+  return next;
+}
+
 function patchIdea(ctx: EasyStepContext, patch: Partial<EasyState['idea']>): void {
   const state = ctx.store.get();
   const textChanged = typeof patch.text === 'string' && patch.text !== state.idea.text;
-  const planned = state.planHash !== null || state.plan.status === 'ready' || state.plan.status === 'stale';
-  ctx.store.patch({
-    idea: { ...state.idea, ...patch },
-    ...(textChanged && planned
-      ? { plan: { ...state.plan, status: 'stale', wordsChanged: true } }
-      : {}),
-  });
+  const session = ctx.store as { invalidateSession?: () => number };
+  if (textChanged) session.invalidateSession?.();
+  ctx.store.patch(ideaChangePatch(state, patch));
 }
 
 function errorHost(view: IdeaView | null): HTMLElement | null {

@@ -1,7 +1,7 @@
 import { COPY } from './copy.ts';
 import { escapeHtml } from './components.ts';
 import { createEasyApi } from './api.ts';
-import { createEasyStore, storageKey } from './store.ts';
+import { createEasyStore, preserveUnsentPrompt, storageKey } from './store.ts';
 import { mountShell, renderShell } from './shell.ts';
 import { STEPS, stepIndex } from './steps.ts';
 import { initialRoute, nextUrl } from './router.ts';
@@ -13,7 +13,7 @@ import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, S
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
 import { writePlan } from './plan-writer.ts';
 import { resumeFacts } from './resume.ts';
-import { approveAndGenerate, retryShot } from './approve-generate.ts';
+import { approveAndGenerate, resetPlanDecisionAnswers, retryShot } from './approve-generate.ts';
 import { runCpuGenerate } from './cpu-path.ts';
 import { levelForState } from './steps/level.ts';
 import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-advanced.ts';
@@ -207,12 +207,25 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
         void superEasySession?.retry();
       },
       onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
+      onMakeAnother: () => {
+        resetPlanDecisionAnswers();
+        store.startNew();
+      },
     });
     if (store.get().productionId) refreshSuperEasySnapshot();
   }
 
   /** More control lands on the existing studio; Review is the preview handoff. */
+  function keepUnsentPrompt(): void {
+    const current = store.get();
+    if (current.packageId !== null || current.productionId !== null) return;
+    const field = root.querySelector<HTMLTextAreaElement>('#super-easy-prompt');
+    const next = preserveUnsentPrompt(current, field?.value ?? '');
+    if (next !== current) store.patch({ idea: next.idea });
+  }
+
   function openStudioFromSuperEasy(step: StepId = 'idea', packageId: string | null = store.get().packageId): void {
+    keepUnsentPrompt();
     setPreferStudio(true);
     const params = new URLSearchParams(search().replace(/^\?/, ''));
     params.delete('view');
@@ -292,7 +305,9 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
       store: {
         get: () => store.get(),
         patch: (patch) => store.patch(patch),
-      },
+        invalidateSession: () => store.invalidateSession(),
+        generation: () => store.generation(),
+      } as EasyStepContext['store'] & { invalidateSession(): number; generation(): number },
       api,
       host,
       shell: {
@@ -389,6 +404,17 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     root.querySelector<HTMLElement>('[data-easy-make-simple]')?.addEventListener('click', makeItSimple);
   }
 
+  function startNewVideo(event: Event): void {
+    event.preventDefault();
+    resetPlanDecisionAnswers();
+    store.startNew();
+    go('idea');
+  }
+
+  function bindNewVideo(): void {
+    root.querySelector<HTMLElement>('[data-easy-new-video]')?.addEventListener('click', startNewVideo);
+  }
+
   function showHomeScreen(): void {
     homeTicket += 1;
     const ticket = homeTicket;
@@ -401,10 +427,12 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
     destroySuperEasy();
     root.innerHTML = renderHomeScreen([]);
     bindMakeItSimple();
+    bindNewVideo();
     void loadHomeVideos((input) => host.apiFetch(input)).then((videos) => {
       if (ticket !== homeTicket) return;
       root.innerHTML = renderHomeScreen(videos);
       bindMakeItSimple();
+      bindNewVideo();
     });
   }
 

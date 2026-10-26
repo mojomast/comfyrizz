@@ -11,6 +11,7 @@ type PlanApi = {
 type PlanStore = {
   get(): EasyState;
   patch(partial: Partial<EasyState>): unknown;
+  generation?(): number;
 };
 
 export interface WritePlanDeps {
@@ -64,14 +65,24 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps): Promise<
   const hash = planInputsHash(state);
   if (state.plan.status === 'ready' && state.planHash === hash) return;
 
+  const startedGeneration = typeof deps.store.generation === 'function'
+    ? deps.store.generation()
+    : null;
+  const currentSession = (): boolean => startedGeneration === null
+    || typeof deps.store.generation !== 'function'
+    || deps.store.generation?.() === startedGeneration;
+
   const live = (): EasyState => deps.store.get();
-  const mark = (status: EasyState['plan']['status']): void => {
+  const mark = (status: EasyState['plan']['status']): boolean => {
+    if (!currentSession()) return false;
     const current = live();
     deps.store.patch({
       plan: { ...current.plan, status, error: null, errorAt: null },
     });
+    return true;
   };
   const fail = (errorAt: NonNullable<EasyState['plan']['errorAt']>, error: unknown): void => {
+    if (!currentSession()) return;
     const current = live();
     deps.store.patch({
       plan: { ...current.plan, status: 'error', error: messageOf(error), errorAt },
@@ -81,18 +92,23 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps): Promise<
   let phase = phaseFor(state);
 
   if (phase <= 1) {
-    mark('writing');
+    if (!mark('writing')) return;
     try {
       const current = live();
       const provider = await connectedSelection(deps.host);
+      if (!currentSession()) return;
       const body = await deps.api.buildVideo({
         brief: ideaPrompt(current) + castLine(current),
         ...(provider ? { provider } : {}),
       });
+      if (!currentSession()) return;
+      const builtPackageId = packageIdOf(body);
+      const packageChanged = builtPackageId !== null && builtPackageId !== state.packageId;
       deps.host.adoptBuiltPackage(body);
       deps.store.patch({
-        packageId: packageIdOf(body),
+        packageId: builtPackageId,
         offline: body?.live !== true,
+        ...(packageChanged ? { productionId: null, planHash: null } : {}),
       });
     } catch (error) {
       fail('agent', error);
@@ -102,7 +118,7 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps): Promise<
   }
 
   if (phase <= 2) {
-    mark('building');
+    if (!mark('building')) return;
     try {
       const current = live();
       if (!current.productionId) {
@@ -110,6 +126,7 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps): Promise<
           conversationId: current.chatId,
           packageId: current.packageId,
         });
+        if (!currentSession()) return;
         const productionId = productionIdOf(created);
         if (!productionId) throw new Error('missing production id');
         deps.store.patch({ productionId });
@@ -121,7 +138,7 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps): Promise<
     phase = 3;
   }
 
-  mark('proposing');
+  if (!mark('proposing')) return;
   try {
     const current = live();
     if (!current.productionId) throw new Error('missing production id');
@@ -133,6 +150,7 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps): Promise<
     fail('proposal', error);
     return;
   }
+  if (!currentSession()) return;
 
   const done = live();
   deps.store.patch({
