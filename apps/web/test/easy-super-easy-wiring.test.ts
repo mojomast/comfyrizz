@@ -45,7 +45,17 @@ function memoryStorage() {
 class FakeWindow {
   constructor() {
     this.location = { search: '' };
-    this.history = { pushState() {} };
+    this.lastUrl = null;
+    this.history = {
+      pushState(_state, _title, url) {
+        this.owner.lastUrl = url;
+        const next = String(url ?? '');
+        const query = next.indexOf('?');
+        this.owner.location.search = query >= 0 ? next.slice(query) : '';
+      },
+      owner: null,
+    };
+    this.history.owner = this;
     this.listeners = new Map();
   }
 
@@ -107,6 +117,13 @@ class FakeRoot {
     const form = { closest: (selector) => (selector === '[data-super-easy-form]' ? {} : null) };
     for (const listener of Array.from(this.listeners.get('submit') ?? [])) {
       listener({ target: form, preventDefault() {} });
+    }
+  }
+
+  click(selector) {
+    const target = { closest: (candidate) => (candidate === selector ? {} : null) };
+    for (const listener of Array.from(this.listeners.get('click') ?? [])) {
+      listener({ target, preventDefault() {} });
     }
   }
 }
@@ -191,6 +208,9 @@ function createBackend(options = {}) {
     if (/^\/api\/productions\/[^/]+\/easy-plan$/u.test(path) && method === 'POST') {
       const body = JSON.parse(String(init.body ?? '{}'));
       calls.push({ kind: 'plan', body });
+      if (options.failPlan) {
+        return json({ error: { code: 'PLAN_FAILED', message: 'The plan could not be written.' } }, 500);
+      }
       revision += 1;
       planEvents.push(planEvent(3 + planEvents.length * 3, planEvents.length + 1));
       return json({ revision });
@@ -465,6 +485,52 @@ test('navigation away cancels the running watch exactly once', async () => {
     shell.navigate();
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(shell.stopCalls(), 1);
+  } finally {
+    shell.dispose();
+    shell.restore();
+  }
+});
+
+// UX06: the mounted journey hands a CPU preview to Review and keeps a planning
+// failure on the progress screen with a working Retry.
+
+test('a CPU preview offers Review and hands the same package to Studio Review', async () => {
+  const backend = createBackend();
+  const shell = mountShell(backend);
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.watch() !== null);
+    await waitFor(() => /data-super-easy-preview-ready/u.test(shell.root.innerHTML));
+
+    assert.match(shell.root.innerHTML, /data-super-easy-review/u);
+    assert.match(shell.root.innerHTML, /Review and export/u);
+    assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-done-actions/u);
+
+    shell.root.click('[data-super-easy-review]');
+    assert.match(shell.document.defaultView.lastUrl, /step=review/u);
+    assert.match(shell.root.innerHTML, /data-easy-shell/u);
+    assert.equal(shell.root.dataset.superEasyView, undefined);
+  } finally {
+    shell.dispose();
+    shell.restore();
+  }
+});
+
+test('a planning failure is visible on the mounted progress screen and Retry runs again', async () => {
+  const backend = createBackend({ failPlan: true });
+  const shell = mountShell(backend);
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => /data-super-easy-error/u.test(shell.root.innerHTML));
+
+    assert.match(shell.root.innerHTML, /data-super-easy-retry/u);
+    assert.match(shell.root.innerHTML, /data-super-easy-more-control/u);
+    assert.match(shell.root.innerHTML, /data-super-easy-open-editor/u);
+
+    const before = backend.calls.filter((call) => call.kind === 'plan').length;
+    shell.root.click('[data-super-easy-retry]');
+    await waitFor(() => backend.calls.filter((call) => call.kind === 'plan').length > before);
+    assert.ok(backend.calls.filter((call) => call.kind === 'plan').length >= 2);
   } finally {
     shell.dispose();
     shell.restore();

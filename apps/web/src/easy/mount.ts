@@ -147,8 +147,14 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
         superEasySnapshot = snapshot;
         superEasy?.render();
       },
-      onError: (failure) => {
-        shell?.alert(failure.message);
+      onPreviewReady: (_result, snapshot) => {
+        superEasySnapshot = snapshot;
+        superEasy?.render();
+      },
+      onError: () => {
+        // The progress screen owns the message, Retry and the escapes now.
+        // The Studio shell is intentionally destroyed while Super Easy runs.
+        superEasy?.render();
       },
     });
     return superEasySession;
@@ -195,19 +201,27 @@ export function mountEasyStudio(root: HTMLElement, host: EasyHost, deps: EasyStu
       snapshot: () => superEasySnapshot,
       onGenerate: (input) => onSuperEasyGenerate(input),
       onMoreControl: () => openStudioFromSuperEasy(),
+      previewReady: () => superEasySession?.previewReady() === true,
+      failure: () => superEasySession?.failure() ?? null,
+      onRetry: () => {
+        void superEasySession?.retry();
+      },
+      onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
     });
     if (store.get().productionId) refreshSuperEasySnapshot();
   }
 
-  /** More control lands on the existing studio at its Idea step. */
-  function openStudioFromSuperEasy(): void {
+  /** More control lands on the existing studio; Review is the preview handoff. */
+  function openStudioFromSuperEasy(step: StepId = 'idea', packageId: string | null = store.get().packageId): void {
     setPreferStudio(true);
     const params = new URLSearchParams(search().replace(/^\?/, ''));
     params.delete('view');
+    if (packageId) params.set('package', packageId);
     const query = params.toString();
-    view?.history?.pushState({}, '', nextUrl(query ? `?${query}` : '', 'idea'));
+    view?.history?.pushState({}, '', nextUrl(query ? `?${query}` : '', step));
     destroySuperEasy();
     ensureShell();
+    if (step === 'review' && shellReady) showStep('review');
   }
 
   function planNeedsUpdate(state: EasyState): StepId[] {

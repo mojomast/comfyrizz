@@ -17,7 +17,14 @@ import {
   SUPER_EASY_MIN_PROMPT_CHARS,
   renderSuperEasyHome,
 } from './home.ts';
-import { renderSuperEasyProgress } from './progress-view.ts';
+import {
+  superEasyProgressParts,
+  updateSuperEasyProgress,
+  type ProgressRoot,
+  type SuperEasyProgressFailure,
+  type SuperEasyProgressKeys,
+  type SuperEasyProgressViewOptions,
+} from './progress-view.ts';
 import { getMode, setMode } from '../../ui/mode.ts';
 import type { EasyState } from '../types.ts';
 
@@ -49,6 +56,14 @@ export interface SuperEasyMountOptions {
   onMakeAnother?(next: EasyState): void;
   /** SE09 owns the run; the shell only hands it the one prompt. */
   onGenerate?(input: SuperEasyGenerateInput): void | Promise<void>;
+  /** A playable preview exists and the finished MP4 is still being watched. */
+  previewReady?(): boolean;
+  /** The run stopped before a preview; the message stays on this screen. */
+  failure?(): SuperEasyProgressFailure | null;
+  /** Re-run the last prompt after a visible failure. */
+  onRetry?(): void;
+  /** Review the playable preview, then export from Studio. */
+  onReview?(packageId: string | null): void;
   reducedMotion?: boolean;
 }
 
@@ -88,6 +103,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   let current = screenNow();
   let promptText = options.state().idea.text ?? '';
   let destroyed = false;
+  let progressKeys: SuperEasyProgressKeys | null = null;
 
   function currentSearch(): string {
     if (options.search) return options.search();
@@ -134,6 +150,18 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
+    if (closest('[data-super-easy-review]')) {
+      event.preventDefault();
+      const packageId = options.state().packageId;
+      if (options.onReview) options.onReview(packageId);
+      else options.onMoreControl(packageId);
+      return;
+    }
+    if (closest('[data-super-easy-retry]')) {
+      event.preventDefault();
+      options.onRetry?.();
+      return;
+    }
     if (closest('[data-super-easy-more-control]') || closest('[data-super-easy-open-studio]')) {
       event.preventDefault();
       const packageId = options.state().packageId;
@@ -176,19 +204,51 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     if (options.onGenerate) void options.onGenerate({ prompt, compute: 'cpu' });
   };
 
+  function progressOptions(): SuperEasyProgressViewOptions {
+    const state = options.state();
+    const failure = options.failure?.() ?? null;
+    return {
+      ...(options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion }),
+      packageId: state.packageId,
+      search: currentSearch(),
+      previewReady: options.previewReady?.() === true,
+      ...(failure === null
+        ? {}
+        : {
+            failure: {
+              message: failure.message,
+              retryable: failure.retryable !== false && typeof options.onRetry === 'function',
+            },
+          }),
+    };
+  }
+
+  function paintProgress(): void {
+    const snapshot = options.snapshot?.() ?? null;
+    const viewOptions = progressOptions();
+    const mounted = root.querySelector('[data-super-easy-chrome]');
+    if (!mounted) {
+      const parts = superEasyProgressParts(snapshot, viewOptions);
+      root.innerHTML = parts.html;
+      progressKeys = parts.keys;
+      return;
+    }
+    progressKeys = updateSuperEasyProgress(
+      root as unknown as ProgressRoot,
+      progressKeys,
+      snapshot,
+      viewOptions,
+    );
+  }
+
   const render = (): void => {
     if (destroyed) return;
     const next = screenNow();
     current = next;
     if (next === 'progress') {
-      const snapshot = options.snapshot?.() ?? null;
-      const state = options.state();
-      root.innerHTML = renderSuperEasyProgress(snapshot, {
-        ...(options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion }),
-        packageId: state.packageId,
-        search: currentSearch(),
-      });
+      paintProgress();
     } else {
+      progressKeys = null;
       const state = options.state();
       root.innerHTML = renderSuperEasyHome({
         prompt: promptText,
@@ -220,6 +280,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       root.removeEventListener('click', onClick);
       root.removeEventListener('submit', onSubmit);
       root.innerHTML = '';
+      progressKeys = null;
       delete root.dataset.superEasyView;
     },
   };

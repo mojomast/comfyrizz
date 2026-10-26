@@ -1,8 +1,9 @@
 // SE05: the presentational Super Easy progress view.
 //
-// Everything here is static markup built from the stage and gallery models.
-// There is no DOM and no network; the same snapshot always produces the same
-// string. node:test imports are runtime-only, like the other Easy render tests.
+// The full markup is deterministic and comes from the stage and gallery
+// models. The DOM updater is exercised against a tiny fake so fraction-only
+// events never replace media, escapes or the live region. node:test imports
+// are runtime-only, like the other Easy render tests.
 // @ts-nocheck
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,6 +18,8 @@ import {
   progressLiveKey,
   progressLiveText,
   renderSuperEasyProgress,
+  superEasyProgressParts,
+  updateSuperEasyProgress,
 } from './progress-view.ts';
 
 function count(html, pattern) {
@@ -353,4 +356,298 @@ test('the view is offline: no fetch, sockets or remote assets', () => {
   assert.doesNotMatch(source, /\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\bsendBeacon\b/u);
   assert.doesNotMatch(source, /https?:\/\//u);
   assert.doesNotMatch(source, /['"]colab['"]/iu);
+});
+
+// UX06: preview-ready, errors and stable progress updates.
+
+function mediaTags(html) {
+  return [...html.matchAll(/<(?:audio|video|img)\b[^>]*>/gu)].map((match) => match[0]);
+}
+
+function fakeProgressRoot() {
+  const writes = { chrome: 0, gallery: 0, actions: 0, live: 0, gauges: 0 };
+  const region = (kind) => {
+    let html = '';
+    return {
+      get innerHTML() {
+        return html;
+      },
+      set innerHTML(value) {
+        html = value;
+        writes[kind] += 1;
+      },
+    };
+  };
+  let liveText = '';
+  const live = {
+    attributes: {},
+    get textContent() {
+      return liveText;
+    },
+    set textContent(value) {
+      liveText = value;
+      writes.live += 1;
+    },
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    },
+  };
+  const gauges = STAGE_IDS.map((id) => ({
+    id,
+    innerHTML: '',
+    getAttribute(name) {
+      return name === 'data-stage-id' ? this.id : null;
+    },
+    set innerHTML(value) {
+      this.innerHTMLValue = value;
+      writes.gauges += 1;
+    },
+    get innerHTML() {
+      return this.innerHTMLValue ?? '';
+    },
+  }));
+  const overallGauge = region('gauges');
+  const overallValue = { textContent: '' };
+  const nodes = new Map([
+    ['[data-super-easy-live]', live],
+    ['[data-super-easy-chrome]', region('chrome')],
+    ['[data-super-easy-gallery]', region('gallery')],
+    ['[data-super-easy-actions]', region('actions')],
+    ['[data-super-easy-overall-gauge]', overallGauge],
+    ['[data-super-easy-overall-value]', overallValue],
+  ]);
+  return {
+    writes,
+    live,
+    overallValue,
+    gauges,
+    overallGauge,
+    root: {
+      querySelector(selector) {
+        return nodes.get(selector) ?? null;
+      },
+      querySelectorAll(selector) {
+        return selector === '[data-super-easy-stage-gauge]' ? gauges : [];
+      },
+    },
+  };
+}
+
+function audioSnapshot(fraction) {
+  return {
+    plan: { status: 'done' },
+    characters: { status: 'done' },
+    shots: [{ status: 'approved' }],
+    voice: { status: 'done', url: '/media/voice.mp3' },
+    render: { status: 'running', fraction },
+  };
+}
+
+test('preview-ready has its own Review handoff and never claims the finished video', () => {
+  const html = renderSuperEasyProgress(partialSnapshot(), { previewReady: true });
+
+  assert.match(html, /data-super-easy-preview-ready/u);
+  assert.match(html, /data-super-easy-review/u);
+  assert.match(html, />Review and export</u);
+  assert.doesNotMatch(html, /data-super-easy-done-actions/u);
+  assert.doesNotMatch(html, /data-super-easy-download/u);
+  assert.doesNotMatch(html, new RegExp(COPY.done.title, 'u'));
+});
+
+test('a delivery id or ready flag without a playable URL is not a final-ready claim', () => {
+  const idOnly = {
+    production: { id: 'prod_1', latestDeliveryId: 'del_1' },
+    plan: { status: 'done' },
+    characters: { status: 'done' },
+    shots: [{ status: 'approved' }],
+    voice: { status: 'done' },
+    render: { status: 'done' },
+    finalVideo: { ready: true, status: 'ready' },
+    deliveries: [{ id: 'del_1', status: 'ready' }],
+  };
+  const html = renderSuperEasyProgress(idOnly);
+  assert.doesNotMatch(html, /data-super-easy-done-actions/u);
+  assert.doesNotMatch(html, /data-super-easy-download/u);
+  assert.doesNotMatch(html, new RegExp(COPY.done.title, 'u'));
+  assert.doesNotMatch(html, /data-super-easy-overall-gauge><div class="easy-progress"[^>]*aria-valuenow="100"/u);
+  assert.match(html, /data-super-easy-stage="render" data-stage-status="running"/u);
+  assert.doesNotMatch(html, /data-super-easy-stage="render" data-stage-status="done"/u);
+  assert.notEqual(
+    progressLiveText(readStages(idOnly), buildGalleryModel(idOnly)),
+    COPY.done.title,
+  );
+
+  const playable = {
+    ...idOnly,
+    finalVideo: { ready: true, url: '/media/final.mp4' },
+    deliveries: [{ id: 'del_1', status: 'ready', url: '/media/final.mp4' }],
+  };
+  assert.match(renderSuperEasyProgress(playable), /data-super-easy-done-actions/u);
+  assert.match(renderSuperEasyProgress(playable), /data-super-easy-download/u);
+
+  const deliveryOnly = {
+    ...idOnly,
+    finalVideo: undefined,
+    production: { id: 'prod_1' },
+    deliveries: [{ id: 'del_1', status: 'ready', url: '/media/final.mp4' }],
+  };
+  const deliveryHtml = renderSuperEasyProgress(deliveryOnly);
+  assert.match(deliveryHtml, /data-super-easy-done-actions/u);
+  assert.match(deliveryHtml, /data-super-easy-stage="render" data-stage-status="done"/u);
+  assert.match(deliveryHtml, /data-super-easy-overall-gauge><div class="easy-progress"[^>]*aria-valuenow="100"/u);
+});
+
+test('a planning failure is visible with retry and an escape', () => {
+  const html = renderSuperEasyProgress({}, {
+    failure: { message: 'The plan could not be written <again>.', retryable: true },
+  });
+
+  assert.match(html, /data-super-easy-error/u);
+  assert.match(html, /The plan could not be written &lt;again&gt;\./u);
+  assert.match(html, /data-super-easy-retry/u);
+  assert.match(html, /data-super-easy-more-control/u);
+  assert.match(html, /data-super-easy-open-editor/u);
+  assert.doesNotMatch(html, /data-super-easy-done-actions/u);
+  assert.match(html, /The plan could not be written &lt;again&gt;\./u);
+});
+
+test('fraction-only progress updates keep the media, live region and escapes untouched', () => {
+  const first = superEasyProgressParts(audioSnapshot(0.2));
+  const next = superEasyProgressParts(audioSnapshot(0.8));
+  const fake = fakeProgressRoot();
+
+  const keys = updateSuperEasyProgress(fake.root, first.keys, audioSnapshot(0.8));
+
+  assert.deepEqual(keys, first.keys, 'only gauges changed');
+  assert.equal(fake.writes.chrome, 0, 'stage markup is not replaced');
+  assert.equal(fake.writes.gallery, 0, 'the playing sample is not replaced');
+  assert.equal(fake.writes.actions, 0, 'the focused escape is not replaced');
+  assert.equal(fake.writes.live, 0, 'the live region is not replaced');
+  assert.ok(fake.writes.gauges > 0, 'the measured gauges still move');
+  assert.deepEqual(mediaTags(first.html), mediaTags(next.html));
+  assert.ok(mediaTags(first.html).some((tag) => tag.startsWith('<audio')), 'a sample is present');
+});
+
+test('a meaningful stage change updates the persistent live region and chrome only', () => {
+  const before = {
+    plan: { status: 'running', fraction: 0.5 },
+    characters: { status: 'waiting' },
+    voice: { status: 'done', url: '/media/voice.mp3' },
+    render: { status: 'running', fraction: 0.2 },
+  };
+  const after = { ...before, plan: { status: 'done' } };
+  const first = superEasyProgressParts(before);
+  const fake = fakeProgressRoot();
+
+  const keys = updateSuperEasyProgress(fake.root, first.keys, after);
+
+  assert.notDeepEqual(keys, first.keys);
+  assert.equal(fake.writes.chrome, 1);
+  assert.equal(fake.writes.gallery, 0);
+  assert.equal(fake.writes.actions, 0);
+  assert.equal(fake.writes.live, 1);
+  assert.match(fake.live.textContent, /Working:/u);
+});
+
+function keyedGalleryRoot(parts) {
+  let fullWrites = 0;
+  let replaced = 0;
+  const nodes = [];
+
+  function makeNode(html) {
+    const id = /data-super-easy-gallery-item="([^"]*)"/u.exec(html)?.[1] ?? '';
+    const key = /data-gallery-item-key="([^"]*)"/u.exec(html)?.[1] ?? '';
+    let outer = html;
+    const node = {
+      id,
+      key,
+      parent: nodes,
+      get outerHTML() {
+        return outer;
+      },
+      set outerHTML(value) {
+        outer = value;
+        replaced += 1;
+      },
+      getAttribute(name) {
+        if (name === 'data-super-easy-gallery-item') return this.id;
+        if (name === 'data-gallery-item-key') return this.key;
+        return null;
+      },
+      insertAdjacentHTML(position, value) {
+        if (position !== 'beforebegin') throw new Error(`unexpected position ${position}`);
+        const index = this.parent.indexOf(this);
+        if (index < 0) throw new Error('detached anchor');
+        this.parent.splice(index, 0, makeNode(value));
+      },
+      remove() {
+        const index = this.parent.indexOf(this);
+        if (index >= 0) this.parent.splice(index, 1);
+      },
+    };
+    return node;
+  }
+
+  for (const slot of parts.gallerySlots) nodes.push(makeNode(slot.html));
+
+  const gallery = {
+    get innerHTML() {
+      return '';
+    },
+    set innerHTML(_value) {
+      fullWrites += 1;
+    },
+    querySelectorAll(selector) {
+      return selector === '[data-super-easy-gallery-item]' ? nodes.slice() : [];
+    },
+    insertAdjacentHTML(position, value) {
+      if (position !== 'beforeend') throw new Error(`unexpected position ${position}`);
+      nodes.push(makeNode(value));
+    },
+  };
+  const live = { textContent: '', setAttribute() {} };
+  const root = {
+    querySelector(selector) {
+      if (selector === '[data-super-easy-gallery]') return gallery;
+      if (selector === '[data-super-easy-live]') return live;
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+  };
+  return {
+    root,
+    nodes,
+    live,
+    writes: () => ({ fullWrites, replaced }),
+  };
+}
+
+test('a new gallery tile is keyed in place and does not replace a playing sample', () => {
+  const before = {
+    plan: { status: 'done' },
+    characters: { status: 'done' },
+    voice: { status: 'done', url: '/media/voice.mp3' },
+    render: { status: 'running', fraction: 0.2 },
+  };
+  const first = superEasyProgressParts(before);
+  const fake = keyedGalleryRoot(first);
+  const voice = fake.nodes.find((node) => node.id === 'voice:voice-1');
+  const final = fake.nodes.find((node) => node.id === 'final');
+  assert.ok(voice, 'the voice sample exists before the update');
+  assert.match(voice.outerHTML, /<audio\b/u);
+
+  const after = {
+    ...before,
+    shots: [{ id: 'shot_1', status: 'approved', url: '/media/shot-1.png' }],
+  };
+  const keys = updateSuperEasyProgress(fake.root, first.keys, after);
+
+  assert.notEqual(keys.gallery, first.keys.gallery);
+  assert.deepEqual(fake.writes(), { fullWrites: 0, replaced: 0 });
+  assert.equal(fake.nodes.find((node) => node.id === 'voice:voice-1'), voice, 'the playing sample node is kept');
+  assert.equal(fake.nodes.find((node) => node.id === 'final'), final, 'the final tile node is kept');
+  assert.deepEqual(fake.nodes.map((node) => node.id), ['character:character-1', 'shot:shot_1', 'voice:voice-1', 'final']);
+  assert.match(voice.outerHTML, /<audio\b/u);
 });

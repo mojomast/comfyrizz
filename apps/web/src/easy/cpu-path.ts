@@ -108,9 +108,45 @@ export interface RunCpuGenerateOptions {
   clearTimer?: (handle: TimerHandle) => void;
 }
 
+export interface CpuPreviewArtifact {
+  kind: 'preview';
+  compiledSequence: number | null;
+  editSequence: number | null;
+  playable: true;
+}
+
+/**
+ * A This-computer run hands off a playable preview, not a finished MP4. The
+ * caller keeps those states separate: `previewReady` is measured from the
+ * editor's derived timeline, while `finalReady` stays false until a watched
+ * delivery provides an actual playable URL.
+ */
 export type CpuGenerateResult =
-  | { ok: true; step: 'review' }
-  | { ok: false; code: 'not-cpu' | 'timeout' | 'refresh-failed'; message: string | null };
+  | {
+      ok: true;
+      step: 'review';
+      previewReady: true;
+      finalReady: false;
+      artifact: CpuPreviewArtifact;
+    }
+  | {
+      ok: false;
+      code: 'not-cpu' | 'timeout' | 'refresh-failed';
+      message: string | null;
+      /** The same screen can safely offer Try again for a transient failure. */
+      retryable: boolean;
+    };
+
+function previewArtifactOf(snapshot: CpuEditorSnapshot | null | undefined): CpuPreviewArtifact {
+  const compiled = snapshot?.derived?.compiledSequence;
+  const edited = snapshot?.doc?.editSequence;
+  return {
+    kind: 'preview',
+    compiledSequence: typeof compiled === 'number' ? compiled : null,
+    editSequence: typeof edited === 'number' ? edited : null,
+    playable: true,
+  };
+}
 
 /** A preview is compiled when the derived timeline exists and is not stale. */
 export function isPreviewCompiled(snapshot: CpuEditorSnapshot | null | undefined): boolean {
@@ -184,7 +220,9 @@ export async function runCpuGenerate(options: RunCpuGenerateOptions): Promise<Cp
     clearTimer = (handle) => clearTimeout(handle),
   } = options;
 
-  if (store.get().compute !== 'cpu') return { ok: false, code: 'not-cpu', message: null };
+  if (store.get().compute !== 'cpu') {
+    return { ok: false, code: 'not-cpu', message: null, retryable: false };
+  }
 
   store.patch({ generate: { status: 'running' } });
   host.rerender?.();
@@ -195,18 +233,24 @@ export async function runCpuGenerate(options: RunCpuGenerateOptions): Promise<Cp
     const message = error instanceof Error ? error.message : String(error);
     store.patch({ generate: { status: 'error' } });
     host.announce?.(message);
-    return { ok: false, code: 'refresh-failed', message };
+    return { ok: false, code: 'refresh-failed', message, retryable: true };
   }
 
   const compiled = await waitForCompiledPreview(host.editorStore, timeoutMs, pollMs, setTimer, clearTimer);
   if (!compiled) {
     store.patch({ generate: { status: 'error' } });
     host.announce?.(COPY.errors.cpuTimeout);
-    return { ok: false, code: 'timeout', message: COPY.errors.cpuTimeout };
+    return { ok: false, code: 'timeout', message: COPY.errors.cpuTimeout, retryable: true };
   }
 
   store.patch({ generate: { status: 'done' } });
   host.announce?.(COPY.generate.cpuReady);
   go('review');
-  return { ok: true, step: 'review' };
+  return {
+    ok: true,
+    step: 'review',
+    previewReady: true,
+    finalReady: false,
+    artifact: previewArtifactOf(host.editorStore.getState()),
+  };
 }

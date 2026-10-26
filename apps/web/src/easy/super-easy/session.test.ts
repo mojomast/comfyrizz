@@ -97,6 +97,7 @@ function harness(options = {}) {
   const views = [];
   const errors = [];
   const dones = [];
+  const previews = [];
   let watchOptions = null;
   let stopCalls = 0;
 
@@ -138,6 +139,9 @@ function harness(options = {}) {
     onError(result) {
       errors.push(result);
     },
+    onPreviewReady(result) {
+      previews.push(result);
+    },
   });
 
   return {
@@ -147,6 +151,7 @@ function harness(options = {}) {
     views,
     errors,
     dones,
+    previews,
     watchOptions: () => watchOptions,
     stopCalls: () => stopCalls,
   };
@@ -256,4 +261,72 @@ test('a failed run reports the error and never starts a watch', async () => {
   assert.equal(h.calls.some((call) => call.kind === 'watch'), false);
   assert.equal(h.store.state.generate.status, 'error');
   assert.deepEqual(h.errors, [failure]);
+});
+
+// UX06: preview-ready is separate from the finished MP4, and failures stay on
+// the progress screen with a retry path.
+
+test('a compiled CPU preview is preview-ready while the MP4 is still unfinished', async () => {
+  const preview = {
+    ok: true,
+    productionId: PRODUCTION_ID,
+    draftCommand: { kind: 'iteration.set' },
+    snapshot: { plan: { status: 'done' } },
+    cpu: { ok: true, step: 'review', previewReady: true, finalReady: false },
+  };
+  const h = harness({ runResult: preview });
+
+  await h.session.generate({ prompt: 'A friendly robot who bakes bread', compute: 'cpu' });
+
+  assert.equal(h.session.status(), 'running', 'the finished MP4 is still being watched');
+  assert.equal(h.session.previewReady(), true);
+  assert.equal(h.previews.length, 1);
+  assert.match(h.session.progressHtml(), /data-super-easy-preview-ready/u);
+  assert.match(h.session.progressHtml(), /data-super-easy-review/u);
+  assert.doesNotMatch(h.session.progressHtml(), /data-super-easy-done-actions/u);
+});
+
+test('a delivery id without a playable URL never marks the run done', async () => {
+  const h = harness();
+  await h.session.generate({ prompt: 'A friendly robot who bakes bread' });
+  h.watchOptions().onState(partialSnapshot());
+
+  const deliveryOnly = finalSnapshot();
+  delete deliveryOnly.finalVideo;
+  deliveryOnly.production.deliveries = [{ id: 'del_1', status: 'ready' }];
+  h.watchOptions().onState(deliveryOnly);
+
+  assert.equal(h.session.status(), 'running');
+  assert.doesNotMatch(h.session.progressHtml(), /data-super-easy-done-actions/u);
+
+  h.watchOptions().onState(finalSnapshot());
+  assert.equal(h.session.status(), 'done');
+  assert.match(h.session.progressHtml(), /data-super-easy-done-actions/u);
+});
+
+test('a planning failure is visible on the progress screen and can be retried', async () => {
+  const failure = {
+    ok: false,
+    code: 'PLAN_FAILED',
+    stage: 'plan',
+    message: 'The plan could not be written.',
+  };
+  const h = harness({ runResult: failure });
+
+  await h.session.generate({ prompt: 'A friendly robot who bakes bread', compute: 'cpu' });
+
+  assert.equal(h.session.status(), 'error');
+  assert.equal(h.errors.length, 1);
+  const html = h.session.progressHtml();
+  assert.match(html, /data-super-easy-error/u);
+  assert.match(html, /The plan could not be written\./u);
+  assert.match(html, /data-super-easy-retry/u);
+  assert.match(html, /data-super-easy-more-control/u);
+  assert.match(html, /data-super-easy-open-editor/u);
+
+  const before = h.calls.filter((call) => call.kind === 'run').length;
+  const retried = await h.session.retry();
+  assert.equal(retried, failure);
+  assert.equal(h.calls.filter((call) => call.kind === 'run').length, before + 1);
+  assert.equal(h.session.status(), 'error');
 });

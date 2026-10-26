@@ -265,6 +265,161 @@ test('destroy unbinds the handoff, the form and the store subscription', () => {
   assert.equal(root.dataset.superEasyView, undefined);
 });
 
+function stableProgressRoot() {
+  const writes = { innerHTML: 0, chrome: 0, gallery: 0, actions: 0, live: 0, gauges: 0 };
+  const listeners = new Map();
+  let html = '';
+  let rendered = false;
+  let liveText = '';
+  const region = (kind) => {
+    let value = '';
+    return {
+      get innerHTML() {
+        return value;
+      },
+      set innerHTML(next) {
+        value = next;
+        writes[kind] += 1;
+      },
+    };
+  };
+  const gauges = ['plan', 'characters', 'shots', 'voice', 'render'].map((id) => {
+    let value = '';
+    return {
+      get innerHTML() {
+        return value;
+      },
+      set innerHTML(next) {
+        value = next;
+        writes.gauges += 1;
+      },
+      getAttribute(name) {
+        return name === 'data-stage-id' ? id : null;
+      },
+    };
+  });
+  const live = {
+    get textContent() {
+      return liveText;
+    },
+    set textContent(value) {
+      liveText = value;
+      writes.live += 1;
+    },
+    setAttribute() {},
+  };
+  const nodes = new Map([
+    ['[data-super-easy-chrome]', region('chrome')],
+    ['[data-super-easy-gallery]', region('gallery')],
+    ['[data-super-easy-actions]', region('actions')],
+    ['[data-super-easy-live]', live],
+    ['[data-super-easy-overall-value]', { textContent: '' }],
+    ['[data-super-easy-overall-gauge]', region('gauges')],
+  ]);
+  const root = {
+    dataset: {},
+    get innerHTML() {
+      return html;
+    },
+    set innerHTML(value) {
+      html = value;
+      writes.innerHTML += 1;
+      rendered = true;
+    },
+    querySelector(selector) {
+      if (!rendered) return null;
+      return nodes.get(selector) ?? null;
+    },
+    querySelectorAll(selector) {
+      return selector === '[data-super-easy-stage-gauge]' ? gauges : [];
+    },
+    addEventListener(type, handler) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type).add(handler);
+    },
+    removeEventListener(type, handler) {
+      listeners.get(type)?.delete(handler);
+    },
+  };
+  return { root, writes };
+}
+
+test('frequent progress repaints leave the playing sample, live region and escapes in place', () => {
+  const { root, writes } = stableProgressRoot();
+  const snapshot = {
+    plan: { status: 'done' },
+    characters: { status: 'done' },
+    shots: [{ status: 'approved' }],
+    voice: { status: 'done', url: '/media/voice.mp3' },
+    render: { status: 'running', fraction: 0.2 },
+  };
+  const handle = mountSuperEasy({
+    root,
+    state: () => state({ productionId: 'prod_0123456789abcdef01234567', generate: { status: 'running' } }),
+    snapshot: () => snapshot,
+    onMoreControl: () => {},
+  });
+
+  assert.equal(writes.innerHTML, 1, 'the first paint mounts the whole screen');
+  assert.equal(writes.gallery, 0);
+
+  for (const fraction of [0.4, 0.6, 0.8]) {
+    snapshot.render.fraction = fraction;
+    handle.render();
+  }
+
+  assert.equal(writes.innerHTML, 1, 'no full replacement for fraction-only events');
+  assert.equal(writes.chrome, 0, 'stage markup stays in place');
+  assert.equal(writes.gallery, 0, 'a playing sample is not replaced');
+  assert.equal(writes.actions, 0, 'a focused escape is not replaced');
+  assert.equal(writes.live, 0, 'the live region keeps the same sentence');
+  assert.ok(writes.gauges > 0, 'the measured gauges still move');
+  handle.destroy();
+});
+
+test('the preview and failure handoffs are clickable escapes', () => {
+  const { root } = fakeRoot();
+  const reviews = [];
+  const retries = [];
+  const handle = mountSuperEasy({
+    root,
+    state: () => state({ packageId: 'pkg_1', productionId: 'prod_0123456789abcdef01234567', generate: { status: 'running' } }),
+    snapshot: () => ({ plan: { status: 'done' }, render: { status: 'running', fraction: 0.2 } }),
+    previewReady: () => true,
+    failure: () => null,
+    onReview: (packageId) => reviews.push(packageId),
+    onRetry: () => retries.push(true),
+    onMoreControl: () => {},
+  });
+
+  assert.match(root.innerHTML, /data-super-easy-review/u);
+  root.fire('click', {
+    target: clickTarget('[data-super-easy-review]'),
+    preventDefault() {},
+  });
+  assert.deepEqual(reviews, ['pkg_1']);
+  assert.deepEqual(retries, []);
+  handle.destroy();
+
+  const failed = fakeRoot();
+  const retryHandle = mountSuperEasy({
+    root: failed.root,
+    state: () => state({ productionId: 'prod_0123456789abcdef01234567', generate: { status: 'running' } }),
+    snapshot: () => null,
+    failure: () => ({ message: 'The plan could not be written.', retryable: true }),
+    onRetry: () => retries.push(true),
+    onMoreControl: () => {},
+  });
+
+  assert.match(failed.root.innerHTML, /data-super-easy-error/u);
+  failed.root.fire('click', {
+    target: clickTarget('[data-super-easy-retry]'),
+    preventDefault() {},
+  });
+  assert.deepEqual(retries, [true]);
+  retryHandle.destroy();
+});
+
 test('Easy delegates first paint to Super Easy and releases the player first', () => {
   const easy = readFileSync(EASY_MOUNT, 'utf8');
   const superEasy = readFileSync(SUPER_EASY_MOUNT, 'utf8');

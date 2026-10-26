@@ -14,8 +14,7 @@ import type {
   SuperEasyRunFailure,
   SuperEasyRunResult,
 } from './run.ts';
-import { renderSuperEasyProgress } from './progress-view.ts';
-import { readStages } from './stages.ts';
+import { hasFinalArtifact, renderSuperEasyProgress } from './progress-view.ts';
 import { buildGalleryModel } from './gallery-model.ts';
 import type { EasyState } from '../types.ts';
 
@@ -32,18 +31,28 @@ export interface SuperEasySessionOptions extends RunSuperEasyDeps {
   onProgress?(html: string, snapshot: unknown): void;
   onDone?(snapshot: unknown): void;
   onError?(failure: SuperEasyRunFailure): void;
+  /** A playable This-computer preview exists before the watched MP4 does. */
+  onPreviewReady?(result: SuperEasyRunResult, snapshot: unknown): void;
 }
 
 export interface SuperEasySession {
   generate(input: RunSuperEasyInput): Promise<SuperEasyRunResult>;
+  /** Re-run the last prompt after a visible planning or preview failure. */
+  retry(): Promise<SuperEasyRunResult | null>;
   stop(): void;
   status(): EasyState['generate']['status'];
   snapshot(): unknown;
+  previewReady(): boolean;
+  failure(): SuperEasyRunFailure | null;
   progressHtml(): string;
 }
 
-function isFinalReady(state: unknown): boolean {
-  return readStages(state).finalReady || buildGalleryModel(state).final.state === 'ready';
+function wasPreviewReady(result: SuperEasyRunResult): boolean {
+  if (result.ok !== true) return false;
+  const direct = (result as { previewReady?: unknown }).previewReady;
+  if (direct === true) return true;
+  const cpu = (result as { cpu?: { previewReady?: unknown } }).cpu;
+  return cpu?.previewReady === true;
 }
 
 export function createSuperEasySession(options: SuperEasySessionOptions): SuperEasySession {
@@ -54,6 +63,9 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let snapshot: unknown = null;
   let watchStop: (() => void) | null = null;
   let stopped = false;
+  let preview = false;
+  let failure: SuperEasyRunFailure | null = null;
+  let lastInput: RunSuperEasyInput | null = null;
 
   function patchStatus(next: EasyState['generate']['status']): void {
     status = next;
@@ -61,10 +73,13 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   }
 
   function progressHtml(): string {
-    return renderSuperEasyProgress(
-      snapshot,
-      options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion },
-    );
+    return renderSuperEasyProgress(snapshot, {
+      ...(options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion }),
+      previewReady: preview,
+      ...(failure === null
+        ? {}
+        : { failure: { message: failure.message, retryable: true } }),
+    });
   }
 
   function publish(): void {
@@ -82,7 +97,9 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   function onState(state: ProductionWatchState): void {
     if (stopped || status === 'done') return;
     snapshot = state;
-    if (isFinalReady(state)) {
+    // Only a playable URL counts as the finished video; a delivery id does not.
+    if (hasFinalArtifact(buildGalleryModel(state))) {
+      preview = false;
       patchStatus('done');
       publish();
       cancelWatch();
@@ -97,20 +114,21 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       throw new Error(RUN_ALREADY_STARTED);
     }
 
+    const nextInput: RunSuperEasyInput = {
+      prompt: input.prompt,
+      compute: input.compute ?? 'cpu',
+      ...(input.cpu === undefined ? {} : { cpu: input.cpu }),
+    };
+    lastInput = nextInput;
     stopped = false;
+    preview = false;
+    failure = null;
     cancelWatch();
     snapshot = null;
     patchStatus('running');
     publish();
 
-    const result = await run(
-      {
-        prompt: input.prompt,
-        compute: input.compute ?? 'cpu',
-        ...(input.cpu === undefined ? {} : { cpu: input.cpu }),
-      },
-      options,
-    );
+    const result = await run(nextInput, options);
 
     if (stopped) {
       patchStatus('stopped');
@@ -118,17 +136,20 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     }
 
     if (result.ok === false) {
+      failure = result;
       patchStatus('error');
       publish();
       options.onError?.(result);
       return result;
     }
 
-    // The run may have marked its own local preview done, but the video is not
-    // done until the watched production delivers it.
-    patchStatus('running');
+    // A local preview is useful immediately, but the video is not done until
+    // the watched production delivers a playable artifact.
+    preview = wasPreviewReady(result);
     snapshot = result.snapshot;
+    patchStatus('running');
     publish();
+    if (preview) options.onPreviewReady?.(result, result.snapshot);
 
     watchStop = watch({
       productionId: result.productionId,
@@ -136,6 +157,11 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     });
     if (stopped || status === 'done') cancelWatch();
     return result;
+  }
+
+  async function retry(): Promise<SuperEasyRunResult | null> {
+    if (status !== 'error' || lastInput === null) return null;
+    return generate(lastInput);
   }
 
   function stop(): void {
@@ -152,9 +178,12 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
   return {
     generate,
+    retry,
     stop,
     status: () => status,
     snapshot: () => snapshot,
+    previewReady: () => preview,
+    failure: () => failure,
     progressHtml,
   };
 }
