@@ -28,10 +28,67 @@ export interface ProductionEvent {
   [key: string]: unknown;
 }
 
+export interface ProductionPlan {
+  id?: string;
+  planHash?: string;
+  revision?: number;
+  approval?: { status?: string; planId?: string; planHash?: string };
+  [key: string]: unknown;
+}
+
+export interface ProductionActionRecord {
+  id: string;
+  state?: string;
+  [key: string]: unknown;
+}
+
+export interface ProductionDecisionRecord {
+  id: string;
+  status?: string;
+  [key: string]: unknown;
+}
+
+export interface ProductionErrorRecord {
+  source?: string;
+  actionId?: string | null;
+  code?: string | null;
+  message?: string | null;
+  at?: string | null;
+  sequence?: number;
+  [key: string]: unknown;
+}
+
+export interface ProductionExecution {
+  status: 'unknown' | 'active' | 'reconcile' | 'attention' | 'terminal';
+  evidence?: string;
+  lastSequence?: number;
+  activeActionIds: string[];
+  reconcileActionIds: string[];
+  failedActionIds: string[];
+  terminalActionIds: string[];
+  reconcileRequired?: boolean;
+}
+
+export interface ProductionRecoveryAction {
+  id: string;
+  reason?: string;
+}
+
+export interface ProductionRecovery {
+  actions: ProductionRecoveryAction[];
+}
+
 export interface ProductionSnapshot {
   production: ProductionRecord;
   revision: number;
   lastSequence: number;
+  epoch?: string | null;
+  plan?: ProductionPlan | null;
+  actions?: ProductionActionRecord[];
+  decisions?: ProductionDecisionRecord[];
+  errors?: ProductionErrorRecord[];
+  execution?: ProductionExecution | null;
+  recovery?: ProductionRecovery | null;
   pendingDecisions?: unknown[];
   pendingActions?: unknown[];
 }
@@ -41,6 +98,8 @@ export interface ProductionEventBatch {
   after?: number;
   lastSequence?: number;
   nextAfter?: number;
+  epoch?: string | null;
+  expired?: boolean;
   reset?: boolean;
   snapshot?: ProductionSnapshot;
   events?: ProductionEvent[];
@@ -54,6 +113,20 @@ export interface ProductionState {
   lastSequence: number;
   /** The newest sequence the server has declared, which may be ahead. */
   targetSequence: number;
+  /** The journal generation this state was hydrated from, when the server says. */
+  epoch: string | null;
+  /** The current plan projection, or null when none has been committed. */
+  plan: ProductionPlan | null;
+  /** Every action's latest committed state, not a browser-owned spinner. */
+  actions: ProductionActionRecord[];
+  /** Every decision the committed journal can still describe. */
+  decisions: ProductionDecisionRecord[];
+  /** Structured failures recorded by the production or its actions. */
+  errors: ProductionErrorRecord[];
+  /** Server-owned execution summary; `unknown` is never rounded to done. */
+  execution: ProductionExecution | null;
+  /** Recovery actions derived by the server from committed state. */
+  recovery: ProductionRecovery | null;
   /**
    * Journal entries learned while this client has been running, oldest first.
    * It starts anew on a reset. A plain snapshot can jump the baseline, so this
@@ -68,6 +141,12 @@ export interface ProductionState {
   gap: boolean;
   /** True while a gap remains or the server declares more than we have. */
   stale: boolean;
+  /** The server's journal generation changed; refetch before applying events. */
+  epochChanged: boolean;
+  /** The requested cursor could not be served; the state is not authoritative. */
+  replayExpired: boolean;
+  /** The last non-reset batch contained no events; this never implies completion. */
+  lastReplayEmpty: boolean;
 }
 
 export interface ProductionSnapshotOptions {
@@ -217,6 +296,13 @@ interface NormalizedSnapshot {
   production: ProductionRecord;
   revision: number;
   lastSequence: number;
+  epoch?: string | null;
+  plan?: ProductionPlan | null;
+  actions?: ProductionActionRecord[];
+  decisions?: ProductionDecisionRecord[];
+  errors?: ProductionErrorRecord[];
+  execution?: ProductionExecution | null;
+  recovery?: ProductionRecovery | null;
   pendingDecisions?: unknown[];
   pendingActions?: unknown[];
 }
@@ -271,6 +357,27 @@ function eventIn(events: ProductionEvent[], candidate: ProductionEvent): boolean
     || (id !== null && eventIdentity(event) === id));
 }
 
+function readEpoch(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function isExecution(value: unknown): value is ProductionExecution {
+  return isPlainObject(value)
+    && typeof value.status === 'string'
+    && Array.isArray(value.activeActionIds)
+    && Array.isArray(value.reconcileActionIds)
+    && Array.isArray(value.failedActionIds)
+    && Array.isArray(value.terminalActionIds);
+}
+
+function isRecovery(value: unknown): value is ProductionRecovery {
+  return isPlainObject(value)
+    && Array.isArray(value.actions)
+    && value.actions.every((action) => isPlainObject(action) && typeof action.id === 'string');
+}
+
 function normalizeSnapshot(raw: unknown): NormalizedSnapshot | null {
   // The only accepted snapshot shape is IP19's snapshot body. A bare
   // production document (`raw.id`/`raw.revision`) is not a snapshot.
@@ -285,6 +392,34 @@ function normalizeSnapshot(raw: unknown): NormalizedSnapshot | null {
     revision: raw.revision,
     lastSequence: raw.lastSequence,
   };
+  const epoch = readEpoch(raw.epoch);
+  if (epoch !== undefined) normalized.epoch = epoch;
+  if (Object.prototype.hasOwnProperty.call(raw, 'plan')) {
+    normalized.plan = raw.plan === null || isPlainObject(raw.plan)
+      ? cloneJson(raw.plan as ProductionPlan | null)
+      : null;
+  }
+  if (Array.isArray(raw.actions)) {
+    normalized.actions = raw.actions
+      .filter((action) => isPlainObject(action) && typeof action.id === 'string')
+      .map((action) => cloneJson(action) as ProductionActionRecord);
+  }
+  if (Array.isArray(raw.decisions)) {
+    normalized.decisions = raw.decisions
+      .filter((decision) => isPlainObject(decision) && typeof decision.id === 'string')
+      .map((decision) => cloneJson(decision) as ProductionDecisionRecord);
+  }
+  if (Array.isArray(raw.errors)) {
+    normalized.errors = raw.errors
+      .filter(isPlainObject)
+      .map((error) => cloneJson(error) as ProductionErrorRecord);
+  }
+  if (Object.prototype.hasOwnProperty.call(raw, 'execution')) {
+    normalized.execution = isExecution(raw.execution) ? cloneJson(raw.execution) : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(raw, 'recovery')) {
+    normalized.recovery = isRecovery(raw.recovery) ? cloneJson(raw.recovery) : null;
+  }
   if (Array.isArray(raw.pendingDecisions)) {
     normalized.pendingDecisions = cloneJson(raw.pendingDecisions);
   }
@@ -362,12 +497,22 @@ export function createProductionState(productionId: string | null = null): Produ
     revision: 0,
     lastSequence: 0,
     targetSequence: 0,
+    epoch: null,
+    plan: null,
+    actions: [],
+    decisions: [],
+    errors: [],
+    execution: null,
+    recovery: null,
     events: [],
     pendingEvents: [],
     pendingDecisions: [],
     pendingActions: [],
     gap: false,
     stale: false,
+    epochChanged: false,
+    replayExpired: false,
+    lastReplayEmpty: false,
   };
 }
 
@@ -389,10 +534,16 @@ export function applySnapshotToState(
   const normalized = normalizeSnapshot(snapshot);
   if (!normalized) return base;
 
-  const reset = readReset(options);
   if (base.productionId !== null && normalized.production.id !== base.productionId) {
     return base;
   }
+
+  const snapshotEpoch = normalized.epoch;
+  const epochChanged = snapshotEpoch !== undefined
+    && snapshotEpoch !== null
+    && base.epoch !== null
+    && snapshotEpoch !== base.epoch;
+  const reset = readReset(options) || epochChanged;
 
   if (!reset) {
     if (normalized.revision < base.revision) return base;
@@ -407,6 +558,27 @@ export function applySnapshotToState(
   const pendingActions = normalized.pendingActions !== undefined
     ? normalized.pendingActions
     : (reset ? [] : base.pendingActions);
+  const plan = normalized.plan !== undefined
+    ? normalized.plan
+    : (reset ? null : base.plan);
+  const actions = normalized.actions !== undefined
+    ? normalized.actions
+    : (reset ? [] : base.actions);
+  const decisions = normalized.decisions !== undefined
+    ? normalized.decisions
+    : (reset ? [] : base.decisions);
+  const errors = normalized.errors !== undefined
+    ? normalized.errors
+    : (reset ? [] : base.errors);
+  const execution = normalized.execution !== undefined
+    ? normalized.execution
+    : (reset ? null : base.execution);
+  const recovery = normalized.recovery !== undefined
+    ? normalized.recovery
+    : (reset ? null : base.recovery);
+  const epoch = snapshotEpoch !== undefined
+    ? snapshotEpoch
+    : (base.epoch);
 
   const next: ProductionState = {
     ...base,
@@ -415,6 +587,13 @@ export function applySnapshotToState(
     revision: normalized.revision,
     lastSequence: normalized.lastSequence,
     targetSequence: normalized.lastSequence,
+    epoch,
+    plan,
+    actions,
+    decisions,
+    errors,
+    execution,
+    recovery,
     // A reset starts a new journal. A plain snapshot keeps what was learned
     // before, but entries beyond the new baseline are no longer trustworthy.
     events: reset
@@ -425,6 +604,9 @@ export function applySnapshotToState(
     pendingActions,
     gap: false,
     stale: false,
+    epochChanged: false,
+    replayExpired: false,
+    lastReplayEmpty: false,
   };
 
   return reconcile(next);
@@ -506,11 +688,57 @@ export function applyEventBatchToState(
     && batch.productionId !== base.productionId) {
     return base;
   }
-  if (batch.reset === true) {
-    return applySnapshotToState(base, batch.snapshot, { reset: true });
+
+  const batchEpoch = typeof batch.epoch === 'string' && batch.epoch !== '' ? batch.epoch : undefined;
+  const epochChanged = batchEpoch !== undefined && base.epoch !== null && batchEpoch !== base.epoch;
+  const snapshot = isPlainObject(batch.snapshot)
+    ? { ...(batchEpoch === undefined ? {} : { epoch: batchEpoch }), ...batch.snapshot }
+    : batch.snapshot;
+
+  if (batch.reset === true || (epochChanged && isPlainObject(snapshot))) {
+    if (isPlainObject(snapshot)) {
+      return applySnapshotToState(base, snapshot, { reset: true });
+    }
+    return {
+      ...base,
+      epochChanged,
+      replayExpired: true,
+      stale: true,
+      gap: true,
+      lastReplayEmpty: false,
+    };
   }
+
+  if (epochChanged) {
+    return {
+      ...base,
+      epochChanged: true,
+      replayExpired: true,
+      stale: true,
+      gap: true,
+      lastReplayEmpty: false,
+    };
+  }
+
+  if (batch.expired === true) {
+    return {
+      ...base,
+      replayExpired: true,
+      stale: true,
+      gap: true,
+      lastReplayEmpty: false,
+    };
+  }
+
   const declared = isSequence(batch.lastSequence) ? batch.lastSequence : undefined;
-  return ingestProductionEvents(base, batch.events, declared);
+  const rawEvents = Array.isArray(batch.events) ? batch.events : [];
+  const next = ingestProductionEvents(base, rawEvents, declared);
+  if (next === base) return base;
+  return {
+    ...next,
+    ...(batchEpoch === undefined || next.epoch !== null ? {} : { epoch: batchEpoch }),
+    lastReplayEmpty: rawEvents.length === 0,
+  };
 }
 
 function readResponseStatus(response: unknown): number {
@@ -880,7 +1108,8 @@ export function createProductionClient(options: ProductionClientOptions): Produc
 
   async function pullEvents(requestOptions: { signal?: AbortSignal } = {}): Promise<ProductionState> {
     const after = state.lastSequence;
-    const body = await request(`${root}/events?after=${after}`, {
+    const epoch = state.epoch === null ? '' : `&epoch=${encodeURIComponent(state.epoch)}`;
+    const body = await request(`${root}/events?after=${after}${epoch}`, {
       method: 'GET',
       headers: { accept: 'application/json' },
       ...(requestOptions.signal === undefined ? {} : { signal: requestOptions.signal }),
@@ -918,6 +1147,13 @@ export function createProductionClient(options: ProductionClientOptions): Produc
           production: body.production,
           revision: body.revision,
           lastSequence: body.lastSequence,
+          ...(body.epoch === undefined ? {} : { epoch: body.epoch }),
+          ...(Object.prototype.hasOwnProperty.call(body, 'plan') ? { plan: body.plan } : {}),
+          ...(Array.isArray(body.actions) ? { actions: body.actions } : {}),
+          ...(Array.isArray(body.decisions) ? { decisions: body.decisions } : {}),
+          ...(Array.isArray(body.errors) ? { errors: body.errors } : {}),
+          ...(body.execution === undefined ? {} : { execution: body.execution }),
+          ...(body.recovery === undefined ? {} : { recovery: body.recovery }),
           ...(Array.isArray(body.pendingDecisions) ? { pendingDecisions: body.pendingDecisions } : {}),
           ...(Array.isArray(body.pendingActions) ? { pendingActions: body.pendingActions } : {}),
         });

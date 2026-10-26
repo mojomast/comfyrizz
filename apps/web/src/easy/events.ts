@@ -4,8 +4,63 @@ import {
 } from '../productions/client.ts';
 import type {
   ProductionApiFetch,
+  ProductionRecoveryAction,
   ProductionState,
 } from '../productions/client.ts';
+
+export const RECOVERY_ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  reconnect: 'Reconnect',
+  retry_download: 'Retry download',
+  reconcile_shutdown: 'Reconcile shutdown',
+  new_generation: 'Start a new generation',
+});
+
+export interface RecoveryChoice extends ProductionRecoveryAction {
+  label: string;
+}
+
+export interface RecoveryActionsOptions {
+  error?: unknown;
+}
+
+function recoveryChoice(action: ProductionRecoveryAction): RecoveryChoice {
+  return {
+    ...action,
+    label: RECOVERY_ACTION_LABELS[action.id] ?? action.id,
+  };
+}
+
+/**
+ * Recovery choices a caller can render. The server's committed recovery
+ * actions come first; reconnect is added only when the transport or cursor is
+ * actually unhealthy, so a healthy poll does not show a misleading button.
+ */
+export function recoveryActions(
+  state: ProductionState,
+  options: RecoveryActionsOptions = {},
+): RecoveryChoice[] {
+  const actions: RecoveryChoice[] = [];
+  const seen = new Set<string>();
+  const declared = Array.isArray(state.recovery?.actions) ? state.recovery.actions : [];
+  for (const action of declared) {
+    if (typeof action?.id !== 'string' || action.id === '' || seen.has(action.id)) continue;
+    seen.add(action.id);
+    actions.push(recoveryChoice(action));
+  }
+
+  const stateError = (state as ProductionState & { error?: unknown }).error;
+  const transportUnhealthy = options.error !== undefined
+    || (stateError !== undefined && stateError !== null)
+    || state.stale
+    || state.gap
+    || state.epochChanged
+    || state.replayExpired;
+  if (transportUnhealthy && !seen.has('reconnect')) {
+    seen.add('reconnect');
+    actions.push(recoveryChoice({ id: 'reconnect', reason: 'the production state is not authoritative' }));
+  }
+  return actions;
+}
 
 const DEFAULT_INTERVAL_MS = 2000;
 const HIDDEN_INTERVAL_MS = 10000;
