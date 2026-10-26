@@ -8,6 +8,23 @@ import { COPY, fill } from '../copy.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
 import { loadSyncnetBanner } from '../syncnet-notice.ts';
 import { defaultEasyState } from '../store.ts';
+import {
+  corruptExportArtifactNotice,
+  createExportArtifactRecord,
+  exportStorageWarning,
+  loadExportArtifact,
+  renderDeliveryFacts,
+  renderExportArtifactRecovery,
+  renderExportArtifactWarning,
+  resolveSavedExport,
+  saveExportArtifact,
+} from '../export-artifacts.ts';
+import type {
+  ExportArtifactRecord,
+  ExportArtifactState,
+  ExportArtifactStorage,
+  ResolveExportArtifact,
+} from '../export-artifacts.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
 
 const WORKING_STEP = 10;
@@ -22,7 +39,14 @@ export interface ExportQa {
   items?: string[];
 }
 
+export interface ExportArtifactView {
+  record?: ExportArtifactRecord | null;
+  warning?: string;
+  recovery?: { state: ExportArtifactState; message: string } | null;
+}
+
 export interface ExportDoneOptions {
+  artifact?: ExportArtifactView | null;
   name?: string;
   title?: string;
   videoName?: string;
@@ -326,13 +350,22 @@ export function renderExportDone(input: ExportDoneOptions | string | null = {}):
   const track = parts.narration
     ? `<track kind="captions"${parts.captionsUrl ? ` src="${escapeHtml(parts.captionsUrl)}"` : ''} srclang="en" label="English" default />`
     : '';
+  const artifact = options.artifact ?? {};
+  const savedRecord = artifact.record ?? null;
   const download = parts.blobUrl
     ? `<a class="btn btn-primary" download="${escapeHtml(parts.fileName)}" href="${escapeHtml(parts.blobUrl)}" data-easy-export-download>${escapeHtml(COPY.export.download)}</a>`
-    : `<button type="button" class="btn btn-primary" data-easy-export-again>${escapeHtml(COPY.export.again)}</button>`;
+    : (savedRecord
+      ? `<button type="button" class="btn btn-primary" data-easy-export-download>${escapeHtml(COPY.export.download)}</button>`
+      : `<button type="button" class="btn btn-primary" data-easy-export-again>${escapeHtml(COPY.export.again)}</button>`);
   const colab = parts.colabStopped
     ? `<p class="easy-export-colab" data-easy-export-colab>${escapeHtml(COPY.colab.stopped)}</p>`
     : '';
   const stale = parts.stale ? renderExportStale() : '';
+  const warning = artifact.warning ? renderExportArtifactWarning(artifact.warning) : '';
+  const recovery = artifact.recovery
+    ? renderExportArtifactRecovery(artifact.recovery.state, artifact.recovery.message)
+    : '';
+  const facts = renderDeliveryFacts(savedRecord);
   return `<section class="easy-export-done" data-easy-export-done>
 <h2 class="easy-export-heading" tabindex="-1">${escapeHtml(COPY.export.doneHeading)}</h2>
 <figure class="easy-export-player">
@@ -343,6 +376,9 @@ export function renderExportDone(input: ExportDoneOptions | string | null = {}):
 ${download}
 <button type="button" class="btn btn-secondary" data-easy-export-extras>${escapeHtml(COPY.export.extras)}</button>
 </div>
+${warning}
+${recovery}
+${facts}
 ${renderQa(parts.qa)}
 ${colab}
 ${stale}
@@ -480,6 +516,9 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
   let currentQa: ExportQa | null = null;
   let bundleCaptions: string | null = null;
   let currentRun = 0;
+  let artifactRecord: ExportArtifactRecord | null = null;
+  let artifactWarning = '';
+  let recovery: { state: ExportArtifactState; message: string } | null = null;
 
   function stopTimer(): void {
     if (timer !== null) {
@@ -503,6 +542,16 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     }
   }
 
+  function artifactStorage(): ExportArtifactStorage | undefined {
+    const host = ctx.host as unknown as { exportArtifactStorage?: ExportArtifactStorage };
+    return host.exportArtifactStorage;
+  }
+
+  function artifactResolver(): ResolveExportArtifact | undefined {
+    const host = ctx.host as unknown as { resolveExportArtifact?: ResolveExportArtifact };
+    return host.resolveExportArtifact;
+  }
+
   function cachedExportForCurrent(): CachedExport | null {
     const state = ctx.store.get();
     const pkg = currentPackage();
@@ -518,11 +567,16 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
       pkg,
       state,
       blobUrl: blobUrl ?? '',
-      sizeBytes: blob?.size ?? 0,
+      sizeBytes: blob?.size ?? artifactRecord?.files.find((file) => file.name === 'video.mp4')?.bytes,
       qa: currentQa,
       captionsUrl: bundleCaptions,
       colabStopped: state.compute === 'colab' && (state.generate.status === 'done' || state.generate.status === 'stopped'),
       exportedRevision: state.exported.revision,
+      artifact: {
+        record: artifactRecord,
+        warning: artifactWarning,
+        recovery,
+      },
     };
   }
 
@@ -541,7 +595,8 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     stopTimer();
     el.innerHTML = withNotice(renderExportDone(doneOptions()));
     setHeading(el, COPY.export.doneHeading, true);
-    ctx.shell.setPrimary({ label: blobUrl ? COPY.export.download : COPY.export.again });
+    const canDownload = Boolean(blobUrl || (artifactRecord && (!recovery || recovery.state === 'ready')));
+    ctx.shell.setPrimary({ label: canDownload ? COPY.export.download : COPY.export.again });
   }
 
   function paintError(reason: string): void {
@@ -570,6 +625,9 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     progress = WORKING_STEP;
     currentQa = null;
     blob = null;
+    artifactRecord = null;
+    artifactWarning = '';
+    recovery = null;
     revoke();
     paintWorking();
     startTimer();
@@ -587,6 +645,18 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
           at: new Date().toISOString(),
         },
       });
+      try {
+        const built = createExportArtifactRecord(result);
+        if (built.ok) {
+          artifactRecord = built.record;
+          const saved = saveExportArtifact(built.record, artifactStorage());
+          if (!saved.saved) artifactWarning = exportStorageWarning(saved.reason);
+        } else {
+          artifactWarning = built.notice;
+        }
+      } catch {
+        artifactWarning = 'This export finished, but its delivery record could not be read, so it cannot be reopened after reload.';
+      }
       if (result.renderId) {
         try {
           currentQa = qaFrom(await ctx.api.qa(result.renderId));
@@ -609,6 +679,22 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
       const reason = error instanceof Error ? error.message : String(error ?? DEFAULT_REASON);
       paintError(reason);
     }
+  }
+
+  async function recoverSaved(): Promise<void> {
+    if (!artifactRecord) {
+      void begin();
+      return;
+    }
+    const access = await resolveSavedExport(artifactRecord, artifactResolver());
+    if (access.state === 'ready' && access.href) {
+      recovery = null;
+      triggerDownload(doc, access.href, exportFileName(currentPackage()?.title));
+      paintDone();
+      return;
+    }
+    recovery = { state: access.state, message: access.message };
+    paintDone();
   }
 
   async function downloadExtras(button: HTMLButtonElement): Promise<void> {
@@ -646,6 +732,7 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
   function primary(): void {
     if (phase === 'done') {
       if (blobUrl) triggerDownload(doc, blobUrl, exportFileName(currentPackage()?.title));
+      else if (artifactRecord && (!recovery || recovery.state === 'ready')) void recoverSaved();
       else void begin();
       return;
     }
@@ -661,6 +748,12 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     if (!target || typeof target.closest !== 'function') return;
     const button = target.closest<HTMLElement>('button, a');
     if (!button) return;
+    if (button.hasAttribute('data-easy-export-download')) {
+      event.preventDefault();
+      if (blobUrl) triggerDownload(doc, blobUrl, exportFileName(currentPackage()?.title));
+      else if (artifactRecord) void recoverSaved();
+      return;
+    }
     if (button.hasAttribute('data-easy-export-retry') || button.hasAttribute('data-easy-export-again')) {
       event.preventDefault();
       void begin();
@@ -706,6 +799,11 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     else if (phase === 'done') paintDone();
     else paintError(errorReason);
   });
+  const pkg = currentPackage();
+  const packageId = recordOf(pkg)?.id;
+  const loaded = loadExportArtifact(typeof packageId === 'string' ? packageId : '', artifactStorage());
+  if (loaded.status === 'corrupt') artifactWarning = corruptExportArtifactNotice();
+  else if (loaded.status === 'ok') artifactRecord = loaded.record;
   const cached = cachedExportForCurrent();
   if (cached) {
     blob = cached.blob;
@@ -715,7 +813,9 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     currentQa = cached.qa;
     bundleCaptions = cached.captions;
     paintDone();
-  } else if (isExportCurrent(currentPackage(), ctx.store.get().exported.revision)) {
+  } else if (artifactRecord) {
+    paintDone();
+  } else if (isExportCurrent(pkg, ctx.store.get().exported.revision)) {
     paintDone();
   } else {
     void begin();

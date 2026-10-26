@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 
 import { COPY } from '../copy.ts';
 import { defaultEasyState } from '../store.ts';
+import { createExportArtifactRecord, exportArtifactStorageKey, saveExportArtifact } from '../export-artifacts.ts';
 import { step } from './export.ts';
 
 class FakeElement {
@@ -100,7 +101,16 @@ function clickOn(attribute) {
 
 let packageOrder = 0;
 
-function exportHarness({ revision, exportedRevision = null, at = null, blob = null, packageId = null }) {
+function exportHarness({
+  revision,
+  exportedRevision = null,
+  at = null,
+  blob = null,
+  packageId = null,
+  exportResult = undefined,
+  storage = undefined,
+  resolveExportArtifact = undefined,
+}) {
   packageOrder += 1;
   const doc = new FakeDocument();
   const el = new FakeElement('div', doc);
@@ -109,7 +119,9 @@ function exportHarness({ revision, exportedRevision = null, at = null, blob = nu
   state.exported = { revision: exportedRevision, at };
   const pkg = { id: state.packageId, title: 'Crumb & Co', revision, durationSeconds: 30 };
   const primary = [];
+  const apiCalls = [];
   let renders = 0;
+  let resolutions = 0;
   const ctx = {
     state,
     store: {
@@ -120,13 +132,24 @@ function exportHarness({ revision, exportedRevision = null, at = null, blob = nu
     },
     api: {
       qa: async () => ({ passed: true, notes: 0 }),
+      export: async () => {
+        apiCalls.push('export');
+        throw new Error('the export endpoint must not be called to reopen a saved download');
+      },
     },
     host: {
       getPackage: () => pkg,
       renderMp4: async () => {
         renders += 1;
-        return { blob, revision: pkg.revision };
+        return exportResult ?? { blob, revision: pkg.revision };
       },
+      resolveExportArtifact: resolveExportArtifact
+        ? async (record) => {
+          resolutions += 1;
+          return resolveExportArtifact(record);
+        }
+        : undefined,
+      exportArtifactStorage: storage,
       openEditor() {},
       playerElement: () => null,
     },
@@ -147,7 +170,9 @@ function exportHarness({ revision, exportedRevision = null, at = null, blob = nu
     pkg,
     ctx,
     primary,
+    apiCalls,
     renders: () => renders,
+    resolutions: () => resolutions,
     fire: (attribute) => {
       const event = clickOn(attribute);
       el.fire('click', event);
@@ -268,5 +293,244 @@ test('a cached blob for a different package does not masquerade as the current e
     assert.doesNotMatch(second.el.innerHTML, /data-easy-export-download/);
     assert.equal(second.primary.at(-1)?.label, COPY.export.again);
     stopSecond();
+  });
+});
+
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
+
+function fullExportResult({ packageId, revision, blob = null, preflight = true, exportId = 'x_ux16' }) {
+  const result = {
+    exportId,
+    packageId,
+    revision,
+    files: [
+      { name: 'video.mp4', bytes: 2048, path: '/exports/video.mp4' },
+      { name: 'captions.vtt', bytes: 128, path: '/exports/captions.vtt' },
+    ],
+    intent: 'draft',
+    archiveMode: 'private',
+  };
+  if (blob) result.blob = blob;
+  if (preflight) {
+    result.preflight = {
+      ok: true,
+      final: false,
+      intent: 'draft',
+      blockers: [],
+      warnings: [],
+      facts: {
+        intent: 'draft',
+        format: { width: 1080, height: 1920, aspect: '9:16', fps: 30 },
+        archiveMode: 'private',
+        snapshotFingerprint: HASH_A,
+        timelineHash: HASH_B,
+        captionRevision: HASH_A,
+        speechSha256: HASH_B,
+        sourceCompleteness: {
+          complete: false,
+          missing: ['audio/durations.json'],
+          inputs: [{ path: 'audio/durations.json', sha256: null, bytes: null }],
+        },
+        rightsExclusions: [],
+        reviews: [{ decisionId: 'dec_1', state: 'unknown' }],
+      },
+    };
+    result.snapshot = {
+      fingerprint: HASH_A,
+      schema: 'comfyrizz.delivery-snapshot/v1',
+      packageRevision: revision,
+      editorRevision: 1,
+    };
+  }
+  return result;
+}
+
+function fakeExportStorage(initial = {}) {
+  const map = new Map(Object.entries(initial));
+  return {
+    map,
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => {
+      map.set(key, value);
+    },
+    removeItem: (key) => {
+      map.delete(key);
+    },
+  };
+}
+
+let freshModule = 0;
+function importFreshExportStep() {
+  freshModule += 1;
+  return import(`./export.ts?fresh=${freshModule}-${Date.now()}`);
+}
+
+test('export then a fresh module loads the saved artifact and Download uses the resolver, not a render', async () => {
+  await withBlobUrls(async () => {
+    const storage = fakeExportStorage();
+    const packageId = 'pkg_ux16_reload';
+    const blob = new Blob(['mp4'], { type: 'video/mp4' });
+    const first = exportHarness({
+      revision: 3,
+      packageId,
+      storage,
+      exportResult: fullExportResult({ packageId, revision: 3, blob }),
+    });
+    const stopFirst = step.bind(first.el, first.ctx);
+    await flush();
+
+    assert.equal(first.renders(), 1);
+    assert.match(first.el.innerHTML, /data-easy-export-download/);
+    assert.ok(storage.map.has(exportArtifactStorageKey(packageId)));
+    stopFirst();
+
+    const reloaded = exportHarness({
+      revision: 3,
+      exportedRevision: 3,
+      at: '2026-10-26T00:00:00.000Z',
+      packageId,
+      storage,
+      resolveExportArtifact: async () => ({
+        href: 'https://media.example.test/video.mp4?sig=renewed',
+      }),
+    });
+    const fresh = await importFreshExportStep();
+    const stopReloaded = fresh.step.bind(reloaded.el, reloaded.ctx);
+    await flush();
+
+    assert.equal(reloaded.renders(), 0, 'a saved artifact must not start another render');
+    assert.match(reloaded.el.innerHTML, /data-easy-export-download/);
+    assert.match(reloaded.el.innerHTML, /data-easy-export-facts/);
+    assert.match(reloaded.el.innerHTML, /9:16/);
+    assert.match(reloaded.el.innerHTML, /audio\/durations\.json/);
+    assert.equal(reloaded.apiCalls.length, 0);
+
+    const click = reloaded.fire('[data-easy-export-download]');
+    await flush();
+    assert.equal(click.prevented, true);
+    assert.equal(reloaded.resolutions(), 1);
+    assert.equal(reloaded.renders(), 0);
+    assert.equal(reloaded.apiCalls.length, 0);
+    stopReloaded();
+  });
+});
+
+test('without a resolver a saved artifact says reopening is not connected and offers Export again', async () => {
+  await withBlobUrls(async () => {
+    const storage = fakeExportStorage();
+    const packageId = 'pkg_ux16_not_connected';
+    const built = createExportArtifactRecord(fullExportResult({ packageId, revision: 2 }));
+    assert.deepEqual(saveExportArtifact(built.record, storage), { saved: true });
+
+    const harness = exportHarness({ revision: 2, packageId, storage });
+    const fresh = await importFreshExportStep();
+    const stop = fresh.step.bind(harness.el, harness.ctx);
+    await flush();
+
+    assert.equal(harness.renders(), 0);
+    assert.match(harness.el.innerHTML, /data-easy-export-download/);
+    const click = harness.fire('[data-easy-export-download]');
+    await flush();
+    assert.equal(click.prevented, true);
+    assert.match(harness.el.innerHTML, /data-easy-export-artifact-state="not-connected"/);
+    assert.match(harness.el.innerHTML, /not connected in this build yet/i);
+    assert.match(harness.el.innerHTML, /data-easy-export-again/);
+    assert.equal(harness.renders(), 0);
+
+    harness.fire('[data-easy-export-again]');
+    assert.equal(harness.renders(), 1, 'Export again must start a fresh render');
+    stop();
+  });
+});
+
+test('no export id shows a visible cannot-reopen notice and persists nothing', async () => {
+  await withBlobUrls(async () => {
+    const storage = fakeExportStorage();
+    const packageId = 'pkg_ux16_no_id';
+    const blob = new Blob(['mp4'], { type: 'video/mp4' });
+    const harness = exportHarness({
+      revision: 1,
+      packageId,
+      storage,
+      exportResult: { blob, revision: 1 },
+    });
+    const stop = step.bind(harness.el, harness.ctx);
+    await flush();
+
+    assert.equal(harness.renders(), 1);
+    assert.match(harness.el.innerHTML, /data-easy-export-download/);
+    assert.match(harness.el.innerHTML, /data-easy-export-artifact-warning/);
+    assert.match(harness.el.innerHTML, /cannot be reopened after reload/);
+    assert.equal(storage.map.size, 0);
+    assert.doesNotMatch(harness.el.innerHTML, new RegExp(packageId));
+    stop();
+  });
+});
+
+test('a storage failure is visible in the done view and does not hide the export', async () => {
+  await withBlobUrls(async () => {
+    const packageId = 'pkg_ux16_quota';
+    const storage = fakeExportStorage();
+    storage.setItem = () => {
+      const error = new Error('quota');
+      error.name = 'QuotaExceededError';
+      throw error;
+    };
+    const blob = new Blob(['mp4'], { type: 'video/mp4' });
+    const harness = exportHarness({
+      revision: 1,
+      packageId,
+      storage,
+      exportResult: fullExportResult({ packageId, revision: 1, blob }),
+    });
+    const stop = step.bind(harness.el, harness.ctx);
+    await flush();
+
+    assert.match(harness.el.innerHTML, /data-easy-export-done/);
+    assert.match(harness.el.innerHTML, /data-easy-export-download/);
+    assert.match(harness.el.innerHTML, /data-easy-export-artifact-warning/);
+    assert.match(harness.el.innerHTML, /could not be saved/i);
+    stop();
+  });
+});
+
+test('a clean MP4 result without preflight shows delivery facts as not recorded', async () => {
+  await withBlobUrls(async () => {
+    const packageId = 'pkg_ux16_no_preflight';
+    const storage = fakeExportStorage();
+    const blob = new Blob(['mp4'], { type: 'video/mp4' });
+    const harness = exportHarness({
+      revision: 1,
+      packageId,
+      storage,
+      exportResult: fullExportResult({ packageId, revision: 1, blob, preflight: false }),
+    });
+    const stop = step.bind(harness.el, harness.ctx);
+    await flush();
+
+    assert.match(harness.el.innerHTML, /data-easy-export-facts/);
+    assert.match(harness.el.innerHTML, /Delivery facts not recorded for this file\./);
+    assert.doesNotMatch(harness.el.innerHTML, /No creative reviews recorded/);
+    stop();
+  });
+});
+
+test('corrupt saved JSON is reported and ignored instead of looking like a fresh export', async () => {
+  await withBlobUrls(async () => {
+    const storage = fakeExportStorage();
+    const packageId = 'pkg_ux16_corrupt';
+    storage.setItem(exportArtifactStorageKey(packageId), '{not json');
+
+    const harness = exportHarness({ revision: 5, exportedRevision: 5, packageId, storage });
+    const fresh = await importFreshExportStep();
+    const stop = fresh.step.bind(harness.el, harness.ctx);
+    await flush();
+
+    assert.equal(harness.renders(), 0);
+    assert.match(harness.el.innerHTML, /data-easy-export-artifact-warning/);
+    assert.match(harness.el.innerHTML, /unreadable/i);
+    assert.match(harness.el.innerHTML, /data-easy-export-again/);
+    stop();
   });
 });
