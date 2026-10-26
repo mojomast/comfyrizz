@@ -1,0 +1,555 @@
+{
+  "schema": "comfyrizz.action-film-shot-skeleton/v1",
+  "note": "Planning skeleton. Not the quality CLI shots.json: that evidence file is authored later with real prompts.",
+  "fps": 24,
+  "totalEditFrames": 2880,
+  "rows": [
+    {
+      "id": "S01",
+      "beat": "hook",
+      "editFrames": 96,
+      "generatedFrames": null,
+      "measuredFrames": null,
+      "dominantAction": "Locked-off wide: rockfall seals the canyon gate",
+      "contactResult": "Boulder lands at the gate base; dust plume; gate visibly closed",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "flux3-still",
+      "fallbackPath": "remotion-deterministic",
+      "characters": [],
+      "highRiskFlags": [],
+      "status": "planned"
+    },
+    {
+      "id": "S02",
+      "beat": "hook",
+      "editFrames": 84,
+      "generatedFrames": 90,
+      "measuredFrames": null,
+      "dominantAction": "char_c_small drops from a cliff ledge, lands on all fours and skids",
+      "contactResult": "Feet/palms meet ground; body compresses then settles; dust at the skid",
+      "riskTier": "pilot",
+      "pilot": "P1",
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "landing"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S03",
+      "beat": "hook",
+      "editFrames": 96,
+      "generatedFrames": 107,
+      "measuredFrames": null,
+      "dominantAction": "char_a_heavy lumbers in and shoulder-bumps the gate",
+      "contactResult": "Shoulder meets gate; gate does not move; dust sifts down",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy"
+      ],
+      "highRiskFlags": [
+        "heavy-contact"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S04",
+      "beat": "hook",
+      "editFrames": 84,
+      "generatedFrames": 90,
+      "measuredFrames": null,
+      "dominantAction": "Close on char_a_heavy: realization and sag",
+      "contactResult": "Eyes narrow then widen; shoulders drop; settle into a held beat",
+      "riskTier": "pilot",
+      "pilot": "P3",
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy"
+      ],
+      "highRiskFlags": [
+        "face-stability"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S05",
+      "beat": "team",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_b_spindly unfolds from a perch and points to a crank wheel high on the cliff",
+      "contactResult": "char_b_spindly pincer points; char_c_small turns head to the wheel",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_b_spindly",
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "two-character-framing"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S06",
+      "beat": "team",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_a_heavy cups hands and launches char_c_small upward",
+      "contactResult": "char_c_small steps into char_a_heavy's hands; launch; char_c_small leaves frame top",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy",
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "multi-character-handoff"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S07",
+      "beat": "team",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_b_spindly strides across stepping stones in a staccato rhythm",
+      "contactResult": "Each foot plant visible on a stone; stone wobbles on the last step",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_b_spindly"
+      ],
+      "highRiskFlags": [
+        "locomotion"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S08",
+      "beat": "team",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_c_small grips the crank wheel and pushes: first attempt",
+      "contactResult": "Wheel rotates a quarter turn then jams; jam pin pops out; wheel state changes from rest to jammed",
+      "riskTier": "pilot",
+      "pilot": "P2",
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "hand-prop-state-change"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S09",
+      "beat": "escalate",
+      "editFrames": 144,
+      "generatedFrames": 158,
+      "measuredFrames": null,
+      "dominantAction": "char_b_spindly pole-vaults a collapsing gap",
+      "contactResult": "Pole plants and bends; body clears gap; pole lands on far side",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_b_spindly"
+      ],
+      "highRiskFlags": [
+        "prop-in-hand",
+        "locomotion"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S10",
+      "beat": "escalate",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_c_small scrambles up a crumbling wall",
+      "contactResult": "Foot on stone, stone breaks away and falls; second foothold holds",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "hand-prop-state-change"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S11",
+      "beat": "escalate",
+      "editFrames": 132,
+      "generatedFrames": 141,
+      "measuredFrames": null,
+      "dominantAction": "char_a_heavy swings a mallet at the jam pin",
+      "contactResult": "Mallet strikes pin; pin shears and drops; sparks",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy"
+      ],
+      "highRiskFlags": [
+        "hand-prop-state-change",
+        "heavy-contact"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S12",
+      "beat": "escalate",
+      "editFrames": 144,
+      "generatedFrames": 158,
+      "measuredFrames": null,
+      "dominantAction": "Crank wheel spins free; gate chains rattle taut",
+      "contactResult": "Wheel rotation drives chains; gate rises one hand-width",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "remotion-deterministic",
+      "characters": [],
+      "highRiskFlags": [
+        "mechanism"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S13",
+      "beat": "escalate",
+      "editFrames": 132,
+      "generatedFrames": 141,
+      "measuredFrames": null,
+      "dominantAction": "char_b_spindly and char_c_small tumble as the ledge collapses",
+      "contactResult": "Ledge breaks under both; both fall toward camera-left",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_b_spindly",
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "multi-character-handoff",
+        "falling"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S14",
+      "beat": "escalate",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_a_heavy catches char_b_spindly and char_c_small mid-fall",
+      "contactResult": "char_a_heavy's arms close around both; char_a_heavy skids to a stop",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy",
+        "char_b_spindly",
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "multi-character-handoff"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S15",
+      "beat": "escalate",
+      "editFrames": 144,
+      "generatedFrames": null,
+      "measuredFrames": null,
+      "dominantAction": "Wide: storm front rolls toward the canyon",
+      "contactResult": "Storm edge reaches the near ridge; light drains from the ground",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "flux3-still",
+      "fallbackPath": "remotion-deterministic",
+      "characters": [],
+      "highRiskFlags": [],
+      "status": "planned"
+    },
+    {
+      "id": "S16",
+      "beat": "escalate",
+      "editFrames": 144,
+      "generatedFrames": 158,
+      "measuredFrames": null,
+      "dominantAction": "char_a_heavy braces under the slipping gate",
+      "contactResult": "Gate bottom lands on char_a_heavy's shoulders; legs bend; gate holds",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy"
+      ],
+      "highRiskFlags": [
+        "heavy-contact",
+        "body-reaction"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S17",
+      "beat": "solution",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_b_spindly and char_c_small slip under the lifted gate past char_a_heavy",
+      "contactResult": "Bodies pass under gate edge without touching it",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy",
+        "char_b_spindly",
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "locomotion"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S18",
+      "beat": "solution",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_c_small lifts the lantern off its pedestal",
+      "contactResult": "Hands lift lantern; pedestal clicks; lantern state changes from dark to lit",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "hand-prop-state-change"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S19",
+      "beat": "solution",
+      "editFrames": 120,
+      "generatedFrames": null,
+      "measuredFrames": null,
+      "dominantAction": "Floor glyphs light in a ripple from the pedestal",
+      "contactResult": "Glyph rows light in sequence toward the gate",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "flux3-still",
+      "fallbackPath": "remotion-deterministic",
+      "characters": [],
+      "highRiskFlags": [],
+      "status": "planned"
+    },
+    {
+      "id": "S20",
+      "beat": "solution",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "char_a_heavy rolls out as the gate drops behind",
+      "contactResult": "Gate lands where char_a_heavy was; dust blast; char_a_heavy comes up on one knee",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy"
+      ],
+      "highRiskFlags": [
+        "locomotion",
+        "heavy-contact"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S21",
+      "beat": "solution",
+      "editFrames": 120,
+      "generatedFrames": 124,
+      "measuredFrames": null,
+      "dominantAction": "All three regroup; char_c_small raises the lantern into the storm",
+      "contactResult": "Storm edge parts around the lantern light; characters look up",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy",
+        "char_b_spindly",
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "multi-character-framing"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S22",
+      "beat": "payoff",
+      "editFrames": 72,
+      "generatedFrames": null,
+      "measuredFrames": null,
+      "dominantAction": "Lantern light spreads across the canyon wall",
+      "contactResult": "Light front reveals a painted mural; wall visibly changes from dark to lit",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "flux3-still",
+      "fallbackPath": "remotion-deterministic",
+      "characters": [],
+      "highRiskFlags": [],
+      "status": "planned"
+    },
+    {
+      "id": "S23",
+      "beat": "payoff",
+      "editFrames": 60,
+      "generatedFrames": 73,
+      "measuredFrames": null,
+      "dominantAction": "char_a_heavy breaks into a simple smile",
+      "contactResult": "Mouth and cheeks move; eyes soften; settle",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy"
+      ],
+      "highRiskFlags": [
+        "face-stability"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S24",
+      "beat": "payoff",
+      "editFrames": 72,
+      "generatedFrames": 73,
+      "measuredFrames": null,
+      "dominantAction": "char_b_spindly and char_c_small bump fists/pincers",
+      "contactResult": "Contact point visible; both recoil slightly",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_b_spindly",
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "multi-character-contact"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S25",
+      "beat": "payoff",
+      "editFrames": 60,
+      "generatedFrames": 73,
+      "measuredFrames": null,
+      "dominantAction": "Wide: the three walk away along the ridge at dusk, screen-left to screen-right",
+      "contactResult": "Silhouettes cross the ridge; lantern glow recedes",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "fasth3-omni",
+      "fallbackPath": "ltx25-fallback",
+      "characters": [
+        "char_a_heavy",
+        "char_b_spindly",
+        "char_c_small"
+      ],
+      "highRiskFlags": [
+        "locomotion"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "S26",
+      "beat": "close",
+      "editFrames": 36,
+      "generatedFrames": null,
+      "measuredFrames": null,
+      "dominantAction": "Close: lantern flame flickers",
+      "contactResult": "Flame sways then steadies",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "flux3-still",
+      "fallbackPath": "remotion-deterministic",
+      "characters": [],
+      "highRiskFlags": [],
+      "status": "planned"
+    },
+    {
+      "id": "S27",
+      "beat": "close",
+      "editFrames": 36,
+      "generatedFrames": null,
+      "measuredFrames": null,
+      "dominantAction": "Title card over a stylized still",
+      "contactResult": "Title text resolves over the still",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "flux3-still",
+      "fallbackPath": "remotion-deterministic",
+      "characters": [],
+      "highRiskFlags": [],
+      "status": "planned"
+    },
+    {
+      "id": "S28",
+      "beat": "close",
+      "editFrames": 24,
+      "generatedFrames": null,
+      "measuredFrames": null,
+      "dominantAction": "Fade to end card",
+      "contactResult": "Image and audio fall to black/silence on the final frame",
+      "riskTier": "batch",
+      "pilot": null,
+      "modelPath": "flux3-still",
+      "fallbackPath": "remotion-deterministic",
+      "characters": [],
+      "highRiskFlags": [],
+      "status": "planned"
+    }
+  ]
+}

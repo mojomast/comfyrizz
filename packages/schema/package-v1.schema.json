@@ -599,6 +599,11 @@
       "type": "object",
       "unevaluatedProperties": false,
       "properties": {
+        "presentation": {
+          "type": "string",
+          "enum": ["phrases"],
+          "description": "Split aligned captions into readable sentence phrases without changing speech or word timing. Existing cue overrides apply before splitting."
+        },
         "style": {
           "type": "string",
           "enum": [

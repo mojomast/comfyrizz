@@ -8,6 +8,7 @@
     "node": ">=22.6"
   },
   "scripts": {
+    "quality:production": "node scripts/quality/pipeline.mjs",
     "doctor": "node scripts/doctor/doctor.mjs",
     "test": "pnpm run build:libs && pnpm -r --if-present test",
     "test:py": "cd pipeline-py && node ../scripts/py.mjs -m pytest -q",

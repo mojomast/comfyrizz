@@ -1,0 +1,25 @@
+{
+  "schema": "comfyrizz.action-film-production/v1",
+  "id": "action-film-20261026",
+  "researchDoc": "docs/research/ACTION_FILM_PRODUCTION_RESEARCH_20261026.md",
+  "targetSeconds": 120,
+  "fps": 24,
+  "budget": {
+    "unit": "google-colab-credits",
+    "status": "APPROVED",
+    "approvedBy": "Kyle",
+    "approvedOn": "2026-10-26",
+    "approvedTotal": 20,
+    "envelopes": { "setup": 2, "pilots": 3, "main": 10, "reserve": 5 },
+    "retryPolicy": "no-unattended-retry-loops",
+    "note": "Allocations, not measured prices. Approval of the envelope is not an instruction to spend it; each paid action still follows the runbook."
+  },
+  "timingBeats": [
+    { "id": "hook", "fromSeconds": 0, "toSeconds": 15 },
+    { "id": "team", "fromSeconds": 15, "toSeconds": 35 },
+    { "id": "escalate", "fromSeconds": 35, "toSeconds": 80 },
+    { "id": "solution", "fromSeconds": 80, "toSeconds": 105 },
+    { "id": "payoff", "fromSeconds": 105, "toSeconds": 116 },
+    { "id": "close", "fromSeconds": 116, "toSeconds": 120 }
+  ]
+}

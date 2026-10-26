@@ -13,6 +13,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { textZones } from '../src/layout-model.js';
 import { textColors } from '../src/theme-model.js';
+import { checkCaptionQuality } from './caption-quality.mjs';
 
 export const QA_SEVERITY = { error: 'error', warning: 'warning' };
 /** A first frame this dark, with this little detail, is a black thumbnail. */
@@ -306,7 +307,7 @@ export function checkVideo({ mp4, timeline, pkg, sampleWidth = 160, onLog = () =
   const fps = timeline.fps || 30;
   const report = runQa(frames, { fps, durationInFrames: timeline.durationInFrames, width, height, sourceWidth, sourceHeight, scenes: timeline.scenes ?? [], onLog });
   const contrast = checkContrasts({ mp4, timeline, pkg, sampleWidth, onLog });
-  const findings = [...report.findings, ...contrast];
+  const findings = [...report.findings, ...contrast, ...checkCaptionQuality({ timeline, pkg })];
   return { ...report, findings, ok: findings.every(item => item.severity !== 'error'), width, height, mp4, fps };
 }
 

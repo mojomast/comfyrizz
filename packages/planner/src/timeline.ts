@@ -16,6 +16,7 @@
  *               a pacing advisory, never speeding up, clipping or cutting speech.
  */
 
+import { phraseCaptions } from './caption-presentation.js';
 import type {
   CompileOptions,
   ComfyrizzPackage,
@@ -774,7 +775,8 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
   };
 
   const built = buildCaptions(scenes, pkg, options, fps);
-  const captions = applyCaptionOverrides(built.captions, options.captionOverrides);
+  const correctedCaptions = applyCaptionOverrides(built.captions, options.captionOverrides);
+  const captions = (options.captionPresentation ?? pkg.captions?.presentation) === 'phrases' ? phraseCaptions(correctedCaptions, fps) : correctedCaptions;
   warnings.push(...built.warnings);
 
   // Storytelling cues: resolve against the spoken captions (before display-only wording fixes),
