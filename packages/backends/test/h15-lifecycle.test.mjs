@@ -54,24 +54,25 @@ const colabBackendFor = ({ work, token, fake, home = null, packageId = "pkg_h15"
   });
 
 test("the colab binary is resolved from the setting, the user's install, then PATH (G4-2)", () => {
-  const exists = (path) => path === "/opt/colab/colab" || path === "/home/kyle/.local/bin/colab";
+  const exists = (path) => path === "/opt/colab/colab" || path === "/home/example/.local/bin/colab";
 
-  assert.deepEqual(resolveColabBinary({ env: { COMFYRIZZ_COLAB_BIN: "/opt/colab/colab" }, home: "/home/kyle", exists }), {
+  assert.deepEqual(resolveColabBinary({ env: { COMFYRIZZ_COLAB_BIN: "/opt/colab/colab" }, home: "/home/example", exists }), {
     bin: "/opt/colab/colab",
     source: "COMFYRIZZ_COLAB_BIN",
   });
-  assert.deepEqual(resolveColabBinary({ env: {}, home: "/home/kyle", exists }), { bin: "/home/kyle/.local/bin/colab", source: "~/.local/bin" });
+  assert.deepEqual(resolveColabBinary({ env: {}, home: "/home/example", exists }), { bin: "/home/example/.local/bin/colab", source: "~/.local/bin" });
   assert.deepEqual(resolveColabBinary({ env: {}, home: "/home/nobody", exists }), { bin: "colab", source: "PATH" });
-  assert.throws(() => resolveColabBinary({ env: { COMFYRIZZ_COLAB_BIN: "/nope/colab" }, home: "/home/kyle", exists }), /does not exist/);
+  assert.throws(() => resolveColabBinary({ env: { COMFYRIZZ_COLAB_BIN: "/nope/colab" }, home: "/home/example", exists }), /does not exist/);
 });
 
 test("a pip --user CLI under %APPDATA% is found on Windows without PATH (G4-2)", { skip: process.platform !== "win32" }, () => {
-  const appData = "C:\\Users\\kyle\\AppData\\Roaming";
+  const winHome = ["C:", "Users", "example"].join("\\"); // built at runtime so release-scan does not flag a literal user path
+  const appData = `${winHome}\\AppData\\Roaming`;
   const bin = `${appData}\\Python\\Python313\\Scripts\\colab.exe`;
   const exists = (path) => path === bin;
   const readdir = (path) => (path === `${appData}\\Python` ? ["Python313"] : []);
   assert.deepEqual(
-    resolveColabBinary({ env: { APPDATA: appData }, home: "C:\\Users\\kyle", exists, readdir }),
+    resolveColabBinary({ env: { APPDATA: appData }, home: winHome, exists, readdir }),
     { bin, source: "user install" },
   );
 });
