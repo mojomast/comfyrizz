@@ -12,6 +12,13 @@
  * displays what those records say.
  */
 
+import {
+  readVoiceReferenceState,
+  renderVoiceReference,
+  type VoiceReferenceInput,
+  type VoiceReferenceState,
+} from './voice-reference.ts';
+
 export const VOICE_MODE_SCHEMA = 'comfyrizz.voice-mode-ui/v1';
 export const H3_VOICE_MODES = Object.freeze(['clip', 'prompt'] as const);
 export type H3VoiceMode = (typeof H3_VOICE_MODES)[number];
@@ -44,6 +51,7 @@ export interface VoiceModeInput {
   character?: VoiceModeCharacter | null;
   production?: { h3VoiceMode?: unknown } | null;
   shots?: readonly VoiceModeShot[] | null;
+  reference?: VoiceReferenceInput | null;
 }
 
 export interface VoiceModeShotState {
@@ -61,6 +69,7 @@ export interface VoiceModeState {
   seed: number | null;
   productionOverride: H3VoiceMode | null;
   shots: VoiceModeShotState[];
+  reference: VoiceReferenceState;
 }
 
 export interface VoiceModeUiState {
@@ -157,6 +166,7 @@ export function readVoiceModeState(input: VoiceModeInput = {}): VoiceModeState {
   }
   const voice = isRecord(character.voice) ? character.voice : {};
   const production = isRecord(input.production) ? input.production : {};
+  const reference = isRecord(input.reference) ? input.reference : {};
   const mode = modeValue(voice.h3Mode);
   const productionOverride = overrideValue(production.h3VoiceMode);
   return {
@@ -168,6 +178,12 @@ export function readVoiceModeState(input: VoiceModeInput = {}): VoiceModeState {
     seed: seedValue(voice.seed),
     productionOverride,
     shots: shotStates(input.shots),
+    reference: readVoiceReferenceState({
+      characterId: character.id,
+      references: reference.references,
+      selectedReferenceId: reference.selectedReferenceId,
+      capability: reference.capability,
+    }),
   };
 }
 
@@ -180,7 +196,7 @@ function renderToggle(state: VoiceModeState): string {
 
 function renderPrompt(state: VoiceModeState, ui: VoiceModeUiState): string {
   if (state.mode !== 'prompt') {
-    return '<p class="chr-hint" data-voice-mode-clip-note>Uses the character\'s voice clip. No voice description is generated.</p>';
+    return `<div class="chr-voice-mode-clip" data-voice-mode-clip-note>${renderVoiceReference(state.reference)}</div>`;
   }
   const empty = state.description.trim() === '';
   const suggestBusy = ui.suggestBusy === true;

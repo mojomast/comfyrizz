@@ -27,12 +27,32 @@ import {
   promptVoiceAuditionStatus,
   promptVoiceHash,
 } from '../characters/audition.mjs';
+import {
+  inspectVoiceTransferCapability,
+  referenceIdentity,
+  resolveOwnVoiceReference,
+} from '../characters/voice-projection.mjs';
 
 export const NATIVE_TEST_SCHEMA = 'comfyrizz.native-test/v1';
 export const NATIVE_TEST_KIND = 'native_test_shot';
 export const NATIVE_VOICE_UNSUPPORTED = 'NATIVE_VOICE_UNSUPPORTED';
 export const NATIVE_TEST_PROMPT_UNSUPPORTED = 'NATIVE_TEST_PROMPT_UNSUPPORTED';
 export const NATIVE_TEST_AUDIO_REQUIRED = 'NATIVE_TEST_AUDIO_REQUIRED';
+
+export const NATIVE_TRANSFER_SCHEMA = 'comfyrizz.native-transfer/v1';
+export const NATIVE_TRANSFER_KIND = 'native_transfer_test';
+export const NATIVE_TRANSFER_VERDICT_KIND = 'native_transfer_verdict';
+export const NATIVE_TRANSFER_UNSUPPORTED = 'NATIVE_TRANSFER_UNSUPPORTED';
+export const NATIVE_TRANSFER_VERDICT_USER_ONLY = 'NATIVE_TRANSFER_VERDICT_USER_ONLY';
+export const NATIVE_TRANSFER_VERDICT_INVALID = 'NATIVE_TRANSFER_VERDICT_INVALID';
+export const NATIVE_TRANSFER_STALE = 'NATIVE_TRANSFER_STALE';
+export const NATIVE_TRANSFER_STATUSES = Object.freeze([
+  'unreviewed',
+  'accepted',
+  'rejected',
+  'invalidated',
+]);
+export const NATIVE_TRANSFER_VERDICTS = Object.freeze(['accepted', 'rejected']);
 
 const KOKORO_AUDITION_ALTERNATIVE = Object.freeze({
   kind: 'kokoro_audition',
@@ -490,4 +510,278 @@ export function reviewNativeTestTranscript(input, ...extra) {
     transcriptText,
     findings,
   });
+}
+
+function revisionValue(value, field) {
+  if (typeof value === 'string' && value.trim() !== '') return value.trim();
+  if (Number.isSafeInteger(value) && value >= 0) return String(value);
+  fail('NATIVE_TRANSFER_WORKFLOW', field, `${field} must be a non-empty revision string or a non-negative integer`);
+}
+
+function transferDependencies(reference, model, workflow, conditioning) {
+  return deepFreeze({
+    reference: referenceIdentity(reference),
+    model: {
+      id: identifier(model.id, 'model.id', 'NATIVE_TRANSFER_MODEL'),
+      voiceTransfer: true,
+      supportsNativeVoice: supportsNativeVoice(model),
+    },
+    workflow: {
+      id: identifier(workflow.id, 'workflow.id', 'NATIVE_TRANSFER_WORKFLOW'),
+      revision: revisionValue(workflow.revision, 'workflow.revision'),
+      conditioning: [...conditioning],
+    },
+  });
+}
+
+function currentDependencies(value) {
+  if (!isRecord(value)) return null;
+  if (isRecord(value.dependencies)) return value.dependencies;
+  if (!isRecord(value.reference) || !isRecord(value.model) || !isRecord(value.workflow)) return null;
+  const capability = inspectVoiceTransferCapability({
+    model: value.model,
+    workflow: value.workflow,
+  });
+  try {
+    return transferDependencies(value.reference, value.model, value.workflow, capability.conditioning);
+  } catch {
+    return null;
+  }
+}
+
+function dependencyChanges(expected, actual) {
+  const reasons = [];
+  const left = expected ?? {};
+  const right = actual ?? {};
+
+  const referenceChanged = !isRecord(left.reference) || !isRecord(right.reference)
+    || left.reference.referenceId !== right.reference.referenceId
+    || left.reference.characterId !== right.reference.characterId
+    || left.reference.sha256 !== right.reference.sha256
+    || left.reference.bytes !== right.reference.bytes;
+  if (referenceChanged) reasons.push('reference');
+
+  const modelChanged = !isRecord(left.model) || !isRecord(right.model)
+    || left.model.id !== right.model.id
+    || left.model.voiceTransfer !== right.model.voiceTransfer
+    || left.model.supportsNativeVoice !== right.model.supportsNativeVoice;
+  if (modelChanged) reasons.push('model');
+
+  const workflowChanged = !isRecord(left.workflow) || !isRecord(right.workflow)
+    || left.workflow.id !== right.workflow.id
+    || left.workflow.revision !== right.workflow.revision;
+  if (workflowChanged) reasons.push('workflow');
+
+  const conditioningChanged = !isRecord(left.workflow) || !isRecord(right.workflow)
+    || JSON.stringify(left.workflow.conditioning) !== JSON.stringify(right.workflow.conditioning);
+  if (conditioningChanged) reasons.push('conditioning');
+
+  return reasons;
+}
+
+function failureStatus(test, status, reasons, technicalClean) {
+  return deepFreeze({
+    schema: NATIVE_TRANSFER_SCHEMA,
+    testId: typeof test?.id === 'string' ? test.id : null,
+    status,
+    accepted: status === 'accepted',
+    invalidated: status === 'invalidated',
+    reasons,
+    technicalClean,
+    requiresHumanReview: status !== 'accepted' && status !== 'rejected',
+  });
+}
+
+/**
+ * Build one native transfer test. The plan is technical evidence only: it is
+ * never approved, never dispatched, and carries no backend call. The exact
+ * reference checksum, model, workflow revision and conditioning list become
+ * the dependency set that a later human verdict is bound to.
+ */
+export function buildNativeTransferTest(input, ...extra) {
+  if (extra.length > 0) {
+    fail('NATIVE_TEST_INPUT', 'input', 'buildNativeTransferTest takes exactly one input object');
+  }
+  const raw = requireRecord(input, 'input', 'NATIVE_TEST_INPUT');
+  refuseForbidden(raw, 'input');
+
+  const actionId = identifier(raw.actionId, 'actionId', 'NATIVE_TEST_ACTION_ID');
+  const shotId = identifier(raw.shotId, 'shotId', 'NATIVE_TEST_SHOT_ID');
+  const budget = upperBound(raw.upperBound);
+  const characterId = identifier(raw.characterId, 'characterId', 'NATIVE_TRANSFER_CHARACTER_ID');
+  const backendId = raw.backendId === undefined
+    ? DEFAULT_BACKEND_ID
+    : identifier(raw.backendId, 'backendId', 'NATIVE_TEST_BACKEND');
+
+  const suppliedReference = requireRecord(raw.reference, 'reference', 'NATIVE_TRANSFER_REFERENCE');
+  refuseForbidden(suppliedReference, 'reference');
+  const reference = resolveOwnVoiceReference({
+    characterId,
+    references: [suppliedReference],
+    referenceId: suppliedReference.referenceId,
+  });
+
+  const model = requireRecord(raw.model, 'model', 'NATIVE_TEST_MODEL');
+  const workflow = requireRecord(raw.workflow, 'workflow', 'NATIVE_TRANSFER_WORKFLOW');
+  const capability = inspectVoiceTransferCapability({ model, workflow });
+  if (!capability.supportsTransfer) {
+    const modelMissing = capability.reasons.includes('MODEL_REQUIRED')
+      || capability.reasons.includes('MODEL_TRANSFER_CAPABILITY_MISSING');
+    const error = new NativeTestError(
+      NATIVE_TRANSFER_UNSUPPORTED,
+      modelMissing ? 'model' : 'workflow',
+      'the selected backend does not declare native transfer from this reference audio and workflow conditioning',
+    );
+    error.capability = capability;
+    throw error;
+  }
+
+  const line = requireRecord(raw.line, 'line', 'NATIVE_TEST_LINE');
+  refuseForbidden(line, 'line');
+  const lineText = textValue(line.text, 'line.text', 'NATIVE_TEST_LINE_TEXT');
+  if (/[<>]/.test(lineText)) {
+    fail('NATIVE_TEST_LINE_TEXT', 'line.text', 'line.text must be plain spoken text, not prompt tags');
+  }
+  const lineLanguage = line.language === undefined
+    ? reference.language
+    : languageText(line.language, 'line.language', 'NATIVE_TEST_LINE_LANGUAGE');
+  let delivery;
+  if (line.delivery !== undefined) {
+    delivery = textValue(line.delivery, 'line.delivery', 'NATIVE_TEST_DELIVERY', { max: 400 });
+  }
+  if (line.offscreen !== undefined && typeof line.offscreen !== 'boolean') {
+    fail('NATIVE_TEST_OFFSCREEN', 'line.offscreen', 'line.offscreen must be a boolean');
+  }
+
+  const conditioning = deepFreeze([{
+    kind: 'voice_reference_audio',
+    referenceId: reference.referenceId,
+    sha256: reference.audio.sha256,
+    bytes: reference.audio.bytes,
+  }]);
+  const dependencies = transferDependencies(reference, model, workflow, capability.conditioning);
+  const outputLine = { text: lineText, language: lineLanguage };
+  if (delivery !== undefined) outputLine.delivery = delivery;
+  if (line.offscreen !== undefined) outputLine.offscreen = line.offscreen;
+
+  return deepFreeze({
+    schema: NATIVE_TRANSFER_SCHEMA,
+    kind: NATIVE_TRANSFER_KIND,
+    id: actionId,
+    shotId,
+    characterId,
+    backendId,
+    upperBound: budget,
+    state: 'planned',
+    approvalRequired: true,
+    autoDispatch: false,
+    approved: false,
+    humanReviewRequired: true,
+    verdict: null,
+    voicePath: 'native',
+    line: outputLine,
+    reference,
+    conditioning,
+    dependencies,
+  });
+}
+
+/**
+ * A human verdict is a separate record. Only the user can create it, and it is
+ * bound to the exact transfer test id. It never turns technical evidence into
+ * acting approval by itself.
+ */
+export function recordNativeTransferVerdict(input, ...extra) {
+  if (extra.length > 0) {
+    fail('NATIVE_TEST_INPUT', 'input', 'recordNativeTransferVerdict takes exactly one input object');
+  }
+  const raw = requireRecord(input, 'input', 'NATIVE_TEST_INPUT');
+  const test = requireRecord(raw.test, 'test', 'NATIVE_TRANSFER_TEST');
+  if (test.schema !== NATIVE_TRANSFER_SCHEMA || test.kind !== NATIVE_TRANSFER_KIND) {
+    fail('NATIVE_TRANSFER_TEST', 'test', 'test must be a native transfer test');
+  }
+  const testId = identifier(test.id, 'test.id', 'NATIVE_TRANSFER_TEST');
+  if (!isRecord(test.dependencies)) {
+    fail('NATIVE_TRANSFER_TEST', 'test.dependencies', 'test must carry its exact dependency set');
+  }
+  if (raw.current !== undefined) {
+    const current = currentDependencies(raw.current);
+    const changes = dependencyChanges(test.dependencies, current);
+    if (changes.length > 0) {
+      fail(
+        NATIVE_TRANSFER_STALE,
+        'current',
+        `the transfer test is stale; changed dependencies: ${changes.join(', ')}`,
+      );
+    }
+  }
+  if (raw.reviewedBy !== 'user') {
+    fail(
+      NATIVE_TRANSFER_VERDICT_USER_ONLY,
+      'reviewedBy',
+      'only a user may record a native transfer verdict',
+    );
+  }
+  if (!NATIVE_TRANSFER_VERDICTS.includes(raw.verdict)) {
+    fail(
+      NATIVE_TRANSFER_VERDICT_INVALID,
+      'verdict',
+      `verdict must be one of ${NATIVE_TRANSFER_VERDICTS.join(', ')}`,
+    );
+  }
+  const verdict = {
+    schema: NATIVE_TRANSFER_SCHEMA,
+    kind: NATIVE_TRANSFER_VERDICT_KIND,
+    testId,
+    verdict: raw.verdict,
+    reviewedBy: 'user',
+    accepted: raw.verdict === 'accepted',
+    requiresHumanReview: false,
+    dependencies: test.dependencies,
+  };
+  if (raw.note !== undefined) {
+    verdict.note = textValue(raw.note, 'note', 'NATIVE_TRANSFER_VERDICT_INVALID', { max: 1000 });
+  }
+  return deepFreeze(verdict);
+}
+
+/**
+ * Status of one transfer test against current dependencies and an optional
+ * human verdict. Technical evidence is reported but never changes the status.
+ */
+export function nativeTransferStatus(input, ...extra) {
+  if (extra.length > 0) {
+    fail('NATIVE_TEST_INPUT', 'input', 'nativeTransferStatus takes exactly one input object');
+  }
+  const raw = requireRecord(input, 'input', 'NATIVE_TEST_INPUT');
+  const test = requireRecord(raw.test, 'test', 'NATIVE_TRANSFER_TEST');
+  if (test.schema !== NATIVE_TRANSFER_SCHEMA || test.kind !== NATIVE_TRANSFER_KIND) {
+    fail('NATIVE_TRANSFER_TEST', 'test', 'test must be a native transfer test');
+  }
+  const technicalClean = isRecord(raw.technical)
+    && (raw.technical.clean === true || raw.technical.ok === true);
+
+  const current = raw.current === undefined ? test : raw.current;
+  const actual = currentDependencies(current);
+  const changes = dependencyChanges(test.dependencies, actual);
+  if (changes.length > 0) {
+    return failureStatus(test, 'invalidated', changes, technicalClean);
+  }
+
+  if (raw.verdict === undefined || raw.verdict === null) {
+    return failureStatus(test, 'unreviewed', [], technicalClean);
+  }
+  const verdict = requireRecord(raw.verdict, 'verdict', 'NATIVE_TRANSFER_VERDICT_INVALID');
+  if (verdict.kind !== NATIVE_TRANSFER_VERDICT_KIND
+    || verdict.testId !== test.id
+    || verdict.reviewedBy !== 'user'
+    || !NATIVE_TRANSFER_VERDICTS.includes(verdict.verdict)) {
+    return failureStatus(test, 'invalidated', ['verdict'], technicalClean);
+  }
+  return failureStatus(
+    test,
+    verdict.verdict === 'accepted' ? 'accepted' : 'rejected',
+    [],
+    technicalClean,
+  );
 }
