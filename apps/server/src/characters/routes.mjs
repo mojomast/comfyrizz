@@ -582,14 +582,29 @@ function resolveAuditionConfig(value) {
 
 function auditionStatusFor(code) {
   switch (code) {
+    case 'AUDITION_PROMPT_PLANNED':
+      return 200;
     case 'AUDITION_NATIVE_VOICE':
     case 'ACTION_CONSUMED':
       return 409;
     case 'AUDITION_ADMISSION_REQUIRED':
       return 403;
+    case 'PROMPT_VOICE_UNSUPPORTED':
+    case 'PROMPT_VOICE_AUDITION_REQUIRED':
+    case 'PROMPT_VOICE_AUDITION_STALE':
+      return 422;
     case 'AUDITION_INVALID_INPUT':
     case 'AUDITION_INVALID_LINE':
     case 'AUDITION_INVALID_VOICE':
+    case 'PROMPT_AUDITION_INVALID_DURATION':
+    case 'PROMPT_AUDITION_AUDIO_FORBIDDEN':
+    case 'VOICE_CLONE_FORBIDDEN':
+    case 'PLAN_H3_NO_VOICE_DESCRIPTION':
+    case 'VOICE_CHARACTER_ID_REQUIRED':
+    case 'VOICE_DESCRIPTION_INVALID':
+    case 'VOICE_DESCRIPTION_TOO_LONG':
+    case 'VOICE_DESCRIPTION_REAL_PERSON':
+    case 'VOICE_H3_MODE_INVALID':
       return 400;
     case 'AUDITION_UNAVAILABLE':
     case 'AUDITION_NO_SYNTH':
@@ -1102,13 +1117,37 @@ export function createCharacterRoutes(options = {}) {
         return true;
       }
     }
+    if (body.description !== undefined && typeof body.description !== 'string') {
+      sendJson(response, 400, {
+        ok: false,
+        code: 'AUDITION_INVALID_INPUT',
+        message: 'description must be a string',
+      });
+      return true;
+    }
+    if (body.h3VoiceMode !== undefined && body.h3VoiceMode !== 'clip' && body.h3VoiceMode !== 'prompt') {
+      sendJson(response, 400, {
+        ok: false,
+        code: 'AUDITION_INVALID_VOICE',
+        message: 'h3VoiceMode must be clip or prompt',
+      });
+      return true;
+    }
+    const voice = body.description !== undefined || body.h3VoiceMode !== undefined
+      ? {
+        ...character.voice,
+        ...(body.description !== undefined ? { voiceDescription: body.description } : {}),
+        ...(body.h3VoiceMode !== undefined ? { h3Mode: body.h3VoiceMode } : {}),
+      }
+      : character.voice;
     const result = await auditionConfig.worker.run({
-      character,
-      voice: character.voice,
+      character: voice === character.voice ? character : { ...character, voice },
+      voice,
       line: body.line,
       model: auditionConfig.model,
       ...(body.nativeVoice !== undefined ? { nativeVoice: body.nativeVoice } : {}),
       ...(body.language !== undefined ? { language: body.language } : {}),
+      ...(body.h3VoiceMode !== undefined ? { h3VoiceMode: body.h3VoiceMode } : {}),
       ...(productionId !== undefined ? { productionId } : {}),
       ...(actionId !== undefined ? { actionId } : {}),
     });

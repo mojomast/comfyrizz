@@ -9,6 +9,8 @@
  */
 
 import type {
+  AuditionOutcome,
+  AuditionRequest,
   Character,
   CharacterBible,
   CharacterImage,
@@ -20,6 +22,7 @@ import type {
   ExpressionItem,
   WardrobeItem,
 } from './api.ts';
+import { characterPath } from './api.ts';
 import {
   readVoiceModeState,
   renderVoiceMode,
@@ -175,6 +178,7 @@ export type CharacterEditorApi = {
     line?: string,
     options?: Record<string, unknown>,
   ) => Promise<unknown>;
+  requestAudition?: (request: AuditionRequest) => Promise<AuditionOutcome>;
   thumb?: (id: string, imgId: string, signal?: AbortSignal) => Promise<Blob>;
   imageFile?: (id: string, imgId: string, signal?: AbortSignal) => Promise<Blob>;
   [key: string]: unknown;
@@ -1095,16 +1099,33 @@ export class CharacterEditorController {
       this.notify();
       return { ...this.state.audition };
     }
-    const fn = this.options.audition
+    const legacy = this.options.audition
       ?? method<(
         character: unknown,
         line?: string,
         options?: Record<string, unknown>,
       ) => Promise<unknown>>(this.api as Record<string, unknown>, ['audition']);
-    if (!fn) {
+    const requestAudition = legacy
+      ? null
+      : method<(request: AuditionRequest) => Promise<AuditionOutcome>>(
+        this.api as Record<string, unknown>,
+        ['requestAudition'],
+      );
+    if (!legacy && !requestAudition) {
       this.state.audition = {
         status: 'unavailable',
         message: 'Auditioning is not available in this build.',
+        file: '',
+        url: '',
+      };
+      this.notify();
+      return { ...this.state.audition };
+    }
+    const characterId = this.state.character?.id;
+    if (!legacy && !characterId) {
+      this.state.audition = {
+        status: 'unavailable',
+        message: 'Save the character before auditioning.',
         file: '',
         url: '',
       };
@@ -1117,28 +1138,72 @@ export class CharacterEditorController {
     this.state.audition = { status: 'loading', message: 'Rendering the audition…', file: '', url: '' };
     this.notify();
     try {
-      const result = await fn(this.state.draft, chosenLine, {
-        characterId: this.state.character?.id,
-        voice: clone(this.state.draft.voice),
-      });
-      const record = isPlainObject(result) ? result : { url: String(result ?? '') };
-      const ok = record.ok !== false;
-      const file = asString(record.file ?? record.relativePath);
-      const url = asString(record.url ?? record.href);
-      if (!ok) {
-        this.state.audition = {
-          status: 'error',
-          message: asString(record.message ?? record.error) || 'The audition could not be generated.',
-          file,
-          url,
-        };
+      if (legacy) {
+        const result = await legacy(this.state.draft, chosenLine, {
+          characterId,
+          voice: clone(this.state.draft.voice),
+        });
+        const record = isPlainObject(result) ? result : { url: String(result ?? '') };
+        const ok = record.ok !== false;
+        const file = asString(record.file ?? record.relativePath);
+        const url = asString(record.url ?? record.href);
+        if (!ok) {
+          this.state.audition = {
+            status: 'error',
+            message: asString(record.message ?? record.error) || 'The audition could not be generated.',
+            file,
+            url,
+          };
+        } else {
+          this.state.audition = {
+            status: 'ready',
+            message: asString(record.message) || 'Audition ready.',
+            file,
+            url,
+          };
+        }
       } else {
-        this.state.audition = {
-          status: 'ready',
-          message: asString(record.message) || 'Audition ready.',
-          file,
-          url,
-        };
+        const outcome = await requestAudition!({ characterId: characterId!, line: chosenLine });
+        const code = asString(outcome.code);
+        const file = asString(outcome.file ?? outcome.filename);
+        const url = asString(outcome.url);
+        const message = asString(outcome.message);
+        if (outcome.voicePath === 'native' || code === 'AUDITION_NATIVE_VOICE') {
+          this.state.audition = {
+            status: 'unavailable',
+            message: message || 'This model speaks with its built-in voice; audition it in a generated take.',
+            file: '',
+            url: '',
+          };
+        } else if (code === 'AUDITION_PROMPT_PLANNED') {
+          this.state.audition = {
+            status: 'ready',
+            message: message || 'The prompt voice audition is planned and needs approval before dispatch.',
+            file: '',
+            url: '',
+          };
+        } else if (!outcome.ok) {
+          this.state.audition = {
+            status: code === 'PROMPT_VOICE_UNSUPPORTED' ? 'unavailable' : 'error',
+            message: message || 'The audition could not be generated.',
+            file,
+            url,
+          };
+        } else if (!url) {
+          this.state.audition = {
+            status: 'error',
+            message: 'The audition is ready but has no playable URL.',
+            file,
+            url: '',
+          };
+        } else {
+          this.state.audition = {
+            status: 'ready',
+            message: message || 'Audition ready.',
+            file,
+            url,
+          };
+        }
       }
     } catch (error) {
       this.state.audition = {
@@ -1352,7 +1417,8 @@ export class CharacterEditorController {
       this.api as Record<string, unknown>,
       ['requestAudition'],
     );
-    if (!character || !requestAudition) {
+    const apiFetch = typeof this.options.apiFetch === 'function' ? this.options.apiFetch : null;
+    if (!character || (!requestAudition && !apiFetch)) {
       this.voiceUi = {
         ...this.voiceUi,
         message: 'Voice auditions are not available in this build.',
@@ -1381,34 +1447,66 @@ export class CharacterEditorController {
       const savedVoice: Record<string, unknown> = isPlainObject(character.voice) ? character.voice : {};
       if (savedVoice.h3Mode !== 'prompt'
         || asString(savedVoice.voiceDescription).trim() !== patch.voice.voiceDescription) {
-        const updated = await this.patch(character.id, {
-          voice: {
-            h3Mode: 'prompt',
-            voiceDescription: patch.voice.voiceDescription,
-          },
-        } as CharacterPatch);
-        if (updated && typeof updated === 'object') this.applyCharacter(updated);
+        try {
+          const updated = await this.patch(character.id, {
+            voice: {
+              h3Mode: 'prompt',
+              voiceDescription: patch.voice.voiceDescription,
+            },
+          } as CharacterPatch);
+          if (updated && typeof updated === 'object') this.applyCharacter(updated);
+        } catch (error) {
+          // A server that does not persist H3 voice fields yet can still plan the
+          // audition from the request below. Any other save failure is real.
+          if (!/unknown field voice\.(?:h3Mode|voiceDescription)/i.test(errorMessage(error))) throw error;
+        }
       }
       const line = String(
         this.state.draft.voice.sampleLines[0] ?? 'Hello! This is what I sound like.',
       ).slice(0, MAX_SAMPLE_LINE_CHARS);
-      const outcome = await requestAudition({
-        characterId: character.id,
-        line,
-        description: patch.voice.voiceDescription,
-      });
+      let outcome: unknown;
+      if (apiFetch) {
+        const response = await apiFetch(
+          characterPath(character.id, '/audition'),
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              line,
+              description: patch.voice.voiceDescription,
+              h3VoiceMode: 'prompt',
+            }),
+          },
+        );
+        let parsed: unknown = {};
+        try { parsed = await response.json(); } catch { parsed = {}; }
+        const body = isPlainObject(parsed) ? parsed : {};
+        outcome = {
+          ...body,
+          status: response.status,
+          ok: response.status >= 200 && response.status < 300 && body.ok !== false,
+        };
+      } else {
+        outcome = await requestAudition!({
+          characterId: character.id,
+          line,
+          description: patch.voice.voiceDescription,
+          h3VoiceMode: 'prompt',
+        });
+      }
       const record = isPlainObject(outcome) ? outcome : {};
       const ok = record.ok === true;
       const code = asString(record.code);
+      const planned = code === 'AUDITION_PROMPT_PLANNED';
       const message = asString(record.message)
         || (ok ? 'Audition ready.' : 'The voice audition could not be generated.');
       this.voiceUi = {
         ...this.voiceUi,
         auditionBusy: false,
         message,
-        error: !ok,
+        error: !ok && !planned,
         code,
-        auditionUrl: asString(record.url),
+        auditionUrl: ok ? asString(record.url) : '',
       };
       this.notify();
       return ok;

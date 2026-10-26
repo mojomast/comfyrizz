@@ -106,6 +106,35 @@ function escapeHtml(value: unknown): string {
   })[char]!);
 }
 
+const MODAL_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
+/** The focus target when Tab would leave the modal, or null to let it move normally. */
+export function focusWrapTarget(
+  root: Pick<HTMLElement, 'querySelectorAll'>,
+  active: Element | null,
+  backwards: boolean,
+): HTMLElement | null {
+  if (!root || typeof root.querySelectorAll !== 'function') return null;
+  const items = Array.from(root.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE))
+    .filter(element => element.hidden !== true
+      && element.getAttribute?.('aria-hidden') !== 'true'
+      && !element.closest?.('[hidden]'));
+  if (items.length === 0) return null;
+  const index = active ? items.indexOf(active as HTMLElement) : -1;
+  if (index < 0) return backwards ? items[items.length - 1] : items[0];
+  if (backwards && index === 0) return items[items.length - 1];
+  if (!backwards && index === items.length - 1) return items[0];
+  return null;
+}
+
+/** A dialog above the Characters surface owns Escape before the tab does. */
+export function shouldCloseCharactersForEscape(target: EventTarget | null, root: HTMLElement): boolean {
+  if (!target || typeof (target as Element).closest !== 'function') return true;
+  const dialog = (target as Element).closest('dialog[open]');
+  if (!dialog) return true;
+  return typeof root.contains === 'function' ? root.contains(dialog) : false;
+}
+
 /** Project pins keyed by character id, derived from the project's cast entries. */
 export function pinsFromCast(cast: readonly CastEntry[] | null | undefined): Record<string, LibraryProjectPin> {
   const pins: Record<string, LibraryProjectPin> = {};
@@ -690,11 +719,23 @@ export function mountCharactersTab(
   };
 
   const onKeyDown = (event: Event) => {
-    const key = (event as KeyboardEvent).key;
+    const keyboard = event as KeyboardEvent;
+    const key = keyboard.key;
+    if (key === 'Tab' && open) {
+      const doc = typeof document !== 'undefined' ? document : null;
+      const next = focusWrapTarget(root, doc?.activeElement ?? null, keyboard.shiftKey === true);
+      if (next) {
+        keyboard.preventDefault?.();
+        keyboard.stopPropagation?.();
+        next.focus();
+      }
+      return;
+    }
     if (key !== 'Escape') return;
+    if (!shouldCloseCharactersForEscape(event.target, root)) return;
     if (editor) {
-      (event as KeyboardEvent).preventDefault?.();
-      (event as KeyboardEvent).stopPropagation?.();
+      keyboard.preventDefault?.();
+      keyboard.stopPropagation?.();
       closeEditor();
       try {
         const newBtn = libraryHost.querySelector<HTMLElement>('[data-new-character]');
@@ -703,8 +744,8 @@ export function mountCharactersTab(
         /* ignore */
       }
     } else if (open) {
-      (event as KeyboardEvent).preventDefault?.();
-      (event as KeyboardEvent).stopPropagation?.();
+      keyboard.preventDefault?.();
+      keyboard.stopPropagation?.();
       setOpen(false);
     }
   };

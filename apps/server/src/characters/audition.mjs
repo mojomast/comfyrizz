@@ -1619,7 +1619,7 @@ export function createAuditionWorker(options = {}) {
       );
     }
 
-    if (supportsPromptVoice(model) && h3VoiceMode === 'prompt') {
+    if (h3VoiceMode === 'prompt') {
       const audio = findPromptAudioField(input, 'input') ?? findPromptAudioField(rawVoice, 'voice');
       if (audio) {
         return failure(
@@ -1655,8 +1655,17 @@ export function createAuditionWorker(options = {}) {
     }
 
     // VX08: prompt mode plans a short generated take, never a synthesized WAV.
-    // The plan is not an approval and cannot start or dispatch anything.
-    if (supportsPromptVoice(model) && h3VoiceMode === 'prompt') {
+    // The plan is not an approval and cannot start or dispatch anything. A model
+    // without prompt voice support is reported as unsupported rather than
+    // falling through to the stock Kokoro path.
+    if (h3VoiceMode === 'prompt') {
+      if (!supportsPromptVoice(model)) {
+        return failure(
+          PROMPT_VOICE_UNSUPPORTED,
+          'the selected model does not support prompt voice; this written voice cannot be auditioned',
+          { voicePath: 'prompt' },
+        );
+      }
       try {
         const plan = planPromptVoiceAudition({
           characterId: character?.id,

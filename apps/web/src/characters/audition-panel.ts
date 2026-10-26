@@ -43,6 +43,10 @@ export interface AuditionCandidate {
   engine?: VoiceEngine | string;
   voice?: string;
   language?: VoiceLanguage | string;
+  /** Immutable voice fields used for both the audition and the selection. */
+  voiceConfig?: Record<string, unknown>;
+  /** Server-issued identity for the exact voice config and line. */
+  voiceHash?: string;
   /** Server-provided speaking path. Never inferred from a model name. */
   voicePath?: AuditionVoicePath;
   sampleLine?: string;
@@ -60,13 +64,19 @@ export interface AuditionDecisionRecord {
   reason: string;
 }
 
+export interface AuditionPanelAuditionRequest extends AuditionRequest {
+  candidateId?: string;
+  voice?: Record<string, unknown>;
+  voiceHash?: string;
+}
+
 export interface AuditionPanelApi {
   update?(
     id: string,
     patch: CharacterPatch,
     options?: UpdateCharacterOptions,
   ): Promise<Character>;
-  requestAudition?(request: AuditionRequest): Promise<AuditionOutcome>;
+  requestAudition?(request: AuditionPanelAuditionRequest): Promise<AuditionOutcome>;
   recordAuditionDecision?(record: AuditionDecisionRecord): Promise<unknown>;
   [key: string]: unknown;
 }
@@ -115,6 +125,15 @@ export interface AuditionRow {
   busy: boolean;
   playing: boolean;
   message: string;
+  /** The immutable voice config this row auditions and selects. */
+  voiceConfig: Record<string, unknown>;
+  voiceHash: string;
+  /** Identity of the audio that actually played, or empty before a verified play. */
+  audioHash: string;
+  /** True when the last audition returned audio for a different candidate identity. */
+  audioMismatch: boolean;
+  /** Identity of the candidate saved by the last successful selection. */
+  selectedHash: string;
   /** IL20: measured RMS of the last audition, in dBFS, or null when unknown. */
   rmsDbfs: number | null;
   /** IL20: linear gain matched to the target RMS. */
@@ -218,12 +237,22 @@ function rowFor(candidate: AuditionCandidate, fallbackLine: string): AuditionRow
     candidate.decision === 'selected' || candidate.decision === 'rejected'
       ? candidate.decision
       : 'pending';
+  const voiceConfig: Record<string, unknown> = isRecord(candidate.voiceConfig)
+    ? clone(candidate.voiceConfig)
+    : {};
+  const engine = text(candidate.engine) || text(voiceConfig.engine);
+  const voice = text(candidate.voice) || text(voiceConfig.voice);
+  const language = text(candidate.language) || text(voiceConfig.language);
+  if (!voiceConfig.engine && engine) voiceConfig.engine = engine;
+  if (!voiceConfig.voice && voice) voiceConfig.voice = voice;
+  if (!voiceConfig.language && language) voiceConfig.language = language;
+  const voiceHash = text(candidate.voiceHash);
   return {
     candidateId: text(candidate.candidateId),
-    label: text(candidate.label) || text(candidate.voice) || text(candidate.candidateId),
-    engine: text(candidate.engine),
-    voice: text(candidate.voice),
-    language: text(candidate.language),
+    label: text(candidate.label) || voice || text(candidate.candidateId),
+    engine,
+    voice,
+    language,
     line: text(candidate.sampleLine) || fallbackLine,
     voicePath,
     decision,
@@ -231,6 +260,11 @@ function rowFor(candidate: AuditionCandidate, fallbackLine: string): AuditionRow
     busy: false,
     playing: false,
     message: voicePath === 'native' ? NATIVE_VOICE_MESSAGE : '',
+    voiceConfig,
+    voiceHash,
+    audioHash: '',
+    audioMismatch: false,
+    selectedHash: decision === 'selected' ? voiceHash : '',
     rmsDbfs: rmsValue(candidate.rmsDbfs),
     gain: gainFor(rmsValue(candidate.rmsDbfs)).gain,
   };
@@ -621,6 +655,9 @@ export class AuditionPanelController {
       const outcome = await audition({
         characterId: this.characterId,
         line: row.line || this.line,
+        candidateId: row.candidateId,
+        ...(Object.keys(row.voiceConfig).length > 0 ? { voice: clone(row.voiceConfig) } : {}),
+        ...(row.voiceHash ? { voiceHash: row.voiceHash } : {}),
         ...(this.options.signal ? { signal: this.options.signal } : {}),
       });
       if (!outcome || typeof outcome !== 'object') {
@@ -634,24 +671,42 @@ export class AuditionPanelController {
           : 'unknown';
       if (voicePath === 'native' || outcome.code === 'AUDITION_NATIVE_VOICE') {
         row.voicePath = 'native';
+        row.audioHash = '';
+        row.audioMismatch = false;
         row.message = outcome.message || NATIVE_VOICE_MESSAGE;
         return this.getState();
       }
       if (!outcome.ok) {
         row.voicePath = voicePath;
+        row.audioHash = '';
+        row.audioMismatch = false;
         row.message = outcome.message || 'The audition failed.';
         this.error = row.message;
         return this.getState();
       }
       if (voicePath !== 'kokoro') {
         row.voicePath = 'unknown';
+        row.audioHash = '';
+        row.audioMismatch = false;
         row.message = 'The audition did not declare a speaking path.';
         this.error = row.message;
         return this.getState();
       }
+      const playedHash = text(outcome.voiceHash);
+      if (row.voiceHash && playedHash !== row.voiceHash) {
+        row.voicePath = 'kokoro';
+        row.audioHash = '';
+        row.audioMismatch = true;
+        row.message = 'The auditioned audio does not match this candidate.';
+        this.error = row.message;
+        return this.getState();
+      }
       row.voicePath = 'kokoro';
+      row.audioHash = playedHash || row.voiceHash;
+      row.audioMismatch = false;
       this.applyReportedRms(row, outcome);
       if (!outcome.url) {
+        row.audioHash = '';
         row.message = 'The audition is ready but has no playable URL.';
         this.error = row.message;
         return this.getState();
@@ -688,6 +743,11 @@ export class AuditionPanelController {
       return this.getState();
     }
     if (row.busy) return this.getState();
+    if (row.audioMismatch || (row.voiceHash && row.audioHash && row.voiceHash !== row.audioHash)) {
+      this.error = 'The played audio does not match this candidate.';
+      this.notify();
+      return this.getState();
+    }
     if (row.engine !== 'kokoro' || !row.voice) {
       // Q4: the speaking fallback is Kokoro only; a Qwen3-TTS or voiceless
       // candidate is never saved as the character's voice.
@@ -706,6 +766,7 @@ export class AuditionPanelController {
     const previousReason = row.reason;
     const previousSelectedId = this.selectedId;
     const previousRejectedId = this.rejectedId;
+    const previousSelectedHash = row.selectedHash;
     row.busy = true;
     this.busyId = row.candidateId;
     this.error = '';
@@ -714,10 +775,10 @@ export class AuditionPanelController {
     this.notify();
 
     try {
-      const voice: Partial<CharacterVoice> = {};
-      if (row.engine) voice.engine = row.engine as VoiceEngine;
-      if (row.voice) voice.voice = row.voice;
-      if (row.language) voice.language = row.language as VoiceLanguage;
+      const voice = clone(row.voiceConfig) as Partial<CharacterVoice>;
+      if (!voice.engine && row.engine) voice.engine = row.engine as VoiceEngine;
+      if (!voice.voice && row.voice) voice.voice = row.voice;
+      if (!voice.language && row.language) voice.language = row.language as VoiceLanguage;
       const saved = await update(
         this.characterId,
         { voice },
@@ -725,10 +786,14 @@ export class AuditionPanelController {
       );
       // One voice per character: the previously selected row goes back to pending.
       for (const other of this.rows) {
-        if (other !== row && other.decision === 'selected') other.decision = 'pending';
+        if (other !== row && other.decision === 'selected') {
+          other.decision = 'pending';
+          other.selectedHash = '';
+        }
       }
       row.decision = 'selected';
       row.reason = '';
+      row.selectedHash = row.voiceHash || row.audioHash;
       this.selectedId = row.candidateId;
       if (this.rejectedId === row.candidateId) this.rejectedId = null;
       if (isRecord(saved) && Number.isSafeInteger(saved.revision)) {
@@ -738,6 +803,7 @@ export class AuditionPanelController {
     } catch (error) {
       row.decision = previousDecision;
       row.reason = previousReason;
+      row.selectedHash = previousSelectedHash;
       this.selectedId = previousSelectedId;
       this.rejectedId = previousRejectedId;
       this.error = errorMessage(error);
@@ -774,6 +840,7 @@ export class AuditionPanelController {
     const previousReason = row.reason;
     const previousSelectedId = this.selectedId;
     const previousRejectedId = this.rejectedId;
+    const previousSelectedHash = row.selectedHash;
     row.busy = true;
     this.busyId = row.candidateId;
     this.error = '';
@@ -790,12 +857,14 @@ export class AuditionPanelController {
       });
       row.decision = 'rejected';
       row.reason = reason;
+      row.selectedHash = '';
       this.rejectedId = row.candidateId;
       if (this.selectedId === row.candidateId) this.selectedId = null;
       this.message = 'Voice rejected.';
     } catch (error) {
       row.decision = previousDecision;
       row.reason = previousReason;
+      row.selectedHash = previousSelectedHash;
       this.selectedId = previousSelectedId;
       this.rejectedId = previousRejectedId;
       this.error = errorMessage(error);
