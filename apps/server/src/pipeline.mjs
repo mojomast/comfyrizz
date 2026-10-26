@@ -1,12 +1,15 @@
 // Durable application pipeline. Heavy work lives in a child, never the HTTP/SSE loop.
 import { fork } from 'node:child_process';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
 import { planPipeline } from './pipeline-contract.mjs';
+import { createProductionStore } from './productions/store.mjs';
+import { createProductionAdmission } from './productions/admission.mjs';
+import { admissionRefusal } from './productions/contract.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 // PO-4: reconciliation stops Google Colab runtimes one at a time; without a deadline a CLI that never answers
@@ -59,10 +62,12 @@ export function launchPipeline(spec, onMessage, onExit) {
   return { cancel: () => child.connected && child.send({ kind: 'cancel' }), kill: signal => { try { child.kill(signal); } catch { /* already gone */ } } };
 }
 
-export function createPipelineController({ runtimeDir, events, stageInputs, launch = launchPipeline, env = process.env, operations = null, isBusy = () => false, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = Math.max(90000, Number(env.COMFYRIZZ_RECONCILE_STOP_GRACE_MS) || RECONCILE_STOP_GRACE_MS), takeOver = env.COMFYRIZZ_TAKE_OVER === '1' || process.argv.includes('--take-over'), ownerStaleMs = (Number(env.COMFYRIZZ_OWNER_STALE_MINUTES) || OWNER_STALE_MINUTES) * 60000, ownerHeartbeatMs = OWNER_HEARTBEAT_MS }) {
+export function createPipelineController({ runtimeDir, productionStore = createProductionStore({ runtimeDir }), events, stageInputs, launch = launchPipeline, env = process.env, operations = null, isBusy = () => false, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = Math.max(90000, Number(env.COMFYRIZZ_RECONCILE_STOP_GRACE_MS) || RECONCILE_STOP_GRACE_MS), takeOver = env.COMFYRIZZ_TAKE_OVER === '1' || process.argv.includes('--take-over'), ownerStaleMs = (Number(env.COMFYRIZZ_OWNER_STALE_MINUTES) || OWNER_STALE_MINUTES) * 60000, ownerHeartbeatMs = OWNER_HEARTBEAT_MS }) {
   const dir = join(runtimeDir, 'pipelines');
   mkdirSync(dir, { recursive: true });
   const records = new Map(), workers = new Map(), journals = new Map();
+  // UX01: a package bound to a production starts only from its dispatched action.
+  const admission = createProductionAdmission({ store: productionStore });
   let starting = false, lastPersist = 0, ownsLock = false;
   /**
    * RL10c: a Google Colab generation run owns the shared operation slot (RL05's coordinator) for its
@@ -255,6 +260,24 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     if (TERMINAL.has(record.status)) releaseSlot(record.runId);
   }
   async function start(pkg, input, sourceDir, options = {}) {
+    // IP22: a production action owns the run that was dispatched for it. The
+    // origin is recorded before the worker is launched, so a restart can
+    // attribute the interrupted run back to the same approved slot instead of
+    // submitting a second paid run. UX01: only the server-owned dispatch path
+    // passes it; the HTTP route never does.
+    const origin = options?.origin && typeof options.origin.productionId === 'string'
+      && typeof options.origin.actionId === 'string'
+      ? { productionId: options.origin.productionId, actionId: options.origin.actionId }
+      : null;
+    // UX01: admission comes first, so a refused request touches no slot, no
+    // directory and no worker.
+    if (origin && forAction(origin.productionId, origin.actionId)) {
+      return admissionRefusal('DUPLICATE_START', 'a pipeline run was already started for this action', {
+        entryPoint: 'pipeline.start', productionId: origin.productionId, actionId: origin.actionId,
+      });
+    }
+    const refusal = admission.pipelineRefusal(pkg, input, { origin });
+    if (refusal) return refusal;
     if (starting || active() || isBusy()) {
       // RL10c: the run that already owns the machine is named, so the caller knows who holds it.
       const holder = slotHolder();
@@ -264,14 +287,6 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
     if (unresolved) return { status: 409, error: 'runtime shutdown needs reconciliation', runId: unresolved.runId, action: `/api/pipeline/${unresolved.runId}/reconcile` };
     starting = true;
     const runId = `pipe_${randomUUID().replaceAll('-', '')}`;
-    // IP22: a production action owns the run that was dispatched for it. The
-    // origin is recorded before the worker is launched, so a restart can
-    // attribute the interrupted run back to the same approved slot instead of
-    // submitting a second paid run.
-    const origin = options?.origin && typeof options.origin.productionId === 'string'
-      && typeof options.origin.actionId === 'string'
-      ? { productionId: options.origin.productionId, actionId: options.origin.actionId }
-      : null;
     let live = false;
     try {
       // RL10c: the shared slot decides admission before the plan is even looked at, so a machine
@@ -284,6 +299,9 @@ export function createPipelineController({ runtimeDir, events, stageInputs, laun
       const runDir = join(dir, runId), workDir = join(runDir, 'work');
       mkdirSync(workDir, { recursive: true });
       await stageInputs(pkg, sourceDir, workDir);
+      // UX01: staging awaits, so intent is read again before any worker exists.
+      const late = admission.pipelineRefusal(pkg, input, { origin });
+      if (late) { releaseSlot(runId); rmSync(runDir, { recursive: true, force: true }); return late; }
       writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg, null, 2));
       const record = { version: 1, runId, packageId: pkg.id, baseRevision: pkg.revision, origin, inputHash: plan.inputHash, planHash: plan.planHash, status: 'running', sequence: 0, startedAt: new Date().toISOString(), updatedAt: null, finishedAt: null, currentStage: null, stages: plan.stages, budget: plan.budget, runtimes: {}, tasks: {}, warnings: [], error: null, result: null, reconcile: null };
       records.set(runId, record);
