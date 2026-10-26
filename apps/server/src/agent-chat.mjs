@@ -20,7 +20,7 @@ import { createTakeStore } from './takes/store.mjs';
 import { createCharacterStore } from './characters/store.mjs';
 import { addToProject, setCastOverrides } from './characters/cast.mjs';
 import { buildCastManifest, manifestBlock as castManifestBlock } from './characters/manifest.mjs';
-import { IterationScopeError, toPromptHint, validateIterationScope } from './productions/iteration-scope.mjs';
+import { IterationScopeError, normalizeTargetSet, scopeIdKind, toPromptHint, validateIterationScope } from './productions/iteration-scope.mjs';
 
 function fail(status, message, extra) { throw Object.assign(new Error(message), { status }, extra); }
 const clone = value => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
@@ -111,6 +111,22 @@ function normalizedIterationScope(raw) {
   } catch (error) {
     if (error instanceof IterationScopeError) {
       fail(400, 'Invalid iteration scope', { code: 'INVALID_ITERATION_SCOPE', field: error.field });
+    }
+    throw error;
+  }
+}
+
+// UX09: the explicit requested target set (UX00). Absent means unscoped, an
+// empty list means nothing may change, and anything malformed is refused before
+// a turn starts. The host omits `targets` when no chips are selected.
+function normalizedTargets(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  try {
+    const set = normalizeTargetSet(raw);
+    return { shotIds: [...set.shotIds], lineIds: [...set.lineIds] };
+  } catch (error) {
+    if (error instanceof IterationScopeError) {
+      fail(400, 'Invalid targets', { code: 'INVALID_TARGETS', field: error.field });
     }
     throw error;
   }
@@ -305,24 +321,44 @@ function productionShotsFor(snapshot, pkg) {
   }));
 }
 
-// Explicit turnContext chips are the only source of a requested scope. There is
-// deliberately no last-selected fallback: no chips means the state's default.
-function requestedProductionIds(turnContext) {
+const CHIP_ID_FIELDS = ['sceneId', 'shotId', 'lineId', 'targetId'];
+const CHIP_TEXT_FIELDS = ['value', 'id', 'label'];
+const CHIP_PREFIX = /^(?:clip|shot|line|scene|target):/u;
+
+// Explicit turnContext chips are the only chip source of a requested scope. There
+// is deliberately no last-selected fallback. A chip names a target by a canonical
+// id (`s_intro:l2`, `s_intro`, or a clip `s_intro:a_logo`, which means its shot)
+// or by numeric prose ("shot 2 line 1"). Free text only counts when it is a real
+// shot or line of the production, so a label such as "Sunset" never becomes a
+// target. A chip that names nothing is ignored; no chip naming a target at all
+// leaves the turn unscoped (undefined), never an empty list.
+function requestedTargetsFromChips(turnContext, shots) {
+  const knownShots = new Set(shots.map(shot => shot.id));
+  const knownLines = new Set(shots.flatMap(shot => shot.lines));
   const shotIds = new Set();
   const lineIds = new Set();
+  const add = id => {
+    if (scopeIdKind(id) === 'line') lineIds.add(id);
+    else if (scopeIdKind(id) === 'clip') shotIds.add(id.split(':')[0]);
+    else if (scopeIdKind(id) === 'shot') shotIds.add(id);
+  };
   for (const chip of Array.isArray(turnContext) ? turnContext : []) {
     if (!isPlainObject(chip)) continue;
-    const fields = ['value', 'id', 'label', 'sceneId', 'shotId', 'lineId', 'targetId'];
-    for (const field of fields) {
+    for (const field of CHIP_ID_FIELDS) {
+      const text = chip[field];
+      if (typeof text === 'string') add(text.replace(CHIP_PREFIX, ''));
+    }
+    for (const field of CHIP_TEXT_FIELDS) {
       const text = chip[field];
       if (typeof text !== 'string') continue;
-      for (const id of idMentions(text)) {
-        if (id.includes(':')) lineIds.add(id);
-        else shotIds.add(id);
-      }
+      const bare = text.replace(CHIP_PREFIX, '');
+      if (knownLines.has(bare) || knownShots.has(bare)) add(bare);
+      else if (scopeIdKind(bare) === 'clip') add(bare);
+      else for (const id of idMentions(text)) add(id);
     }
   }
-  return { requestedShotIds: [...shotIds], requestedLineIds: [...lineIds] };
+  if (shotIds.size === 0 && lineIds.size === 0) return undefined;
+  return { shotIds: [...shotIds], lineIds: [...lineIds] };
 }
 
 export function createProjectChat({
@@ -367,7 +403,7 @@ export function createProjectChat({
   // the conversation is actually working on. A production context is only
   // built with productionState and a real user turn, so live chat never reaches
   // the unguarded IP35 dispatch path and never invents an attribution.
-  function productionContextFor(pkg, input) {
+  function productionContextFor(pkg, input, { iterationScope = null, targets, builtPlan } = {}) {
     if (!production
       || typeof production.findBound !== 'function'
       || typeof production.read !== 'function'
@@ -380,7 +416,15 @@ export function createProjectChat({
     const snapshot = production.read(bound.id);
     if (!isPlainObject(snapshot)) return null;
     const intent = typeof snapshot.intent === 'string' ? snapshot.intent : 'active';
-    const requested = requestedProductionIds(input?.turnContext);
+    const shots = productionShotsFor(snapshot, pkg);
+    const requested = targets ?? requestedTargetsFromChips(input?.turnContext, shots);
+    const lockedShotIds = Array.isArray(snapshot.lockedShotIds)
+      ? snapshot.lockedShotIds.filter(id => typeof id === 'string' && id !== '')
+      : [];
+    const pinned = iterationScope?.sourceRevision?.packageRevision;
+    const scopeStale = Number.isSafeInteger(pinned) && Number.isSafeInteger(pkg.revision) && pinned !== pkg.revision
+      ? `the iteration scope was authored against package revision ${pinned} but the project is at revision ${pkg.revision}; ask the user to select the target again`
+      : undefined;
     return {
       productionId: bound.id,
       userEventId: `ue_${turnId}`,
@@ -390,10 +434,13 @@ export function createProjectChat({
       capabilities: { read: true, proposePlan: true, commands: true },
       productionState: {
         intent,
-        shots: productionShotsFor(snapshot, pkg),
-        requestedShotIds: requested.requestedShotIds,
-        requestedLineIds: requested.requestedLineIds,
+        shots,
+        ...(requested ? { targets: requested } : {}),
+        ...(lockedShotIds.length ? { lockedShotIds } : {}),
       },
+      ...(iterationScope ? { iterationScope } : {}),
+      ...(scopeStale ? { scopeStale } : {}),
+      ...(builtPlan ? { builtPlan } : {}),
     };
   }
   function read(id) {
@@ -833,6 +880,7 @@ export function createProjectChat({
     if (input.action !== undefined && input.action !== 'build') fail(400, 'Unknown conversation action');
     if (input.turnId !== undefined && (typeof input.turnId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(input.turnId))) fail(400, 'Invalid turn ID');
     const iterationScope = normalizedIterationScope(input.iterationScope);
+    const requestedTargets = normalizedTargets(input.targets);
     if (input.rejectAssignments !== undefined && (!Array.isArray(input.rejectAssignments)
       || input.rejectAssignments.some(assignmentId => typeof assignmentId !== 'string' || !assignmentId || assignmentId.length > 80))) {
       fail(400, 'rejectAssignments must be a list of assignment IDs');
@@ -1321,7 +1369,11 @@ export function createProjectChat({
           },
         };
       };
-      const productionContext = productionContextFor(simCurrent, input);
+      const productionContext = productionContextFor(simCurrent, input, {
+        iterationScope,
+        targets: requestedTargets,
+        builtPlan: rebased.previousPlan ?? session.plan ?? undefined,
+      });
       // The explicit UI action applies the reviewed draft without another creative generation.
       const result = input.action === 'build' ? await (async () => {
         await build(rebased.plan);
