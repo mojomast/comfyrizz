@@ -1,9 +1,19 @@
 # Pilot plan
 
 Budget: **3 Google Colab credits (APPROVED)**, drawn from the 20-credit envelope in
-the [README](README.md). Pilots validate the recipe and the no-clip Omni graph on
-its pinned revision, and produce the cost-per-accepted-second estimate for the main
+the [README](README.md). Pilots validate the recipe on the exercised graph and produce the cost-per-accepted-second estimate for the main
 batch. Pilots are launched by the parent, one at a time, with **no unattended retry**.
+
+Graph: the initial pilots use the previously exercised audio graph with silent
+conditioning, not the unvalidated no-clip graph. Review each take for generated
+speech contamination before accepting it.
+
+Shots S02, S08 and S04 are placeholders for the pilot categories. The checkpoint's
+accepted identities and lighthouse environment suggest concrete actions: cart pushing
+(locomotion with weight), a lever lifting a wheel (hand-prop contact and state
+change), and a restrained face/body reaction. Substitute them while revising the shot
+skeleton, keeping the categories and one-variable rule. Stairs reach only the
+lighthouse base, so stage any upper access explicitly.
 
 Rules for all pilots:
 

@@ -34,8 +34,11 @@ Tick each line against the actual graph before a paid run, and record deviations
 - [ ] Frames on the H3 `17n+5` grid at 24fps, rounded up, at least as long as the edit
   needs. 124 frames = 5.1667s.
 - [ ] Dimensions on the 32-pixel lattice.
-- [ ] The no-clip graph needs a runtime validation on its pinned revision before the
-  main batch; the pilots serve as that validation. Record the result.
+- [ ] The no-clip graph is **not yet validated** on its pinned revision. For the
+  initial action pilots use the previously exercised audio graph with **silent
+  conditioning** rather than relying on the no-clip graph, and review every take for
+  generated speech contamination. Validate the no-clip graph only as a bounded,
+  separately recorded comparison.
 - [ ] Existing NVFP4 encoder weights need suitable Blackwell hardware; confirm the
   Google Colab accelerator before launching.
 - [ ] Published multi-GPU throughput is not a single Google Colab cost estimate.

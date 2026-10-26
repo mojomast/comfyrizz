@@ -45,6 +45,25 @@ Conditions that remain in force with the approval:
 - The package-authoring run was zero-spend. Pilots are started by the parent after
   this package lands.
 
+### Checkpoint already recorded (from the research doc)
+
+The first production checkpoint (see "First production checkpoint" in the research)
+used an estimated **1.10 credits** of the 2-credit setup envelope: four
+visual-development stills generated, verified by SHA256 and decoded, no
+regeneration. That is an estimate, not a measured price, and it is drawn from the
+same approved 20 credits. Remaining estimate: setup about 0.9, pilots 3, main 10,
+reserve 5. The three non-human identities were accepted for action development.
+Carry that estimate forward in the balance record in [`RUNBOOK.md`](RUNBOOK.md).
+
+### Skeleton versus checkpoint
+
+The shot skeleton's setting (canyon gate, crank wheel) is a placeholder. The
+checkpoint's environment has a lighthouse whose stairs reach only the base, so upper
+access must be staged explicitly; reconcile story, props and the character stubs with
+those accepted stills during boards. Pilot action candidates from the checkpoint are
+cart pushing, a lever lifting a wheel, and a restrained face/body reaction; see
+[`PILOT_PLAN.md`](PILOT_PLAN.md). Stills do not establish motion quality.
+
 ## Timing beats (24fps, 2880 frames)
 
 | Seconds | Beat | Frames | Shots |

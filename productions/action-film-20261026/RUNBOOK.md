@@ -20,11 +20,13 @@ Google Colab; the parent starts pilots after the package lands.
 ## 1. Refresh Google Colab balance and idle state
 
 1. Record the current credit balance and whether any session is running or idle.
-2. Record any unresolved prior exposure (earlier sessions not yet reconciled)
+2. Carry forward the setup checkpoint: an estimated 1.10 credits already used for the
+   four verified visual-development stills (estimate, not a measured price).
+3. Record any unresolved prior exposure (earlier sessions not yet reconciled)
    **separately**; it is not charged to this film's envelopes.
-3. Confirm the accelerator satisfies the NVFP4/Blackwell requirement in the settings
+4. Confirm the accelerator satisfies the NVFP4/Blackwell requirement in the settings
    checklist.
-4. Apply the existing paid-work gates. Stop if the balance cannot cover the next
+5. Apply the existing paid-work gates. Stop if the balance cannot cover the next
    envelope.
 
 ## 2. Persistent scratch and disk headroom
@@ -36,13 +38,19 @@ takes get new names).
 
 ## 3. Setup / boards (2 credits)
 
-FLUX 3 Image Klein stills with expanded captions for the three character plates,
-key environments and boards. Review plates for full-body proportions and angles.
+The first four stills are done (see the README checkpoint note). Continue with FLUX 3
+Image Klein stills with expanded captions for any remaining character plates, key
+environments and boards (lighthouse access staged explicitly). Review plates for full-body proportions and angles.
 Build the rough animatic from stills. Collect, hash and decode before teardown.
 
 ## 4. Pilots (3 credits), one at a time
 
-Follow [`PILOT_PLAN.md`](PILOT_PLAN.md): P1, then P2, then P3.
+Follow [`PILOT_PLAN.md`](PILOT_PLAN.md): P1, then P2, then P3, on the exercised audio
+graph with silent conditioning (check takes for speech contamination).
+
+Production runners verify already-collected local outputs (hash and decode) before
+making any further collection request; keep the original result, error and recovery
+receipt, because an outer script failure must not erase successful assets.
 
 - **No unattended retry.** One launch, one review, one decision.
 - After each pilot, before teardown: **collect** outputs to persistent scratch,
