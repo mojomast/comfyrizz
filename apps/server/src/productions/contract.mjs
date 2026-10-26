@@ -958,3 +958,398 @@ export const validateEvent = makeValidator(event);
 export const validateCommandEnvelope = makeValidator(commandEnvelope);
 /** @param {unknown} value @returns {ValidationResult} */
 export const validateRecordedCommand = makeValidator(recordedCommand);
+
+// --- UX00: generation admission (comfyrizz.admission/v1) -------------------
+//
+// One admission rule for every entry point that can allocate generation work.
+// The field names are the live IP24 `/api/run` shape (`authority` +
+// `expected`); this is not a second envelope. Binding is resolved by the
+// server from the production store, never from a caller boolean.
+
+export const ADMISSION_CONTRACT = 'comfyrizz.admission/v1';
+
+// Every start path that can reach a backend. A bound package must be admitted
+// (or refused with a code below) at each of these; an entry point that cannot
+// verify authority refuses with BOUND_ENTRY_UNSUPPORTED instead of running
+// unguarded. Unbound packages keep their legacy behaviour.
+export const ADMISSION_ENTRY_POINTS = Object.freeze([
+  'run.start',
+  'pipeline.start',
+  'take.regenerate',
+  'take.regenerate_batch',
+  'take.queue_drain',
+  'chat.correction',
+  'audition.synthesize',
+  'action.outbox',
+]);
+
+// Pause stops future admissions; cancel_requested and archived never admit.
+// Intent does not unbind a package: a paused production still owns it.
+export const ADMITTING_INTENTS = Object.freeze(['active']);
+
+// Typed refusal code -> HTTP status. Codes already returned by run.mjs keep
+// their status; PRODUCTION_NOT_ACTIVE and BOUND_ENTRY_UNSUPPORTED are new.
+export const ADMISSION_REFUSALS = Object.freeze({
+  BOUND_AUTHORITY_REQUIRED: 400,
+  CALLER_AUTHORITY_FORBIDDEN: 400,
+  PRODUCTION_MISMATCH: 403,
+  PRODUCTION_NOT_FOUND: 404,
+  UNKNOWN_PLAN: 404,
+  UNKNOWN_ACTION: 404,
+  REVISION_CONFLICT: 409,
+  PRODUCTION_NOT_ACTIVE: 409,
+  PLAN_REJECTED: 409,
+  APPROVAL_REQUIRED: 409,
+  ACTION_CONSUMED: 409,
+  ACTION_NOT_ADMITTED: 409,
+  SLOT_BOUND_EXCEEDED: 409,
+  BUDGET_EXCEEDED: 409,
+  IDEMPOTENCY_CONFLICT: 409,
+  DUPLICATE_START: 409,
+  RUN_BUSY: 409,
+  BOUND_ENTRY_UNSUPPORTED: 409,
+  BOUND_AUTHORITY_UNAVAILABLE: 500,
+  LEDGER_UNAVAILABLE: 500,
+});
+
+// Safe detail keys on a refusal body. `budget` stays an opaque object until the
+// UX02 amendment versions its spent/reserved/available fields.
+export const ADMISSION_REFUSAL_DETAIL_KEYS = Object.freeze([
+  'entryPoint',
+  'productionId',
+  'planId',
+  'planHash',
+  'actionId',
+  'reservationId',
+  'commandId',
+  'idempotencyKey',
+  'intent',
+  'currentRevision',
+  'baseRevision',
+  'activeRunId',
+  'slot',
+  'budget',
+  'errors',
+]);
+
+// A refusal must not look like started or queued work.
+const REFUSAL_START_KEYS = Object.freeze(['runId', 'started', 'queued', 'approved', 'jobId', 'attemptId']);
+const REFUSAL_BASE_KEYS = new Set(['error', 'code', 'status']);
+const AUTHORITY_KEYS = new Set(['productionId', 'planId', 'planHash', 'actionId']);
+const CALLER_AUTHORITY_KEYS = new Set(['approved', 'actor', 'userEventId', 'reservationId', 'state']);
+const BOUND_ADMISSION_KEYS = new Set(['authority', 'expected']);
+
+/**
+ * @typedef {{ productionId: string, planId: string, planHash: string, actionId: string }} BoundAuthority
+ * @typedef {{ authority: BoundAuthority, expected: ExpectedRevisions }} BoundAdmission
+ * @typedef {{ state: 'unbound' }
+ *   | { state: 'bound', productionId: string, source: 'store'|'package', intent: string|null, revision: number|null }
+ *   | { state: 'conflict', productionId: string, packageProductionId: string }} ProductionBinding
+ * @typedef {{ error: string, code: string, status: number } & Record<string, unknown>} AdmissionRefusal
+ */
+
+function boundAdmission(errors, doc, path) {
+  if (!requireObject(errors, doc, path, 'bound admission')) return;
+  for (const key of Object.keys(doc)) {
+    if (BOUND_ADMISSION_KEYS.has(key)) continue;
+    const at = joinPath(path, key);
+    if (CALLER_AUTHORITY_KEYS.has(key)) {
+      push(errors, at, 'CALLER_AUTHORITY_FORBIDDEN', `${at} cannot authorize a bound start; only the dispatched action authority does`);
+    } else {
+      push(errors, at, 'UNKNOWN_FIELD', `${at} is not a recognized field`);
+    }
+  }
+  const authorityPath = joinPath(path, 'authority');
+  if (doc.authority === undefined || doc.authority === null) {
+    push(errors, authorityPath, 'BOUND_AUTHORITY_REQUIRED', 'a production-bound start requires its dispatched action authority');
+  } else if (requireObject(errors, doc.authority, authorityPath, 'authority')) {
+    for (const key of Object.keys(doc.authority)) {
+      if (AUTHORITY_KEYS.has(key)) continue;
+      const at = joinPath(authorityPath, key);
+      if (CALLER_AUTHORITY_KEYS.has(key)) {
+        push(errors, at, 'CALLER_AUTHORITY_FORBIDDEN', `${at} is server-owned and cannot be supplied as authority`);
+      } else {
+        push(errors, at, 'UNKNOWN_FIELD', `${at} is not a recognized field`);
+      }
+    }
+    requireId(errors, doc.authority.productionId, joinPath(authorityPath, 'productionId'), { code: 'BOUND_AUTHORITY_REQUIRED', label: 'production id' });
+    requireId(errors, doc.authority.planId, joinPath(authorityPath, 'planId'), { code: 'BOUND_AUTHORITY_REQUIRED', label: 'action plan id' });
+    requireText(errors, doc.authority.planHash, joinPath(authorityPath, 'planHash'), { code: 'BOUND_AUTHORITY_REQUIRED', label: 'an immutable plan hash', max: 512 });
+    requireId(errors, doc.authority.actionId, joinPath(authorityPath, 'actionId'), { code: 'BOUND_AUTHORITY_REQUIRED', label: 'action id' });
+  }
+  const expectedPath = joinPath(path, 'expected');
+  if (doc.expected === undefined || doc.expected === null) {
+    push(errors, expectedPath, 'BOUND_AUTHORITY_REQUIRED', 'expected.productionRevision is required for a production-bound start');
+  } else {
+    validateExpectedRevisions(errors, doc.expected, expectedPath);
+  }
+}
+
+function admissionRefusalRecord(errors, doc, path) {
+  if (!requireObject(errors, doc, path, 'admission refusal')) return;
+  const codeOk = requireEnum(errors, doc.code, Object.keys(ADMISSION_REFUSALS), joinPath(path, 'code'), 'UNKNOWN_REFUSAL_CODE');
+  if (codeOk && doc.status !== ADMISSION_REFUSALS[doc.code]) {
+    push(errors, joinPath(path, 'status'), 'REFUSAL_STATUS_MISMATCH', `${doc.code} is refused with HTTP ${ADMISSION_REFUSALS[doc.code]}`);
+  }
+  requireText(errors, doc.error, joinPath(path, 'error'), { max: 4000 });
+  for (const key of Object.keys(doc)) {
+    if (REFUSAL_BASE_KEYS.has(key) || ADMISSION_REFUSAL_DETAIL_KEYS.includes(key)) continue;
+    const at = joinPath(path, key);
+    if (REFUSAL_START_KEYS.includes(key)) {
+      push(errors, at, 'REFUSAL_CLAIMS_START', `${at} must not appear on a refusal; refused work was never started or queued`);
+    } else {
+      push(errors, at, 'UNKNOWN_FIELD', `${at} is not a recognized refusal detail`);
+    }
+  }
+  if (doc.code === 'PRODUCTION_NOT_ACTIVE') {
+    const nonAdmitting = PRODUCTION_INTENTS.filter((intent) => !ADMITTING_INTENTS.includes(intent));
+    requireEnum(errors, doc.intent, nonAdmitting, joinPath(path, 'intent'), 'INVALID_INTENT');
+  }
+  if (doc.entryPoint !== undefined) {
+    requireEnum(errors, doc.entryPoint, ADMISSION_ENTRY_POINTS, joinPath(path, 'entryPoint'), 'UNKNOWN_ENTRY_POINT');
+  }
+  scanForPaths(errors, doc, path);
+}
+
+/** @param {unknown} value @returns {ValidationResult} */
+export const validateBoundAdmission = makeValidator(boundAdmission);
+/** @param {unknown} value @returns {ValidationResult} */
+export const validateAdmissionRefusal = makeValidator(admissionRefusalRecord);
+
+/**
+ * The legacy unbound `/api/run` budget refusal: HTTP 200 with `refused: true`
+ * and no `status`. Accepted only for unbound packages; a bound refusal uses
+ * BUDGET_EXCEEDED with HTTP 409.
+ */
+export function isLegacyBudgetRefusal(value) {
+  return isPlainObject(value)
+    && value.code === 'BUDGET_EXCEEDED'
+    && value.refused === true
+    && value.status === undefined
+    && REFUSAL_START_KEYS.every((key) => value[key] === undefined || value[key] === null || value[key] === false);
+}
+
+/**
+ * Build a typed refusal body. Unlike the validators this throws, because an
+ * unknown code or detail key is a programming error in the caller.
+ * @param {string} code
+ * @param {string} message
+ * @param {Record<string, unknown>} [details]
+ * @returns {AdmissionRefusal}
+ */
+export function admissionRefusal(code, message, details = {}) {
+  if (!Object.hasOwn(ADMISSION_REFUSALS, code)) throw new TypeError(`unknown admission refusal code: ${code}`);
+  if (typeof message !== 'string' || message.trim() === '') throw new TypeError('an admission refusal needs a message');
+  if (!isPlainObject(details)) throw new TypeError('refusal details must be an object');
+  for (const key of Object.keys(details)) {
+    if (!ADMISSION_REFUSAL_DETAIL_KEYS.includes(key)) throw new TypeError(`unknown admission refusal detail: ${key}`);
+  }
+  return { ...details, error: message, code, status: ADMISSION_REFUSALS[code] };
+}
+
+/**
+ * The durable command identity for consuming one dispatched action. It is the
+ * id run.mjs already commits (`run-start:<planHash>:<actionId>`) and is shared
+ * by every entry point, so one action can start at most one execution.
+ * @param {BoundAuthority} authority
+ */
+export function admissionCommandId(authority) {
+  return `run-start:${authority.planHash}:${authority.actionId}`;
+}
+
+/**
+ * Server-side production binding for a package.
+ *
+ * A package is bound to the lowest-id production whose `packageId` equals the
+ * package id (the store lists productions in id order). A caller-supplied
+ * `pkg.productionId` is not a package-schema field and can only make a start
+ * stricter: it binds an otherwise unbound package, and disagreeing with the
+ * store binding is a conflict (PRODUCTION_MISMATCH). Intent never unbinds.
+ *
+ * @param {{ id?: string, productionId?: string } | null | undefined} pkg
+ * @param {Array<{ id: string, packageId: string|null, intent?: string, revision?: number }>} productions
+ * @returns {ProductionBinding}
+ */
+export function resolveProductionBinding(pkg, productions) {
+  const list = Array.isArray(productions) ? productions : [];
+  const packageId = isPlainObject(pkg) && typeof pkg.id === 'string' && pkg.id !== '' ? pkg.id : null;
+  const claimed = isPlainObject(pkg) && typeof pkg.productionId === 'string' && pkg.productionId.trim() !== ''
+    ? pkg.productionId.trim()
+    : null;
+  const owners = packageId === null
+    ? []
+    : list.filter((production) => isPlainObject(production) && production.packageId === packageId)
+      .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  const owner = owners[0] ?? null;
+  if (owner && claimed && claimed !== owner.id) {
+    return { state: 'conflict', productionId: owner.id, packageProductionId: claimed };
+  }
+  const chosen = owner ?? (claimed ? list.find((production) => isPlainObject(production) && production.id === claimed) ?? null : null);
+  if (!owner && !claimed) return { state: 'unbound' };
+  return {
+    state: 'bound',
+    productionId: owner ? owner.id : claimed,
+    source: owner ? 'store' : 'package',
+    intent: typeof chosen?.intent === 'string' ? chosen.intent : null,
+    revision: Number.isSafeInteger(chosen?.revision) ? chosen.revision : null,
+  };
+}
+
+/**
+ * The refusal for a binding that cannot admit new work, or null when it can.
+ * Authority (plan approval, queued action, reservation) is checked after this.
+ * @param {ProductionBinding} binding
+ * @param {string} [entryPoint]
+ * @returns {AdmissionRefusal|null}
+ */
+export function bindingRefusal(binding, entryPoint) {
+  const where = entryPoint === undefined ? {} : { entryPoint };
+  if (!isPlainObject(binding) || binding.state === 'unbound') return null;
+  if (binding.state === 'conflict') {
+    return admissionRefusal('PRODUCTION_MISMATCH', 'the package names a different production than the one that owns it', {
+      ...where,
+      productionId: binding.productionId,
+    });
+  }
+  if (binding.intent === null) {
+    return admissionRefusal('PRODUCTION_NOT_FOUND', 'production not found', { ...where, productionId: binding.productionId });
+  }
+  if (!ADMITTING_INTENTS.includes(binding.intent)) {
+    return admissionRefusal('PRODUCTION_NOT_ACTIVE', `the production is ${binding.intent}; no new work is admitted`, {
+      ...where,
+      productionId: binding.productionId,
+      intent: binding.intent,
+    });
+  }
+  return null;
+}
+
+// --- UX00: media source identity and tickets (comfyrizz.media-ticket/v1) ---
+//
+// A ticket is a short-lived bearer URL; the durable identity is the media
+// source. Persist the source (or mediaId/artifactId), never `url`/`ticket`.
+
+export const MEDIA_TICKET_CONTRACT = 'comfyrizz.media-ticket/v1';
+export const MEDIA_ID_PATTERN = /^med_[a-f0-9]{32}$/;
+export const MEDIA_TICKET_PATTERN = /^[a-f0-9]{32}$/;
+export const MEDIA_SOURCE_KINDS = Object.freeze(['take', 'artifact', 'package_media', 'thumb']);
+// Renew this long before `expiresAt` so a seek does not race expiry.
+export const MEDIA_RENEW_BEFORE_MS = 30_000;
+// Consecutive renewals without a successful load before a source is shown as
+// unavailable instead of retried again.
+export const MEDIA_RENEWAL_LIMIT = 2;
+
+const MEDIA_SOURCE_FIELDS = Object.freeze({
+  take: Object.freeze(['packageId', 'clipId', 'takeId']),
+  artifact: Object.freeze(['artifactId', 'mediaId']),
+  package_media: Object.freeze(['packageId', 'path']),
+  thumb: Object.freeze(['key']),
+});
+const MEDIA_TICKET_KEYS = new Set(['ticket', 'url', 'expiresAt', 'mediaId', 'artifactId', 'kind', 'takeId']);
+const EXPIRING_IDENTITY_KEYS = new Set(['url', 'ticket', 'ticketUrl', 'expiresAt']);
+
+/**
+ * @typedef {{ kind: 'take', packageId: string, clipId: string, takeId: string }
+ *   | { kind: 'artifact', artifactId?: string, mediaId?: string }
+ *   | { kind: 'package_media', packageId: string, path: string }
+ *   | { kind: 'thumb', key: string }} MediaSource
+ * @typedef {{ ticket: string, url: string, expiresAt: string, mediaId?: string, artifactId?: string|null, kind?: 'ticket', takeId?: string }} MediaTicket
+ * @typedef {'fresh'|'renew'|'expired'|'unknown'} TicketExpiryState
+ *
+ * UX11 implements this; consumers depend only on the interface.
+ * `resolve` deduplicates concurrent calls by `mediaSourceKey`, renews a
+ * cached ticket whose expiry state is not `fresh`, rejects with an AbortError
+ * when `signal` aborts, and stops after MEDIA_RENEWAL_LIMIT failed renewals.
+ * `invalidate` drops a cached ticket after a media error so the next resolve
+ * renews it.
+ * @typedef {object} MediaResolver
+ * @property {(source: MediaSource, options?: { signal?: AbortSignal }) => Promise<MediaTicket>} resolve
+ * @property {(source: MediaSource) => void} invalidate
+ * @property {() => void} dispose
+ */
+
+function mediaSource(errors, doc, path) {
+  if (!requireObject(errors, doc, path, 'media source')) return;
+  if (!requireEnum(errors, doc.kind, MEDIA_SOURCE_KINDS, joinPath(path, 'kind'), 'UNKNOWN_MEDIA_SOURCE')) return;
+  const fields = MEDIA_SOURCE_FIELDS[doc.kind];
+  for (const key of Object.keys(doc)) {
+    if (key === 'kind' || fields.includes(key)) continue;
+    const at = joinPath(path, key);
+    if (EXPIRING_IDENTITY_KEYS.has(key)) {
+      push(errors, at, 'EXPIRING_URL_AS_IDENTITY', `${at} expires; identify media by its source, mediaId or artifactId`);
+    } else {
+      push(errors, at, 'UNKNOWN_FIELD', `${at} is not a recognized field`);
+    }
+  }
+  if (doc.kind === 'take') {
+    for (const key of fields) requireId(errors, doc[key], joinPath(path, key), { label: key });
+  } else if (doc.kind === 'artifact') {
+    if (doc.artifactId === undefined && doc.mediaId === undefined) {
+      push(errors, path, 'MISSING_ID', 'an artifact media source names artifactId or mediaId');
+    }
+    if (doc.artifactId !== undefined) requireId(errors, doc.artifactId, joinPath(path, 'artifactId'), { label: 'artifact id' });
+    if (doc.mediaId !== undefined && (typeof doc.mediaId !== 'string' || !MEDIA_ID_PATTERN.test(doc.mediaId))) {
+      push(errors, joinPath(path, 'mediaId'), 'INVALID_MEDIA_ID', 'mediaId must match med_<32 hex>');
+    }
+  } else if (doc.kind === 'package_media') {
+    requireId(errors, doc.packageId, joinPath(path, 'packageId'), { label: 'package id' });
+    if (requireText(errors, doc.path, joinPath(path, 'path'), { max: 1024 })) {
+      scanForPaths(errors, doc.path, joinPath(path, 'path'));
+    }
+  } else {
+    requireText(errors, doc.key, joinPath(path, 'key'), { max: 512 });
+  }
+}
+
+function mediaTicket(errors, doc, path) {
+  if (!requireObject(errors, doc, path, 'media ticket')) return;
+  for (const key of Object.keys(doc)) {
+    if (!MEDIA_TICKET_KEYS.has(key)) push(errors, joinPath(path, key), 'UNKNOWN_FIELD', `${joinPath(path, key)} is not a recognized field`);
+  }
+  const ticketOk = typeof doc.ticket === 'string' && MEDIA_TICKET_PATTERN.test(doc.ticket);
+  if (!ticketOk) push(errors, joinPath(path, 'ticket'), 'INVALID_TICKET', 'ticket must be 32 lowercase hex characters');
+  if (typeof doc.url !== 'string' || (ticketOk && doc.url !== `/api/media/${doc.ticket}`)) {
+    push(errors, joinPath(path, 'url'), 'INVALID_TICKET_URL', 'url must be /api/media/<ticket>');
+  }
+  requireTimestamp(errors, doc.expiresAt, joinPath(path, 'expiresAt'));
+  if (doc.mediaId !== undefined && (typeof doc.mediaId !== 'string' || !MEDIA_ID_PATTERN.test(doc.mediaId))) {
+    push(errors, joinPath(path, 'mediaId'), 'INVALID_MEDIA_ID', 'mediaId must match med_<32 hex>');
+  }
+  if (doc.artifactId !== undefined && doc.artifactId !== null) optionalId(errors, doc.artifactId, joinPath(path, 'artifactId'), 'artifact id');
+  if (doc.kind !== undefined && doc.kind !== 'ticket') push(errors, joinPath(path, 'kind'), 'INVALID_KIND', 'kind must be ticket');
+  if (doc.takeId !== undefined) optionalId(errors, doc.takeId, joinPath(path, 'takeId'), 'take id');
+}
+
+/** @param {unknown} value @returns {ValidationResult} */
+export const validateMediaSource = makeValidator(mediaSource);
+/** @param {unknown} value @returns {ValidationResult} */
+export const validateMediaTicket = makeValidator(mediaTicket);
+
+/**
+ * Deduplication/cache key for a valid media source: the same source always
+ * maps to the same key regardless of property order.
+ * @param {MediaSource} source
+ */
+export function mediaSourceKey(source) {
+  const fields = MEDIA_SOURCE_FIELDS[source.kind] ?? [];
+  return JSON.stringify([source.kind, ...fields.map((key) => source[key] ?? null)]);
+}
+
+/**
+ * Expiry state of a ticket at `nowMs`. A ticket without `expiresAt` (the
+ * legacy thumbs `ticketUrl`) is `unknown`: use it once, renew on the first
+ * media error, never persist it.
+ * @param {{ expiresAt?: string|null } | null | undefined} ticket
+ * @param {number} nowMs
+ * @param {number} [renewBeforeMs]
+ * @returns {TicketExpiryState}
+ */
+export function ticketExpiryState(ticket, nowMs, renewBeforeMs = MEDIA_RENEW_BEFORE_MS) {
+  const expiresAt = isPlainObject(ticket) ? ticket.expiresAt : undefined;
+  if (typeof expiresAt !== 'string' || !ISO_RE.test(expiresAt)) return 'unknown';
+  const expires = Date.parse(expiresAt);
+  if (!Number.isFinite(expires)) return 'unknown';
+  if (expires <= nowMs) return 'expired';
+  if (expires - nowMs <= renewBeforeMs) return 'renew';
+  return 'fresh';
+}
