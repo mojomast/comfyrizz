@@ -83,3 +83,26 @@ Runway guidance informs general shot planning, not H3-specific syntax. Local
 cross-checks: model locks, both Omni graph parameter maps, FLUX 3 t2i graph and
 `docs/FASTH3_OMNI_DIRECTION.md`. These findings do not justify changing model pins
 without a bounded runtime/quality comparison.
+
+## First production checkpoint
+
+The first four visual-development images generated successfully. A redundant
+explicit `backend.collect()` after `runPackage()` reported a download failure,
+although `runPackage()` had already collected all four final assets locally.
+Recovery verified each SHA256 against the returned package and decoded every
+image with FFmpeg. No regeneration was needed. Runtime teardown confirmed zero
+active assignments and zero hourly rate. Estimated batch usage was 1.10 credits.
+
+Production runners now verify the already-collected local outputs before making
+any further collection request. Retain the original result, error and recovery
+receipt; an outer script failure must not erase successful generated assets.
+This is a production-runner correction, not a claim that the shared backend API
+was changed by this documentation update.
+
+Still review accepted the three non-human identities for action development,
+recording actual generated design differences. The environment's stairs reach
+only the lighthouse base, so upper access must be staged explicitly. These stills
+do not establish motion quality. Next evidence: cart pushing, a lever lifting a
+wheel, and a restrained face/body reaction. Use the previously exercised audio
+graph with silent conditioning for the initial action pilot, rather than relying
+on the unvalidated no-clip graph; review any generated speech contamination.
