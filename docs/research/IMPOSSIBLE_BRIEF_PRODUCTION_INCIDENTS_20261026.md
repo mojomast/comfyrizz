@@ -277,3 +277,24 @@ The optional Webpack cache warning recurred despite the local cache override.
 Layout stills completed, but the override therefore cannot be described as a proven
 cache fix. Persistent scratch storage and final output verification remain required;
 trace the actual dependency cache configuration before closing PB06.
+
+### PB08 — Multi-command render continued after failed assembly
+
+**Observed:** a local caption-punctuation edit introduced Python indentation errors.
+The shell invocation then continued through stills and a complete render using the
+previous `edit.json`, because commands were newline-separated without fail-fast
+execution. The final command's exit zero hid the earlier assembly failure in the
+overall status. The prior assembly was valid, but the new formatting was absent.
+
+**Mitigation:** inspect the complete completion log, fix the indentation, and rerun
+assembly/stills/final under `set -e`. The stale-format render was not published.
+This consumed local rendering time, not additional Colab credits.
+
+**Proposed fix — P1, production orchestration owner:** use explicit checked process
+calls or fail-fast shell execution; bind each rendered artifact to hashes of its
+edit, caption, composition and audio inputs. Publish only a successful receipt for
+that exact input set. Check script syntax before dispatching long dependent work.
+
+**Regression:** assembly exits nonzero with an older valid edit present; neither
+render nor publish may execute. A render receipt from older inputs must fail the
+publication freshness gate even if its dimensions/frame count are otherwise valid.
