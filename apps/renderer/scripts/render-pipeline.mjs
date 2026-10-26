@@ -8,6 +8,7 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { inlineGeneratedAssets, narrationOptions, missingMediaFiles, preparePublicDir, rendererDir } from './render-package-lib.mjs';
 import { collectMediaDims } from '../src/media-dims.js';
 import { materializeCompositions } from './composition-worker.mjs';
+import { resolveBrowserExecutable } from './browser-executable.mjs';
 
 // Resolve the exact renderer/bundler versions used by the pinned CLI.
 const require = createRequire(import.meta.resolve('@remotion/cli/package.json'));
@@ -40,7 +41,7 @@ export async function renderPipeline(packagePath, output, { signal, onEvent = ()
     onEvent({ phase: 'bundling', progress: null });
     serveUrl = await bundle({ entryPoint, publicDir });
     signal?.throwIfAborted();
-    const browserExecutable = process.env.REMOTION_BROWSER || '/usr/bin/google-chrome';
+    const browserExecutable = resolveBrowserExecutable();
     const composition = await selectComposition({ serveUrl, id: 'PackageDemo', inputProps: props, browserExecutable });
     let last = 0;
     await renderMedia({

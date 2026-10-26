@@ -135,6 +135,7 @@ export const COPY = Object.freeze({
   },
   compute: {
     legend: 'Where should we make it?',
+    checking: 'Checking Google Colab…',
     cpuTitle: 'This computer',
     cpuBody: 'Free. Motion graphics, charts and text. No AI video.',
     colabTitle: 'Google Colab',

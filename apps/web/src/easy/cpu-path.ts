@@ -17,6 +17,13 @@ export interface StudioClip {
   takeCount?: number;
 }
 
+export interface StudioAsset {
+  gen?: { generator?: string } | null;
+  status?: string;
+  origin?: string;
+  kind?: string;
+}
+
 export interface StudioGate {
   ok: boolean;
   approved: number;
@@ -25,21 +32,25 @@ export interface StudioGate {
 }
 
 /**
- * The studio's review gate. A This-computer clip with no versions is kept.
- * A clip that already has versions, and every other clip, still has to be kept.
+ * The studio's review gate. A This-computer clip with no versions is kept, and
+ * a ready uploaded/stock still is already the chosen source. A clip that
+ * already has versions, and every other clip, still has to be kept.
  */
 export function studioClipGate(
   clips: readonly StudioClip[] | null | undefined,
-  assets: Record<string, { gen?: { generator?: string } | null }> | null | undefined,
+  assets: Record<string, StudioAsset> | null | undefined,
 ): StudioGate {
   const list = Array.isArray(clips) ? clips : [];
   const blocking: StudioGate['blocking'] = [];
   let approved = 0;
   for (const clip of list) {
     if (!clip || typeof clip.clipId !== 'string') continue;
-    const generator = clip.assetId ? assets?.[clip.assetId]?.gen?.generator : undefined;
+    const asset = clip.assetId ? assets?.[clip.assetId] : undefined;
+    const generator = asset?.gen?.generator;
     const takes = typeof clip.takeCount === 'number' ? clip.takeCount : 0;
-    if (typeof generator === 'string' && CPU_GENERATORS.has(generator) && takes === 0) {
+    const importedSource = asset?.status === 'ready' && (asset.origin === 'upload' || asset.origin === 'stock');
+    const presenterClip = asset?.kind === 'video' && generator === 'ltx25-a2v' && asset.status === 'ready';
+    if ((importedSource || presenterClip || (typeof generator === 'string' && CPU_GENERATORS.has(generator))) && takes === 0) {
       approved += 1;
       continue;
     }

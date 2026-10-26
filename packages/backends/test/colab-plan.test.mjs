@@ -90,6 +90,13 @@ test("argv arrays are exact, and none of them is a shell string", () => {
     "/tmp/jobs.zip",
     "/content/comfyrizz/jobs.zip",
   ]);
+  assert.deepEqual(argvUpload({ session: "comfyrizz-demo", localPath: "C:\\tmp\\jobs.zip", remotePath: "/content/comfyrizz/jobs.zip" }), [
+    "upload",
+    "-s",
+    "comfyrizz-demo",
+    "C:\\tmp\\jobs.zip",
+    "/content/comfyrizz/jobs.zip",
+  ]);
   assert.deepEqual(argvDownload({ session: "comfyrizz-demo", remotePath: "/content/comfyrizz/out", localPath: "/tmp/out" }), [
     "download",
     "-s",

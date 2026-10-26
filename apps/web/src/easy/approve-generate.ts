@@ -12,7 +12,7 @@ type Go = (step: 'generate') => void;
 
 interface ApproveDeps {
   api: {
-    setSpendCap: (id: string, body: { ceiling: number; expected: { productionRevision: number } }) => Promise<unknown>;
+    setSpendCap: (id: string, body: { ceiling: number | null; expected: { productionRevision: number } }) => Promise<unknown>;
     sendCommand: (id: string, command: unknown) => Promise<unknown>;
     dispatchAction: (id: string, body: unknown) => Promise<unknown>;
     startRun: (body: unknown) => Promise<unknown>;

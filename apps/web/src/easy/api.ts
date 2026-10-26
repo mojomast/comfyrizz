@@ -61,7 +61,21 @@ export function createEasyApi(fetchImpl: FetchImpl) {
       return request('POST', '/api/brief', { prompt, mode: 'plan', decisions });
     },
     buildVideo({ brief, provider }: { brief: any; provider?: any }) {
-      return request('POST', '/api/agent', { brief, provider });
+      // /api/agent takes the provider id and model as top-level fields. Easy
+      // callers pass the selection object from Agent settings, so flatten it
+      // here; a bare provider id is accepted too.
+      const selection = typeof provider === 'string'
+        ? { provider }
+        : provider && typeof provider === 'object'
+          ? { provider: provider.provider, model: provider.model }
+          : null;
+      const chosen = typeof selection?.provider === 'string' ? selection.provider : '';
+      const model = typeof selection?.model === 'string' ? selection.model : '';
+      return request('POST', '/api/agent', {
+        brief,
+        ...(chosen && chosen !== 'none' ? { provider: chosen } : {}),
+        ...(chosen && chosen !== 'none' && model ? { model } : {}),
+      });
     },
     createConversation() {
       return request('POST', '/api/conversations');

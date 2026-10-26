@@ -5,7 +5,7 @@ import {
   renderErrorState,
   renderSkeleton,
 } from '../components.ts';
-import { adoptPlayer } from '../preview-slot.ts';
+import { adoptPlayer, currentPlayer } from '../preview-slot.ts';
 import {
   planCostLabel,
   planImpactSummary,
@@ -433,14 +433,36 @@ export const step: EasyStepModule = {
 
     const slot = el.querySelector<HTMLElement>('[data-easy-player]');
     if (slot) {
-      const player = ctx.host.playerElement();
+      const player = ctx.host.playerElement() ?? currentPlayer();
       if (player) adoptPlayer(slot, player);
+    }
+    const firstScene = Array.isArray((registered as { scenes?: unknown })?.scenes)
+      ? ((registered as { scenes: Array<{ id?: unknown }> }).scenes[0] ?? null)
+      : null;
+    if (firstScene && typeof firstScene.id === 'string' && firstScene.id) {
+      ctx.host.seekToScene(firstScene.id);
     }
 
     function syncPrimary(): void {
       const current = ctx.store.get();
       const snapshot = snapshotFor(current.productionId);
       ctx.shell.setPrimary(planPrimary(current, snapshot));
+    }
+
+    function writeOnce(): void {
+      const pending = ctx.writePlan?.();
+      if (!pending) return;
+      const done = (): void => {
+        if (!disposed) ctx.rerender();
+      };
+      void pending.then(done, done);
+    }
+
+    function retryPlan(): void {
+      ctx.shell.setStatus(COPY.plan.writing);
+      const retry = el.querySelector<HTMLButtonElement>('[data-easy-plan-retry]');
+      if (retry) retry.disabled = true;
+      writeOnce();
     }
 
     function markWordsChanged(): void {
@@ -452,7 +474,7 @@ export const step: EasyStepModule = {
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (target.closest('[data-easy-plan-retry]')) {
-        void ctx.writePlan?.();
+        retryPlan();
         return;
       }
       if (target.closest('[data-easy-plan-level]')) {
@@ -508,7 +530,9 @@ export const step: EasyStepModule = {
     el.addEventListener('input', onInput);
     el.addEventListener('change', onChange);
     syncPrimary();
-    void ctx.writePlan?.();
+    // A finished plan is not rewritten. An error waits for the user's retry,
+    // and every other state resumes or starts the state machine.
+    if (state.plan.status !== 'ready' && state.plan.status !== 'error') writeOnce();
 
     return () => {
       disposed = true;

@@ -8,7 +8,10 @@
 //
 // The token is never read, stored or returned: it lives with the CLI, and this only reports what the CLI
 // says about itself.
+import os from "node:os";
 import { resolveColabBinary } from "../../../packages/backends/src/colab-plan.mjs";
+
+const defaultHome = () => process.env.HOME || process.env.USERPROFILE || os.homedir();
 
 /** The install command per platform, for the card to show when there is no CLI to ask. */
 export const COLAB_INSTALL = Object.freeze({
@@ -29,7 +32,7 @@ export const COLAB_BINARY_ORDER = Object.freeze(["COMFYRIZZ_COLAB_BIN", "~/.loca
  * @param {string} [opts.home] the user's home for the ~/.local/bin probe
  * @param {string} [opts.packageId]
  */
-export async function colabStatus({ backendFactory = null, home = process.env.HOME || null, packageId = "colab-status" } = {}) {
+export async function colabStatus({ backendFactory = null, home = defaultHome(), packageId = "colab-status" } = {}) {
   let resolved = null;
   try {
     resolved = resolveColabBinary({ home });
@@ -64,7 +67,7 @@ export async function colabStatus({ backendFactory = null, home = process.env.HO
       ratePerHour: report?.usage?.ratePerHour ?? null,
       problems,
       tokenReady: tokenNote === null,
-      tokenNote,
+      tokenNote: tokenNote ? `${tokenNote} The server also reads apps/server/.runtime/hf-token when COMFYRIZZ_HF_TOKEN_FILE is unset.` : null,
       reason: units !== null ? null : problems[0] ?? tokenNote ?? "the CLI did not report usage",
       install: COLAB_INSTALL,
     };

@@ -22,7 +22,7 @@ export interface EasyState {
   level: Level;
   levelTouched: boolean;
   compute: Compute;
-  spendCap: number;
+  spendCap: number | null;
   planHash: string | null;
   plan: { status: 'none' | 'writing' | 'building' | 'proposing' | 'ready' | 'stale' | 'error'; error: string | null; errorAt: 'agent' | 'production' | 'proposal' | null; wordsChanged: boolean };
   generate: { status: 'idle' | 'running' | 'stopping' | 'done' | 'stopped' | 'error' };
@@ -63,6 +63,9 @@ export interface EasyHost {
   hasToken(): boolean;
   editorStore: import('../editor/store.ts').EditorStore;
   getPackage(): any;
+  clips(): readonly import('../takes/api.ts').ClipSummary[];
+  subscribeClips(listener: () => void): () => void;
+  takesApi: Pick<import('../takes/api.ts').TakesApi, 'getTakes' | 'select' | 'verdict'>;
   adoptBuiltPackage(body: any): void;
   renderMp4(): Promise<{ blob: Blob; revision: number; renderId?: string }>;
   seekToScene(sceneId: string): void;

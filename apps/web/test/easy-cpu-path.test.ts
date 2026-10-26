@@ -164,3 +164,29 @@ test('This computer clips with no versions are kept, and a GPU clip still blocks
   assert.equal(kept.ok, true);
   assert.equal(kept.approved, 2);
 });
+
+test('a ready uploaded portrait is kept without a take', () => {
+  const assets = {
+    a_kevin: { kind: 'image', origin: 'upload', status: 'ready' },
+    a_gpu: { gen: { generator: 'flux3-klein' }, status: 'ready', origin: 'generated' },
+  };
+  const gate = studioClipGate([
+    { clipId: 's1:a_kevin', assetId: 'a_kevin', state: 'planned', takeCount: 0, sceneId: 's1' },
+    { clipId: 's2:a_gpu', assetId: 'a_gpu', state: 'planned', takeCount: 0, sceneId: 's2' },
+  ], assets);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.approved, 1);
+  assert.deepEqual(gate.blocking.map((entry) => entry.clipId), ['s2:a_gpu']);
+});
+
+test('a ready LTX presenter clip is kept without a take', () => {
+  const assets = {
+    a_presenter: { kind: 'video', status: 'ready', gen: { generator: 'ltx25-a2v' } },
+  };
+  const gate = studioClipGate([
+    { clipId: 's1:a_presenter', assetId: 'a_presenter', state: 'planned', takeCount: 0, sceneId: 's1' },
+  ], assets);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.approved, 1);
+  assert.deepEqual(gate.blocking, []);
+});

@@ -6,8 +6,11 @@
 // pass it on - after the same redaction every other log line goes through, because a URL that carries a
 // token must not land in the card or in a log file.
 import { spawn as spawnProcess } from "node:child_process";
+import os from "node:os";
 
 import { redactForLog, resolveColabBinary } from "../../../packages/backends/src/colab-plan.mjs";
+
+const defaultHome = () => process.env.HOME || process.env.USERPROFILE || os.homedir();
 
 /** How long the CLI gets to finish an interactive sign-in before the card offers to try again. */
 export const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
@@ -23,7 +26,7 @@ export const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
  * @param {string} [opts.home]
  * @param {(argv: string[], opts: object) => any} [opts.spawn]  injectable for tests
  */
-export async function startColabAuth({ onLine = null, home = process.env.HOME || null, spawn = spawnProcess, timeoutMs = AUTH_TIMEOUT_MS } = {}) {
+export async function startColabAuth({ onLine = null, home = defaultHome(), spawn = spawnProcess, timeoutMs = AUTH_TIMEOUT_MS } = {}) {
   let binary;
   try {
     binary = resolveColabBinary({ home });

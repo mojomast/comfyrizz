@@ -349,6 +349,24 @@ test('UR31: a flux3-klein asset with no takes still blocks', () => {
   assert.deepEqual(gate.blocking, [{ clipId: 's1:a_0', state: 'planned' }]);
 });
 
+test('UR31: a ready uploaded still with no takes is approved', () => {
+  const pkg = { assets: { a_kevin: { kind: 'image', origin: 'upload', status: 'ready', file: 'assets/kevin.jpg' } } };
+  const gate = finalGate(pkg, null, [{ clipId: 's1:a_kevin', assetId: 'a_kevin' }]);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.autoApproved, 1);
+  assert.equal(gate.approved, 1);
+  assert.deepEqual(gate.blocking, []);
+});
+
+test('UR31: a ready LTX presenter clip with no takes is approved', () => {
+  const pkg = { assets: { a_presenter: { kind: 'video', origin: 'generated', status: 'ready', gen: { generator: 'ltx25-a2v' } } } };
+  const gate = finalGate(pkg, null, [{ clipId: 's1:a_presenter', assetId: 'a_presenter' }]);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.autoApproved, 1);
+  assert.equal(gate.approved, 1);
+  assert.deepEqual(gate.blocking, []);
+});
+
 test('UR31: an llm-svg asset with a rejected take still blocks', () => {
   const gen = { generator: 'llm-svg', inputs: { prompt: 'a title card' } };
   const pkg = { assets: { a_svg: { gen } } };

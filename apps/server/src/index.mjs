@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import * as nodeFs from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -116,6 +116,14 @@ function startServer() {
   const host = '127.0.0.1';
   const runtimeDir = process.env.COMFYRIZZ_RUNTIME ?? join(repoRoot, 'apps', 'server', '.runtime');
   mkdirSync(runtimeDir, { recursive: true });
+
+  // A token dropped in the runtime directory is enough; the environment override
+  // still wins when the user keeps the file somewhere else.
+  const defaultHfToken = join(runtimeDir, 'hf-token');
+  if (!process.env.COMFYRIZZ_HF_TOKEN_FILE && existsSync(defaultHfToken)) {
+    process.env.COMFYRIZZ_HF_TOKEN_FILE = defaultHfToken;
+    try { chmodSync(defaultHfToken, 0o600); } catch { /* Windows ACLs do not map to mode bits */ }
+  }
 
   const tokenPath = join(runtimeDir, 'server-token');
   const token = process.env.COMFYRIZZ_TOKEN ?? randomBytes(32).toString('hex');

@@ -324,8 +324,9 @@ function setupStatusbar(host: HTMLElement): {
     });
   }
 
-  // Move host inside popoverBody so the full Google Colab spend card opens from the status bar popover
-  if (host && popoverBody && !popoverBody.contains(host)) {
+  // Move the dedicated status-bar host inside its popover. A settings or Easy
+  // dialog host stays where it was mounted.
+  if (host?.id === 'colab-card-host' && popoverBody && !popoverBody.contains(host)) {
     popoverBody.appendChild(host);
   }
 

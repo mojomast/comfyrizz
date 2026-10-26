@@ -47,6 +47,16 @@ test('Google Colab is disabled when not signed in', () => {
   assert.doesNotMatch(radioTag(html, 'cpu'), /\sdisabled(?=[\s/>])/);
 });
 
+test('the checking state is explicit and does not offer Connect yet', () => {
+  const html = renderCompute({ compute: 'cpu', colabStatus: null, spendCap: 15, spent: 0, checking: true });
+  assert.ok(html.includes(COPY.compute.checking));
+  assert.ok(!html.includes(COPY.compute.notConnected));
+  assert.doesNotMatch(html, /data-easy-compute-connect/);
+  const colab = radioTag(html, 'colab');
+  assert.doesNotMatch(colab, /\sdisabled(?=[\s/>])/);
+  assert.match(colab, /aria-describedby="easy-not-connected"/);
+});
+
 test('Google Colab is enabled when signed in', () => {
   const html = renderCompute({ compute: 'cpu', colabStatus: signedIn, spendCap: 15, spent: 0 });
   assert.doesNotMatch(radioTag(html, 'colab'), /\sdisabled(?=[\s/>])/);

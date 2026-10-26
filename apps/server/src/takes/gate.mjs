@@ -41,7 +41,17 @@ export function finalGate(pkg, takeDoc, clips) {
     const generator = isObject(asset?.gen) && typeof asset.gen.generator === 'string'
       ? asset.gen.generator
       : null;
-    if (generator && CPU_GENERATORS.has(generator) && takes.length === 0) {
+    // A ready uploaded still (a character portrait, a supplied chart, ...) is
+    // already the chosen source. There is no take to review, so it must not
+    // block the final render.
+    const importedSource = isObject(asset)
+      && asset.status === 'ready'
+      && (asset.origin === 'upload' || asset.origin === 'stock');
+    const presenterClip = isObject(asset)
+      && asset.kind === 'video'
+      && generator === 'ltx25-a2v'
+      && asset.status === 'ready';
+    if (takes.length === 0 && (importedSource || presenterClip || (generator && CPU_GENERATORS.has(generator)))) {
       approved += 1;
       autoApproved += 1;
       continue;

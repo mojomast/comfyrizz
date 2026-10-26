@@ -8,6 +8,10 @@
 
 import { COPY, fill } from '../copy.ts';
 import { escapeHtml } from '../components.ts';
+import { adoptPlayer, currentPlayer } from '../preview-slot.ts';
+import { mountShotCard, type ShotCardController, type ShotCardModel, type ShotCardVersion } from '../shot-card.ts';
+import { bindShotText, renderShotText, type ShotTextScene, type ShotTextStore } from '../shot-text.ts';
+import type { ClipSummary, TakesResponse } from '../../takes/api.ts';
 import {
   moveShotSelection,
   renderShotStrip,
@@ -164,6 +168,23 @@ function stateForScene(sceneId: string, gate: ReviewGate, blocked: Set<string>):
   return 'kept';
 }
 
+function sceneIdOf(shot: ReviewShot): string {
+  return textOf(shot.sceneId) || textOf(shot.id);
+}
+
+function sceneRecordFor(pkg: PackageRecord | null, shot: ReviewShot): SceneRecord | null {
+  const id = sceneIdOf(shot);
+  return scenesOf(pkg).find((scene, index) => textOf(scene.id) === id || `scene-${index + 1}` === id) ?? null;
+}
+
+/** The scene can hold more than one clip; review the one that still needs a choice first. */
+function clipForShot(clips: readonly ClipSummary[], shot: ReviewShot): ClipSummary | null {
+  const sceneId = sceneIdOf(shot);
+  const matches = clips.filter((clip) => clip.sceneId === sceneId);
+  if (matches.length === 0) return null;
+  return matches.find((clip) => clip.state !== 'approved') ?? matches[0] ?? null;
+}
+
 /** Build the strip model from the open project without ever naming an asset id. */
 export function reviewShotsFromPackage(
   value: unknown,
@@ -318,7 +339,7 @@ export function renderReview(view: ReviewView): string {
 <h2 class="easy-review-shots-heading">${escapeHtml(COPY.review.shots)}</h2>
 ${strip}
 </div>
-<div class="easy-shot-host" data-easy-shot></div>
+<div class="easy-shot-host" data-easy-shot-host></div>
 <div class="easy-review-ask">
 <button type="button" class="btn btn-secondary easy-review-ask-button" data-easy-ask>${escapeHtml(COPY.review.ask)}</button>
 <p class="easy-review-ask-hint">${escapeHtml(COPY.review.askHint)}</p>
@@ -359,9 +380,98 @@ export const step: EasyStepModule = {
       }
     })();
 
-    const gate = readHostGate(ctx);
+    const packageRecord = isRecord(pkg) ? pkg as PackageRecord : null;
+    let gate = readHostGate(ctx);
     let shots = reviewShotsFromPackage(pkg, gate);
     let selectedId = resolvedShotId(shots, ctx.state.review.shotId);
+    let disposed = false;
+    let stopClips: (() => void) | null = null;
+    let stopWords: (() => void) | null = null;
+    let card: ShotCardController | null = null;
+    let cardRequest = 0;
+
+    function packageId(): string {
+      const current = ctx.store.get();
+      if (typeof current.packageId === 'string' && current.packageId) return current.packageId;
+      return isRecord(pkg) && typeof pkg.id === 'string' ? pkg.id : '';
+    }
+
+    function shotModel(shot: ReviewShot, clip: ClipSummary | null, data: TakesResponse | null): ShotCardModel {
+      const versions: ShotCardVersion[] = (data?.takes ?? [])
+        .filter((take) => !take.purged)
+        .map((take) => ({ takeId: take.takeId, n: take.n, verdict: take.verdict }));
+      const selected = data?.selected ?? clip?.selected ?? null;
+      const sceneId = sceneIdOf(shot);
+      const current = ctx.store.get();
+      return {
+        shot: {
+          shotId: sceneId,
+          clipId: clip?.clipId ?? sceneId,
+          sceneId,
+          number: shot.number,
+          title: shot.title,
+          selected,
+        },
+        versions,
+        selectedVersionId: selected,
+        compute: current.compute,
+        cap: current.spendCap,
+        kept: clip?.state === 'approved'
+          || versions.some((version) => version.takeId === selected && version.verdict === 'approved'),
+      };
+    }
+
+    function destroyShotPanel(): void {
+      cardRequest += 1;
+      stopWords?.();
+      stopWords = null;
+      card?.destroy();
+      card = null;
+    }
+
+    function mountWords(host: HTMLElement, shot: ReviewShot): void {
+      stopWords?.();
+      stopWords = null;
+      const words = host.querySelector<HTMLElement>('[data-easy-words]');
+      const scene = sceneRecordFor(packageRecord, shot);
+      if (!words || !scene) return;
+      words.innerHTML = renderShotText(scene as unknown as ShotTextScene);
+      stopWords = bindShotText(words, {
+        host: { editorStore: ctx.host.editorStore as unknown as ShotTextStore },
+        sceneId: sceneIdOf(shot),
+      });
+    }
+
+    function mountShotPanel(): void {
+      destroyShotPanel();
+      const host = el.querySelector<HTMLElement>('[data-easy-shot-host]');
+      const shot = reviewShotAt(shots, selectedId);
+      if (!host || !shot) return;
+      const clip = clipForShot(ctx.host.clips(), shot);
+      card = mountShotCard(host, shotModel(shot, clip, null), {
+        host: ctx.host,
+        packageId: packageId(),
+        takesApi: ctx.host.takesApi,
+        il: ctx.il,
+        retryShot: ctx.retryShot,
+        openAsk: ctx.openAsk,
+        status: (text) => ctx.shell.setStatus(text),
+        alert: (text) => {
+          ctx.shell.alert(text);
+          ctx.shell.setStatus(text);
+        },
+      });
+      mountWords(host, shot);
+      if (!clip) return;
+      const request = ++cardRequest;
+      void ctx.host.takesApi.getTakes(packageId(), clip.clipId).then((data) => {
+        if (disposed || request !== cardRequest) return;
+        card?.update(shotModel(shot, clip, data));
+        mountWords(host, shot);
+      }).catch(() => {
+        // Keep the scene card usable without versions.
+      });
+    }
 
     function applyPrimary(): void {
       ctx.shell.setPrimary(reviewPrimary(gate));
@@ -380,6 +490,7 @@ export const step: EasyStepModule = {
         // Seeking is best-effort; the selection is still recorded.
       }
       syncSelection();
+      mountShotPanel();
     }
 
     function syncSelection(): void {
@@ -394,16 +505,23 @@ export const step: EasyStepModule = {
     }
 
     function paint(): void {
+      destroyShotPanel();
       const view: ReviewView = {
         shots,
         selectedId,
         gate,
-        package: isRecord(pkg) ? pkg as PackageRecord : null,
+        package: packageRecord,
         editorStore: ctx.host.editorStore ?? null,
       };
       el.innerHTML = renderReview(view);
       applyPrimary();
       ctx.shell.setStatus(reviewStatusText(view));
+      const slot = el.querySelector<HTMLElement>('[data-easy-player]');
+      if (slot) {
+        const player = ctx.host.playerElement() ?? currentPlayer();
+        if (player) adoptPlayer(slot, player);
+      }
+      mountShotPanel();
     }
 
     function onClick(event: Event): void {
@@ -441,9 +559,23 @@ export const step: EasyStepModule = {
 
     el.addEventListener('click', onClick);
     el.addEventListener('keydown', onKeyDown);
+    stopClips = ctx.host.subscribeClips(() => {
+      if (disposed) return;
+      gate = readHostGate(ctx);
+      shots = reviewShotsFromPackage(pkg, gate);
+      selectedId = resolvedShotId(shots, ctx.store.get().review.shotId ?? selectedId);
+      paint();
+    });
+    // Clips may still be loading when Review opens; a later store update repaints.
+    if (ctx.host.clips().length === 0) void ctx.host.refreshClips();
     paint();
+    const initial = reviewShotAt(shots, selectedId);
+    if (initial) ctx.host.seekToScene(sceneIdOf(initial));
 
     return () => {
+      disposed = true;
+      stopClips?.();
+      destroyShotPanel();
       el.removeEventListener('click', onClick);
       el.removeEventListener('keydown', onKeyDown);
     };

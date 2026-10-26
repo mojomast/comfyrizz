@@ -61,6 +61,22 @@ test('the default level follows compute until the level is touched', () => {
   assert.equal(levelForState(touchedCpu), 'balanced');
 });
 
+test('the level step mounts the compute choice and spend cap controls', () => {
+  const colab = { ...defaultEasyState(), compute: 'colab', spendCap: 15 };
+  const html = step.render(colab, FACTS);
+  assert.match(html, /data-easy-compute/);
+  assert.match(html, /name="easy-compute"/);
+  assert.match(html, /value="cpu"/);
+  assert.match(html, /value="colab"/);
+  assert.match(html, /id="easy-cap"/);
+  assert.match(html, /Google Colab units/);
+
+  const cpu = { ...defaultEasyState(), compute: 'cpu' };
+  const cpuHtml = step.render(cpu, FACTS);
+  assert.match(cpuHtml, /value="cpu"/);
+  assert.doesNotMatch(cpuHtml, /id="easy-cap"/);
+});
+
 test('Google Colab needs sign-in and a user-set spend cap', () => {
   const colab = { ...defaultEasyState(), compute: 'colab' };
   assert.equal(levelBlockReason({ ...colab, spendCap: null }, { signedIn: true }), COPY.compute.capError);

@@ -60,7 +60,17 @@ export async function preparePresenterInputs(workDir, { signal, onEvent = () => 
     const frames = Math.max(9, Math.ceil((timing.durationInFrames / timeline.fps * fps - 1) / 8) * 8 + 1);
     const file = `audio/presenter-${scene.id}.wav`, voiceId = `a_voice_${scene.id}`;
     await pipelineCommand('ffmpeg', ['-y', '-v', 'error', '-ss', String(timing.from / timeline.fps), '-i', join(workDir, 'audio/narration.norm.wav'), '-af', `apad,atrim=duration=${frames / fps}`, '-ar', '24000', '-ac', '1', '-c:a', 'pcm_s16le', join(workDir, file)], { signal });
-    pkg.assets[voiceId] = { kind: 'audio', origin: 'generated', status: 'ready', file, ...assetMetadata(join(workDir, file)), license: { id: 'CC0-1.0' }, redistributable: true, media: { durationSeconds: frames / fps, audio: 'present', codec: 'pcm_s16le' } };
+    pkg.assets[voiceId] = {
+      kind: 'audio', origin: 'generated', status: 'ready', file, ...assetMetadata(join(workDir, file)),
+      license: { id: 'CC0-1.0' }, redistributable: true,
+      model_license: { id: 'Apache-2.0', url: 'https://huggingface.co/hexgrad/Kokoro-82M' },
+      media: { durationSeconds: frames / fps, audio: 'present', codec: 'pcm_s16le' },
+      gen: {
+        generator: 'kokoro', model: 'kokoro-v1.0.onnx',
+        inputs: { source: 'a_narration', scene: scene.id, sample_rate: 24000 },
+        caption: 'Presenter narration excerpt cut from the measured narration track.',
+      },
+    };
     // New narration invalidates every audio-conditioned presenter; never reuse by ID alone.
     pkg.assets[assetId] = {
       kind: 'video', origin: 'generated', status: 'pending', license: { id: 'CC0-1.0' }, redistributable: true,

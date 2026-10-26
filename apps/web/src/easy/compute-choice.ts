@@ -15,6 +15,10 @@ export interface ComputeView {
   colabStatus?: ComputeColabStatus | null;
   spendCap?: number | string | null;
   spent?: number | string | null;
+  /** The status request is still in flight; do not call it "not connected" yet. */
+  checking?: boolean;
+  /** Keep DOM ids unique when more than one picker is mounted in the page. */
+  idPrefix?: string;
 }
 
 export interface ComputeBlockState {
@@ -27,11 +31,14 @@ export interface ComputeMountOptions {
   colabStatus(): Promise<unknown>;
   onChange(patch: { compute?: ComputeChoice; spendCap?: number | null }): void;
   onStatus?(status: unknown): void;
+  idPrefix?: string;
 }
 
-const NOT_CONNECTED_ID = 'easy-compute-not-connected';
-const CAP_ERROR_ID = 'easy-cap-error';
-const SO_FAR_ID = 'easy-cap-so-far';
+const DEFAULT_ID_PREFIX = 'easy';
+const CAP_ERROR_SUFFIX = 'cap-error';
+const SO_FAR_SUFFIX = 'cap-so-far';
+const NOT_CONNECTED_SUFFIX = 'not-connected';
+const CAP_SUFFIX = 'cap';
 
 let connectCounter = 0;
 
@@ -71,34 +78,44 @@ function option(
   body: string,
   checked: boolean,
   disabled: boolean,
+  describedBy: string | null,
 ): string {
   const disabledAttribute = disabled ? ' disabled' : '';
-  const describedBy = disabled ? ` aria-describedby="${NOT_CONNECTED_ID}"` : '';
+  const describedByAttribute = describedBy ? ` aria-describedby="${describedBy}"` : '';
   const checkedAttribute = checked ? ' checked' : '';
-  return `<label class="easy-compute-card${disabled ? ' easy-is-disabled' : ''}"><input class="easy-compute-input" type="radio" name="easy-compute" value="${value}"${checkedAttribute}${disabledAttribute}${describedBy} /><span class="easy-compute-title">${escapeHtml(title)}</span><span class="easy-compute-body">${escapeHtml(body)}</span></label>`;
+  return `<label class="easy-compute-card${disabled ? ' easy-is-disabled' : ''}"><input class="easy-compute-input" type="radio" name="easy-compute" value="${value}"${checkedAttribute}${disabledAttribute}${describedByAttribute} /><span class="easy-compute-title">${escapeHtml(title)}</span><span class="easy-compute-body">${escapeHtml(body)}</span></label>`;
 }
 
-export function renderCompute({ compute, colabStatus, spendCap, spent }: ComputeView): string {
+export function renderCompute({ compute, colabStatus, spendCap, spent, checking = false, idPrefix = DEFAULT_ID_PREFIX }: ComputeView): string {
   const selected: ComputeChoice = compute === 'colab' ? 'colab' : 'cpu';
   const connected = colabStatus?.signedIn === true;
-  const colabDisabled = !connected;
+  const waiting = checking === true && colabStatus == null;
+  const colabDisabled = !connected && !waiting;
+  const prefix = idPrefix || DEFAULT_ID_PREFIX;
+  const notConnectedId = `${prefix}-${NOT_CONNECTED_SUFFIX}`;
+  const colabDescription = waiting || colabDisabled ? notConnectedId : null;
+  const capErrorId = `${prefix}-${CAP_ERROR_SUFFIX}`;
+  const soFarId = `${prefix}-${SO_FAR_SUFFIX}`;
+  const capId = `${prefix}-${CAP_SUFFIX}`;
 
-  const notConnected = colabDisabled
-    ? `<div class="easy-compute-status" id="${NOT_CONNECTED_ID}"><span>${escapeHtml(COPY.compute.notConnected)}</span><button type="button" class="btn btn-secondary easy-compute-connect" data-easy-compute-connect>${escapeHtml(COPY.compute.connect)}</button></div>`
-    : '';
+  const notConnected = waiting
+    ? `<div class="easy-compute-status" id="${notConnectedId}"><span>${escapeHtml(COPY.compute.checking)}</span></div>`
+    : colabDisabled
+      ? `<div class="easy-compute-status" id="${notConnectedId}"><span>${escapeHtml(COPY.compute.notConnected)}</span><button type="button" class="btn btn-secondary easy-compute-connect" data-easy-compute-connect>${escapeHtml(COPY.compute.connect)}</button></div>`
+      : '';
 
   const cap = capText(spendCap);
   const capError = cap === '' ? null : validateCap(cap);
   const errorBlock = capError
-    ? `<p class="easy-compute-error" id="${CAP_ERROR_ID}" role="alert">${escapeHtml(capError)}</p>`
+    ? `<p class="easy-compute-error" id="${capErrorId}" role="alert">${escapeHtml(capError)}</p>`
     : '';
-  const describedBy = capError ? `${SO_FAR_ID} ${CAP_ERROR_ID}` : SO_FAR_ID;
+  const describedBy = capError ? `${soFarId} ${capErrorId}` : soFarId;
   const capBlock =
     selected === 'colab'
-      ? `<fieldset class="easy-compute-cap"><legend class="easy-compute-cap-legend">${escapeHtml(COPY.compute.capLegend)}</legend><label class="easy-compute-cap-label" for="easy-cap">${escapeHtml(COPY.compute.capLabel)}</label><div class="easy-compute-cap-row"><input id="easy-cap" class="easy-compute-cap-input" name="easy-cap" type="number" min="0.5" max="500" step="0.5" inputmode="decimal" value="${escapeHtml(cap)}" aria-describedby="${describedBy}"${capError ? ' aria-invalid="true"' : ''} /><span class="easy-compute-cap-suffix">${escapeHtml(COPY.compute.capSuffix)}</span></div><p class="easy-compute-so-far" id="${SO_FAR_ID}">${escapeHtml(fill(COPY.compute.soFar, { spent: spentText(spent) }))}</p>${errorBlock}</fieldset>`
+      ? `<fieldset class="easy-compute-cap"><legend class="easy-compute-cap-legend">${escapeHtml(COPY.compute.capLegend)}</legend><label class="easy-compute-cap-label" for="${capId}">${escapeHtml(COPY.compute.capLabel)}</label><div class="easy-compute-cap-row"><input id="${capId}" class="easy-compute-cap-input" name="easy-cap" type="number" min="0.5" max="500" step="0.5" inputmode="decimal" value="${escapeHtml(cap)}" aria-describedby="${describedBy}"${capError ? ' aria-invalid="true"' : ''} /><span class="easy-compute-cap-suffix">${escapeHtml(COPY.compute.capSuffix)}</span></div><p class="easy-compute-so-far" id="${soFarId}">${escapeHtml(fill(COPY.compute.soFar, { spent: spentText(spent) }))}</p>${errorBlock}</fieldset>`
       : '';
 
-  return `<fieldset class="easy-compute"><legend class="easy-compute-legend">${escapeHtml(COPY.compute.legend)}</legend><div class="easy-compute-grid"><div class="easy-compute-option">${option('cpu', COPY.compute.cpuTitle, COPY.compute.cpuBody, selected === 'cpu', false)}</div><div class="easy-compute-option">${option('colab', COPY.compute.colabTitle, COPY.compute.colabBody, selected === 'colab', colabDisabled)}${notConnected}</div></div></fieldset>${capBlock}`;
+  return `<fieldset class="easy-compute"><legend class="easy-compute-legend">${escapeHtml(COPY.compute.legend)}</legend><div class="easy-compute-grid"><div class="easy-compute-option">${option('cpu', COPY.compute.cpuTitle, COPY.compute.cpuBody, selected === 'cpu', false, null)}</div><div class="easy-compute-option">${option('colab', COPY.compute.colabTitle, COPY.compute.colabBody, selected === 'colab', colabDisabled, colabDescription)}${notConnected}</div></div></fieldset>${capBlock}`;
 }
 
 async function openConnectDialog(opener: HTMLElement, options: ComputeMountOptions): Promise<void> {
@@ -120,6 +137,8 @@ async function openConnectDialog(opener: HTMLElement, options: ComputeMountOptio
 }
 
 export function mountCompute(root: HTMLElement, options: ComputeMountOptions): () => void {
+  const prefix = options.idPrefix || DEFAULT_ID_PREFIX;
+  const capId = `${prefix}-${CAP_SUFFIX}`;
   const onClick = (event: Event) => {
     const target = event.target as HTMLElement | null;
     const connect = target?.closest<HTMLElement>('[data-easy-compute-connect]');
@@ -140,7 +159,7 @@ export function mountCompute(root: HTMLElement, options: ComputeMountOptions): (
       }
       return;
     }
-    if (target.id === 'easy-cap') {
+    if (target.id === capId) {
       const text = target.value.trim();
       if (text === '') {
         options.onChange({ spendCap: null });

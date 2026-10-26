@@ -44,6 +44,18 @@ export function mediaFor(job, cutout, output = null) {
       audio: job.generator === "fasth3-omni" ? "present" : "muted",
     };
   }
+  // H17: an LTX audio-to-video presenter clip is a talking-head plate. Its
+  // native audio is never mixed; the narration track is the voice.
+  if (job.kind === "presenter") {
+    return {
+      width,
+      height,
+      fps: measured.fps ?? job.fps,
+      frames: measured.frames ?? job.frames,
+      ...(measured.durationSeconds === undefined ? {} : { durationSeconds: measured.durationSeconds }),
+      audio: "muted",
+    };
+  }
   if (job.kind === "audio") return { audio: "present" };
   return undefined;
 }

@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import os from "node:os";
 // B3: Comfyrizz's own planning around the official Google Colab CLI (`colab`, 0.7.4,
 // Apache-2.0). The parsers and the local-path blocklist come from Orbit's
 // colab-plan.mjs (see ./orbit-colab-plan.mjs, copied verbatim with the MIT relicence
@@ -138,7 +139,8 @@ export function argvUpload({ session, localPath, remotePath: remote }) {
   const local = String(localPath ?? "");
   if (!local) throw fail("A local path is required to upload.");
   if (blockedLocalPath(local)) throw fail("Refusing to upload a credential file (blocked local path).");
-  if (!local.includes("/") && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(local)) throw fail("Local file name is not allowed.");
+  const hasSeparator = local.includes("/") || local.includes("\\");
+  if (!hasSeparator && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(local)) throw fail("Local file name is not allowed.");
   return argv(["upload", "-s", sessionName(session), local, remotePath(remote)]);
 }
 
@@ -256,14 +258,48 @@ export function parseHealthLine(output) {
  * "missing_binary" on a machine where the CLI is installed and signed in. Order: an explicit setting,
  * then the user's own install, then the bare name (PATH lookup at spawn time).
  */
-export function resolveColabBinary({ env = process.env, home = env.HOME || "", exists = existsSync } = {}) {
+export function resolveColabBinary({ env = process.env, home, exists = existsSync, readdir = readdirSync } = {}) {
+  const userHome = home || env.HOME || env.USERPROFILE || os.homedir();
   const override = String(env.COMFYRIZZ_COLAB_BIN || "").trim();
   if (override) {
     if (!exists(override)) throw new Error(`COMFYRIZZ_COLAB_BIN points at ${override}, which does not exist`);
     return { bin: override, source: "COMFYRIZZ_COLAB_BIN" };
   }
-  const userInstall = home ? `${home.replace(/\/+$/, "")}/.local/bin/colab` : null;
-  if (userInstall && exists(userInstall)) return { bin: userInstall, source: "~/.local/bin" };
+
+  const candidates = [];
+  const add = (candidate) => {
+    if (candidate && !candidates.includes(candidate)) candidates.push(candidate);
+  };
+
+  // `pip install --user` puts the CLI outside the PATH the child gets.
+  if (userHome) {
+    const userRoot = String(userHome).replace(/[\\/]+$/, "");
+    add(`${userRoot}/.local/bin/colab`);
+    add(`${userRoot}/.local/bin/colab.exe`);
+    add(`${userRoot}\\.local\\bin\\colab.exe`);
+  }
+
+  // On Windows, pip --user uses %APPDATA%\Python\Python3xx\Scripts.
+  if (process.platform === "win32") {
+    const roots = [
+      env.APPDATA ? `${env.APPDATA}\\Python` : "",
+      env.LOCALAPPDATA ? `${env.LOCALAPPDATA}\\Programs\\Python` : "",
+    ].filter(Boolean);
+    for (const root of roots) {
+      add(`${root}\\Scripts\\colab.exe`);
+      add(`${root}\\Scripts\\colab.cmd`);
+      let entries = [];
+      try { entries = readdir(root); } catch { /* Python is not installed there */ }
+      for (const entry of entries) {
+        if (!/^Python\d+/i.test(String(entry))) continue;
+        add(`${root}\\${entry}\\Scripts\\colab.exe`);
+        add(`${root}\\${entry}\\Scripts\\colab.cmd`);
+      }
+    }
+  }
+
+  const userInstall = candidates.find((candidate) => exists(candidate));
+  if (userInstall) return { bin: userInstall, source: userInstall.includes(".local") ? "~/.local/bin" : "user install" };
   return { bin: "colab", source: "PATH" };
 }
 
