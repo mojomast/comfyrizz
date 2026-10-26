@@ -110,3 +110,21 @@ on the unvalidated no-clip graph; review any generated speech contamination.
 ## Production package
 
 Executable package: [`productions/action-film-20261026/`](../../productions/action-film-20261026/README.md).
+
+### Motion-pilot findings
+
+Two 141-frame action pilots were collected and fully decoded. Twelve samples per
+clip show promising closed-face stability and recognizable physical performances,
+but do not establish continuous foot contact, wheel rotation or listening approval.
+The reaction source changes from a studio background into the landing in its first
+approximately 36 frames. Inspection found that the runner copied the complete
+portrait prompt, including studio background and pose, into `direction.subject`.
+This conflicted with the intended scene composition. Separate invariant identity
+description from location, pose and action; retain the original source as evidence.
+Do not infer a sole cause without a controlled comparison. A candidate trimmed
+interval must be reviewed separately, not used to approve the entire original.
+
+The lever reference was rejected before motion inference because of missing
+contact geometry and cart drift. Mechanical validation continues with the planned
+crank/lift action; it has not yet passed. Estimated cumulative spend after these
+two motion pilots was 2.82 credits of the new film's 20-credit ceiling.
