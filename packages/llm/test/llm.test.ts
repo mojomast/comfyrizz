@@ -66,6 +66,8 @@ test('presets: three providers, OpenCode fallback key and session header', () =>
   const custom = resolveProvider('custom', { env: {} });
   assert.equal(custom.apiKey, null);
   assert.equal(custom.reasoningEffort, undefined);
+  const directDeepSeek = resolveProvider('custom', { env: {}, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash' });
+  assert.equal(directDeepSeek.reasoningEffort, 'max');
   assert.throws(() => resolveProvider('openrouter', { env: {} }), /requires OPENROUTER_API_KEY/);
   assert.throws(() => resolveProvider('openrouter', { env: { OPENROUTER_API_KEY: 'secret' }, apiKey: null }), /requires/);
 });
