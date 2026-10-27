@@ -720,7 +720,7 @@ export async function runConversationTurn(options: {
         } else {
           repairs += 1;
           if (repairs > 2) throw new Error(`The agent could not create a valid draft: ${(error as Error).message}`);
-          result = { error: (error as Error).message, instruction: 'Repair the arguments and retry. Do not claim the failed operation succeeded.' };
+          result = { error: (error as Error).message, instruction: `Repair ${repairs} of 2: change only the arguments this error names, keep the rest, and retry. Never resend identical arguments. Do not claim the failed operation succeeded.` };
         }
       }
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });

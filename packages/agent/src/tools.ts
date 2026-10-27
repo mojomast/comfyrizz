@@ -910,7 +910,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     if (!wordless && !args.dialogue) throw new Error('wordless:false needs exact dialogue and ready conditioning audio');
 
     const noText = intent.generatedFilm && intent.noCaptions
-      ? ' No captions, subtitles, titles, labels, logos or other on-screen text.'
+      ? ' Every surface, garment and prop is plain and unmarked.'
       : '';
     const direction = {
       subject: args.subject.trim(),
@@ -1035,7 +1035,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           `Identity and subject: ${args.subject}.`,
           `Composition and art direction: ${args.composition}.`,
           'Preserve the shared subject identity from Picture 2 and the composition from Picture 1.',
-          intent.generatedFilm && intent.noCaptions ? 'No captions, text, letters, logos or watermarks.' : 'No unintended text or watermarks.',
+          intent.generatedFilm && intent.noCaptions ? 'Every surface, garment and prop is plain and unmarked.' : 'Background surfaces are clean and unmarked.',
         ].join(' ');
         delete startAsset.gen.inputs.text;
         startAsset.notes = 'pending-GPU: LTX start frame compiled from the shared identity and composition references; this still is an input, not film completion.';
@@ -1059,7 +1059,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         `${args.subject.trim()}. ${args.composition.trim()}.`,
         `${args.action.trim()}. ${args.camera.trim()}.`,
         'One continuous shot, no cuts.',
-        intent.generatedFilm && intent.noCaptions ? 'No captions, text, letters, logos or watermarks.' : 'No unintended text or watermarks.',
+        intent.generatedFilm && intent.noCaptions ? 'Every surface, garment and prop is plain and unmarked.' : 'Background surfaces are clean and unmarked.',
       ].join(' ');
       id = hashId('a_vid', `${args.scene_id}:ltx:${image}:${resolvedFrames}:${args.seed ?? 0}:${prompt}:${finishingSound}`);
       asset = {
@@ -1324,8 +1324,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ),
     'assets.generate_image': tool(
       'assets.generate_image',
-      'Plan a FLUX still with an expanded caption. This never runs a GPU job; spend needs approval.',
-      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string' } }, ['scene_id', 'intent']),
+      'Plan a FLUX 3 Image Klein still with an expanded caption (with refs: a Klein reference edit). This never runs a GPU job; spend needs approval.',
+      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string', description: 'Klein prose, subject first: pose or action, setting, light and mood in one or two specific sentences. Describe what is visible, not what is absent. Style, palette, framing and the text guard are appended. With text:true, quote the exact words and their placement. With refs, say what changes and what stays.' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string' } }, ['scene_id', 'intent']),
       generateImageSchema,
       planImage,
     ),
@@ -1335,16 +1335,16 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       baseParameters({
         scene_id: { type: 'string' },
         motion_model: { type: 'string', enum: ['auto', 'h3', 'ltx', 'klein'], description: 'Per-shot selection. Must agree with a non-auto configured motionModel.' },
-        subject: { type: 'string', description: 'Visible subject and stable identity, not a prompt tag.' },
-        composition: { type: 'string', description: 'Framing, setting, spatial contacts and art direction.' },
-        action: { type: 'string', description: 'One observable action; auto uses character action to select H3.' },
-        camera: { type: 'string', description: 'Shot size and camera move; auto uses camera-led scenery to select LTX.' },
-        soundscape: { type: 'string', description: 'Physical/native audio direction for H3. Wordless never means silent.' },
+        subject: { type: 'string', description: 'Visible subject and stable identity, not a prompt tag. For a recurring character, the same verbatim identity sentence in every shot.' },
+        composition: { type: 'string', description: 'Framing, setting, spatial contacts and art direction, phrased as what is visible.' },
+        action: { type: 'string', description: 'One observable action in the present tense, in order and sized to the shot (for LTX: the motion that follows the start frame); auto uses character action to select H3.' },
+        camera: { type: 'string', description: 'Shot size and one camera move relative to the subject, or a static camera; auto uses camera-led scenery to select LTX.' },
+        soundscape: { type: 'string', description: 'Physical/native diegetic audio direction for H3 (ambience, contact sounds); score belongs in finishing. Wordless never means silent.' },
         characterCount: { type: 'integer', minimum: 0 },
         image: { type: 'string', description: 'Picture 1 subject/identity image asset id; LTX start art when reference is absent.' },
         reference: { type: 'string', description: 'Picture 2 composition/art-direction image asset id. Required for H3.' },
         audio: { type: 'string', description: 'Ready exact-line voice WAV asset for H3 dialogue. Omit for wordless silent conditioning.' },
-        finishing_sound: { type: 'string', description: 'Required LTX/Klein post-production sound plan; neither emits native audio.' },
+        finishing_sound: { type: 'string', description: 'Required LTX/Klein post-production sound plan; neither emits native audio. Name concrete ambience, effects and, when music is wanted, instruments, tempo and mood.' },
         frames: { type: 'integer', minimum: 1, description: 'Requested source frames at 24 fps; snapped up to the selected model lattice and must cover the scene slot.' },
         seed: { type: 'integer', minimum: 0 },
         wordless: { type: 'boolean' },

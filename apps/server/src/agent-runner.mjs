@@ -13,6 +13,14 @@ const SVG_SYSTEM = [
   'Prefer simple shapes and paths. Keep it under 4 KB.',
 ].join(' ');
 
+const REPAIR_SYSTEM = [
+  'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded.',
+  'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace or regenerate existing assets, change the story, or change the model route.',
+  'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy or notes. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
+  'Tool errors: for invalid_arguments, correct only the fields named in issues[].path and resend; for tool_failed, supply the prerequisite the message names. Never resend identical arguments.',
+  'When the listed issues are fixed, stop calling tools and reply with one short sentence.',
+].join('\n');
+
 function extractSvg(text) {
   const match = /<svg[\s\S]*?<\/svg>/i.exec(text);
   return match ? match[0] : null;
@@ -119,7 +127,7 @@ function createLlmSvgGenerator(model, sessionId) {
     const prompt = [
       `Draw a ${intent.kind} SVG for: ${intent.prompt}`,
       intent.palette?.length ? `Palette: ${intent.palette.join(', ')}.` : '',
-      attempt > 1 && errors.length ? `The previous attempt failed: ${errors.map(error => error.message).join('; ')}. Fix it.` : '',
+      attempt > 1 && errors.length ? `The previous attempt failed: ${errors.map(error => error.message).join('; ')}. Return a complete corrected SVG that fixes exactly these errors and keeps the same drawing.` : '',
     ].filter(Boolean).join('\n');
     let text = '';
     for await (const chunk of model.stream({
@@ -240,7 +248,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         sessionId,
         now,
         ...(repairInstructions ? {
-          system: 'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded. Do not call storyboard.propose, rebuild the storyboard, replace or regenerate existing assets, change the story, or change the model route. Use only the edits required by the user validation report. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image. When the listed issues are fixed, stop calling tools and reply with one short sentence.',
+          system: REPAIR_SYSTEM,
         } : {}),
         // Initial planning is bounded separately from the much smaller edit-only repair.
         maxSteps: repairInstructions ? 8 : 16,
@@ -257,7 +265,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     if (agentModel && !acceptable(slice)) {
       if (productionIntent.generatedFilm) {
         const initialProblems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
-        slice = await runOnce(agentModel, `The current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, then stop: ${initialProblems.join('; ')}. Return the corrected complete package.`);
+        slice = await runOnce(agentModel, `Validation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`);
         if (!acceptable(slice)) {
           const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
           const schemaProblems = validatePackage(slice.package).valid ? [] : ['package schema validation failed'];
