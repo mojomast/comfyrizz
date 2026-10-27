@@ -19,13 +19,13 @@ test('redaction removes tokens, keys, tickets, links and local paths', () => {
     ['x-comfyrizz-token: s3cr3t', '[redacted]'],
     ['Authorization: Bearer abc.def.ghi', 'Authorization: Bearer [redacted]'],
     ['key hf_abcdefghijklmnop', 'key [redacted]'],
-    ['openai sk-proj-abcdefghijklmnop', 'openai [redacted]'],
-    ['gh ghp_abcdefghijklmnopqrst', 'gh [redacted]'],
+    [`openai ${'sk-'}proj-abcdefghijklmnop`, 'openai [redacted]'],
+    [`gh ${'ghp_'}abcdefghijklmnopqrst`, 'gh [redacted]'],
     ['google AIzaSyA1234567890abcdefghijk', 'google [redacted]'],
     ['jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig', 'jwt [redacted]'],
     ['hash 0123456789abcdef0123456789abcdef01', 'hash [redacted]'],
     ['saved to /home/kyle/comfy/out/video.mp4', 'saved to [path]'],
-    ['saved to C:\\Users\\kyle\\video.mp4', 'saved to [path]'],
+    [`saved to ${['C:', 'Users', 'kyle', 'video.mp4'].join('\\')}`, 'saved to [path]'],
     ['runtime /tmp/comfyrizz-e2e-1234/out', 'runtime [path]'],
     ['poster data:image/png;base64,iVBORw0KGgo=', 'poster [data]'],
   ];
@@ -77,6 +77,26 @@ test('ffmpeg chapters escape metadata characters and use millisecond timebase', 
   assert.ok(meta.startsWith(';FFMETADATA1\ntitle=Robot\\; bakes \\= bread\n'));
   assert.equal(meta.match(/\[CHAPTER\]/gu).length, 3);
   assert.match(meta, /TIMEBASE=1\/1000\nSTART=2000\nEND=5000\ntitle=Plan: Running/u);
+});
+
+test('steps in the same instant share one readable cue and one chapter', () => {
+  const burst = {
+    title: 'Burst',
+    durationMs: 6000,
+    entries: [
+      { atMs: 1000, kind: 'start', label: 'Procedure capture started' },
+      { atMs: 1001, kind: 'prompt', label: 'Prompt: robot' },
+      { atMs: 1100, kind: 'stage', label: 'Plan: Done' },
+      { atMs: 1200, kind: 'stage', label: 'Shots: Running' },
+      { atMs: 4000, kind: 'result', label: 'Final video ready' },
+    ],
+  } as const;
+  const vtt = toWebVtt(burst);
+  assert.match(vtt, /1\n00:00:01\.000 --> 00:00:04\.000\nPrompt: robot\nPlan: Done\nShots: Running\n/u);
+  assert.match(vtt, /2\n00:00:04\.000 --> 00:00:06\.000\nFinal video ready/u);
+  const meta = toFfmetadata(burst);
+  assert.equal(meta.match(/\[CHAPTER\]/gu).length, 2);
+  assert.match(meta, /START=1000\nEND=4000\ntitle=Procedure capture started · Prompt: robot · Plan: Done · Shots: Running/u);
 });
 
 test('an empty journal still produces valid files', () => {

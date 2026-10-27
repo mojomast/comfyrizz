@@ -84,11 +84,14 @@ export function vttTimestamp(ms: number): string {
 }
 
 const MIN_CUE_MS = 1500;
+/** Steps closer together than this share one cue; a 1 ms caption is unreadable. */
+const GROUP_MS = 600;
+const MAX_CUE_LINES = 3;
 
 interface Span {
   startMs: number;
   endMs: number;
-  label: string;
+  labels: string[];
 }
 
 function spans(entries: readonly ProcedureEntry[], durationMs: number): Span[] {
@@ -96,19 +99,25 @@ function spans(entries: readonly ProcedureEntry[], durationMs: number): Span[] {
     .filter((entry) => Number.isFinite(entry.atMs) && entry.label !== '')
     .slice()
     .sort((left, right) => left.atMs - right.atMs);
-  const end = Math.max(durationMs, ...sorted.map((entry) => entry.atMs + MIN_CUE_MS), 0);
-  return sorted.map((entry, index) => {
-    const next = sorted[index + 1];
+  const groups: Array<{ startMs: number; labels: string[] }> = [];
+  for (const entry of sorted) {
     const startMs = Math.max(0, Math.round(entry.atMs));
-    const until = next === undefined ? end : Math.max(next.atMs, startMs + 1);
-    return { startMs, endMs: Math.max(startMs + 1, Math.round(until)), label: entry.label };
+    const last = groups.at(-1);
+    if (last !== undefined && startMs - last.startMs < GROUP_MS) last.labels.push(entry.label);
+    else groups.push({ startMs, labels: [entry.label] });
+  }
+  const end = Math.max(durationMs, ...groups.map((group) => group.startMs + MIN_CUE_MS), 0);
+  return groups.map((group, index) => {
+    const next = groups[index + 1];
+    const until = next === undefined ? end : next.startMs;
+    return { startMs: group.startMs, endMs: Math.max(group.startMs + 1, Math.round(until)), labels: group.labels };
   });
 }
 
-/** One cue per journal entry, held until the next entry; editors read these as captions or markers. */
+/** One cue per step (or burst of steps), held until the next; editors read these as captions or markers. */
 export function toWebVtt(doc: Pick<ProcedureDocument, 'entries' | 'durationMs'>): string {
   const cues = spans(doc.entries, doc.durationMs).map((span, index) => (
-    `${index + 1}\n${vttTimestamp(span.startMs)} --> ${vttTimestamp(span.endMs)}\n${span.label.replace(/-->/gu, '→')}`
+    `${index + 1}\n${vttTimestamp(span.startMs)} --> ${vttTimestamp(span.endMs)}\n${span.labels.slice(-MAX_CUE_LINES).join('\n').replace(/-->/gu, '→')}`
   ));
   return `WEBVTT\n\n${cues.join('\n\n')}${cues.length > 0 ? '\n' : ''}`;
 }
@@ -121,7 +130,7 @@ function ffEscape(value: string): string {
 export function toFfmetadata(doc: Pick<ProcedureDocument, 'entries' | 'durationMs' | 'title'>): string {
   const lines = [';FFMETADATA1', `title=${ffEscape(doc.title)}`];
   for (const span of spans(doc.entries, doc.durationMs)) {
-    lines.push('', '[CHAPTER]', 'TIMEBASE=1/1000', `START=${span.startMs}`, `END=${span.endMs}`, `title=${ffEscape(span.label)}`);
+    lines.push('', '[CHAPTER]', 'TIMEBASE=1/1000', `START=${span.startMs}`, `END=${span.endMs}`, `title=${ffEscape(span.labels.join(' · '))}`);
   }
   return `${lines.join('\n')}\n`;
 }
