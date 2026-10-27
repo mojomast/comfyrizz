@@ -2001,6 +2001,7 @@
           "type": "string",
           "enum": [
             "llm-svg",
+            "procedural-audio",
             "flux3-klein",
             "ltx25",
             "ltx25-a2v",
@@ -2008,7 +2009,7 @@
             "kokoro",
             "qwen3-tts"
           ],
-          "description": "llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by a scene's narration WAV); fasth3-omni = experimental FastH3 Omni reference-conditioned video with native audio (MiniMax-H3 community licence); kokoro = Kokoro narration audio; qwen3-tts = optional Qwen3-TTS 1.7B narration audio (Apache-2.0)."
+          "description": "llm-svg = procedural vector written as code (CPU, free); procedural-audio = deterministic PCM sound synthesized on CPU (free, no model licence); flux3-klein = FLUX 3 Image Klein stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by a scene's narration WAV); fasth3-omni = experimental FastH3 Omni reference-conditioned video with native audio (MiniMax-H3 community licence); kokoro = Kokoro narration audio; qwen3-tts = optional Qwen3-TTS 1.7B narration audio (Apache-2.0)."
         },
         "workflow": {
           "$ref": "#/$defs/relativePath"

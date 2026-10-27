@@ -153,10 +153,15 @@ test('auto mixes camera-led LTX and character-action H3 without model fallback',
 });
 
 test('explicit Klein is stills + code motion only, with Remotion and finishing metadata', async () => {
-  const { tools, getDraft, identity, composition } = await filmTools('klein');
+  let stem: Uint8Array | undefined;
+  const { tools, getDraft, identity, composition } = await filmTools('klein', undefined, (_id, wav) => { stem = wav; });
   assert.throws(() => tools['assets.generate_video'].run(direction(identity, composition, { motion_model: 'klein', finishing_sound: undefined })), /finishing_sound/);
   const result = await tools['assets.generate_video'].run(direction(identity, composition, { motion_model: 'klein' })) as any;
   const pkg = getDraft();
+  assert.ok(stem && stem.length > 44, 'a real PCM finishing stem was written');
+  assert.equal(pkg.audio.music.asset, 'a_finishing_mix');
+  assert.equal(pkg.assets.a_finishing_mix.media.durationSeconds, 6);
+  assert.equal(pkg.assets.a_finishing_mix.status, 'ready');
   assert.equal(result.asset.kind, 'image');
   assert.equal(result.asset.gen.generator, 'flux3-klein');
   assert.equal(result.medium, 'stills + code motion');

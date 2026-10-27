@@ -8,7 +8,7 @@ import { deriveClipState } from './model.mjs';
 // Generators that run without a GPU. `rg "generator: '" packages/agent/src`
 // finds `llm-svg` (CPU) and `flux3-klein` (GPU). Kokoro is a voice engine, not
 // a generator string in that tree, so it is not in this set.
-export const CPU_GENERATORS = new Set(['llm-svg']);
+export const CPU_GENERATORS = new Set(['llm-svg', 'procedural-audio']);
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

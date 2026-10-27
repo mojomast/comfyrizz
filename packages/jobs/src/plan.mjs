@@ -191,6 +191,7 @@ const GENERATOR_KIND = {
   "fasth3-omni": "plate",
   kokoro: "audio",
   "llm-svg": null, // procedural vector: CPU work, no Comfy job (PLAN.md A5)
+  "procedural-audio": null, // deterministic PCM finishing stem: already synthesized on CPU
 };
 
 /** Stable JSON: object keys sorted, so a hash never depends on key order. */
@@ -743,7 +744,7 @@ export function planJobs(pkg, opts = {}) {
       continue;
     }
     if (kind === null) {
-      skipped.push({ asset: assetId, reason: "llm-svg is CPU work (A5 sanitize + render-check), not a Comfy job" });
+      skipped.push({ asset: assetId, reason: generator === "llm-svg" ? "llm-svg is CPU work (A5 sanitize + render-check), not a Comfy job" : "procedural-audio is already synthesized on CPU, not a Comfy job" });
       continue;
     }
     if (asset.origin !== "generated") {

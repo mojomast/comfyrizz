@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { synthesizeFinishingWav } from './finishing-audio.js';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -70,7 +71,7 @@ export interface ToolsetOptions {
   /** Persist an SVG and return its package-relative path (C5 server). */
   persistSvg?: (assetId: string, svg: string, kind: string) => string | undefined;
   /** Persist deterministic CPU audio conditioning; never calls a model or GPU. */
-  persistAudio?: (assetId: string, wav: Uint8Array, kind: 'silent-conditioning') => string | undefined;
+  persistAudio?: (assetId: string, wav: Uint8Array, kind: 'silent-conditioning' | 'finishing-stem') => string | undefined;
   /** Generated-film router. Auto selects H3 or LTX independently for each shot. */
   motionModel?: MotionModel;
   /** Observe every package mutation; runCpuSlice uses this to return the draft. */
@@ -1138,6 +1139,24 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       assets: { ...(state.package.assets ?? {}), [id]: asset },
       revision: Number(state.package.revision ?? 0) + 1,
     };
+    if (finishingSound && model !== 'h3' && !state.package.audio?.music?.asset && options.persistAudio) {
+      const seconds = scenes.reduce((sum: number, scene: any) => sum + (Number(scene.preferredFrames) || 0), 0) / packageFps;
+      const stem = synthesizeFinishingWav(finishingSound, seconds, args.seed ?? 1);
+      const assetId = 'a_finishing_mix';
+      const file = options.persistAudio(assetId, stem.wav, 'finishing-stem') ?? `assets/${assetId}.wav`;
+      state.package.assets[assetId] = {
+        kind: 'audio', origin: 'generated', status: 'ready',
+        file, sha256: createHash('sha256').update(stem.wav).digest('hex'), bytes: stem.wav.length,
+        media: { durationSeconds: stem.durationSeconds },
+        gen: { generator: 'procedural-audio', model: 'deterministic-pcm-v1', inputs: { plan: finishingSound, seed: args.seed ?? 1 } },
+        license: { id: 'CC0-1.0' }, redistributable: true,
+        notes: `Original deterministic procedural finishing stem; not native model audio. Plan: ${finishingSound}`,
+      };
+      state.package.audio = {
+        ...(state.package.audio ?? {}),
+        music: { asset: assetId, gain_db: -18, fade_in_seconds: 0.5, fade_out_seconds: 1, loop: false },
+      };
+    }
     touch();
     return {
       scene_id: args.scene_id,

@@ -643,7 +643,7 @@ function checkAssets(assets, errors) {
     const ready = asset.status === "ready";
     if (asset.origin === "generated") {
       if (!isObj(asset.gen) || !isStr(asset.gen.generator)) {
-        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | fasth3-omni | kokoro | qwen3-tts)"));
+        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | procedural-audio | flux3-klein | ltx25 | ltx25-a2v | fasth3-omni | kokoro | qwen3-tts)"));
       }
       if (ready && !isStr(asset.license?.id)) {
         errors.push(error("SEM_LICENSE_MISSING", `${at}/license/id`, "a ready generated asset needs an output licence; generated output defaults to CC0-1.0"));
