@@ -42,8 +42,10 @@ Third-party software (not vendored unless stated; see each package's lockfile):
   deterministic directed-graph layout.
 
 Models are not distributed with this repository. FLUX 3 Image Klein (FLUX
-Kommunity License v1.0), LTX-2.5 (LTX-2.x Community License) and Kokoro-82M
-are downloaded by each user under their own licences.
+Kommunity License v1.0), LTX-2.5 (LTX-2.x Community License), MiniMax H3 Omni
+(MiniMax-H3 Community License Agreement) and Kokoro-82M are downloaded by each
+user under their own licences. MiniMax H3 terms:
+https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE
 
 Optional narration weights (R3; not downloaded by the default install, not
 vendored). The licences below are the ones named in the team's voice notes.

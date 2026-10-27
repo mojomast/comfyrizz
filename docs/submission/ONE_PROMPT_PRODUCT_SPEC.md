@@ -16,6 +16,11 @@ Advanced mode after a result exists.
 
 ### 1. Guided setup, once
 
+**The judge deployment uses managed inference.** Judges do not install anything,
+enter keys or connect Colab. Agent/model access and conservative server-side rate
+and credit ceilings are preconfigured; the browser cannot raise them. The
+following setup applies to people self-hosting ComfyRizz.
+
 A discoverable setup checklist from Super Easy covers:
 
 1. Agent connection: provider, API key, exact model, and a real tool-calling test.
@@ -37,10 +42,12 @@ Windows and Linux instructions rather than absolute developer-machine paths.
 ### 2. One-prompt production
 
 The first screen asks for a prompt and offers a small number of polished examples.
-Before planning it offers **Auto**, H3-only and LTX-only motion routes. Auto uses
-LTX for establishing/scenery/camera motion and H3 for recurring character acting
-and native sound. The structured selection persists, appears in the proposal and
-never silently falls back to the other model.
+Before planning it offers **Auto**, H3-only, LTX-only and Klein-only motion routes.
+Auto uses Klein for identity/keyframe art, LTX for establishing/scenery/camera
+motion and H3 for recurring character acting and native sound. Klein-only uses
+Klein stills plus code motion and finishing sound, without claiming generated
+character animation. The structured selection persists, appears in the proposal
+and never silently falls back to another model.
 Generate first creates a free creative plan and presents one concise proposal:
 title, a logline of at most two sentences, visual look, duration and sound. The
 user can revise it or choose **Make this film**. This is the only initial creative

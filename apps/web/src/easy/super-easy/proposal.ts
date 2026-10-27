@@ -8,7 +8,7 @@ export interface SuperEasyProposal {
   shots: number;
   basePrompt: string;
   revisionNotes: string[];
-  motionModel?: 'auto' | 'h3' | 'ltx';
+  motionModel?: 'auto' | 'h3' | 'ltx' | 'klein';
 }
 
 function text(value: unknown, fallback: string): string {
@@ -43,7 +43,7 @@ export function proposalForPackage(pkg: any, basePrompt: string, revisionNotes: 
 
 export function renderSuperEasyProposal(proposal: SuperEasyProposal): string {
   const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
-  const model = proposal.motionModel === 'h3' ? 'MiniMax H3' : proposal.motionModel === 'ltx' ? 'LTX-2.5' : 'Auto: H3 + LTX';
+  const model = proposal.motionModel === 'h3' ? 'MiniMax H3' : proposal.motionModel === 'ltx' ? 'LTX-2.5' : proposal.motionModel === 'klein' ? 'Klein only: stills + code motion' : 'Auto: Klein + H3 + LTX';
   return `<section class="super-easy-proposal" data-super-easy-proposal>
 <p class="super-easy-proposal-eyebrow">Your film proposal</p>
 <h1>${escape(proposal.title)}</h1>

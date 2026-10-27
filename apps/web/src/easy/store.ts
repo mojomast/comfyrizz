@@ -187,7 +187,7 @@ export function normalizeEasyState(raw: unknown): EasyState {
     level,
     levelTouched,
     compute,
-    motionModel: raw.motionModel === 'h3' || raw.motionModel === 'ltx' ? raw.motionModel : 'auto',
+    motionModel: raw.motionModel === 'h3' || raw.motionModel === 'ltx' || raw.motionModel === 'klein' ? raw.motionModel : 'auto',
     spendCap,
     planHash,
     plan: normalizePlan(raw.plan),

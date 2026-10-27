@@ -300,7 +300,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   const onChange = (event: Event): void => {
     const target = event.target as { checked?: boolean; value?: string } | null;
     if (closestOf(event.target)('[data-super-easy-motion-model]')) {
-      const model = target?.value === 'h3' || target?.value === 'ltx' ? target.value : 'auto';
+      const model = target?.value === 'h3' || target?.value === 'ltx' || target?.value === 'klein' ? target.value : 'auto';
       options.onMotionModelChange?.(model);
       return;
     }

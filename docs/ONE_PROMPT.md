@@ -1,8 +1,10 @@
 # One prompt to a finished film
 
-ComfyRizz's default flow is **one prompt → visible generated assets → a finished
-MP4 → agent-led changes**. Use Google Colab for generated films, or This computer
-for a no-key motion-graphics preview.
+ComfyRizz's default flow is **one prompt → proposal → visible generated assets →
+a finished MP4 → agent-led changes**. **Hackathon judges use the managed demo
+link with inference already configured; no setup is required.** The instructions
+below are for people running ComfyRizz themselves. Use Google Colab for generated
+films, or This computer for a no-key motion-graphics preview.
 
 ## Install on Linux or native Windows
 
@@ -75,12 +77,16 @@ verified model access are required for unattended Google Colab generation.
 
 ## Choose the motion models
 
-Before planning, choose **Auto**, **MiniMax H3**, or **LTX-2.5** on the home
-screen. Auto is the recommended mixed workflow: LTX handles establishing shots,
-scenery and camera-driven motion, while H3 handles recurring character acting,
-physical action and native sound. H3-only or LTX-only remains available. The
-selection is saved without credentials, appears in the proposal, and is passed to
-the planner as a structured option rather than inferred from prompt wording.
+Before planning, choose **Auto**, **MiniMax H3**, **LTX-2.5**, or **Klein only**
+on the home screen. Auto is the recommended mixed workflow: Klein supplies
+identity/keyframe art, LTX handles establishing shots, scenery and camera-driven
+motion, and H3 handles recurring character acting, physical action and native
+sound. H3-only or LTX-only remains available. **Klein only** is the image-driven
+route: all art comes from FLUX 3 Image Klein, camera moves/transitions/timing are
+handled by code, and sound is added in finishing rather than by H3. It does not
+claim full generated character animation. The selection is saved without
+credentials, appears in the proposal, and is passed to the planner as a structured
+option rather than inferred from prompt wording.
 
 ## Make a video
 

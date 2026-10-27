@@ -12,11 +12,18 @@ ComfyRizz turns a short brief into a narrated motion-graphics explainer or a gen
 The default flow plans, generates, finishes and plays the result without per-shot approval dialogs.
 Characters, shots and audio appear in a live gallery as they land; the finished MP4 can be downloaded
 or revised in place through the agent and Advanced editor. Type, charts and captions are exact
-because code draws them. FLUX 3 Klein stills and LTX-2.5 motion plates are generated through the
-Comfy SDK on a Google Colab GPU that Comfyrizz starts and stops for you, or on your own ComfyUI. MIT licensed.
+because code draws them. FLUX 3 Klein stills, LTX-2.5 motion plates and MiniMax H3 character/native
+AV shots are generated through the Comfy SDK on a Google Colab GPU that Comfyrizz starts and stops
+for you, or on your own ComfyUI. MIT licensed.
 
 **[One-prompt setup for Linux and native Windows](docs/ONE_PROMPT.md)** ·
 **[Product contract](docs/submission/ONE_PROMPT_PRODUCT_SPEC.md)**
+
+**For hackathon judges:** use the managed demo link supplied with the submission. Agent inference,
+Google Colab and model access are preconfigured; no API keys or installation are required. Model
+selection and generation run within server-side rate and credit limits. The instructions below are
+for people who want to run ComfyRizz themselves. A managed-demo deployment is pending until its
+real generation and safety checks pass.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
 [![Node.js 22.6+](https://img.shields.io/badge/node-%E2%89%A522.6-339933?logo=nodedotjs&logoColor=white)](#quick-start)
@@ -52,10 +59,14 @@ Comfy SDK on a Google Colab GPU that Comfyrizz starts and stops for you, or on y
 
 ### Super Easy, Easy home and the seven-step flow
 
-**Super Easy** is the default entry: type what your video is about and press **Generate**. It uses
-Draft for you and starts on **This computer**, so a first run needs no Google Colab. **I want more
-control** opens **Easy Studio** (the seven-step flow below), and **Open in editor** in Easy Studio
-opens **Advanced** for the full timeline. See [docs/ui/SUPER_EASY.md](docs/ui/SUPER_EASY.md).
+**Super Easy** is the default entry: choose **Auto**, **H3**, **LTX** or **Klein only**, enter one
+prompt and press **Generate**. Review the concise title, logline, look, duration and soundtrack,
+then revise for free or choose **Make this film**. Auto combines Klein identity/keyframe art, LTX
+camera/scenery motion and H3 character acting/native sound; Klein-only uses stills plus code motion.
+A saved Colab cap avoids repeated spending approvals. Real assets appear in a live gallery, and the
+finished MP4 offers Download, an agent composer for changes and **Advanced mode**. **I want more
+control** opens **Easy Studio** (the seven-step flow below), and **Open in editor** opens the full
+timeline with the agent beside it. See [docs/ui/SUPER_EASY.md](docs/ui/SUPER_EASY.md).
 Tick **Record this run** to film the run itself for a demo
 ([docs/ui/PROCEDURE_CAPTURE.md](docs/ui/PROCEDURE_CAPTURE.md)).
 
@@ -159,11 +170,13 @@ pnpm run doctor --offline
 cd apps/server && npm start
 ```
 
-Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). **Super Easy** opens: describe the
-video and press **Generate**. Choose **I want more control** for **Easy home**, where **New video**
-and **Try the example** (Pip's Night Shift, `examples/pip-night-shift`) live. With the **local ·
-scripted model** and the CPU backend you can plan, edit a headline or a chart value, then **Export
-MP4** or **Export bundle** with no GPU and no API key.
+Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). **Super Easy** opens: choose a
+motion route, describe the video and press **Generate**. Review or revise the short proposal, then
+choose **Make this film**. Choose **I want more control** for **Easy home**, where **New video** and
+**Try the example** (Pip's Night Shift, `examples/pip-night-shift`) live. With the **local · scripted
+model** and the CPU backend you can plan, edit a headline or a chart value, then **Export MP4** or
+**Export bundle** with no GPU and no API key. For managed Google Colab generation, complete the
+one-time [agent/Colab/HF setup](docs/ONE_PROMPT.md).
 
 > Use `pnpm run doctor`, not bare `pnpm doctor`: the bare form runs pnpm's own built-in command.
 
@@ -222,7 +235,7 @@ flowchart TD
     B --> C["Package<br/>comfyrizz.package/v1"]
     B -->|"propose only"| P["Production journal<br/>plan cards · approvals · budget ledger"]
     P -->|"approved slots"| D
-    C --> D["jobs.json<br/>FLUX 3 Klein stills · LTX-2.5 plates · upscale"]
+    C --> D["jobs.json<br/>FLUX 3 Klein stills · LTX-2.5 plates · H3 character/native AV"]
     D --> S{"Spend card approved?"}
     S -->|Google Colab| E["Google Colab G4<br/>up · bootstrap · run · collect · verified stop"]
     S -->|BYO| F["Your ComfyUI<br/>+ comfy-api-proxy"]

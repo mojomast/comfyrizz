@@ -1,4 +1,4 @@
-export type MotionModel = 'auto' | 'h3' | 'ltx';
+export type MotionModel = 'auto' | 'h3' | 'ltx' | 'klein';
 
 export interface SuperEasySetup {
   compute: 'cpu' | 'colab';
@@ -25,7 +25,7 @@ export function readSuperEasySetup(): SuperEasySetup {
     const cap = Number(value?.spendCap);
     return {
       compute: value?.compute === 'colab' ? 'colab' : 'cpu',
-      motionModel: value?.motionModel === 'h3' || value?.motionModel === 'ltx' ? value.motionModel : 'auto',
+      motionModel: value?.motionModel === 'h3' || value?.motionModel === 'ltx' || value?.motionModel === 'klein' ? value.motionModel : 'auto',
       spendCap: Number.isFinite(cap) && cap >= 0.5 && cap <= 500 ? cap : 15,
       confirmed: value?.confirmed === true,
     };

@@ -3,7 +3,7 @@ import { planInputsHash } from './store.ts';
 import type { EasyHost, EasyState } from './types.ts';
 
 type PlanApi = {
-  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: 'auto' | 'h3' | 'ltx' }): Promise<any>;
+  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein' }): Promise<any>;
   createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
 };

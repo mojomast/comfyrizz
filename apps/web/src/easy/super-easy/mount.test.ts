@@ -187,6 +187,7 @@ test('the motion-model selector offers Auto, H3 and LTX and saves changes', () =
   assert.match(root.innerHTML, /Auto — H3 acting \+ LTX camera/u);
   assert.match(root.innerHTML, /MiniMax H3 — characters \+ native sound/u);
   assert.match(root.innerHTML, /LTX-2.5 — cinematic motion plates/u);
+  assert.match(root.innerHTML, /Klein only — stills \+ code motion/u);
   root.fire('change', { target: { value: 'ltx', closest: selector => (selector === '[data-super-easy-motion-model]' ? {} : null) } });
   assert.equal(selected, 'ltx');
   handle.destroy();

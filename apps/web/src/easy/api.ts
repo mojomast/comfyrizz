@@ -130,7 +130,7 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     planBrief(prompt: any, decisions?: any) {
       return request('POST', '/api/brief', { prompt, mode: 'plan', decisions });
     },
-    buildVideo({ brief, provider, motionModel }: { brief: any; provider?: any; motionModel?: 'auto' | 'h3' | 'ltx' }) {
+    buildVideo({ brief, provider, motionModel }: { brief: any; provider?: any; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein' }) {
       // /api/agent takes the provider id and model as top-level fields. Easy
       // callers pass the selection object from Agent settings, so flatten it
       // here; a bare provider id is accepted too.

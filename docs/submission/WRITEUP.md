@@ -1,101 +1,118 @@
-# Comfyrizz: open-source AI motion graphics from a chat brief
+# ComfyRizz: one prompt to an editable generated film
 
-## What it is, and who it is for
+## What it is
 
-Comfyrizz turns a short brief into a 30–90 second narrated motion-graphics video: a storyboard,
-exact typography, real charts, generated stills, moving plates and captions, exported as an MP4. It
-is for founders, developers and educators without a motion-design team or a GPU.
+ComfyRizz turns a short brief into a watchable, editable film. It is for creators
+who want a strong first result without learning node graphs, production journals
+or a timeline first. A concise creative proposal appears before any paid work;
+the user can revise it or choose **Make this film**. Real assets appear while the
+film is being made, and the finished MP4 can be downloaded or changed with the
+agent.
 
-It is a pnpm monorepo under the MIT licence (Node 22, Python). Its contract is
-`comfyrizz.package/v1`: scenes, copy, datasets, assets, licences and generation provenance in one
-JSON file. The bundled CPU example, `examples/launch-demo`, opens and exports with no key, GPU or network.
+The app is MIT-licensed, runs as a browser UI plus a local Node server, and uses
+ComfyUI workflows through the Comfy SDK on Google Colab or a user's ComfyUI. The
+primary setup path covers Linux and native Windows; see [One prompt setup](../ONE_PROMPT.md)
+for current validation limits.
+
+## Four ways to make a film
+
+Before planning, the user selects a structured motion route:
+
+- **Auto:** FLUX 3 Image Klein for identity/keyframe art, LTX-2.5 for establishing
+  shots, scenery and camera motion, and MiniMax H3 for recurring character acting,
+  physical action and native sound.
+- **MiniMax H3:** recurring characters, reference-driven motion and native audio.
+- **LTX-2.5:** cinematic motion plates.
+- **Klein only:** FLUX 3 Image Klein stills, code-driven camera moves, transitions
+  and timing, plus finishing sound. It is an image-driven film, not a claim of full
+  generated character animation.
+
+Model substitution is not hidden: the choice persists and appears in the proposal.
 
 ## How it is built
 
-It separates generative pixels from exact information.
-
-- **Comfy SDK workflows.** `pipeline-py` reads an ordered, hashed `jobs.json` and submits API-format
-  ComfyUI workflows through the Comfy SDK. `workflows/` covers FLUX 3 Klein text-to-image and
-  reference edits, LTX-2.5 text-to-video and image-to-video, and an LTX ×2 upscale pass. The same
-  runner reaches Google Colab or a user's ComfyUI via `comfy-api-proxy`.
-- **FLUX 3 Klein stills.** The agent expands prompts for illustrations, textures and hero images;
-  the submitted graph, seed and prompt stay with the asset.
-- **LTX-2.5 plates.** LTX supplies moving backgrounds and hero shots, sized to the model's lattice
-  and retimed to 30 fps.
-- **Remotion for exact text and charts.** `apps/renderer` is deterministic: frame = f(timeline,
-  local assets, frame number). Headlines, statistics, SVG charts, lists and captions are drawn by
-  code, so chart values never come from an image model. Eight layouts and frame-driven motion recipes are supported.
-- **A model-agnostic chat agent.** `packages/agent` runs a bounded, zod-validated tool loop. An
-  asset router prefers CPU-checked SVG for icons, diagrams and patterns, FLUX for raster art, and
-  Openverse or uploads only as fallbacks. `packages/llm` supports OpenRouter, OpenCode Go
-  (conditional) and any OpenAI-compatible endpoint, so open-weights models can be used.
-- **Two backends, one pipeline.** The Google Colab adapter allocates a G4, bootstraps pinned
-  models, runs batches, collects results and verifies the stop; a spend card and reserve formula
-  gate every job. The BYO adapter points the same jobs at the user's own ComfyUI.
-- **Rights and portability.** Each asset records its source, licence and approval. `CREDITS.md` and
-  a rights-filtered `package.zip` ship only assets that may be redistributed, with reasons.
+- **A bounded creative agent.** The model writes a creative plan, not executable
+  ComfyUI graphs or spending decisions. Tool arguments and plans are validated;
+  generated-film intent requires appropriate motion, references and sound rather
+  than accepting FLUX-only stills.
+- **A concise proposal.** `proposal.logline`, `look` and `soundtrack` give the user
+  a short, accurate creative checkpoint. Revisions preserve the original prompt
+  and notes and create no production or paid run.
+- **Pinned ComfyUI workflows.** Ordered, hashed jobs use model-specific graphs and
+  prompt contracts. Only scene-reachable assets and their reference/audio
+  dependencies become jobs; orphan restyles cannot consume budget.
+- **Server-priced execution.** A whole-production final action uses the same
+  dry-run estimate as execution, including setup overhead. A saved per-video cap
+  limits spend, while production approval, reservations and settlement remain
+  server-owned.
+- **Deterministic finishing.** Remotion draws exact typography, charts and
+  captions. Generated media is assembled at natural speed; no image model invents
+  a chart number or title. Native audio is required even for wordless H3 films.
+- **Live evidence and recovery.** The gallery uses real clip/take routes and
+  expiring media tickets. Durable journals, package revisions, collected hashes,
+  bounded retries and verified runtime teardown make execution inspectable.
+- **Agent-led editing.** Result chat adopts the existing package with stable scene
+  IDs and revision checks. Advanced mode adds shots, takes and timeline editing.
+  Subsequent paid regeneration remains explicit.
 
 ## Why it is innovative
 
-ComfyUI is usually the whole product. Here it is a plate and still generator inside a deterministic
-motion-graphics engine. That gives generated imagery without letting a diffusion model invent
-numbers or headline spelling. Editing copy, palette or chart data recompiles the
-timeline and previews instantly.
+The innovation is not merely “an agent plus video generation.” ComfyRizz separates
+creative direction, model-specific media generation and exact editorial finishing
+in one usable app. It combines per-shot H3/LTX/Klein routing, a short user-approved
+creative contract, reachable-asset budgeting, deterministic type/data rendering,
+and same-project agent edits with source provenance and verified compute teardown.
 
-Second, a licence-aware agent makes asset choice, provenance and export rights part of the project
-format. The third is execution honesty. Attempt records are written before submission, an
-atomic result manifest is the only proof of success, lost submissions are reconciled rather than
-resubmitted, and a Google Colab runtime is reported stopped only after `colab sessions` confirms it.
+That claim should be demonstrated visibly: one prompt and model choice, proposal,
+live generated assets, a finished film, then a scoped agent change. Architecture
+slides and model checkboxes are not enough.
 
 ## Categories and bonuses
 
-| Target | Priority | Reason |
+| Target | Priority | Evidence to show |
 | --- | --- | --- |
-| **Open Weights Only** | Primary main prize | FLUX 3 Klein, LTX-2.5 and Kokoro are open weights; both backends run the repo's workflows with no partner nodes. The LLM is user-selected, and a local OpenAI-compatible model keeps the stack open. A hosted open-weights LLM is [unverified]. |
-| **Best Overall** | Automatic | Demo and output quality. |
-| **Most Innovative** | Secondary | Generative plates in a deterministic compositor, licence tracking and a verified Colab teardown. |
-| **Most Viral** | Not targeted | A productivity tool. |
-| **VFX Workflow Built with LTX** | Primary bonus | LTX-2.5 makes the moving plates. Motion graphics may not count as VFX [unverified]. |
-| **Built with FLUX** | Fallback bonus | FLUX 3 Klein makes stills and reference edits. Klein's "FLUX 3" eligibility is [unverified]. |
+| **Best Overall** | Primary | One-prompt usability, output quality, reliable delivery and editing. |
+| **Most Innovative** | Secondary | Per-shot model routing plus deterministic finishing, reachable-asset pricing and same-project revision. |
+| **Most Viral** | Secondary | A strong result people want to share, a short setup and an immediate downloadable MP4. No official view threshold is assumed. |
+| **Open Weights Only** | Conditional | The entire critical path, including the agent and every dependency, must comply. A hosted closed agent API disqualifies that path. |
+| **Built with MiniMax H3** | Relevant for H3/Auto | H3 character acting and native audio must be central and audible in the demo. |
+| **VFX Workflow Built with LTX** | Relevant for LTX/Auto | LTX must be the core video model for the claimed workflow; motion-graphics eligibility is not assumed. |
+| **Built with FLUX** | Relevant if organizers confirm Klein | Klein identity/keyframe art and reference editing are central. FLUX 3 Image Klein's bonus eligibility needs confirmation. |
 
-## What works today
+One entry can be considered for Best Overall and a model-provider bonus according
+to the official FAQ. Do not infer that multiple bonuses are guaranteed.
 
-- **CPU path:** install, build, serve, edit, preview and export MP4 plus captions,
-  credits and a project archive. `examples/launch-demo` has 1,100 frames (36.7 s) and a clean-clone
-  end-to-end script.
-- **Narration:** Kokoro on CPU, measured sentence cues and SRT/VTT export (`examples/hook-20s`,
-  `examples/narrated-demo`).
-- **Authoring:** the package schema and validators, timeline compiler, SVG sanitise and render-check
-  pipeline, agent tools and provider probe.
-- **GPU:** the FLUX and LTX workflows, Comfy SDK runner, attempt records and manifest handling, the
-  Google Colab lifecycle and BYO ComfyUI. Real G4 media runs are documented; a combined paid
-  nine-stage Colab run is outstanding.
+## Current evidence and remaining work
 
-## Post-hackathon (SCOPE FREEZE)
+The web unit suite, focused server suites, browser/capture tests, production
+build, TypeScript check and release scan are green. A real no-GPU Easy Studio
+brief-to-MP4 path passed. The separate four-route comparison is planned with a
+40-credit total ceiling including setup, failures and retries.
 
-`docs/PLAN.md` freezes the submission to the demo path. These are post-hackathon:
+Real four-route output quality, native-Windows smoke and final submission media
+must be verified before claiming them. See [STATUS.md](STATUS.md) for the
+authoritative state, not historical demo notes.
 
-- Music bed and SFX in the mix.
-- Motion transitions (blur, push, zoom, iris); the vocabulary and motion lint stay.
-- Qwen3-TTS voices; Kokoro is the only submission voice.
-- SVG-guided generation defaults from `workflows/svg-guided/`, which stays experimental and off by
-  default.
-- A Comfy Cloud backend; Google Colab and your own ComfyUI remain.
+## Run it
 
-## How to run it
+**Judges:** open the managed demo link supplied with the submission. Agent
+inference, Colab and model access are preconfigured, with server-side rate and
+credit limits. No installation or keys are required.
 
-```bash
+**Self-host users:**
+
+```sh
 pnpm install --frozen-lockfile
 pnpm -r --if-present run build
-cd apps/server && npm start          # open the printed 127.0.0.1 URL
+npm --prefix apps/server start
 ```
 
-Or render the example directly and run the checks:
+Open the printed loopback URL. Setup, model selection and the first real run are
+covered in [docs/ONE_PROMPT.md](../ONE_PROMPT.md). For the no-spend capture fixture:
 
-```bash
-pnpm --filter @comfyrizz/renderer render:example
-pnpm test:all
+```sh
+pnpm capture:procedure
 ```
 
-CPU needs no key. For GPU work, choose Google Colab or BYO ComfyUI; the README covers the
-Hugging Face token and `google-colab-cli`.
+The fixture is labelled as mocked. It is not a substitute for a real generated
+example.

@@ -83,7 +83,7 @@ export const MODEL_GENERATORS = Object.freeze(["flux3-klein", "ltx25", "ltx25-a2
  * it carries (GPU test 3, N6: apply left it empty). One map, so the examples and the run agree.
  */
 export const MODEL_LICENSES = Object.freeze({
-  // FastH3 Omni is experimental: the MiniMax-H3 community licence carries territorial and
+  // FastH3 Omni: the MiniMax-H3 community licence carries territorial and
   // commercial conditions, so its output is not CC0 by default (see applyDefaults below).
   "fasth3-omni": Object.freeze({
     id: "LicenseRef-MiniMax-H3-Community",
