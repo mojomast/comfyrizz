@@ -9,6 +9,14 @@ import { tmpdir } from 'node:os';
 export function fixture(t) {
   const runDir = mkdtempSync(join(tmpdir(), 'pipeline-stages-')), workDir = join(runDir, 'work');
   mkdirSync(workDir); t.after(() => rmSync(runDir, { recursive: true, force: true }));
+  const previousPython = process.env.COMFYRIZZ_SYNCNET_PYTHON, previousDir = process.env.COMFYRIZZ_SYNCNET_DIR;
+  const fakePython = join(runDir, 'python'), modelDir = join(runDir, 'syncnet');
+  mkdirSync(modelDir); writeFileSync(fakePython, ''); writeFileSync(join(modelDir, 'syncnet_v2.model'), 'fixture');
+  process.env.COMFYRIZZ_SYNCNET_PYTHON = fakePython; process.env.COMFYRIZZ_SYNCNET_DIR = modelDir;
+  t.after(() => {
+    if (previousPython === undefined) delete process.env.COMFYRIZZ_SYNCNET_PYTHON; else process.env.COMFYRIZZ_SYNCNET_PYTHON = previousPython;
+    if (previousDir === undefined) delete process.env.COMFYRIZZ_SYNCNET_DIR; else process.env.COMFYRIZZ_SYNCNET_DIR = previousDir;
+  });
   const pkg = JSON.parse(readFileSync(new URL('../../../examples/data-story/package.json', import.meta.url)));
   pkg.voice = { enabled: true, engine: 'qwen3-tts', voice: 'fixture', strict: true };
   for (const asset of Object.values(pkg.assets)) if (asset.gen?.workflow) asset.gen.workflow_sha256 = '0'.repeat(64);

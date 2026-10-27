@@ -6,12 +6,17 @@
   <img src="brand/comfyrizz-logo-light.svg" alt="Comfyrizz" width="420">
 </picture>
 
-### Chat in a brief. Get a narrated motion-graphics explainer, rendered on open weights.
+### One prompt in. Watch your film come together. Change anything with the agent.
 
-Comfyrizz is a chat agent that turns a short brief into a 30–90 second narrated motion-graphics
-video. Type, charts and captions are exact because code draws them. FLUX 3 Klein stills and LTX-2.5
-motion plates are generated through the Comfy SDK on a Google Colab GPU that Comfyrizz starts and
-stops for you, or on your own ComfyUI. MIT licensed.
+ComfyRizz turns a short brief into a narrated motion-graphics explainer or a generated short film.
+The default flow plans, generates, finishes and plays the result without per-shot approval dialogs.
+Characters, shots and audio appear in a live gallery as they land; the finished MP4 can be downloaded
+or revised in place through the agent and Advanced editor. Type, charts and captions are exact
+because code draws them. FLUX 3 Klein stills and LTX-2.5 motion plates are generated through the
+Comfy SDK on a Google Colab GPU that Comfyrizz starts and stops for you, or on your own ComfyUI. MIT licensed.
+
+**[One-prompt setup for Linux and native Windows](docs/ONE_PROMPT.md)** ·
+**[Product contract](docs/submission/ONE_PROMPT_PRODUCT_SPEC.md)**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
 [![Node.js 22.6+](https://img.shields.io/badge/node-%E2%89%A522.6-339933?logo=nodedotjs&logoColor=white)](#quick-start)
@@ -139,9 +144,10 @@ Voice cloning is not supported. See [docs/features/voice.md](docs/features/voice
 ## Quick start
 
 Requirements: **Node.js 22.6+**, **pnpm 10**, **ffmpeg** and Chrome or Chromium
-for Remotion (`REMOTION_BROWSER` overrides the default `/usr/bin/google-chrome`). Python 3.10+ is
-needed only for the GPU pipeline and Kokoro narration. Supported operating systems: Linux and
-macOS, or WSL on Windows. Set `COMFYRIZZ_PYTHON` to the Python interpreter with the pipeline
+for Remotion (`REMOTION_BROWSER` overrides discovery; without it Remotion can manage a browser).
+Python 3.12 is used by the setup doctor, GPU pipeline and Kokoro narration. The primary one-prompt
+path supports Linux and native Windows; see [platform notes](docs/ONE_PROMPT.md#platform-notes-and-current-limits)
+for current validation limits. Set `COMFYRIZZ_PYTHON` to the Python interpreter with the pipeline
 dependencies (for example `.venv/bin/python`); it defaults to `python3`.
 
 ```bash

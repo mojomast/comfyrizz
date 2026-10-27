@@ -240,6 +240,27 @@ test('IP24D (a): a successful bound run journals queued -> dispatching -> runnin
   }
 });
 
+test('Super Easy final mode runs once, renders once and settles its reservation once', async t => {
+  const ctx = makeProduction(t, { upperBound: 30 });
+  const { backend, state } = fakeBackend({ resultSpend: 25 });
+  state.gate = Promise.resolve();
+  let renders = 0;
+  const controller = controllerFor(ctx, async () => backend, {
+    onComplete: async () => {
+      renders += 1;
+      return { render: { output: 'final.mp4', bytes: 1000, frames: 2880, hash: 'final-hash' } };
+    },
+  });
+  const started = await controller.start(startParams(ctx, { mode: 'final' }));
+  const done = await controller.wait(started.runId);
+  assert.equal(done.status, 'done');
+  assert.equal(state.realCalls, 1);
+  assert.equal(renders, 1);
+  assert.equal(done.render.frames, 2880);
+  assert.equal(settleEntries(ctx.ledger, ctx.action.reservationId).length, 1);
+  assert.equal(actionFrom(ctx.store, ctx.productionId).state, 'completed');
+});
+
 test('IP24D (b): the journal never contains a queued -> running pair for the action', async t => {
   const ctx = makeProduction(t, { upperBound: 30 });
   const { backend, state } = fakeBackend({ resultSpend: 25 });
