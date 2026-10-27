@@ -589,3 +589,19 @@ test('the Studio escape for a ready package lands past Idea', async ({ page }) =
   await expect(page.locator('[data-easy-heading]')).toHaveText('Review your video', { timeout: 30_000 });
   assertNoPaidCalls();
 });
+
+test('one-time setup reveals the credit cap when Google Colab is selected', async ({ page }) => {
+  await page.route('**/api/colab/status', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ installed: true, signedIn: true, tokenPresent: true, tokenChecked: true, tokenReady: true }),
+  }));
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'Set up AI & Google Colab' }).click();
+  const dialog = page.locator('dialog[open]');
+  await expect(dialog.getByRole('heading', { name: 'Set up your video maker' })).toBeVisible();
+  await expect(dialog.locator('input[name="easy-cap"]')).toHaveCount(0);
+  await dialog.locator('input[name="easy-compute"][value="colab"]').check();
+  await expect(dialog.locator('input[name="easy-cap"]')).toBeVisible();
+  await dialog.locator('input[name="easy-cap"]').fill('10');
+  await expect(dialog.locator('input[name="easy-cap"]')).toHaveValue('10');
+});

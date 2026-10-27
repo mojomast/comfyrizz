@@ -261,14 +261,21 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       opener,
     });
     const setupRoot = doc.getElementById(hostId);
+    const paint = () => {
+      if (setupRoot) setupRoot.innerHTML = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, idPrefix: hostId });
+    };
     const unmount = setupRoot ? mountCompute(setupRoot, {
       apiFetch: host.apiFetch,
       colabStatus: async () => {
         const response = await host.apiFetch('/api/colab/status');
         return response.ok ? response.json() : null;
       },
-      onChange: patch => { draft = { ...draft, ...patch, spendCap: patch.spendCap === null ? Number.NaN : (patch.spendCap ?? draft.spendCap) }; },
-      onStatus: next => { status = next; },
+      onChange: patch => {
+        const computeChanged = patch.compute !== undefined && patch.compute !== draft.compute;
+        draft = { ...draft, ...patch, spendCap: patch.spendCap === null ? Number.NaN : (patch.spendCap ?? draft.spendCap) };
+        if (computeChanged) paint();
+      },
+      onStatus: next => { status = next; paint(); },
       idPrefix: hostId,
     }) : () => {};
     opener?.ownerDocument.querySelector('[data-super-easy-ai-setup]')?.addEventListener('click', () => { void settings?.open(); }, { once: true });
