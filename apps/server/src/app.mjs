@@ -1195,15 +1195,18 @@ export function createApp({
     readPackage: (packageId) => {
       try { return store.read(packageId); } catch { return null; }
     },
-    estimateFinalRun: async ({ productionId, budgetUnits }) => {
+    estimateFinalRun: async ({ productionId }) => {
       const production = productionStore.read(productionId);
       if (!production?.packageId) throw new Error('the final plan has no bound package');
       const pkg = store.read(production.packageId);
-      const estimated = await runs.estimate({ backendId: 'colab', pkg, budgetUnits });
+      // The browser's easy-plan ceiling is only a placeholder. Price against the
+      // user-configured production cap, then replace that placeholder with the estimate.
+      const pricingBudget = createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId }).status().ceiling ?? Number.MAX_SAFE_INTEGER;
+      const estimated = await runs.estimate({ backendId: 'colab', pkg, budgetUnits: pricingBudget });
       const required = estimated.budget?.required;
       if (!Number.isFinite(required) || required <= 0) throw new Error('the final run could not be priced');
       if (estimated.budget?.allowed === false) {
-        const error = new Error(`the final run needs ${required.toFixed(2)} Google Colab credits, above the configured ${budgetUnits}-credit cap`);
+        const error = new Error(`the final run needs ${required.toFixed(2)} Google Colab credits, above the configured ${pricingBudget}-credit cap`);
         error.code = 'BUDGET_EXCEEDED';
         throw error;
       }
@@ -2060,6 +2063,7 @@ export function createApp({
           response.destroy(error);
           return;
         }
+        if ((error.status ?? 500) >= 500) console.error('[app request]', error);
         sendJson(response, error.status ?? 500, { error: error.message });
       });
     },
