@@ -2229,7 +2229,25 @@ function applySceneRenderStatus(rendered: string[], reused: string[], full: bool
 
 type RenderExportError = Error & { code?: string; gate?: RenderGateSummary };
 
-async function renderExportBlob(overrideReason?: string): Promise<{ blob: Blob; revision: number; renderId?: string }> {
+/**
+ * A package owned by a production is a production-bound render: the server
+ * journals it as a command, so it needs a fresh command id and the current
+ * production revision.
+ */
+async function productionRenderFields(productionId: string | null | undefined): Promise<Record<string, unknown>> {
+  if (typeof productionId !== 'string' || productionId === '') return {};
+  const response = await apiFetch(`/api/productions/${encodeURIComponent(productionId)}`);
+  const snapshot = await response.json().catch(() => ({})) as { revision?: unknown; production?: { revision?: unknown }; error?: string };
+  if (!response.ok) throw new Error(snapshot.error ?? `HTTP ${response.status}`);
+  const revision = Number.isSafeInteger(snapshot.revision) ? snapshot.revision : snapshot.production?.revision;
+  if (!Number.isSafeInteger(revision)) throw new Error('the production revision could not be read');
+  const commandId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return { commandId: `render:${commandId}`, expected: { productionRevision: revision } };
+}
+
+async function renderExportBlob(overrideReason?: string, options: { productionId?: string | null } = {}): Promise<{ blob: Blob; revision: number; renderId?: string }> {
   let body: Record<string, unknown> = { package: pkg };
   if (token) {
     // C2: persist with a base revision, then render that exact revision.
@@ -2237,7 +2255,7 @@ async function renderExportBlob(overrideReason?: string): Promise<{ blob: Blob; 
     const savedBody = await saved.json().catch(() => ({}));
     if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
     pkg.revision = savedBody.revision;
-    body = { packageId: pkg.id, baseRevision: savedBody.revision };
+    body = { packageId: pkg.id, baseRevision: savedBody.revision, ...await productionRenderFields(options.productionId) };
     logActivity(`Saved revision ${savedBody.revision} before render`);
   }
   const requestBody = audioMixEnabled ? body : { ...body, mixAudio: false };
@@ -2535,6 +2553,9 @@ function adoptBuiltPackage(body: any): void {
   pkg = body.package as PackageV1;
   timeline = body.timeline as Timeline;
   adoptEditorPackage(pkg);
+  // The agent route already persisted this revision; without the ack the
+  // header reads a server-saved package as an unreachable server.
+  if (Number.isSafeInteger(body.revision)) editorStore.noteSave({ type: 'ack', editSequence: 0, revision: body.revision });
   generatedAssets = (body.generatedAssets ?? {}) as Record<string, InlineAsset>;
   pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu as typeof pendingGpu : [];
   scrub.max = String(timeline.durationInFrames - 1);
@@ -2751,7 +2772,7 @@ function init(opened: OpenedProject): void {
     // than pretending a saved download is recoverable.
     const easyHost = {
       apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
-      hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: () => renderExportBlob(),
+      hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: (options?: { productionId?: string | null }) => renderExportBlob(undefined, options),
       clips: () => clipStore.all(), subscribeClips: (listener: () => void) => clipStore.subscribe(() => listener()), takesApi,
       clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
       openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),

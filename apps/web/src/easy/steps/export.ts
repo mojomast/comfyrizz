@@ -632,7 +632,7 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     paintWorking();
     startTimer();
     try {
-      const result = await ctx.host.renderMp4();
+      const result = await ctx.host.renderMp4({ productionId: ctx.store.get().productionId });
       if (destroyed || run !== currentRun) return;
       blob = result.blob;
       if (blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
