@@ -37,8 +37,13 @@ Windows and Linux instructions rather than absolute developer-machine paths.
 ### 2. One-prompt production
 
 The first screen asks for a prompt and offers a small number of polished examples.
-Generate uses the saved agent and Colab configuration. No per-shot, plan, take or
-spend-approval dialogs interrupt the run.
+Generate first creates a free creative plan and presents one concise proposal:
+title, a logline of at most two sentences, visual look, duration and sound. The
+user can revise it or choose **Make this film**. This is the only initial creative
+checkpoint; no production or GPU work exists before it. After approval, no
+per-shot, take or spending-approval dialogs interrupt the run. Proposal revisions
+must preserve the original prompt and revision notes and must not silently start
+a new project.
 
 The application, not a person assembling files outside the app, owns the entire
 pipeline: brief, coherent visual plan, necessary references, generation, native
@@ -111,7 +116,8 @@ is not a substitute for the product path.
 
 - [ ] Clean local setup on Linux; documented/verified Windows setup without WSL-only assumptions.
 - [ ] Agent key/model and Colab connection can be configured and tested in the UI.
-- [ ] One-time credit ceiling persists; no per-run approval is requested.
+- [ ] One-time credit ceiling persists; no per-run spending approval is requested.
+- [ ] A concise proposal can be revised for free; only Make this film creates production work.
 - [ ] One prompt produces and automatically displays the final MP4 in the same flow.
 - [ ] Real character, image, motion and audio assets appear in the live gallery as collected, with stable cards and non-disruptive preview.
 - [ ] A real generated example has coherent characters, deliberate action, sound and a strong first frame.

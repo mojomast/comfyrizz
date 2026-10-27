@@ -1,0 +1,91 @@
+.super-easy-proposal {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 56px);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--bg-0);
+  color: var(--text-1);
+}
+
+.super-easy-proposal-eyebrow {
+  margin: 0 0 var(--space-2);
+  color: var(--accent);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.super-easy-proposal h1 {
+  margin: 0 0 var(--space-4);
+  font-size: clamp(32px, 6vw, 56px);
+  line-height: 1.08;
+}
+
+.super-easy-proposal-logline {
+  max-width: 58ch;
+  margin: 0;
+  font-size: var(--font-size-18);
+  line-height: 1.6;
+}
+
+.super-easy-proposal-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.super-easy-proposal-facts li {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-proposal-question {
+  margin: 0 0 var(--space-4);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-proposal-actions {
+  margin-bottom: var(--space-5);
+}
+
+.super-easy-proposal-revise {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.super-easy-proposal-revise label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-proposal-revise > div {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.super-easy-proposal-revise textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+.super-easy-proposal-revise .hint {
+  margin-bottom: 0;
+}
+
+@media (max-width: 520px) {
+  .super-easy-proposal-revise > div {
+    flex-direction: column;
+  }
+}

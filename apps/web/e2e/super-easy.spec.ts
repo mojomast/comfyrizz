@@ -462,6 +462,8 @@ test('the full app starts at the bare visit and fills the progress view from the
   expect(pageErrors).toEqual([]);
   await page.locator('#super-easy-prompt').fill(PROMPT);
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await expect(page.locator('[data-super-easy-proposal]')).toBeVisible();
+  await page.getByRole('button', { name: 'Make this film' }).click();
 
   await expect(page.locator('[data-super-easy-progress]')).toBeVisible();
   await expect(page.locator('[data-super-easy-overall-gauge] [role="progressbar"]')).toBeVisible();

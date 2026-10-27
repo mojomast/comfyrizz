@@ -18,6 +18,7 @@ import { hasFinalArtifact, renderSuperEasyProgress } from './progress-view.ts';
 import { buildGalleryModel } from './gallery-model.ts';
 import type { SuperEasyPhase } from './local-stages.ts';
 import type { EasyState } from '../types.ts';
+import type { SuperEasyProposal } from './proposal.ts';
 
 const RUN_ALREADY_STARTED = 'The Super Easy run is already going.';
 
@@ -34,12 +35,16 @@ export interface SuperEasySessionOptions extends RunSuperEasyDeps {
   onError?(failure: SuperEasyRunFailure): void;
   /** A playable This-computer preview exists before the watched MP4 does. */
   onPreviewReady?(result: SuperEasyRunResult, snapshot: unknown): void;
+  onProposal?(proposal: SuperEasyProposal): void;
 }
 
 export interface SuperEasySession {
   generate(input: RunSuperEasyInput): Promise<SuperEasyRunResult>;
   /** Re-run the last prompt after a visible planning or preview failure. */
   retry(): Promise<SuperEasyRunResult | null>;
+  proposal(): SuperEasyProposal | null;
+  approveProposal(): Promise<SuperEasyRunResult | null>;
+  reviseProposal(note: string): Promise<SuperEasyRunResult | null>;
   stop(): void;
   status(): EasyState['generate']['status'];
   snapshot(): unknown;
@@ -71,6 +76,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let lastInput: RunSuperEasyInput | null = null;
   let phase: SuperEasyPhase = 'idle';
   let objectUrl: string | null = null;
+  let proposal: SuperEasyProposal | null = null;
 
   function finalBlobUrl(value: unknown): string | null {
     const url = buildGalleryModel(value).final.url;
@@ -149,9 +155,13 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(input.setupConfirmed === undefined ? {} : { setupConfirmed: input.setupConfirmed }),
       ...(input.cpu === undefined ? {} : { cpu: input.cpu }),
       ...(input.run === undefined ? {} : { run: input.run }),
+      ...(input.proposalOnly === undefined ? {} : { proposalOnly: input.proposalOnly }),
+      ...(input.basePrompt === undefined ? {} : { basePrompt: input.basePrompt }),
+      ...(input.revisionNotes === undefined ? {} : { revisionNotes: input.revisionNotes }),
     };
     lastInput = nextInput;
     stopped = false;
+    proposal = null;
     preview = false;
     failure = null;
     cancelWatch();
@@ -185,6 +195,15 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       return result;
     }
 
+    if ('proposal' in result) {
+      proposal = result.proposal;
+      snapshot = null;
+      phase = 'proposal';
+      publish();
+      options.onProposal?.(proposal);
+      return result;
+    }
+
     snapshot = result.snapshot;
     // A Colab run already fetched its authenticated MP4. It is the final
     // result, not a preview, so do not start a second production watch.
@@ -213,6 +232,23 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     return result;
   }
 
+  async function approveProposal(): Promise<SuperEasyRunResult | null> {
+    if (!proposal || !lastInput) return null;
+    const next = { ...lastInput, proposalOnly: false, basePrompt: proposal.basePrompt, revisionNotes: proposal.revisionNotes };
+    proposal = null;
+    status = 'idle';
+    return generate(next);
+  }
+
+  async function reviseProposal(note: string): Promise<SuperEasyRunResult | null> {
+    const change = note.trim();
+    if (!proposal || !lastInput || !change) return null;
+    const next = { ...lastInput, proposalOnly: true, basePrompt: proposal.basePrompt, revisionNotes: [...proposal.revisionNotes, change] };
+    proposal = null;
+    status = 'idle';
+    return generate(next);
+  }
+
   async function retry(): Promise<SuperEasyRunResult | null> {
     if (status !== 'error' || lastInput === null) return null;
     return generate(lastInput);
@@ -235,6 +271,9 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   return {
     generate,
     retry,
+    proposal: () => proposal,
+    approveProposal,
+    reviseProposal,
     stop,
     status: () => status,
     snapshot: () => snapshot,

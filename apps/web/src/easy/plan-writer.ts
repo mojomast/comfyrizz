@@ -51,13 +51,14 @@ async function connectedSelection(host: WritePlanDeps['host']): Promise<{ provid
 }
 
 function phaseFor(state: EasyState): 1 | 2 | 3 {
+  if (state.plan.status === 'building') return 2;
   if (state.plan.status === 'stale' && state.plan.wordsChanged) return 3;
   if (state.plan.status === 'error' && state.plan.errorAt === 'production') return 2;
   if (state.plan.status === 'error' && state.plan.errorAt === 'proposal') return 3;
   return 1;
 }
 
-export async function writePlan(state: EasyState, deps: WritePlanDeps): Promise<void> {
+export async function writePlan(state: EasyState, deps: WritePlanDeps, options: { stopAfterPackage?: boolean } = {}): Promise<void> {
   const hash = planInputsHash(state);
   if (state.plan.status === 'ready' && state.planHash === hash) return;
 
@@ -111,6 +112,11 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps): Promise<
       return;
     }
     phase = 2;
+  }
+
+  if (options.stopAfterPackage) {
+    mark('building');
+    return;
   }
 
   if (phase <= 2) {

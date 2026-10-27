@@ -263,6 +263,9 @@ function createBackend(options = {}) {
     releaseBuild() {
       releaseBuild?.();
     },
+    recoverPlan() {
+      options.failPlan = false;
+    },
   };
 }
 
@@ -332,6 +335,7 @@ function mountShell(backend) {
   let watchOptions = null;
   let stopCalls = 0;
   let createCalls = 0;
+  let currentPackage = null;
 
   const host = {
     apiFetch: backend.apiFetch,
@@ -342,8 +346,8 @@ function mountShell(backend) {
         derived: { timeline: { durationInFrames: 90 }, compiledSequence: 1 },
       }),
     },
-    getPackage: () => null,
-    adoptBuiltPackage() {},
+    getPackage: () => currentPackage,
+    adoptBuiltPackage(body) { currentPackage = body.package ?? body; },
     renderMp4: async () => ({ blob: new Blob(), revision: 1 }),
     seekToScene() {},
     previewTake: async () => {},
@@ -389,6 +393,11 @@ function mountShell(backend) {
   };
 }
 
+async function approveProposal(shell) {
+  await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+  shell.root.click('[data-super-easy-approve-proposal]');
+}
+
 async function waitFor(predicate, timeoutMs = 2000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -404,6 +413,7 @@ test('Generate in the real Easy shell starts one Draft session on This computer'
   try {
     await waitFor(() => shell.root.dataset.superEasyView === 'home');
     shell.root.submit(PROMPT);
+    await approveProposal(shell);
     await waitFor(() => shell.watch() !== null);
 
     assert.equal(shell.createCalls(), 1);
@@ -435,6 +445,7 @@ test('watch callbacks move the mounted stages and fill the gallery', async () =>
   const shell = mountShell(backend);
   try {
     shell.root.submit(PROMPT);
+    await approveProposal(shell);
     await waitFor(() => shell.watch() !== null);
     const before = shell.root.innerHTML;
 
@@ -474,6 +485,7 @@ test('a second Generate while one runs does not start a second session', async (
     assert.equal(backend.calls.filter((call) => call.kind === 'build').length, 1);
 
     backend.releaseBuild();
+    await approveProposal(shell);
     await waitFor(() => shell.watch() !== null);
     assert.equal(shell.createCalls(), 1);
   } finally {
@@ -487,6 +499,7 @@ test('navigation away cancels the running watch exactly once', async () => {
   const shell = mountShell(backend);
   try {
     shell.root.submit(PROMPT);
+    await approveProposal(shell);
     await waitFor(() => shell.watch() !== null);
     assert.equal(shell.stopCalls(), 0);
 
@@ -509,6 +522,7 @@ test('a CPU preview offers Review and hands the same package to Studio Review', 
   const shell = mountShell(backend);
   try {
     shell.root.submit(PROMPT);
+    await approveProposal(shell);
     await waitFor(() => shell.watch() !== null);
     await waitFor(() => /data-super-easy-preview-ready/u.test(shell.root.innerHTML));
 
@@ -532,6 +546,7 @@ test('Download MP4 on a CPU preview hands the same package straight to Studio Ex
   const shell = mountShell(backend);
   try {
     shell.root.submit(PROMPT);
+    await approveProposal(shell);
     await waitFor(() => /data-super-easy-preview-ready/u.test(shell.root.innerHTML));
 
     shell.root.click('[data-super-easy-export]');
@@ -550,6 +565,7 @@ test('the gauges follow the run before the journal has anything to show', async 
   const shell = mountShell(backend);
   try {
     shell.root.submit(PROMPT);
+    await approveProposal(shell);
     await waitFor(() => /data-super-easy-preview-ready/u.test(shell.root.innerHTML));
     const html = shell.root.innerHTML;
     assert.match(html, /data-super-easy-stage="plan" data-stage-status="done"/u);
@@ -566,6 +582,7 @@ test('a planning failure is visible on the mounted progress screen and Retry run
   const shell = mountShell(backend);
   try {
     shell.root.submit(PROMPT);
+    await approveProposal(shell);
     await waitFor(() => /data-super-easy-error/u.test(shell.root.innerHTML));
 
     assert.match(shell.root.innerHTML, /data-super-easy-retry/u);
@@ -573,6 +590,7 @@ test('a planning failure is visible on the mounted progress screen and Retry run
     assert.match(shell.root.innerHTML, /data-super-easy-open-editor/u);
 
     const before = backend.calls.filter((call) => call.kind === 'plan').length;
+    backend.recoverPlan();
     shell.root.click('[data-super-easy-retry]');
     await waitFor(() => backend.calls.filter((call) => call.kind === 'plan').length > before);
     assert.ok(backend.calls.filter((call) => call.kind === 'plan').length >= 2);

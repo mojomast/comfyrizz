@@ -66,7 +66,9 @@ re-run after a server restart.
 
 Choose **Google Colab**, enter a per-video credit ceiling, and save. The one-time
 confirmation enables automatic generation up to that ceiling on later videos.
-There is no plan, take or spending dialog during each initial one-prompt run.
+After one short creative proposal is approved, there is no take or spending
+dialog during the initial run. **Make this film** starts production; revising the
+proposal creates no production and spends no Google Colab credits.
 The ceiling is a default for each new production, not permission for the agent to
 raise its own budget. Change it any time in setup. A configured AI agent and
 verified model access are required for unattended Google Colab generation.
@@ -75,7 +77,9 @@ verified model access are required for unattended Google Colab generation.
 
 1. Enter one specific sentence. A stylized 20–40 second story with a small cast,
    a clear goal and a visual setting is a good first run.
-2. Press **Generate** once.
+2. Press **Generate** once, then review the short title, logline, look, duration
+   and soundtrack. Choose **Revise proposal** for a free creative revision, or
+   **Make this film** to start production.
 3. Watch real character/reference images, shots, clips and audio appear in the
    gallery. A card is ready only when its media has actually landed.
 4. The finished MP4 opens in the large player with sound and a Download action.

@@ -110,6 +110,11 @@ const sceneSchema = z.object({
 export const proposeSchema = z.object({
   brief: z.string().min(1),
   title: z.string().min(1).max(120).optional(),
+  proposal: z.object({
+    logline: z.string().min(1).max(240),
+    look: z.string().min(1).max(100),
+    soundtrack: z.string().min(1).max(100),
+  }).strict().optional(),
   motion: z.object({
     energy: zodEnum(motionVocab.energies).optional(),
     direction: zodEnum(motionVocab.directions).optional(),
@@ -555,6 +560,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) },
       voice: { enabled: false, engine: 'none' },
       datasets: args.datasets ?? {},
+      ...(args.proposal ? { proposal: args.proposal } : {}),
       scenes,
       ...(mascot ? { cast: [mascot.member] } : {}),
       assets: { ...(options.brandAssets ?? {}), ...(mascot ? { [mascot.assetId]: mascot.asset } : {}) },
@@ -859,6 +865,17 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       baseParameters({
         brief: { type: 'string' },
         title: { type: 'string' },
+        proposal: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'A short user-facing film proposal: one or two sentences, not technical production details.',
+          properties: {
+            logline: { type: 'string', description: 'Clear story summary in at most two sentences and 240 characters.' },
+            look: { type: 'string', description: 'Short visual style description.' },
+            soundtrack: { type: 'string', description: 'Short audio direction, including wordless sound when relevant.' },
+          },
+          required: ['logline', 'look', 'soundtrack'],
+        },
         motion: {
           type: 'object',
           additionalProperties: false,

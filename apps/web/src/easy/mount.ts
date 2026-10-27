@@ -189,6 +189,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   function superEasyRunHost(): SuperEasyHost {
     return {
       adoptBuiltPackage: (body) => host.adoptBuiltPackage(body),
+      getPackage: () => host.getPackage(),
       aiSelection: () => host.aiSelection(),
       editorStore: host.editorStore,
       refreshClips: () => host.refreshClips(),
@@ -253,7 +254,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     } catch { /* the setup dialog retains the actionable offline state */ }
     const hostId = `super-easy-setup-${Date.now()}`;
     const opener = root.querySelector<HTMLElement>('[data-super-easy-setup]');
-    const computeHtml = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, idPrefix: hostId });
+    const computeHtml = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, soFarText: 'This cap is saved for later one-prompt runs; no spending approval is needed for each run.', idPrefix: hostId });
     const pending = openDialog({
       title: 'Set up your video maker',
       bodyHtml: `<p>Connect once. Future prompts will use these choices without another approval.</p><div id="${hostId}">${computeHtml}</div><button type="button" class="btn btn-secondary" data-super-easy-ai-setup>Connect AI agent</button><p class="hint">API keys and Hugging Face tokens stay on this server. Your credit cap is saved, not your credentials.</p>`,
@@ -262,7 +263,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     });
     const setupRoot = doc.getElementById(hostId);
     const paint = () => {
-      if (setupRoot) setupRoot.innerHTML = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, idPrefix: hostId });
+      if (setupRoot) setupRoot.innerHTML = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, soFarText: 'This cap is saved for later one-prompt runs; no spending approval is needed for each run.', idPrefix: hostId });
     };
     const unmount = setupRoot ? mountCompute(setupRoot, {
       apiFetch: host.apiFetch,
@@ -320,7 +321,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: input.prompt }));
       procedure.mark('compute', input.compute === 'colab' ? PROCEDURE_COPY.computeColab : PROCEDURE_COPY.computeCpu);
     }
-    void session.generate({ prompt: input.prompt, compute: input.compute, setupConfirmed: input.setupConfirmed });
+    void session.generate({ prompt: input.prompt, compute: input.compute, setupConfirmed: input.setupConfirmed, proposalOnly: true });
   }
 
   function refreshSuperEasySnapshot(): void {
@@ -371,6 +372,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       }),
       snapshot: () => superEasySnapshot,
       onGenerate: (input) => onSuperEasyGenerate(input),
+      proposal: () => superEasySession?.proposal() ?? null,
+      onApproveProposal: () => { void superEasySession?.approveProposal(); },
+      onReviseProposal: (note) => { void superEasySession?.reviseProposal(note); },
       setup: () => readSuperEasySetup(),
       onSetup: () => { void openSuperEasySetup(); },
       onChangeAnything: (change = '') => {

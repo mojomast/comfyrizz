@@ -29,6 +29,7 @@ import {
 import type { StagesProgress } from './stages.ts';
 import type { GalleryModel } from './gallery-model.ts';
 import { DEFAULT_SUPER_EASY_SETUP, type SuperEasySetup } from './setup.ts';
+import { renderSuperEasyProposal, type SuperEasyProposal } from './proposal.ts';
 import { getMode, setMode } from '../../ui/mode.ts';
 import type { EasyState } from '../types.ts';
 
@@ -85,6 +86,9 @@ export interface SuperEasyMountOptions {
   onSetup?(): void;
   /** Open the current project's agent with an optional requested change. */
   onChangeAnything?(change?: string): void;
+  proposal?(): SuperEasyProposal | null;
+  onApproveProposal?(): void;
+  onReviseProposal?(note: string): void;
 }
 
 export interface SuperEasyMountHandle {
@@ -170,6 +174,11 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
+    if (closest('[data-super-easy-approve-proposal]')) {
+      event.preventDefault();
+      options.onApproveProposal?.();
+      return;
+    }
     if (closest('[data-super-easy-setup]')) {
       event.preventDefault();
       options.onSetup?.();
@@ -251,6 +260,13 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   };
 
   const onSubmit = (event: Event): void => {
+    if (closestOf(event.target)('[data-super-easy-revise-proposal]')) {
+      event.preventDefault();
+      const field = root.querySelector<HTMLTextAreaElement>('#super-easy-proposal-change');
+      const note = field?.value.trim() ?? '';
+      if (note) options.onReviseProposal?.(note);
+      return;
+    }
     if (closestOf(event.target)('[data-super-easy-change-form]')) {
       event.preventDefault();
       const field = root.querySelector<HTMLTextAreaElement>('#super-easy-change');
@@ -330,7 +346,11 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     if (destroyed) return;
     const next = screenNow();
     current = next;
-    if (next === 'progress') {
+    const proposal = options.proposal?.() ?? null;
+    if (next === 'progress' && proposal) {
+      root.innerHTML = renderSuperEasyProposal(proposal);
+      progressKeys = null;
+    } else if (next === 'progress') {
       paintProgress();
     } else {
       progressKeys = null;

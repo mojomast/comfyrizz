@@ -12,7 +12,7 @@ import {
 } from './stages.ts';
 import type { SuperEasyRunStage } from './run.ts';
 
-export type SuperEasyPhase = 'idle' | SuperEasyRunStage | 'preview';
+export type SuperEasyPhase = 'idle' | SuperEasyRunStage | 'proposal' | 'preview';
 
 export interface LocalStageReading {
   status: StageStatus;
@@ -38,6 +38,7 @@ const ORDER: Record<Exclude<SuperEasyPhase, 'idle'>, number> = {
   idea: 0,
   compute: 0,
   plan: 1,
+  proposal: 1,
   iteration: 2,
   approval: 3,
   run: 4,
@@ -124,6 +125,7 @@ export function localStageReadings(input: LocalStagesInput): LocalStageReadings 
 function advanced(server: StageProgress, local: LocalStageReading | undefined): StageProgress {
   if (local === undefined) return server;
   if (server.status === 'error' || server.status === 'done' || server.status === 'skipped') return server;
+  if (server.status === 'running' && local.status === 'skipped') return server;
   const localSettled = local.status === 'done' || local.status === 'skipped' || local.status === 'error';
   if (!localSettled && server.status !== 'waiting' && server.fraction >= local.fraction) return server;
   return {

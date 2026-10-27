@@ -4,6 +4,7 @@ import { runCpuGenerate, type CpuHost, type RunCpuGenerateOptions } from '../cpu
 import { readPlanCard, type PlanCard } from '../../productions/cards/plan-card.ts';
 import { buildDraftLevelCommand, type DraftLevelCommand } from './set-draft-level.ts';
 import type { EasyState, StepId } from '../types.ts';
+import { proposalForPackage, type SuperEasyProposal } from './proposal.ts';
 
 const EMPTY_PROMPT = 'Tell us what your video is about first.';
 const GOOGLE_COLAB_CONFIRM_REQUIRED = 'Google Colab needs your confirmation before it can spend anything. Choose This computer, or confirm Google Colab first.';
@@ -39,6 +40,7 @@ export interface SuperEasyHost {
   adoptBuiltPackage(body: any): void;
   aiSelection(): Promise<{ provider: string; model?: string }>;
   editorStore: CpuHost['editorStore'];
+  getPackage?(): any;
   refreshClips(): Promise<void> | void;
   /** Existing local renderer, used only when the server priced no paid actions. */
   renderMp4?(options?: { productionId?: string | null }): Promise<{ blob: Blob; revision: number; renderId?: string }>;
@@ -64,6 +66,10 @@ export interface RunSuperEasyInput {
   setupConfirmed?: boolean;
   cpu?: Pick<RunCpuGenerateOptions, 'timeoutMs' | 'pollMs' | 'setTimer' | 'clearTimer'>;
   run?: SuperEasyRunPollingOptions;
+  /** Return after a free creative plan, before production or paid work exists. */
+  proposalOnly?: boolean;
+  basePrompt?: string;
+  revisionNotes?: string[];
 }
 
 export type SuperEasyRunStage = 'idea' | 'compute' | 'plan' | 'iteration' | 'approval' | 'run';
@@ -118,7 +124,13 @@ export interface SuperEasyRunSuccess {
   runId?: string;
 }
 
-export type SuperEasyRunResult = SuperEasyRunSuccess | SuperEasyRunFailure;
+export interface SuperEasyProposalResult {
+  ok: true;
+  proposal: SuperEasyProposal;
+  snapshot: null;
+}
+
+export type SuperEasyRunResult = SuperEasyRunSuccess | SuperEasyProposalResult | SuperEasyRunFailure;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -328,8 +340,12 @@ async function finishWithVideo(
 }
 
 export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyDeps): Promise<SuperEasyRunResult> {
-  const prompt = typeof input?.prompt === 'string' ? input.prompt.trim() : '';
-  if (prompt === '') return failure('EMPTY_PROMPT', 'idea', EMPTY_PROMPT);
+  const basePrompt = typeof input?.basePrompt === 'string' ? input.basePrompt.trim() : (typeof input?.prompt === 'string' ? input.prompt.trim() : '');
+  if (basePrompt === '') return failure('EMPTY_PROMPT', 'idea', EMPTY_PROMPT);
+  const revisionNotes = Array.isArray(input.revisionNotes) ? input.revisionNotes.filter(note => typeof note === 'string' && note.trim()).map(note => note.trim()) : [];
+  const prompt = revisionNotes.length
+    ? `${basePrompt}\n\nCreative revision requests (keep unrelated creative choices): ${revisionNotes.join(' | ')}`
+    : basePrompt;
 
   const compute = input.compute ?? 'cpu';
   const setupConfirmed = input.setupConfirmed === true || deps.setupConfirmed === true;
@@ -337,24 +353,33 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     return failure('GOOGLE_COLAB_CONFIRM_REQUIRED', 'compute', GOOGLE_COLAB_CONFIRM_REQUIRED);
   }
 
+  const current = deps.store.get();
   deps.store.patch({
-    idea: { ...deps.store.get().idea, text: prompt },
+    idea: { ...current.idea, text: prompt },
     compute,
     level: 'draft',
     levelTouched: true,
+    ...(input.proposalOnly === true && revisionNotes.length > 0 ? { plan: { ...current.plan, status: 'writing' } } : {}),
   });
 
-  const write = (): Promise<void> => writePlan(deps.store.get(), {
+  const write = (proposalOnly = false): Promise<void> => writePlan(deps.store.get(), {
     api: deps.api as never,
     host: deps.host,
     store: deps.store,
-  });
+  }, { stopAfterPackage: proposalOnly });
 
   deps.onPhase?.('plan');
   try {
-    await write();
+    await write(input.proposalOnly === true);
   } catch (error) {
     return failure('PLAN_FAILED', 'plan', messageOf(error, PLAN_FAILED));
+  }
+
+  if (input.proposalOnly === true) {
+    const planned = deps.store.get();
+    const pkg = deps.host.getPackage?.();
+    if (!planned.packageId || !pkg) return failure('PLAN_FAILED', 'plan', planned.plan.error || PLAN_FAILED);
+    return { ok: true, proposal: proposalForPackage(pkg, basePrompt, revisionNotes), snapshot: null };
   }
 
   const planned = deps.store.get();

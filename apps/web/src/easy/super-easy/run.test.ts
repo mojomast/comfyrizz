@@ -170,14 +170,17 @@ function harness(options = {}) {
   };
 
   const compiled = options.compiled !== false;
+  let adoptedPackage = null;
   const editorState = {
     doc: { editSequence: 1 },
     derived: compiled ? { timeline: { durationInFrames: 90 }, compiledSequence: 1 } : { timeline: null, compiledSequence: null },
   };
   const host = {
     adoptBuiltPackage(body) {
+      adoptedPackage = body.package;
       calls.push({ kind: 'adopt', body });
     },
+    getPackage: () => adoptedPackage,
     async aiSelection() {
       return { provider: 'none' };
     },
@@ -509,5 +512,26 @@ test('a final-plan failure stops before approval or dispatch', async () => {
   assert.equal(calls.some(call => call.kind === 'command' && call.command.kind === 'plan.approve'), false);
   assert.equal(calls.some(call => call.kind === 'dispatch'), false);
   assert.equal(calls.some(call => call.kind === 'run'), false);
+  store.flush();
+});
+
+test('creative proposals can be revised for free and approved without rebuilding the package', async () => {
+  const { api, host, calls, store } = harness();
+  const first = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', proposalOnly: true }, { api, host, store, go: () => {} });
+  assert.equal(first.ok, true);
+  assert.ok(first.proposal);
+  assert.equal(calls.some(call => call.kind === 'production'), false);
+  assert.equal(calls.filter(call => call.kind === 'build').length, 1);
+
+  const revised = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', proposalOnly: true, basePrompt: PROMPT, revisionNotes: ['Make it more playful'] }, { api, host, store, go: () => {} });
+  assert.equal(revised.ok, true);
+  assert.deepEqual(revised.proposal.revisionNotes, ['Make it more playful']);
+  assert.match(calls.filter(call => call.kind === 'build').at(-1).input.brief, /Make it more playful/u);
+  assert.equal(calls.some(call => call.kind === 'production'), false);
+
+  const approved = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', proposalOnly: false, basePrompt: PROMPT, revisionNotes: ['Make it more playful'] }, { api, host, store, go: () => {} });
+  assert.equal(approved.ok, true);
+  assert.equal(calls.filter(call => call.kind === 'build').length, 2, 'approval resumes the existing package');
+  assert.equal(calls.some(call => call.kind === 'production'), true);
   store.flush();
 });
