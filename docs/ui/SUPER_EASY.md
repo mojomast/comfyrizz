@@ -4,7 +4,7 @@ Super Easy is the short way to make a video. A bare visit opens it first. Easy S
 
 ## One prompt, one button
 
-Type what the video is about, then press **Generate**. That is the whole happy path. There is no level picker, no plan editing and no shot strip to review first. **Try an example** fills the prompt if you want a starting point.
+Type what the video is about, then press **Generate**. That is the whole happy path. There is no level picker, no plan editing and no shot strip to review first. **Try an example** or one of the idea chips fills the prompt if you want a starting point.
 
 ## Draft under the hood
 
@@ -22,7 +22,11 @@ Because Draft picks the best take automatically, Super Easy does not ask you to 
 4. **Voice**
 5. **Video**
 
-The gallery fills with pictures and clips as each stage finishes. When the run ends, the final video appears with **Download** and **Make another**.
+The gauges move as soon as the run starts, even before the server has anything to show: **Plan** runs while the script is written, then **Characters**, **Shots** and **Voice** read from the video that was built. A stage the video does not need, such as **Voice** with narration off, reads **Skipped**.
+
+On **This computer** the run ends with **Your preview is ready** above the gauges. **Download MP4** opens Easy Studio on **Export**, which makes the MP4 in about a minute; **Watch and review** opens **Review** first.
+
+The gallery fills with pictures and clips as each stage finishes. When a run delivers a finished video, it appears with **Download** and **Make another**.
 
 ## Where to go for more control
 
