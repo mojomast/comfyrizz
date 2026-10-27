@@ -121,6 +121,20 @@ Google Colab account screen.
 - [ ] Pip and Juno are fictional. Placeholder media is generated locally and is
       not a real Google Colab generation.
 
+### 4.4 Procedure A-roll without OBS
+
+Comfyrizz can film its own Generate run. See
+[docs/ui/PROCEDURE_CAPTURE.md](../ui/PROCEDURE_CAPTURE.md).
+
+- **A real run:** tick **Record this run** under Generate (or open `/?capture=1`)
+  and share **This tab**. The video and a step log land in Downloads. Then
+  `pnpm capture:procedure --assemble <video>` makes an H.264 MP4 with a chapter
+  and caption per step.
+- **No spend:** `pnpm capture:procedure` films Super Easy against a scripted
+  production in about 30 s and writes `out/procedure-capture/<stamp>/procedure.mp4`.
+  Its first caption says the Google Colab session is mocked; keep it on screen or
+  say so in the voiceover.
+
 ## 5. Why this demo is the product
 
 The default project is the shortest honest path through the whole product:

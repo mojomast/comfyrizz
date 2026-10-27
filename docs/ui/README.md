@@ -4,6 +4,8 @@ Easy is the studio. Its steps are Idea, Characters, Iteration level, Plan, Gener
 
 Words in this note follow that vocabulary. An **Idea** is what the user typed, plus length, shape and look. A **Plan** is the script, the shot list, what will be made, and the most it can cost. A **Shot** is one scene of the video, numbered from 1. **Generate** makes the planned shots. **Export** makes the final MP4 and files. **This computer** is free motion graphics with no network. **Google Colab** is the rented GPU and spends Google Colab units, up to the video's **spend cap**. The **AI provider** is the service that writes scripts and chats.
 
+To film a Generate run for a demo, see [PROCEDURE_CAPTURE.md](PROCEDURE_CAPTURE.md).
+
 For the editor work behind these shots, see the [frontend editor research and implementation plan](../FRONTEND_EDITOR_PLAN.md): linked shot tracks, preview and Export staying in step, undo and autosave, preparation before any Google Colab spend, and overall usability.
 
 The images are the U1 and R2 captures (headless Chrome, 1440×900) of `apps/server` serving a built `apps/web`. `u1-before.jpg` is the shell before U1. The `u1-after*.jpg` images are the U1 polish pass. Button labels drawn on those images are the ones the shell used then. This note names the same controls with the studio and editor words.

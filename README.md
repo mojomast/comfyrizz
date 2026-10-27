@@ -51,6 +51,8 @@ stops for you, or on your own ComfyUI. MIT licensed.
 Draft for you and starts on **This computer**, so a first run needs no Google Colab. **I want more
 control** opens **Easy Studio** (the seven-step flow below), and **Open in editor** in Easy Studio
 opens **Advanced** for the full timeline. See [docs/ui/SUPER_EASY.md](docs/ui/SUPER_EASY.md).
+Tick **Record this run** to film the run itself for a demo
+([docs/ui/PROCEDURE_CAPTURE.md](docs/ui/PROCEDURE_CAPTURE.md)).
 
 <table>
 <tr>
