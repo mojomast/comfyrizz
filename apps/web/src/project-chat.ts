@@ -172,7 +172,7 @@ export type ProjectCastEntry = {
   orphaned?: boolean;
 };
 
-type Conversation = {
+export type Conversation = {
   id: string; revision: number; messages: ChatMessage[]; plan: ProjectPlan | null;
   phase: 'chatting' | 'draft' | 'built'; projectId: string | null; projectRevision: number | null;
   referenceAssignments?: ReferenceAssignment[];
@@ -195,7 +195,7 @@ type RecoveryReply = ChatReply & {
   error?: string;
   recoveryConflict?: RecoveryConflict;
 };
-type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[]; rejectAssignments?: string[]; rejectCastProposals?: string[]; turnContext?: TurnContextChip[] };
+type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; adoptPackageId?: string; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[]; rejectAssignments?: string[]; rejectCastProposals?: string[]; turnContext?: TurnContextChip[] };
 
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const STORAGE_KEY = 'comfyrizz.project-chat';
@@ -505,6 +505,10 @@ export type CreateProjectChatOptions = {
   initialConversationId?: string;
   restoreSaved?: boolean;
   expectedPackageId?: string;
+  /** Bind this chat's first new/unbound turn to an existing generated package. */
+  adoptPackageId?: string;
+  /** Server snapshots only: fired before the host applies a built package. */
+  onConversationChange?: (conversation: Conversation) => void;
   brand?: () => unknown;
   referenceLabel?: (refId: string) => string | undefined;
   /**
@@ -711,10 +715,30 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy; });
   }
 
+  function validateReplyPackage(reply: ChatReply): void {
+    if (!options.expectedPackageId) return;
+    const conversationPackage = reply.conversation?.projectId;
+    const responsePackage = reply.project?.package?.id;
+    if ((conversationPackage && conversationPackage !== options.expectedPackageId)
+      || (responsePackage && responsePackage !== options.expectedPackageId)) {
+      throw new Error('The linked conversation belongs to a different project.');
+    }
+  }
+
+  function notifyConversation(): void {
+    if (!conversation) return;
+    try { options.onConversationChange?.(conversation); } catch { /* optional host observer */ }
+  }
+
   function adopt(reply: ChatReply, built: boolean): void {
+    validateReplyPackage(reply);
     conversation = reply.conversation;
     conversationId = reply.conversation.id;
     localStorage.setItem(STORAGE_KEY, conversationId);
+    // The host may synchronously publish a package/store change from
+    // applyProject. Persist the server-returned chat binding first so that a
+    // scope subscriber does not tear down this still-current conversation.
+    notifyConversation();
     if (reply.project && built) options.applyProject(reply.project, built);
     try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
     render();
@@ -745,14 +769,13 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
       }
       if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
       const reply = body as ChatReply;
-      if (options.expectedPackageId && reply.project?.package?.id !== options.expectedPackageId) {
-        throw new Error('The linked conversation belongs to a different project.');
-      }
+      validateReplyPackage(reply);
       conversation = reply.conversation;
       pending = null; errorText = ''; conflict = false; recoveryHint = '';
       recovery = isRecoveryConflict(body) ? (body.recoveryConflict ?? {}) : null;
       dismissedContextChipIds.clear();
       options.replace(reply.conversation.messages);
+      notifyConversation();
       if (reply.project) options.applyProject(reply.project, reply.conversation.phase === 'built');
       try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
       options.log(recovery
@@ -1014,7 +1037,9 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
       const provider = await options.provider();
       pending = { conversationId: ensureConversationId(), turnId: crypto.randomUUID(), message: text, mode,
         provider: provider.provider, model: provider.model,
-        ...(conversation ? { baseRevision: conversation.revision } : {}), ...(action ? { action } : {}),
+        ...(conversation ? { baseRevision: conversation.revision } : {}),
+        ...(options.adoptPackageId && !conversation?.projectId ? { adoptPackageId: options.adoptPackageId } : {}),
+        ...(action ? { action } : {}),
         ...(confirm?.length ? { confirmAssignments: confirm } : {}),
         ...(confirmCast?.length ? { confirmCastProposals: confirmCast } : {}),
         ...(turnContext.length ? { turnContext } : {}) };
@@ -1029,12 +1054,14 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   /** Apply a get-style recovery body without treating it as a new turn. */
   function applyRecoveryBody(body: RecoveryReply): void {
     if (!body || !body.conversation || typeof body.conversation !== 'object') return;
+    validateReplyPackage(body);
     conversation = body.conversation;
     if (typeof body.conversation.id === 'string' && body.conversation.id) {
       conversationId = body.conversation.id;
       localStorage.setItem(STORAGE_KEY, conversationId);
     }
     options.replace(Array.isArray(body.conversation.messages) ? body.conversation.messages : []);
+    notifyConversation();
     if (body.project) options.applyProject(body.project, body.conversation.phase === 'built');
     try { void options.onCastChanged?.(body.conversation.cast ?? []); } catch { /* optional observer */ }
   }

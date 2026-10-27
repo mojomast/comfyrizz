@@ -170,17 +170,19 @@ function createBackend(options = {}) {
     const production = { id: PRODUCTION_ID, revision };
     if (iteration !== null) production.iteration = iteration;
     const events = [
+      { productionId: PRODUCTION_ID, type: 'production.created', data: {} },
+      { productionId: PRODUCTION_ID, type: 'brief.updated', data: {} },
       ...planEvents,
       ...(iteration === null
         ? []
         : [{
             id: 'evt_iteration_1',
-            sequence: 5,
             productionId: PRODUCTION_ID,
             type: 'iteration.set',
             data: { policy: iteration.policy },
           }]),
-    ].sort((left, right) => left.sequence - right.sequence);
+    ].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0))
+      .map((event, index) => ({ ...event, id: event.id ?? `evt_setup_${index + 1}`, sequence: index + 1 }));
     return {
       productionId: PRODUCTION_ID,
       production,
@@ -218,6 +220,11 @@ function createBackend(options = {}) {
     if (/^\/api\/productions\/[^/]+$/u.test(path) && method === 'GET') {
       calls.push({ kind: 'get' });
       return json(snapshot());
+    }
+    if (/^\/api\/productions\/[^/]+\/events$/u.test(path) && method === 'GET') {
+      calls.push({ kind: 'events' });
+      const body = snapshot();
+      return json({ productionId: PRODUCTION_ID, lastSequence: body.lastSequence, nextAfter: body.lastSequence, events: body.events, gap: false, truncated: false });
     }
     if (/^\/api\/productions\/[^/]+\/commands$/u.test(path) && method === 'POST') {
       const command = JSON.parse(String(init.body ?? '{}'));

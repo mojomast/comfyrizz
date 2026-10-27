@@ -45,13 +45,9 @@ function productionIdOf(body: any): string | null {
 }
 
 async function connectedSelection(host: WritePlanDeps['host']): Promise<{ provider: string; model?: string } | undefined> {
-  try {
-    const selection = await host.aiSelection();
-    if (!selection?.provider || selection.provider === 'none') return undefined;
-    return selection;
-  } catch {
-    return undefined;
-  }
+  const selection = await host.aiSelection();
+  if (!selection?.provider || selection.provider === 'none') return undefined;
+  return selection;
 }
 
 function phaseFor(state: EasyState): 1 | 2 | 3 {

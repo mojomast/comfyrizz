@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { colabStatus, COLAB_INSTALL } from "../src/colab-status.mjs";
+import { colabStatus, colabInstall, COLAB_INSTALL } from "../src/colab-status.mjs";
 import { installFakeColab } from "../../../packages/backends/test/helpers.mjs";
 import { createColabBackend } from "../../../packages/backends/src/colab-backend.mjs";
 
@@ -62,12 +62,18 @@ test("a binary that is not there is a state, not an error (U2)", async () => {
     },
     home: "/nonexistent-home",
   });
-  assert.equal(bogus.installed, true);
+  assert.equal(bogus.installed, false, "a PATH spawn ENOENT is not an installed CLI");
   assert.equal(bogus.signedIn, false);
   assert.match(bogus.reason, /ENOENT/);
   assert.equal(bogus.install.linux, COLAB_INSTALL.linux, "the card gets the install command to show");
   assert.match(bogus.install.note, /never reads or stores them/);
   assert.ok(dir.length > 0);
+});
+
+test("install help uses the server OS and native Windows Python launcher", () => {
+  assert.equal(colabInstall("win32").command, "py -m pip install --user google-colab-cli");
+  assert.equal(colabInstall("linux").command, "python3 -m pip install --user google-colab-cli");
+  assert.equal(colabInstall("darwin").command, "python3 -m pip install --user google-colab-cli");
 });
 
 test("an installed but signed-out CLI says so instead of pretending (U2)", async () => {
@@ -87,6 +93,29 @@ test("an installed but signed-out CLI says so instead of pretending (U2)", async
   assert.equal(status.units, null);
   assert.match(status.reason, /not signed in/);
   assert.equal(status.install.linux, COLAB_INSTALL.linux, "and the card still has something to show");
+});
+
+test("token file presence is not reported as model-access readiness", async () => {
+  const status = await colabStatus({
+    backendFactory: async () => ({
+      preflight: async () => ({
+        ok: true,
+        cliVersion: "0.7.4",
+        usage: { balance: 10 },
+        hfToken: { configured: true, present: true },
+        problems: [],
+      }),
+    }),
+    hfSettings: {
+      status: () => ({ tokenPresent: true, tokenChecked: false, tokenReady: false, repositories: [] }),
+    },
+    home: "/nonexistent-home",
+  });
+  assert.equal(status.signedIn, true);
+  assert.equal(status.tokenPresent, true);
+  assert.equal(status.tokenChecked, false);
+  assert.equal(status.tokenReady, false);
+  assert.match(status.tokenNote, /has not been verified/);
 });
 
 test("a user install is found before PATH, like the backend finds it (U2)", async () => {

@@ -33,7 +33,7 @@ function makeStore(patch = {}) {
   return store;
 }
 
-function planEvent(sequence, id) {
+function planEvent(sequence, id, options = {}) {
   return {
     id,
     sequence,
@@ -44,10 +44,10 @@ function planEvent(sequence, id) {
       productionId: PRODUCTION_ID,
       revision: sequence,
       planHash: PLAN_HASH,
-      reservationCeiling: 0,
-      collectAndStopReserve: 0,
-      requiredDecisions: [],
-      actions: [],
+      reservationCeiling: options.ceiling ?? 0,
+      collectAndStopReserve: options.reserve ?? 0,
+      requiredDecisions: options.requiredDecisions ?? [],
+      actions: options.actions ?? [],
     },
   };
 }
@@ -91,8 +91,22 @@ function harness(options = {}) {
       calls.push({ kind: 'plan', id, body });
       if (options.fail === 'plan') throw new Error('plan down');
       revision += 1;
-      planEvents.push(planEvent(3 + planEvents.length * 3, `evt_plan_${planEvents.length + 1}`));
+      planEvents.push(planEvent(3 + planEvents.length * 3, `evt_plan_${planEvents.length + 1}`, options));
       return { revision };
+    },
+    async proposeActionPlan(id, body) {
+      calls.push({ kind: 'final-plan', id, body });
+      if (options.fail === 'final-plan') throw new Error('final plan down');
+      revision += 1;
+      const event = planEvent(3 + planEvents.length * 3, `evt_plan_${planEvents.length + 1}`, options);
+      event.data = {
+        ...body.payload,
+        id: body.payload.planId,
+        productionId: PRODUCTION_ID,
+        planHash: PLAN_HASH,
+      };
+      planEvents.push(event);
+      return { revision, plan: event.data };
     },
     async getProduction(id) {
       calls.push({ kind: 'get', id });
@@ -127,7 +141,27 @@ function harness(options = {}) {
     },
     async startRun(body) {
       calls.push({ kind: 'run', body });
-      return { runId: 'run_1' };
+      return options.noRunId ? {} : { runId: 'run_1' };
+    },
+    async getRun(id) {
+      calls.push({ kind: 'get-run', id });
+      if (options.fail === 'get-run') throw new Error('run status down');
+      const statuses = options.runStatuses ?? ['done'];
+      const status = statuses.length > 1 ? statuses.shift() : statuses[0];
+      return {
+        run: {
+          runId: id,
+          status,
+          error: options.runError,
+          teardown: { state: status === 'stop_unconfirmed' ? 'stop_unconfirmed' : 'stopped' },
+          render: { url: `/api/run/${id}/video` },
+        },
+      };
+    },
+    async getRunVideo(id) {
+      calls.push({ kind: 'run-video', id });
+      if (options.fail === 'run-video') throw new Error('video down');
+      return new Blob(['real mp4 bytes'], { type: 'video/mp4' });
     },
     async colabStatus() {
       calls.push({ kind: 'colab-status' });
@@ -152,6 +186,11 @@ function harness(options = {}) {
     },
     async refreshClips() {
       calls.push({ kind: 'refresh' });
+    },
+    async renderMp4(renderOptions) {
+      calls.push({ kind: 'local-render', options: renderOptions });
+      if (options.fail === 'local-render') throw new Error('local render down');
+      return { blob: new Blob(['local mp4'], { type: 'video/mp4' }), revision: 1 };
     },
     announce(text) {
       calls.push({ kind: 'announce', text });
@@ -319,4 +358,156 @@ test('a failed plan stops the phases at plan', async () => {
   const result = await runSuperEasy({ prompt: PROMPT }, { api, host, store, go: () => {}, onPhase: (stage) => phases.push(stage) });
   assert.equal(result.ok, false);
   assert.deepEqual(phases, ['plan']);
+});
+
+const PAID_ACTIONS = [
+  { id: 'act_shot_1', kind: 'shot.generate', targetId: 'shot_1', upperBound: 4, reuse: false },
+  { id: 'act_shot_2', kind: 'shot.generate', targetId: 'shot_2', upperBound: 5, reuse: false },
+];
+
+function confirmedColab(extra = {}) {
+  return { prompt: PROMPT, compute: 'colab', setupConfirmed: true, ...extra };
+}
+
+test('configured Google Colab collapses multi-scene work to one final run and fetches its MP4', async () => {
+  const requiredDecisions = [{ id: 'sound', options: ['on'] }];
+  const { api, host, calls, store } = harness({
+    actions: PAID_ACTIONS,
+    ceiling: 9,
+    reserve: 0,
+    requiredDecisions,
+    runStatuses: ['running', 'done'],
+    patch: { spendCap: 12 },
+  });
+
+  const result = await runSuperEasy(confirmedColab({ run: { pollMs: 0 } }), {
+    api, host, store, go: () => {},
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.runId, 'run_1');
+  assert.equal(result.finalReady, true);
+  assert.equal(result.final.source, 'run');
+  assert.match(result.final.videoUrl, /^blob:/u);
+  assert.equal(result.snapshot.finalVideo.url, result.final.videoUrl);
+  assert.equal(result.cpu, undefined);
+  assert.equal(store.get().generate.status, 'done');
+
+  const finalPlans = calls.filter(call => call.kind === 'final-plan');
+  assert.equal(finalPlans.length, 1);
+  const payload = finalPlans[0].body.payload;
+  assert.equal(payload.reservationCeiling, 9);
+  assert.equal(payload.collectAndStopReserve, 0);
+  assert.deepEqual(payload.requiredDecisions, requiredDecisions);
+  assert.deepEqual(payload.actions, [{ id: 'act_super_easy_final', kind: 'final', upperBound: 9 }]);
+  assert.equal(Object.hasOwn(payload.actions[0], 'backendId'), false);
+
+  assert.equal(calls.filter(call => call.kind === 'dispatch').length, 1);
+  const runs = calls.filter(call => call.kind === 'run');
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].body.mode, 'final');
+  assert.equal(runs[0].body.authority.actionId, 'act_super_easy_final');
+  assert.equal(runs[0].body.budgetUnits, 12);
+  assert.deepEqual(calls.filter(call => call.kind === 'get-run').map(call => call.id), ['run_1', 'run_1']);
+  assert.deepEqual(calls.filter(call => call.kind === 'run-video').map(call => call.id), ['run_1']);
+  assert.equal(calls.some(call => call.kind === 'local-render'), false);
+  store.flush();
+});
+
+test('setup confirmation can come from configured session options', async () => {
+  const { api, host, calls, store } = harness({ actions: PAID_ACTIONS, ceiling: 9, patch: { spendCap: 12 } });
+  const result = await runSuperEasy(
+    { prompt: PROMPT, compute: 'colab' },
+    { api, host, store, go: () => {}, setupConfirmed: true },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(calls.filter(call => call.kind === 'run').length, 1);
+  store.flush();
+});
+
+test('zero paid actions render locally without a final proposal or paid run', async () => {
+  const { api, host, calls, store } = harness({ actions: [], ceiling: 0 });
+  const result = await runSuperEasy(confirmedColab(), { api, host, store, go: () => {} });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.final.source, 'local');
+  assert.equal(result.final.runId, null);
+  assert.match(result.snapshot.finalVideo.url, /^blob:/u);
+  assert.equal(calls.some(call => call.kind === 'final-plan'), false);
+  assert.equal(calls.some(call => call.kind === 'dispatch'), false);
+  assert.equal(calls.some(call => call.kind === 'run'), false);
+  assert.equal(calls.some(call => call.kind === 'get-run'), false);
+  assert.equal(calls.some(call => call.kind === 'run-video'), false);
+  assert.equal(calls.filter(call => call.kind === 'local-render').length, 1);
+  store.flush();
+});
+
+test('free Kokoro actions stay local even when their collapsed bound is nonzero', async () => {
+  const { api, host, calls, store } = harness({
+    actions: [{ id: 'act_free_voice', kind: 'audition', engine: 'kokoro', upperBound: 1, reuse: false }],
+    ceiling: 1,
+  });
+  const result = await runSuperEasy(confirmedColab(), { api, host, store, go: () => {} });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.final.source, 'local');
+  assert.equal(calls.filter(call => call.kind === 'final-plan').length, 1);
+  assert.equal(calls.some(call => call.kind === 'dispatch'), false);
+  assert.equal(calls.some(call => call.kind === 'run'), false);
+  assert.equal(calls.filter(call => call.kind === 'local-render').length, 1);
+  store.flush();
+});
+
+test('a paid plan without a run id fails instead of polling or claiming success', async () => {
+  const { api, host, calls, store } = harness({ actions: PAID_ACTIONS, ceiling: 9, noRunId: true });
+  const result = await runSuperEasy(confirmedColab(), { api, host, store, go: () => {} });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.code, 'RUN_ID_REQUIRED');
+  assert.equal(calls.some(call => call.kind === 'get-run'), false);
+  assert.equal(calls.some(call => call.kind === 'run-video'), false);
+  assert.equal(calls.some(call => call.kind === 'local-render'), false);
+  store.flush();
+});
+
+test('failed, cancelled and stop_unconfirmed runs never become final success', async () => {
+  for (const status of ['failed', 'cancelled', 'stop_unconfirmed']) {
+    const { api, host, calls, store } = harness({
+      actions: PAID_ACTIONS,
+      ceiling: 9,
+      runStatuses: [status],
+      runError: `run ${status}`,
+    });
+    const result = await runSuperEasy(confirmedColab(), { api, host, store, go: () => {} });
+    assert.equal(result.ok, false, status);
+    if (result.ok) return;
+    assert.equal(result.code, 'RUN_FAILED');
+    assert.match(result.message, new RegExp(status, 'u'));
+    assert.equal(calls.some(call => call.kind === 'run-video'), false);
+    store.flush();
+  }
+});
+
+test('an authenticated MP4 fetch failure is not hidden by a local render', async () => {
+  const { api, host, calls, store } = harness({ actions: PAID_ACTIONS, ceiling: 9, fail: 'run-video' });
+  const result = await runSuperEasy(confirmedColab(), { api, host, store, go: () => {} });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.code, 'FINAL_VIDEO_FAILED');
+  assert.equal(calls.some(call => call.kind === 'local-render'), false);
+  store.flush();
+});
+
+test('a final-plan failure stops before approval or dispatch', async () => {
+  const { api, host, calls, store } = harness({ actions: PAID_ACTIONS, ceiling: 9, fail: 'final-plan' });
+  const result = await runSuperEasy(confirmedColab(), { api, host, store, go: () => {} });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.code, 'FINAL_PLAN_FAILED');
+  assert.equal(calls.some(call => call.kind === 'command' && call.command.kind === 'plan.approve'), false);
+  assert.equal(calls.some(call => call.kind === 'dispatch'), false);
+  assert.equal(calls.some(call => call.kind === 'run'), false);
+  store.flush();
 });

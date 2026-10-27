@@ -152,6 +152,42 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
   assert.equal(calls.find((item) => item.kind === 'approve').command.expected.productionRevision, 5);
 });
 
+test('final mode starts one whole-production run and reports its id', async () => {
+  const store = memoryStore();
+  const { api, calls } = fakeApi();
+  const started = [];
+  await approveAndGenerate(store.get(), {
+    api,
+    store,
+    snapshot: snapshot({}, [{ id: 'act_super_easy_final', kind: 'final', upperBound: 9, reuse: false }]),
+  }, {
+    runMode: 'final',
+    onRunStarted(runId, response) {
+      started.push({ runId, response });
+    },
+  });
+  assert.deepEqual(kinds(calls), ['spend-cap', 'approve', 'dispatch', 'run']);
+  const run = calls.find(call => call.kind === 'run').body;
+  assert.equal(run.mode, 'final');
+  assert.equal(run.authority.actionId, 'act_super_easy_final');
+  assert.equal(started.length, 1);
+  assert.equal(started[0].runId, 'run_1');
+});
+
+test('final mode never fakes a paid run for zero-cost actions', async () => {
+  const store = memoryStore();
+  const { api, calls } = fakeApi();
+  await approveAndGenerate(store.get(), {
+    api,
+    store,
+    snapshot: snapshot({ production: { id: PRODUCTION_ID, revision: 4 } }, [
+      { id: 'act_free', kind: 'audition', engine: 'kokoro', upperBound: 1, reuse: false },
+      { id: 'act_zero', kind: 'final', upperBound: 0, reuse: false },
+    ]),
+  }, { runMode: 'final' });
+  assert.deepEqual(kinds(calls), ['spend-cap', 'approve']);
+});
+
 test('a stale card refetches, marks the plan stale, and does not dispatch', async () => {
   const store = memoryStore();
   const { api, calls } = fakeApi();

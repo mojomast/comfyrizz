@@ -181,3 +181,26 @@
     flex: 0 0 auto;
   }
 }
+
+.super-easy-home-setup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-home-setup button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 480px) {
+  .super-easy-home-setup {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

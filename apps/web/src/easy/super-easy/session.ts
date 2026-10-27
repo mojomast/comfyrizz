@@ -1,9 +1,9 @@
 // SE10: one Super Easy Generate, from the one prompt to the final video.
 //
-// The session calls the run first (SE09), then follows the production through
-// the existing production watch. Every watch state goes through the pure
-// progress view, so the caller only has to paint the returned HTML. Stop is
-// idempotent and cancels the watch once; the final video marks the run done.
+// The session calls the run first (SE09). CPU previews then follow the existing
+// production watch; an already-final Colab result goes straight to done. Every
+// state goes through the pure progress view, so the caller only paints the HTML.
+// Stop is idempotent, cancels any watch once, and releases owned blob URLs.
 
 import { watchProduction } from '../events.ts';
 import type { ProductionWatchState, WatchProductionOptions } from '../events.ts';
@@ -70,6 +70,30 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let failure: SuperEasyRunFailure | null = null;
   let lastInput: RunSuperEasyInput | null = null;
   let phase: SuperEasyPhase = 'idle';
+  let objectUrl: string | null = null;
+
+  function finalBlobUrl(value: unknown): string | null {
+    const url = buildGalleryModel(value).final.url;
+    return typeof url === 'string' && url.startsWith('blob:') ? url : null;
+  }
+
+  function revokeUrl(url: string | null): void {
+    if (url === null || typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+    URL.revokeObjectURL(url);
+  }
+
+  function revokeObjectUrl(): void {
+    const url = objectUrl;
+    objectUrl = null;
+    revokeUrl(url);
+  }
+
+  function rememberObjectUrl(value: unknown): void {
+    const next = finalBlobUrl(value);
+    if (next === objectUrl) return;
+    revokeObjectUrl();
+    objectUrl = next;
+  }
 
   function patchStatus(next: EasyState['generate']['status']): void {
     status = next;
@@ -103,6 +127,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     snapshot = state;
     // Only a playable URL counts as the finished video; a delivery id does not.
     if (hasFinalArtifact(buildGalleryModel(state))) {
+      rememberObjectUrl(state);
       preview = false;
       patchStatus('done');
       publish();
@@ -121,13 +146,16 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     const nextInput: RunSuperEasyInput = {
       prompt: input.prompt,
       compute: input.compute ?? 'cpu',
+      ...(input.setupConfirmed === undefined ? {} : { setupConfirmed: input.setupConfirmed }),
       ...(input.cpu === undefined ? {} : { cpu: input.cpu }),
+      ...(input.run === undefined ? {} : { run: input.run }),
     };
     lastInput = nextInput;
     stopped = false;
     preview = false;
     failure = null;
     cancelWatch();
+    revokeObjectUrl();
     snapshot = null;
     phase = 'idea';
     patchStatus('running');
@@ -144,6 +172,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     });
 
     if (stopped) {
+      if (result.ok) revokeUrl(finalBlobUrl(result.snapshot));
       patchStatus('stopped');
       return result;
     }
@@ -156,11 +185,22 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       return result;
     }
 
+    snapshot = result.snapshot;
+    // A Colab run already fetched its authenticated MP4. It is the final
+    // result, not a preview, so do not start a second production watch.
+    if (hasFinalArtifact(buildGalleryModel(snapshot))) {
+      rememberObjectUrl(snapshot);
+      preview = false;
+      patchStatus('done');
+      publish();
+      options.onDone?.(snapshot);
+      return result;
+    }
+
     // A local preview is useful immediately, but the video is not done until
     // the watched production delivers a playable artifact.
     preview = wasPreviewReady(result);
     if (preview) phase = 'preview';
-    snapshot = result.snapshot;
     patchStatus('running');
     publish();
     if (preview) options.onPreviewReady?.(result, result.snapshot);
@@ -181,11 +221,13 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   function stop(): void {
     if (status === 'done') {
       cancelWatch();
+      revokeObjectUrl();
       return;
     }
     if (stopped) return;
     stopped = true;
     cancelWatch();
+    revokeObjectUrl();
     patchStatus('stopped');
     publish();
   }

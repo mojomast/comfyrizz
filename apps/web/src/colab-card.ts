@@ -2,10 +2,20 @@
 //
 // It is deliberately dumb: it renders what /api/colab/status says, offers the install command when there
 // is no CLI, streams the sign-in when there is but the account is not answering, and shows the units a
-// run will be measured against when there is. Nothing here reads a credential, and the sign-in's lines
-// come from the CLI through the server, already redacted.
+// run will be measured against when there is. Google credentials stay with the CLI; the optional HF
+// token input is write-only and is never read back from the server. Sign-in lines arrive redacted.
 
 import './ui/statusbar.css';
+import './colab-card.css';
+
+export interface HfRepositoryStatus {
+  id: string;
+  label: string;
+  url: string;
+  ok: boolean | null;
+  status: 'unchecked' | 'ready' | 'denied' | 'http-error' | 'error';
+  detail: string;
+}
 
 export interface ColabStatus {
   installed: boolean;
@@ -16,11 +26,18 @@ export interface ColabStatus {
   units?: number | null;
   ratePerHour?: number | null;
   problems?: string[];
-  tokenReady?: boolean;
+  tokenPresent?: boolean;
+  tokenReady?: boolean | null;
+  tokenChecked?: boolean;
+  tokenManaged?: boolean;
+  checkedAt?: string | null;
+  storageNote?: string | null;
+  tokenError?: string;
   tokenNote?: string | null;
+  repositories?: HfRepositoryStatus[];
   reason?: string | null;
   lookedFor?: string[];
-  install?: { linux: string; macos: string; note: string; verify: string };
+  install?: { linux: string; macos: string; windows: string; command: string; note: string; verify: string };
 }
 
 const esc = (value: unknown): string =>
@@ -53,14 +70,47 @@ export function colabStatusLine(status: ColabStatus | null, error: string | null
   return `Installed${status.version ? ` (${status.version})` : ''}, but it did not report an account.`;
 }
 
+function hfStatusLine(status: ColabStatus): string {
+  if (status.tokenError) return status.tokenError;
+  if (status.tokenReady === true && status.tokenChecked === true) return 'Model access verified for both gated repositories.';
+  if (!status.tokenPresent) return 'No Hugging Face token saved.';
+  if (status.tokenChecked) return 'Model access needs attention. Review the repository checks below.';
+  return 'Token saved. Check both gated models to finish setup.';
+}
+
+function hfSetupHtml(status: ColabStatus | null): string {
+  if (!status || (status.tokenPresent === undefined && !Array.isArray(status.repositories))) return '';
+  const repositories = (status.repositories ?? []).map(repo => `
+    <li class="colab-hf-repo" data-state="${esc(repo.status)}">
+      <a href="${esc(repo.url)}" target="_blank" rel="noopener noreferrer">${esc(repo.label)} licence</a>
+      <span>${esc(repo.detail)}</span>
+    </li>`).join('');
+  return `<section class="colab-hf" aria-labelledby="colab-hf-title">
+    <h4 id="colab-hf-title">Hugging Face model access</h4>
+    <p id="colab-hf-status">${esc(hfStatusLine(status))}</p>
+    <p class="hint">Use a read token. It is sent only to this server and is never returned to the browser. Accept both licences before checking access.</p>
+    <label class="field-label" for="colab-hf-token">Hugging Face read token</label>
+    <input id="colab-hf-token" class="field-control" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="hf_…" />
+    <div class="toolbar colab-hf-actions">
+      <button type="button" id="colab-hf-save" class="btn btn-primary btn-sm">Save &amp; check access</button>
+      ${status.tokenPresent ? '<button type="button" id="colab-hf-check" class="btn btn-secondary btn-sm">Check saved token</button>' : ''}
+      ${status.tokenPresent && status.tokenManaged ? '<button type="button" id="colab-hf-delete" class="btn btn-danger btn-sm">Delete saved token</button>' : ''}
+    </div>
+    ${status.storageNote ? `<p class="hint">${esc(status.storageNote)}</p>` : ''}
+    ${repositories ? `<ul class="colab-hf-repositories">${repositories}</ul>` : ''}
+    <p id="colab-hf-feedback" class="hint" role="status" aria-live="polite"></p>
+  </section>`;
+}
+
 export function colabCardHtml(status: ColabStatus | null, error: string | null = null, lines: string[] = [], cap: number | null = null): string {
   const install = status?.install;
+  const installCommand = install?.command ?? install?.linux ?? '';
   const installBlock =
     status && !status.installed && install
       ? `<div class="colab-install">
         <p>Install it once, then come back and re-check:</p>
-        <code>${esc(install.linux)}</code>
-        <button type="button" id="colab-copy" class="btn btn-secondary btn-sm" data-command="${esc(install.linux)}">Copy</button>
+        <code>${esc(installCommand)}</code>
+        <button type="button" id="colab-copy" class="btn btn-secondary btn-sm" data-command="${esc(installCommand)}">Copy</button>
         <p class="hint">${esc(install.note)}</p>
       </div>`
       : '';
@@ -85,6 +135,7 @@ export function colabCardHtml(status: ColabStatus | null, error: string | null =
     ${installBlock}
     ${signInBlock}
     ${tokenBlock}
+    ${hfSetupHtml(status)}
     ${problems}
     ${log}
   </div>`;
@@ -124,6 +175,16 @@ function hookEventSource(): void {
     const es = new OrigEventSource(url, eventSourceInitDict);
     updateBadge('connected');
     es.addEventListener('open', () => updateBadge('connected'));
+    es.addEventListener('colab_auth', (event) => {
+      try {
+        const payload = JSON.parse(String((event as MessageEvent).data)) as { line?: unknown };
+        if (typeof payload.line === 'string') {
+          window.dispatchEvent(new CustomEvent('comfyrizz-colab-auth-line', { detail: { line: payload.line } }));
+        }
+      } catch {
+        // Malformed event data is never rendered as a trusted sign-in line.
+      }
+    });
     es.addEventListener('error', () => {
       updateBadge(es.readyState === OrigEventSource.CLOSED ? 'disconnected' : 'offline');
     });
@@ -339,37 +400,64 @@ function setupStatusbar(host: HTMLElement): {
  * `request` is the app's own authenticated fetch, so the card goes through the same token as every other
  * call rather than inventing one.
  */
-export function mountSettingsCard(host: HTMLElement, request: (input: string, init?: RequestInit) => Promise<Response>): void {
+export function mountSettingsCard(host: HTMLElement, request: (input: string, init?: RequestInit) => Promise<Response>): () => void {
   const widgets = setupStatusbar(host);
+  const view = host.ownerDocument.defaultView;
+  let live = true;
+  let authBusy = false;
+  let hfBusy = false;
+  let authLines: string[] = [];
+  let currentStatus: ColabStatus | null = null;
+  let currentError: string | null = null;
+  let renderGeneration = 0;
 
-  const render = async (lines: string[] = []): Promise<void> => {
-    host.innerHTML = colabCardHtml(null, null, lines, displayedSpendCap());
-    let status: ColabStatus | null = null;
-    let error: string | null = null;
-    try {
-      const response = await request('/api/colab/status');
-      status = (await response.json()) as ColabStatus;
-    } catch (failure) {
-      error = failure instanceof Error ? failure.message : String(failure);
-    }
+  const messageOf = (failure: unknown): string => failure instanceof Error ? failure.message : String(failure);
+  const setBusy = (): void => {
+    const busy = authBusy || hfBusy;
+    host.setAttribute('aria-busy', String(busy));
+    host.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy; });
+  };
+  const showLog = (lines: string[]): void => {
+    const log = host.querySelector('#colab-log') as HTMLElement | null;
+    if (!log) return;
+    log.hidden = false;
+    log.textContent = lines.join('\n');
+    log.scrollTop = log.scrollHeight;
+  };
+  const hfFeedback = (text: string, error = false): void => {
+    const feedback = host.querySelector('#colab-hf-feedback');
+    if (!feedback) return;
+    feedback.textContent = text;
+    feedback.classList.toggle('error', error);
+  };
+  const json = async <T>(response: Response): Promise<T> => {
+    const body = await response.json().catch(() => ({})) as { error?: string; reason?: string };
+    if (!response.ok) throw new Error(body.error ?? body.reason ?? `HTTP ${response.status}`);
+    return body as T;
+  };
+  const onAuthLine = (event: Event): void => {
+    if (!authBusy) return;
+    const line = (event as CustomEvent<{ line?: unknown }>).detail?.line;
+    if (typeof line !== 'string') return;
+    authLines.push(line);
+    showLog(authLines);
+  };
+  view?.addEventListener('comfyrizz-colab-auth-line', onAuthLine);
+
+  const paint = (status: ColabStatus | null, error: string | null, lines: string[]): void => {
+    if (!live) return;
     host.innerHTML = colabCardHtml(status, error, lines, displayedSpendCap());
     host.querySelector('#colab-recheck')?.addEventListener('click', () => void render(lines));
     host.querySelector('#colab-copy')?.addEventListener('click', (event) => {
       const command = (event.currentTarget as HTMLElement).dataset.command ?? '';
       void navigator.clipboard?.writeText(command);
     });
-    host.querySelector('#colab-signin')?.addEventListener('click', async () => {
-      const log = host.querySelector('#colab-log') as HTMLElement | null;
-      if (log) {
-        log.hidden = false;
-        log.textContent = 'Starting the Google Colab sign-in…';
-      }
-      const response = await request('/api/colab/auth', { method: 'POST' });
-      const outcome = (await response.json()) as { ok: boolean; lines: string[]; reason?: string };
-      void render([...outcome.lines, outcome.ok ? 'Signed in.' : `Sign-in failed: ${outcome.reason ?? 'unknown'}`]);
-    });
+    host.querySelector('#colab-signin')?.addEventListener('click', () => void signIn());
+    host.querySelector('#colab-hf-save')?.addEventListener('click', () => void saveAndProbeHf());
+    host.querySelector('#colab-hf-check')?.addEventListener('click', () => void probeHf());
+    host.querySelector('#colab-hf-delete')?.addEventListener('click', () => void deleteHf());
+    setBusy();
 
-    // Update status bar trigger spend summary and gauge
     if (widgets?.summary && widgets?.miniGaugeFill) {
       if (status && status.signedIn === true) {
         const units = typeof status.units === 'number' ? status.units.toFixed(2) : '?';
@@ -390,5 +478,136 @@ export function mountSettingsCard(host: HTMLElement, request: (input: string, in
       }
     }
   };
+
+  const render = async (lines: string[] = []): Promise<void> => {
+    const generation = ++renderGeneration;
+    paint(null, null, lines);
+    let status: ColabStatus | null = null;
+    let error: string | null = null;
+    try {
+      const response = await request('/api/colab/status');
+      status = await json<ColabStatus>(response);
+    } catch (failure) {
+      error = messageOf(failure);
+    }
+    if (!live || generation !== renderGeneration) return;
+    currentStatus = status;
+    currentError = error;
+    paint(status, error, lines);
+  };
+
+  const mergeHf = (next: Partial<ColabStatus>): void => {
+    if (!currentStatus) return;
+    currentStatus = { ...currentStatus, ...next };
+    paint(currentStatus, currentError, authLines);
+  };
+
+  async function signIn(): Promise<void> {
+    if (authBusy || hfBusy) return;
+    authBusy = true;
+    authLines = [];
+    setBusy();
+    showLog(['Starting the Google Colab sign-in…']);
+    try {
+      const response = await request('/api/colab/auth', { method: 'POST' });
+      const outcome = await response.json().catch(() => ({})) as { ok?: boolean; lines?: string[]; reason?: string; error?: string };
+      if (Array.isArray(outcome.lines)) authLines = outcome.lines;
+      if (!response.ok || !outcome.ok) {
+        throw new Error(outcome.reason ?? outcome.error ?? `Google Colab sign-in failed (HTTP ${response.status}).`);
+      }
+      await render([...authLines, 'Signed in.']);
+    } catch (failure) {
+      const reason = messageOf(failure);
+      authLines = [...authLines, `Sign-in failed: ${reason}`];
+      showLog(authLines);
+      const status = host.querySelector('#colab-status');
+      if (status) status.textContent = `Sign-in failed: ${reason}`;
+    } finally {
+      authBusy = false;
+      setBusy();
+    }
+  }
+
+  async function saveAndProbeHf(): Promise<void> {
+    if (authBusy || hfBusy) return;
+    const input = host.querySelector('#colab-hf-token') as HTMLInputElement | null;
+    const token = input?.value.trim() ?? '';
+    if (!token) {
+      hfFeedback('Paste a Hugging Face read token first.', true);
+      return;
+    }
+    hfBusy = true;
+    setBusy();
+    hfFeedback('Saving the token on this server…');
+    try {
+      const saved = await json<Partial<ColabStatus>>(await request('/api/hf/settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token }),
+      }));
+      if (input) input.value = '';
+      mergeHf(saved);
+      hfFeedback('Token saved. Checking both gated repositories…');
+      const checked = await json<Partial<ColabStatus>>(await request('/api/hf/settings/probe', { method: 'POST' }));
+      mergeHf(checked);
+      hfFeedback(
+        checked.tokenReady && checked.tokenChecked
+          ? 'Model access verified. Google Colab can now be selected when you are signed in.'
+          : 'Model access is not ready. Review the licence links and repository checks.',
+        !(checked.tokenReady && checked.tokenChecked),
+      );
+    } catch (failure) {
+      if (input) input.value = '';
+      hfFeedback(`Hugging Face setup failed: ${messageOf(failure)}`, true);
+    } finally {
+      hfBusy = false;
+      setBusy();
+    }
+  }
+
+  async function probeHf(): Promise<void> {
+    if (authBusy || hfBusy) return;
+    hfBusy = true;
+    setBusy();
+    hfFeedback('Checking the saved token against both gated repositories…');
+    try {
+      const checked = await json<Partial<ColabStatus>>(await request('/api/hf/settings/probe', { method: 'POST' }));
+      mergeHf(checked);
+      hfFeedback(
+        checked.tokenReady && checked.tokenChecked
+          ? 'Model access verified. Google Colab can now be selected when you are signed in.'
+          : 'Model access is not ready. Review the licence links and repository checks.',
+        !(checked.tokenReady && checked.tokenChecked),
+      );
+    } catch (failure) {
+      hfFeedback(`Model access check failed: ${messageOf(failure)}`, true);
+    } finally {
+      hfBusy = false;
+      setBusy();
+    }
+  }
+
+  async function deleteHf(): Promise<void> {
+    if (authBusy || hfBusy) return;
+    hfBusy = true;
+    setBusy();
+    hfFeedback('Deleting the saved token…');
+    try {
+      const deleted = await json<Partial<ColabStatus>>(await request('/api/hf/settings', { method: 'DELETE' }));
+      mergeHf(deleted);
+      hfFeedback('Saved token deleted. Model access must be set up again before using Google Colab.');
+    } catch (failure) {
+      hfFeedback(`Could not delete the token: ${messageOf(failure)}`, true);
+    } finally {
+      hfBusy = false;
+      setBusy();
+    }
+  }
+
   void render();
+  return () => {
+    live = false;
+    renderGeneration += 1;
+    view?.removeEventListener('comfyrizz-colab-auth-line', onAuthLine);
+  };
 }

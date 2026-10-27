@@ -347,17 +347,18 @@ function fullAppBackend() {
       production.render = { status: 'running', fraction: 0.4 };
     }
     const events = [
+      { productionId: FULL_APP_PRODUCTION_ID, type: 'production.created', data: {} },
+      { productionId: FULL_APP_PRODUCTION_ID, type: 'brief.updated', data: {} },
       ...plans,
       ...(iteration === null
         ? []
         : [{
-            id: 'evt_full_app_iteration_1',
-            sequence: 5,
             productionId: FULL_APP_PRODUCTION_ID,
             type: 'iteration.set',
             data: { policy: iteration.policy },
           }]),
-    ].sort((left, right) => left.sequence - right.sequence);
+    ].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0))
+      .map((event, index) => ({ ...event, id: `evt_full_app_${index + 1}`, sequence: index + 1 }));
     return {
       productionId: FULL_APP_PRODUCTION_ID,
       production,
@@ -418,7 +419,8 @@ function fullAppBackend() {
     }
     if (/^\/api\/productions\/[^/]+\/events$/u.test(path) && method === 'GET') {
       calls.push('events');
-      return send({ productionId: FULL_APP_PRODUCTION_ID, lastSequence: snapshot().lastSequence, events: [] });
+      const body = snapshot();
+      return send({ productionId: FULL_APP_PRODUCTION_ID, lastSequence: body.lastSequence, nextAfter: body.lastSequence, events: body.events, gap: false, truncated: false });
     }
     if (/^\/api\/productions\/[^/]+\/commands$/u.test(path) && method === 'POST') {
       const command = JSON.parse(request.postData() ?? '{}');

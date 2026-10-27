@@ -3145,6 +3145,16 @@ function init(opened: OpenedProject): void {
     void refreshSpend();
   }
 
+  document.querySelector('#chat-pane')?.addEventListener('click', event => {
+    const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('[data-agent-change-example]');
+    if (!button) return;
+    const prompt = $<HTMLTextAreaElement>('prompt');
+    if (!prompt) return;
+    prompt.value = button.dataset.agentChangeExample ?? '';
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    prompt.focus();
+  });
+
   projectChat = mountProjectChat({
     apiFetch: chatApiFetch,
     getTurnContext: activeTurnContext,

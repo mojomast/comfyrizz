@@ -235,6 +235,60 @@ test('the final video marks the run done and stops the watch', async () => {
   assert.match(h.session.progressHtml(), /src="\/media\/final\.mp4"/u);
 });
 
+test('an already-final run marks done without starting a production watch', async () => {
+  const snapshot = finalSnapshot();
+  snapshot.finalVideo = { ready: true, status: 'done', url: 'blob:final-run' };
+  const h = harness({
+    runResult: {
+      ok: true,
+      productionId: PRODUCTION_ID,
+      draftCommand: { kind: 'iteration.set' },
+      snapshot,
+      final: { ready: true, runId: 'run_1', videoUrl: 'blob:final-run', source: 'run' },
+      finalReady: true,
+      runId: 'run_1',
+    },
+  });
+
+  const result = await h.session.generate({ prompt: 'A friendly robot', compute: 'colab', setupConfirmed: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(h.session.status(), 'done');
+  assert.equal(h.store.state.generate.status, 'done');
+  assert.equal(h.calls.some(call => call.kind === 'watch'), false);
+  assert.equal(h.dones.length, 1);
+  assert.equal(h.previews.length, 0);
+  assert.match(h.session.progressHtml(), /src="blob:final-run"/u);
+});
+
+test('the session revokes final object URLs on regeneration and teardown', async () => {
+  const previousRevoke = URL.revokeObjectURL;
+  const revoked = [];
+  URL.revokeObjectURL = url => revoked.push(url);
+  const snapshot = finalSnapshot();
+  snapshot.finalVideo = { ready: true, status: 'done', url: 'blob:owned-final' };
+  const h = harness({
+    runResult: {
+      ok: true,
+      productionId: PRODUCTION_ID,
+      draftCommand: { kind: 'iteration.set' },
+      snapshot,
+      final: { ready: true, runId: 'run_1', videoUrl: 'blob:owned-final', source: 'run' },
+    },
+  });
+  try {
+    await h.session.generate({ prompt: 'A friendly robot', compute: 'colab', setupConfirmed: true });
+    assert.deepEqual(revoked, []);
+    await h.session.generate({ prompt: 'A friendly robot again', compute: 'colab', setupConfirmed: true });
+    assert.deepEqual(revoked, ['blob:owned-final']);
+    h.session.stop();
+    h.session.stop();
+    assert.deepEqual(revoked, ['blob:owned-final', 'blob:owned-final']);
+  } finally {
+    URL.revokeObjectURL = previousRevoke;
+  }
+});
+
 test('the run finishing its preview does not mark the whole video done', async () => {
   const h = harness({ runPatches: { generate: { status: 'done' } } });
 

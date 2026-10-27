@@ -6,6 +6,8 @@ import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { colabStatus } from './colab-status.mjs';
 import { startColabAuth } from './colab-auth.mjs';
+import { createHfTokenSettings } from './hf-token-settings.mjs';
+import { handleHfTokenRoutes } from './hf-token-routes.mjs';
 import { readColabProgress } from '../../../packages/backends/src/colab-progress.mjs';
 import { createRunController } from './run.mjs';
 import { createExporter } from './export.mjs';
@@ -210,6 +212,7 @@ export function createApp({
   agentRunner = null,
   providers = providerAvailability(),
   providerSettings = null,
+  hfTokenSettings: providedHfTokenSettings = null,
   backendFactory = defaultBackendFactory,
   // IP02F: only the exact string '1' opts into the deterministic CPU placeholder
   // backend; every other value (including 'true' and '0') leaves the default app as-is.
@@ -241,6 +244,7 @@ export function createApp({
   }
   mkdirSync(runtimeDir, { recursive: true });
   mkdirSync(mediaRoot, { recursive: true });
+  const hfTokenSettings = providedHfTokenSettings ?? createHfTokenSettings({ runtimeDir });
   const mediaTickets = createMediaTickets();
   const rendersDir = join(runtimeDir, 'renders');
   const qa = createQaRegistry();
@@ -1468,6 +1472,7 @@ export function createApp({
     }
 
     if (providerSettings && await handleProviderSettings({ request, response, url, settings: providerSettings, readJson, sendJson })) return;
+    if (await handleHfTokenRoutes({ request, response, url, settings: hfTokenSettings, readJson, sendJson })) return;
 
     const chatRecoveryMatch = /^\/api\/agent\/chat\/([^/]+)\/recovery$/.exec(url.pathname);
     if (chatRecoveryMatch && request.method === 'POST') {
@@ -1503,7 +1508,7 @@ export function createApp({
     // not, and the units a run will be measured against. Read-only on purpose: the sign-in itself is a
     // separate route that streams the CLI's own prompt, and the token never passes through here.
     if (url.pathname === '/api/colab/status' && request.method === 'GET') {
-      const status = await colabStatus({ backendFactory });
+      const status = await colabStatus({ backendFactory, hfSettings: hfTokenSettings });
       return sendJson(response, 200, status);
     }
 
@@ -1522,7 +1527,7 @@ export function createApp({
           // the run panel's own event stream, when it is there: the card renders live lines if it is
           // watching, and the response below carries them all either way
           try {
-            events?.emit?.('colab_auth', { line });
+            events?.publish?.({ type: 'colab_auth', line });
           } catch {
             /* an emitter that is not there yet is not a reason to lose the sign-in */
           }

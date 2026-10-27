@@ -27,7 +27,30 @@ export class EasyApiError extends Error {
 
 type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function journalError(code: string, message: string, details?: unknown): EasyApiError {
+  return new EasyApiError({ status: 409, code, message, details });
+}
+
 export function createEasyApi(fetchImpl: FetchImpl) {
+  async function responseError(response: Response): Promise<EasyApiError> {
+    let parsed: any = {};
+    try {
+      parsed = await response.json();
+    } catch {
+      parsed = {};
+    }
+    return new EasyApiError(
+      response.status,
+      parsed?.code ?? parsed?.error ?? `HTTP_${response.status}`,
+      parsed?.message ?? parsed?.error ?? response.statusText ?? '',
+      parsed?.details,
+    );
+  }
+
   async function request(method: string, path: string, body?: unknown): Promise<any> {
     let response: Response;
     try {
@@ -54,6 +77,53 @@ export function createEasyApi(fetchImpl: FetchImpl) {
       );
     }
     return parsed;
+  }
+
+  async function getProduction(id: any): Promise<any> {
+    const snapshot = await request('GET', `/api/productions/${encodeURIComponent(id)}`);
+    if (!isRecord(snapshot) || !isRecord(snapshot.production)) {
+      throw journalError('PRODUCTION_JOURNAL_INCOMPLETE', 'The production snapshot is incomplete.');
+    }
+    const lastSequence = snapshot.lastSequence ?? snapshot.production.lastSequence;
+    if (!Number.isSafeInteger(lastSequence) || lastSequence < 0 || snapshot.gap === true || snapshot.stale === true) {
+      throw journalError('PRODUCTION_JOURNAL_INCOMPLETE', 'The production journal position is incomplete.');
+    }
+
+    // Plan cards are journal projections, not snapshot fields. Replay from zero
+    // so an old production is just as approvable as one hydrated in this tab.
+    const replay = await request('GET', `/api/productions/${encodeURIComponent(id)}/events?after=0`);
+    if (!isRecord(replay) || replay.reset === true || replay.expired === true || replay.replayExpired === true) {
+      throw journalError('PRODUCTION_JOURNAL_RESET', 'The production journal must be reloaded before approval.');
+    }
+    if (!Array.isArray(replay.events)
+      || replay.gap === true
+      || replay.truncated === true
+      || replay.lastSequence !== lastSequence
+      || (replay.nextAfter !== undefined && replay.nextAfter !== lastSequence)) {
+      throw journalError('PRODUCTION_JOURNAL_INCOMPLETE', 'The production journal replay is truncated.');
+    }
+
+    const events = replay.events;
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      if (!isRecord(event) || event.sequence !== index + 1) {
+        throw journalError('PRODUCTION_JOURNAL_INCOMPLETE', 'The production journal replay has a gap.');
+      }
+    }
+    if (events.length !== lastSequence) {
+      throw journalError('PRODUCTION_JOURNAL_INCOMPLETE', 'The production journal replay is truncated.');
+    }
+
+    return {
+      ...snapshot,
+      productionId: snapshot.productionId ?? snapshot.production.id,
+      lastSequence,
+      targetSequence: lastSequence,
+      events,
+      pendingEvents: [],
+      gap: false,
+      stale: false,
+    };
   }
 
   return {
@@ -89,9 +159,7 @@ export function createEasyApi(fetchImpl: FetchImpl) {
         payload: { conversationId, packageId },
       });
     },
-    getProduction(id: any) {
-      return request('GET', `/api/productions/${encodeURIComponent(id)}`);
-    },
+    getProduction,
     sendCommand(id: any, envelope: any) {
       return request('POST', `/api/productions/${encodeURIComponent(id)}/commands`, envelope);
     },
@@ -103,6 +171,9 @@ export function createEasyApi(fetchImpl: FetchImpl) {
       if (body.onlyShotIds !== undefined) payload.onlyShotIds = body.onlyShotIds;
       if (body.chip !== undefined) payload.chip = body.chip;
       return request('POST', `/api/productions/${encodeURIComponent(id)}/easy-plan`, payload);
+    },
+    proposeActionPlan(id: any, body: any) {
+      return request('POST', `/api/productions/${encodeURIComponent(id)}/action-plans`, body);
     },
     setSpendCap(id: any, body: { ceiling: any; expected?: { productionRevision?: number }; commandId?: string; idempotencyKey?: string }) {
       const commandId = typeof body.commandId === 'string' && body.commandId.trim() !== '' ? body.commandId : crypto.randomUUID();
@@ -123,6 +194,21 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     },
     startRun(body: any) {
       return request('POST', '/api/run', body);
+    },
+    getRun(id: any) {
+      return request('GET', `/api/run/${encodeURIComponent(id)}`);
+    },
+    async getRunVideo(id: any): Promise<Blob> {
+      let response: Response;
+      try {
+        // Use the same authenticated fetch as every other Easy API call. MP4
+        // bytes must not be pasted into an unauthenticated media element URL.
+        response = await fetchImpl(`/api/run/${encodeURIComponent(id)}/video`, { method: 'GET' });
+      } catch {
+        throw new EasyApiError(0, 'OFFLINE', 'OFFLINE');
+      }
+      if (!response.ok) throw await responseError(response);
+      return response.blob();
     },
     listClips(packageId: any) {
       return request('GET', clipsPath(packageId));

@@ -198,7 +198,8 @@ export function preparePublicDir(pkg, packageDir) {
 }
 
 function remotionArguments({ still, compositionId, outputPath, propsPath, publicDir, frame, scale }) {
-  const browser = `--browser-executable=${resolveBrowserExecutable()}`;
+  const executable = resolveBrowserExecutable();
+  const browser = executable ? [`--browser-executable=${executable}`] : [];
   const scaleArg = scale ? [`--scale=${scale}`] : [];
   if (still) {
     return [
@@ -206,7 +207,7 @@ function remotionArguments({ still, compositionId, outputPath, propsPath, public
       `--props=${propsPath}`,
       `--public-dir=${publicDir}`,
       `--frame=${frame}`,
-      browser,
+      ...browser,
       '--log=error',
       ...scaleArg,
     ];
@@ -215,7 +216,7 @@ function remotionArguments({ still, compositionId, outputPath, propsPath, public
     'render', 'src/index.ts', compositionId, outputPath,
     `--props=${propsPath}`,
     `--public-dir=${publicDir}`,
-    browser,
+    ...browser,
     '--concurrency=2',
     '--log=error',
     ...scaleArg,

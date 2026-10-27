@@ -1,6 +1,7 @@
 import { writePlan } from '../plan-writer.ts';
 import { approveAndGenerate } from '../approve-generate.ts';
 import { runCpuGenerate, type CpuHost, type RunCpuGenerateOptions } from '../cpu-path.ts';
+import { readPlanCard, type PlanCard } from '../../productions/cards/plan-card.ts';
 import { buildDraftLevelCommand, type DraftLevelCommand } from './set-draft-level.ts';
 import type { EasyState, StepId } from '../types.ts';
 
@@ -11,16 +12,26 @@ const ITERATION_LEVEL_REQUIRED = 'Choose the Draft level before approving genera
 const ITERATION_SET_FAILED = 'The Draft level could not be saved. Try again.';
 const APPROVAL_FAILED = 'The plan could not be approved. Try again.';
 const CPU_FAILED = 'The This computer preview did not finish.';
+const FINAL_PLAN_FAILED = 'The whole-production final plan could not be written. Try again.';
+const RUN_ID_REQUIRED = 'The paid final run did not return a run id.';
+const RUN_FAILED = 'The final video run did not finish.';
+const FINAL_VIDEO_FAILED = 'The finished MP4 could not be loaded.';
+const LOCAL_RENDER_FAILED = 'The local final render did not finish.';
+const DEFAULT_RUN_TIMEOUT_MS = 60 * 60 * 1000;
+const DEFAULT_RUN_POLL_MS = 1000;
 
 export interface SuperEasyApi {
   buildVideo(input: { brief: string; provider?: { provider: string; model?: string } }): Promise<any>;
   createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
+  proposeActionPlan(id: string, body: unknown): Promise<unknown>;
   getProduction(id: string): Promise<unknown>;
   sendCommand(id: string, command: unknown): Promise<unknown>;
   setSpendCap(id: string, body: { ceiling: number; expected: { productionRevision: number } }): Promise<unknown>;
   dispatchAction(id: string, body: unknown): Promise<unknown>;
   startRun(body: unknown): Promise<unknown>;
+  getRun(id: string): Promise<unknown>;
+  getRunVideo(id: string): Promise<Blob>;
   colabStatus(): Promise<{ backendId?: string } | null>;
 }
 
@@ -29,6 +40,8 @@ export interface SuperEasyHost {
   aiSelection(): Promise<{ provider: string; model?: string }>;
   editorStore: CpuHost['editorStore'];
   refreshClips(): Promise<void> | void;
+  /** Existing local renderer, used only when the server priced no paid actions. */
+  renderMp4?(options?: { productionId?: string | null }): Promise<{ blob: Blob; revision: number; renderId?: string }>;
   announce?(text: string): void;
   rerender?(): void;
 }
@@ -38,10 +51,19 @@ export interface SuperEasyStore {
   patch(partial: Partial<EasyState>): EasyState;
 }
 
+export interface SuperEasyRunPollingOptions {
+  timeoutMs?: number;
+  pollMs?: number;
+  setTimer?: (callback: () => void, delayMs: number) => unknown;
+}
+
 export interface RunSuperEasyInput {
   prompt: string;
   compute?: EasyState['compute'];
+  /** One-time guided setup confirmation; a per-click spend override is not accepted. */
+  setupConfirmed?: boolean;
   cpu?: Pick<RunCpuGenerateOptions, 'timeoutMs' | 'pollMs' | 'setTimer' | 'clearTimer'>;
+  run?: SuperEasyRunPollingOptions;
 }
 
 export type SuperEasyRunStage = 'idea' | 'compute' | 'plan' | 'iteration' | 'approval' | 'run';
@@ -51,6 +73,8 @@ export interface RunSuperEasyDeps {
   host: SuperEasyHost;
   store: SuperEasyStore;
   go(step: StepId): void;
+  /** Configured once by setup; Generate does not manufacture this confirmation. */
+  setupConfirmed?: boolean;
   /** Told when the run moves on, so the gauges can move before the server journals anything. */
   onPhase?(stage: SuperEasyRunStage): void;
 }
@@ -62,7 +86,12 @@ export type SuperEasyRunFailureCode =
   | 'ITERATION_SET_FAILED'
   | 'ITERATION_LEVEL_REQUIRED'
   | 'APPROVAL_FAILED'
-  | 'CPU_FAILED';
+  | 'CPU_FAILED'
+  | 'FINAL_PLAN_FAILED'
+  | 'RUN_ID_REQUIRED'
+  | 'RUN_FAILED'
+  | 'FINAL_VIDEO_FAILED'
+  | 'LOCAL_RENDER_FAILED';
 
 export interface SuperEasyRunFailure {
   ok: false;
@@ -71,12 +100,22 @@ export interface SuperEasyRunFailure {
   message: string;
 }
 
+export interface SuperEasyFinalArtifact {
+  ready: true;
+  runId: string | null;
+  videoUrl: string;
+  source: 'run' | 'local';
+}
+
 export interface SuperEasyRunSuccess {
   ok: true;
   productionId: string;
   draftCommand: DraftLevelCommand;
   snapshot: unknown;
-  cpu: { ok: true; step: 'review' };
+  cpu?: { ok: true; step: 'review'; previewReady?: boolean; finalReady?: boolean };
+  final?: SuperEasyFinalArtifact;
+  finalReady?: boolean;
+  runId?: string;
 }
 
 export type SuperEasyRunResult = SuperEasyRunSuccess | SuperEasyRunFailure;
@@ -134,18 +173,173 @@ function hasDraftIteration(snapshot: unknown): boolean {
   return false;
 }
 
+function isPaidAction(action: PlanCard['actions'][number]): boolean {
+  if (!(typeof action.upperBound === 'number' && action.upperBound > 0)) return false;
+  return !(action.kind === 'audition' && action.engine === 'kokoro');
+}
+
+function finalPlanEnvelope(card: PlanCard, snapshot: unknown): Record<string, unknown> {
+  const expectedProductionRevision = revisionOf(snapshot);
+  if (card.planId === null
+    || card.reservationCeiling === null
+    || card.collectAndStopReserve === null
+    || expectedProductionRevision === null) {
+    throw new Error(FINAL_PLAN_FAILED);
+  }
+  const suffix = crypto.randomUUID().replaceAll('-', '');
+  const commandId = `cmd_super_easy_final_${suffix}`;
+  return {
+    commandId,
+    idempotencyKey: commandId,
+    expected: { productionRevision: expectedProductionRevision },
+    payload: {
+      planId: `plan_super_easy_final_${suffix}`,
+      revision: 0,
+      reservationCeiling: card.reservationCeiling,
+      collectAndStopReserve: card.collectAndStopReserve,
+      requiredDecisions: card.requiredDecisions,
+      actions: [{
+        id: 'act_super_easy_final',
+        kind: 'final',
+        upperBound: card.reservationCeiling,
+      }],
+    },
+  };
+}
+
+function finalPlanId(envelope: Record<string, unknown>): string {
+  const payload = isRecord(envelope.payload) ? envelope.payload : null;
+  return typeof payload?.planId === 'string' ? payload.planId : '';
+}
+
+function isExpectedFinalCard(card: PlanCard, planId: string, ceiling: number, reserve: number): boolean {
+  const action = card.actions.length === 1 ? card.actions[0] : null;
+  return card.planId === planId
+    && card.reservationCeiling === ceiling
+    && card.collectAndStopReserve === reserve
+    && action?.id === 'act_super_easy_final'
+    && action.kind === 'final'
+    && action.upperBound === ceiling
+    && !Object.prototype.hasOwnProperty.call(action, 'backendId');
+}
+
+function runRecordOf(body: unknown): Record<string, unknown> {
+  if (!isRecord(body)) throw new Error(RUN_FAILED);
+  if (Object.prototype.hasOwnProperty.call(body, 'run')) {
+    if (!isRecord(body.run)) throw new Error(RUN_FAILED);
+    return body.run;
+  }
+  return body;
+}
+
+function runFailureMessage(run: Record<string, unknown>): string {
+  for (const value of [run.error, run.renderError, run.message]) {
+    if (typeof value === 'string' && value.trim() !== '') return value;
+    if (isRecord(value) && typeof value.message === 'string' && value.message !== '') return value.message;
+  }
+  const teardown = isRecord(run.teardown) ? run.teardown : null;
+  return typeof teardown?.evidence === 'string' && teardown.evidence !== '' ? teardown.evidence : RUN_FAILED;
+}
+
+function terminalRunFailure(run: Record<string, unknown>): string | null {
+  const status = typeof run.status === 'string' ? run.status.toLowerCase() : '';
+  const teardown = isRecord(run.teardown) ? run.teardown : null;
+  const teardownState = typeof teardown?.state === 'string' ? teardown.state.toLowerCase() : '';
+  if (teardownState === 'stop_unconfirmed') return runFailureMessage(run);
+  if (['failed', 'failure', 'error', 'cancelled', 'canceled', 'stopped', 'refused', 'stop_unconfirmed'].includes(status)) {
+    return runFailureMessage(run);
+  }
+  return null;
+}
+
+function pause(options: SuperEasyRunPollingOptions | undefined, milliseconds: number): Promise<void> {
+  const schedule = options?.setTimer
+    ?? ((callback: () => void, delayMs: number) => globalThis.setTimeout(callback, delayMs));
+  return new Promise((resolve) => {
+    schedule(resolve, Math.max(0, milliseconds));
+  });
+}
+
+async function pollFinalRun(
+  api: SuperEasyApi,
+  runId: string,
+  options: SuperEasyRunPollingOptions | undefined,
+): Promise<Record<string, unknown>> {
+  const startedAt = Date.now();
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+  const pollMs = options?.pollMs ?? DEFAULT_RUN_POLL_MS;
+  for (;;) {
+    const run = runRecordOf(await api.getRun(runId));
+    const failed = terminalRunFailure(run);
+    if (failed !== null) throw new Error(failed);
+    const status = typeof run.status === 'string' ? run.status.toLowerCase() : '';
+    if (status === 'done' || status === 'idle') return run;
+    if (!['starting', 'running', 'rendering', 'queued', 'dispatching', 'pending'].includes(status)) {
+      throw new Error(runFailureMessage(run));
+    }
+    if (Date.now() - startedAt >= timeoutMs) throw new Error('The final video run timed out.');
+    await pause(options, pollMs);
+  }
+}
+
+function snapshotWithFinalVideo(snapshot: unknown, videoUrl: string, runId: string | null): unknown {
+  const root = isRecord(snapshot) ? snapshot : {};
+  return {
+    ...root,
+    finalVideo: {
+      ready: true,
+      status: 'done',
+      url: videoUrl,
+      runId,
+    },
+  };
+}
+
+function objectUrlFor(blob: Blob): string {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    throw new Error('This browser cannot create a playable MP4 URL.');
+  }
+  return URL.createObjectURL(blob);
+}
+
+async function finishWithVideo(
+  input: {
+    snapshot: unknown;
+    blob: Blob;
+    runId: string | null;
+    source: SuperEasyFinalArtifact['source'];
+    productionId: string;
+    draftCommand: DraftLevelCommand;
+  },
+  deps: RunSuperEasyDeps,
+): Promise<SuperEasyRunSuccess> {
+  const videoUrl = objectUrlFor(input.blob);
+  const snapshot = snapshotWithFinalVideo(input.snapshot, videoUrl, input.runId);
+  deps.store.patch({ generate: { status: 'done' } });
+  return {
+    ok: true,
+    productionId: input.productionId,
+    draftCommand: input.draftCommand,
+    snapshot,
+    final: { ready: true, runId: input.runId, videoUrl, source: input.source },
+    finalReady: true,
+    ...(input.runId === null ? {} : { runId: input.runId }),
+  };
+}
+
 export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyDeps): Promise<SuperEasyRunResult> {
   const prompt = typeof input?.prompt === 'string' ? input.prompt.trim() : '';
   if (prompt === '') return failure('EMPTY_PROMPT', 'idea', EMPTY_PROMPT);
 
   const compute = input.compute ?? 'cpu';
-  if (compute !== 'cpu') {
+  const setupConfirmed = input.setupConfirmed === true || deps.setupConfirmed === true;
+  if (compute !== 'cpu' && !(compute === 'colab' && setupConfirmed)) {
     return failure('GOOGLE_COLAB_CONFIRM_REQUIRED', 'compute', GOOGLE_COLAB_CONFIRM_REQUIRED);
   }
 
   deps.store.patch({
     idea: { ...deps.store.get().idea, text: prompt },
-    compute: 'cpu',
+    compute,
     level: 'draft',
     levelTouched: true,
   });
@@ -227,6 +421,33 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     return failure('APPROVAL_FAILED', 'approval', messageOf(error, APPROVAL_FAILED));
   }
 
+  let hasPaidWork = false;
+  if (compute === 'colab') {
+    const easyCard = readPlanCard(snapshot);
+    hasPaidWork = easyCard.actions.some(isPaidAction);
+    if (easyCard.actions.length > 0) {
+      let envelope: Record<string, unknown>;
+      try {
+        envelope = finalPlanEnvelope(easyCard, snapshot);
+        await deps.api.proposeActionPlan(productionId, envelope);
+        snapshot = await deps.api.getProduction(productionId);
+      } catch (error) {
+        return failure('FINAL_PLAN_FAILED', 'plan', messageOf(error, FINAL_PLAN_FAILED));
+      }
+      const finalCard = readPlanCard(snapshot);
+      const payload = isRecord(envelope.payload) ? envelope.payload : {};
+      if (!isExpectedFinalCard(
+        finalCard,
+        finalPlanId(envelope),
+        payload.reservationCeiling as number,
+        payload.collectAndStopReserve as number,
+      )) {
+        return failure('FINAL_PLAN_FAILED', 'plan', FINAL_PLAN_FAILED);
+      }
+    }
+  }
+
+  let runId: string | null = null;
   let approvalMessage: string | undefined;
   try {
     approvalMessage = await approveAndGenerate(deps.store.get(), {
@@ -234,6 +455,12 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
       store: deps.store,
       snapshot,
       go: deps.go,
+    }, {
+      runMode: compute === 'colab' ? 'final' : 'take',
+      dispatchActions: compute !== 'colab' || hasPaidWork,
+      onRunStarted(startedRunId) {
+        runId = startedRunId;
+      },
     });
   } catch (error) {
     if (codeOf(error) === 'ITERATION_LEVEL_REQUIRED') {
@@ -247,22 +474,61 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
 
   deps.onPhase?.('run');
-  const cpu = await runCpuGenerate({
-    host: deps.host,
-    store: deps.store,
-    go: deps.go,
-    ...(input.cpu ?? {}),
-  });
+  if (compute === 'cpu') {
+    const cpu = await runCpuGenerate({
+      host: deps.host,
+      store: deps.store,
+      go: deps.go,
+      ...(input.cpu ?? {}),
+    });
 
-  if (cpu.ok === false) {
-    return failure('CPU_FAILED', 'run', cpu.message || CPU_FAILED);
+    if (cpu.ok === false) {
+      return failure('CPU_FAILED', 'run', cpu.message || CPU_FAILED);
+    }
+
+    return {
+      ok: true,
+      productionId,
+      draftCommand: built.command,
+      snapshot,
+      cpu,
+    };
   }
 
-  return {
-    ok: true,
-    productionId,
-    draftCommand: built.command,
-    snapshot,
-    cpu,
-  };
+  if (hasPaidWork) {
+    if (runId === null || runId === '') return failure('RUN_ID_REQUIRED', 'run', RUN_ID_REQUIRED);
+    try {
+      await pollFinalRun(deps.api, runId, input.run);
+    } catch (error) {
+      return failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED));
+    }
+    try {
+      const blob = await deps.api.getRunVideo(runId);
+      return await finishWithVideo({
+        snapshot,
+        blob,
+        runId,
+        source: 'run',
+        productionId,
+        draftCommand: built.command,
+      }, deps);
+    } catch (error) {
+      return failure('FINAL_VIDEO_FAILED', 'run', messageOf(error, FINAL_VIDEO_FAILED));
+    }
+  }
+
+  try {
+    if (typeof deps.host.renderMp4 !== 'function') throw new Error(LOCAL_RENDER_FAILED);
+    const rendered = await deps.host.renderMp4({ productionId });
+    return await finishWithVideo({
+      snapshot,
+      blob: rendered.blob,
+      runId: null,
+      source: 'local',
+      productionId,
+      draftCommand: built.command,
+    }, deps);
+  } catch (error) {
+    return failure('LOCAL_RENDER_FAILED', 'run', messageOf(error, LOCAL_RENDER_FAILED));
+  }
 }

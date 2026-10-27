@@ -79,6 +79,27 @@ function routeServer(routes) {
   });
 }
 
+test('CPU-only clips use the same automatic approval in the list API and final gate', async (t) => {
+  const runtime = tempRuntime(t, 'auto-approved-list');
+  const pkg = launchPackage();
+  const app = createApp({
+    root: REPO_ROOT,
+    token: TOKEN,
+    runtimeDir: runtime,
+    render: async () => ({ output: 'unused.mp4', bytes: 0, frames: 0, hash: 'unused' }),
+  });
+  t.after(() => app.close());
+  app.store.seed(pkg);
+  const server = createServer(app.handler);
+  const port = await listen(server);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const listed = await request(port, `/api/package/${PACKAGE_ID}/clips`, undefined, 'GET');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.json.clips.length, 5);
+  assert.ok(listed.json.clips.every(clip => clip.state === 'approved'));
+  assert.ok(listed.json.clips.every(clip => clip.takeCount === 0));
+});
+
 test('DN18: CPU regenerate of the launch-demo still clip is a specific 4xx, never INTERNAL', async (t) => {
   const runtime = tempRuntime(t, 'app');
   const pkg = launchPackage();

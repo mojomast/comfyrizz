@@ -7,6 +7,10 @@ export interface ComputeColabStatus {
   signedIn?: boolean | null;
   installed?: boolean;
   units?: number | null;
+  /** File presence is not readiness; both access checks must have succeeded. */
+  tokenPresent?: boolean;
+  tokenReady?: boolean | null;
+  tokenChecked?: boolean;
   [key: string]: unknown;
 }
 
@@ -40,6 +44,13 @@ const SO_FAR_SUFFIX = 'cap-so-far';
 const NOT_CONNECTED_SUFFIX = 'not-connected';
 const CAP_SUFFIX = 'cap';
 
+export const COMPUTE_HF_NOT_READY = 'Check Hugging Face model access in Google Colab setup or choose This computer.';
+const HF_SETUP_SHORT = 'Hugging Face model access is not verified';
+
+function hfReady(status: ComputeColabStatus | null | undefined): boolean {
+  return status?.tokenChecked === true && status.tokenReady === true;
+}
+
 let connectCounter = 0;
 
 function capText(spendCap: number | string | null | undefined): string {
@@ -68,6 +79,7 @@ export function validateCap(value: unknown): string | null {
 export function computeBlockReason(state: ComputeBlockState, colabStatus: ComputeColabStatus | null): string | null {
   if (state.compute !== 'colab') return null;
   if (colabStatus?.signedIn !== true) return COPY.compute.blockNotConnected;
+  if (!hfReady(colabStatus)) return COMPUTE_HF_NOT_READY;
   if (validateCap(state.spendCap) !== null) return COPY.compute.capError;
   return null;
 }
@@ -89,8 +101,9 @@ function option(
 export function renderCompute({ compute, colabStatus, spendCap, spent, checking = false, idPrefix = DEFAULT_ID_PREFIX }: ComputeView): string {
   const selected: ComputeChoice = compute === 'colab' ? 'colab' : 'cpu';
   const connected = colabStatus?.signedIn === true;
+  const ready = connected && hfReady(colabStatus);
   const waiting = checking === true && colabStatus == null;
-  const colabDisabled = !connected && !waiting;
+  const colabDisabled = !ready && !waiting;
   const prefix = idPrefix || DEFAULT_ID_PREFIX;
   const notConnectedId = `${prefix}-${NOT_CONNECTED_SUFFIX}`;
   const colabDescription = waiting || colabDisabled ? notConnectedId : null;
@@ -101,7 +114,7 @@ export function renderCompute({ compute, colabStatus, spendCap, spent, checking 
   const notConnected = waiting
     ? `<div class="easy-compute-status" id="${notConnectedId}"><span>${escapeHtml(COPY.compute.checking)}</span></div>`
     : colabDisabled
-      ? `<div class="easy-compute-status" id="${notConnectedId}"><span>${escapeHtml(COPY.compute.notConnected)}</span><button type="button" class="btn btn-secondary easy-compute-connect" data-easy-compute-connect>${escapeHtml(COPY.compute.connect)}</button></div>`
+      ? `<div class="easy-compute-status" id="${notConnectedId}"><span>${escapeHtml(connected ? HF_SETUP_SHORT : COPY.compute.notConnected)}</span><button type="button" class="btn btn-secondary easy-compute-connect" data-easy-compute-connect>${escapeHtml(COPY.compute.connect)}</button></div>`
       : '';
 
   const cap = capText(spendCap);
@@ -130,8 +143,9 @@ async function openConnectDialog(opener: HTMLElement, options: ComputeMountOptio
     opener,
   });
   const host = document.getElementById(hostId);
-  if (host) mountSettingsCard(host, options.apiFetch);
+  const unmount = host ? mountSettingsCard(host, options.apiFetch) : null;
   await result;
+  unmount?.();
   const status = await options.colabStatus();
   options.onStatus?.(status);
 }

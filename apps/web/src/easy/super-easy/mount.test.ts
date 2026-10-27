@@ -157,6 +157,25 @@ test('Generate sends the trimmed prompt to This computer and never to Google Col
   handle.destroy();
 });
 
+test('confirmed setup forwards Google Colab once; unconfirmed setup opens setup instead', () => {
+  const { root, prompt } = fakeRoot();
+  const calls = [];
+  let opened = 0;
+  let setup = { compute: 'colab', spendCap: 7.5, confirmed: false };
+  const handle = mountSuperEasy({
+    root, state: () => state(), onMoreControl: () => {},
+    setup: () => setup, onSetup: () => { opened += 1; }, onGenerate: input => calls.push(input),
+  });
+  prompt.value = 'A tiny lighthouse crew races the coming storm';
+  root.fire('submit', { target: submitTarget(), preventDefault() {} });
+  assert.equal(opened, 1);
+  assert.deepEqual(calls, []);
+  setup = { ...setup, confirmed: true };
+  root.fire('submit', { target: submitTarget(), preventDefault() {} });
+  assert.deepEqual(calls, [{ prompt: prompt.value, compute: 'colab', setupConfirmed: true }]);
+  handle.destroy();
+});
+
 test('Record this run rides along with Generate and remembers the checkbox', () => {
   const { root, prompt } = fakeRoot();
   const toggle = { checked: true };

@@ -53,9 +53,9 @@ test('a done step starts with the hidden Done prefix', () => {
 
 test('the compact label reads Step 3 of 7 with the step name', () => {
   const html = renderStepper({ current: 'level', state: baseState(), facts: lockedFacts, needsUpdate: [] });
-  const label = fill(COPY.stepper.compact, { n: 3, total: 7, name: COPY.steps.level });
-  assert.equal(label, 'Step 3 of 7 · Iteration level');
-  assert.match(html, /<button[^>]*class="stepper-compact"[^>]*>Step 3 of 7 · Iteration level<\/button>/);
+  const label = fill(COPY.stepper.compact, { n: 3, total: 7, name: COPY.level.compactName });
+  assert.equal(label, 'Step 3 of 7 · Level');
+  assert.match(html, /<button[^>]*class="stepper-compact"[^>]*>Step 3 of 7 · Level<\/button>/);
 });
 
 test('a step that needs an update shows a dot and hidden status text', () => {

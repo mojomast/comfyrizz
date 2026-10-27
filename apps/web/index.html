@@ -53,8 +53,16 @@
       </header>
 
       <main class="shell-main" data-region="workspace">
-        <section id="chat-pane" class="pane panel shell-left" data-region="left" aria-label="Chat and references">
-          <div class="pane-head panel-header"><b>Chat</b><span class="hint">Your conversation</span></div>
+        <section id="chat-pane" class="pane panel shell-left" data-region="left" aria-label="Agent chat and references">
+          <div class="pane-head panel-header"><b>Agent — change anything</b><span class="hint">Edits this video</span></div>
+          <div class="agent-change-guide">
+            <p>Describe a change to the story, look, sound or a single shot. The agent updates this project.</p>
+            <div class="agent-change-examples" aria-label="Example changes">
+              <button type="button" data-agent-change-example="Make the opening more dramatic">More dramatic opening</button>
+              <button type="button" data-agent-change-example="Change the visual style while keeping the story">Change the look</button>
+              <button type="button" data-agent-change-example="Shorten the video and keep the strongest moments">Make it shorter</button>
+            </div>
+          </div>
           <div id="messages"></div>
           <div id="project-plan-panel" hidden></div>
           <form id="composer">

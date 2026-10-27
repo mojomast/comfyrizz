@@ -462,3 +462,74 @@ test('mountProjectChat still resolves the global prompt for suggested prompts', 
     dom.restore();
   }
 });
+
+test('adoptPackageId is sent only while unbound and the returned chat is handed off before package adoption', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    const bodies = [];
+    const order = [];
+    let turn = 0;
+    const chat = create(host, {
+      adoptPackageId: 'pkg_existing',
+      expectedPackageId: 'pkg_existing',
+      onConversationChange: (conversation) => order.push(`chat:${conversation.id}`),
+      applyProject: (project) => order.push(`package:${project.package.id}`),
+      apiFetch: async (_url, init = {}) => {
+        turn += 1;
+        bodies.push(JSON.parse(init.body));
+        const built = turn === 1;
+        return jsonResponse({
+          conversation: conversation({
+            revision: turn,
+            projectId: 'pkg_existing',
+            projectRevision: built ? 2 : 3,
+            phase: built ? 'built' : 'chatting',
+          }),
+          reply: built ? 'Changed the existing package.' : 'No further changes.',
+          built,
+          ...(built ? { project: { package: { id: 'pkg_existing', title: 'Existing', revision: 2 }, revision: 2 } } : {}),
+        });
+      },
+    });
+    await chat.ready;
+
+    await chat.send('Change the opening.', 'plan');
+    await chat.send('Keep everything else unchanged.', 'plan');
+
+    assert.equal(bodies[0].adoptPackageId, 'pkg_existing');
+    assert.equal('adoptPackageId' in bodies[1], false, 'a bound conversation never re-adopts');
+    assert.deepEqual(order.slice(0, 2), [`chat:${CHAT_ID}`, 'package:pkg_existing']);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('a response from another package is rejected before chat or package handoff', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    const handedOff = [];
+    const chat = create(host, {
+      expectedPackageId: 'pkg_expected',
+      onConversationChange: (conversation) => handedOff.push(conversation.id),
+      applyProject: (project) => handedOff.push(project.package.id),
+      apiFetch: async () => jsonResponse({
+        conversation: conversation({ projectId: 'pkg_other', phase: 'built' }),
+        reply: 'Wrong project.',
+        built: true,
+        project: { package: { id: 'pkg_other', title: 'Other', revision: 2 }, revision: 2 },
+      }),
+    });
+    await chat.ready;
+
+    await chat.send('Change something.', 'plan');
+
+    assert.deepEqual(handedOff, []);
+    assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /different project/);
+  } finally {
+    dom.restore();
+  }
+});

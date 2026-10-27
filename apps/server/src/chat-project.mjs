@@ -505,12 +505,102 @@ function applyCharacterBuild({ draft, characters, runtimeDir }) {
 const ASPECTS = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
 const DEFAULT_TRANSITION = { type: 'fade', frames: 12 };
 
+function packageAspect(pkg, fallback = '16:9') {
+  const width = Number(pkg?.format?.width);
+  const height = Number(pkg?.format?.height);
+  if (!(width > 0 && height > 0)) return fallback;
+  if (width === height) return '1:1';
+  return width < height ? '9:16' : '16:9';
+}
+
+function packageMediaType(pkg, scene) {
+  for (const item of Array.isArray(scene?.foreground) ? scene.foreground : []) {
+    const kind = pkg?.assets?.[item?.asset]?.kind;
+    if (kind === 'svg' || kind === 'vector-anim') return 'svg';
+    if (kind === 'image') return 'image';
+  }
+  return 'procedural';
+}
+
+/**
+ * Project the actual package into the draft vocabulary used by the merge and
+ * production-scope differ. This is deliberately not a conversation's
+ * `previousPlan`: an adopted package did not necessarily come from chat.
+ *
+ * Fields the package cannot represent (brief, audience and style preset) come
+ * from the new complete plan. For media that is already present, an omitted or
+ * default procedural media type must not accidentally discard user assets;
+ * an explicit change to a different non-procedural type remains a real change.
+ */
+export function chatPlanFromPackage(pkg, authored = null) {
+  const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
+  const authoredScenes = Array.isArray(authored?.scenes) ? authored.scenes : [];
+  const scenes = (Array.isArray(pkg?.scenes) ? pkg.scenes : []).map(scene => {
+    const draft = authoredScenes.find(candidate => candidate?.id === scene?.id) ?? null;
+    const requestedMediaType = draft?.mediaType ?? 'procedural';
+    const currentMediaType = packageMediaType(pkg, scene);
+    const mediaType = requestedMediaType === 'procedural' || requestedMediaType === currentMediaType
+      ? requestedMediaType
+      : currentMediaType;
+    const seconds = Number(scene?.preferredFrames) > 0
+      ? Number(scene.preferredFrames) / fps
+      : (Number(draft?.seconds) > 0 ? Number(draft.seconds) : 4);
+    const plates = Array.isArray(draft?.plates)
+      ? draft.plates.map((plate, index) => {
+        const media = Array.isArray(scene?.media) ? scene.media[index] : null;
+        if (!media?.procedural) return structuredClone(plate);
+        return {
+          ...structuredClone(plate),
+          mediaType: 'procedural',
+          ...(media.label !== undefined ? { label: media.label } : {}),
+          pattern: media.procedural.pattern ?? plate.pattern,
+          ...(media.procedural.seed !== undefined ? { seed: media.procedural.seed } : {}),
+          ...(media.procedural.palette !== undefined ? { palette: structuredClone(media.procedural.palette) } : {}),
+        };
+      })
+      : undefined;
+    return {
+      id: scene.id,
+      layout: scene.layout ?? draft?.layout ?? 'title',
+      headline: typeof scene?.copy?.headline === 'string' ? scene.copy.headline : '',
+      sub: typeof scene?.copy?.sub === 'string' ? scene.copy.sub : '',
+      body: typeof scene?.copy?.body === 'string' ? scene.copy.body : '',
+      items: Array.isArray(scene?.copy?.items) ? structuredClone(scene.copy.items) : [],
+      footnote: typeof scene?.copy?.footnote === 'string' ? scene.copy.footnote : '',
+      narration: typeof scene?.narration === 'string' ? scene.narration : '',
+      seconds,
+      visual: typeof scene?.notes === 'string' && scene.notes.trim()
+        ? scene.notes
+        : (draft?.visual ?? 'Keep the current scene visual.'),
+      mediaType,
+      ...(draft?.svg !== undefined ? { svg: draft.svg } : {}),
+      ...(scene?.data !== undefined && scene.data !== null ? { data: structuredClone(scene.data) } : {}),
+      ...(scene?.code !== undefined && scene.code !== null ? { code: structuredClone(scene.code) } : {}),
+      ...(plates ? { plates } : {}),
+      ...(scene?.motion !== undefined ? { motion: structuredClone(scene.motion) } : {}),
+      ...(scene?.transitionOut !== undefined ? { transitionOut: structuredClone(scene.transitionOut) } : {}),
+    };
+  });
+  return {
+    title: typeof pkg?.title === 'string' ? pkg.title : (authored?.title ?? ''),
+    brief: authored?.brief ?? '',
+    audience: authored?.audience ?? '',
+    aspect: packageAspect(pkg, authored?.aspect ?? '16:9'),
+    stylePreset: authored?.stylePreset ?? 'cinematic-dark',
+    datasets: structuredClone(pkg?.datasets ?? {}),
+    scenes,
+  };
+}
+
 /** Compile model-authored content, merging revisions into the current project. */
-export async function buildChatProject({ plan: rawPlan, previous, previousPlan, brand, runtimeDir, signal, references, characters, cast, placements, characterFiles, requestedDuration }) {
+export async function buildChatProject({ plan: rawPlan, previous, previousPlan, adoptPackage = false, brand, runtimeDir, signal, references, characters, cast, placements, characterFiles, requestedDuration }) {
   signal?.throwIfAborted();
   const plan = conversationPlanSchema.parse(rawPlan);
-  if (previous && !previousPlan) throw conflict('the last built plan is missing');
-  const baseline = previous ? conversationPlanSchema.parse(previousPlan) : undefined;
+  const adopting = Boolean(previous && !previousPlan && adoptPackage);
+  if (previous && !previousPlan && !adopting) throw conflict('the last built plan is missing');
+  const baseline = previous
+    ? (adopting ? chatPlanFromPackage(previous, plan) : conversationPlanSchema.parse(previousPlan))
+    : undefined;
   const aspect = ASPECTS[plan.aspect];
   const defaults = STYLE_PRESET_DEFAULTS[plan.stylePreset];
   const pkg = previous ? structuredClone(previous) : {

@@ -9,6 +9,7 @@ import { runQwenColab } from '../../../scripts/tts/qwen_colab.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPipeline } from '../../renderer/scripts/render-pipeline.mjs';
+import { resolveBrowserExecutable } from '../../renderer/scripts/browser-executable.mjs';
 import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { json, writeJson, preparePresenterInputs, correctPresenters, presenterScenes } from './pipeline-media.mjs';
@@ -92,7 +93,8 @@ async function main() {
     if (!validation.valid) throw new Error('Invalid pipeline input');
     await command('ffmpeg', ['-version']); await command('ffprobe', ['-version']);
     if (plan.voiced) await command(process.env.COMFYRIZZ_PYTHON || 'python3', ['-c', 'import numpy']);
-    if (!remoteRender && !existsSync(process.env.REMOTION_BROWSER || '/usr/bin/google-chrome') && render === renderPipeline) throw new Error('Configure REMOTION_BROWSER with an installed headless browser before starting generation.');
+    const configuredBrowser = typeof process.env.REMOTION_BROWSER === 'string' && process.env.REMOTION_BROWSER.trim() !== '';
+    if (!remoteRender && configuredBrowser && !existsSync(resolveBrowserExecutable()) && render === renderPipeline) throw new Error('REMOTION_BROWSER does not point to an installed headless browser. Fix the path or unset it to let Remotion manage a browser.');
     cpSync(join(repoRoot, 'workflows'), join(workDir, 'workflows'), { recursive: true });
     if (plan.presenters && syncnetReady) await command(process.env.COMFYRIZZ_SYNCNET_PYTHON, ['-c', 'import cv2, torch, numpy; assert hasattr(cv2, "CascadeClassifier")']);
     if (plan.voiced && !plan.remoteVoice) {

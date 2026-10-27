@@ -38,6 +38,30 @@ test("the card never handles a credential of its own (U2)", () => {
   assert.match(CARD, /never reads or stores your credentials/);
 });
 
+test("the card consumes live auth events and exposes busy and failure paths", () => {
+  assert.match(CARD, /addEventListener\('colab_auth'/);
+  assert.match(CARD, /comfyrizz-colab-auth-line/);
+  assert.match(CARD, /authBusy/);
+  assert.match(CARD, /aria-busy/);
+  assert.match(CARD, /Sign-in failed:/);
+  assert.match(CARD, /showLog\(authLines\)/);
+});
+
+test("HF setup is write-only, checks both licences, and uses the server-selected install command", () => {
+  for (const id of ["colab-hf-token", "colab-hf-save", "colab-hf-check", "colab-hf-delete", "colab-hf-feedback"]) {
+    assert.ok(CARD.includes(id), `${id} is not in the card`);
+  }
+  assert.match(CARD, /\/api\/hf\/settings/);
+  assert.match(CARD, /\/api\/hf\/settings\/probe/);
+  assert.match(CARD, /type="password"/);
+  assert.match(CARD, /input\.value = ''/);
+  assert.match(CARD, /tokenPresent/);
+  assert.match(CARD, /tokenChecked/);
+  assert.match(CARD, /tokenReady/);
+  assert.match(CARD, /install\?\.command \?\? install\?\.linux/);
+  assert.match(CARD, /Accept both licences before checking access/);
+});
+
 test("the status line is the four states, not two (U2)", () => {
   assert.match(CARD, /is not installed yet/);
   assert.match(CARD, /but not signed in/);

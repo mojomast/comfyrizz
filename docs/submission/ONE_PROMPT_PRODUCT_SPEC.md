@@ -50,6 +50,16 @@ or spend when known, and a working cancel action. Failure messages preserve any
 usable result, stop the runtime where appropriate, and offer a bounded retry.
 No fake completion or fabricated generated media.
 
+**The work is visible while it happens.** A live production gallery, not a row of
+progress bars, is the visual focus during generation. Character/reference images
+and keyframes arrive first; completed motion clips replace their placeholders;
+voice, music and sound assets become playable. Cards use truthful planned,
+generating, ready and needs-attention states. New assets animate in without
+stealing focus or resetting the page, and selecting one opens its larger preview
+without interrupting the run. The interface does not label a planned asset as
+ready or substitute unrelated demo media. Overall stage, elapsed time and spend
+remain secondary to the emerging work.
+
 ### 3. Results worth sharing
 
 The first finished screen plays the actual video with sound and offers:
@@ -103,6 +113,7 @@ is not a substitute for the product path.
 - [ ] Agent key/model and Colab connection can be configured and tested in the UI.
 - [ ] One-time credit ceiling persists; no per-run approval is requested.
 - [ ] One prompt produces and automatically displays the final MP4 in the same flow.
+- [ ] Real character, image, motion and audio assets appear in the live gallery as collected, with stable cards and non-disruptive preview.
 - [ ] A real generated example has coherent characters, deliberate action, sound and a strong first frame.
 - [ ] The result page offers agent changes, download, new video and Advanced mode.
 - [ ] Agent edits preserve the current project and make revision scope clear.
