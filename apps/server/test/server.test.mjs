@@ -192,13 +192,19 @@ test('SSE replays from Last-Event-ID', async () => {
 });
 
 test('POST /api/agent runs the runner, validates and compiles the package', async () => {
-  const response = await request({ method: 'POST', path: '/api/agent', body: { brief: 'a calm agent desktop' } });
+  const response = await request({ method: 'POST', path: '/api/agent', body: { brief: 'a calm agent desktop', sessionId: 'agent-progress-test' } });
   assert.equal(response.status, 200);
+  assert.equal(response.json.sessionId, 'agent-progress-test');
   assert.equal(response.json.package.id, 'pkg_agenttest0001');
   assert.ok(response.json.timeline.durationInFrames > 0);
   assert.deepEqual(response.json.svgAssets, ['a_icon_check']);
   assert.ok(response.json.generatedAssets.a_icon_check.svg.includes('<svg'));
   assert.equal(response.json.live, false);
+  const progress = await request({ path: '/api/agent/progress?sessionId=agent-progress-test' });
+  assert.equal(progress.status, 200);
+  assert.equal(progress.json.status, 'done');
+  assert.equal(progress.json.sessionId, 'agent-progress-test');
+  assert.equal(typeof progress.json.elapsedMs, 'number');
   const reread = await request({ path: '/api/package/pkg_agenttest0001' });
   assert.equal(reread.status, 200);
   assert.equal(reread.json.package.title, 'Agent: a calm agent desktop');

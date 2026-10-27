@@ -35,6 +35,17 @@ function hasCopy(copy) {
   );
 }
 
+export function packageSchemaProblems(pkg) {
+  const validation = validatePackage(pkg);
+  if (validation.valid) return [];
+  return validation.errors.map((issue, index) => {
+    if (typeof issue === 'string') return issue;
+    const path = issue.path ?? issue.instancePath ?? `package[${index}]`;
+    const message = issue.message ?? JSON.stringify(issue).slice(0, 300);
+    return `${path}: ${message}${issue.code ? ` [${issue.code}]` : ''}`;
+  });
+}
+
 /** Completion is shot-reachable: orphan pending GPU assets never satisfy it. */
 export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto') {
   const problems = [];
@@ -234,26 +245,38 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         },
       };
     };
-    const runOnce = (model, repairInstructions = null) =>
-      runCpuSlice({
-        brief: repairInstructions ? `${brief}\n\n${repairInstructions}` : brief,
-        ...(repairInstructions ? { initialPackage: slice.package } : {}),
-        ...(model ? { model } : {}),
-        ...(brandKit ? { brand: brandKit } : {}),
-        ...(brandAssets ? { brandAssets } : {}),
-        generateSvg,
-        persistSvg,
-        persistAudio,
-        motionModel,
-        sessionId,
-        now,
-        ...(repairInstructions ? {
-          system: REPAIR_SYSTEM,
-        } : {}),
-        // Initial planning is bounded separately from the much smaller edit-only repair.
-        maxSteps: repairInstructions ? 8 : 16,
-        ...(onEvent ? { onEvent } : {}),
-      });
+    const runStartedAt = Date.now();
+    const runOnce = async (model, repairInstructions = null) => {
+      const phase = repairInstructions ? 'repair' : 'initial';
+      const phaseStartedAt = Date.now();
+      onEvent?.({ type: 'runner_phase', phase, status: 'started', elapsedMs: Date.now() - runStartedAt });
+      try {
+        const result = await runCpuSlice({
+          brief: repairInstructions ? `${brief}\n\n${repairInstructions}` : brief,
+          ...(repairInstructions ? { initialPackage: slice.package } : {}),
+          ...(model ? { model } : {}),
+          ...(brandKit ? { brand: brandKit } : {}),
+          ...(brandAssets ? { brandAssets } : {}),
+          generateSvg,
+          persistSvg,
+          persistAudio,
+          motionModel,
+          sessionId,
+          now,
+          ...(repairInstructions ? {
+            system: REPAIR_SYSTEM,
+          } : {}),
+          // Initial planning is bounded separately from the much smaller edit-only repair.
+          maxSteps: repairInstructions ? 8 : 16,
+          onEvent: event => onEvent?.({ ...event, phase, runElapsedMs: Date.now() - runStartedAt }),
+        });
+        onEvent?.({ type: 'runner_phase', phase, status: 'completed', durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - runStartedAt, stopped: result.result.stopped ?? 'final' });
+        return result;
+      } catch (error) {
+        onEvent?.({ type: 'runner_phase', phase, status: 'failed', durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - runStartedAt, message: error.message });
+        throw error;
+      }
+    };
     const acceptable = candidate => productionIntent.generatedFilm
       ? candidate.ok && generatedFilmCompletionProblems(candidate.package, productionIntent, motionModel).length === 0 && validatePackage(candidate.package).valid
       : candidate.svgAssets.length >= 4 && candidate.pendingGpu.length >= 1 && validatePackage(candidate.package).valid;
@@ -264,15 +287,22 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     // silently change the requested deliverable and hide missing generated shots.
     if (agentModel && !acceptable(slice)) {
       if (productionIntent.generatedFilm) {
-        const initialProblems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
+        const initialProblems = [
+          ...generatedFilmCompletionProblems(slice.package, productionIntent, motionModel),
+          ...packageSchemaProblems(slice.package),
+        ];
+        onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: initialProblems, elapsedMs: Date.now() - runStartedAt });
         slice = await runOnce(agentModel, `Validation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`);
         if (!acceptable(slice)) {
-          const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
-          const schemaProblems = validatePackage(slice.package).valid ? [] : ['package schema validation failed'];
-          const error = new Error(`generated-film plan is incomplete: ${[...problems, ...schemaProblems].join('; ') || slice.result.error || 'live agent did not finish'}`);
+          const problems = [
+            ...generatedFilmCompletionProblems(slice.package, productionIntent, motionModel),
+            ...packageSchemaProblems(slice.package),
+          ];
+          onEvent?.({ type: 'runner_phase', phase: 'repair', status: 'validation', ok: false, problems, elapsedMs: Date.now() - runStartedAt });
+          const error = new Error(`generated-film plan is incomplete: ${problems.join('; ') || slice.result.error || 'live agent did not finish'}`);
           error.status = 422;
           error.code = 'GENERATED_FILM_INCOMPLETE';
-          error.errors = [...problems, ...schemaProblems];
+          error.errors = problems;
           throw error;
         }
       } else {

@@ -3,7 +3,8 @@ import { planInputsHash } from './store.ts';
 import type { EasyHost, EasyState } from './types.ts';
 
 type PlanApi = {
-  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein' }): Promise<any>;
+  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein'; sessionId?: string }): Promise<any>;
+  getAgentProgress?(sessionId: string): Promise<any>;
   createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
 };
@@ -16,7 +17,7 @@ type PlanStore = {
 
 export interface WritePlanDeps {
   api: PlanApi;
-  host: Pick<EasyHost, 'adoptBuiltPackage' | 'aiSelection'>;
+  host: Pick<EasyHost, 'adoptBuiltPackage' | 'aiSelection'> & { announce?(text: string): void };
   store: PlanStore;
 }
 
@@ -58,6 +59,28 @@ function phaseFor(state: EasyState): 1 | 2 | 3 {
   return 1;
 }
 
+function seconds(value: unknown): string {
+  const milliseconds = typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
+  return `${Math.round(milliseconds / 1000)}s`;
+}
+
+export function plannerProgressAnnouncement(progress: any): string {
+  const phase = progress?.phase === 'repair' ? 'repair' : 'initial plan';
+  const step = progress?.step ? ` · step ${progress.step}${progress.maxSteps ? `/${progress.maxSteps}` : ''}` : '';
+  const elapsed = ` · ${seconds(progress?.elapsedMs)}`;
+  const activity = String(progress?.activity ?? 'starting');
+  if (activity === 'model_waiting') return `Planning ${phase}${step} · waiting for model${elapsed}`;
+  if (activity === 'model_streaming') return `Planning ${phase}${step} · ${String(progress?.milestone ?? 'stream').replaceAll('_', ' ')}${elapsed}`;
+  if (activity === 'model_complete') return `Planning ${phase}${step} · model ${seconds(progress?.lastModel?.durationMs)}${elapsed}`;
+  if (activity === 'tool_running') return `Planning ${phase}${step} · ${progress?.tool ?? 'tool'} running${elapsed}`;
+  if (activity === 'tool_complete') return `Planning ${phase}${step} · ${progress?.lastTool?.name ?? 'tool'} ${seconds(progress?.lastTool?.durationMs)}${elapsed}`;
+  if (activity === 'argument_repair') return `Planning ${phase}${step} · repairing tool arguments${elapsed}`;
+  if (activity === 'validation') return `Planning ${phase} · validating package${elapsed}`;
+  if (activity === 'failed') return `Planning failed${elapsed}`;
+  if (activity === 'done') return `Planning complete${elapsed}`;
+  return `Planning ${phase}${step}${elapsed}`;
+}
+
 export async function writePlan(state: EasyState, deps: WritePlanDeps, options: { stopAfterPackage?: boolean } = {}): Promise<void> {
   const hash = planInputsHash(state);
   if (state.plan.status === 'ready' && state.planHash === hash) return;
@@ -94,11 +117,29 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps, options: 
       const current = live();
       const provider = await connectedSelection(deps.host);
       if (!currentSession()) return;
-      const body = await deps.api.buildVideo({
-        brief: ideaPrompt(current) + castLine(current),
-        motionModel: current.motionModel ?? 'auto',
-        ...(provider ? { provider } : {}),
-      });
+      const sessionId = crypto.randomUUID();
+      const pollProgress = async () => {
+        if (!deps.api.getAgentProgress) return;
+        try {
+          const progress = await deps.api.getAgentProgress(sessionId);
+          if (currentSession()) deps.host.announce?.(plannerProgressAnnouncement(progress));
+        } catch {
+          // Planning remains authoritative; telemetry must never fail the run.
+        }
+      };
+      const progressTimer = deps.api.getAgentProgress ? setInterval(pollProgress, 2000) : null;
+      if (progressTimer) void pollProgress();
+      let body;
+      try {
+        body = await deps.api.buildVideo({
+          brief: ideaPrompt(current) + castLine(current),
+          motionModel: current.motionModel ?? 'auto',
+          sessionId,
+          ...(provider ? { provider } : {}),
+        });
+      } finally {
+        if (progressTimer) clearInterval(progressTimer);
+      }
       if (!currentSession()) return;
       const builtPackageId = packageIdOf(body);
       const packageChanged = builtPackageId !== null && builtPackageId !== state.packageId;

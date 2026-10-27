@@ -4,7 +4,7 @@ import type { AgentTool } from './tools.js';
 import type { ChatChunk, ChatMessage, ChatModel } from './types.js';
 
 export interface AgentEvent {
-  type: 'step' | 'text' | 'tool_call' | 'tool_result' | 'repair' | 'error' | 'done';
+  type: 'step' | 'model_milestone' | 'model_result' | 'text' | 'tool_call' | 'tool_result' | 'repair' | 'runner_phase' | 'error' | 'done';
   [key: string]: unknown;
 }
 
@@ -125,61 +125,91 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   ];
   const records: ToolRecord[] = [];
   const usage = { input: 0, output: 0 };
+  const runStartedAt = Date.now();
+  const elapsedMs = () => Date.now() - runStartedAt;
   let repairs = 0;
   let text = '';
 
   for (let step = 1; step <= maxSteps; step += 1) {
     if (signal.aborted) return { ok: false, text, messages, toolCalls: records, usage, stopped: 'aborted' };
-    emit({ type: 'step', step });
+    const stepStartedAt = Date.now();
+    emit({ type: 'step', step, maxSteps, elapsedMs: elapsedMs() });
     let stepText = '';
     let reasoning: string | undefined;
+    let reasoningChars = 0;
+    let firstChunkMs: number | null = null;
+    let firstReasoningMs: number | null = null;
+    let firstTextMs: number | null = null;
+    const stepUsage = { input: 0, output: 0 };
     const calls: Array<{ id: string; name: string; args: unknown }> = [];
     let modelError: ChatChunk & { type: 'error' } | undefined;
     for await (const chunk of options.model.stream({ system: options.system ?? DEFAULT_SYSTEM, messages: messages.filter(message => message.role !== 'system'), tools: definitions, signal, sessionId })) {
+      if (firstChunkMs === null) {
+        firstChunkMs = Date.now() - stepStartedAt;
+        emit({ type: 'model_milestone', step, milestone: 'first_chunk', durationMs: firstChunkMs, elapsedMs: elapsedMs() });
+      }
       if (chunk.type === 'text') {
+        if (firstTextMs === null) {
+          firstTextMs = Date.now() - stepStartedAt;
+          emit({ type: 'model_milestone', step, milestone: 'first_text', durationMs: firstTextMs, elapsedMs: elapsedMs() });
+        }
         stepText += chunk.delta;
         text += chunk.delta;
         emit({ type: 'text', delta: chunk.delta });
       } else if (chunk.type === 'reasoning') {
+        if (firstReasoningMs === null) {
+          firstReasoningMs = Date.now() - stepStartedAt;
+          emit({ type: 'model_milestone', step, milestone: 'first_reasoning', durationMs: firstReasoningMs, elapsedMs: elapsedMs() });
+        }
         reasoning = (reasoning ?? '') + chunk.delta;
+        reasoningChars += chunk.delta.length;
       } else if (chunk.type === 'tool_call') {
         calls.push({ id: chunk.id, name: chunk.name, args: chunk.args });
       } else if (chunk.type === 'usage') {
         usage.input += chunk.input;
         usage.output += chunk.output;
+        stepUsage.input += chunk.input;
+        stepUsage.output += chunk.output;
       } else if (chunk.type === 'error') {
         modelError = chunk;
       }
     }
+    emit({
+      type: 'model_result', step, durationMs: Date.now() - stepStartedAt, elapsedMs: elapsedMs(),
+      firstChunkMs, firstReasoningMs, firstTextMs, reasoningChars, textChars: stepText.length,
+      toolCalls: calls.map(call => call.name), usage: stepUsage,
+    });
     if (modelError) {
-      emit({ type: 'error', code: modelError.code, message: modelError.message });
+      emit({ type: 'error', code: modelError.code, message: modelError.message, step, elapsedMs: elapsedMs() });
       return { ok: false, text, messages, toolCalls: records, usage, stopped: 'model_error', error: `${modelError.code}${modelError.message ? `: ${modelError.message}` : ''}` };
     }
     if (calls.length === 0) {
-      emit({ type: 'done', ok: Boolean(text.trim()) });
+      emit({ type: 'done', ok: Boolean(text.trim()), step, elapsedMs: elapsedMs(), toolCallCount: records.length, usage });
       return { ok: Boolean(text.trim()), text, messages, toolCalls: records, usage, stopped: 'final' };
     }
 
     messages.push({ role: 'assistant', content: stepText, tool_calls: calls, ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}) });
     for (const call of calls) {
-      emit({ type: 'tool_call', id: call.id, name: call.name, args: call.args });
+      const toolStartedAt = Date.now();
+      emit({ type: 'tool_call', id: call.id, name: call.name, args: call.args, step, elapsedMs: elapsedMs() });
       const tool = options.tools[call.name];
       if (!tool) {
         const result = { error: 'unknown_tool', name: call.name };
         messages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: call.id });
         records.push({ id: call.id, name: call.name, args: call.args, ok: false, result });
+        emit({ type: 'tool_result', id: call.id, name: call.name, ok: false, message: 'unknown_tool', step, durationMs: Date.now() - toolStartedAt });
         continue;
       }
       const parsed = tool.schema.safeParse(call.args);
       if (!parsed.success) {
         repairs += 1;
         const issues = zodIssues(parsed.error);
-        emit({ type: 'repair', id: call.id, name: call.name, issues, repairs });
+        emit({ type: 'repair', id: call.id, name: call.name, issues, repairs, step, durationMs: Date.now() - toolStartedAt });
         const result = { error: 'invalid_arguments', issues, repair: repairs, max_repairs: maxRepairs };
         messages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: call.id });
         records.push({ id: call.id, name: call.name, args: call.args, ok: false, error: 'invalid_arguments', result });
         if (repairs > maxRepairs) {
-          emit({ type: 'error', code: 'repair_limit' });
+          emit({ type: 'error', code: 'repair_limit', step, elapsedMs: elapsedMs() });
           return { ok: false, text, messages, toolCalls: records, usage, stopped: 'repair_limit', error: `tool argument repair limit (${maxRepairs}) exceeded` };
         }
         continue;
@@ -188,15 +218,15 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
         const result = await tool.run(parsed.data, { operationId: call.id });
         messages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: call.id });
         records.push({ id: call.id, name: call.name, args: parsed.data, ok: true, result });
-        emit({ type: 'tool_result', id: call.id, name: call.name, ok: true });
+        emit({ type: 'tool_result', id: call.id, name: call.name, ok: true, step, durationMs: Date.now() - toolStartedAt });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         messages.push({ role: 'tool', content: JSON.stringify({ error: 'tool_failed', message }), tool_call_id: call.id });
         records.push({ id: call.id, name: call.name, args: parsed.data, ok: false, error: message });
-        emit({ type: 'tool_result', id: call.id, name: call.name, ok: false, message });
+        emit({ type: 'tool_result', id: call.id, name: call.name, ok: false, message, step, durationMs: Date.now() - toolStartedAt });
       }
     }
   }
-  emit({ type: 'error', code: 'max_steps' });
+  emit({ type: 'error', code: 'max_steps', step: maxSteps, elapsedMs: elapsedMs(), toolCallCount: records.length, usage });
   return { ok: false, text, messages, toolCalls: records, usage, stopped: 'max_steps', error: `agent step limit (${maxSteps}) reached` };
 }

@@ -23,7 +23,8 @@ const DEFAULT_RUN_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_RUN_POLL_MS = 1000;
 
 export interface SuperEasyApi {
-  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: MotionModel }): Promise<any>;
+  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: MotionModel; sessionId?: string }): Promise<any>;
+  getAgentProgress?(sessionId: string): Promise<any>;
   createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
   proposeActionPlan(id: string, body: unknown): Promise<unknown>;

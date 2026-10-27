@@ -21,6 +21,7 @@ import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
 import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
+import { createAgentProgress } from './agent-progress.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
 import { createCharacterRoutes } from './characters/routes.mjs';
 import { createCharacterStore } from './characters/store.mjs';
@@ -252,6 +253,7 @@ export function createApp({
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
   const events = new EventLog();
+  const agentProgress = new Map();
   const publishEntry = events.publish.bind(events);
   const pipelineIngested = new Set();
   const runPackages = new Map();
@@ -1701,10 +1703,22 @@ export function createApp({
       }
     }
 
+    if (url.pathname === '/api/agent/progress' && request.method === 'GET') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      if (!sessionId) return sendJson(response, 400, { error: 'sessionId is required' });
+      const progress = agentProgress.get(sessionId);
+      if (!progress) return sendJson(response, 404, { error: 'planning session not found' });
+      return sendJson(response, 200, progress.snapshot());
+    }
+
     if (url.pathname === '/api/agent' && request.method === 'POST') {
       if (!agentRunner) return sendJson(response, 503, { error: 'agent runner not configured' });
       const body = await readJson(request);
-      events.publish({ type: 'agent.started', brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });
+      const sessionId = typeof body.sessionId === 'string' && body.sessionId.trim() ? body.sessionId.trim() : randomUUID();
+      const progress = createAgentProgress(sessionId);
+      if (agentProgress.size >= 100) agentProgress.delete(agentProgress.keys().next().value);
+      agentProgress.set(sessionId, progress);
+      events.publish({ type: 'agent.started', sessionId, brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });
       try {
         const brand = body.brand ? prepareBrand(body.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : null;
         const result = await agentRunner({
@@ -1713,14 +1727,19 @@ export function createApp({
           provider: body.provider,
           model: body.model,
           motionModel: body.motionModel,
-          sessionId: body.sessionId,
+          sessionId,
           runtimeDir,
-          onEvent: event => events.publish({ type: 'agent.event', event }),
+          onEvent: event => {
+            progress.update(event);
+            events.publish({ type: 'agent.event', sessionId, event });
+          },
         });
         const saved = store.write(result.package);
         const timeline = compilePackage(saved, dirname(store.path(saved.id)));
-        events.publish({ type: 'agent.finished', packageId: saved.id, revision: saved.revision, svgAssets: result.svgAssets?.length ?? 0, live: Boolean(result.live) });
+        progress.finish('done');
+        events.publish({ type: 'agent.finished', sessionId, packageId: saved.id, revision: saved.revision, svgAssets: result.svgAssets?.length ?? 0, live: Boolean(result.live) });
         return sendJson(response, 200, {
+          sessionId,
           package: saved,
           revision: saved.revision,
           timeline,
@@ -1734,8 +1753,10 @@ export function createApp({
           model: result.model ?? null,
         });
       } catch (error) {
-        events.publish({ type: 'agent.failed', message: error.message });
+        progress.finish('failed', error.message);
+        events.publish({ type: 'agent.failed', sessionId, message: error.message });
         return sendJson(response, error.status ?? 500, {
+          sessionId,
           error: error.message,
           ...(Array.isArray(error.errors) ? { details: error.errors } : {}),
         });

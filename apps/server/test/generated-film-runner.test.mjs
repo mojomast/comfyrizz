@@ -70,6 +70,9 @@ test('runner accepts real wordless H3 completion and persists silent conditionin
     assert.fail(`${error.message}\n${JSON.stringify(events)}`);
   }
   assert.equal(result.fallback, false, JSON.stringify(events));
+  assert.ok(events.some(event => event.type === 'runner_phase' && event.phase === 'initial' && event.status === 'completed'));
+  assert.ok(events.some(event => event.type === 'model_result' && typeof event.durationMs === 'number' && typeof event.elapsedMs === 'number'));
+  assert.ok(events.some(event => event.type === 'tool_result' && event.name === 'assets.generate_video' && typeof event.durationMs === 'number'));
   assert.equal(result.package.scenes[0].copy, undefined);
   const video = Object.values(result.package.assets).find(asset => asset.gen?.generator === 'fasth3-omni');
   assert.ok(video);

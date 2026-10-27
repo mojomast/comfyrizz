@@ -130,7 +130,7 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     planBrief(prompt: any, decisions?: any) {
       return request('POST', '/api/brief', { prompt, mode: 'plan', decisions });
     },
-    buildVideo({ brief, provider, motionModel }: { brief: any; provider?: any; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein' }) {
+    buildVideo({ brief, provider, motionModel, sessionId }: { brief: any; provider?: any; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein'; sessionId?: string }) {
       // /api/agent takes the provider id and model as top-level fields. Easy
       // callers pass the selection object from Agent settings, so flatten it
       // here; a bare provider id is accepted too.
@@ -146,7 +146,11 @@ export function createEasyApi(fetchImpl: FetchImpl) {
         ...(motionModel ? { motionModel } : {}),
         ...(chosen && chosen !== 'none' ? { provider: chosen } : {}),
         ...(chosen && chosen !== 'none' && model ? { model } : {}),
+        ...(sessionId ? { sessionId } : {}),
       });
+    },
+    getAgentProgress(sessionId: string) {
+      return request('GET', `/api/agent/progress?sessionId=${encodeURIComponent(sessionId)}`);
     },
     createConversation() {
       return request('POST', '/api/conversations');
