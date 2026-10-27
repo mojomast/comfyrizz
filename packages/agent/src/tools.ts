@@ -116,13 +116,17 @@ const sceneSchema = z.object({
   narration: z.string().optional(),
 }).passthrough();
 
+function boundedText(max: number) {
+  return z.preprocess(value => typeof value === 'string' ? clampText(value, max) : value, z.string().min(1).max(max));
+}
+
 export const proposeSchema = z.object({
   brief: z.string().min(1),
-  title: z.string().min(1).max(120).optional(),
+  title: boundedText(120).optional(),
   proposal: z.object({
-    logline: z.string().min(1).max(240),
-    look: z.string().min(1).max(100),
-    soundtrack: z.string().min(1).max(100),
+    logline: boundedText(240),
+    look: boundedText(100),
+    soundtrack: boundedText(100),
   }).strict().optional(),
   motion: z.object({
     energy: zodEnum(motionVocab.energies).optional(),
@@ -171,7 +175,7 @@ export const generateImageSchema = z.object({
   /** Labelled frame: keep labels and lock the camera. */
   labelled: z.boolean().optional(),
   /** Target style for a reference edit (with refs): clay, glass, editorial, ... */
-  style: z.string().min(1).max(80).optional(),
+  style: boundedText(80).optional(),
 });
 
 export const generateVideoSchema = z.object({
@@ -209,7 +213,7 @@ export const sketchToRenderSchema = z.object({
   scene_id: z.string().min(1),
   kind: z.enum(['diagram', 'hero', 'background', 'illustration', 'plate', 'pattern', 'chart', 'vector', 'vector-anim']),
   intent: z.string().min(1),
-  style: z.string().min(1).max(80),
+  style: boundedText(80),
   palette: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/)).max(8).optional(),
   width: z.number().int().positive().max(4096).optional(),
   height: z.number().int().positive().max(4096).optional(),
@@ -1282,9 +1286,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           additionalProperties: false,
           description: 'A short user-facing film proposal: one or two sentences, not technical production details.',
           properties: {
-            logline: { type: 'string', description: 'Clear story summary in at most two sentences and 240 characters.' },
-            look: { type: 'string', description: 'Short visual style description.' },
-            soundtrack: { type: 'string', description: 'Short audio direction, including wordless sound when relevant.' },
+            logline: { type: 'string', maxLength: 240, description: 'Clear story summary in at most two sentences and 240 characters.' },
+            look: { type: 'string', maxLength: 100, description: 'Short visual style description, at most 100 characters.' },
+            soundtrack: { type: 'string', maxLength: 100, description: 'Short audio direction, including wordless sound when relevant, at most 100 characters.' },
           },
           required: ['logline', 'look', 'soundtrack'],
         },
@@ -1325,7 +1329,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     'assets.generate_image': tool(
       'assets.generate_image',
       'Plan a FLUX 3 Image Klein still with an expanded caption (with refs: a Klein reference edit). This never runs a GPU job; spend needs approval.',
-      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string', description: 'Klein prose, subject first: pose or action, setting, light and mood in one or two specific sentences. Describe what is visible, not what is absent. Style, palette, framing and the text guard are appended. With text:true, quote the exact words and their placement. With refs, say what changes and what stays.' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string' } }, ['scene_id', 'intent']),
+      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string', description: 'Klein prose, subject first: pose or action, setting, light and mood in one or two specific sentences. Describe what is visible, not what is absent. Style, palette, framing and the text guard are appended. With text:true, quote the exact words and their placement. With refs, say what changes and what stays.' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string', maxLength: 80, description: 'Optional short reference-edit style, at most 80 characters.' } }, ['scene_id', 'intent']),
       generateImageSchema,
       planImage,
     ),

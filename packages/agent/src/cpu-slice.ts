@@ -73,7 +73,7 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
   }
   let draft: Record<string, any> | undefined = options.initialPackage ? structuredClone(options.initialPackage) : undefined;
   const stylePreset = /Look:\s*([a-z-]+)/i.exec(options.brief)?.[1] as StylePreset | undefined;
-  const tools = createToolset({
+  const allTools = createToolset({
     generateSvg: options.generateSvg,
     ...(options.initialPackage ? { initialPackage: options.initialPackage, initialIntent: intent } : {}),
     ...(options.persistSvg ? { persistSvg: options.persistSvg } : {}),
@@ -88,6 +88,11 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
       draft = pkg;
     },
   });
+  // Keep generated-film planning focused. SVG/style/chart tools are irrelevant,
+  // enlarge every model request and can derail a shot plan before video exists.
+  const tools = intent.generatedFilm
+    ? Object.fromEntries(Object.entries(allTools).filter(([name]) => ['storyboard.propose', 'storyboard.edit', 'assets.generate_image', 'assets.generate_video'].includes(name)))
+    : allTools;
   const live = Boolean(options.model);
   const model = options.model ?? createScriptedModel(defaultCpuScript(options.brief));
   const result = await runAgent({

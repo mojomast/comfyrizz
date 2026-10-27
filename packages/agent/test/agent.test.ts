@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { routeAsset, routeBrief } from '../src/router.js';
 import { expandFluxCaption, expandVideoCaption, aspectFromSize, sourceDims } from '../src/caption.js';
-import { createToolset, generateSvgSchema, proposeSchema } from '../src/tools.js';
+import { createToolset, generateImageSchema, generateSvgSchema, proposeSchema } from '../src/tools.js';
 import { runAgent } from '../src/agent.js';
 import type { ChatChunk, ChatModel, ChatRequest } from '../src/types.js';
 
@@ -125,6 +125,16 @@ test('a plain string copy is lifted to a headline object (DeepSeek shape)', () =
   // Objects still pass through unchanged.
   const kept = proposeSchema.parse({ brief: 'x', scenes: [{ id: 's', copy: { headline: 'A', items: ['one', 'two'] } }] });
   assert.deepEqual(kept.scenes?.[0].copy, { headline: 'A', items: ['one', 'two'] });
+});
+
+test('tools: deterministic text bounds avoid pointless model repair turns', () => {
+  const long = 'x'.repeat(300);
+  const parsed = proposeSchema.parse({ brief: 'x', proposal: { logline: long, look: long, soundtrack: long } });
+  assert.equal(parsed.proposal?.logline.length, 240);
+  assert.equal(parsed.proposal?.look.length, 100);
+  assert.equal(parsed.proposal?.soundtrack.length, 100);
+  const image = generateImageSchema.parse({ scene_id: 's1', intent: 'a map', style: long });
+  assert.equal(image.style?.length, 80);
 });
 
 test('tools: propose + edit package, SVG result, planned FLUX job', async () => {
@@ -280,6 +290,18 @@ test('agent stops after the repair limit and the step cap', async () => {
   const loop = new ScriptedModel(step => [{ type: 'tool_call', id: `c${step}`, name: 'assets.route', args: { scene_id: 's', need: 'icon' } }, { type: 'done' }]);
   const capped = await runAgent({ model: loop, brief: 'icon', tools, maxSteps: 2 });
   assert.equal(capped.stopped, 'max_steps');
+});
+
+test('agent circuit-breaks a repeated invalid call instead of spending more model turns', async () => {
+  const tools = createToolset();
+  let step = 0;
+  const model = new ScriptedModel(() => [{ type: 'tool_call', id: `bad${step++}`, name: 'assets.route', args: { need: 'icon' } }, { type: 'done' }]);
+  const result = await runAgent({ model, brief: 'icon', tools, maxRepairs: 8 });
+  assert.equal(result.ok, false);
+  assert.equal(result.stopped, 'repair_limit');
+  assert.match(result.error ?? '', /repeated invalid tool call/);
+  assert.equal(result.toolCalls.length, 2);
+  assert.equal(result.toolCalls[1].error, 'duplicate_invalid_call');
 });
 
 test('runCpuSlice builds a six-scene package with four SVG assets and one GPU plan', async () => {

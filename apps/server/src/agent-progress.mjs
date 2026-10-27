@@ -24,6 +24,7 @@ function sanitizedEvent(event) {
 /** In-memory, per-request planning telemetry. No prompts, reasoning or API keys. */
 export function createAgentProgress(sessionId, now = () => Date.now()) {
   const startedAt = now();
+  let finishedAt = null;
   const events = [];
   const state = {
     sessionId,
@@ -78,6 +79,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
   }
 
   function finish(status, message = null) {
+    finishedAt = now();
     state.status = status;
     state.activity = status;
     state.message = message;
@@ -88,7 +90,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
       ...state,
       startedAt: new Date(startedAt).toISOString(),
       updatedAt: new Date(now()).toISOString(),
-      elapsedMs: Math.max(0, now() - startedAt),
+      elapsedMs: Math.max(0, (finishedAt ?? now()) - startedAt),
       recentEvents: events.slice(-30),
     };
   }

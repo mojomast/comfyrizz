@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { createToolset, SILENT_CONDITIONING_ASSET_ID } from '../src/tools.js';
 import { classifyProductionIntent } from '../src/production-intent.js';
 import { autoMotionModel, parseMotionModel } from '../src/motion-model.js';
+import { runCpuSlice } from '../src/cpu-slice.js';
+import type { ChatModel, ChatRequest } from '../src/types.js';
 
 export const RETAINED_FILM_BRIEF = 'Create a 24-second wordless handcrafted miniature film in 4 shots. A mustard felt jerboa and a cobalt wooden bird restore an island lighthouse at dusk as a small boat approaches. Recurring tactile characters, clear physical action, cinematic camera moves, warm golden payoff, gentle coastal sound. No dialogue, captions, logos or real people.';
 
@@ -65,6 +67,26 @@ test('retained four-shot prompt is generated film; explicit procedural controls 
   assert.equal(classifyProductionIntent('No SVG or charts. Create a generated film in 4 shots with a felt mascot and coastal sound.').kind, 'generated-film');
   assert.equal(parseMotionModel(undefined), 'auto');
   assert.throws(() => parseMotionModel('flux'), /motionModel/);
+});
+
+test('generated-film planning exposes only storyboard and generated-media tools', async () => {
+  const requests: ChatRequest[] = [];
+  let step = 0;
+  const model: ChatModel = {
+    id: 'capture',
+    async *stream(request: ChatRequest) {
+      requests.push(request);
+      if (step++ === 0) {
+        yield { type: 'tool_call' as const, id: 'propose', name: 'storyboard.propose', args: { brief: RETAINED_FILM_BRIEF, title: 'The Lamp at Dusk', proposal, scenes: [shot('shot1')] } };
+      } else {
+        yield { type: 'text' as const, delta: 'done' };
+      }
+    },
+  };
+  await runCpuSlice({ brief: RETAINED_FILM_BRIEF, model, motionModel: 'klein', generateSvg: () => ({ svg: SVG }) });
+  assert.deepEqual(requests[0].tools.map(tool => tool.name).sort(), [
+    'assets.generate_image', 'assets.generate_video', 'storyboard.edit', 'storyboard.propose',
+  ]);
 });
 
 test('wordless H3 reuses real silent conditioning, preserves native soundscape and scene.media', async () => {

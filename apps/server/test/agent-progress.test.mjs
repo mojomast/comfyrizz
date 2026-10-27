@@ -28,6 +28,8 @@ test('agent progress tracks phases and timings without retaining private content
   assert.equal(snapshot.lastTool.durationMs, 125);
   assert.equal(snapshot.status, 'failed');
   assert.equal(snapshot.elapsedMs, 4125);
+  now += 5000;
+  assert.equal(progress.snapshot().elapsedMs, 4125, 'terminal elapsed time stays frozen');
   assert.deepEqual(snapshot.problems, ['scenes.0.copy: too long']);
   assert.ok(snapshot.recentEvents.length >= 7);
   assert.doesNotMatch(JSON.stringify(snapshot), /do-not-retain/);

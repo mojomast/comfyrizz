@@ -105,6 +105,18 @@ function zodIssues(error: { issues: Array<{ path: Array<string | number>; messag
   return error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }));
 }
 
+function fingerprintValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(fingerprintValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, fingerprintValue(item)]));
+  }
+  return value;
+}
+
+function invalidCallFingerprint(call: { name: string; args: unknown }): string {
+  return `${call.name}:${JSON.stringify(fingerprintValue(call.args))}`;
+}
+
 /**
  * Bounded tool loop. Every call is zod-validated before execution, invalid
  * arguments go back to the model (max 2 repairs by default), and the loop
@@ -128,6 +140,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   const runStartedAt = Date.now();
   const elapsedMs = () => Date.now() - runStartedAt;
   let repairs = 0;
+  const invalidCallFingerprints = new Set<string>();
   let text = '';
 
   for (let step = 1; step <= maxSteps; step += 1) {
@@ -202,6 +215,18 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       }
       const parsed = tool.schema.safeParse(call.args);
       if (!parsed.success) {
+        const fingerprint = invalidCallFingerprint(call);
+        if (invalidCallFingerprints.has(fingerprint)) {
+          const issues = zodIssues(parsed.error);
+          repairs += 1;
+          emit({ type: 'repair', id: call.id, name: call.name, issues, repairs, duplicate: true, step, durationMs: Date.now() - toolStartedAt });
+          const result = { error: 'duplicate_invalid_call', issues, repair: repairs, max_repairs: maxRepairs };
+          messages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: call.id });
+          records.push({ id: call.id, name: call.name, args: call.args, ok: false, error: 'duplicate_invalid_call', result });
+          emit({ type: 'error', code: 'duplicate_invalid_call', step, elapsedMs: elapsedMs() });
+          return { ok: false, text, messages, toolCalls: records, usage, stopped: 'repair_limit', error: `repeated invalid tool call: ${call.name}` };
+        }
+        invalidCallFingerprints.add(fingerprint);
         repairs += 1;
         const issues = zodIssues(parsed.error);
         emit({ type: 'repair', id: call.id, name: call.name, issues, repairs, step, durationMs: Date.now() - toolStartedAt });
