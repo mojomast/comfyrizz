@@ -8,6 +8,8 @@ __pycache__/
 runs/
 *.mp4
 !examples/**/*.mp4
+!site/assets/*.mp4
+!site/assets/*.webm
 .DS_Store
 .runtime/
 .env.*
