@@ -54,7 +54,7 @@ capture testing; it spends nothing and is not evidence of model output.
 
 ## Four-route comparison
 
-The planned real-output comparison uses the same short, four-shot film brief for:
+The planned real-output comparison uses four distinct, art-directed four-shot briefs:
 
 1. Klein only — stills plus code motion;
 2. H3 only — recurring characters and native sound;
