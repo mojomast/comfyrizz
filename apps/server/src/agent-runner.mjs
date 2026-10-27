@@ -226,9 +226,10 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         },
       };
     };
-    const runOnce = model =>
+    const runOnce = (model, repairInstructions = null) =>
       runCpuSlice({
-        brief,
+        brief: repairInstructions ? `${brief}\n\n${repairInstructions}` : brief,
+        ...(repairInstructions ? { initialPackage: slice.package } : {}),
         ...(model ? { model } : {}),
         ...(brandKit ? { brand: brandKit } : {}),
         ...(brandAssets ? { brandAssets } : {}),
@@ -253,6 +254,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     // silently change the requested deliverable and hide missing generated shots.
     if (agentModel && !acceptable(slice)) {
       if (productionIntent.generatedFilm) {
+        const initialProblems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
+        slice = await runOnce(agentModel, `The current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, then stop: ${initialProblems.join('; ')}. Return the corrected complete package.`);
         const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
         const schemaProblems = validatePackage(slice.package).valid ? [] : ['package schema validation failed'];
         const error = new Error(`generated-film plan is incomplete: ${[...problems, ...schemaProblems].join('; ') || slice.result.error || 'live agent did not finish'}`);

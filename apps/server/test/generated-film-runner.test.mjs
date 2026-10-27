@@ -41,7 +41,7 @@ test('FLUX-only generated-film output is rejected with no scripted fallback', as
       return true;
     },
   );
-  assert.equal(provider.calls, calls.length + 1, 'only the live script and its final answer ran; defaultCpuScript was never replayed as a fallback');
+  assert.equal(provider.calls, calls.length + 2, 'one live plan and one bounded repair, never the defaultCpuScript fallback');
 });
 
 test('runner accepts real wordless H3 completion and persists silent conditioning', async t => {
@@ -77,6 +77,24 @@ test('runner accepts real wordless H3 completion and persists silent conditionin
   assert.equal(audio.media.durationSeconds, 0.5);
   assert.equal(existsSync(join(runtimeDir, 'packages', audio.file)), true);
   assert.equal(readFileSync(join(runtimeDir, 'packages', audio.file)).length, 24044);
+});
+
+test('one bounded repair corrects the existing package duration before production', async t => {
+  const badScenes = scenes.map(scene => ({ ...scene, preferredFrames: 225 }));
+  const calls = [
+    { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: badScenes } },
+    ...scenes.map(scene => ({ name: 'assets.generate_video', args: { ...shotDirection(scene.id), motion_model: 'klein' } })),
+  ];
+  const { runner, provider } = await setup(t, calls);
+  provider.setCalls([
+    ...calls,
+    ...scenes.map(scene => ({ name: 'storyboard.edit', args: { scene_id: scene.id, patch: { preferredFrames: 180 } } })),
+  ]);
+  const result = await runner({ brief: BRIEF, provider: 'custom', motionModel: 'klein' });
+  assert.equal(result.fallback, false);
+  const seconds = result.package.scenes.reduce((sum, scene) => sum + scene.preferredFrames, 0) / result.package.format.fps;
+  assert.equal(seconds, 24);
+  assert.equal(result.package.proposal.logline, proposal.logline);
 });
 
 test('completion requires meaningful proposal fields and the requested duration', async () => {

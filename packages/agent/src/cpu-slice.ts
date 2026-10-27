@@ -17,6 +17,8 @@ export interface CpuSliceOptions {
   persistSvg?: ToolsetOptions['persistSvg'];
   persistAudio?: ToolsetOptions['persistAudio'];
   motionModel?: MotionModel;
+  /** Existing package for one bounded semantic-repair pass. */
+  initialPackage?: Record<string, unknown>;
   planImage?: (args: Parameters<NonNullable<ToolsetOptions['planImage']>>[0]) => PlannedImage;
   sessionId?: string;
   maxSteps?: number;
@@ -67,10 +69,11 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
   if (intent.generatedFilm && !options.model) {
     throw new Error('generated-film planning requires a live model and scene-referenced generated shots; the scripted defaultCpuScript is motion-graphics-only and is not an acceptable fallback');
   }
-  let draft: Record<string, any> | undefined;
+  let draft: Record<string, any> | undefined = options.initialPackage ? structuredClone(options.initialPackage) : undefined;
   const stylePreset = /Look:\s*([a-z-]+)/i.exec(options.brief)?.[1] as StylePreset | undefined;
   const tools = createToolset({
     generateSvg: options.generateSvg,
+    ...(options.initialPackage ? { initialPackage: options.initialPackage } : {}),
     ...(options.persistSvg ? { persistSvg: options.persistSvg } : {}),
     ...(options.persistAudio ? { persistAudio: options.persistAudio } : {}),
     motionModel,
