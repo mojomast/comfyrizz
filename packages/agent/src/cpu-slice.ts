@@ -6,6 +6,8 @@ import { createScriptedModel, type ScriptedCall } from './scripted-model.js';
 import { createToolset, type PlannedImage, type SvgAssetResult, type ToolsetOptions } from './tools.js';
 import type { ChatModel } from './types.js';
 import type { SvgIntentLike } from './svg.js';
+import { classifyProductionIntent } from './production-intent.js';
+import { parseMotionModel, type MotionModel } from './motion-model.js';
 
 export interface CpuSliceOptions {
   brief: string;
@@ -13,6 +15,8 @@ export interface CpuSliceOptions {
   model?: ChatModel;
   generateSvg: (intent: SvgIntentLike) => Promise<SvgAssetResult> | SvgAssetResult;
   persistSvg?: ToolsetOptions['persistSvg'];
+  persistAudio?: ToolsetOptions['persistAudio'];
+  motionModel?: MotionModel;
   planImage?: (args: Parameters<NonNullable<ToolsetOptions['planImage']>>[0]) => PlannedImage;
   sessionId?: string;
   maxSteps?: number;
@@ -58,11 +62,18 @@ export function defaultCpuScript(brief: string): ScriptedCall[] {
  * raster need left as a pending-GPU plan plus a procedural fallback.
  */
 export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceResult> {
+  const intent = classifyProductionIntent(options.brief);
+  const motionModel = parseMotionModel(options.motionModel, 'auto');
+  if (intent.generatedFilm && !options.model) {
+    throw new Error('generated-film planning requires a live model and scene-referenced generated shots; the scripted defaultCpuScript is motion-graphics-only and is not an acceptable fallback');
+  }
   let draft: Record<string, any> | undefined;
   const stylePreset = /Look:\s*([a-z-]+)/i.exec(options.brief)?.[1] as StylePreset | undefined;
   const tools = createToolset({
     generateSvg: options.generateSvg,
     ...(options.persistSvg ? { persistSvg: options.persistSvg } : {}),
+    ...(options.persistAudio ? { persistAudio: options.persistAudio } : {}),
+    motionModel,
     ...(options.planImage ? { planImage: options.planImage } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.brand ? { brand: options.brand } : {}),
@@ -93,10 +104,20 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
   const svgAssets = Object.entries(pkg.assets ?? {})
     .filter(([, asset]: [string, any]) => asset?.gen?.generator === 'llm-svg' && asset.status === 'ready')
     .map(([id]) => id);
-  if (svgAssets.length < 4) throw new Error(`CPU slice needs at least 4 ready llm-svg assets, got ${svgAssets.length}`);
+  if (!intent.generatedFilm && svgAssets.length < 4) throw new Error(`CPU slice needs at least 4 ready llm-svg assets, got ${svgAssets.length}`);
+  const { reachableAssetIds } = await import(new URL('../../../jobs/src/reachable.mjs', import.meta.url).href) as {
+    reachableAssetIds: (pkg: Record<string, any>) => Set<string>;
+  };
+  const reachable = reachableAssetIds(pkg);
   const pendingGpu = Object.entries(pkg.assets ?? {})
-    .filter(([, asset]: [string, any]) => asset?.status === 'pending' && ['flux3-klein', 'ltx25'].includes(asset?.gen?.generator))
-    .map(([assetId, asset]: [string, any]) => ({ assetId, generator: asset.gen.generator, ...(asset.gen.workflow ? { workflow: asset.gen.workflow } : {}) }));
+    .filter(([assetId, asset]: [string, any]) => reachable.has(assetId) && asset?.status === 'pending' && ['flux3-klein', 'ltx25', 'fasth3-omni'].includes(asset?.gen?.generator))
+    .map(([assetId, asset]: [string, any]) => {
+      const scene = (pkg.scenes ?? []).find((candidate: any) => candidate?.background?.asset === assetId
+        || candidate?.foreground?.some((item: any) => item?.asset === assetId)
+        || candidate?.media?.some((item: any) => item?.asset === assetId)
+        || candidate?.narration_asset === assetId || candidate?.presenter_asset === assetId);
+      return { assetId, generator: asset.gen.generator, ...(asset.gen.workflow ? { workflow: asset.gen.workflow } : {}), ...(scene?.id ? { sceneId: scene.id } : {}) };
+    });
   const routes = result.toolCalls
     .filter((call: ToolRecord) => call.name === 'assets.route' && call.ok)
     .map((call: ToolRecord) => {

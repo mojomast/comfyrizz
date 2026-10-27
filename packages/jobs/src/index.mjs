@@ -10,6 +10,7 @@ export {
   DIM_MULTIPLE_BY_KIND,
 } from "./plan.mjs";
 export { applyManifestToPackage, mediaFor } from "./apply.mjs";
+export { reachableAssetIds, planningAssetIds, sceneAssetIds, sceneAssetPlacements } from "./reachable.mjs";
 export { buildFastH3Prompt, fastH3SlotSeconds } from "./fasth3-direction.mjs";
 export {
   TEXT_GUARD,

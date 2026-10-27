@@ -1,0 +1,96 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { createCpuAgentRunner } from '../src/agent-runner.mjs';
+import { replayProvider } from './fake-provider.mjs';
+
+const BRIEF = 'Create a 24-second wordless handcrafted miniature film in 4 shots. A mustard felt jerboa and a cobalt wooden bird restore an island lighthouse at dusk as a small boat approaches. Recurring tactile characters, clear physical action, cinematic camera moves, warm golden payoff, gentle coastal sound. No dialogue, captions, logos or real people.';
+const proposal = { logline: 'Two friends restore the lamp.', look: 'Handcrafted dusk miniatures.', soundtrack: 'Coastal sound without speech.' };
+const scenes = [1, 2, 3, 4].map(n => ({ id: `shot${n}`, layout: 'hero', preferredFrames: 180, copy: { headline: 'Unwanted headline' } }));
+const shotDirection = scene => ({
+  scene_id: scene, subject: 'A mustard felt jerboa and cobalt wooden bird.',
+  composition: 'Handcrafted island lighthouse at dusk.', action: 'The jerboa hauls the lens while the bird braces it.',
+  camera: 'Slow cinematic push.', soundscape: 'Coastal wind and a soft lens click.', characterCount: 2,
+  finishing_sound: 'Mix coastal wind and the lens click in finishing.',
+});
+
+async function setup(t, calls) {
+  const runtimeDir = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'generated-film-runner-'));
+  const provider = await replayProvider(calls);
+  const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
+  t.after(async () => {
+    await provider.close();
+    rmSync(runtimeDir, { recursive: true, force: true });
+  });
+  return { provider, runner, runtimeDir };
+}
+
+test('FLUX-only generated-film output is rejected with no scripted fallback', async t => {
+  const calls = [
+    { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes } },
+    ...scenes.map((scene, index) => ({ name: 'assets.generate_image', args: { scene_id: scene.id, kind: 'illustration', intent: `FLUX-only shot ${index + 1}`, seed: index + 1 } })),
+  ];
+  const { provider, runner } = await setup(t, calls);
+  await assert.rejects(
+    () => runner({ brief: BRIEF, provider: 'custom', motionModel: 'h3' }),
+    error => {
+      assert.equal(error.code, 'GENERATED_FILM_INCOMPLETE');
+      assert.match(error.message, /scene\.media|FLUX stills/);
+      return true;
+    },
+  );
+  assert.equal(provider.calls, calls.length + 1, 'only the live script and its final answer ran; defaultCpuScript was never replayed as a fallback');
+});
+
+test('runner accepts real wordless H3 completion and persists silent conditioning', async t => {
+  const calls = [
+    { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: [scenes[0]] } },
+    { name: 'assets.generate_image', args: { scene_id: 'shot1', kind: 'identity-reference', intent: 'Recurring jerboa and bird identity', seed: 11 } },
+    { name: 'assets.generate_image', args: { scene_id: 'shot1', kind: 'composition-reference', intent: 'Island lighthouse composition', seed: 12 } },
+  ];
+  const { runner, runtimeDir, provider } = await setup(t, []);
+  // Stable generated image ids are returned by the same deterministic tool. The
+  // fake provider cannot discover them ahead of time, so obtain them from a
+  // dry tool run through the model is unnecessary: use the IDs computed by the
+  // agent's public deterministic script helper below.
+  const { createToolset } = await import('../../../packages/agent/dist/src/index.js');
+  let draft;
+  const tools = createToolset({ generateSvg: () => ({ svg: '<svg/>' }), onPackageChange: pkg => { draft = pkg; } });
+  await tools['storyboard.propose'].run(calls[0].args);
+  const identity = await tools['assets.generate_image'].run(calls[1].args);
+  const composition = await tools['assets.generate_image'].run(calls[2].args);
+  provider.setCalls([...calls, { name: 'assets.generate_video', args: { ...shotDirection('shot1'), motion_model: 'h3', image: identity.asset.id, reference: composition.asset.id, wordless: true } }]);
+  const events = [];
+  let result;
+  try {
+    result = await runner({ brief: BRIEF, provider: 'custom', motionModel: 'h3', onEvent: event => events.push(event) });
+  } catch (error) {
+    assert.fail(`${error.message}\n${JSON.stringify(events)}`);
+  }
+  assert.equal(result.fallback, false, JSON.stringify(events));
+  assert.equal(result.package.scenes[0].copy, undefined);
+  const video = Object.values(result.package.assets).find(asset => asset.gen?.generator === 'fasth3-omni');
+  assert.ok(video);
+  const audio = result.package.assets[video.gen.inputs.audio];
+  assert.equal(audio.media.durationSeconds, 0.5);
+  assert.equal(existsSync(join(runtimeDir, 'packages', audio.file)), true);
+  assert.equal(readFileSync(join(runtimeDir, 'packages', audio.file)).length, 24044);
+});
+
+test('runner explicitly accepts Klein stills + code motion without H3/LTX jobs', async t => {
+  const calls = [
+    { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: [scenes[0]] } },
+    { name: 'assets.generate_video', args: { ...shotDirection('shot1'), motion_model: 'klein' } },
+  ];
+  const { runner } = await setup(t, calls);
+  const result = await runner({ brief: BRIEF, provider: 'custom', motionModel: 'klein' });
+  assert.equal(result.fallback, false);
+  assert.match(result.package.compliance.warnings.join(' '), /stills \+ code motion/);
+  assert.ok(result.package.scenes[0].motion);
+  assert.ok(result.pendingGpu.every(asset => asset.generator === 'flux3-klein'));
+  const still = result.package.assets[result.package.scenes[0].media[0].asset];
+  assert.equal(still.kind, 'image');
+  assert.match(still.notes, /stills \+ code motion/);
+  assert.ok(!Object.values(result.package.assets).some(asset => ['fasth3-omni', 'ltx25'].includes(asset.gen?.generator)));
+});

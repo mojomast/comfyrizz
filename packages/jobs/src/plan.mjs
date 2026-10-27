@@ -15,6 +15,7 @@ import { pathProblem } from "../../schema/src/semantic.mjs";
 import { applyMotionRoleDefaults, applyPresenterDefaults, applyPromptDefaults } from "./defaults.mjs";
 import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
 import { buildFastH3Prompt, fastH3SlotSeconds } from "./fasth3-direction.mjs";
+import { planningAssetIds, sceneAssetIds } from "./reachable.mjs";
 
 export const JOBS_VERSION = 1;
 export const BATCH_ORDER = ["stills", "plates", "upscales", "audio", "presenters"];
@@ -262,11 +263,7 @@ function requireRelativePath(value, what, errors) {
 function sceneIndexOf(pkg, assetId) {
   const scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
   for (let i = 0; i < scenes.length; i += 1) {
-    const scene = scenes[i];
-    if (!scene || typeof scene !== "object") continue;
-    if (scene.background && scene.background.asset === assetId) return i;
-    if (Array.isArray(scene.foreground) && scene.foreground.some((fg) => fg && fg.asset === assetId)) return i;
-    if (scene.narration_asset === assetId) return i;
+    if (sceneAssetIds(scenes[i]).includes(assetId)) return i;
   }
   return -1;
 }
@@ -604,10 +601,7 @@ function checkSourceAspect({ pkg, plateAssetId, sourceId, dims, format, kinds, e
 }
 
 function sceneNamesAsset(scene, assetId) {
-  if (!scene || typeof scene !== "object") return false;
-  if (scene.background && scene.background.asset === assetId) return true;
-  if (Array.isArray(scene.foreground) && scene.foreground.some((fg) => fg && fg.asset === assetId)) return true;
-  return false;
+  return sceneAssetIds(scene).includes(assetId);
 }
 
 /** Cast members a Klein still depicts: its own `cast`, a scene that shows it, or the presenter portrait. */
@@ -729,9 +723,13 @@ export function planJobs(pkg, opts = {}) {
   //: things the plan did on purpose that a reader should know about (an allowed aspect mismatch)
   const warnings = [];
 
-  const orderedAssets = Object.keys(assets)
-    .filter((id) => (only ? only.has(id) : true))
-    .sort();
+  const orderedAssets = planningAssetIds(pkg, opts);
+  const plannedAssetSet = new Set(orderedAssets);
+  if (!only) {
+    for (const assetId of Object.keys(assets).sort()) {
+      if (!plannedAssetSet.has(assetId)) skipped.push({ asset: assetId, reason: "asset is not reachable from a scene or package render input" });
+    }
+  }
 
   // Pass 1: decide which assets produce a job at all.
   const kinds = new Map();

@@ -18,6 +18,90 @@ function extractSvg(text) {
   return match ? match[0] : null;
 }
 
+const FASTH3_WORKFLOW = 'workflows/fasth3_omni_ref2va.api.json';
+const LTX_I2V_WORKFLOW = 'workflows/ltx25_i2v_2stage.api.json';
+
+function hasCopy(copy) {
+  return Boolean(copy) && typeof copy === 'object' && Object.values(copy).some(value =>
+    Array.isArray(value) ? value.length > 0 : typeof value === 'string' ? value.trim().length > 0 : value != null,
+  );
+}
+
+/** Completion is shot-reachable: orphan pending GPU assets never satisfy it. */
+export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto') {
+  const problems = [];
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
+  if (scenes.length === 0) return ['generated film has no scenes/shots'];
+  if (motionModel === 'klein' && !/stills \+ code motion/i.test((pkg?.compliance?.warnings ?? []).join(' '))) {
+    problems.push('Klein proposal must explicitly say stills + code motion');
+  }
+  for (const scene of scenes) {
+    const sceneId = scene?.id ?? '(unknown scene)';
+    const mediaAssets = (Array.isArray(scene?.media) ? scene.media : [])
+      .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
+      .filter(Boolean);
+    const videos = mediaAssets.filter(asset => asset.kind === 'video' && ['fasth3-omni', 'ltx25'].includes(asset.gen?.generator));
+    if (motionModel === 'klein') {
+      const stills = mediaAssets.filter(asset => asset.kind === 'image' && asset.gen?.generator === 'flux3-klein');
+      if (stills.length === 0) problems.push(`${sceneId}: explicit Klein medium requires a scene-referenced FLUX 3 Image Klein still for every shot`);
+      if (videos.length > 0) problems.push(`${sceneId}: explicit Klein medium forbids H3/LTX substitution; use stills + code motion only`);
+      for (const asset of stills) {
+        if (!['workflows/flux3_klein_t2i.api.json', 'workflows/flux3_klein_ref_edit.api.json'].includes(asset.gen.workflow)) {
+          problems.push(`${sceneId}: Klein keyframe uses an unexpected workflow ${asset.gen.workflow}`);
+        }
+        if (!/stills \+ code motion/i.test(asset.notes ?? '') || !/finishing sound plan:/i.test(asset.notes ?? '')) {
+          problems.push(`${sceneId}: Klein still must say stills + code motion and carry an explicit finishing sound plan`);
+        }
+      }
+      if (!scene?.motion || !/stills \+ code motion/i.test(scene?.notes ?? '') || !/finishing sound plan/i.test(scene?.notes ?? '')) {
+        problems.push(`${sceneId}: Klein shot needs Remotion motion plus stills + code motion/finishing metadata`);
+      }
+      if (intent.wordless && (scene?.narration || scene?.narration_asset)) problems.push(`${sceneId}: wordless film cannot add narration`);
+      if (intent.noCaptions && (hasCopy(scene?.copy) || scene?.lower_third)) problems.push(`${sceneId}: no-captions brief forbids headlines, copy and lower thirds`);
+      continue;
+    }
+    if (videos.length === 0) {
+      const fluxOnly = mediaAssets.some(asset => asset.gen?.generator === 'flux3-klein')
+        || Object.values(assets).some(asset => asset.gen?.generator === 'flux3-klein');
+      problems.push(`${sceneId}: ${fluxOnly ? 'FLUX stills are not generated-film completion; ' : ''}attach a planned/ready H3 or LTX video through scene.media`);
+      continue;
+    }
+    for (const asset of videos) {
+      const generator = asset.gen.generator;
+      if (motionModel !== 'auto' && ((motionModel === 'h3' && generator !== 'fasth3-omni') || (motionModel === 'ltx' && generator !== 'ltx25'))) {
+        problems.push(`${sceneId}: configured motionModel ${motionModel} cannot be completed by ${generator}; do not substitute models`);
+      }
+      if (generator === 'fasth3-omni') {
+        if (asset.gen.workflow !== FASTH3_WORKFLOW) problems.push(`${sceneId}: H3 shot must use ${FASTH3_WORKFLOW}`);
+        if (typeof asset.gen.direction?.soundscape !== 'string' || !asset.gen.direction.soundscape.trim()) {
+          problems.push(`${sceneId}: H3 shot lacks its native soundscape direction (wordless does not mean no audio)`);
+        }
+        const audio = assets[asset.gen.inputs?.audio];
+        if (!audio || audio.kind !== 'audio' || audio.status !== 'ready' || typeof audio.file !== 'string') {
+          problems.push(`${sceneId}: H3 shot lacks required ready audio conditioning; wordless shots must use the deterministic silent WAV`);
+        }
+        if (!asset.gen.inputs?.image || !asset.gen.inputs?.reference) problems.push(`${sceneId}: H3 shot lacks its identity/composition image references`);
+      } else {
+        if (asset.gen.workflow !== LTX_I2V_WORKFLOW) problems.push(`${sceneId}: LTX shot must use ${LTX_I2V_WORKFLOW}`);
+        if (!asset.gen.inputs?.image) problems.push(`${sceneId}: LTX i2v shot lacks its required start-frame image`);
+        if (asset.gen.inputs?.audio) problems.push(`${sceneId}: LTX i2v has no native audio input; move sound to the explicit finishing plan`);
+        if (!['none', 'muted'].includes(asset.media?.audio)) problems.push(`${sceneId}: LTX output must be marked picture-only (media.audio none)`);
+        if (!/finishing sound plan:/i.test(asset.notes ?? '') || !/LTX finishing sound plan/i.test(scene?.notes ?? '')) {
+          problems.push(`${sceneId}: LTX shot lacks an explicit finishing sound plan`);
+        }
+      }
+    }
+    if (intent.wordless && (scene?.narration || scene?.narration_asset)) {
+      problems.push(`${sceneId}: wordless film cannot add narration (native H3 soundscape is still allowed)`);
+    }
+    if (intent.noCaptions && (hasCopy(scene?.copy) || scene?.lower_third)) {
+      problems.push(`${sceneId}: no-captions brief forbids headlines, copy and lower thirds`);
+    }
+  }
+  return problems;
+}
+
 function createLlmSvgGenerator(model, sessionId) {
   return async ({ intent, attempt, errors }) => {
     const prompt = [
@@ -42,10 +126,10 @@ function createLlmSvgGenerator(model, sessionId) {
   };
 }
 
-export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOString(), providers = {}, resolveProviderConfig } = {}) {
+export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOString(), providers = {}, resolveProviderConfig, motionModel: defaultMotionModel = 'auto' } = {}) {
   const packagesDir = join(runtimeDir, 'packages');
   const assetsDir = join(packagesDir, 'assets');
-  return async function runCpuAgent({ brief, brand, provider, model: modelName, sessionId = 'cpu-slice', onEvent } = {}) {
+  return async function runCpuAgent({ brief, brand, provider, model: modelName, motionModel: requestedMotionModel, sessionId = 'cpu-slice', onEvent } = {}) {
     if (typeof brief !== 'string' || brief.trim().length === 0) {
       const error = new Error('brief is required');
       error.status = 400;
@@ -53,7 +137,16 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     }
     const brandKit = brand?.kit ?? null;
     const brandAssets = brand?.assets ?? null;
-    const { runCpuSlice } = await import('../../../packages/agent/dist/src/index.js');
+    const { runCpuSlice, classifyProductionIntent, parseMotionModel } = await import('../../../packages/agent/dist/src/index.js');
+    const productionIntent = classifyProductionIntent(brief);
+    let motionModel;
+    try {
+      motionModel = parseMotionModel(requestedMotionModel ?? defaultMotionModel, 'auto');
+    } catch (cause) {
+      const error = new Error(cause.message);
+      error.status = 400;
+      throw error;
+    }
     const vector = await import('../../../packages/vector/dist/src/index.js');
     let agentModel;
     let live = false;
@@ -74,6 +167,11 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       mkdirSync(assetsDir, { recursive: true });
       writeFileSync(join(assetsDir, `${assetId}.svg`), svg);
       return `assets/${assetId}.svg`;
+    };
+    const persistAudio = (assetId, wav) => {
+      mkdirSync(assetsDir, { recursive: true });
+      writeFileSync(join(assetsDir, `${assetId}.wav`), wav);
+      return `assets/${assetId}.wav`;
     };
     // The live model builds the package draft (the C5-live goal). Live SVG markup
     // is opt-in: each live SVG is a full reasoning stream and one run can take
@@ -124,6 +222,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         ...(brandAssets ? { brandAssets } : {}),
         generateSvg,
         persistSvg,
+        persistAudio,
+        motionModel,
         sessionId,
         now,
         // The deterministic script needs 12 steps; a live model gets the same
@@ -131,14 +231,24 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         maxSteps: 16,
         ...(onEvent ? { onEvent } : {}),
       });
-    const acceptable = candidate =>
-      candidate.svgAssets.length >= 4 && candidate.pendingGpu.length >= 1 && validatePackage(candidate.package).valid;
+    const acceptable = candidate => productionIntent.generatedFilm
+      ? candidate.ok && generatedFilmCompletionProblems(candidate.package, productionIntent, motionModel).length === 0 && validatePackage(candidate.package).valid
+      : candidate.svgAssets.length >= 4 && candidate.pendingGpu.length >= 1 && validatePackage(candidate.package).valid;
     let slice = await runOnce(agentModel);
     let fallback = false;
-    // A live model can stall, stop early, or invent fields the v1 schema rejects.
-    // Fall back to the deterministic plan (still using the live SVG generator)
-    // so the CPU slice always completes with a valid package.
+    // Motion graphics retains the deterministic CPU fallback. A generated-film
+    // miss is an actionable failure: substituting the SVG/FLUX script would
+    // silently change the requested deliverable and hide missing generated shots.
     if (agentModel && !acceptable(slice)) {
+      if (productionIntent.generatedFilm) {
+        const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
+        const schemaProblems = validatePackage(slice.package).valid ? [] : ['package schema validation failed'];
+        const error = new Error(`generated-film plan is incomplete: ${[...problems, ...schemaProblems].join('; ') || slice.result.error || 'live agent did not finish'}`);
+        error.status = 422;
+        error.code = 'GENERATED_FILM_INCOMPLETE';
+        error.errors = [...problems, ...schemaProblems];
+        throw error;
+      }
       slice = await runOnce(null);
       fallback = true;
     }
@@ -148,11 +258,22 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       error.errors = validation.errors;
       throw error;
     }
+    if (productionIntent.generatedFilm) {
+      const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
+      if (problems.length) {
+        const error = new Error(`generated-film plan is incomplete: ${problems.join('; ')}`);
+        error.status = 422;
+        error.code = 'GENERATED_FILM_INCOMPLETE';
+        error.errors = problems;
+        throw error;
+      }
+    }
     const generatedAssets = inlineGeneratedAssets(slice.package, packagesDir);
     return {
       ok: slice.ok,
       live,
       fallback,
+      motionModel,
       provider: resolved?.name ?? 'scripted',
       model: resolved?.model ?? 'scripted',
       package: slice.package,

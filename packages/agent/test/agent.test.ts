@@ -218,10 +218,12 @@ test('C7: a styled diagram yields an SVG base plus a reference-edit image that p
 
   const plan = jobs.planJobs(draft);
   assert.deepEqual(jobs.checkJobsDoc(plan), []);
-  const refJob = plan.jobs.find((job: any) => job.asset === imageId);
-  assert.ok(refJob, 'a reference-edit still job is planned');
-  assert.deepEqual(refJob.fileInputs, [{ param: 'reference', from: 'package', path: draft.assets[svgId].file }]);
+  assert.ok(!plan.jobs.some((job: any) => job.asset === imageId), 'an orphan restyle never becomes a paid job');
   assert.ok(!plan.jobs.some((job: any) => job.asset === svgId), 'llm-svg stays CPU work, never a GPU job');
+  const explicit = jobs.planJobs(draft, { assets: [imageId] });
+  const refJob = explicit.jobs.find((job: any) => job.asset === imageId);
+  assert.ok(refJob, 'an explicitly selected reference edit remains plannable with its refs');
+  assert.deepEqual(refJob.fileInputs, [{ param: 'reference', from: 'package', path: draft.assets[svgId].file }]);
 });
 
 test('agent builds and edits a package and routes SVG vs FLUX on a mixed brief', async () => {

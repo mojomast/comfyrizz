@@ -184,7 +184,7 @@ test("a reference parameter resolves to the generated still too", () => {
       inputs: { reference: "a_plate1_still", prompt: "keep the layout, restyle it", seed: 9, steps: 16, megapixels: 1 },
     },
   };
-  const byId = Object.fromEntries(planJobs(pkg).jobs.map((j) => [j.id, j]));
+  const byId = Object.fromEntries(planJobs(pkg, { assets: ["a_ref"] }).jobs.map((j) => [j.id, j]));
   assert.deepEqual(byId["a_ref.still"].fileInputs, [
     { param: "reference", from: "job", job: "a_plate1_still.still", path: "assets/a_plate1_still.png" },
   ]);
@@ -529,10 +529,10 @@ test("a reference/edit job plans the reference-based size, not the package forma
       inputs: { prompt: "turn the reference into a product shot", reference: "a_plate1_still", megapixels: 1.0 },
     },
   };
-  const doc = planJobs(pkg);
+  const doc = planJobs(pkg, { assets: ["a_ref"] });
   const ref = doc.jobs.find((j) => j.id === "a_ref.still");
   assert.equal(ref.dimsSource, "reference-megapixels");
-  assert.deepEqual(ref.referenceDims, { width: 960, height: 576 }, "the reference's planned size");
+  assert.deepEqual(ref.referenceDims, { width: 960, height: 544 }, "the explicitly planned still reference uses the still lattice");
   assert.equal(ref.megapixels, 1.0);
   assert.ok(Math.abs((ref.dims.width * ref.dims.height) / 1e6 - 1) < 0.05, JSON.stringify(ref.dims));
   assert.notDeepEqual(ref.dims, { width: 1920, height: 1080 }, "the package format is not the output size");
@@ -550,7 +550,7 @@ test("a reference the plan cannot size warns instead of claiming the format (N4)
       inputs: { prompt: "product shot", reference: "assets/photo.png", megapixels: 1.0 },
     },
   };
-  const doc = planJobs(pkg);
+  const doc = planJobs(pkg, { assets: ["a_ref2"] });
   const ref = doc.jobs.find((j) => j.id === "a_ref2.still");
   assert.equal(ref.dimsSource, undefined);
   assert.deepEqual(doc.warnings.map((w) => w.code), ["PLAN_REFERENCE_SIZE_UNKNOWN"]);
@@ -835,7 +835,7 @@ test("the presenter job takes its length from the narration and its portrait at 
   // the shared fixture is the one the workflows contract test plans from, so it is the one that has to
   // carry a presenter; this package reads it rather than keeping a second copy that could drift
   const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "pipeline-py", "tests", "fixtures", "package-gpu1-workflows.json");
-  const doc = planJobs(JSON.parse(readFileSync(fixturePath, "utf8")));
+  const doc = planJobs(JSON.parse(readFileSync(fixturePath, "utf8")), { assets: ["a_presenter"] });
   const job = doc.jobs.find((candidate) => candidate.kind === "presenter");
 
   assert.ok(job, "the a2v asset plans a presenter job");

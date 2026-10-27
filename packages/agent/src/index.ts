@@ -11,6 +11,9 @@ export {
   routeSchema,
   generateSvgSchema,
   generateImageSchema,
+  generateVideoSchema,
+  silentConditioningWav,
+  SILENT_CONDITIONING_ASSET_ID,
   sketchToRenderSchema,
   codeSceneSchema,
   cutdownSchema,
@@ -26,6 +29,10 @@ export {
 } from './cutdown.js';
 export type { CutdownResult, CutdownSeconds, PresenterPlan, VoiceFn, VoiceInput, VoiceResult } from './cutdown.js';
 export type { AgentTool, PlannedImage, SvgAssetResult, ToolsetOptions } from './tools.js';
+export { classifyProductionIntent } from './production-intent.js';
+export type { ProductionIntent, ProductionIntentKind } from './production-intent.js';
+export { MOTION_MODELS, parseMotionModel, autoMotionModel, resolveShotMotionModel } from './motion-model.js';
+export type { MotionModel, ResolvedMotionModel, AutoResolvedMotionModel, ShotMotionDirection } from './motion-model.js';
 export { runAgent } from './agent.js';
 export { RENDER_LOCATIONS, DEFAULT_RENDER_LOCATION } from './render-location.js';
 export type { RenderLocation } from './render-location.js';

@@ -30,6 +30,8 @@ import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
 import { cutdownPackage, type VoiceFn } from './cutdown.js';
 import { styleApplyFor, styleList, styleSuggest } from './style-recipes.js';
+import { classifyProductionIntent, type ProductionIntent } from './production-intent.js';
+import { parseMotionModel, resolveShotMotionModel, type MotionModel } from './motion-model.js';
 
 export interface AgentTool {
   definition: ToolDef;
@@ -67,6 +69,10 @@ export interface ToolsetOptions {
   planImage?: (args: z.infer<typeof generateImageSchema>) => PlannedImage;
   /** Persist an SVG and return its package-relative path (C5 server). */
   persistSvg?: (assetId: string, svg: string, kind: string) => string | undefined;
+  /** Persist deterministic CPU audio conditioning; never calls a model or GPU. */
+  persistAudio?: (assetId: string, wav: Uint8Array, kind: 'silent-conditioning') => string | undefined;
+  /** Generated-film router. Auto selects H3 or LTX independently for each shot. */
+  motionModel?: MotionModel;
   /** Observe every package mutation; runCpuSlice uses this to return the draft. */
   onPackageChange?: (pkg: Record<string, any>) => void;
   /** Clock injection so tests are deterministic. */
@@ -165,6 +171,37 @@ export const generateImageSchema = z.object({
   style: z.string().min(1).max(80).optional(),
 });
 
+export const generateVideoSchema = z.object({
+  scene_id: z.string().min(1),
+  motion_model: z.enum(['auto', 'h3', 'ltx', 'klein']).optional(),
+  subject: z.string().min(1).max(2000),
+  composition: z.string().min(1).max(4000),
+  action: z.string().min(1).max(4000),
+  camera: z.string().min(1).max(2000),
+  soundscape: z.string().min(1).max(2000),
+  characterCount: z.number().int().min(0).max(100),
+  /** Picture 1: recurring subject/identity reference (H3), or LTX start art. */
+  image: z.string().min(1).optional(),
+  /** Picture 2: composition/art-direction reference. Required by H3. */
+  reference: z.string().min(1).optional(),
+  /** Exact-line voice conditioning for dialogue. Wordless shots create silence. */
+  audio: z.string().min(1).optional(),
+  /** Required for LTX: this model generates no native audio track. */
+  finishing_sound: z.string().min(1).max(2000).optional(),
+  frames: z.number().int().positive().optional(),
+  seed: z.number().int().min(0).max(0xffffffff).optional(),
+  wordless: z.boolean().optional(),
+  media_index: z.union([z.literal(0), z.literal(1)]).optional(),
+  dialogue: z.object({
+    text: z.string().min(1).max(2000),
+    conditioningText: z.string().min(1).max(2000),
+    language: z.string().min(1).max(64),
+    voice: z.string().min(1).max(512),
+    delivery: z.string().min(1).max(2000),
+    offscreen: z.boolean().optional(),
+  }).strict().optional(),
+});
+
 export const sketchToRenderSchema = z.object({
   scene_id: z.string().min(1),
   kind: z.enum(['diagram', 'hero', 'background', 'illustration', 'plate', 'pattern', 'chart', 'vector', 'vector-anim']),
@@ -220,6 +257,46 @@ const tool = (name: string, description: string, parameters: Record<string, unkn
 
 function hashId(prefix: string, value: string): string {
   return `${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
+}
+
+export const SILENT_CONDITIONING_ASSET_ID = 'a_h3_silence_500ms_24k';
+const FASTH3_WORKFLOW = 'workflows/fasth3_omni_ref2va.api.json';
+const LTX_I2V_WORKFLOW = 'workflows/ltx25_i2v_2stage.api.json';
+
+/** A deterministic 0.5 s, mono, 24 kHz PCM16 RIFF/WAV conditioning signal. */
+export function silentConditioningWav(): Buffer {
+  const sampleRate = 24000;
+  const samples = sampleRate / 2;
+  const dataBytes = samples * 2;
+  const wav = Buffer.alloc(44 + dataBytes);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + dataBytes, 4);
+  wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(dataBytes, 40);
+  return wav;
+}
+
+function nextFastH3Frames(requested: number): number {
+  const base = Math.max(5, requested);
+  return base + ((5 - (base % 17) + 17) % 17);
+}
+
+function nextLtxFrames(requested: number): number {
+  const base = Math.max(1, requested);
+  return base + ((1 - (base % 8) + 8) % 8);
+}
+
+function meaningfulCopy(copy: unknown): boolean {
+  if (!copy || typeof copy !== 'object') return false;
+  return Object.values(copy).some(value => Array.isArray(value) ? value.length > 0 : typeof value === 'string' ? value.trim().length > 0 : value != null);
 }
 
 function baseParameters(properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
@@ -449,6 +526,28 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   return scene;
 }
 
+function applyProductionIntentToScene(scene: Record<string, any>, intent: ProductionIntent): Record<string, any> {
+  if (!intent.generatedFilm) return scene;
+  const next = { ...scene };
+  if (intent.noCaptions) {
+    delete next.copy;
+    delete next.lower_third;
+    // Title/hero layouts require a headline. A copy-free list layout is the
+    // schema-supported shell; generate_video subsequently enables media_only.
+    if (['title', 'hero', 'stat', 'chart', 'code'].includes(next.layout)) {
+      next.layout = 'list';
+      delete next.variant;
+      delete next.data;
+      delete next.code;
+    }
+  }
+  if (intent.wordless) {
+    delete next.narration;
+    delete next.narration_asset;
+  }
+  return next;
+}
+
 function withMotionFixes<T extends Record<string, unknown>>(result: T, pkg: Record<string, any>): T {
   const fixes = motionFixInstructions(lintPackageMotion(pkg));
   if (fixes.length === 0) return result;
@@ -528,7 +627,8 @@ function mergeRefs(userRefs: string[], castRefs: string[]): string[] {
  * uploads) return a card request and never perform the action here.
  */
 export function createToolset(options: ToolsetOptions = {}): Record<string, AgentTool> {
-  const state: { package?: Record<string, any> } = {
+  const configuredMotionModel = parseMotionModel(options.motionModel, 'auto');
+  const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal'] } = {
     package: options.initialPackage ? structuredClone(options.initialPackage) : undefined,
   };
 
@@ -541,9 +641,13 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45).trimEnd()}…` : rawTitle;
     const id = hashId('pkg', args.brief);
     const datasetIds = new Set(Object.keys(args.datasets ?? {}));
-    const scenes = args.scenes?.length
+    const intent = classifyProductionIntent(args.brief);
+    state.intent = intent;
+    state.proposal = args.proposal;
+    const scenes = (args.scenes?.length
       ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set()))
-      : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }];
+      : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
+      .map(scene => applyProductionIntentToScene(scene, intent));
     const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot() : null;
     if (mascot) {
       for (const scene of scenes) scene.cast = [mascot.member.id];
@@ -560,7 +664,6 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) },
       voice: { enabled: false, engine: 'none' },
       datasets: args.datasets ?? {},
-      ...(args.proposal ? { proposal: args.proposal } : {}),
       scenes,
       ...(mascot ? { cast: [mascot.member] } : {}),
       assets: { ...(options.brandAssets ?? {}), ...(mascot ? { [mascot.assetId]: mascot.asset } : {}) },
@@ -572,7 +675,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     if (motion) state.package.motion = motion;
     touch();
     return withMotionFixes(
-      { package: state.package, revision: state.package.revision, placeholders: scenes.length === 1 && !args.scenes ? ['duration', 'palette'] : [] },
+      { package: state.package, revision: state.package.revision, proposal: state.proposal ?? null, placeholders: scenes.length === 1 && !args.scenes ? ['duration', 'palette'] : [] },
       state.package,
     );
   };
@@ -588,7 +691,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const datasetIds = new Set(Object.keys(draft.datasets ?? {}));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
     const nextScenes = scenes.map((scene, sceneIndex) => sceneIndex === index
-      ? normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds)
+      ? applyProductionIntentToScene(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds), state.intent ?? classifyProductionIntent(''))
       : scene);
     state.package = { ...draft, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
@@ -745,15 +848,26 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       },
     };
     if (state.package) {
-      const scenes = cast.ids.length
-        ? (Array.isArray(state.package.scenes) ? state.package.scenes : []).map((scene: any) => {
-            if (scene?.id !== args.scene_id) return scene;
-            const existing = Array.isArray(scene.cast) ? scene.cast : [];
-            const next = [...existing];
-            for (const castId of cast.ids) if (!next.includes(castId)) next.push(castId);
-            return next.length === existing.length ? scene : { ...scene, cast: next.slice(0, 8) };
-          })
-        : state.package.scenes;
+      const referenceOnly = (isRefEdit && cast.ids.length === 0) || /\b(?:reference|identity|cast|portrait|start[\s-]?frame)\b/i.test(args.kind ?? '');
+      const scenes = (Array.isArray(state.package.scenes) ? state.package.scenes : []).map((scene: any) => {
+        if (scene?.id !== args.scene_id) return scene;
+        let next = scene;
+        if (cast.ids.length) {
+          const existing = Array.isArray(next.cast) ? next.cast : [];
+          const castIds = [...existing];
+          for (const castId of cast.ids) if (!castIds.includes(castId)) castIds.push(castId);
+          if (castIds.length !== existing.length) next = { ...next, cast: castIds.slice(0, 8) };
+        }
+        if (!referenceOnly) {
+          const existing = Array.isArray(next.foreground) ? next.foreground : [];
+          if (!existing.some((item: any) => item?.asset === id)) {
+            const index = existing.length;
+            const placement = foregroundFor(args.scene_id, index) ?? { x: 0.5, y: 0.5 + index * 0.05, w: 0.5, anim: 'fade-in' as const };
+            next = { ...next, foreground: [...existing, { ...placement, asset: id }] };
+          }
+        }
+        return next;
+      });
       state.package = {
         ...state.package,
         scenes,
@@ -774,6 +888,267 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       note: aspectMismatch
         ? `planned only; no GPU job was submitted. Source is ${requestedAspect} but the package output is ${outputAspect}: i2v will centre-crop.`
         : 'planned only; no GPU job was submitted',
+    };
+  };
+
+  const generateVideo = (args: z.infer<typeof generateVideoSchema>) => {
+    if (!state.package) throw new Error('no package draft; call storyboard.propose first');
+    const sceneIndex = (Array.isArray(state.package.scenes) ? state.package.scenes : []).findIndex((scene: any) => scene?.id === args.scene_id);
+    if (sceneIndex < 0) throw new Error(`scene ${args.scene_id} not found`);
+    const intent = state.intent ?? classifyProductionIntent('');
+    const wordless = args.wordless ?? args.dialogue === undefined;
+    if (wordless && args.dialogue) throw new Error('wordless shots cannot also carry dialogue; remove dialogue or set wordless:false');
+    if (!wordless && !args.dialogue) throw new Error('wordless:false needs exact dialogue and ready conditioning audio');
+
+    const noText = intent.generatedFilm && intent.noCaptions
+      ? ' No captions, subtitles, titles, labels, logos or other on-screen text.'
+      : '';
+    const direction = {
+      subject: args.subject.trim(),
+      composition: `${args.composition.trim()}${noText}`,
+      action: args.action.trim(),
+      camera: args.camera.trim(),
+      soundscape: args.soundscape.trim(),
+      characterCount: args.characterCount,
+      ...(args.dialogue ? { dialogue: { ...args.dialogue } } : {}),
+    };
+    const model = resolveShotMotionModel(configuredMotionModel, args.motion_model, direction);
+    if (model === 'ltx' && args.dialogue) {
+      throw new Error('LTX-2.5 i2v does not generate synchronized dialogue; choose motion_model h3 for this shot or make it wordless with an explicit finishing sound plan');
+    }
+    if (model === 'klein' && args.dialogue) {
+      throw new Error('Klein stills + code motion does not accept H3 dialogue conditioning; put speech and sound in finishing_sound, or choose h3 for native AV');
+    }
+
+    const visualRef = (id: string | undefined, role: string, required: boolean): string | undefined => {
+      if (!id) {
+        if (required) throw new Error(`${model} needs ${role}. Call assets.generate_image for that role and pass its returned asset id; a FLUX still alone is not film completion.`);
+        return undefined;
+      }
+      const asset = state.package!.assets?.[id];
+      if (!asset) throw new Error(`${role} ${id} is not in the package. Create it with assets.generate_image, then pass the returned id to assets.generate_video.`);
+      if (asset.kind !== 'image') throw new Error(`${role} ${id} is ${asset.kind}; ${model} needs a raster image reference, not ${asset.kind}. Generate a proper image reference instead of substituting a still for video.`);
+      if (asset.status === 'ready') {
+        if (typeof asset.file !== 'string' || typeof asset.sha256 !== 'string') throw new Error(`${role} ${id} is ready but has no usable file/sha256; regenerate the image reference.`);
+      } else if (asset.status !== 'pending' || asset.gen?.generator !== 'flux3-klein') {
+        throw new Error(`${role} ${id} is ${asset.status}; provide a ready image or a pending FLUX image plan that the shot can depend on.`);
+      }
+      return id;
+    };
+
+    let image = visualRef(args.image, 'Picture 1 (subject/identity)', model === 'h3');
+    let reference = visualRef(args.reference, 'Picture 2 (composition/art direction)', model === 'h3');
+    if (model === 'ltx' && !image && !reference) {
+      throw new Error('LTX-2.5 i2v needs a start-frame image. Generate a shot image with assets.generate_image and pass it as image (or reference).');
+    }
+
+    const scene = state.package.scenes[sceneIndex];
+    const packageFps = Number(state.package.format?.fps ?? 30);
+    const slotSeconds = Number(scene.preferredFrames) / packageFps;
+    if (!(slotSeconds > 0.2)) throw new Error(`${args.scene_id}: set preferredFrames and package fps before planning a generated shot`);
+    const requestedFrames = args.frames ?? Math.max(1, Math.ceil(slotSeconds * 24));
+    let asset: Record<string, any>;
+    let id: string;
+    let resolvedFrames: number;
+    let outputFps = 24;
+    let finishingSound: string | undefined;
+
+    if (model === 'h3') {
+      let audio: string;
+      if (wordless) {
+        if (args.audio) throw new Error('wordless H3 shots use the shared silent conditioning asset; omit audio or provide dialogue with an exact-line clip');
+        const wav = silentConditioningWav();
+        const sha256 = createHash('sha256').update(wav).digest('hex');
+        const existing = state.package.assets?.[SILENT_CONDITIONING_ASSET_ID];
+        if (existing && (existing.kind !== 'audio' || existing.status !== 'ready' || existing.sha256 !== sha256)) {
+          throw new Error(`${SILENT_CONDITIONING_ASSET_ID} already exists with different content; replace the collision before planning wordless H3 shots`);
+        }
+        if (!existing) {
+          const file = options.persistAudio?.(SILENT_CONDITIONING_ASSET_ID, wav, 'silent-conditioning') ?? `assets/${SILENT_CONDITIONING_ASSET_ID}.wav`;
+          state.package.assets = {
+            ...(state.package.assets ?? {}),
+            [SILENT_CONDITIONING_ASSET_ID]: {
+              kind: 'audio', origin: 'upload', status: 'ready', file, sha256, bytes: wav.length,
+              license: { id: 'CC0-1.0' }, redistributable: true,
+              source: { provider: 'repo', id: 'comfyrizz/deterministic-silence-500ms-24k-mono' },
+              media: { durationSeconds: 0.5, audio: 'present', codec: 'pcm_s16le' },
+              notes: 'Deterministic digital silence for wordless FastH3 conditioning; no TTS model was run.',
+            },
+          };
+        }
+        audio = SILENT_CONDITIONING_ASSET_ID;
+      } else {
+        audio = args.audio ?? '';
+        const conditioning = state.package.assets?.[audio];
+        if (!args.audio || !conditioning || conditioning.kind !== 'audio' || conditioning.status !== 'ready'
+          || typeof conditioning.file !== 'string' || typeof conditioning.sha256 !== 'string'
+          || !(Number(conditioning.media?.durationSeconds) > 0)) {
+          throw new Error('H3 dialogue needs a ready exact-line audio asset with file, sha256 and measured media.durationSeconds; wordless shots can omit audio to reuse deterministic silence');
+        }
+      }
+      resolvedFrames = nextFastH3Frames(requestedFrames);
+      if (resolvedFrames > 362 || slotSeconds > resolvedFrames / 24 + 1 / 24) {
+        throw new Error(`${args.scene_id}: the ${slotSeconds.toFixed(3)} s editorial slot exceeds FastH3's legal 17n+5 source duration; shorten the shot or split coverage`);
+      }
+      id = hashId('a_vid', `${args.scene_id}:h3:${image}:${reference}:${audio}:${resolvedFrames}:${args.seed ?? 0}:${JSON.stringify(direction)}`);
+      asset = {
+        kind: 'video', origin: 'generated', status: 'pending',
+        license: { id: 'LicenseRef-MiniMax-H3-Community' }, redistributable: false,
+        model_license: { id: 'LicenseRef-MiniMax-H3-Community', url: 'https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE' },
+        notes: wordless
+          ? 'pending-GPU: FastH3 native AV; wordless means no speech, with the directed physical soundscape retained.'
+          : 'pending-GPU: FastH3 native AV with exact-line voice conditioning.',
+        gen: {
+          generator: 'fasth3-omni', workflow: FASTH3_WORKFLOW, workflow_sha256: WORKFLOW_SHA256[FASTH3_WORKFLOW], model: 'fasth3-omni',
+          direction: { ...direction, slotSeconds },
+          inputs: { image, reference, audio, width: 832, height: 480, frames: resolvedFrames, fps: 24, seed: args.seed ?? 0 },
+        },
+      };
+    } else if (model === 'ltx') {
+      finishingSound = args.finishing_sound?.trim();
+      if (!finishingSound) {
+        throw new Error('LTX-2.5 generates picture without native audio; pass finishing_sound with an explicit soundscape/music/SFX mix plan (or choose h3 for native AV)');
+      }
+      if (image && reference && image !== reference) {
+        // LTX has one start-image slot. Compile a real, traceable start-frame
+        // still from both shared roles rather than dropping either reference.
+        const start = planImage({
+          scene_id: args.scene_id,
+          kind: 'ltx-start-frame',
+          intent: `${args.subject}. ${args.composition}`,
+          refs: [reference!, image!],
+          ...(args.seed !== undefined ? { seed: args.seed } : {}),
+        });
+        const startId = start.asset.id;
+        const startAsset = state.package.assets[startId];
+        startAsset.gen.inputs.prompt = [
+          'Create the first frame of one continuous cinematic shot.',
+          `Identity and subject: ${args.subject}.`,
+          `Composition and art direction: ${args.composition}.`,
+          'Preserve the shared subject identity from Picture 2 and the composition from Picture 1.',
+          intent.generatedFilm && intent.noCaptions ? 'No captions, text, letters, logos or watermarks.' : 'No unintended text or watermarks.',
+        ].join(' ');
+        delete startAsset.gen.inputs.text;
+        startAsset.notes = 'pending-GPU: LTX start frame compiled from the shared identity and composition references; this still is an input, not film completion.';
+        image = startId;
+        reference = undefined;
+      } else {
+        image = image ?? reference;
+        reference = undefined;
+      }
+      resolvedFrames = nextLtxFrames(requestedFrames);
+      if (slotSeconds > resolvedFrames / 24 + 1 / 24) {
+        throw new Error(`${args.scene_id}: the ${slotSeconds.toFixed(3)} s slot is longer than the requested LTX source; omit frames to fit the scene or split the shot`);
+      }
+      const startAsset = state.package.assets[image!];
+      const outputAspect = aspectFromSize(state.package.format?.width, state.package.format?.height);
+      const fallbackDims = sourceDims(outputAspect);
+      const width = Number(startAsset?.gen?.inputs?.width ?? startAsset?.media?.width ?? fallbackDims.width);
+      const height = Number(startAsset?.gen?.inputs?.height ?? startAsset?.media?.height ?? fallbackDims.height);
+      const prompt = [
+        'Use the provided start image as the first frame.',
+        `${args.subject.trim()}. ${args.composition.trim()}.`,
+        `${args.action.trim()}. ${args.camera.trim()}.`,
+        'One continuous shot, no cuts.',
+        intent.generatedFilm && intent.noCaptions ? 'No captions, text, letters, logos or watermarks.' : 'No unintended text or watermarks.',
+      ].join(' ');
+      id = hashId('a_vid', `${args.scene_id}:ltx:${image}:${resolvedFrames}:${args.seed ?? 0}:${prompt}:${finishingSound}`);
+      asset = {
+        kind: 'video', origin: 'generated', status: 'pending',
+        license: { id: 'CC0-1.0' }, redistributable: true,
+        model_license: { id: 'LTX-2.x-Community', url: 'https://huggingface.co/Lightricks/LTX-2.5' },
+        media: { audio: 'none', fps: 24, frames: resolvedFrames },
+        notes: `pending-GPU: LTX-2.5 picture only; no native audio. Finishing sound plan: ${finishingSound}`,
+        gen: {
+          generator: 'ltx25', workflow: LTX_I2V_WORKFLOW, workflow_sha256: WORKFLOW_SHA256[LTX_I2V_WORKFLOW], model: 'ltx-2.5',
+          inputs: { image, prompt, width, height, frames: resolvedFrames, fps: 24, seed: args.seed ?? 0, strength: 0.85 },
+        },
+      };
+    } else {
+      finishingSound = args.finishing_sound?.trim();
+      if (!finishingSound) {
+        throw new Error('Klein stills + code motion generates no native audio; pass finishing_sound with an explicit soundscape/music/SFX mix plan');
+      }
+      const refs = [...new Set([image, reference].filter((value): value is string => typeof value === 'string' && value.length > 0))];
+      const keyframe = planImage({
+        scene_id: args.scene_id,
+        kind: 'klein-film-keyframe',
+        intent: `${args.subject}. ${args.composition}. Keyframe for: ${args.action}`,
+        refs,
+        ...(args.seed !== undefined ? { seed: args.seed } : {}),
+      });
+      id = keyframe.asset.id;
+      asset = state.package.assets[id];
+      asset.gen.inputs.prompt = `${asset.gen.inputs.prompt} Single still keyframe only; camera movement, transitions and timing are handled by Remotion. stills + code motion.`;
+      delete asset.gen.inputs.text;
+      asset.media = { ...(asset.media ?? {}), audio: 'none' };
+      asset.notes = `pending-GPU: Klein image keyframe only, not generated character animation. stills + code motion; Remotion handles camera movement, transitions and timing. Finishing sound plan: ${finishingSound}`;
+      resolvedFrames = Number(scene.preferredFrames);
+      outputFps = packageFps;
+    }
+
+    const scenes = state.package.scenes.map((candidate: any, index: number) => {
+      if (index !== sceneIndex) return candidate;
+      let next = applyProductionIntentToScene(candidate, intent);
+      const mediaIndex = args.media_index ?? 0;
+      const existingMedia = Array.isArray(next.media) && next.media.length === 2 ? next.media : [{ asset: id }, { asset: id }];
+      next.media = existingMedia.map((plate: any, plateIndex: number) => plateIndex === mediaIndex ? { asset: id } : plate);
+      next.background = { asset: id };
+      next.media_only = true;
+      if (intent.generatedFilm) next.foreground = [];
+      if (model === 'ltx') {
+        const note = `LTX finishing sound plan (picture has no native audio): ${finishingSound}`;
+        next.notes = clampText(next.notes && !next.notes.includes('LTX finishing sound plan') ? `${next.notes} ${note}` : note, 512);
+      }
+      if (model === 'klein') {
+        next.foreground = [{
+          asset: id, x: 0.5, y: 0.5, w: 1,
+          anim: /push|dolly|zoom|pan|tracking|drift/i.test(args.camera) ? 'ken-burns' as const : 'fade-in' as const,
+        }];
+        next.motion = normalizeSceneMotion({
+          ...(next.motion ?? {}), entry: next.motion?.entry ?? 'fadeUp', ease: next.motion?.ease ?? 'enter',
+          spring: next.motion?.spring ?? 'settle', stagger: next.motion?.stagger ?? 'none', emphasis: next.motion?.emphasis ?? 'none',
+        }) ?? { entry: 'fadeUp', ease: 'enter', spring: 'settle', stagger: 'none', emphasis: 'none' };
+        next.transitionOut = next.transitionOut ?? { type: 'fade', frames: 15 };
+        const note = `Klein stills + code motion; Remotion handles camera movement, transitions and timing. Finishing sound plan (no native audio): ${finishingSound}`;
+        next.notes = clampText(next.notes && !next.notes.includes('stills + code motion') ? `${next.notes} ${note}` : note, 512);
+      }
+      return next;
+    });
+    if (model === 'klein' && state.proposal) {
+      state.proposal = {
+        ...state.proposal,
+        look: clampText(`stills + code motion; ${state.proposal.look}`, 100)!,
+        soundtrack: clampText(`stills + code motion finishing sound: ${finishingSound}`, 100)!,
+      };
+    }
+    const compliance = model === 'klein' ? {
+      ...(state.package.compliance ?? {}),
+      warnings: [
+        ...(Array.isArray(state.package.compliance?.warnings) ? state.package.compliance.warnings : []).filter((note: string) => !note.startsWith('Proposal medium:') && !note.startsWith('Finishing sound plan (stills + code motion):')),
+        'Proposal medium: stills + code motion',
+        `Finishing sound plan (stills + code motion): ${finishingSound}`,
+      ].slice(-64),
+    } : state.package.compliance;
+    state.package = {
+      ...state.package,
+      compliance,
+      scenes,
+      assets: { ...(state.package.assets ?? {}), [id]: asset },
+      revision: Number(state.package.revision ?? 0) + 1,
+    };
+    touch();
+    return {
+      scene_id: args.scene_id,
+      motion_model: model,
+      asset: { id, ...asset },
+      native_audio: model === 'h3',
+      ...(model === 'klein' ? { medium: 'stills + code motion', generated_character_animation: false, ...(state.proposal ? { proposal: state.proposal } : {}) } : {}),
+      ...(finishingSound ? { finishing_sound: finishingSound } : {}),
+      frames: resolvedFrames,
+      fps: outputFps,
+      requires_approval: 'spend',
+      note: 'planned only; no GPU job was submitted',
     };
   };
 
@@ -916,6 +1291,38 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string' } }, ['scene_id', 'intent']),
       generateImageSchema,
       planImage,
+    ),
+    'assets.generate_video': tool(
+      'assets.generate_video',
+      'Plan one scene-referenced generated-film shot; never submits GPU work. motion_model auto routes character acting/dialogue/native sound to FastH3 and scenery/B-roll/camera-led shots to LTX-2.5. H3 requires image=identity and reference=composition plus exact-line audio for dialogue; wordless H3 reuses deterministic silent conditioning and still generates native soundscape. LTX requires a start image and finishing_sound because it emits no native audio. Explicit klein plans still keyframes only, labels stills + code motion, uses Remotion for camera/transitions/timing and requires finishing_sound. Conflicting explicit selections fail; no model is a fallback for another.',
+      baseParameters({
+        scene_id: { type: 'string' },
+        motion_model: { type: 'string', enum: ['auto', 'h3', 'ltx', 'klein'], description: 'Per-shot selection. Must agree with a non-auto configured motionModel.' },
+        subject: { type: 'string', description: 'Visible subject and stable identity, not a prompt tag.' },
+        composition: { type: 'string', description: 'Framing, setting, spatial contacts and art direction.' },
+        action: { type: 'string', description: 'One observable action; auto uses character action to select H3.' },
+        camera: { type: 'string', description: 'Shot size and camera move; auto uses camera-led scenery to select LTX.' },
+        soundscape: { type: 'string', description: 'Physical/native audio direction for H3. Wordless never means silent.' },
+        characterCount: { type: 'integer', minimum: 0 },
+        image: { type: 'string', description: 'Picture 1 subject/identity image asset id; LTX start art when reference is absent.' },
+        reference: { type: 'string', description: 'Picture 2 composition/art-direction image asset id. Required for H3.' },
+        audio: { type: 'string', description: 'Ready exact-line voice WAV asset for H3 dialogue. Omit for wordless silent conditioning.' },
+        finishing_sound: { type: 'string', description: 'Required LTX/Klein post-production sound plan; neither emits native audio.' },
+        frames: { type: 'integer', minimum: 1, description: 'Requested source frames at 24 fps; snapped up to the selected model lattice and must cover the scene slot.' },
+        seed: { type: 'integer', minimum: 0 },
+        wordless: { type: 'boolean' },
+        media_index: { type: 'integer', enum: [0, 1], description: 'Which supported scene.media plate receives this video; defaults to 0.' },
+        dialogue: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            text: { type: 'string' }, conditioningText: { type: 'string' }, language: { type: 'string' },
+            voice: { type: 'string' }, delivery: { type: 'string' }, offscreen: { type: 'boolean' },
+          },
+          required: ['text', 'conditioningText', 'language', 'voice', 'delivery'],
+        },
+      }, ['scene_id', 'subject', 'composition', 'action', 'camera', 'soundscape', 'characterCount']),
+      generateVideoSchema,
+      generateVideo,
     ),
     'assets.sketch_to_render': tool(
       'assets.sketch_to_render',
