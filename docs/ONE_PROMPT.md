@@ -55,8 +55,8 @@ server OS, not the browser's OS. The CLI uses your own Google account and credit
 
 ### 3. Hugging Face model access
 
-Accept the licences for FLUX 3 Image Klein and LTX-2.5 using the links in the
-connection card. Paste a read token once, then run **Check saved token**. The app
+Accept the licences for FLUX 3 Image Klein, LTX-2.5 and MiniMax H3 Omni using the
+links in the connection card. Paste a read token once, then run **Check saved token**. The app
 checks repository metadata access only; it does not download weights during setup.
 The token is written to a fixed server runtime file, not browser storage. Presence
 of a file is not treated as proof of access, and verification is intentionally
@@ -72,6 +72,15 @@ proposal creates no production and spends no Google Colab credits.
 The ceiling is a default for each new production, not permission for the agent to
 raise its own budget. Change it any time in setup. A configured AI agent and
 verified model access are required for unattended Google Colab generation.
+
+## Choose the motion models
+
+Before planning, choose **Auto**, **MiniMax H3**, or **LTX-2.5** on the home
+screen. Auto is the recommended mixed workflow: LTX handles establishing shots,
+scenery and camera-driven motion, while H3 handles recurring character acting,
+physical action and native sound. H3-only or LTX-only remains available. The
+selection is saved without credentials, appears in the proposal, and is passed to
+the planner as a structured option rather than inferred from prompt wording.
 
 ## Make a video
 

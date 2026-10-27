@@ -16,6 +16,12 @@ export const HF_MODEL_REPOSITORIES = Object.freeze([
     url: 'https://huggingface.co/Lightricks/LTX-2.5',
     apiUrl: 'https://huggingface.co/api/models/Lightricks/LTX-2.5',
   }),
+  Object.freeze({
+    id: 'FastVideo/FastH3-Omni-Comfy',
+    label: 'MiniMax H3 Omni',
+    url: 'https://huggingface.co/FastVideo/FastH3-Omni-Comfy',
+    apiUrl: 'https://huggingface.co/api/models/FastVideo/FastH3-Omni-Comfy',
+  }),
 ]);
 
 const MAX_TOKEN_LENGTH = 512;

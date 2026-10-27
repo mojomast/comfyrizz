@@ -321,7 +321,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: input.prompt }));
       procedure.mark('compute', input.compute === 'colab' ? PROCEDURE_COPY.computeColab : PROCEDURE_COPY.computeCpu);
     }
-    void session.generate({ prompt: input.prompt, compute: input.compute, setupConfirmed: input.setupConfirmed, proposalOnly: true });
+    void session.generate({ prompt: input.prompt, compute: input.compute, motionModel: input.motionModel, setupConfirmed: input.setupConfirmed, proposalOnly: true });
   }
 
   function refreshSuperEasySnapshot(): void {
@@ -376,6 +376,10 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onApproveProposal: () => { void superEasySession?.approveProposal(); },
       onReviseProposal: (note) => { void superEasySession?.reviseProposal(note); },
       setup: () => readSuperEasySetup(),
+      onMotionModelChange: (motionModel) => {
+        saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });
+        superEasy?.render();
+      },
       onSetup: () => { void openSuperEasySetup(); },
       onChangeAnything: (change = '') => {
         openStudioFromSuperEasy('review');

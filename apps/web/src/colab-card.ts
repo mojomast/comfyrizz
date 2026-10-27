@@ -72,10 +72,10 @@ export function colabStatusLine(status: ColabStatus | null, error: string | null
 
 function hfStatusLine(status: ColabStatus): string {
   if (status.tokenError) return status.tokenError;
-  if (status.tokenReady === true && status.tokenChecked === true) return 'Model access verified for both gated repositories.';
+  if (status.tokenReady === true && status.tokenChecked === true) return 'Model access verified for the required model repositories.';
   if (!status.tokenPresent) return 'No Hugging Face token saved.';
   if (status.tokenChecked) return 'Model access needs attention. Review the repository checks below.';
-  return 'Token saved. Check both gated models to finish setup.';
+  return 'Token saved. Check the required model repositories to finish setup.';
 }
 
 function hfSetupHtml(status: ColabStatus | null): string {
@@ -547,7 +547,7 @@ export function mountSettingsCard(host: HTMLElement, request: (input: string, in
       }));
       if (input) input.value = '';
       mergeHf(saved);
-      hfFeedback('Token saved. Checking both gated repositories…');
+      hfFeedback('Token saved. Checking the required model repositories…');
       const checked = await json<Partial<ColabStatus>>(await request('/api/hf/settings/probe', { method: 'POST' }));
       mergeHf(checked);
       hfFeedback(
@@ -569,7 +569,7 @@ export function mountSettingsCard(host: HTMLElement, request: (input: string, in
     if (authBusy || hfBusy) return;
     hfBusy = true;
     setBusy();
-    hfFeedback('Checking the saved token against both gated repositories…');
+    hfFeedback('Checking the saved token against the required model repositories…');
     try {
       const checked = await json<Partial<ColabStatus>>(await request('/api/hf/settings/probe', { method: 'POST' }));
       mergeHf(checked);

@@ -1,3 +1,5 @@
+import type { MotionModel } from './super-easy/setup.ts';
+
 export type StepId = 'idea' | 'characters' | 'level' | 'plan' | 'generate' | 'review' | 'export';
 export type Level = 'draft' | 'balanced' | 'director' | 'custom';
 export type Compute = 'cpu' | 'colab';
@@ -22,6 +24,7 @@ export interface EasyState {
   level: Level;
   levelTouched: boolean;
   compute: Compute;
+  motionModel?: MotionModel;
   spendCap: number | null;
   planHash: string | null;
   plan: { status: 'none' | 'writing' | 'building' | 'proposing' | 'ready' | 'stale' | 'error'; error: string | null; errorAt: 'agent' | 'production' | 'proposal' | null; wordsChanged: boolean };

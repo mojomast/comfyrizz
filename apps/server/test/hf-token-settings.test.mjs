@@ -24,7 +24,7 @@ async function listen(t, handler) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-test('save is fixed-file and atomic, presence is not readiness, and probes only the two gated repos', async t => {
+test('save is fixed-file and atomic, presence is not readiness, and probes the required model repositories', async t => {
   const runtimeDir = space(t);
   const env = {};
   const calls = [];
@@ -180,7 +180,7 @@ test('HF settings routes require auth and same origin, never return the token, a
   assert.equal(probed.status, 200);
   assert.equal(probed.body.tokenChecked, true);
   assert.equal(probed.body.tokenReady, true);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(probed.body.repositories.every(repo => repo.url.startsWith('https://huggingface.co/')), true);
 
   const colab = await api('/api/colab/status');

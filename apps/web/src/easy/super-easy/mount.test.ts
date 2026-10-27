@@ -153,7 +153,7 @@ test('Generate sends the trimmed prompt to This computer and never to Google Col
   });
 
   assert.equal(prevented, true);
-  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu' }]);
+  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu', motionModel: 'auto' }]);
   handle.destroy();
 });
 
@@ -172,7 +172,23 @@ test('confirmed setup forwards Google Colab once; unconfirmed setup opens setup 
   assert.deepEqual(calls, []);
   setup = { ...setup, confirmed: true };
   root.fire('submit', { target: submitTarget(), preventDefault() {} });
-  assert.deepEqual(calls, [{ prompt: prompt.value, compute: 'colab', setupConfirmed: true }]);
+  assert.deepEqual(calls, [{ prompt: prompt.value, compute: 'colab', motionModel: 'auto', setupConfirmed: true }]);
+  handle.destroy();
+});
+
+test('the motion-model selector offers Auto, H3 and LTX and saves changes', () => {
+  const { root } = fakeRoot();
+  let selected = null;
+  const handle = mountSuperEasy({
+    root, state: () => state(), onMoreControl: () => {},
+    setup: () => ({ compute: 'cpu', motionModel: 'auto', spendCap: 10, confirmed: false }),
+    onMotionModelChange: model => { selected = model; },
+  });
+  assert.match(root.innerHTML, /Auto — H3 acting \+ LTX camera/u);
+  assert.match(root.innerHTML, /MiniMax H3 — characters \+ native sound/u);
+  assert.match(root.innerHTML, /LTX-2.5 — cinematic motion plates/u);
+  root.fire('change', { target: { value: 'ltx', closest: selector => (selector === '[data-super-easy-motion-model]' ? {} : null) } });
+  assert.equal(selected, 'ltx');
   handle.destroy();
 });
 
@@ -202,7 +218,7 @@ test('Record this run rides along with Generate and remembers the checkbox', () 
   toggle.checked = true;
   prompt.value = 'A friendly robot who learns to bake bread';
   root.fire('submit', { target: submitTarget(), preventDefault() {} });
-  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu', capture: true }]);
+  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu', motionModel: 'auto', capture: true }]);
   handle.destroy();
 });
 

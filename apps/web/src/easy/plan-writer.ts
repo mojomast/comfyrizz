@@ -3,7 +3,7 @@ import { planInputsHash } from './store.ts';
 import type { EasyHost, EasyState } from './types.ts';
 
 type PlanApi = {
-  buildVideo(input: { brief: string; provider?: { provider: string; model?: string } }): Promise<any>;
+  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: 'auto' | 'h3' | 'ltx' }): Promise<any>;
   createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
 };
@@ -96,6 +96,7 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps, options: 
       if (!currentSession()) return;
       const body = await deps.api.buildVideo({
         brief: ideaPrompt(current) + castLine(current),
+        motionModel: current.motionModel ?? 'auto',
         ...(provider ? { provider } : {}),
       });
       if (!currentSession()) return;

@@ -37,6 +37,10 @@ Windows and Linux instructions rather than absolute developer-machine paths.
 ### 2. One-prompt production
 
 The first screen asks for a prompt and offers a small number of polished examples.
+Before planning it offers **Auto**, H3-only and LTX-only motion routes. Auto uses
+LTX for establishing/scenery/camera motion and H3 for recurring character acting
+and native sound. The structured selection persists, appears in the proposal and
+never silently falls back to the other model.
 Generate first creates a free creative plan and presents one concise proposal:
 title, a logline of at most two sentences, visual look, duration and sound. The
 user can revise it or choose **Make this film**. This is the only initial creative

@@ -8,6 +8,7 @@ export interface SuperEasyProposal {
   shots: number;
   basePrompt: string;
   revisionNotes: string[];
+  motionModel?: 'auto' | 'h3' | 'ltx';
 }
 
 function text(value: unknown, fallback: string): string {
@@ -42,11 +43,12 @@ export function proposalForPackage(pkg: any, basePrompt: string, revisionNotes: 
 
 export function renderSuperEasyProposal(proposal: SuperEasyProposal): string {
   const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+  const model = proposal.motionModel === 'h3' ? 'MiniMax H3' : proposal.motionModel === 'ltx' ? 'LTX-2.5' : 'Auto: H3 + LTX';
   return `<section class="super-easy-proposal" data-super-easy-proposal>
 <p class="super-easy-proposal-eyebrow">Your film proposal</p>
 <h1>${escape(proposal.title)}</h1>
 <p class="super-easy-proposal-logline">${escape(proposal.logline)}</p>
-<ul class="super-easy-proposal-facts"><li>${proposal.shots} shots</li><li>${proposal.seconds} seconds</li><li>${escape(proposal.look)}</li><li>${escape(proposal.soundtrack)}</li></ul>
+<ul class="super-easy-proposal-facts"><li>${proposal.shots} shots</li><li>${proposal.seconds} seconds</li><li>${escape(proposal.look)}</li><li>${escape(proposal.soundtrack)}</li><li>${escape(model)}</li></ul>
 <p class="super-easy-proposal-question">Does this sound right, or would you like to change anything?</p>
 <div class="super-easy-proposal-actions"><button type="button" class="btn btn-primary" data-super-easy-approve-proposal>Make this film</button></div>
 <form class="super-easy-proposal-revise" data-super-easy-revise-proposal><label for="super-easy-proposal-change">Change the proposal</label><div><textarea id="super-easy-proposal-change" rows="2" placeholder="For example: make it more playful and keep it under 20 seconds"></textarea><button type="submit" class="btn btn-secondary">Revise proposal</button></div><p class="hint">Nothing is generated or charged until you choose Make this film.</p></form>

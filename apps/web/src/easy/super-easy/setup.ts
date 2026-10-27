@@ -1,5 +1,8 @@
+export type MotionModel = 'auto' | 'h3' | 'ltx';
+
 export interface SuperEasySetup {
   compute: 'cpu' | 'colab';
+  motionModel: MotionModel;
   /** Default for each new production, not authorization to raise a cap. */
   spendCap: number;
   /** Explicitly saved after connection checks, never inferred from defaults. */
@@ -7,7 +10,7 @@ export interface SuperEasySetup {
 }
 
 export const DEFAULT_SUPER_EASY_SETUP: Readonly<SuperEasySetup> = Object.freeze({
-  compute: 'cpu', spendCap: 15, confirmed: false,
+  compute: 'cpu', motionModel: 'auto', spendCap: 15, confirmed: false,
 });
 
 const KEY = 'comfyrizz.super-easy.setup.v1';
@@ -22,6 +25,7 @@ export function readSuperEasySetup(): SuperEasySetup {
     const cap = Number(value?.spendCap);
     return {
       compute: value?.compute === 'colab' ? 'colab' : 'cpu',
+      motionModel: value?.motionModel === 'h3' || value?.motionModel === 'ltx' ? value.motionModel : 'auto',
       spendCap: Number.isFinite(cap) && cap >= 0.5 && cap <= 500 ? cap : 15,
       confirmed: value?.confirmed === true,
     };

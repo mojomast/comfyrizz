@@ -1706,6 +1706,7 @@ export function createApp({
           ...(brand ? { brand } : {}),
           provider: body.provider,
           model: body.model,
+          motionModel: body.motionModel,
           sessionId: body.sessionId,
           runtimeDir,
           onEvent: event => events.publish({ type: 'agent.event', event }),

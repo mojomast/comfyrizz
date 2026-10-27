@@ -165,7 +165,7 @@ test('Generate runs the one prompt, then watches that production', async () => {
   assert.equal(result.ok, true);
   assert.deepEqual(
     h.calls.filter((call) => call.kind === 'run').map((call) => call.input),
-    [{ prompt: '  A friendly robot who bakes bread  ', compute: 'cpu' }],
+    [{ prompt: '  A friendly robot who bakes bread  ', compute: 'cpu', motionModel: 'auto' }],
   );
   const watched = h.calls.filter((call) => call.kind === 'watch');
   assert.equal(watched.length, 1);

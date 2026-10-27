@@ -5,6 +5,7 @@ import { readPlanCard, type PlanCard } from '../../productions/cards/plan-card.t
 import { buildDraftLevelCommand, type DraftLevelCommand } from './set-draft-level.ts';
 import type { EasyState, StepId } from '../types.ts';
 import { proposalForPackage, type SuperEasyProposal } from './proposal.ts';
+import type { MotionModel } from './setup.ts';
 
 const EMPTY_PROMPT = 'Tell us what your video is about first.';
 const GOOGLE_COLAB_CONFIRM_REQUIRED = 'Google Colab needs your confirmation before it can spend anything. Choose This computer, or confirm Google Colab first.';
@@ -22,7 +23,7 @@ const DEFAULT_RUN_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_RUN_POLL_MS = 1000;
 
 export interface SuperEasyApi {
-  buildVideo(input: { brief: string; provider?: { provider: string; model?: string } }): Promise<any>;
+  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: MotionModel }): Promise<any>;
   createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
   proposeActionPlan(id: string, body: unknown): Promise<unknown>;
@@ -62,6 +63,7 @@ export interface SuperEasyRunPollingOptions {
 export interface RunSuperEasyInput {
   prompt: string;
   compute?: EasyState['compute'];
+  motionModel?: MotionModel;
   /** One-time guided setup confirmation; a per-click spend override is not accepted. */
   setupConfirmed?: boolean;
   cpu?: Pick<RunCpuGenerateOptions, 'timeoutMs' | 'pollMs' | 'setTimer' | 'clearTimer'>;
@@ -357,6 +359,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   deps.store.patch({
     idea: { ...current.idea, text: prompt },
     compute,
+    motionModel: input.motionModel ?? 'auto',
     level: 'draft',
     levelTouched: true,
     ...(input.proposalOnly === true && revisionNotes.length > 0 ? { plan: { ...current.plan, status: 'writing' } } : {}),
@@ -379,7 +382,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     const planned = deps.store.get();
     const pkg = deps.host.getPackage?.();
     if (!planned.packageId || !pkg) return failure('PLAN_FAILED', 'plan', planned.plan.error || PLAN_FAILED);
-    return { ok: true, proposal: proposalForPackage(pkg, basePrompt, revisionNotes), snapshot: null };
+    return { ok: true, proposal: { ...proposalForPackage(pkg, basePrompt, revisionNotes), motionModel: input.motionModel ?? 'auto' }, snapshot: null };
   }
 
   const planned = deps.store.get();

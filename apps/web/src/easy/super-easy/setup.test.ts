@@ -11,8 +11,8 @@ test('saved setup contains only backend, cap and explicit confirmation', () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) } });
   try {
-    saveSuperEasySetup({ compute: 'colab', spendCap: 8.5, confirmed: true });
-    assert.deepEqual(readSuperEasySetup(), { compute: 'colab', spendCap: 8.5, confirmed: true });
+    saveSuperEasySetup({ compute: 'colab', motionModel: 'ltx', spendCap: 8.5, confirmed: true });
+    assert.deepEqual(readSuperEasySetup(), { compute: 'colab', motionModel: 'ltx', spendCap: 8.5, confirmed: true });
     const serialized = [...values.values()].join('');
     assert.doesNotMatch(serialized, /api.?key|token|secret|password/iu);
   } finally {

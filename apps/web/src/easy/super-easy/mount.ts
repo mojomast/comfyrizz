@@ -28,7 +28,7 @@ import {
 } from './progress-view.ts';
 import type { StagesProgress } from './stages.ts';
 import type { GalleryModel } from './gallery-model.ts';
-import { DEFAULT_SUPER_EASY_SETUP, type SuperEasySetup } from './setup.ts';
+import { DEFAULT_SUPER_EASY_SETUP, type SuperEasySetup, type MotionModel } from './setup.ts';
 import { renderSuperEasyProposal, type SuperEasyProposal } from './proposal.ts';
 import { getMode, setMode } from '../../ui/mode.ts';
 import type { EasyState } from '../types.ts';
@@ -41,6 +41,7 @@ export interface SuperEasyGenerateInput {
   prompt: string;
   compute: EasyState['compute'];
   setupConfirmed?: boolean;
+  motionModel?: MotionModel;
   /** "Record this run" was ticked; the Generate click is the gesture that starts it. */
   capture?: boolean;
 }
@@ -84,6 +85,7 @@ export interface SuperEasyMountOptions {
   /** Credential-free saved backend/cap preference and its one-time setup action. */
   setup?(): SuperEasySetup;
   onSetup?(): void;
+  onMotionModelChange?(model: MotionModel): void;
   /** Open the current project's agent with an optional requested change. */
   onChangeAnything?(change?: string): void;
   proposal?(): SuperEasyProposal | null;
@@ -291,12 +293,17 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     freshStart = false;
     const toggle = root.querySelector<HTMLInputElement>('[data-procedure-capture-toggle]');
     if (options.onGenerate) {
-      void options.onGenerate({ prompt, compute: setup.compute, ...(setup.compute === 'colab' ? { setupConfirmed: true } : {}), ...(toggle ? { capture: toggle.checked === true } : {}) });
+      void options.onGenerate({ prompt, compute: setup.compute, motionModel: setup.motionModel ?? 'auto', ...(setup.compute === 'colab' ? { setupConfirmed: true } : {}), ...(toggle ? { capture: toggle.checked === true } : {}) });
     }
   };
 
   const onChange = (event: Event): void => {
-    const target = event.target as { checked?: boolean } | null;
+    const target = event.target as { checked?: boolean; value?: string } | null;
+    if (closestOf(event.target)('[data-super-easy-motion-model]')) {
+      const model = target?.value === 'h3' || target?.value === 'ltx' ? target.value : 'auto';
+      options.onMotionModelChange?.(model);
+      return;
+    }
     if (!closestOf(event.target)('[data-procedure-capture-toggle]')) return;
     options.onCaptureToggle?.(target?.checked === true);
   };

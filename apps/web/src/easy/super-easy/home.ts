@@ -47,6 +47,7 @@ export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string 
   const colab = options.setup?.compute === 'colab' && options.setup.confirmed;
   const hint = colab ? 'One sentence is enough. Your film is planned, generated, finished and ready to watch here.' : COPY.home.hint;
   const setupText = colab ? `Google Colab · up to ${options.setup?.spendCap} credits per video` : 'Connect your AI agent and Google Colab for generated films';
+  const motionModel = options.setup?.motionModel ?? 'auto';
   return `<section class="super-easy-home" aria-labelledby="super-easy-title" data-super-easy-home>
 <h1 class="super-easy-home-title" id="super-easy-title">${escapeHtml(COPY.home.title)}</h1>
 <form class="super-easy-home-form" data-super-easy-form novalidate>
@@ -61,6 +62,7 @@ export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string 
 ${options.capture ? renderProcedureToggle({ armed: options.capture.armed, id: 'super-easy-capture' }) : ''}
 </form>
 <div class="super-easy-home-setup"><span>${escapeHtml(setupText)}</span><button type="button" class="btn btn-secondary btn-sm" data-super-easy-setup>${colab ? 'Change setup' : 'Set up AI & Google Colab'}</button></div>
+<label class="super-easy-home-motion-model">Motion model<select data-super-easy-motion-model aria-label="Motion model"><option value="auto"${motionModel === 'auto' ? ' selected' : ''}>Auto — H3 acting + LTX camera</option><option value="h3"${motionModel === 'h3' ? ' selected' : ''}>MiniMax H3 — characters + native sound</option><option value="ltx"${motionModel === 'ltx' ? ' selected' : ''}>LTX-2.5 — cinematic motion plates</option></select></label>
 <div class="super-easy-home-ideas">
 <p class="super-easy-home-ideas-label" id="super-easy-ideas-label">${escapeHtml(COPY.home.ideasLabel)}</p>
 <ul class="super-easy-home-idea-list" aria-labelledby="super-easy-ideas-label">
