@@ -181,6 +181,7 @@ test('auto route is deterministic and explicit non-auto conflicts are refused', 
   const base = direction('a', 'b');
   assert.equal(autoMotionModel(base as any), 'h3');
   assert.equal(autoMotionModel({ ...base, subject: 'A lighthouse', action: 'Waves move.', characterCount: 0 } as any), 'ltx');
+  assert.equal(autoMotionModel({ ...base, subject: 'A deaf percussionist', action: 'Feels the floor and guides the runaway piano.', characterCount: 1 } as any), 'h3');
   const { tools } = await filmTools('h3');
   assert.throws(() => tools['assets.generate_video'].run(direction('missing', 'also-missing', { motion_model: 'ltx' })), /conflicts/);
 });

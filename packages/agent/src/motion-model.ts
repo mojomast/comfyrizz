@@ -28,8 +28,8 @@ export function autoMotionModel(direction: ShotMotionDirection): AutoResolvedMot
   if (direction.dialogue !== undefined || /\b(?:native\s+(?:audio|sound)|dialogue|spoken|speech|synchroni[sz]ed\s+(?:audio|sound)|footsteps?|vocali[sz]ations?)\b/i.test(sound)) {
     return 'h3';
   }
-  const character = /\b(?:jerboa|bird|fox|bear|robot|mascot|protagonist|puppet|person|woman|man|girl|boy|child|character|felt|wooden|clay|plush)\b/i.test(subjectAndAction);
-  const acting = /\b(?:act(?:ing|s|ed)?|react(?:ing|s|ed)?|gestur(?:e|es|ing)|speak(?:s|ing)?|restore[sd]?|repair[sd]?|haul[sd]?|lift[sd]?|carr(?:y|ies|ied)|brac(?:e|es|ed)|holds?|pulls?|pushes?|places?|picks?\s+up|opens?|closes?|climbs?|walks?|runs?|jumps?|dances?|waves?|turns?|rows?)\b/i.test(direction.action);
+  const character = /\b(?:jerboa|bird|fox|bear|robot|mascot|protagonist|puppet|person|woman|man|girl|boy|child|character|felt|wooden|clay|plush|percussionist|drummer|musician|locksmith|operator|cartographer|worker|archivist|dancer)\b/i.test(subjectAndAction);
+  const acting = /\b(?:act(?:ing|s|ed)?|react(?:ing|s|ed)?|gestur(?:e|es|ing)|speak(?:s|ing)?|restore[sd]?|repair[sd]?|haul[sd]?|lift[sd]?|carr(?:y|ies|ied)|brac(?:e|es|ed)|holds?|pulls?|pushes?|places?|picks?\s+up|opens?|closes?|climbs?|walks?|runs?|jumps?|dances?|waves?|turns?|rows?|guides?|feels?|listens?|plays?)\b/i.test(direction.action);
   if (character && acting) return 'h3';
 
   const scenery = /\b(?:establishing|scenery|landscape|seascape|cityscape|b[\s-]?roll|aerial|insert|wide\s+shot|camera[\s-]+driven|drifts?|pans?|tilts?|dollies|orbits?|tracking\s+shot|push[\s-]+in|pull[\s-]+out)\b/i;

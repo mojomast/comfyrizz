@@ -664,6 +664,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) },
       voice: { enabled: false, engine: 'none' },
       datasets: args.datasets ?? {},
+      ...(args.proposal ? { proposal: args.proposal } : {}),
       scenes,
       ...(mascot ? { cast: [mascot.member] } : {}),
       assets: { ...(options.brandAssets ?? {}), ...(mascot ? { [mascot.assetId]: mascot.asset } : {}) },

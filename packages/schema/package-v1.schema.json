@@ -41,6 +41,17 @@
     "title": {
       "$ref": "#/$defs/nonEmptyString"
     },
+    "proposal": {
+      "type": "object",
+      "description": "Optional concise creative proposal shown before production. Existing motion-graphics packages need not include it.",
+      "required": ["logline", "look", "soundtrack"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "logline": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "look": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "soundtrack": { "type": "string", "minLength": 1, "maxLength": 100 }
+      }
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time"

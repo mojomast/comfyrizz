@@ -33,6 +33,18 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
   if (scenes.length === 0) return ['generated film has no scenes/shots'];
+  const proposal = pkg?.proposal;
+  for (const field of ['logline', 'look', 'soundtrack']) {
+    if (typeof proposal?.[field] !== 'string' || proposal[field].trim().length < 3) {
+      problems.push(`proposal.${field} is required: give the user a specific, concise creative direction`);
+    }
+  }
+  if (proposal?.logline === 'A story built from your idea.') problems.push('proposal.logline must describe the actual story, not a generic fallback');
+  const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
+  const plannedSeconds = scenes.reduce((sum, scene) => sum + (Number(scene?.preferredFrames) || 0), 0) / fps;
+  if (intent.requestedSeconds !== null && Math.abs(plannedSeconds - intent.requestedSeconds) > 0.05) {
+    problems.push(`brief requests ${intent.requestedSeconds} seconds but the plan is ${plannedSeconds.toFixed(2)} seconds; adjust scene frames before production`);
+  }
   if (motionModel === 'klein' && !/stills \+ code motion/i.test((pkg?.compliance?.warnings ?? []).join(' '))) {
     problems.push('Klein proposal must explicitly say stills + code motion');
   }

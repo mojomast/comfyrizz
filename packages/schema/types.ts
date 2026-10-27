@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 9955e1847b7b9bc9d0a9cfaea77fb753bab1016a1e0b4aa8e077598a3a9094a1
+// Schema sha256: ac07a8e0759cb30bbda56e084f2c71031fa94ea8bdb0920a5d6bbb928fcc8e2a
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -34,6 +34,15 @@ export interface PackageV1 {
    */
   id: string;
   title: NonEmptyString;
+  /**
+   * Optional concise creative proposal shown before production. Existing motion-graphics packages
+   * need not include it.
+   */
+  proposal?: {
+    logline: string;
+    look: string;
+    soundtrack: string;
+    };
   createdAt?: string;
   format: {
     width: number;

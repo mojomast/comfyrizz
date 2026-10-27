@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createCpuAgentRunner } from '../src/agent-runner.mjs';
+import { createCpuAgentRunner, generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
 import { replayProvider } from './fake-provider.mjs';
 
 const BRIEF = 'Create a 24-second wordless handcrafted miniature film in 4 shots. A mustard felt jerboa and a cobalt wooden bird restore an island lighthouse at dusk as a small boat approaches. Recurring tactile characters, clear physical action, cinematic camera moves, warm golden payoff, gentle coastal sound. No dialogue, captions, logos or real people.';
+const ONE_SHOT_BRIEF = BRIEF.replace('24-second', '6-second').replace('in 4 shots', 'in 1 shot');
 const proposal = { logline: 'Two friends restore the lamp.', look: 'Handcrafted dusk miniatures.', soundtrack: 'Coastal sound without speech.' };
 const scenes = [1, 2, 3, 4].map(n => ({ id: `shot${n}`, layout: 'hero', preferredFrames: 180, copy: { headline: 'Unwanted headline' } }));
 const shotDirection = scene => ({
@@ -64,7 +65,7 @@ test('runner accepts real wordless H3 completion and persists silent conditionin
   const events = [];
   let result;
   try {
-    result = await runner({ brief: BRIEF, provider: 'custom', motionModel: 'h3', onEvent: event => events.push(event) });
+    result = await runner({ brief: ONE_SHOT_BRIEF, provider: 'custom', motionModel: 'h3', onEvent: event => events.push(event) });
   } catch (error) {
     assert.fail(`${error.message}\n${JSON.stringify(events)}`);
   }
@@ -78,13 +79,30 @@ test('runner accepts real wordless H3 completion and persists silent conditionin
   assert.equal(readFileSync(join(runtimeDir, 'packages', audio.file)).length, 24044);
 });
 
+test('completion requires meaningful proposal fields and the requested duration', async () => {
+  const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
+  const intent = classifyProductionIntent('Create a 20-second wordless film in 4 shots. A cartographer erases a river. No captions.');
+  const pkg = {
+    proposal: { logline: 'A cartographer erases a river and reflections vanish.', look: 'Woodcut and ink.', soundtrack: 'Paper and dry room tone.' },
+    format: { fps: 30 },
+    scenes: Array.from({ length: 4 }, (_, index) => ({ id: `shot${index + 1}`, preferredFrames: 225, media: [] })),
+    assets: {},
+  };
+  assert.ok(generatedFilmCompletionProblems(pkg, intent, 'klein').some(problem => problem.includes('20 seconds but the plan is 30.00 seconds')));
+  delete pkg.proposal;
+  const missing = generatedFilmCompletionProblems(pkg, intent, 'klein');
+  assert.ok(missing.some(problem => problem.includes('proposal.logline')));
+  assert.ok(missing.some(problem => problem.includes('proposal.look')));
+  assert.ok(missing.some(problem => problem.includes('proposal.soundtrack')));
+});
+
 test('runner explicitly accepts Klein stills + code motion without H3/LTX jobs', async t => {
   const calls = [
     { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: [scenes[0]] } },
     { name: 'assets.generate_video', args: { ...shotDirection('shot1'), motion_model: 'klein' } },
   ];
   const { runner } = await setup(t, calls);
-  const result = await runner({ brief: BRIEF, provider: 'custom', motionModel: 'klein' });
+  const result = await runner({ brief: ONE_SHOT_BRIEF, provider: 'custom', motionModel: 'klein' });
   assert.equal(result.fallback, false);
   assert.match(result.package.compliance.warnings.join(' '), /stills \+ code motion/);
   assert.ok(result.package.scenes[0].motion);

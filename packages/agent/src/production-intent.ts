@@ -6,6 +6,7 @@ export interface ProductionIntent {
   /** Wordless describes speech, never the presence of a native soundscape. */
   wordless: boolean;
   noCaptions: boolean;
+  requestedSeconds: number | null;
   evidence: {
     generatedShots: boolean;
     recurringPhysicalCharacters: boolean;
@@ -56,6 +57,8 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   const noCaptions = /\bno\b[^.!?\n]{0,90}\b(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|copy)\b/i.test(text)
     || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?)\b/i.test(text)
     || /\btext[\s-]+free\b/i.test(text);
+  const requestedSecondsMatch = /\b(\d{1,3})[\s-]+seconds?\b/i.exec(text);
+  const requestedSeconds = requestedSecondsMatch ? Number(requestedSecondsMatch[1]) : null;
   const strongEvidence = [generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape]
     .filter(Boolean).length;
   const generatedFilm = !proceduralConstraint && (generatedShots || strongEvidence >= 2);
@@ -64,6 +67,7 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     generatedFilm,
     wordless,
     noCaptions,
+    requestedSeconds,
     evidence: { generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape, proceduralConstraint },
   };
 }
