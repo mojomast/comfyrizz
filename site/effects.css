@@ -1,0 +1,98 @@
+/* Decorative layers have a static fallback; content never depends on motion. */
+.top { position: relative; }
+.top::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 5%, #6d28ff 35%, #00d8ab 70%, transparent 95%);
+  opacity: .6;
+  pointer-events: none;
+}
+
+.hero { position: relative; isolation: isolate; }
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(#a499d80c 1px, transparent 1px), linear-gradient(90deg, #a499d80c 1px, transparent 1px);
+  background-size: 3rem 3rem;
+  mask-image: linear-gradient(90deg, transparent 8%, #000 85%);
+}
+
+.hero-art { position: relative; isolation: isolate; overflow: hidden; }
+.hero-art::before, .hero-art::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+}
+.hero-art::before {
+  inset: 10%;
+  z-index: -1;
+  border: 1px solid #bda8ff66;
+  background: radial-gradient(circle, #6d28ff27 0, transparent 65%);
+  box-shadow: 0 0 0 1.15rem #a98aff08, 0 0 0 2.3rem #00d8ab09;
+}
+.hero-art::after {
+  inset: 18%;
+  z-index: -1;
+  border: 1px dashed #00d8ab65;
+  box-shadow: 0 0 2.5rem #6d28ff33 inset;
+}
+.hero-art img { filter: drop-shadow(0 .8rem 1.5rem #08051c88); }
+
+.steps li { position: relative; overflow: hidden; }
+.steps li::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, #6d28ff, #00b991);
+}
+.grid figure { transition: border-color .2s ease, box-shadow .2s ease; }
+.grid figure:focus-within { border-color: var(--mint); box-shadow: 0 0 0 3px #00d8ab38; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-art img { animation: logo-arrive 900ms cubic-bezier(.2,.7,.2,1) both; }
+  .hero-art::before { animation: halo-arrive 1.2s ease-out both; }
+  .hero-art::after { animation: orbit-arrive 1.4s ease-out both; }
+  .btn { transition: background-color .2s ease, border-color .2s ease, transform .2s ease, box-shadow .2s ease; }
+
+  @media (hover: hover) {
+    .btn:hover { transform: translateY(-2px); }
+    .btn.primary:hover { box-shadow: 0 .5rem 1.5rem #00d8ab38; }
+    .steps li { transition: transform .2s ease, box-shadow .2s ease; }
+    .steps li:hover { transform: translateY(-4px); box-shadow: 0 1rem 2rem #23144316; }
+    .grid figure:hover { border-color: #9380c6; box-shadow: 0 .8rem 2rem #09061666; }
+  }
+
+  @supports (animation-timeline: scroll()) {
+    body::before {
+      content: "";
+      position: fixed;
+      z-index: 20;
+      inset: 0 0 auto;
+      height: 3px;
+      pointer-events: none;
+      background: linear-gradient(90deg, #6d28ff, #00d8ab);
+      transform-origin: left;
+      animation: reading-progress linear both;
+      animation-timeline: scroll(root block);
+    }
+    .steps li::before {
+      transform-origin: left;
+      animation: card-accent linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 90%;
+    }
+  }
+}
+
+@keyframes logo-arrive { from { opacity: .4; transform: translateY(1rem) scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes halo-arrive { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: scale(1); } }
+@keyframes orbit-arrive { from { opacity: 0; transform: rotate(-35deg) scale(.9); } to { opacity: 1; transform: rotate(0) scale(1); } }
+@keyframes reading-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes card-accent { from { transform: scaleX(.1); } to { transform: scaleX(1); } }
