@@ -10,6 +10,9 @@ import { escapeToStudio } from './escape.ts';
 
 export const SUPER_EASY_MIN_PROMPT_CHARS = 10;
 
+/** One-click starting prompts, keyed by `data-super-easy-idea`. */
+export const SUPER_EASY_IDEAS: Readonly<Record<string, string>> = COPY.ideas;
+
 export interface SuperEasyHomeOptions {
   /** Initial prompt text; escaped before it reaches the page. */
   prompt?: string;
@@ -19,26 +22,40 @@ export interface SuperEasyHomeOptions {
   search?: string;
 }
 
+function ideaChips(): string {
+  return Object.entries(SUPER_EASY_IDEAS)
+    .map(([id, text]) => `<li><button type="button" class="btn btn-ghost btn-sm super-easy-home-idea" data-super-easy-idea="${escapeHtml(id)}">${escapeHtml(text)}</button></li>`)
+    .join('\n');
+}
+
 /**
  * Render the Super Easy landing for a bare visit.
  *
  * The returned string is static markup: the prompt box, the one primary
- * Generate action, the optional example action and the more-control link.
+ * Generate action, the optional example actions and the more-control link.
+ * The empty-prompt message stays hidden until a too-short Generate.
  */
 export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string {
   const prompt = typeof options.prompt === 'string' ? options.prompt : '';
   const moreControlHref = escapeToStudio(options.search ?? '', options.packageId ?? null);
   return `<section class="super-easy-home" aria-labelledby="super-easy-title" data-super-easy-home>
 <h1 class="super-easy-home-title" id="super-easy-title">${escapeHtml(COPY.home.title)}</h1>
-<form class="super-easy-home-form" data-super-easy-form>
+<form class="super-easy-home-form" data-super-easy-form novalidate>
 <label class="super-easy-home-label" for="super-easy-prompt">${escapeHtml(COPY.home.promptLabel)}</label>
 <textarea class="super-easy-home-prompt" id="super-easy-prompt" name="prompt" rows="4" minlength="${SUPER_EASY_MIN_PROMPT_CHARS}" required placeholder="${escapeHtml(COPY.home.promptPlaceholder)}" aria-describedby="super-easy-prompt-hint">${escapeHtml(prompt)}</textarea>
-<p class="super-easy-home-hint" id="super-easy-prompt-hint">${escapeHtml(COPY.home.emptyPrompt)}</p>
+<p class="super-easy-home-hint" id="super-easy-prompt-hint">${escapeHtml(COPY.home.hint)}</p>
+<p class="super-easy-home-error" id="super-easy-prompt-error" role="alert" data-super-easy-prompt-error hidden>${escapeHtml(COPY.home.emptyPrompt)}</p>
 <div class="super-easy-home-actions">
 <button type="submit" class="btn btn-primary super-easy-home-generate" data-super-easy-generate>${escapeHtml(COPY.home.generate)}</button>
 <button type="button" class="btn btn-secondary super-easy-home-example" data-super-easy-example>${escapeHtml(COPY.home.tryExample)}</button>
 </div>
 </form>
+<div class="super-easy-home-ideas">
+<p class="super-easy-home-ideas-label" id="super-easy-ideas-label">${escapeHtml(COPY.home.ideasLabel)}</p>
+<ul class="super-easy-home-idea-list" aria-labelledby="super-easy-ideas-label">
+${ideaChips()}
+</ul>
+</div>
 <p class="super-easy-home-more"><a class="super-easy-home-more-link" href="${escapeHtml(moreControlHref)}" data-super-easy-more-control>${escapeHtml(COPY.home.moreControl)}</a></p>
 </section>`;
 }

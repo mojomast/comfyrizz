@@ -451,3 +451,121 @@ test('Easy delegates first paint to Super Easy and releases the player first', (
   assert.doesNotMatch(superEasy, /data-easy-player|playerElement/u);
   assert.doesNotMatch(superEasy, /Google Colab/u);
 });
+
+function richRoot() {
+  const { root, prompt } = fakeRoot();
+  const attributes = new Map();
+  Object.assign(prompt, {
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    removeAttribute(name) { attributes.delete(name); },
+    getAttribute(name) { return attributes.has(name) ? attributes.get(name) : null; },
+  });
+  const error = { hidden: true };
+  const plain = root.querySelector;
+  root.querySelector = (selector) => (selector === '[data-super-easy-prompt-error]' ? error : plain(selector));
+  return { root, prompt, error };
+}
+
+test('an idea chip fills its own prompt and clears a shown error', () => {
+  const { root, prompt, error } = richRoot();
+  const handle = mountSuperEasy({ root, state: () => state(), onMoreControl: () => {} });
+  error.hidden = false;
+  root.fire('click', {
+    target: {
+      closest(candidate) {
+        return candidate === '[data-super-easy-idea]'
+          ? { getAttribute: (name) => (name === 'data-super-easy-idea' ? 'coffee' : null) }
+          : null;
+      },
+    },
+    preventDefault() {},
+  });
+  assert.equal(prompt.value, 'How a coffee bean becomes your morning cup');
+  assert.equal(prompt.focused, true);
+  assert.equal(error.hidden, true);
+  handle.destroy();
+});
+
+test('a too-short Generate shows the inline message, and typing hides it again', () => {
+  const { root, prompt, error } = richRoot();
+  const calls = [];
+  const handle = mountSuperEasy({ root, state: () => state(), onMoreControl: () => {}, onGenerate: (input) => calls.push(input) });
+  prompt.value = 'robot';
+  root.fire('submit', { target: submitTarget(), preventDefault() {} });
+  assert.deepEqual(calls, []);
+  assert.equal(error.hidden, false);
+  assert.equal(prompt.getAttribute('aria-invalid'), 'true');
+  assert.match(prompt.getAttribute('aria-describedby'), /super-easy-prompt-error/u);
+
+  root.fire('input', { target: clickTarget('#super-easy-prompt') });
+  assert.equal(error.hidden, true);
+  assert.equal(prompt.getAttribute('aria-invalid'), null);
+  handle.destroy();
+});
+
+test('Download MP4 hands the package to export, falling back to Review', () => {
+  const exported = [];
+  const reviewed = [];
+  const withExport = fakeRoot();
+  const first = mountSuperEasy({
+    root: withExport.root,
+    state: () => state({ packageId: 'pkg_1', generate: { status: 'running' } }),
+    onMoreControl: () => {},
+    onReview: (id) => reviewed.push(id),
+    onExport: (id) => exported.push(id),
+  });
+  withExport.root.fire('click', { target: clickTarget('[data-super-easy-export]'), preventDefault() {} });
+  assert.deepEqual(exported, ['pkg_1']);
+  assert.deepEqual(reviewed, []);
+  first.destroy();
+
+  const reviewOnly = fakeRoot();
+  const second = mountSuperEasy({
+    root: reviewOnly.root,
+    state: () => state({ packageId: 'pkg_2', generate: { status: 'running' } }),
+    onMoreControl: () => {},
+    onReview: (id) => reviewed.push(id),
+  });
+  reviewOnly.root.fire('click', { target: clickTarget('[data-super-easy-export]'), preventDefault() {} });
+  assert.deepEqual(reviewed, ['pkg_2']);
+  second.destroy();
+});
+
+test('the caller can supply the gauges for a snapshot the journal cannot fill', () => {
+  const { root } = fakeRoot();
+  const seen = [];
+  const handle = mountSuperEasy({
+    root,
+    state: () => state({ generate: { status: 'running' } }),
+    snapshot: () => ({ marker: 1 }),
+    stages(snapshot) {
+      seen.push(snapshot);
+      return {
+        overall: 0.5,
+        finalReady: false,
+        complete: false,
+        stages: ['plan', 'characters', 'shots', 'voice', 'render'].map((id) => ({
+          id,
+          label: id,
+          status: id === 'plan' ? 'done' : 'waiting',
+          statusText: id === 'plan' ? 'Done' : 'Waiting',
+          fraction: id === 'plan' ? 1 : 0,
+          error: null,
+        })),
+      };
+    },
+    onMoreControl: () => {},
+  });
+  assert.deepEqual(seen[0], { marker: 1 });
+  assert.match(root.innerHTML, /data-super-easy-stage="plan" data-stage-status="done"/u);
+  assert.match(root.innerHTML, /data-super-easy-overall-value>50%</u);
+  handle.destroy();
+});
+
+test('the Easy mount sends Download MP4 to the Studio Export step and merges local gauges', () => {
+  const source = readFileSync(EASY_MOUNT, 'utf8');
+  assert.match(source, /onExport: \(packageId\) => openStudioFromSuperEasy\('export', packageId\)/u);
+  assert.match(source, /stages: \(snapshot\) => superEasyStages\(snapshot\)/u);
+  assert.match(source, /mergeLocalStages\(readStages\(snapshot\), localStageReadings\(/u);
+  assert.match(source, /currentStep !== step\) showStep\(step\)/u, 'Export is shown once, so it renders once');
+});

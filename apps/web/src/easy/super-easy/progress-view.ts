@@ -88,10 +88,11 @@ export interface ProgressRoot {
 }
 
 const VIDEO_URL = /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/iu;
-const PREVIEW_TITLE = 'Preview ready';
-const PREVIEW_BODY = 'Review it now, then export when you like.';
-const PREVIEW_ACTION = 'Review and export';
-const PREVIEW_LIVE = 'Preview ready to review.';
+const PREVIEW_TITLE = 'Your preview is ready';
+const PREVIEW_BODY = 'Download MP4 makes the video file on this computer. It takes about a minute, and you can watch the preview while it works.';
+const PREVIEW_DOWNLOAD = 'Download MP4';
+const PREVIEW_ACTION = 'Watch and review';
+const PREVIEW_LIVE = 'Preview ready. Download MP4 makes the video file.';
 
 function percent(fraction: number): number {
   if (!Number.isFinite(fraction)) return 0;
@@ -262,7 +263,7 @@ export function progressLiveKey(
 
 function chromeKeyOf(stages: StagesProgress, finalReady: boolean): string {
   const statuses = stages.stages.map(
-    (stage) => `${stage.id}=${stage.status}:${stage.error ?? ''}`,
+    (stage) => `${stage.id}=${stage.status}:${stage.statusText}:${stage.error ?? ''}`,
   ).join(',');
   return `${statuses};final=${finalReady ? 1 : 0}`;
 }
@@ -288,7 +289,8 @@ function previewMarkup(): string {
 <p class="super-easy-progress-preview-title">${escapeHtml(PREVIEW_TITLE)}</p>
 <p class="super-easy-progress-preview-body">${escapeHtml(PREVIEW_BODY)}</p>
 <div class="super-easy-progress-preview-actions">
-<button type="button" class="btn btn-primary" data-super-easy-review>${escapeHtml(PREVIEW_ACTION)}</button>
+<button type="button" class="btn btn-primary" data-super-easy-export>${escapeHtml(PREVIEW_DOWNLOAD)}</button>
+<button type="button" class="btn btn-secondary" data-super-easy-review>${escapeHtml(PREVIEW_ACTION)}</button>
 </div>
 </section>`;
 }
@@ -383,12 +385,12 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
 <h1 class="super-easy-progress-title" id="super-easy-progress-title">${escapeHtml(COPY.making.title)}</h1>
 <p class="super-easy-progress-subtitle">${escapeHtml(COPY.making.subtitle)}</p>
 <p class="super-easy-progress-live" role="status" aria-live="polite" aria-atomic="true" data-super-easy-live data-super-easy-live-key="${escapeHtml(keys.live)}">${escapeHtml(liveText)}</p>
+<div class="super-easy-progress-actions" data-super-easy-actions>${actionsHtml}</div>
 <div class="super-easy-progress-chrome" data-super-easy-chrome style="display: flex; flex-direction: column; gap: var(--space-4)">${chromeHtml}</div>
 <section class="super-easy-progress-gallery" aria-label="${escapeHtml(COPY.gallery.empty)}" data-super-easy-gallery>
 ${galleryHtml}
 </section>
-</section>
-<div class="super-easy-progress-actions" data-super-easy-actions>${actionsHtml}</div>`;
+</section>`;
 
   return {
     html,

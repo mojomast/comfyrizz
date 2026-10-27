@@ -44,14 +44,16 @@ export interface RunSuperEasyInput {
   cpu?: Pick<RunCpuGenerateOptions, 'timeoutMs' | 'pollMs' | 'setTimer' | 'clearTimer'>;
 }
 
+export type SuperEasyRunStage = 'idea' | 'compute' | 'plan' | 'iteration' | 'approval' | 'run';
+
 export interface RunSuperEasyDeps {
   api: SuperEasyApi;
   host: SuperEasyHost;
   store: SuperEasyStore;
   go(step: StepId): void;
+  /** Told when the run moves on, so the gauges can move before the server journals anything. */
+  onPhase?(stage: SuperEasyRunStage): void;
 }
-
-export type SuperEasyRunStage = 'idea' | 'compute' | 'plan' | 'iteration' | 'approval' | 'run';
 
 export type SuperEasyRunFailureCode =
   | 'EMPTY_PROMPT'
@@ -154,6 +156,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     store: deps.store,
   });
 
+  deps.onPhase?.('plan');
   try {
     await write();
   } catch (error) {
@@ -166,6 +169,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
   const productionId = planned.productionId;
 
+  deps.onPhase?.('iteration');
   let before: unknown;
   try {
     before = await deps.api.getProduction(productionId);
@@ -216,6 +220,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     return failure('PLAN_FAILED', 'plan', reproposed.plan.error || PLAN_FAILED);
   }
 
+  deps.onPhase?.('approval');
   try {
     snapshot = await deps.api.getProduction(productionId);
   } catch (error) {
@@ -241,6 +246,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     return failure('APPROVAL_FAILED', 'approval', approvalMessage);
   }
 
+  deps.onPhase?.('run');
   const cpu = await runCpuGenerate({
     host: deps.host,
     store: deps.store,

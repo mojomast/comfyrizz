@@ -447,11 +447,49 @@ test('preview-ready has its own Review handoff and never claims the finished vid
   const html = renderSuperEasyProgress(partialSnapshot(), { previewReady: true });
 
   assert.match(html, /data-super-easy-preview-ready/u);
-  assert.match(html, /data-super-easy-review/u);
-  assert.match(html, />Review and export</u);
+  assert.match(html, /<button[^>]*class="btn btn-primary"[^>]*data-super-easy-export[^>]*>Download MP4<\/button>/u);
+  assert.match(html, /<button[^>]*class="btn btn-secondary"[^>]*data-super-easy-review[^>]*>Watch and review<\/button>/u);
   assert.doesNotMatch(html, /data-super-easy-done-actions/u);
   assert.doesNotMatch(html, /data-super-easy-download/u);
   assert.doesNotMatch(html, new RegExp(COPY.done.title, 'u'));
+});
+
+test('the next action sits above the gauges, inside the one centred column', () => {
+  const html = renderSuperEasyProgress(partialSnapshot(), { previewReady: true });
+  const section = html.indexOf('<section class="super-easy-progress"');
+  const actions = html.indexOf('data-super-easy-actions');
+  const chrome = html.indexOf('data-super-easy-chrome ');
+  const close = html.lastIndexOf('</section>');
+  assert.ok(section >= 0 && section < actions, 'actions live inside the progress section');
+  assert.ok(actions < chrome, 'the call to action comes before the gauges');
+  assert.ok(close > chrome, 'the progress section closes after the gallery');
+  assert.ok(html.trimEnd().endsWith('</section>'), 'nothing trails outside the column');
+});
+
+test('progress-view.css styles the preview card and moves running gauges', () => {
+  const css = readFileSync(fileURLToPath(new URL('./progress-view.css', import.meta.url)), 'utf8');
+  for (const selector of [
+    '.super-easy-progress-actions:empty',
+    '.super-easy-progress-preview',
+    '.super-easy-progress-error',
+    '.super-easy-progress-stage-running .easy-progress::after',
+    '@keyframes super-easy-progress-sweep',
+    '.super-easy-progress-reduced-motion .easy-progress::after',
+  ]) {
+    assert.ok(css.includes(selector), `missing ${selector}`);
+  }
+});
+
+test('a running stage with a custom status text repaints its chrome', () => {
+  const base = readStages(partialSnapshot());
+  const relabel = (statusText: string) => ({
+    ...base,
+    stages: base.stages.map((stage) => (stage.id === 'render' ? { ...stage, statusText } : stage)),
+  });
+  const running = superEasyProgressParts(partialSnapshot(), { stages: relabel('Running') });
+  const preview = superEasyProgressParts(partialSnapshot(), { stages: relabel('Preview ready') });
+  assert.notEqual(running.keys.chrome, preview.keys.chrome);
+  assert.match(preview.chromeHtml, />Preview ready</u);
 });
 
 test('a delivery id or ready flag without a playable URL is not a final-ready claim', () => {
