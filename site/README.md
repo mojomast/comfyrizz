@@ -18,7 +18,7 @@ Upload the contents of `site/` as-is to any static host (GitHub Pages, Cloudflar
 
 ## Assets
 
-`assets/` holds Kinetic ZZ marks copied from `brand/` (logo SVGs, symbol, favicon, PNG exports, social card). The showcase images come from `docs/media/`. Don't redraw the logo. Update by re-copying from `brand/`.
+`assets/` holds Kinetic ZZ marks copied from `brand/` (logo SVGs, symbol, favicon, PNG exports, social card), plus `showcase-demo.mp4` / `showcase-demo-poster.jpg` for the featured reel. Other showcase stills come from `docs/media/`. Don't redraw the logo. Update brand marks by re-copying from `brand/`.
 
 ## Brand tokens
 
