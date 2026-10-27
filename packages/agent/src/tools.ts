@@ -636,6 +636,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     intent: options.initialPackage ? options.initialIntent : undefined,
     proposal: options.initialPackage?.proposal,
   };
+  // Rebuild the whole-film stem as each shot arrives. Using only the first
+  // shot's plan made otherwise different scenes share one generic sound bed.
+  const finishingSoundPlans = new Map<string, string>();
 
   const touch = () => {
     if (state.package) options.onPackageChange?.(state.package);
@@ -1100,7 +1103,12 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       const existingMedia = Array.isArray(next.media) && next.media.length === 2 ? next.media : [{ asset: id }, { asset: id }];
       next.media = existingMedia.map((plate: any, plateIndex: number) => plateIndex === mediaIndex ? { asset: id } : plate);
       next.background = { asset: id };
-      next.media_only = true;
+      const hasEditorialCopy = Object.values(next.copy ?? {}).some(value =>
+        typeof value === 'string' ? value.trim().length > 0 : Array.isArray(value) && value.some(item => typeof item === 'string' && item.trim().length > 0));
+      // media_only still supports animated lower thirds. When the brief asks
+      // for Remotion typography, preserve full copy layouts too; an explicit
+      // media_only scene remains the cinematic lower-third-only choice.
+      next.media_only = candidate.media_only === true || !hasEditorialCopy;
       if (intent.generatedFilm) next.foreground = [];
       if (model === 'ltx') {
         const note = `LTX finishing sound plan (picture has no native audio): ${finishingSound}`;
@@ -1143,22 +1151,27 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       assets: { ...(state.package.assets ?? {}), [id]: asset },
       revision: Number(state.package.revision ?? 0) + 1,
     };
-    if (finishingSound && model !== 'h3' && !state.package.audio?.music?.asset && options.persistAudio) {
+    if (finishingSound && model !== 'h3' && options.persistAudio) {
+      finishingSoundPlans.set(args.scene_id, finishingSound);
+      const combinedPlan = state.package.scenes
+        .map((scene: any) => finishingSoundPlans.get(scene.id))
+        .filter((plan: string | undefined): plan is string => Boolean(plan))
+        .join(' | ');
       const seconds = scenes.reduce((sum: number, scene: any) => sum + (Number(scene.preferredFrames) || 0), 0) / packageFps;
-      const stem = synthesizeFinishingWav(finishingSound, seconds, args.seed ?? 1);
+      const stem = synthesizeFinishingWav(combinedPlan, seconds, args.seed ?? 1);
       const assetId = 'a_finishing_mix';
       const file = options.persistAudio(assetId, stem.wav, 'finishing-stem') ?? `assets/${assetId}.wav`;
       state.package.assets[assetId] = {
         kind: 'audio', origin: 'generated', status: 'ready',
         file, sha256: createHash('sha256').update(stem.wav).digest('hex'), bytes: stem.wav.length,
         media: { durationSeconds: stem.durationSeconds },
-        gen: { generator: 'procedural-audio', model: 'deterministic-pcm-v1', inputs: { plan: finishingSound, seed: args.seed ?? 1 } },
+        gen: { generator: 'procedural-audio', model: 'deterministic-pcm-v2', inputs: { plan: combinedPlan, seed: args.seed ?? 1 } },
         license: { id: 'CC0-1.0' }, redistributable: true,
-        notes: `Original deterministic procedural finishing stem; not native model audio. Plan: ${finishingSound}`,
+        notes: clampText(`Original deterministic procedural finishing stem; not native model audio. Whole-film plan: ${combinedPlan}`, 1000),
       };
       state.package.audio = {
         ...(state.package.audio ?? {}),
-        music: { asset: assetId, gain_db: -18, fade_in_seconds: 0.5, fade_out_seconds: 1, loop: false },
+        music: { asset: assetId, gain_db: configuredMotionModel === 'auto' ? -16 : -12, fade_in_seconds: 0.5, fade_out_seconds: 1, loop: false },
       };
     }
     touch();

@@ -17,7 +17,7 @@ function shot(id: string) {
   return { id, layout: 'hero', preferredFrames: 180, copy: { headline: 'Unwanted caption' } };
 }
 
-async function filmTools(motionModel: 'auto' | 'h3' | 'ltx' | 'klein', scenes = [shot('shot1')], persistAudio?: (id: string, wav: Uint8Array) => void) {
+async function filmTools(motionModel: 'auto' | 'h3' | 'ltx' | 'klein', scenes: Array<Record<string, any>> = [shot('shot1')], persistAudio?: (id: string, wav: Uint8Array) => void, brief = RETAINED_FILM_BRIEF) {
   let draft: any;
   const tools = createToolset({
     motionModel,
@@ -25,7 +25,7 @@ async function filmTools(motionModel: 'auto' | 'h3' | 'ltx' | 'klein', scenes = 
     ...(persistAudio ? { persistAudio: (id, wav) => { persistAudio(id, wav); return `assets/${id}.wav`; } } : {}),
     onPackageChange: pkg => { draft = pkg; },
   });
-  await tools['storyboard.propose'].run({ brief: RETAINED_FILM_BRIEF, title: 'The Lamp at Dusk', proposal, scenes });
+  await tools['storyboard.propose'].run({ brief, title: 'The Lamp at Dusk', proposal, scenes });
   const identity = await tools['assets.generate_image'].run({
     scene_id: scenes[0].id, kind: 'identity-reference', intent: 'A mustard felt jerboa and a cobalt wooden bird, recurring handmade character identity.', seed: 11,
   }) as any;
@@ -196,6 +196,42 @@ test('explicit Klein is stills + code motion only, with Remotion and finishing m
   assert.deepEqual(keyframe.fileInputs.map((input: any) => input.param), ['reference', '_reference_2']);
   assert.ok(keyframe.deps.includes(`${identity}.still`));
   assert.ok(keyframe.deps.includes(`${composition}.still`));
+});
+
+test('whole-film finishing stem accumulates every shot plan instead of freezing the first', async () => {
+  const writes: Uint8Array[] = [];
+  const { tools, getDraft, identity, composition } = await filmTools('ltx', [shot('shot1'), shot('shot2')], (_id, wav) => writes.push(wav));
+  await tools['assets.generate_video'].run(direction(identity, composition, { motion_model: 'ltx' }));
+  await tools['assets.generate_video'].run({
+    ...direction(identity, composition), scene_id: 'shot2', motion_model: 'ltx',
+    finishing_sound: 'Add two isolated brass bell answers after the lens click.',
+  });
+  const pkg = getDraft();
+  assert.equal(writes.length, 2, 'the same whole-film stem is rebuilt as shot direction arrives');
+  assert.notEqual(Buffer.from(writes[0]).toString('base64'), Buffer.from(writes[1]).toString('base64'));
+  assert.match(pkg.assets.a_finishing_mix.gen.inputs.plan, /coastal wind/);
+  assert.match(pkg.assets.a_finishing_mix.gen.inputs.plan, /brass bell answers/);
+  assert.equal(pkg.assets.a_finishing_mix.gen.model, 'deterministic-pcm-v2');
+  assert.equal(pkg.assets.a_finishing_mix.media.durationSeconds, 12);
+  assert.equal(pkg.audio.music.gain_db, -12);
+});
+
+test('requested Remotion typography survives generated-video planning', async () => {
+  const brief = 'Create a 12-second wordless film in 2 shots about a cartographer erasing a river. Use exact Remotion chapter titles and documentary lower thirds with no dialogue or logos; generated footage stays clean of lettering.';
+  const typographyScenes = [
+    { id: 'shot1', layout: 'hero', preferredFrames: 180, media_only: true, lower_third: { kicker: '01 / THE MAP', text: 'RIVER: INTACT' } },
+    { id: 'shot2', layout: 'hero', variant: 'full-bleed', preferredFrames: 180, copy: { kicker: '02 / ONE LINE BACK', headline: 'REDRAWN', sub: 'One reflection returns.' } },
+  ];
+  assert.equal(classifyProductionIntent(brief).noCaptions, false);
+  const { tools, getDraft, identity, composition } = await filmTools('h3', typographyScenes, undefined, brief);
+  await tools['assets.generate_video'].run(direction(identity, composition, { motion_model: 'h3', wordless: true }));
+  await tools['assets.generate_video'].run({ ...direction(identity, composition), scene_id: 'shot2', motion_model: 'h3', wordless: true });
+  const pkg = getDraft();
+  assert.equal(pkg.scenes[0].media_only, true);
+  assert.equal(pkg.scenes[0].lower_third.text, 'RIVER: INTACT');
+  assert.equal(pkg.scenes[1].media_only, false);
+  assert.equal(pkg.scenes[1].copy.headline, 'REDRAWN');
+  assert.equal(pkg.scenes[1].copy.sub, 'One reflection returns.');
 });
 
 test('auto route is deterministic and explicit non-auto conflicts are refused', async () => {
