@@ -24,7 +24,7 @@ export interface SuperEasyHomeOptions {
 
 function ideaChips(): string {
   return Object.entries(SUPER_EASY_IDEAS)
-    .map(([id, text]) => `<li><button type="button" class="btn btn-ghost btn-sm super-easy-home-idea" data-super-easy-idea="${escapeHtml(id)}">${escapeHtml(text)}</button></li>`)
+    .map(([id, text]) => `<li><button type="button" class="super-easy-home-idea" data-super-easy-idea="${escapeHtml(id)}">${escapeHtml(text)}</button></li>`)
     .join('\n');
 }
 

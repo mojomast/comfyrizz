@@ -2255,19 +2255,26 @@ async function renderExportBlob(overrideReason?: string, options: { productionId
     const savedBody = await saved.json().catch(() => ({}));
     if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
     pkg.revision = savedBody.revision;
-    body = { packageId: pkg.id, baseRevision: savedBody.revision, ...await productionRenderFields(options.productionId) };
+    body = { packageId: pkg.id, baseRevision: savedBody.revision };
     logActivity(`Saved revision ${savedBody.revision} before render`);
   }
-  const requestBody = audioMixEnabled ? body : { ...body, mixAudio: false };
-  const response = await apiFetch('/api/render', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(withRenderOverride(requestBody, overrideReason)) });
-  if (!response.ok) {
+  const bound = Boolean(token) && typeof options.productionId === 'string' && options.productionId !== '';
+  // Other production commands (a new conversation, a chat turn) can land
+  // between reading the revision and the render, so a conflict reads it again.
+  for (let attempt = 0; ; attempt += 1) {
+    const production = bound ? await productionRenderFields(options.productionId) : {};
+    const requestBody = { ...(audioMixEnabled ? body : { ...body, mixAudio: false }), ...production };
+    const response = await apiFetch('/api/render', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(withRenderOverride(requestBody, overrideReason)) });
+    if (response.ok) {
+      const blob = await response.blob();
+      const renderId = response.headers.get('x-comfyrizz-render-id') ?? undefined;
+      return { blob, revision: Number(pkg.revision) || 0, ...(renderId ? { renderId } : {}) };
+    }
     const errorBody = (await response.json().catch(() => ({}))) as { error?: string; code?: string; gate?: RenderGateSummary };
+    if (bound && errorBody.code === 'REVISION_CONFLICT' && attempt < 2) continue;
     const error = new Error(errorBody.error ?? `HTTP ${response.status}`) as RenderExportError;
     error.code = errorBody.code; error.gate = errorBody.gate; throw error;
   }
-  const blob = await response.blob();
-  const renderId = response.headers.get('x-comfyrizz-render-id') ?? undefined;
-  return { blob, revision: Number(pkg.revision) || 0, ...(renderId ? { renderId } : {}) };
 }
 
 function syncExportButton(): void {

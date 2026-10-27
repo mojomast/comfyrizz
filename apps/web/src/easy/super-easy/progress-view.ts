@@ -89,7 +89,7 @@ export interface ProgressRoot {
 
 const VIDEO_URL = /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/iu;
 const PREVIEW_TITLE = 'Your preview is ready';
-const PREVIEW_BODY = 'Download MP4 makes the video file on this computer. It takes about a minute, and you can watch the preview while it works.';
+const PREVIEW_BODY = 'Download MP4 makes the video file on this computer in about a minute. You can watch the preview while it works.';
 const PREVIEW_DOWNLOAD = 'Download MP4';
 const PREVIEW_ACTION = 'Watch and review';
 const PREVIEW_LIVE = 'Preview ready. Download MP4 makes the video file.';

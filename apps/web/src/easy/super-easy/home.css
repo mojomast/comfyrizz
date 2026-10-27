@@ -119,6 +119,11 @@
   border-color: var(--accent);
 }
 
+.super-easy-home-idea:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .super-easy-home-actions {
   display: flex;
   flex-direction: column;
