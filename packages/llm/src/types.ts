@@ -58,5 +58,6 @@ export interface ResolvedProvider {
   model: string;
   headers: Record<string, string>;
   sessionHeader?: string;
+  reasoningEffort?: 'low' | 'high' | 'max';
   status: ProviderPreset['status'];
 }

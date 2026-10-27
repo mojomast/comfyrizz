@@ -62,8 +62,10 @@ test('presets: three providers, OpenCode fallback key and session header', () =>
   assert.equal(oc.sessionHeader, 'x-opencode-session');
   assert.equal(oc.headers['User-Agent'], 'comfyrizz/0.1');
   assert.equal(oc.model, 'deepseek-v4.1-flash');
+  assert.equal(oc.reasoningEffort, 'max');
   const custom = resolveProvider('custom', { env: {} });
   assert.equal(custom.apiKey, null);
+  assert.equal(custom.reasoningEffort, undefined);
   assert.throws(() => resolveProvider('openrouter', { env: {} }), /requires OPENROUTER_API_KEY/);
   assert.throws(() => resolveProvider('openrouter', { env: { OPENROUTER_API_KEY: 'secret' }, apiKey: null }), /requires/);
 });
@@ -94,9 +96,22 @@ test('streams text and usage, sends bearer + session header and keeps tools out 
   assert.equal(body.model, 'test-model');
   assert.equal(body.stream, true);
   assert.equal(body.tools.length, 1);
+  assert.equal(body.reasoning_effort, undefined);
   const noTools = await collect(createOpenAICompatibleModel(config(fetchImpl)), { ...request, tools: [] });
   assert.equal(JSON.parse(String(seen?.init.body)).tools, undefined);
   assert.ok(noTools.some(chunk => chunk.type === 'done'));
+});
+
+test('OpenCode Go DeepSeek defaults to explicit max reasoning on the wire', async () => {
+  let body: any;
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+  }) as typeof fetch;
+  const provider = resolveProvider('opencode-go', { env: { OPENCODE_GO_API_KEY: 'k' }, baseUrl: 'http://mock/v1' });
+  await collect(createOpenAICompatibleModel({ ...provider, fetchImpl, maxRetries: 0 }));
+  assert.equal(body.model, 'deepseek-v4.1-flash');
+  assert.equal(body.reasoning_effort, 'max');
 });
 
 test('assembles fragmented tool arguments and emits only a complete call', async () => {

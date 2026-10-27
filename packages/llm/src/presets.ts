@@ -31,6 +31,7 @@ export interface ResolveOptions {
   baseUrl?: string;
   apiKey?: string | null;
   headers?: Record<string, string>;
+  reasoningEffort?: 'low' | 'high' | 'max';
 }
 
 /**
@@ -48,14 +49,17 @@ export function resolveProvider(name: string, options: ResolveOptions = {}): Res
   const apiKey = options.apiKey === undefined ? (keyFromEnv ?? null) : options.apiKey;
   if (name !== 'custom' && !apiKey) throw new Error(`${name} requires ${preset.apiKeyEnv}`);
   const baseUrl = (options.baseUrl ?? preset.baseUrl).replace(/\/+$/, '');
+  const model = options.model ?? preset.defaultModel ?? '';
+  const reasoningEffort = options.reasoningEffort ?? (name === 'opencode-go' && model === 'deepseek-v4.1-flash' ? 'max' : undefined);
   return {
     name,
     baseUrl,
     modelsUrl: preset.modelsUrl ?? `${baseUrl}/models`,
     apiKey,
-    model: options.model ?? preset.defaultModel ?? '',
+    model,
     headers: { ...(preset.headers ?? {}), ...(options.headers ?? {}) },
     sessionHeader: preset.sessionHeader,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     status: preset.status,
   };
 }
