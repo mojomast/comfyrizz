@@ -22,6 +22,8 @@ export interface CpuSliceOptions {
   planImage?: (args: Parameters<NonNullable<ToolsetOptions['planImage']>>[0]) => PlannedImage;
   sessionId?: string;
   maxSteps?: number;
+  /** Edit-only repair uses a focused system prompt instead of the full builder prompt. */
+  system?: string;
   now?: () => string;
   onEvent?: (event: AgentEvent) => void;
   /** B1: brand kit whose theme overrides the default palette/font/logo. */
@@ -73,7 +75,7 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
   const stylePreset = /Look:\s*([a-z-]+)/i.exec(options.brief)?.[1] as StylePreset | undefined;
   const tools = createToolset({
     generateSvg: options.generateSvg,
-    ...(options.initialPackage ? { initialPackage: options.initialPackage } : {}),
+    ...(options.initialPackage ? { initialPackage: options.initialPackage, initialIntent: intent } : {}),
     ...(options.persistSvg ? { persistSvg: options.persistSvg } : {}),
     ...(options.persistAudio ? { persistAudio: options.persistAudio } : {}),
     motionModel,
@@ -94,6 +96,7 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
     tools,
     sessionId: options.sessionId ?? 'cpu-slice',
     maxSteps: options.maxSteps ?? 24,
+    ...(options.system ? { system: options.system } : {}),
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   });
   const pkg = draft ?? (result.toolCalls.find(call => call.name === 'storyboard.propose')?.result as any)?.package;

@@ -64,6 +64,8 @@ export interface PlannedImage {
 
 export interface ToolsetOptions {
   initialPackage?: Record<string, any>;
+  /** Original brief constraints retained when an existing package is repaired without propose. */
+  initialIntent?: ProductionIntent;
   /** Wired to A5: autoFix(generate, intent) with sanitize/render-check. */
   generateSvg?: (intent: SvgIntentLike) => Promise<SvgAssetResult> | SvgAssetResult;
   /** Wired to the job planner; defaults to a caption + workflow plan, never a GPU run. */
@@ -631,6 +633,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   const configuredMotionModel = parseMotionModel(options.motionModel, 'auto');
   const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal'] } = {
     package: options.initialPackage ? structuredClone(options.initialPackage) : undefined,
+    intent: options.initialPackage ? options.initialIntent : undefined,
+    proposal: options.initialPackage?.proposal,
   };
 
   const touch = () => {

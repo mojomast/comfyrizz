@@ -239,9 +239,11 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         motionModel,
         sessionId,
         now,
-        // The deterministic script needs 12 steps; a live model gets the same
-        // bound so one run cannot stream tool calls indefinitely.
-        maxSteps: 16,
+        ...(repairInstructions ? {
+          system: 'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded. Do not call storyboard.propose, rebuild the storyboard, regenerate assets, change the story, or change the model route. Use only the edits required by the user validation report. When the listed issues are fixed, stop calling tools and reply with one short sentence.',
+        } : {}),
+        // Initial planning is bounded separately from the much smaller edit-only repair.
+        maxSteps: repairInstructions ? 8 : 16,
         ...(onEvent ? { onEvent } : {}),
       });
     const acceptable = candidate => productionIntent.generatedFilm
@@ -256,16 +258,19 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       if (productionIntent.generatedFilm) {
         const initialProblems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
         slice = await runOnce(agentModel, `The current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, then stop: ${initialProblems.join('; ')}. Return the corrected complete package.`);
-        const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
-        const schemaProblems = validatePackage(slice.package).valid ? [] : ['package schema validation failed'];
-        const error = new Error(`generated-film plan is incomplete: ${[...problems, ...schemaProblems].join('; ') || slice.result.error || 'live agent did not finish'}`);
-        error.status = 422;
-        error.code = 'GENERATED_FILM_INCOMPLETE';
-        error.errors = [...problems, ...schemaProblems];
-        throw error;
+        if (!acceptable(slice)) {
+          const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
+          const schemaProblems = validatePackage(slice.package).valid ? [] : ['package schema validation failed'];
+          const error = new Error(`generated-film plan is incomplete: ${[...problems, ...schemaProblems].join('; ') || slice.result.error || 'live agent did not finish'}`);
+          error.status = 422;
+          error.code = 'GENERATED_FILM_INCOMPLETE';
+          error.errors = [...problems, ...schemaProblems];
+          throw error;
+        }
+      } else {
+        slice = await runOnce(null);
+        fallback = true;
       }
-      slice = await runOnce(null);
-      fallback = true;
     }
     const validation = validatePackage(slice.package);
     if (!validation.valid) {

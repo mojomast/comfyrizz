@@ -81,17 +81,23 @@ test('runner accepts real wordless H3 completion and persists silent conditionin
 
 test('one bounded repair corrects the existing package duration before production', async t => {
   const badScenes = scenes.map(scene => ({ ...scene, preferredFrames: 225 }));
-  const calls = [
+  const { runner, provider } = await setup(t, [
     { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: badScenes } },
+  ]);
+  const repairCalls = [
+    ...scenes.map(scene => ({ name: 'storyboard.edit', args: { scene_id: scene.id, patch: { preferredFrames: 180 } } })),
     ...scenes.map(scene => ({ name: 'assets.generate_video', args: { ...shotDirection(scene.id), motion_model: 'klein' } })),
   ];
-  const { runner, provider } = await setup(t, calls);
-  provider.setCalls([
-    ...calls,
-    ...scenes.map(scene => ({ name: 'storyboard.edit', args: { scene_id: scene.id, patch: { preferredFrames: 180 } } })),
-  ]);
-  const result = await runner({ brief: BRIEF, provider: 'custom', motionModel: 'klein' });
+  let repaired = false;
+  const result = await runner({ brief: BRIEF, provider: 'custom', motionModel: 'klein', onEvent: event => {
+    if (event.type === 'done' && !repaired) {
+      repaired = true;
+      provider.setCalls(repairCalls);
+    }
+  } });
   assert.equal(result.fallback, false);
+  assert.equal(repaired, true, 'the invalid first plan really exercised the bounded repair');
+  assert.equal(provider.calls, repairCalls.length, 'repair used its step cap only for edits and required shot assets, not another storyboard proposal');
   const seconds = result.package.scenes.reduce((sum, scene) => sum + scene.preferredFrames, 0) / result.package.format.fps;
   assert.equal(seconds, 24);
   assert.equal(result.package.proposal.logline, proposal.logline);
