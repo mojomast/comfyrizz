@@ -400,7 +400,7 @@ test('CAST1: "use the same mascot in every scene" adds a fictional cast ref to e
   assert.deepEqual(jobs.checkJobsDoc(plan), []);
   const introJob = plan.jobs.find((job: any) => job.asset === intro.asset.id);
   const heroJob = plan.jobs.find((job: any) => job.asset === hero.asset.id);
-  assert.equal(introJob.workflow, 'workflows/flux3_klein_ref_edit.api.json');
+  assert.equal(introJob.workflow, 'workflows/flux3_klein_ref2_edit.api.json');
   assert.equal(introJob.params.reference, svgId);
   assert.equal(introJob.params._reference_2, 'a_cast_pip');
   assert.equal(introJob.params.width, undefined);
