@@ -180,6 +180,15 @@ function actionButton(
   return `<button type="button" class="btn ${kind === 'link' ? 'btn-ghost easy-button-link' : 'btn-secondary'}" data-${dataName}>${escapeHtml(label)}</button>`;
 }
 
+/** The banner's state and sentence without markup, or null when there is no session. */
+export function colabBannerLine(teardown: unknown, usage: unknown): { state: ColabBannerState; text: string } | null {
+  if (!hasSession(usage, teardown)) return null;
+  const state = resolvedState(teardown, usage);
+  if (state === null) return null;
+  const line = bannerLine(state, usage);
+  return { state: line.state, text: line.text };
+}
+
 /**
  * Pure HTML for the Google Colab banner. `teardown` is the explicit teardown
  * record and `usage` is the session usage record. An unconfirmed stop stays

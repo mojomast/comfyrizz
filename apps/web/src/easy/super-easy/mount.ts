@@ -37,6 +37,8 @@ export type SuperEasyScreen = 'home' | 'progress';
 export interface SuperEasyGenerateInput {
   prompt: string;
   compute: 'cpu';
+  /** "Record this run" was ticked; the Generate click is the gesture that starts it. */
+  capture?: boolean;
 }
 
 export interface SuperEasyMountOptions {
@@ -71,6 +73,9 @@ export interface SuperEasyMountOptions {
   /** Gauges for this snapshot, when the caller knows more than the journal does. */
   stages?(snapshot: unknown): StagesProgress | undefined;
   reducedMotion?: boolean;
+  /** Offer "Record this run" on the home; returns whether it starts ticked. */
+  captureArmed?(): boolean;
+  onCaptureToggle?(armed: boolean): void;
 }
 
 export interface SuperEasyMountHandle {
@@ -238,7 +243,16 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     }
     promptText = prompt;
     freshStart = false;
-    if (options.onGenerate) void options.onGenerate({ prompt, compute: 'cpu' });
+    const toggle = root.querySelector<HTMLInputElement>('[data-procedure-capture-toggle]');
+    if (options.onGenerate) {
+      void options.onGenerate({ prompt, compute: 'cpu', ...(toggle ? { capture: toggle.checked === true } : {}) });
+    }
+  };
+
+  const onChange = (event: Event): void => {
+    const target = event.target as { checked?: boolean } | null;
+    if (!closestOf(event.target)('[data-procedure-capture-toggle]')) return;
+    options.onCaptureToggle?.(target?.checked === true);
   };
 
   function progressOptions(snapshot: unknown): SuperEasyProgressViewOptions {
@@ -293,6 +307,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
         prompt: promptText,
         packageId: state.packageId,
         search: currentSearch(),
+        ...(options.captureArmed ? { capture: { armed: options.captureArmed() } } : {}),
       });
     }
     root.dataset.superEasyView = next;
@@ -301,6 +316,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   render();
   root.addEventListener('click', onClick);
   root.addEventListener('submit', onSubmit);
+  root.addEventListener('change', onChange);
   root.addEventListener('input', onInput);
   const unsubscribe = options.subscribe?.(() => {
     if (destroyed) return;
@@ -319,6 +335,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       unsubscribe();
       root.removeEventListener('click', onClick);
       root.removeEventListener('submit', onSubmit);
+      root.removeEventListener('change', onChange);
       root.removeEventListener('input', onInput);
       root.innerHTML = '';
       progressKeys = null;

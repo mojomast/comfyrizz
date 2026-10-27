@@ -1,0 +1,80 @@
+.procedure-capture-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.procedure-capture-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--font-weight-500);
+  cursor: pointer;
+}
+
+.procedure-capture-toggle-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.procedure-capture {
+  position: fixed;
+  left: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 2147483000;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  max-width: min(560px, calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  box-shadow: var(--elevation-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+}
+
+.procedure-capture-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.procedure-capture[data-state='logging'] .procedure-capture-dot {
+  background: var(--color-warn);
+}
+
+.procedure-capture-title {
+  font-weight: var(--font-weight-600);
+}
+
+.procedure-capture-step {
+  color: var(--text-2);
+}
+
+.procedure-capture-files {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .procedure-capture[data-state='recording'] .procedure-capture-dot {
+    animation: procedure-capture-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes procedure-capture-pulse {
+  50% { opacity: 0.35; }
+}
+
+/* Pixels cannot be redacted after the fact, so marked secrets leave the frame while recording. */
+html[data-procedure-recording] :is([data-secret], [data-token], [data-runtime-path], #server-token, .server-token, #runtime-path, input[type='password']) {
+  visibility: hidden !important;
+}

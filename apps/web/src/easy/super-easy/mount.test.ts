@@ -157,6 +157,36 @@ test('Generate sends the trimmed prompt to This computer and never to Google Col
   handle.destroy();
 });
 
+test('Record this run rides along with Generate and remembers the checkbox', () => {
+  const { root, prompt } = fakeRoot();
+  const toggle = { checked: true };
+  const baseQuery = root.querySelector;
+  root.querySelector = (selector) => (selector === '[data-procedure-capture-toggle]' ? toggle : baseQuery(selector));
+  const calls = [];
+  const toggles = [];
+  const handle = mountSuperEasy({
+    root,
+    state: () => state(),
+    onMoreControl: () => {},
+    captureArmed: () => true,
+    onCaptureToggle: (armed) => toggles.push(armed),
+    onGenerate: (input) => {
+      calls.push(input);
+    },
+  });
+
+  assert.match(root.innerHTML, /data-procedure-capture-toggle[^>]* checked>/u);
+  toggle.checked = false;
+  root.fire('change', { target: { checked: false, closest: (selector) => (selector === '[data-procedure-capture-toggle]' ? toggle : null) } });
+  assert.deepEqual(toggles, [false]);
+
+  toggle.checked = true;
+  prompt.value = 'A friendly robot who learns to bake bread';
+  root.fire('submit', { target: submitTarget(), preventDefault() {} });
+  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu', capture: true }]);
+  handle.destroy();
+});
+
 test('a too-short prompt stays on the home screen', () => {
   const { root, prompt } = fakeRoot();
   const calls = [];

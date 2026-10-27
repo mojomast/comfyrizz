@@ -7,6 +7,7 @@
 import { COPY } from './copy.ts';
 import { escapeHtml } from '../components.ts';
 import { escapeToStudio } from './escape.ts';
+import { renderProcedureToggle } from '../procedure/toggle.ts';
 
 export const SUPER_EASY_MIN_PROMPT_CHARS = 10;
 
@@ -20,6 +21,8 @@ export interface SuperEasyHomeOptions {
   packageId?: string | null;
   /** Current address, so unrelated query parameters survive the escape. */
   search?: string;
+  /** Show the "Record this run" checkbox under Generate. */
+  capture?: { armed: boolean };
 }
 
 function ideaChips(): string {
@@ -49,6 +52,7 @@ export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string 
 <button type="submit" class="btn btn-primary super-easy-home-generate" data-super-easy-generate>${escapeHtml(COPY.home.generate)}</button>
 <button type="button" class="btn btn-secondary super-easy-home-example" data-super-easy-example>${escapeHtml(COPY.home.tryExample)}</button>
 </div>
+${options.capture ? renderProcedureToggle({ armed: options.capture.armed, id: 'super-easy-capture' }) : ''}
 </form>
 <div class="super-easy-home-ideas">
 <p class="super-easy-home-ideas-label" id="super-easy-ideas-label">${escapeHtml(COPY.home.ideasLabel)}</p>
