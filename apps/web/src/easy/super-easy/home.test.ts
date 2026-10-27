@@ -121,3 +121,25 @@ test('home.css styles the Super Easy home without a second layout system', () =>
     assert.ok(css.includes(selector), `missing ${selector}`);
   }
 });
+
+test('the hint coaches instead of scolding, and the empty-prompt message waits for a short Generate', () => {
+  const html = renderSuperEasyHome();
+  assert.match(html, new RegExp(`id="super-easy-prompt-hint">${COPY.home.hint}</p>`, 'u'));
+  assert.match(COPY.home.hint, /Google Colab/u);
+  const error = tagWith(html, 'data-super-easy-prompt-error');
+  assert.match(error, /role="alert"/u);
+  assert.match(error, /\bhidden\b/u);
+  assert.match(html, /<form[^>]*data-super-easy-form[^>]*novalidate/u, 'our message, not the browser tooltip');
+});
+
+test('idea chips are one-click starting prompts, never a second primary', () => {
+  const html = renderSuperEasyHome();
+  const chips = html.match(/<button\b[^>]*data-super-easy-idea="[a-z]+"[^>]*>[^<]+<\/button>/gu) ?? [];
+  assert.equal(chips.length, Object.keys(COPY.ideas).length);
+  assert.ok(chips.length >= 3);
+  for (const chip of chips) {
+    assert.match(chip, /type="button"/u);
+    assert.doesNotMatch(chip, /btn-primary/u);
+  }
+  assert.match(html, new RegExp(`>${COPY.ideas.coffee}</button>`, 'u'));
+});

@@ -16,6 +16,7 @@ import type {
 } from './run.ts';
 import { hasFinalArtifact, renderSuperEasyProgress } from './progress-view.ts';
 import { buildGalleryModel } from './gallery-model.ts';
+import type { SuperEasyPhase } from './local-stages.ts';
 import type { EasyState } from '../types.ts';
 
 const RUN_ALREADY_STARTED = 'The Super Easy run is already going.';
@@ -44,6 +45,8 @@ export interface SuperEasySession {
   snapshot(): unknown;
   previewReady(): boolean;
   failure(): SuperEasyRunFailure | null;
+  /** How far the run itself has got, for gauges the journal cannot fill yet. */
+  phase(): SuperEasyPhase;
   progressHtml(): string;
 }
 
@@ -66,6 +69,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let preview = false;
   let failure: SuperEasyRunFailure | null = null;
   let lastInput: RunSuperEasyInput | null = null;
+  let phase: SuperEasyPhase = 'idle';
 
   function patchStatus(next: EasyState['generate']['status']): void {
     status = next;
@@ -125,10 +129,19 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     failure = null;
     cancelWatch();
     snapshot = null;
+    phase = 'idea';
     patchStatus('running');
     publish();
 
-    const result = await run(nextInput, options);
+    const result = await run(nextInput, {
+      ...options,
+      onPhase(next) {
+        if (stopped) return;
+        phase = next;
+        options.onPhase?.(next);
+        publish();
+      },
+    });
 
     if (stopped) {
       patchStatus('stopped');
@@ -146,6 +159,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     // A local preview is useful immediately, but the video is not done until
     // the watched production delivers a playable artifact.
     preview = wasPreviewReady(result);
+    if (preview) phase = 'preview';
     snapshot = result.snapshot;
     patchStatus('running');
     publish();
@@ -184,6 +198,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     snapshot: () => snapshot,
     previewReady: () => preview,
     failure: () => failure,
+    phase: () => phase,
     progressHtml,
   };
 }

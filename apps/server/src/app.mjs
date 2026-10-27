@@ -998,6 +998,11 @@ export function createApp({
     return { pkg, input, sourceDir: dirname(store.path(pkg.id)) };
   }
 
+  // UX21F2: a cancel drain carries no dispatch authority. dispatchEntry sees
+  // no package and leaves any pending dispatch entry untouched, while
+  // cancelEntry reads the action id from its own outbox payload and runs.
+  const CANCEL_ONLY_DRAIN = Object.freeze({ pkg: false });
+
   /**
    * UX21F: the one post-commit hook at the command boundary. Production
    * commands commit to the production journal and never publish to EventLog,
@@ -1017,8 +1022,33 @@ export function createApp({
     }
     const outboxIds = Array.isArray(result.outboxIds) ? result.outboxIds : [];
     if (outboxIds.length > 0) {
-      const context = pipelineDrainContext(productionId, result.action?.id ?? null);
-      if (context.refused) {
+      // UX21F2: action.cancel/action.retry name their durable action in the
+      // command payload; result.action is only a fallback for a commit shape
+      // that does not carry the command envelope.
+      const payloadActionId = result.command?.payload?.actionId;
+      const actionId = typeof payloadActionId === 'string' && payloadActionId !== ''
+        ? payloadActionId
+        : (result.action?.id ?? null);
+      const context = pipelineDrainContext(productionId, actionId);
+      if (result.command?.kind === 'action.cancel') {
+        // A cancel commit owns its cancel effect, not dispatch authority. When
+        // the dispatch context is refused (for example SLOT_INCOMPLETE) or
+        // another slot has a dispatch entry pending, withhold the package so
+        // dispatchEntry refuses without starting anything while cancelEntry,
+        // which reads only its own outbox payload, still acknowledges the
+        // cancel. This is the same drain, never a second path.
+        let otherDispatchPending = false;
+        try {
+          otherDispatchPending = productionStore.pending(productionId)
+            .some(entry => entry?.type === 'action.dispatch' && (entry.payload?.actionId ?? null) !== actionId);
+        } catch (error) {
+          reportExecutionFailure(productionId, 'OUTBOX_PENDING_UNAVAILABLE', error);
+          otherDispatchPending = true;
+        }
+        const cancelContext = context.refused || otherDispatchPending ? CANCEL_ONLY_DRAIN : context;
+        Promise.resolve(outboxExecutor.drainProduction(productionId, cancelContext))
+          .catch(error => reportExecutionFailure(productionId, 'OUTBOX_DRAIN_FAILED', error));
+      } else if (context.refused) {
         reportExecutionFailure(productionId, context.refused, context.error ?? `outbox drain refused: ${context.refused}`);
       } else {
         if (context.preflightError) {

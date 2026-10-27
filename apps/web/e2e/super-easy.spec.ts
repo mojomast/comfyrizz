@@ -229,17 +229,13 @@ async function openHarness(page: Page): Promise<string[]> {
 }
 
 /**
- * The Easy studio eagerly imports every step module. The base app's glob also
- * picks up the colocated node:test files, whose bare `test(...)` calls throw in
- * a browser. Stub only those test modules so the full app can boot; no step
- * implementation is replaced.
+ * The full app must boot as shipped. A bundled node:test file once threw on
+ * the bare visit and left a half-drawn editor instead of Super Easy.
  */
-async function stubStudioStepTests(page: Page): Promise<void> {
-  await page.route(/\/src\/easy\/steps\/[^/]+\.test\.ts(?:\?.*)?$/u, (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/javascript',
-    body: 'export {};',
-  }));
+function collectPageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  return errors;
 }
 
 test('one prompt shows progress, fills the gallery and ends on the final ready fixture', async ({ page }) => {
@@ -455,12 +451,13 @@ function fullAppBackend() {
 
 test('the full app starts at the bare visit and fills the progress view from the fake backend', async ({ page }) => {
   test.setTimeout(90_000);
-  await stubStudioStepTests(page);
+  const pageErrors = collectPageErrors(page);
   const backend = fullAppBackend();
   await page.route('**/api/**', (route) => backend.handle(route));
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
   await expect(page.locator('[data-super-easy-home]')).toBeVisible();
+  expect(pageErrors).toEqual([]);
   await page.locator('#super-easy-prompt').fill(PROMPT);
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
 
@@ -474,13 +471,59 @@ test('the full app starts at the bare visit and fills the progress view from the
   expect(backend.calls.some((call) => call === 'plan')).toBe(true);
   expect(backend.calls).toContain('command:iteration.set');
   expect(backend.calls.some((call) => call === 'run' || call === 'dispatch' || call === 'spend-cap')).toBe(false);
+  expect(pageErrors).toEqual([]);
+});
+
+test('the home coaches a first-time visitor and an idea chip is enough to Generate', async ({ page }) => {
+  await openHarness(page);
+
+  await expect(page.locator('#super-easy-prompt-hint')).toContainText('no Google Colab');
+  await expect(page.locator('[data-super-easy-prompt-error]')).toBeHidden();
+
+  await page.locator('#super-easy-prompt').fill('robot');
+  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await expect(page.locator('[data-super-easy-prompt-error]')).toBeVisible();
+  await expect(page.locator('#super-easy-prompt')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('[data-super-easy-home]')).toBeVisible();
+
+  await page.getByRole('button', { name: 'How a coffee bean becomes your morning cup' }).click();
+  await expect(page.locator('#super-easy-prompt')).toHaveValue('How a coffee bean becomes your morning cup');
+  await expect(page.locator('[data-super-easy-prompt-error]')).toBeHidden();
+  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await expect(page.locator('[data-super-easy-progress]')).toBeVisible();
+});
+
+test('the preview card leads with Download MP4 above the gauges', async ({ page }) => {
+  await page.route('**/__super_easy_preview_e2e__', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/html',
+    body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Preview card</title>
+<link rel="stylesheet" href="/src/ui/tokens.css">
+<link rel="stylesheet" href="/src/easy/components.css">
+<link rel="stylesheet" href="/src/easy/super-easy/progress-view.css">
+</head><body><div id="root"></div><script type="module">
+const { renderSuperEasyProgress } = await import('/src/easy/super-easy/progress-view.ts');
+document.getElementById('root').innerHTML = renderSuperEasyProgress({ plan: { status: 'done' }, render: { status: 'running', fraction: 0.5 } }, { previewReady: true });
+</script></body></html>`,
+  }));
+  await page.goto('/__super_easy_preview_e2e__');
+
+  const download = page.getByRole('button', { name: 'Download MP4' });
+  await expect(download).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Watch and review' })).toBeVisible();
+  const card = await page.locator('[data-super-easy-preview-ready]').boundingBox();
+  const gauges = await page.locator('[data-super-easy-stages]').boundingBox();
+  const column = await page.locator('[data-super-easy-progress]').boundingBox();
+  expect(card && gauges && column).toBeTruthy();
+  expect(card!.y).toBeLessThan(gauges!.y);
+  expect(card!.x).toBeGreaterThanOrEqual(column!.x);
+  expect(card!.x + card!.width).toBeLessThanOrEqual(column!.x + column!.width + 1);
 });
 
 test('the Studio escape for a ready package lands past Idea', async ({ page }) => {
   test.setTimeout(90_000);
   const env = loadEnv();
   watchPaidCalls(page);
-  await stubStudioStepTests(page);
   await page.addInitScript((pkg: string) => {
     const state = {
       version: 1,

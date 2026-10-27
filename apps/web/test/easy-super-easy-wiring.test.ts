@@ -438,7 +438,10 @@ test('watch callbacks move the mounted stages and fill the gallery', async () =>
     assert.match(partial, /src="\/media\/mira\.png"/u);
     assert.match(partial, /data-super-easy-gallery-item="shot:shot_1"/u);
     assert.match(partial, /data-super-easy-stage="characters" data-stage-status="running"/u);
-    assert.match(partial, /aria-valuenow="40"/u);
+    // The This-computer preview is further along than the journal's 40% render.
+    assert.match(partial, /data-super-easy-stage="render" data-stage-status="running"/u);
+    assert.match(partial, /aria-label="Video" aria-valuemin="0" aria-valuemax="100" aria-valuenow="90"/u);
+    assert.match(partial, />Preview ready</u);
 
     shell.watch().onState(finalWatchState());
     const done = shell.root.innerHTML;
@@ -503,13 +506,48 @@ test('a CPU preview offers Review and hands the same package to Studio Review', 
     await waitFor(() => /data-super-easy-preview-ready/u.test(shell.root.innerHTML));
 
     assert.match(shell.root.innerHTML, /data-super-easy-review/u);
-    assert.match(shell.root.innerHTML, /Review and export/u);
+    assert.match(shell.root.innerHTML, /Watch and review/u);
+    assert.match(shell.root.innerHTML, /data-super-easy-export/u);
     assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-done-actions/u);
 
     shell.root.click('[data-super-easy-review]');
     assert.match(shell.document.defaultView.lastUrl, /step=review/u);
     assert.match(shell.root.innerHTML, /data-easy-shell/u);
     assert.equal(shell.root.dataset.superEasyView, undefined);
+  } finally {
+    shell.dispose();
+    shell.restore();
+  }
+});
+
+test('Download MP4 on a CPU preview hands the same package straight to Studio Export', async () => {
+  const backend = createBackend();
+  const shell = mountShell(backend);
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => /data-super-easy-preview-ready/u.test(shell.root.innerHTML));
+
+    shell.root.click('[data-super-easy-export]');
+    assert.match(shell.document.defaultView.lastUrl, /step=export/u);
+    assert.match(shell.document.defaultView.lastUrl, /package=/u);
+    assert.match(shell.root.innerHTML, /data-easy-shell/u);
+    assert.equal(shell.root.dataset.superEasyView, undefined);
+  } finally {
+    shell.dispose();
+    shell.restore();
+  }
+});
+
+test('the gauges follow the run before the journal has anything to show', async () => {
+  const backend = createBackend();
+  const shell = mountShell(backend);
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => /data-super-easy-preview-ready/u.test(shell.root.innerHTML));
+    const html = shell.root.innerHTML;
+    assert.match(html, /data-super-easy-stage="plan" data-stage-status="done"/u);
+    assert.match(html, /data-super-easy-stage="render" data-stage-status="running"/u);
+    assert.doesNotMatch(html, /data-super-easy-overall-value>0%</u);
   } finally {
     shell.dispose();
     shell.restore();

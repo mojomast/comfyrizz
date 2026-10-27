@@ -67,7 +67,8 @@ export interface EasyHost {
   subscribeClips(listener: () => void): () => void;
   takesApi: Pick<import('../takes/api.ts').TakesApi, 'getTakes' | 'select' | 'verdict'>;
   adoptBuiltPackage(body: any): void;
-  renderMp4(): Promise<{ blob: Blob; revision: number; renderId?: string }>;
+  /** A production-owned package needs its production id to render. */
+  renderMp4(options?: { productionId?: string | null }): Promise<{ blob: Blob; revision: number; renderId?: string }>;
   seekToScene(sceneId: string): void;
   previewTake(clipId: string, takeId: string | null): Promise<void>;
   refreshClips(): Promise<void>;

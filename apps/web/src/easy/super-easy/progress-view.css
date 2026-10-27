@@ -250,6 +250,84 @@
   font-size: var(--font-size-12);
 }
 
+.super-easy-progress-actions:empty {
+  display: none;
+}
+
+.super-easy-progress-actions .super-easy-done-actions {
+  max-width: none;
+  padding: 0;
+  background: transparent;
+}
+
+.super-easy-progress-preview,
+.super-easy-progress-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+}
+
+.super-easy-progress-error {
+  border-color: var(--danger);
+}
+
+.super-easy-progress-preview-title {
+  margin: 0;
+  font-size: var(--font-size-18);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-progress-preview-body,
+.super-easy-progress-error-message {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+  overflow-wrap: anywhere;
+}
+
+.super-easy-progress-error-message {
+  color: var(--text-1);
+}
+
+.super-easy-progress-preview-actions,
+.super-easy-progress-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-block-start: var(--space-1);
+}
+
+.super-easy-progress-preview-actions .btn,
+.super-easy-progress-error-actions .btn {
+  min-height: 44px;
+}
+
+.super-easy-progress-stage-running .easy-progress,
+.super-easy-progress-stage-starting .easy-progress {
+  position: relative;
+  overflow: hidden;
+}
+
+.super-easy-progress-stage-running .easy-progress::after,
+.super-easy-progress-stage-starting .easy-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent), transparent);
+  transform: translateX(-100%);
+  animation: super-easy-progress-sweep 1600ms ease-in-out infinite;
+}
+
+@keyframes super-easy-progress-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
 .super-easy-progress-live {
   position: absolute;
   width: 1px;
@@ -280,11 +358,19 @@
   animation: none;
 }
 
+.super-easy-progress-reduced-motion .easy-progress::after {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .super-easy-progress .easy-progress-fill,
   .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder {
     transition: none;
     animation: none;
+  }
+
+  .super-easy-progress .easy-progress::after {
+    display: none;
   }
 }
 

@@ -87,6 +87,45 @@ function requireIdentifier(value, label) {
   return value;
 }
 
+/**
+ * Classify the journal's plan provenance for one dispatch entry. A slot that
+ * exists for the action but lacks backendId or a finite upperBound is
+ * incomplete and must never fall back to a sibling entry's input.
+ */
+function planSlotInfo(payload, events) {
+  const planHash = typeof payload.planHash === 'string' && payload.planHash !== '' ? payload.planHash : null;
+  const planId = typeof payload.planId === 'string' && payload.planId !== '' ? payload.planId : null;
+  const plans = events.filter((event) => event?.type === 'plan.proposed' && isPlainObject(event.data));
+  if (plans.length === 0) return { state: 'legacy', slot: null };
+
+  let matched = planHash ? plans.filter((event) => event.data.planHash === planHash) : [];
+  if (matched.length === 0 && planId) matched = plans.filter((event) => event.data.id === planId);
+  if (matched.length === 0) return { state: 'missing', slot: null };
+
+  let slot = null;
+  for (const event of matched) {
+    const actions = Array.isArray(event.data.actions) ? event.data.actions : [];
+    const candidate = actions.find((action) => isPlainObject(action) && action.id === payload.actionId);
+    if (candidate) slot = candidate;
+  }
+  if (!slot) return { state: 'missing', slot: null };
+  const complete = typeof slot.backendId === 'string'
+    && slot.backendId !== ''
+    && typeof slot.upperBound === 'number'
+    && Number.isFinite(slot.upperBound)
+    && slot.upperBound >= 0;
+  return complete ? { state: 'complete', slot } : { state: 'incomplete', slot };
+}
+
+function inputMatchesSlot(input, slot) {
+  return isPlainObject(input)
+    && typeof input.backendId === 'string'
+    && input.backendId === slot.backendId
+    && typeof input.budgetUnits === 'number'
+    && Number.isFinite(input.budgetUnits)
+    && input.budgetUnits === slot.upperBound;
+}
+
 function claimIdFor(productionId, outboxId) {
   return `claim_${createHash('sha256')
     .update(`outbox.claim\u0000${productionId}\u0000${outboxId}\u0000${randomUUID()}`)
@@ -226,6 +265,101 @@ export function createOutboxExecutor(options = {}) {
     }
   }
 
+  // A journal read failure is not an empty journal: every dispatch in this
+  // drain is refused with the typed reason instead of running without slots.
+  function readJournal(productionId) {
+    try {
+      return { events: store.readEvents(productionId), error: null };
+    } catch (error) {
+      return { events: [], error: error instanceof Error ? error : new Error(String(error)) };
+    }
+  }
+
+  // Per-entry dispatch input comes only from the drain option
+  // `resolveDispatchInput(entry)`; there is no second spelling or alias.
+  async function dispatchInputFor(entry, payload, context, journal) {
+    if (journal.error) {
+      return {
+        refused: 'journal_unavailable',
+        message: journal.error.message ?? 'the production journal is unavailable',
+      };
+    }
+    const actionId = payload.actionId;
+    const plan = planSlotInfo(payload, journal.events);
+    if (plan.state === 'incomplete') {
+      return {
+        refused: 'dispatch_slot_incomplete',
+        message: `the plan slot for ${actionId} has no backendId or finite upperBound`,
+      };
+    }
+
+    const resolver = context.resolveDispatchInput;
+    if (typeof resolver === 'function') {
+      let resolved;
+      try {
+        resolved = await resolver(entry);
+      } catch (error) {
+        return {
+          refused: 'dispatch_input_unavailable',
+          message: error?.message ?? 'the dispatch input resolver failed',
+        };
+      }
+      if (!isPlainObject(resolved)) {
+        return { refused: 'dispatch_input_missing', message: `no input was resolved for ${actionId}` };
+      }
+      if (plan.state === 'complete' && !inputMatchesSlot(resolved, plan.slot)) {
+        return {
+          refused: 'dispatch_input_mismatch',
+          message: `the resolved input does not match the plan slot for ${actionId}`,
+        };
+      }
+      return { input: resolved };
+    }
+
+    const shared = isPlainObject(context.input) ? context.input : null;
+    if (!shared) {
+      return { refused: 'dispatch_input_missing', message: `no pipeline input is available for ${actionId}` };
+    }
+    if (context.actionId !== undefined && context.actionId !== actionId) {
+      return {
+        refused: 'dispatch_input_mismatch',
+        message: `the shared drain context names ${context.actionId}, not ${actionId}`,
+      };
+    }
+    if (plan.state === 'complete') {
+      if (!inputMatchesSlot(shared, plan.slot)) {
+        return {
+          refused: 'dispatch_input_mismatch',
+          message: `the shared input does not match the plan slot for ${actionId}`,
+        };
+      }
+      return { input: shared };
+    }
+    if (plan.state === 'missing') {
+      if (context.actionId !== actionId) {
+        return {
+          refused: 'dispatch_slot_missing',
+          message: `the journal has no plan slot for ${actionId}`,
+        };
+      }
+      return { input: shared };
+    }
+    // No plan.proposed event in this journal at all: the entry's own dispatch
+    // bound is the only per-entry fact available, so a shared budget that
+    // contradicts it is refused rather than applied to a sibling action.
+    if (typeof shared.budgetUnits === 'number'
+      && Number.isFinite(shared.budgetUnits)
+      && typeof payload.upperBound === 'number'
+      && Number.isFinite(payload.upperBound)
+      && shared.budgetUnits !== payload.upperBound) {
+      return {
+        refused: 'dispatch_input_mismatch',
+        message: `the shared input budget does not match the dispatch bound for ${actionId}`,
+      };
+    }
+    return { input: shared };
+  }
+
   async function dispatchEntry(entry, context) {
     const payload = isPlainObject(entry.payload) ? entry.payload : {};
     const productionId = requireIdentifier(payload.productionId, 'productionId');
@@ -250,13 +384,25 @@ export function createOutboxExecutor(options = {}) {
       return { outcome: 'missing_package', acknowledged: false, reason: 'package_unavailable', productionId, actionId };
     }
 
+    const input = await dispatchInputFor(entry, payload, context, context.journal ?? { events: [], error: null });
+    if (input.refused) {
+      return {
+        outcome: 'refused',
+        acknowledged: false,
+        reason: input.refused,
+        message: input.message,
+        productionId,
+        actionId,
+      };
+    }
+
     let result;
     try {
       result = await adapter.admit({
         productionId,
         actionId,
         pkg,
-        input: context.input,
+        input: input.input,
         sourceDir: context.sourceDir,
         claimId: context.claimId,
       });
@@ -350,7 +496,8 @@ export function createOutboxExecutor(options = {}) {
     const phase = cancellationPhase(result, result?.run);
     let released = false;
     if (phase === 'stopped' && !result?.run) {
-      const action = result?.action ?? latestActions(store.readEvents(productionId)).get(actionId) ?? null;
+      const events = context.journal ? context.journal.events : store.readEvents(productionId);
+      const action = result?.action ?? latestActions(events).get(actionId) ?? null;
       released = releaseQueuedHold(production, action);
     }
     const acknowledged = acknowledge(productionId, entry.id);
@@ -386,6 +533,9 @@ export function createOutboxExecutor(options = {}) {
     if (!Number.isSafeInteger(maxEntries) || maxEntries < 1 || maxEntries > 256) {
       throw new OutboxExecutionError('INVALID_CONTEXT', 'maxEntries must be an integer between 1 and 256');
     }
+    if (context.resolveDispatchInput !== undefined && typeof context.resolveDispatchInput !== 'function') {
+      throw new OutboxExecutionError('INVALID_CONTEXT', 'resolveDispatchInput must be a function when supplied');
+    }
     return { ...context, maxEntries };
   }
 
@@ -400,13 +550,18 @@ export function createOutboxExecutor(options = {}) {
     const supported = pending
       .filter((entry) => entry.type === DISPATCH_TYPE || entry.type === CANCEL_TYPE)
       .slice(0, context.maxEntries);
+    const journal = supported.some((entry) => entry.type === DISPATCH_TYPE)
+      ? readJournal(productionId)
+      : { events: [], error: null };
     const entries = [];
     for (const entry of supported) {
       const key = `${productionId}\u0000${entry.id}`;
-      const result = await serialized(key, () => executeEntry(entry, {
+      const entryContext = {
         ...context,
+        journal,
         claimId: context.claimId ?? claimIdFor(productionId, entry.id),
-      }));
+      };
+      const result = await serialized(key, () => executeEntry(entry, entryContext));
       entries.push({ entryId: entry.id, type: entry.type, ...result });
     }
     return {

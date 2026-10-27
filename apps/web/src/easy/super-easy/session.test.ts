@@ -330,3 +330,39 @@ test('a planning failure is visible on the progress screen and can be retried', 
   assert.equal(h.calls.filter((call) => call.kind === 'run').length, before + 1);
   assert.equal(h.session.status(), 'error');
 });
+
+test('the session follows the run phases and republishes on each one', async () => {
+  const store = fakeStore();
+  const seen = [];
+  let published = 0;
+  let session;
+  session = createSuperEasySession({
+    async run(_input, deps) {
+      for (const stage of ['plan', 'iteration', 'approval', 'run']) {
+        deps.onPhase(stage);
+        seen.push(session.phase());
+      }
+      return {
+        ok: true,
+        productionId: PRODUCTION_ID,
+        draftCommand: { kind: 'iteration.set' },
+        snapshot: null,
+        cpu: { ok: true, step: 'review', previewReady: true },
+      };
+    },
+    watch: () => () => {},
+    api: {},
+    host: {},
+    store,
+    go() {},
+    onProgress() {
+      published += 1;
+    },
+  });
+
+  assert.equal(session.phase(), 'idle');
+  await session.generate({ prompt: 'A friendly robot who bakes bread' });
+  assert.deepEqual(seen, ['plan', 'iteration', 'approval', 'run']);
+  assert.equal(session.phase(), 'preview');
+  assert.ok(published >= 5, 'each phase repaints the gauges');
+});
