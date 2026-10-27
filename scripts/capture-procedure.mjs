@@ -112,12 +112,14 @@ function probeDurationMs(video) {
   const out = run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', video]).trim();
   const seconds = Number(out);
   if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds * 1000);
-  // MediaRecorder WebM often has no duration header; count the frames instead.
-  const frames = run('ffprobe', ['-v', 'error', '-count_packets', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_packets,r_frame_rate', '-of', 'json', video]);
-  const stream = JSON.parse(frames).streams?.[0] ?? {};
-  const [num, den] = String(stream.r_frame_rate ?? '30/1').split('/').map(Number);
-  const rate = num > 0 && den > 0 ? num / den : 30;
-  return Math.round((Number(stream.nb_read_packets) || 0) / rate * 1000);
+  // MediaRecorder WebM often has no duration header (and a 1000 fps timebase);
+  // the last video packet's timestamp is the reliable length.
+  const times = run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', video]);
+  const last = times.split('\n').reduce((max, line) => {
+    const value = Number.parseFloat(line);
+    return Number.isFinite(value) && value > max ? value : max;
+  }, 0);
+  return Math.round(last * 1000);
 }
 
 /** Re-encode to H.264 MP4 at a constant frame rate, with step chapters and a caption track. */
