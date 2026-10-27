@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>comfyrizz — open-weights film production, made Super Easy</title>
-<meta name="description" content="Comfyrizz turns one prompt into a finished MP4 on open weights (FLUX and LTX via Comfy). Open source, MIT. Independent project, not affiliated with Comfy.org.">
+<meta name="description" content="Comfyrizz makes videos with FLUX, LTX and experimental MiniMax FastH3 Omni workflows via Comfy. Open source, MIT. Independent of Comfy.org.">
 <meta name="theme-color" content="#14112B">
 <link rel="canonical" href="https://comfy.rizz.click/">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
@@ -14,7 +14,12 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://comfy.rizz.click/">
 <meta property="og:image" content="https://comfy.rizz.click/assets/social-card.png">
-<link rel="stylesheet" href="styles.css">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Comfyrizz — open-weights film production, made Super Easy">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="styles-v3.css">
+<link rel="stylesheet" href="effects.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -36,13 +41,14 @@
   <section class="hero" id="top">
     <div class="wrap hero-grid">
       <div>
-        <p class="eyebrow">Open-weights film production</p>
+        <p class="eyebrow"><span aria-hidden="true" class="status-dot"></span>Open-weights film production</p>
         <h1>One prompt. <span class="mint">Finished MP4.</span></h1>
-        <p class="lede">comfyrizz makes FLUX and LTX film production on open weights, run through Comfy, Super Easy. Describe the video; get the cut.</p>
+        <p class="lede">comfyrizz makes open-weight film production with FLUX, LTX and experimental MiniMax FastH3 Omni workflows through Comfy, Super Easy. Describe the video; get the cut.</p>
         <div class="cta">
           <a class="btn primary" href="https://github.com/mojomast/comfyrizz" rel="noopener">View on GitHub</a>
-          <span class="btn ghost" role="note" aria-disabled="true">Judge access &middot; invite-only</span>
+          <a class="btn secondary" href="#showcase">Watch the showcase <span aria-hidden="true">&darr;</span></a>
         </div>
+        <p class="access-note">Judge access &middot; invite-only</p>
         <p class="fine">Independent open-source project. Not made by or affiliated with Comfy.org.</p>
       </div>
       <figure class="hero-art">
@@ -53,32 +59,36 @@
 
   <section class="light" id="how" aria-labelledby="how-h">
     <div class="wrap">
+      <p class="section-label">From brief to film</p>
       <h2 id="how-h">How it works</h2>
+      <p class="section-intro">A creative workflow that keeps the story in your hands.</p>
       <ol class="steps">
-        <li><span class="n">1</span><h3>Prompt</h3><p>Chat a short brief. The agent plans scenes, look and script.</p></li>
-        <li><span class="n">2</span><h3>Generate</h3><p>Open FLUX stills and LTX motion plates render through Comfy.</p></li>
-        <li><span class="n">3</span><h3>Export</h3><p>Exact text and captions are drawn by code. Out comes an MP4.</p></li>
+        <li><span class="n" aria-hidden="true">01</span><h3>Prompt</h3><p>Chat a short brief. The agent plans scenes, look and script.</p></li>
+        <li><span class="n" aria-hidden="true">02</span><h3>Generate</h3><p>FLUX stills and LTX motion plates render through Comfy; experimental FastH3 Omni workflows can generate video and audio.</p></li>
+        <li><span class="n" aria-hidden="true">03</span><h3>Export</h3><p>Exact text and captions are drawn by code. Out comes an MP4.</p></li>
       </ol>
     </div>
   </section>
 
   <section class="dark" id="showcase" aria-labelledby="show-h">
     <div class="wrap">
+      <p class="section-label">Made with comfyrizz</p>
       <h2 id="show-h">Showcase</h2>
-      <p class="sub">A finished film made with comfyrizz — open FLUX stills, LTX motion, Remotion finish.</p>
+      <p class="sub">Explore a finished film made with comfyrizz. Workflows support FLUX stills, LTX motion and experimental FastH3 Omni video and audio, with a Remotion finish.</p>
       <div class="grid">
         <figure class="wide reel">
-          <video controls playsinline preload="metadata" poster="assets/showcase-demo-poster.jpg" width="1920" height="1080">
+          <video controls playsinline preload="none" poster="assets/showcase-demo-poster.jpg" width="1920" height="1080" aria-label="Comfyrizz showcase demo reel">
             <source src="assets/showcase-demo.mp4" type="video/mp4">
+            Your browser cannot play this video. <a href="assets/showcase-demo.mp4">Download the demo reel</a>.
           </video>
           <figcaption>Demo reel · 1080p · ~99s — what a Super Easy run can look like.</figcaption>
         </figure>
         <figure>
-          <img src="assets/motion-gallery.webp" alt="Gallery of motion plates generated with comfyrizz" loading="lazy">
-          <figcaption>Motion plates from open LTX models.</figcaption>
+          <img src="assets/motion-gallery.webp" alt="Gallery of motion styles for comfyrizz" width="1440" height="2540" loading="lazy" decoding="async">
+          <figcaption>Explore motion styles for LTX and experimental FastH3 Omni workflows.</figcaption>
         </figure>
         <figure>
-          <img src="assets/ui-agent-editor.webp" alt="comfyrizz app: chat, preview and timeline" loading="lazy">
+          <img src="assets/ui-agent-editor.webp" alt="comfyrizz app: chat, preview and timeline" width="1440" height="900" loading="lazy" decoding="async">
           <figcaption>Chat, preview and timeline in one app.</figcaption>
         </figure>
       </div>
@@ -88,8 +98,9 @@
   <section class="light" id="open" aria-labelledby="open-h">
     <div class="wrap two">
       <div>
+        <p class="section-label">Behind the work</p>
         <h2 id="open-h">Open weights, honest credits</h2>
-        <p>comfyrizz generates with open models: FLUX Klein for stills and LTX for motion. No closed video model sits in the pipeline.</p>
+        <p>comfyrizz uses open-weight models: FLUX Klein for stills and LTX for motion. Experimental workflows can also use MiniMax FastH3 Omni for video and audio, under the MiniMax-H3 Community License. No closed video model sits in the pipeline.</p>
       </div>
       <div>
         <p>Judge demos run on Comfy Cloud using credits provided for the event. Access is an invite-only, tokenized workspace hosted separately from this site.</p>
@@ -100,7 +111,9 @@
 
   <section class="dark cta-band" aria-labelledby="gh-h">
     <div class="wrap">
+      <p class="section-label">Built in the open</p>
       <h2 id="gh-h">Read the code. Run it yourself.</h2>
+      <p>Explore the project, its workflows and documentation on GitHub.</p>
       <a class="btn primary" href="https://github.com/mojomast/comfyrizz" rel="noopener">View on GitHub</a>
     </div>
   </section>
