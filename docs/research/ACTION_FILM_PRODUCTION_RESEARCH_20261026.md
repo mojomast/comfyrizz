@@ -190,3 +190,45 @@ frames, preserving the longer contact actions. Its stage cap is 6 credits with
 2 credits for correction and the separate 2.5-credit prior exposure hold. Total
 authorization remains 20. Source prompts were also corrected to describe observed
 paw placement and the actual two-piece brace, not rejected board intentions.
+
+### Approved-footage edit and sound finish (27 October)
+
+The revised main run collected all 14 requested clips. After seeing the expanded
+18-clip preview, the user approved continuing with the footage. The final edit
+uses 17 sources at natural speed for exactly 2,880 frames (120 seconds, 24 fps),
+with no repeated source intervals, still padding or interpolation. The lantern
+activation shot begins at 78 seconds. The successful lens-placement source shows
+the lens lowered into its holder and the paws released; transport up the tower
+remains an editorial ellipsis. The empty lift shot establishes preparation, not
+evidence of transporting a lens. Minor generated contact and architectural
+differences remain in the user-approved material.
+
+Original deterministic stereo sound design supplies sea wash, felt footsteps,
+wood contact, mallet hits, mechanical clicks and lamp hum, mixed with the original
+120-second score. Native source audio is preserved in source files but omitted
+from the final soundtrack. The mixed WAV measures approximately -16.4 LUFS,
+7.3 LU range and -1.5 dB true peak. Level checks and muted browser playback must
+not be described as independent subjective listening approval.
+
+The refreshed account balance is 241.45, or **13.93 / 20 credits** estimated spend
+including failed setup and delayed billing. Colab reports zero active assignments
+and zero hourly charge. The separate 2.5-credit prior-production exposure hold
+remains unresolved; conservative unused authorization is 3.57 credits. No further
+generation was needed for this edit. All 120 previously protected project files
+still match the prior delivery hashes. Assembly and delivery scripts are retained
+in the separate production root with source-hash-bound edit and render receipts.
+
+### Delivery verified
+
+Published player: https://mail.tailec998.ts.net:8451/comfyrizz-last-light/index.html
+
+Both 1080p and 720p exports passed full decoding, 2,880-frame/24-fps checks and
+120-second duration checks, with stereo 48 kHz audio. Encoded audio measured
+-16.4 LUFS and -1.5 dB true peak. The source/stem/edit-recipe ZIP passed its CRC
+check. Every published file, including both films and the archive, matched its
+local SHA-256 hash when fetched over HTTPS. Full natural-speed muted browser
+playback reached the end with all 2,880 frames reported (one dropped presentation
+frame); chapter seek and 390-pixel mobile layout checks passed without page
+errors. Final temporal-sheet and mobile screenshot inspection completed.
+Subjective listening approval is not claimed. The delivery README records that
+distinction and remaining generated continuity limitations.
