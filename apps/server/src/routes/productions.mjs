@@ -642,6 +642,7 @@ export function createProductionRoutes(options = {}) {
           response.destroy?.(error);
           return true;
         }
+        if (mapError(error).status === 500) options.onError?.(error, { route: actionPath.resource, productionId: id });
         sendError(response, error);
       }
       return true;

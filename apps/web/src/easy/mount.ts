@@ -248,10 +248,6 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const saved = readSuperEasySetup();
     let draft: SuperEasySetup = { ...saved, confirmed: false };
     let status: any = null;
-    try {
-      const response = await host.apiFetch('/api/colab/status');
-      if (response.ok) status = await response.json();
-    } catch { /* the setup dialog retains the actionable offline state */ }
     const hostId = `super-easy-setup-${Date.now()}`;
     const opener = root.querySelector<HTMLElement>('[data-super-easy-setup]');
     const computeHtml = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, soFarText: 'This cap is saved for later one-prompt runs; no spending approval is needed for each run.', idPrefix: hostId });
@@ -279,6 +275,13 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onStatus: next => { status = next; paint(); },
       idPrefix: hostId,
     }) : () => {};
+    void (async () => {
+      try {
+        const response = await host.apiFetch('/api/colab/status');
+        status = response.ok ? await response.json() : null;
+      } catch { status = null; }
+      if (setupRoot?.isConnected) paint();
+    })();
     opener?.ownerDocument.querySelector('[data-super-easy-ai-setup]')?.addEventListener('click', () => { void settings?.open(); }, { once: true });
     const choice = await pending;
     unmount();

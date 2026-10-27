@@ -1209,6 +1209,9 @@ export function createApp({
       }
       return required;
     },
+    onError: (error, context) => {
+      console.error(`[productions ${context.route} ${context.productionId}]`, error);
+    },
   });
 
   const renderRoutes = createRenderRoutes({
