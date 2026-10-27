@@ -123,6 +123,14 @@ test('LTX uses pinned i2v, retains start-frame refs and requires finishing sound
   const { jobs, schema } = await jobsAndSchema();
   assert.equal(schema.validatePackage(pkg).valid, true, JSON.stringify(schema.validatePackage(pkg).errors));
   const plan = jobs.planJobs(pkg);
+  const startJob = plan.jobs.find((job: any) => job.asset === result.asset.gen.inputs.image);
+  assert.equal(startJob.workflow, 'workflows/flux3_klein_ref2_edit.api.json');
+  assert.equal(startJob.params.width, undefined);
+  assert.equal(startJob.params.height, undefined);
+  assert.ok(startJob.params.megapixels > 0);
+  assert.deepEqual(startJob.fileInputs.map((input: any) => input.param), ['reference', '_reference_2']);
+  assert.ok(startJob.deps.includes(`${identity}.still`));
+  assert.ok(startJob.deps.includes(`${composition}.still`));
   const video = plan.jobs.find((job: any) => job.asset === result.asset.id);
   assert.equal(video.frames, 145);
   assert.equal(video.frames % 8, 1);
@@ -179,7 +187,15 @@ test('explicit Klein is stills + code motion only, with Remotion and finishing m
   const plan = jobs.planJobs(pkg);
   assert.ok(plan.jobs.length > 0);
   assert.ok(plan.jobs.every((job: any) => job.generator === 'flux3-klein'));
-  assert.ok(plan.jobs.some((job: any) => job.asset === result.asset.id));
+  const keyframe = plan.jobs.find((job: any) => job.asset === result.asset.id);
+  assert.ok(keyframe);
+  assert.equal(keyframe.workflow, 'workflows/flux3_klein_ref2_edit.api.json');
+  assert.equal(keyframe.params.width, undefined);
+  assert.equal(keyframe.params.height, undefined);
+  assert.ok(keyframe.params.megapixels > 0);
+  assert.deepEqual(keyframe.fileInputs.map((input: any) => input.param), ['reference', '_reference_2']);
+  assert.ok(keyframe.deps.includes(`${identity}.still`));
+  assert.ok(keyframe.deps.includes(`${composition}.still`));
 });
 
 test('auto route is deterministic and explicit non-auto conflicts are refused', async () => {

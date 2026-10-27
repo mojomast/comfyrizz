@@ -191,6 +191,43 @@ test("a reference parameter resolves to the generated still too", () => {
   assert.deepEqual(byId["a_ref.still"].deps, ["a_plate1_still.still"]);
 });
 
+test("a non-cast two-reference edit normalizes dimensions and plans both uploads", () => {
+  const pkg = fixture("package-pending.json");
+  pkg.assets.a_plate1_still.status = "pending";
+  pkg.assets.a_plate1_still.gen.inputs.width = 1024;
+  pkg.assets.a_plate1_still.gen.inputs.height = 576;
+  pkg.assets.a_composition = structuredClone(pkg.assets.a_plate1_still);
+  pkg.assets.a_ref = {
+    kind: "image", origin: "generated", status: "pending",
+    license: { id: "CC0-1.0" }, model_license: { id: "flux-3-image-klein-nc" },
+    gen: {
+      generator: "flux3-klein", workflow: "workflows/flux3_klein_ref_edit.api.json",
+      workflow_sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      model: "flux-3-image-klein",
+      inputs: { reference: "a_plate1_still", reference_2: "a_composition", prompt: "keep identity and composition", seed: 9, steps: 16, width: 1024, height: 576 },
+    },
+  };
+  const doc = planJobs(pkg, { assets: ["a_ref"] });
+  const job = doc.jobs.find(candidate => candidate.asset === "a_ref");
+  assert.equal(job.workflow, "workflows/flux3_klein_ref2_edit.api.json");
+  assert.equal(job.params.width, undefined);
+  assert.equal(job.params.height, undefined);
+  assert.equal(job.params.megapixels, 0.589824);
+  assert.equal(job.params.reference_2, undefined);
+  assert.equal(job.params._reference_2, "a_composition");
+  assert.deepEqual(job.fileInputs, [
+    { param: "reference", from: "job", job: "a_plate1_still.still", path: "assets/a_plate1_still.png" },
+    { param: "_reference_2", from: "job", job: "a_composition.still", path: "assets/a_composition.png" },
+  ]);
+  assert.deepEqual(job.deps, ["a_plate1_still.still", "a_composition.still"]);
+  assert.deepEqual(checkJobsDoc(doc), []);
+  assert.equal(doc.jobs.find(candidate => candidate.asset === "a_plate1_still").params.width, 1024, "t2i dimensions are unchanged");
+
+  pkg.assets.a_ref.gen.inputs.megapixels = 0.75;
+  const explicit = planJobs(pkg, { assets: ["a_ref"] }).jobs.find(candidate => candidate.asset === "a_ref");
+  assert.equal(explicit.params.megapixels, 0.75, "an explicit area budget is preserved");
+});
+
 test("a file parameter that is neither an asset nor a path is refused, naming it", () => {
   const pkg = fixture("package-pending.json");
   pkg.assets.a_plate1.gen.inputs.image = "the fox picture";
@@ -791,7 +828,8 @@ test("a style ref stays first and the cast ref is appended, up to 10", () => {
   for (let n = 2; n <= 10; n += 1) inputs[`reference_${n}`] = `assets/r${n - 1}.png`;
   const capped = planJobs(full).jobs.find((job) => job.asset === "a_still");
   assert.equal(capped.params.reference, "assets/r0.png");
-  assert.equal(capped.params.reference_10, "assets/r9.png");
+  assert.equal(capped.params.reference_10, undefined);
+  assert.equal(capped.params._reference_10, "assets/r9.png");
   assert.equal(JSON.stringify(capped.params).includes("a_pip"), false);
   assert.equal(capped.fileInputs.some((entry) => entry.path === "assets/pip.svg"), false);
 

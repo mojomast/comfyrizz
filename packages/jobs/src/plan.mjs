@@ -115,6 +115,7 @@ export const WORKFLOW_CAPABILITY_PROFILES = Object.freeze({
   "workflows/flux3_klein_t2i.api.json": capabilityProfile("flux3-klein"),
   "workflows/flux3_klein_img2img.api.json": capabilityProfile("flux3-klein", { image: true }),
   "workflows/flux3_klein_ref_edit.api.json": capabilityProfile("flux3-klein", { image: true, reference: true }),
+  "workflows/flux3_klein_ref2_edit.api.json": capabilityProfile("flux3-klein", { image: true, reference: true }),
   "workflows/character_lora_klein.api.json": capabilityProfile("flux3-klein", { image: true, reference: true }),
   "workflows/character_identity_pulid.api.json": capabilityProfile("flux3-klein", { image: true, reference: true }),
   "workflows/ltx25_i2v_2stage.api.json": capabilityProfile("ltx25", { image: true }),
@@ -134,23 +135,26 @@ function hasMotionReferenceSlot(profile) {
 }
 
 /**
- * Klein reference edits take up to 10 reference images. The shipped graph wires image0
- * (`reference` / `image` on node 10). Further refs are uploaded under `_reference_2` …
- * `_reference_10` so they stay out of the params map (a name the map does not declare
- * would be refused) while the cache key and the runner still see the file.
+ * Klein reference edits take up to 10 reference images. The single-image graph wires image0
+ * (`reference` / `image` on node 10). Exactly two refs select the real two-image graph; larger
+ * legacy lists upload `_reference_2` … `_reference_10` for provenance while the cache key and
+ * runner still see every file. Public reference_N names are normalized before upload planning.
  */
 export const KLEIN_REF_CAP = 10;
 export const REF_EDIT_WORKFLOW = "workflows/flux3_klein_ref_edit.api.json";
+export const REF2_EDIT_WORKFLOW = "workflows/flux3_klein_ref2_edit.api.json";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-let refEditWorkflowShaCache = null;
+const workflowShaCaches = new Map();
 let fastH3NoclipWorkflowShaCache = null;
 
+function workflowSha(workflow) {
+  if (!workflowShaCaches.has(workflow)) workflowShaCaches.set(workflow, sha256Hex(readFileSync(join(REPO_ROOT, workflow))));
+  return workflowShaCaches.get(workflow);
+}
+
 function refEditWorkflowSha() {
-  if (!refEditWorkflowShaCache) {
-    refEditWorkflowShaCache = sha256Hex(readFileSync(join(REPO_ROOT, REF_EDIT_WORKFLOW)));
-  }
-  return refEditWorkflowShaCache;
+  return workflowSha(REF_EDIT_WORKFLOW);
 }
 
 function fastH3NoclipWorkflowSha() {
@@ -650,6 +654,21 @@ function writeRefSlots(params, refs) {
   });
 }
 
+/** Normalize every Klein ref-edit job before sizing, dependency and upload planning. */
+function normalizeRefEditParams(params) {
+  const refs = listedRefs(params);
+  if (refs.length) writeRefSlots(params, refs);
+  if (!(Number(params.megapixels) > 0)) {
+    const width = Number(params.width);
+    const height = Number(params.height);
+    if (width > 0 && height > 0) params.megapixels = width * height / 1_000_000;
+  }
+  // ReferenceMultiLatent takes one area budget, never independent width/height inputs.
+  delete params.width;
+  delete params.height;
+  return refs;
+}
+
 /**
  * Append each named cast member's ref_asset to a Klein still's reference list (cap 10,
  * existing refs first, cast members in `cast[]` order). Returns null when this still
@@ -694,10 +713,6 @@ function applyCastReferences({ pkg, assetId, params, workflow, workflowSha256, e
   if (workflow !== REF_EDIT_WORKFLOW) {
     nextWorkflow = REF_EDIT_WORKFLOW;
     nextSha = refEditWorkflowSha();
-  }
-  if (nextWorkflow === REF_EDIT_WORKFLOW) {
-    delete params.width;
-    delete params.height;
   }
   return { workflow: nextWorkflow, workflowSha256: nextSha, refSha256: attached.map((ref) => ref.sha) };
 }
@@ -889,6 +904,16 @@ export function planJobs(pkg, opts = {}) {
         workflow = cast.workflow;
         workflowSha256 = cast.workflowSha256;
         castRefSha256 = cast.refSha256;
+      }
+      if (workflow === REF_EDIT_WORKFLOW || workflow === REF2_EDIT_WORKFLOW) {
+        const refs = normalizeRefEditParams(params);
+        if (refs.length === 2) {
+          workflow = REF2_EDIT_WORKFLOW;
+          workflowSha256 = workflowSha(REF2_EDIT_WORKFLOW);
+        } else if (workflow === REF2_EDIT_WORKFLOW) {
+          workflow = REF_EDIT_WORKFLOW;
+          workflowSha256 = refEditWorkflowSha();
+        }
       }
     }
     const job = {

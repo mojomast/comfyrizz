@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "generator": "flux3-klein",
+  "kind": "still",
+  "note": "Two-reference Klein edit. LoadImage(10) is <ref_image_0>; LoadImage(11) is <ref_image_1>. Both feed ReferenceMultiLatent(12), so identity and composition genuinely condition the result. Output geometry uses one megapixel area budget, never independent width/height inputs. The planner canonicalizes public reference_2 to _reference_2 before upload planning.",
+  "files": ["image", "reference", "_reference_2"],
+  "map": {
+    "prompt": ["4", "text"],
+    "image": ["10", "image"],
+    "reference": ["10", "image"],
+    "_reference_2": ["11", "image"],
+    "megapixels": ["12", "resolution.megapixels"],
+    "seed": ["7", "seed"],
+    "steps": ["7", "steps"],
+    "denoise": ["7", "denoise"]
+  }
+}

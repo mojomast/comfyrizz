@@ -172,12 +172,18 @@ reference-specific code.
 | `logo_overlay` | image with role `logo` | theme `logo_asset`, the same path as the brand logo | none |
 | `motion_reference` | video only | note becomes a `promptHint` on the plate's prompt; frame 0 becomes the start image unless another `start_frame` exists | LTX i2v `prompt` on node 5 plus `image` on node 30 |
 
-The Klein ref edit graph is `workflows/flux3_klein_ref_edit.api.params.json`; the
-LTX graph is `workflows/ltx25_i2v_2stage.api.params.json`. The cap is 10
-reference images per Klein asset: the style reference goes first and an 11th is
-rejected with `REFERENCE_CAP_REACHED`. The shipped Klein graph wires image0 on
-node 10; further `_reference_2` ... `_reference_10` files are uploaded and
-recorded by the plan, which is what the workflow map declares.
+The single-reference Klein graph is `workflows/flux3_klein_ref_edit.api.json`.
+Exactly two references select `workflows/flux3_klein_ref2_edit.api.json`: node 10
+is `<ref_image_0>`, node 11 is `<ref_image_1>`, and both are linked into
+`ReferenceMultiLatent`. The planner converts requested width/height to one
+megapixel area budget and canonicalizes public `reference_2` to the upload/map
+name `_reference_2`; raw dimensions never reach the reference node. The LTX graph
+is `workflows/ltx25_i2v_2stage.api.json`. The cap is 10 reference images per
+Klein asset: the style reference goes first and an 11th is rejected with
+`REFERENCE_CAP_REACHED`. On the legacy single-image graph, further
+`_reference_2` ... `_reference_10` files are uploaded and recorded but are not
+conditioning inputs; use the two-reference graph when both images must shape the
+result.
 
 Video references always reach Comfy as extracted PNG frames. The raw video is
 never uploaded into a graph.
