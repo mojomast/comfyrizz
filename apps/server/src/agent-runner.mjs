@@ -240,7 +240,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         sessionId,
         now,
         ...(repairInstructions ? {
-          system: 'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded. Do not call storyboard.propose, rebuild the storyboard, regenerate assets, change the story, or change the model route. Use only the edits required by the user validation report. When the listed issues are fixed, stop calling tools and reply with one short sentence.',
+          system: 'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded. Do not call storyboard.propose, rebuild the storyboard, replace or regenerate existing assets, change the story, or change the model route. Use only the edits required by the user validation report. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image. When the listed issues are fixed, stop calling tools and reply with one short sentence.',
         } : {}),
         // Initial planning is bounded separately from the much smaller edit-only repair.
         maxSteps: repairInstructions ? 8 : 16,
