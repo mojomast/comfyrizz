@@ -454,7 +454,19 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
       let envelope: Record<string, unknown>;
       try {
         envelope = finalPlanEnvelope(easyCard, snapshot);
-        await deps.api.proposeActionPlan(productionId, envelope);
+        const priced = await deps.api.proposeActionPlan(productionId, envelope);
+        const pricedCeiling = isRecord(priced) && isRecord(priced.plan) ? priced.plan.reservationCeiling : null;
+        if (typeof pricedCeiling !== 'number' || !Number.isFinite(pricedCeiling) || pricedCeiling <= 0) {
+          return failure('FINAL_PLAN_FAILED', 'plan', FINAL_PLAN_FAILED);
+        }
+        envelope = {
+          ...envelope,
+          payload: {
+            ...(isRecord(envelope.payload) ? envelope.payload : {}),
+            reservationCeiling: pricedCeiling,
+            actions: [{ id: 'act_super_easy_final', kind: 'final', upperBound: pricedCeiling }],
+          },
+        };
         snapshot = await deps.api.getProduction(productionId);
       } catch (error) {
         return failure('FINAL_PLAN_FAILED', 'plan', messageOf(error, FINAL_PLAN_FAILED));

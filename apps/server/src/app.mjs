@@ -1195,6 +1195,20 @@ export function createApp({
     readPackage: (packageId) => {
       try { return store.read(packageId); } catch { return null; }
     },
+    estimateFinalRun: async ({ productionId, budgetUnits }) => {
+      const production = productionStore.read(productionId);
+      if (!production?.packageId) throw new Error('the final plan has no bound package');
+      const pkg = store.read(production.packageId);
+      const estimated = await runs.estimate({ backendId: 'colab', pkg, budgetUnits });
+      const required = estimated.budget?.required;
+      if (!Number.isFinite(required) || required <= 0) throw new Error('the final run could not be priced');
+      if (estimated.budget?.allowed === false) {
+        const error = new Error(`the final run needs ${required.toFixed(2)} Google Colab credits, above the configured ${budgetUnits}-credit cap`);
+        error.code = 'BUDGET_EXCEEDED';
+        throw error;
+      }
+      return required;
+    },
   });
 
   const renderRoutes = createRenderRoutes({
