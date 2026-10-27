@@ -64,7 +64,7 @@ ${retention}
 
 detailed_description:
 The visual style and lighting follow the supplied references.
-[Shot 1] ${composition} ${count === 0 ? 'The setting is unoccupied throughout.' : `Exactly ${count} visible character${count === 1 ? '' : 's'} occupy the shot.`} ${camera} ${action} ${speech} Hold the resulting state through the remaining source duration of ${sourceSeconds.toFixed(3)} seconds.
+[Shot 1] At the first clear appearance of <Subject 1>, preserve this exact identity without age or design drift: ${subject}. ${composition} ${count === 0 ? 'The setting is unoccupied throughout.' : `Exactly ${count} visible character${count === 1 ? '' : 's'} occupy the shot.`} ${camera} ${action} ${speech} Hold the resulting state through the remaining source duration of ${sourceSeconds.toFixed(3)} seconds.
 
 overall_soundscape:
 ${soundscape}
