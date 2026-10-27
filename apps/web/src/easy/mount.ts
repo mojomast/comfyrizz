@@ -1,4 +1,4 @@
-import { COPY } from './copy.ts';
+import { COPY, fill } from './copy.ts';
 import { escapeHtml } from './components.ts';
 import { createEasyApi } from './api.ts';
 import { createEasyStore, preserveUnsentPrompt, storageKey } from './store.ts';
@@ -26,6 +26,10 @@ import { createAskDrawer, type AskDrawerController } from './ask-drawer.ts';
 import { mountEasyAgentSettings } from './agent-settings.ts';
 import { mountProjectName, type ProjectNameController } from './project-name.ts';
 import { mountShellSave, type ShellSaveController } from './shell-save.ts';
+import { createProcedureCapture, type ProcedureCapture } from './procedure/capture.ts';
+import { readCaptureArmed, writeCaptureArmed } from './procedure/arm.ts';
+import { renderProcedureToggle } from './procedure/toggle.ts';
+import { PROCEDURE_COPY } from './procedure/copy.ts';
 
 import './easy.css';
 
@@ -50,6 +54,7 @@ function packageIdFrom(search: string): string | null {
 
 export interface EasyStudioDeps {
   createSession?: typeof createSuperEasySession;
+  createCapture?: typeof createProcedureCapture;
 }
 
 export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: EasyStudioDeps = {}): () => void {
@@ -88,6 +93,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let projectName: ProjectNameController | null = null;
   let shellSave: ShellSaveController | null = null;
   let ask: AskDrawerController | null = null;
+  const procedure: ProcedureCapture = (deps.createCapture ?? createProcedureCapture)({ doc });
   let facts: StepFacts = {
     hasPackage: false,
     planApproved: false,
@@ -187,28 +193,44 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onProgress: (_html, snapshot) => {
         superEasySnapshot = snapshot;
         superEasy?.render();
+        procedure.observe(snapshot);
       },
       onDone: (snapshot) => {
         superEasySnapshot = snapshot;
         superEasy?.render();
+        procedure.observe(snapshot);
       },
       onPreviewReady: (_result, snapshot) => {
         superEasySnapshot = snapshot;
         superEasy?.render();
+        procedure.mark('preview', PROCEDURE_COPY.previewReady);
+        procedure.observe(snapshot);
       },
-      onError: () => {
+      onError: (failure) => {
         // The progress screen owns the message, Retry and the escapes now.
         // The Studio shell is intentionally destroyed while Super Easy runs.
         superEasy?.render();
+        procedure.fail(failure.message);
       },
     });
     return superEasySession;
   }
 
-  function onSuperEasyGenerate(input: { prompt: string; compute: 'cpu' }): void {
+  /** Start the procedure capture from inside the Generate gesture. */
+  async function startProcedure(title: string): Promise<void> {
+    if (procedure.active()) return;
+    await procedure.start({ title });
+  }
+
+  async function onSuperEasyGenerate(input: { prompt: string; compute: 'cpu'; capture?: boolean }): Promise<void> {
     const session = ensureSuperEasySession();
     const status = session.status();
     if (status === 'running' || status === 'stopping') return;
+    if (input.capture) {
+      await startProcedure(input.prompt);
+      procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: input.prompt }));
+      procedure.mark('compute', PROCEDURE_COPY.computeCpu);
+    }
     void session.generate({ prompt: input.prompt, compute: 'cpu' });
   }
 
@@ -248,6 +270,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       }),
       snapshot: () => superEasySnapshot,
       onGenerate: (input) => onSuperEasyGenerate(input),
+      captureArmed: () => readCaptureArmed(search()),
+      onCaptureToggle: (armed) => writeCaptureArmed(armed),
       onMoreControl: () => openStudioFromSuperEasy(),
       previewReady: () => superEasySession?.previewReady() === true,
       failure: () => superEasySession?.failure() ?? null,
@@ -320,6 +344,12 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       go('level');
       return;
     }
+    const toggle = root.querySelector<HTMLInputElement>('[data-procedure-capture-toggle]');
+    if (toggle?.checked) {
+      await startProcedure(state.idea.text || videoTitle());
+      procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: state.idea.text }));
+      procedure.mark('compute', paid ? PROCEDURE_COPY.computeColab : PROCEDURE_COPY.computeCpu);
+    }
     let snapshot: unknown = null;
     if (state.productionId) {
       try {
@@ -335,10 +365,24 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       go: (step) => go(step),
     });
     if (typeof message === 'string' && message) {
+      procedure.fail(message);
       shell?.alert(message);
       return;
     }
-    if (store.get().compute === 'cpu') await runCpuFromStudio();
+    const approved = store.get();
+    if (approved.compute === 'colab') {
+      procedure.mark('approval', typeof approved.spendCap === 'number' && approved.spendCap > 0
+        ? fill(PROCEDURE_COPY.approvalColab, { cap: approved.spendCap })
+        : PROCEDURE_COPY.approvalColabNoCap);
+    } else {
+      procedure.mark('approval', PROCEDURE_COPY.approvalCpu);
+    }
+    if (approved.productionId) procedure.follow(approved.productionId);
+    if (approved.compute === 'cpu') {
+      const cpu = await runCpuFromStudio() as { ok?: boolean; message?: string } | undefined;
+      if (cpu?.ok === true) procedure.mark('preview', PROCEDURE_COPY.previewReady);
+      else if (cpu?.ok === false) procedure.fail(cpu.message || COPY.plan.approveFailed);
+    }
     try {
       facts = await resumeFacts({ api, host, state: store.get() });
     } catch {
@@ -392,8 +436,12 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const mod = modules[step];
     const heading = mod?.heading ?? COPY.steps[step];
     const intro = mod?.intro ?? '';
-    const bodyHtml = mod ? mod.render(state, facts) : `<p>${escapeHtml(COPY.shell.comingSoon)}</p>`;
+    const rendered = mod ? mod.render(state, facts) : `<p>${escapeHtml(COPY.shell.comingSoon)}</p>`;
+    const bodyHtml = step === 'plan'
+      ? `${rendered}\n${renderProcedureToggle({ armed: procedure.active() || readCaptureArmed(search()), id: 'easy-plan-capture' })}`
+      : rendered;
     shell.setStep({ id: step, heading, intro, bodyHtml });
+    procedure.mark('step', fill(PROCEDURE_COPY.step, { step: heading }));
     refreshVideoName();
     shell.setBack(stepIndex(step) > 0);
     const ctx = makeCtx();
@@ -583,6 +631,12 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStepper = mountStepper(stepperHost, { onSelect: (next) => go(next) });
   });
   const stopMode = subscribeMode((mode) => applyShell(mode));
+  const onCaptureToggle = (event: Event): void => {
+    const target = event.target as HTMLInputElement | null;
+    if (superEasy || !target?.matches?.('[data-procedure-capture-toggle]')) return;
+    writeCaptureArmed(target.checked);
+  };
+  root.addEventListener('change', onCaptureToggle);
   view?.addEventListener('popstate', onPopState);
   // Show the studio before resume facts return. A busy server must not leave the editor in front.
   applyShell(getMode());
@@ -604,6 +658,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   return () => {
     stopStore();
     stopMode();
+    root.removeEventListener('change', onCaptureToggle);
+    procedure.destroy();
     view?.removeEventListener('popstate', onPopState);
     stopStep();
     stopStepper();
