@@ -17,11 +17,18 @@ export const COPY = deepFreeze({
     title: 'Make a video',
     promptLabel: 'What is your video about?',
     promptPlaceholder: 'A friendly robot who learns to bake bread',
+    hint: 'One sentence is enough. We write the script, draw the motion graphics and make a preview on this computer, with no GPU and no Google Colab.',
     generate: 'Generate',
     starting: 'Starting…',
     tryExample: 'Try an example',
+    ideasLabel: 'Or start from an idea:',
     moreControl: 'I want more control',
     emptyPrompt: 'Tell us what you want to make first.',
+  },
+  ideas: {
+    bees: 'Why bees matter: a 30-second explainer about pollination',
+    coffee: 'How a coffee bean becomes your morning cup',
+    sleep: 'Three simple habits for better sleep tonight',
   },
   making: {
     title: 'Making your video',

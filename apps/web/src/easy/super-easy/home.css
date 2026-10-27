@@ -67,6 +67,63 @@
   font-size: var(--font-size-13);
 }
 
+.super-easy-home-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-home-error[hidden] {
+  display: none;
+}
+
+.super-easy-home-prompt[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.super-easy-home-ideas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.super-easy-home-ideas-label {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-home-idea-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.super-easy-home-idea {
+  min-height: 36px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--font-size-13);
+  text-align: start;
+  cursor: pointer;
+}
+
+.super-easy-home-idea:hover {
+  border-color: var(--accent);
+}
+
+.super-easy-home-idea:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .super-easy-home-actions {
   display: flex;
   flex-direction: column;

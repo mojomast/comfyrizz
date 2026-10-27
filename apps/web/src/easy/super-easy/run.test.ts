@@ -298,3 +298,25 @@ test('a This computer preview timeout is reported after approval', async () => {
   assert.equal(store.get().generate.status, 'error');
   store.flush();
 });
+
+test('the run reports each phase in order, before the work it names', async () => {
+  const { api, host, calls, store } = harness();
+  const result = await runSuperEasy({ prompt: PROMPT }, {
+    api,
+    host,
+    store,
+    go: (step) => calls.push({ kind: 'go', step }),
+    onPhase: (stage) => calls.push({ kind: `phase:${stage}` }),
+  });
+  assert.equal(result.ok, true);
+  const order = kinds(calls).filter((kind) => kind.startsWith('phase:') || kind === 'build' || kind === 'refresh');
+  assert.deepEqual(order, ['phase:plan', 'build', 'phase:iteration', 'phase:approval', 'phase:run', 'refresh']);
+});
+
+test('a failed plan stops the phases at plan', async () => {
+  const { api, host, store } = harness({ fail: 'plan' });
+  const phases = [];
+  const result = await runSuperEasy({ prompt: PROMPT }, { api, host, store, go: () => {}, onPhase: (stage) => phases.push(stage) });
+  assert.equal(result.ok, false);
+  assert.deepEqual(phases, ['plan']);
+});

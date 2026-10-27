@@ -22,6 +22,8 @@ import { setPreferStudio } from './super-easy/prefs.ts';
 import { escapeToHome } from './super-easy/escape.ts';
 import { createSuperEasySession, type SuperEasySession } from './super-easy/session.ts';
 import type { SuperEasyHost } from './super-easy/run.ts';
+import { localStageReadings, mergeLocalStages } from './super-easy/local-stages.ts';
+import { readStages, type StagesProgress } from './super-easy/stages.ts';
 import { createAskDrawer, type AskDrawerController } from './ask-drawer.ts';
 import { mountEasyAgentSettings } from './agent-settings.ts';
 import { mountProjectName, type ProjectNameController } from './project-name.ts';
@@ -225,6 +227,17 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     });
   }
 
+  function superEasyStages(snapshot: unknown): StagesProgress {
+    const session = superEasySession;
+    const phase = session && typeof session.phase === 'function' ? session.phase() : 'idle';
+    return mergeLocalStages(readStages(snapshot), localStageReadings({
+      phase,
+      failed: session?.failure() != null,
+      pkg: host.getPackage(),
+      packageId: store.get().packageId,
+    }));
+  }
+
   /** Super Easy first paint. The player stays with its owner; only the studio adopts it. */
   function showSuperEasy(): void {
     homeTicket += 1;
@@ -255,6 +268,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         void superEasySession?.retry();
       },
       onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
+      onExport: (packageId) => openStudioFromSuperEasy('export', packageId),
+      stages: (snapshot) => superEasyStages(snapshot),
       onMakeAnother: () => {
         resetPlanDecisionAnswers();
         store.startNew();
@@ -282,7 +297,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     view?.history?.pushState({}, '', nextUrl(query ? `?${query}` : '', step));
     destroySuperEasy();
     ensureShell();
-    if (step === 'review' && shellReady) showStep('review');
+    // Export starts rendering when it is shown, so it must be shown only once.
+    if ((step === 'review' || step === 'export') && shellReady && currentStep !== step) showStep(step);
   }
 
   function planNeedsUpdate(state: EasyState): StepId[] {

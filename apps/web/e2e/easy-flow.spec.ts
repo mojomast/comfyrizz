@@ -99,17 +99,10 @@ async function openExportReloadHarness(page: Page): Promise<void> {
 
 /**
  * The Easy studio is the second door on purpose: a bare visit lands on Super
- * Easy, and More control is the way in. The studio's eager step import also
- * picks up colocated node:test modules on this base, so stub those modules
- * only; every real step stays in place.
+ * Easy, and More control is the way in.
  */
 async function openStudioNew(page: Page): Promise<void> {
   const env = loadEnv();
-  await page.route(/\/src\/easy\/steps\/[^/]+\.test\.ts(?:\?.*)?$/u, (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/javascript',
-    body: 'export {};',
-  }));
   await page.addInitScript(() => {
     // A reload must keep the studio. Clear storage once per tab, not on every document.
     if (!sessionStorage.getItem('easy-e2e-booted')) {
@@ -139,6 +132,10 @@ async function openStudioNew(page: Page): Promise<void> {
     await moreControl.click();
   }
   await expect(page.locator('[data-easy-heading]')).toHaveText("What's your video about?");
+  // The click budget is the Studio's own; the Super Easy door is not part of it.
+  await page.evaluate(() => {
+    (window as Window & { __easyClicks?: number }).__easyClicks = 0;
+  });
   await expect(page).not.toHaveURL(/token=/);
 }
 
