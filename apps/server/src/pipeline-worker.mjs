@@ -341,11 +341,14 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     try {
       report.probe = JSON.parse((await command('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,width,height,nb_read_frames,sample_rate:format=duration', '-of', 'json', join(runDir, 'video.mp4')])).stdout);
       const video = report.probe.streams.find(s => s.codec_type === 'video'), audio = report.probe.streams.find(s => s.codec_type === 'audio');
-      report.checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(report.probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !plan.voiced || Boolean(audio) };
-      if (plan.voiced) {
+      const audioRequired = plan.requiresAudio === true || plan.voiced;
+      report.checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(report.probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !audioRequired || Boolean(audio) };
+      if (audioRequired) {
         const measure = await command('ffmpeg', ['-hide_banner', '-nostats', '-i', join(runDir, 'video.mp4'), '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
         const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(measure.stderr);
         report.checks.nonSilentAudio = Boolean(mean) && Number(mean[1]) > -60;
+      }
+      if (plan.voiced) {
         const narrationPath = join(runDir, 'audio-verification.json');
         rmSync(narrationPath, { force: true });
         const verdict = await command(process.env.COMFYRIZZ_PYTHON || 'python3', [join(repoRoot, 'scripts/tts/verify_mix.py'), '--video', join(runDir, 'video.mp4'), '--narration', join(workDir, 'audio/narration.norm.wav'), '--out', narrationPath], { allowedCodes: [0, 2] });

@@ -103,6 +103,7 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   const voiced = pkg.voice?.enabled === true && pkg.voice?.engine !== 'none' && pkg.scenes.some(s => s.narration?.trim());
   const presenters = selectedPresenterScenes(pkg).length > 0;
   const jobs = planJobs(pkg).jobs;
+  const requiresAudio = voiced || jobs.some(job => job.generator === 'fasth3-omni');
   const remoteVoice = voiced && pkg.voice.engine === 'qwen3-tts' && options.narrationRuntime === 'colab';
   const gpuMedia = jobs.length > 0 || presenters;
   const issues = [];
@@ -132,7 +133,7 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   return {
     version: PIPELINE_VERSION, packageId: pkg.id, baseRevision: pkg.revision,
     inputHash: fingerprint(pkg), planHash: fingerprint({ pkg, options }), options,
-    stages, voiced, presenters, remoteVoice, gpuMedia, remoteRender: remote.remoteRender, remoteRenderNote: remote.note,
+    stages, voiced, requiresAudio, presenters, remoteVoice, gpuMedia, remoteRender: remote.remoteRender, remoteRenderNote: remote.note,
     jobs: summarizeJobs(pkg, jobs),
     reusableAssets: Object.entries(pkg.assets ?? {}).filter(([, asset]) => asset.file && ['ready', 'candidate'].includes(asset.status)).map(([assetId, asset]) => ({ assetId, kind: asset.kind, status: asset.status, verification: 'checked_when_staging' })),
     budget: { ceilingUnits: options.budgetUnits, narrationCeilingUnits: remoteVoice ? options.narrationUnits : 0, mediaCeilingUnits: options.backendId === 'colab' && gpuMedia ? Math.max(0, mediaUnits) : 0, estimateUnits: null, estimateNote },

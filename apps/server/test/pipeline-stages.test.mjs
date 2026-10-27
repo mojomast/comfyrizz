@@ -49,6 +49,25 @@ test('a failed sync diagnostic prevents rendering a misleading successful video'
   assert.equal(f.events.at(-1).stageId, 'presenter_sync');
 });
 
+test('wordless native-audio plans still reject a missing soundtrack', async t => {
+  const f = fixture(t);
+  f.spec.plan.voiced = false;
+  f.spec.plan.requiresAudio = true;
+  const runCommand = f.adapters.runCommand;
+  f.adapters.runCommand = async (bin, args) => {
+    const result = await runCommand(bin, args);
+    if (bin === 'ffprobe' && args.includes('-count_frames')) {
+      const body = JSON.parse(result.stdout);
+      body.streams = body.streams.filter(stream => stream.codec_type !== 'audio');
+      return { ...result, stdout: JSON.stringify(body) };
+    }
+    return result;
+  };
+  assert.equal(await executePipeline(f.spec, f.adapters), 1);
+  assert.equal(f.events.at(-1).stageId, 'verify');
+  assert.equal(f.calls.includes('export'), false);
+});
+
 test('verify records a passing narration envelope in verification.json', async t => {
   const f = fixture(t);
   assert.equal(await executePipeline(f.spec, f.adapters), 0);
