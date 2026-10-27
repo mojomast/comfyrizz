@@ -18,14 +18,14 @@ const BANNED = [/\bpackage\b/i, /\btakes?\b/i, /\bclips?\b/i, /\brender\w*\b/i, 
 
 test('every Google Colab mention is spelled out in the procedure copy and sources', () => {
   for (const text of strings(PROCEDURE_COPY)) {
-    assert.equal(text.replace(/Google Colab/gu, '').includes('Colab'), false, text);
+    assert.doesNotMatch(text, /(?<!Google )Colab/u, text);
   }
   const dir = fileURLToPath(new URL('.', import.meta.url));
   for (const name of readdirSync(dir).filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))) {
     const code = readFileSync(join(dir, name), 'utf8').replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
     for (const match of code.matchAll(/(['"`])((?:\\.|(?!\1).)*)\1/gu)) {
       const literal = match[2];
-      assert.equal(literal.replace(/Google Colab/gu, '').includes('Colab'), false, `${name}: ${literal}`);
+      assert.doesNotMatch(literal, /(?<!Google )Colab/u, `${name}: ${literal}`);
       if (!literal.includes(' ') && !/^[A-Z]/u.test(literal)) continue;
       for (const banned of BANNED) assert.equal(banned.test(literal), false, `${name}: ${literal}`);
     }

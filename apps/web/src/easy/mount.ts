@@ -438,7 +438,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const intro = mod?.intro ?? '';
     const rendered = mod ? mod.render(state, facts) : `<p>${escapeHtml(COPY.shell.comingSoon)}</p>`;
     const bodyHtml = step === 'plan'
-      ? `${rendered}\n${renderProcedureToggle({ armed: procedure.active() || readCaptureArmed(search()), id: 'easy-plan-capture' })}`
+      ? [rendered, renderProcedureToggle({ armed: procedure.active() || readCaptureArmed(search()), id: 'easy-plan-capture' })].join('\n')
       : rendered;
     shell.setStep({ id: step, heading, intro, bodyHtml });
     procedure.mark('step', fill(PROCEDURE_COPY.step, { step: heading }));

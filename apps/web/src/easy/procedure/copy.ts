@@ -28,7 +28,7 @@ export const PROCEDURE_COPY = deepFreeze({
   previewReady: 'Preview ready on This computer',
   downloaded: 'Downloaded the video',
   prompt: 'Prompt: {prompt}',
-  computeCpu: 'Making it on This computer (no Google Colab spend)',
+  computeCpu: 'Starting on This computer',
   computeColab: 'Making it on Google Colab',
   approvalCpu: 'Plan approved on This computer (no Google Colab spend)',
   approvalColab: 'Google Colab spend approved, up to {cap} units',

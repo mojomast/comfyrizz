@@ -109,7 +109,7 @@ test('Record this run saves a tab recording and a redacted step log when the vid
   const labels: string[] = journal.entries.map((entry: { label: string }) => entry.label);
   expect(labels[0]).toBe('Procedure capture started');
   expect(labels).toContain(`Prompt: ${PROMPT}`);
-  expect(labels).toContain('Making it on This computer (no Google Colab spend)');
+  expect(labels).toContain('Starting on This computer');
   for (const expected of ['Plan: Done', 'Characters: Done', 'Shots: Done', 'Voice: Done', 'Video: Done', 'Final video ready', 'Google Colab session stopped']) {
     expect(labels).toContain(expected);
   }

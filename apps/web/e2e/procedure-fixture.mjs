@@ -46,7 +46,6 @@ function phaseSnapshot(phase, finalUrl) {
       : phase === 4 ? { state: 'collecting', used: 3, cap: PROCEDURE_SPEND_CAP } : null;
   const teardown = phase === 5 ? { state: 'stopping' } : phase >= 6 ? { state: 'stopped' } : null;
   const snapshot = {
-    plan: { status: 'done' },
     characters,
     shots,
     voice: phase >= 4 ? { status: 'done' } : phase >= 3 ? { status: 'running' } : { status: 'waiting' },
@@ -135,6 +134,8 @@ export function procedureBackend(options = {}) {
       production,
       revision,
       lastSequence: lastSequence(),
+      // The client keeps a root plan as the production's plan record.
+      ...(phase() >= 0 ? { plan: { status: 'done' } } : {}),
       events: [...setupEvents(), ...phaseEvents()],
       gap: false,
       stale: false,
