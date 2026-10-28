@@ -333,6 +333,29 @@ test('a render failure cannot publish a successful legacy run finish', async t =
   assert.ok(!emitted.some(event => event.type === 'run.finished'));
 });
 
+test('narration preparation precedes final media and is skipped for takes', async t => {
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'comfyrizz-narration-hook-'));
+  t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
+  const backend = fakeBackend('byo-comfyui');
+  let preparations = 0;
+  const controller = createRunController({
+    runtimeDir,
+    backendFactory: async () => backend,
+    prepareNarration: async (_pkg, { mode, workDir, outputDir }) => {
+      preparations += 1;
+      assert.equal(mode, 'final');
+      assert.ok(workDir && outputDir);
+      assert.equal(backend.calls.filter(([, dry]) => dry === false).length, 0, 'no media run started before narration');
+    },
+  });
+  const started = await controller.start({ backendId: 'byo-comfyui', pkg: fixturePackage() });
+  await controller.wait(started.runId);
+  assert.equal(preparations, 1);
+  const take = await controller.start({ backendId: 'byo-comfyui', pkg: fixturePackage(), mode: 'take' });
+  await controller.wait(take.runId);
+  assert.equal(preparations, 1, 'take regeneration does not replace whole-film narration');
+});
+
 // PO-3 review: a pipeline spending on the same account must block every run start, including the
 // queued-regenerate drain that calls start() directly.
 test('a busy pipeline refuses run starts at the controller, not only at the HTTP route', async t => {

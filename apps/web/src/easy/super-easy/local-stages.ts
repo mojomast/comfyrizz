@@ -82,9 +82,16 @@ function charactersReading(pkg: Record<string, unknown>): LocalStageReading {
 
 function voiceReading(pkg: Record<string, unknown>): LocalStageReading {
   const voice = isRecord(pkg.voice) ? pkg.voice : null;
-  if (voice?.enabled === false || text(voice?.engine) === 'none') return SKIPPED;
-  const narrated = scenesOf(pkg).some((scene) => text(scene.narration) !== '');
-  return narrated ? DONE : SKIPPED;
+  if (voice?.enabled !== true || text(voice?.engine) === 'none') return SKIPPED;
+  const narrated = scenesOf(pkg).filter((scene) => text(scene.narration) !== '');
+  if (narrated.length === 0) return SKIPPED;
+  const assets = isRecord(pkg.assets) ? pkg.assets : {};
+  const measured = narrated.every((scene) => {
+    const assetId = text(scene.narration_asset) || 'a_narration';
+    const asset = isRecord(assets[assetId]) ? assets[assetId] : null;
+    return text(asset?.status) === 'ready' && text(asset?.file) !== '';
+  });
+  return measured ? DONE : running(0.5);
 }
 
 /**

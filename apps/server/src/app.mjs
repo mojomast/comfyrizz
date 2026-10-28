@@ -10,6 +10,7 @@ import { createHfTokenSettings } from './hf-token-settings.mjs';
 import { handleHfTokenRoutes } from './hf-token-routes.mjs';
 import { readColabProgress } from '../../../packages/backends/src/colab-progress.mjs';
 import { createRunController } from './run.mjs';
+import { prepareRunNarration } from './run-narration.mjs';
 import { createExporter } from './export.mjs';
 import { buildDataset } from './dataset.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
@@ -481,6 +482,9 @@ export function createApp({
     events,
     runtimeDir,
     prepareWorkDir: prepareRunWorkDir,
+    prepareNarration: (pkg, { workDir, outputDir }) => prepareRunNarration({
+      pkg, workDir, outputDir, packageDir: dirname(store.path(pkg.id)),
+    }),
     onComplete: completeRun,
     isBusy: () => Boolean(pipelines?.active()),
     productionStore,
