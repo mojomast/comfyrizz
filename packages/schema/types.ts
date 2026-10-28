@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 9955e1847b7b9bc9d0a9cfaea77fb753bab1016a1e0b4aa8e077598a3a9094a1
+// Schema sha256: 994208dd293f5a4eff7beb104dd1a1ddd80e633099ba3c091b1955449147d24b
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -34,6 +34,15 @@ export interface PackageV1 {
    */
   id: string;
   title: NonEmptyString;
+  /**
+   * Optional concise creative proposal shown before production. Existing motion-graphics packages
+   * need not include it.
+   */
+  proposal?: {
+    logline: string;
+    look: string;
+    soundtrack: string;
+    };
   createdAt?: string;
   format: {
     width: number;
@@ -893,13 +902,14 @@ export interface FastH3Direction {
 
 export interface Gen {
   /**
-   * llm-svg = procedural vector written as code (CPU, free); flux3-klein = FLUX 3 Image Klein
-   * stills; ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by
-   * a scene's narration WAV); fasth3-omni = experimental FastH3 Omni reference-conditioned video
-   * with native audio (MiniMax-H3 community licence); kokoro = Kokoro narration audio; qwen3-tts =
+   * llm-svg = procedural vector written as code (CPU, free); procedural-audio = deterministic PCM
+   * sound synthesized on CPU (free, no model licence); flux3-klein = FLUX 3 Image Klein stills;
+   * ltx25 = LTX-2.5 plates; ltx25-a2v = LTX-2.5 audio-to-video (the H17 presenter, driven by a
+   * scene's narration WAV); fasth3-omni = experimental FastH3 Omni reference-conditioned video with
+   * native audio (MiniMax-H3 community licence); kokoro = Kokoro narration audio; qwen3-tts =
    * optional Qwen3-TTS 1.7B narration audio (Apache-2.0).
    */
-  generator?: "llm-svg" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "fasth3-omni" | "kokoro" | "qwen3-tts";
+  generator?: "llm-svg" | "procedural-audio" | "flux3-klein" | "ltx25" | "ltx25-a2v" | "fasth3-omni" | "kokoro" | "qwen3-tts";
   workflow?: RelativePath;
   workflow_sha256?: Sha256Hex;
   model?: string;

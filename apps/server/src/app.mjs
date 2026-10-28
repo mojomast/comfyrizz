@@ -6,8 +6,11 @@ import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { colabStatus } from './colab-status.mjs';
 import { startColabAuth } from './colab-auth.mjs';
+import { createHfTokenSettings } from './hf-token-settings.mjs';
+import { handleHfTokenRoutes } from './hf-token-routes.mjs';
 import { readColabProgress } from '../../../packages/backends/src/colab-progress.mjs';
 import { createRunController } from './run.mjs';
+import { prepareRunNarration } from './run-narration.mjs';
 import { createExporter } from './export.mjs';
 import { buildDataset } from './dataset.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
@@ -16,9 +19,11 @@ import { loadAssetWorkflow } from './workflow.mjs';
 import { createQaRegistry } from './qa.mjs';
 import { sceneJobsPlan } from './scene.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
+import { preflightBrief } from './brief-preflight.mjs';
 import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
+import { createAgentProgress } from './agent-progress.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
 import { createCharacterRoutes } from './characters/routes.mjs';
 import { createCharacterStore } from './characters/store.mjs';
@@ -117,8 +122,10 @@ function safeTokenEqual(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+const CONFIGURED_HOSTS = new Set((process.env.COMFYRIZZ_ALLOWED_HOSTS ?? '').split(',').map(host => host.trim()).filter(Boolean));
+
 function hostAllowed(host) {
-  return typeof host === 'string' && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
+  return CONFIGURED_HOSTS.has(host) || (typeof host === 'string' && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host));
 }
 
 function sameOrigin(origin, host) {
@@ -184,7 +191,7 @@ function assetEditedSinceBaseline({ baseline, current, pkg, assetId }) {
 // plate). mergeRunMedia deliberately refuses to replace an asset that was in the staged
 // package, but a ready asset absent from both the staged and the live package is a new
 // output and belongs in the rebased package.
-function mergeFinalRunMedia({ staged, current, generated }) {
+export function mergeFinalRunMedia({ staged, current, generated, baseline = null }) {
   const merged = mergeRunMedia({ staged, current, generated });
   if (!current) return merged;
   for (const [assetId, asset] of Object.entries(generated.assets ?? {})) {
@@ -192,6 +199,22 @@ function mergeFinalRunMedia({ staged, current, generated }) {
     if (staged.assets?.[assetId] !== undefined) continue;
     if (!asset || typeof asset !== 'object' || asset.status !== 'ready' || !asset.file) continue;
     merged.assets = { ...merged.assets, [assetId]: structuredClone(asset) };
+  }
+  // Narration is introduced by the final-run hook after the baseline snapshot.
+  // Keep it when the owner left narration untouched, but never undo an edit or
+  // deletion made while media was running.
+  const narration = generated.assets?.a_narration;
+  if (baseline && narration?.status === 'ready' && narration.file
+    && isDeepStrictEqual(baseline.assets?.a_narration, current.assets?.a_narration)) {
+    merged.assets = { ...merged.assets, a_narration: structuredClone(narration) };
+    merged.scenes = (current.scenes ?? []).map(scene => {
+      const before = baseline.scenes?.find(candidate => candidate.id === scene.id);
+      const after = generated.scenes?.find(candidate => candidate.id === scene.id);
+      if (!before || !after?.narration_asset || !isDeepStrictEqual(before.narration, scene.narration)
+        || !isDeepStrictEqual(before.narration_asset, scene.narration_asset)
+        || !isDeepStrictEqual(before.narration_duration_frames, scene.narration_duration_frames)) return scene;
+      return { ...scene, narration_asset: after.narration_asset, narration_duration_frames: after.narration_duration_frames ?? null };
+    });
   }
   return merged;
 }
@@ -210,6 +233,7 @@ export function createApp({
   agentRunner = null,
   providers = providerAvailability(),
   providerSettings = null,
+  hfTokenSettings: providedHfTokenSettings = null,
   backendFactory = defaultBackendFactory,
   // IP02F: only the exact string '1' opts into the deterministic CPU placeholder
   // backend; every other value (including 'true' and '0') leaves the default app as-is.
@@ -241,6 +265,7 @@ export function createApp({
   }
   mkdirSync(runtimeDir, { recursive: true });
   mkdirSync(mediaRoot, { recursive: true });
+  const hfTokenSettings = providedHfTokenSettings ?? createHfTokenSettings({ runtimeDir });
   const mediaTickets = createMediaTickets();
   const rendersDir = join(runtimeDir, 'renders');
   const qa = createQaRegistry();
@@ -248,6 +273,7 @@ export function createApp({
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
   const events = new EventLog();
+  const agentProgress = new Map();
   const publishEntry = events.publish.bind(events);
   const pipelineIngested = new Set();
   const runPackages = new Map();
@@ -298,6 +324,7 @@ export function createApp({
       runBaselines.set(options.runId, {
         revision: stored?.revision ?? pkg.revision ?? null,
         assets: stored ? JSON.parse(JSON.stringify(stored.assets ?? {})) : null,
+        scenes: stored ? JSON.parse(JSON.stringify(stored.scenes ?? [])) : null,
       });
     }
     mkdirSync(workDir, { recursive: true });
@@ -402,7 +429,7 @@ export function createApp({
     let copied = [];
     while (!saved) {
       const current = store.read(id);
-      const merged = mergeFinalRunMedia({ staged: pkg, current, generated: result.package });
+      const merged = mergeFinalRunMedia({ staged: pkg, current, generated: result.package, baseline });
       copied = copyNamedAssets({ pkg: changedRunMedia(current, merged), outputDir: record.outputDir, packageDir });
       try {
         saved = current ? store.save(id, merged, current.revision) : store.write(merged);
@@ -475,6 +502,13 @@ export function createApp({
     events,
     runtimeDir,
     prepareWorkDir: prepareRunWorkDir,
+    prepareNarration: async (pkg, { workDir, outputDir, runId }) => {
+      const prepared = await prepareRunNarration({ pkg, workDir, outputDir, packageDir: dirname(store.path(pkg.id)) });
+      if (prepared.extendedScenes?.length) {
+        events.publish({ type: 'run.log', runId, line: `Measured narration adjusted ${prepared.extendedScenes.length} shot(s) within the accepted duration range; final timeline is ${(prepared.durationInFrames / (pkg.format?.fps ?? 30)).toFixed(2)}s.` });
+      }
+      return prepared;
+    },
     onComplete: completeRun,
     isBusy: () => Boolean(pipelines?.active()),
     productionStore,
@@ -1191,6 +1225,26 @@ export function createApp({
     readPackage: (packageId) => {
       try { return store.read(packageId); } catch { return null; }
     },
+    estimateFinalRun: async ({ productionId }) => {
+      const production = productionStore.read(productionId);
+      if (!production?.packageId) throw new Error('the final plan has no bound package');
+      const pkg = store.read(production.packageId);
+      // The browser's easy-plan ceiling is only a placeholder. Price against the
+      // user-configured production cap, then replace that placeholder with the estimate.
+      const pricingBudget = createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId }).status().ceiling ?? Number.MAX_SAFE_INTEGER;
+      const estimated = await runs.estimate({ backendId: 'colab', pkg, budgetUnits: pricingBudget });
+      const required = estimated.budget?.required;
+      if (!Number.isFinite(required) || required <= 0) throw new Error('the final run could not be priced');
+      if (estimated.budget?.allowed === false) {
+        const error = new Error(`the final run needs ${required.toFixed(2)} Google Colab credits, above the configured ${pricingBudget}-credit cap`);
+        error.code = 'BUDGET_EXCEEDED';
+        throw error;
+      }
+      return required;
+    },
+    onError: (error, context) => {
+      console.error(`[productions ${context.route} ${context.productionId}]`, error);
+    },
   });
 
   const renderRoutes = createRenderRoutes({
@@ -1468,6 +1522,7 @@ export function createApp({
     }
 
     if (providerSettings && await handleProviderSettings({ request, response, url, settings: providerSettings, readJson, sendJson })) return;
+    if (await handleHfTokenRoutes({ request, response, url, settings: hfTokenSettings, readJson, sendJson })) return;
 
     const chatRecoveryMatch = /^\/api\/agent\/chat\/([^/]+)\/recovery$/.exec(url.pathname);
     if (chatRecoveryMatch && request.method === 'POST') {
@@ -1503,7 +1558,7 @@ export function createApp({
     // not, and the units a run will be measured against. Read-only on purpose: the sign-in itself is a
     // separate route that streams the CLI's own prompt, and the token never passes through here.
     if (url.pathname === '/api/colab/status' && request.method === 'GET') {
-      const status = await colabStatus({ backendFactory });
+      const status = await colabStatus({ backendFactory, hfSettings: hfTokenSettings });
       return sendJson(response, 200, status);
     }
 
@@ -1522,7 +1577,7 @@ export function createApp({
           // the run panel's own event stream, when it is there: the card renders live lines if it is
           // watching, and the response below carries them all either way
           try {
-            events?.emit?.('colab_auth', { line });
+            events?.publish?.({ type: 'colab_auth', line });
           } catch {
             /* an emitter that is not there yet is not a reason to lose the sign-in */
           }
@@ -1676,10 +1731,35 @@ export function createApp({
       }
     }
 
+    if (url.pathname === '/api/agent/progress' && request.method === 'GET') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      if (!sessionId) return sendJson(response, 400, { error: 'sessionId is required' });
+      const progress = agentProgress.get(sessionId);
+      if (!progress) return sendJson(response, 404, { error: 'planning session not found' });
+      return sendJson(response, 200, progress.snapshot());
+    }
+
     if (url.pathname === '/api/agent' && request.method === 'POST') {
       if (!agentRunner) return sendJson(response, 503, { error: 'agent runner not configured' });
       const body = await readJson(request);
-      events.publish({ type: 'agent.started', brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });
+      // PS03: an unsatisfiable brief is refused here, before any planning tool
+      // call or provider spend. The response carries a typed code and details.
+      const refusal = preflightBrief(body);
+      if (refusal) {
+        return sendJson(response, refusal.status, {
+          error: refusal.message,
+          code: refusal.code,
+          details: refusal.details,
+          reason: refusal.reason,
+          conflict: refusal.conflict,
+          next_steps: refusal.next_steps,
+        });
+      }
+      const sessionId = typeof body.sessionId === 'string' && body.sessionId.trim() ? body.sessionId.trim() : randomUUID();
+      const progress = createAgentProgress(sessionId);
+      if (agentProgress.size >= 100) agentProgress.delete(agentProgress.keys().next().value);
+      agentProgress.set(sessionId, progress);
+      events.publish({ type: 'agent.started', sessionId, brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });
       try {
         const brand = body.brand ? prepareBrand(body.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : null;
         const result = await agentRunner({
@@ -1687,14 +1767,20 @@ export function createApp({
           ...(brand ? { brand } : {}),
           provider: body.provider,
           model: body.model,
-          sessionId: body.sessionId,
+          motionModel: body.motionModel,
+          sessionId,
           runtimeDir,
-          onEvent: event => events.publish({ type: 'agent.event', event }),
+          onEvent: event => {
+            progress.update(event);
+            events.publish({ type: 'agent.event', sessionId, event });
+          },
         });
         const saved = store.write(result.package);
         const timeline = compilePackage(saved, dirname(store.path(saved.id)));
-        events.publish({ type: 'agent.finished', packageId: saved.id, revision: saved.revision, svgAssets: result.svgAssets?.length ?? 0, live: Boolean(result.live) });
+        progress.finish('done');
+        events.publish({ type: 'agent.finished', sessionId, packageId: saved.id, revision: saved.revision, svgAssets: result.svgAssets?.length ?? 0, live: Boolean(result.live) });
         return sendJson(response, 200, {
+          sessionId,
           package: saved,
           revision: saved.revision,
           timeline,
@@ -1706,11 +1792,15 @@ export function createApp({
           fallback: Boolean(result.fallback),
           provider: result.provider ?? null,
           model: result.model ?? null,
+          usage: result.usage ?? { input: 0, output: 0, total: 0 },
         });
       } catch (error) {
-        events.publish({ type: 'agent.failed', message: error.message });
+        progress.finish('failed', error.message);
+        events.publish({ type: 'agent.failed', sessionId, message: error.message });
         return sendJson(response, error.status ?? 500, {
+          sessionId,
           error: error.message,
+          usage: progress.snapshot().usage,
           ...(Array.isArray(error.errors) ? { details: error.errors } : {}),
         });
       }
@@ -2037,6 +2127,7 @@ export function createApp({
           response.destroy(error);
           return;
         }
+        if ((error.status ?? 500) >= 500) console.error('[app request]', error);
         sendJson(response, error.status ?? 500, { error: error.message });
       });
     },

@@ -1,42 +1,68 @@
 # Super Easy
 
-Super Easy is the short way to make a video. A bare visit opens it first. Easy Studio is still there when you want it.
+Super Easy is the short way to make a film. A bare visit opens it first. Easy
+Studio and Advanced mode remain available when you want more control.
 
-## One prompt, one button
+## Prompt → proposal → film
 
-Type what the video is about, then press **Generate**. That is the whole happy path. There is no level picker, no plan editing and no shot strip to review first. **Try an example** or one of the idea chips fills the prompt if you want a starting point.
+1. Type one sentence, or choose **Try an example** or an idea chip.
+2. Choose a motion route before planning:
+   - **Auto** — Klein identity/keyframe art, LTX camera/scenery shots and H3
+     character acting/native sound;
+   - **MiniMax H3** — recurring characters and native sound;
+   - **LTX-2.5** — cinematic motion plates;
+   - **Klein only** — FLUX 3 Image Klein stills plus code motion and finishing sound.
+3. Press **Generate** to create a free creative plan.
+4. Review the short proposal: title, logline (at most two sentences), look,
+   duration, soundtrack and model route. Choose **Revise proposal** for another
+   free revision, or **Make this film** to start production.
 
-## Draft under the hood
+No production or paid run exists before **Make this film**. Revisions preserve the
+original prompt and notes instead of starting a different project.
 
-Super Easy uses Draft for you. Pressing **Generate** records that choice as your Draft level, then starts the run. Choosing Draft is not spend approval, and it starts nothing by itself. Easy Studio keeps its own iteration level picker; Draft is only the Super Easy default.
+## Setup once
 
-Because Draft picks the best take automatically, Super Easy does not ask you to **Keep** each shot. You can still open Easy Studio or the editor to look over what was made.
+A fresh install can use **This computer** with the scripted model for a no-key
+motion-graphics preview. For generated films, choose **Set up AI & Google Colab**:
 
-## What you see while it makes the video
+- connect an agent provider and test its model/tool calling;
+- install/sign in to Google Colab CLI and verify Hugging Face model access;
+- choose Google Colab and a per-video credit ceiling.
 
-**Making your video** shows one overall gauge and a gauge for each stage:
+The ceiling is saved after one confirmation. Initial runs do not ask for spending
+approval again. It is a default for each new production, not permission for the
+agent to raise its own cap. See [One prompt setup](../ONE_PROMPT.md).
 
-1. **Plan**
-2. **Characters**
-3. **Shots**
-4. **Voice**
-5. **Video**
+## Watch the work arrive
 
-The gauges move as soon as the run starts, even before the server has anything to show: **Plan** runs while the script is written, then **Characters**, **Shots** and **Voice** read from the video that was built. A stage the video does not need, such as **Voice** with narration off, reads **Skipped**.
+The live gallery is the visual focus, not a wall of technical controls. Character
+and reference images appear first, motion clips replace pending cards as they
+land, and audio becomes playable. Cards use truthful planned, generating, ready
+and needs-attention states. Only collected media receives a ready URL.
 
-On **This computer** the run ends with **Your preview is ready** above the gauges. **Download MP4** opens Easy Studio on **Export**, which makes the MP4 in about a minute; **Watch and review** opens **Review** first.
+Overall stage, elapsed state and spending details remain secondary. Draft chooses
+takes automatically during the initial run, so Super Easy does not ask you to
+**Keep** each shot. Failed or unconfirmed runs never present a successful final
+video.
 
-The gallery fills with pictures and clips as each stage finishes. When a run delivers a finished video, it appears with **Download** and **Make another**.
+On **This computer**, the run ends with **Your preview is ready**. **Download MP4**
+opens Easy Studio on Export to render locally; **Watch and review** opens Review.
+Generated-film runs finish with the actual MP4 in the large player.
 
-## Where to go for more control
+## Change anything afterward
 
-- **I want more control** leaves Super Easy for Easy Studio, where you can edit the idea, characters, plan and shots before you Generate.
-- **Open in editor** in the Easy Studio header opens the Advanced editor for the full timeline.
+The finished view has a prominent **What would you like to change?** composer,
+Download, Make another and Advanced mode. The agent edits the same package, not a
+new project. Advanced mode keeps **Agent — change anything** beside the preview,
+with revision examples, shots, takes and the full timeline.
 
-Both open the same video, so you never lose work by switching.
+Subsequent paid regeneration or export is confirmed separately; the initial saved
+cap does not silently authorize unlimited revisions. Existing Advanced review
+gates remain intact.
 
-## This computer first
+## Record the run
 
-Super Easy starts on **This computer**, which makes motion graphics locally with no network and no Google Colab spend.
-
-Google Colab is the rented GPU. Super Easy asks before using it: **Use Google Colab** continues and spends Google Colab units up to your video's spend cap, while **Use this computer** stays local. Nothing is sent to Google Colab until you confirm.
+Tick **Record this run** before Generate to capture the real tab and a redacted
+step log, including the proposal and Make this film. The no-spend Playwright
+fixture is explicitly labelled as mocked and is not proof of a real generation.
+See [Procedure capture](PROCEDURE_CAPTURE.md).

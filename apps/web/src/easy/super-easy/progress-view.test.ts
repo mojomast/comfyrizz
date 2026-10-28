@@ -458,10 +458,12 @@ test('the next action sits above the gauges, inside the one centred column', () 
   const html = renderSuperEasyProgress(partialSnapshot(), { previewReady: true });
   const section = html.indexOf('<section class="super-easy-progress"');
   const actions = html.indexOf('data-super-easy-actions');
-  const chrome = html.indexOf('data-super-easy-chrome ');
+  const gallery = html.indexOf('data-super-easy-gallery>');
+  const chrome = html.indexOf('data-super-easy-chrome>');
   const close = html.lastIndexOf('</section>');
   assert.ok(section >= 0 && section < actions, 'actions live inside the progress section');
   assert.ok(actions < chrome, 'the call to action comes before the gauges');
+  assert.ok(gallery < chrome, 'emerging assets are the visual focus above the gauges');
   assert.ok(close > chrome, 'the progress section closes after the gallery');
   assert.ok(html.trimEnd().endsWith('</section>'), 'nothing trails outside the column');
 });

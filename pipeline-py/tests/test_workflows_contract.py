@@ -29,7 +29,7 @@ NODE = shutil.which("node")
 #: documented node-specific extra), so a typo cannot silently become a dead entry.
 KNOWN_PARAMS = {
     # CCL3c: `lora` / `lora_strength` select a trained character LoRA in character_lora_klein
-    "still": {"prompt", "image", "reference", "mask", "audio", "width", "height", "seed", "steps", "denoise", "megapixels", "cutout", "lora", "lora_strength"},
+    "still": {"prompt", "image", "reference", "_reference_2", "mask", "audio", "width", "height", "seed", "steps", "denoise", "megapixels", "cutout", "lora", "lora_strength"},
     # R1: `strength` (stage-1 LTXVImgToVideoInplace) and `stage2_strength` (the stage-2 one) are the
     # knobs that hold a UI/diagram frame still; the graph's own default is 0.7
     # RL12: the FastH3 Omni plate is a plate too, and it takes a voice reference as `audio`
@@ -86,16 +86,18 @@ CHARACTER_WORKFLOWS = {
     "character_identity_pulid.api.json",
     "character_lora_klein.api.json",
 }
+TWO_REFERENCE_WORKFLOWS = {"flux3_klein_ref2_edit.api.json"}
 #: RL12: the experimental FastH3 Omni reference-to-video+audio graph. The fixture package plans a
 #: job for it, so it is contract-checked against the planner like the rest.
 FASTH3_WORKFLOWS = {
     "fasth3_omni_ref2va.api.json",
 }
+FASTH3_NOCLIP_WORKFLOWS = {"fasth3_omni_ref2v_noclip.api.json"}
 
 
 def test_the_committed_workflow_set_is_present():
     names = {p.name for p in GRAPH_FILES}
-    assert names == GPU1_WORKFLOWS | CHARACTER_WORKFLOWS | FASTH3_WORKFLOWS, names
+    assert names == GPU1_WORKFLOWS | CHARACTER_WORKFLOWS | FASTH3_WORKFLOWS | FASTH3_NOCLIP_WORKFLOWS | TWO_REFERENCE_WORKFLOWS, names
 
 
 @pytest.mark.parametrize("graph_path", GRAPH_FILES, ids=[p.name for p in GRAPH_FILES])
@@ -205,6 +207,31 @@ def test_every_planned_job_injects_into_its_real_workflow(tmp_path: Path):
                     f"{job['id']}: {name} did not reach {node_id}.{field}"
                 )
     assert injected_total == len(doc["jobs"]) >= 5
+
+
+def test_two_reference_edit_injects_area_and_both_real_image_inputs(tmp_path: Path):
+    package = json.loads(PACKAGE.read_text(encoding="utf-8"))
+    package["assets"]["a_ref"]["gen"]["inputs"].pop("megapixels")
+    package["assets"]["a_ref"]["gen"]["inputs"].update({"width": 1024, "height": 576, "reference_2": "a_i2i"})
+    package_path = tmp_path / "package.json"
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+    doc = plan(package_path, tmp_path / "jobs.json")
+    assert validate_jobs(doc) == []
+    job = next(entry for entry in doc["jobs"] if entry["asset"] == "a_ref")
+    assert job["workflow"] == "workflows/flux3_klein_ref2_edit.api.json"
+    assert job["params"]["megapixels"] == 0.589824
+    assert not {"width", "height", "reference_2"} & set(job["params"])
+    assert job["params"]["_reference_2"] == "a_i2i"
+    assert {entry["param"] for entry in job["fileInputs"]} == {"reference", "_reference_2"}
+
+    graph_path = REPO_ROOT / job["workflow"]
+    graph = json.loads(graph_path.read_text(encoding="utf-8"))
+    injected = inject_params(graph, load_params_map(graph_path), job["params"])
+    assert injected["12"]["inputs"]["resolution.megapixels"] == 0.589824
+    assert injected["10"]["inputs"]["image"] == "a_still"
+    assert injected["11"]["inputs"]["image"] == "a_i2i"
+    assert injected["12"]["inputs"]["images.image0"] == ["10", 0]
+    assert injected["12"]["inputs"]["images.image1"] == ["11", 0]
 
 
 def test_the_two_stage_maps_render_half_the_planned_size():

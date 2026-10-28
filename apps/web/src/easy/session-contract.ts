@@ -92,6 +92,7 @@ export const NEW_PROJECT_CARRY = Object.freeze([
   'level',
   'levelTouched',
   'compute',
+  'motionModel',
 ] as const satisfies readonly (keyof EasyState)[]);
 
 type Classified = (typeof NEW_PROJECT_RESET)[number] | (typeof NEW_PROJECT_CARRY)[number];

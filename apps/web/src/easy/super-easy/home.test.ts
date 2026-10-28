@@ -37,7 +37,8 @@ test('Super Easy shows one primary Generate button and no level picker', () => {
   assert.equal(count(html, /data-iteration-choice=/g), 0);
   assert.equal(count(html, /data-easy-level=/g), 0);
   assert.equal(count(html, /iteration-card/g), 0);
-  assert.equal(count(html, /<select\b/g), 0, 'no level or plan picker');
+  assert.equal(count(html, /<select\b/g), 1, 'one motion-model selector, not an iteration-level or plan editor');
+  assert.match(html, /data-super-easy-motion-model/u);
   assert.equal(count(html, /<input\b/g), 0, 'the happy path is one text box');
 });
 

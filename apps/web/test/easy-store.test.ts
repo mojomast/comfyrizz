@@ -42,6 +42,7 @@ test('defaults equal Appendix B', () => {
     level: 'draft',
     levelTouched: false,
     compute: 'cpu',
+    motionModel: 'auto',
     spendCap: 15,
     planHash: null,
     plan: { status: 'none', error: null, errorAt: null, wordsChanged: false },

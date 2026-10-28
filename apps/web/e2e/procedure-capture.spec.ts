@@ -63,6 +63,7 @@ async function generateWithCapture(page: Page): Promise<void> {
   await expect(toggle).toBeChecked();
   await page.locator('#super-easy-prompt').fill(PROMPT);
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await page.getByRole('button', { name: 'Make this film' }).click();
 }
 
 test('Record this run saves a tab recording and a redacted step log when the video is ready', async ({ page }) => {
@@ -179,6 +180,7 @@ test('Stop and save ends the capture early, and an unticked box records nothing'
   await expect(fresh.getByLabel('Record this run')).not.toBeChecked();
   await fresh.locator('#super-easy-prompt').fill(PROMPT);
   await fresh.getByRole('button', { name: 'Generate', exact: true }).click();
+  await fresh.getByRole('button', { name: 'Make this film' }).click();
   await expect(fresh.locator('[data-super-easy-progress]')).toBeVisible();
   await expect(fresh.locator('[data-procedure-capture]')).toHaveCount(0);
   expect(await fresh.evaluate(() => (window as unknown as { __shared?: number }).__shared ?? 0)).toBe(0);

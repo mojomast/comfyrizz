@@ -339,6 +339,7 @@ async function recordFixtureRun(options, outDir) {
       timeout: PROCEDURE_PHASES * options.phaseMs + 90_000,
     });
     await page.getByRole('button', { name: 'Generate', exact: true }).click();
+    await page.getByRole('button', { name: 'Make this film', exact: true }).click();
     const download = await journalDownload;
     const journalFile = join(work, 'journal.json');
     await download.saveAs(journalFile);

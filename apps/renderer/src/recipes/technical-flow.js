@@ -79,12 +79,18 @@ export function technicalFlowPlan({ items, width, height, scene, seed = 1, cues 
     const y = clamp(point.y - point.height / 2, area.y, area.y + area.h - point.height);
     return { id: `n${index}`, label, index, x, y, w: point.width, h: point.height };
   });
+  // Dagre aligns to the upper-left of the available area. Center the completed
+  // graph vertically so process scenes use the frame instead of crowding the top.
+  const graphTop = Math.min(...nodes.map(node => node.y));
+  const graphBottom = Math.max(...nodes.map(node => node.y + node.h));
+  const offsetY = area.y + area.h / 2 - (graphTop + graphBottom) / 2;
+  for (const node of nodes) node.y += offsetY;
   const edges = [];
   for (let index = 0; index < nodes.length - 1; index += 1) {
     const fromNode = nodes[index];
     const toNode = nodes[index + 1];
     const dagreEdge = graph.edge(`n${index}`, `n${index + 1}`);
-    const points = normalizePoints(dagreEdge?.points, fromNode, toNode);
+    const points = normalizePoints(dagreEdge?.points, fromNode, toNode).map(point => ({ ...point, y: point.y + offsetY }));
     const path = smoothPolyline(points);
     const arrow = arrowAt(points);
     const start = cues.length > index ? Math.round(cues[index] * fps) : Math.round(fps * 0.7 + index * Math.max(1, fps * 1.1));

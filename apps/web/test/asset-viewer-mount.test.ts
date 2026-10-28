@@ -85,7 +85,7 @@ test('submit on a bound production sends exactly one scoped chat turn and starts
   assert.equal((body.match(/projectChat\.send\(/g) ?? []).length, 1);
 
   const chat = functionBody('chatApiFetch');
-  assert.match(chat, /iterationScope:\s*pending\.scope/);
+  assert.match(chat, /next\.iterationScope\s*=\s*pending\.scope/);
   assert.match(MAIN, /apiFetch:\s*chatApiFetch/);
 
   assert.doesNotMatch(body, /regenerate|approve|reserve|plan\.approve/);

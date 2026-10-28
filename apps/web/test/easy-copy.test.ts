@@ -56,12 +56,13 @@ test('export extras label names what the ZIP contains', () => {
   assert.match(COPY.export.extras, /project files/);
 });
 
-test('scanner finds no banned words in easy sources', () => {
+test('scanner finds no banned words in Easy Studio production sources', () => {
   const easyDir = existsSync('src/easy') ? 'src/easy' : 'apps/web/src/easy';
   const entries = readdirSync(easyDir, { recursive: true });
   const files = entries
     .map((e) => (typeof e === 'string' ? e : e.name))
-    .filter((f) => f.endsWith('.ts'));
+    // Test names and assertions are not display copy. Super Easy has its own copy tests.
+    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && !/^super-easy[\\/]/.test(f));
   for (const rel of files) {
     const full = join(easyDir, rel);
     const raw = readFileSync(full, 'utf8');

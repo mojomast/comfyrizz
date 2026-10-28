@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { withConversationLock } from './conversation-lock.mjs';
 import { runConversationTurn, brandTheme, CONVERSATION_PROMPT_VERSION, idMentions, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
 import { createOpenAICompatibleModel } from '../../../packages/llm/dist/src/index.js';
-import { buildChatProject, chatProjectResponse } from './chat-project.mjs';
+import { buildChatProject, chatPlanFromPackage, chatProjectResponse } from './chat-project.mjs';
 import { rebaseChatPlans } from './chat-state.mjs';
 import { createReferenceStore } from './references/store.mjs';
 import { buildManifest, manifestBlock as referenceManifestBlock } from './references/manifest.mjs';
@@ -597,7 +597,7 @@ export function createProjectChat({
   }
   function response(session, built = false) {
     const pkg = session.projectId ? store.read(session.projectId) : null;
-    const { lastTurnId, lastTurnBuilt, previousPlan, brand, ...conversation } = session;
+    const { lastTurnId, lastTurnBuilt, previousPlan, adoptionPending, brand, ...conversation } = session;
     return {
       conversation,
       reply: session.messages.at(-1)?.role === 'assistant' ? session.messages.at(-1).content : '',
@@ -879,6 +879,10 @@ export function createProjectChat({
     if (!validId(id)) fail(400, 'Invalid conversation ID');
     if (input.action !== undefined && input.action !== 'build') fail(400, 'Unknown conversation action');
     if (input.turnId !== undefined && (typeof input.turnId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(input.turnId))) fail(400, 'Invalid turn ID');
+    if (input.adoptPackageId !== undefined && (typeof input.adoptPackageId !== 'string'
+      || !/^[A-Za-z0-9_.-]{1,128}$/.test(input.adoptPackageId))) {
+      fail(400, 'adoptPackageId must be a valid package ID', { code: 'INVALID_ADOPT_PACKAGE_ID' });
+    }
     const iterationScope = normalizedIterationScope(input.iterationScope);
     const requestedTargets = normalizedTargets(input.targets);
     if (input.rejectAssignments !== undefined && (!Array.isArray(input.rejectAssignments)
@@ -912,6 +916,7 @@ export function createProjectChat({
       fail(400, 'Message must contain 1–8000 characters');
     }
     if (decisionOnly) {
+      if (input.adoptPackageId !== undefined) fail(400, 'A proposal decision cannot adopt a package', { code: 'PACKAGE_ADOPTION_NOT_ALLOWED' });
       if (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 0) fail(400, 'A rejection needs the conversation base revision');
       if (!input.turnId) fail(400, 'A rejection needs a fresh turn ID');
     } else if (!input.provider || input.provider === 'none' || !providerSettings) {
@@ -1007,8 +1012,27 @@ export function createProjectChat({
         }
         if (session.messages.length >= 1000 || JSON.stringify(session.messages).length > 4000000) fail(400, 'This conversation is full. Start a new chat to continue.');
         baseRevision = session.revision;
+        if (input.adoptPackageId !== undefined) {
+          // Adoption is a one-way binding for a new or still-unbound conversation.
+          // Replay is handled above, so a retried committed turn remains idempotent.
+          if (session.projectId) {
+            fail(409, 'This conversation is already bound to a package.', { code: 'PACKAGE_ADOPTION_NOT_ALLOWED' });
+          }
+          const adopted = store.read(input.adoptPackageId);
+          if (!adopted) fail(404, 'The package to adopt was not found.', { code: 'PACKAGE_NOT_FOUND' });
+          session = {
+            ...session,
+            projectId: adopted.id,
+            projectRevision: adopted.revision,
+            // There is no last-built chat plan yet. The first complete plan that
+            // builds successfully becomes previousPlan on the commit below.
+            adoptionPending: true,
+          };
+          delete session.previousPlan;
+        }
         // Manual storyboard edits are authoritative and intentionally picked up by
         // the next turn, so only the conversation revision is a concurrency lock.
+        // PackageStore.save still compare-and-swaps capturedPackageRevision below.
         current = session.projectId ? store.read(session.projectId) : null;
         capturedPackageRevision = current ? current.revision : null;
         simCurrent = current;
@@ -1115,6 +1139,11 @@ export function createProjectChat({
         rebased = rebaseChatPlans(session.plan, session.previousPlan, simCurrent);
       });
       if (replay) return replay;
+
+      const lastBuiltPlan = session.adoptionPending ? null : (rebased.previousPlan ?? session.plan);
+      const adoptionBaseline = session.adoptionPending && simCurrent
+        ? chatPlanFromPackage(simCurrent, rebased.plan ?? session.plan)
+        : null;
 
       // Corrections start their run before the model sees the conversation, as
       // they did before the commit split. Phase C contains no await.
@@ -1351,7 +1380,17 @@ export function createProjectChat({
           placements: castPlacements,
           files: characterFilesForBuild(libraryStore, cast),
         } : null;
-        const candidate = await buildChatProject({ plan, previous: simCurrent, previousPlan: rebased.previousPlan ?? session.plan, brand, runtimeDir, signal, ...(referenceStore ? { references: referenceStore } : {}), ...(castBuild ? { characters: castBuild } : {}) });
+        const candidate = await buildChatProject({
+          plan,
+          previous: simCurrent,
+          previousPlan: lastBuiltPlan,
+          adoptPackage: Boolean(adoptionBaseline),
+          brand,
+          runtimeDir,
+          signal,
+          ...(referenceStore ? { references: referenceStore } : {}),
+          ...(castBuild ? { characters: castBuild } : {}),
+        });
         signal.throwIfAborted();
         // The store validates on write; validate the candidate here so an invalid
         // package fails inside the turn instead of after the model reports success.
@@ -1372,7 +1411,7 @@ export function createProjectChat({
       const productionContext = productionContextFor(simCurrent, input, {
         iterationScope,
         targets: requestedTargets,
-        builtPlan: rebased.previousPlan ?? session.plan ?? undefined,
+        builtPlan: adoptionBaseline ?? lastBuiltPlan ?? undefined,
       });
       // The explicit UI action applies the reviewed draft without another creative generation.
       const result = input.action === 'build' ? await (async () => {
@@ -1390,8 +1429,14 @@ export function createProjectChat({
         ...(productionContext ? { production: productionContext } : {}),
         projectContext: simCurrent ? {
           id: simCurrent.id, revision: simCurrent.revision, title: simCurrent.title, format: simCurrent.format,
-          theme: simCurrent.theme, manuallyEditedSinceLastBuild: simCurrent.revision !== session.projectRevision,
-          scenes: simCurrent.scenes.map(scene => ({ id: scene.id, layout: scene.layout, copy: scene.copy, narration: scene.narration, visual: scene.notes, locked: scene.locked, seconds: scene.preferredFrames / simCurrent.format.fps, motion: scene.motion, transitionOut: scene.transitionOut, foreground: scene.foreground })),
+          theme: simCurrent.theme, datasets: simCurrent.datasets ?? {},
+          manuallyEditedSinceLastBuild: simCurrent.revision !== session.projectRevision,
+          scenes: simCurrent.scenes.map(scene => ({
+            id: scene.id, layout: scene.layout, copy: scene.copy, narration: scene.narration,
+            visual: scene.notes, locked: scene.locked, seconds: scene.preferredFrames / simCurrent.format.fps,
+            data: scene.data, code: scene.code, media: scene.media, background: scene.background,
+            motion: scene.motion, transitionOut: scene.transitionOut, foreground: scene.foreground,
+          })),
         } : null,
         build,
       });
@@ -1412,6 +1457,7 @@ export function createProjectChat({
         ...(castProposals.length || Array.isArray(session.castProposals) ? { castProposals } : {}),
         ...(pendingBuild ? { projectId: pendingBuild.id, projectRevision: predictedRevision(), previousPlan: result.plan } : {}),
       };
+      if (pendingBuild) delete nextSession.adoptionPending;
 
       // Phase C: a short, fully synchronous commit. Every effect after the intent
       // is recorded is either proven by the intent or rolled back on error.

@@ -83,7 +83,7 @@ export const MODEL_GENERATORS = Object.freeze(["flux3-klein", "ltx25", "ltx25-a2
  * it carries (GPU test 3, N6: apply left it empty). One map, so the examples and the run agree.
  */
 export const MODEL_LICENSES = Object.freeze({
-  // FastH3 Omni is experimental: the MiniMax-H3 community licence carries territorial and
+  // FastH3 Omni: the MiniMax-H3 community licence carries territorial and
   // commercial conditions, so its output is not CC0 by default (see applyDefaults below).
   "fasth3-omni": Object.freeze({
     id: "LicenseRef-MiniMax-H3-Community",
@@ -643,7 +643,7 @@ function checkAssets(assets, errors) {
     const ready = asset.status === "ready";
     if (asset.origin === "generated") {
       if (!isObj(asset.gen) || !isStr(asset.gen.generator)) {
-        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | flux3-klein | ltx25 | ltx25-a2v | fasth3-omni | kokoro | qwen3-tts)"));
+        errors.push(error("SEM_GEN_MISSING_GENERATOR", `${at}/gen/generator`, "origin generated requires gen.generator (llm-svg | procedural-audio | flux3-klein | ltx25 | ltx25-a2v | fasth3-omni | kokoro | qwen3-tts)"));
       }
       if (ready && !isStr(asset.license?.id)) {
         errors.push(error("SEM_LICENSE_MISSING", `${at}/license/id`, "a ready generated asset needs an output licence; generated output defaults to CC0-1.0"));

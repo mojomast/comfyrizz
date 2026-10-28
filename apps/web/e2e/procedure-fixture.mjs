@@ -89,9 +89,12 @@ export function procedureBackend(options = {}) {
 
   function setupEvents() {
     return [
+      { productionId: PROCEDURE_PRODUCTION_ID, type: 'production.created', data: {} },
+      { productionId: PROCEDURE_PRODUCTION_ID, type: 'brief.updated', data: {} },
       ...plans,
-      ...(iteration === null ? [] : [{ id: 'evt_procedure_iteration', sequence: 5, productionId: PROCEDURE_PRODUCTION_ID, type: 'iteration.set', data: { policy: iteration.policy } }]),
-    ].sort((left, right) => left.sequence - right.sequence);
+      ...(iteration === null ? [] : [{ productionId: PROCEDURE_PRODUCTION_ID, type: 'iteration.set', data: { policy: iteration.policy } }]),
+    ].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0))
+      .map((event, index) => ({ ...event, id: event.id ?? `evt_procedure_setup_${index + 1}`, sequence: index + 1 }));
   }
 
   /**
@@ -184,7 +187,7 @@ export function procedureBackend(options = {}) {
     }
     if (/^\/api\/productions\/[^/]+\/events$/u.test(path) && method === 'GET') {
       calls.push('events');
-      return send({ productionId: PROCEDURE_PRODUCTION_ID, lastSequence: lastSequence(), events: phaseEvents() });
+      return send({ productionId: PROCEDURE_PRODUCTION_ID, lastSequence: lastSequence(), nextAfter: lastSequence(), events: [...setupEvents(), ...phaseEvents()], gap: false, truncated: false });
     }
     if (/^\/api\/productions\/[^/]+\/commands$/u.test(path) && method === 'POST') {
       const command = JSON.parse(request.postData() ?? '{}');

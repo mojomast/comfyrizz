@@ -42,6 +42,9 @@ test('the done state has the heading, video, download link and QA text', () => {
   assert.match(html, /<a\b[^>]*download="crumb-co\.mp4"[^>]*href="blob:https:\/\/example\.test\/123"/);
   assert.match(html, new RegExp(COPY.export.download));
   assert.match(html, new RegExp(COPY.export.qaPass));
+  assert.match(html, /data-easy-export-change[^>]*>Change anything<\/button>/);
+  assert.match(html, /data-easy-export-editor[^>]*>Open in editor<\/button>/);
+  assert.match(html, /Describe any change\. Paid regeneration still asks first\./);
 });
 
 test('the failure state has role=alert with the reason and both actions', () => {
@@ -181,7 +184,7 @@ test('an export already done for the package mounts done without calling renderM
   assert.match(harness.el.innerHTML, new RegExp(COPY.export.doneHeading));
   assert.equal(harness.doc.heading.textContent, COPY.export.doneHeading);
   assert.equal(harness.doc.activeElement, harness.doc.heading);
-  assert.equal(harness.primary.at(-1)?.label, COPY.export.download);
+  assert.equal(harness.primary.at(-1)?.label, COPY.export.again);
   stop();
 });
 

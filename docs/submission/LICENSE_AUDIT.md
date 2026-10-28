@@ -1,6 +1,7 @@
-# Licence and rights audit — S06
+# Licence and rights audit
 
-Audit date: 2026-10-20. Scope: the "Open Weights Only" category and the
+Originally audited 2026-10-20; updated 2026-10-27 for the one-prompt model routes.
+Scope: the "Open Weights Only" category and the
 hackathon's repo-licence requirement. This is a documentation audit of the
 repository only: no network calls, no model cards re-read, and no claim about
 anything outside the files cited. `[unverified]` means the repository itself
@@ -20,8 +21,8 @@ repo's own interpretation of the model side is in `docs/SPEC.md:434-437`.
 | Partner nodes / closed APIs | **Needs work** | Workflows use core ComfyUI nodes only; the optional hosted LLM presets are closed APIs. |
 | Stock-asset policy | **Pass** | CC0 / PDM / approved CC BY / MIT only; NC, ND, SA, unknown refused. |
 | `package.zip` rights filter | **Pass** | Code gates on licence, approval, sha256 and `redistributable`; excluded assets are listed and the zip is marked incomplete. |
-| `CREDITS` | **Needs work** | Export generates `CREDITS.md`, and an example has one, but the root `CREDITS.md` and `THIRD_PARTY_LICENSES.md` are not yet in the repo. |
-| Metadata consistency | **Needs work** | `examples/data-story` names FLUX.1-schnell / LTX-Video and Apache-2.0, which contradicts the models the same package says it uses. |
+| `CREDITS` | **Pass with review** | Root `CREDITS.md` and `THIRD_PARTY_LICENSES.md` exist; final generated assets still need their own provenance review. |
+| Metadata consistency | **Pass after correction** | `examples/data-story` now uses the actual `LicenseRef-FLUX.3-Image-Klein` and `LicenseRef-LTX-2.5` identifiers and model URLs. H3 is listed separately with its community licence. |
 
 ## 1. Repository licence and setup
 
@@ -32,7 +33,7 @@ repo's own interpretation of the model side is in `docs/SPEC.md:434-437`.
 | Package metadata | Root `package.json` has `"license": "MIT"`; every `packages/*/package.json` and `apps/renderer/package.json` / `apps/server/package.json` read in this audit declares MIT. `apps/web/package.json` has no `license` field, but the root licence and `LICENSE` still cover the repo. | Pass, minor metadata gap |
 | Setup instructions | `README.md:179-219` (requirements, CPU quickstart, narration setup); `docs/RELEASE_CHECK.md:5-20` (clean-clone, install, test, CPU export) | Pass |
 | Non-OSI renderer dependency disclosed | `NOTICE:13-15` and `README.md:374`: Remotion is source-available under the Remotion License, not OSI; free for individuals and organisations up to 3 people, larger companies need a Company License. `apps/renderer/package.json:7` still declares the package MIT. | Pass with disclosure |
-| Consolidated third-party licence file | `THIRD_PARTY_LICENSES.md` does not exist at audit time. It is an open submission task (`docs/specs/SUBMISSION.md:35`, `docs/specs/SUBMISSION.md:85-89`). | Needs work |
+| Consolidated third-party licence file | `THIRD_PARTY_LICENSES.md` is present at the repository root. | Pass; final model/asset terms still need review |
 
 The repo licence therefore satisfies "open-source licence and setup
 instructions". The Remotion note matters for downstream redistribution, not for
@@ -51,6 +52,7 @@ licences. The Colab download pins are in `colab/models.lock.json:10-26` and
 | **FLUX 3 Image Klein** (5.6B transformer) | Stills, reference edits, sketch-to-render (`README.md:380`; `workflows/flux3_klein_t2i.api.json`, `flux3_klein_img2img.api.json`, `flux3_klein_ref_edit.api.json`) | Yes — weights are a separate gated download; not vendored (`NOTICE:44-46`) | FLUX Kommunity License v1.0 (`NOTICE:44-46`; `README.md:380`; `docs/SPEC.md:429`; pin: `colab/models.lock.json:11-17`) | Pass; not OSI, commercial-output conditions apply |
 | **Qwen3-VL-4B-Instruct** | FLUX 3 Klein text encoder (`docs/SPEC.md:275`; `docs/SPEC.md:429`; merged pin `colab/models.lock.json:84-95`) | Yes | Apache-2.0 per `docs/SPEC.md:275` and `docs/SPEC.md:429` | Pass |
 | **LTX-2.5** (22B distilled transformer) | Text/image-to-video plates and ×2 upscale (`README.md:381`; `workflows/ltx25_t2v_2stage.api.json`, `ltx25_i2v_2stage.api.json`, `ltx25_a2v_2stage.api.json`) | Yes — separate gated download; not vendored (`NOTICE:44-46`) | LTX-2.x Community License (`NOTICE:44-46`; `README.md:381`; `docs/SPEC.md:430`; pin: `colab/models.lock.json:19-25`) | Pass; revenue threshold and terms apply |
+| **MiniMax H3 Omni** (`FastVideo/FastH3-Omni-Comfy`) | Reference-driven character motion and native audio in H3 and Auto routes (`workflows/fasth3_omni_ref2va.api.json`, `packages/jobs/src/fasth3-direction.mjs`) | Yes — separate model download; not vendored | MiniMax-H3 Community License Agreement: https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE | Pass with caveats; separate community/commercial terms apply |
 | **Gemma 4 12B** | LTX-2.5 text encoder (`docs/SPEC.md:278`; pin `colab/models.lock.json:59-64`) | Yes — part of the gated LTX pack | `docs/SPEC.md:430` records "possible Gemma terms on the encoder [unverified]". `NOTICE` does not name Gemma separately. | **Needs work**: document the encoder terms or mark them `[unverified]` in the consolidated licence file |
 | **Kokoro-82M** | Default CPU narration (`packages/tts/README.md:42-63`; `examples/hook-20s/CREDITS.md:27-31`) | Yes — ONNX weights fetched to a local cache, not committed (`packages/tts/README.md:42-54`) | Apache-2.0 in `packages/tts/README.md:60-63` and `examples/hook-20s/CREDITS.md:29-31`; marked `[unverified]` in `docs/SPEC.md:431` and `NOTICE:16-17` | Pass with `[unverified]` caveat |
 | **Qwen3-TTS 1.7B** (Base / VoiceDesign / CustomVoice) | Optional narration (`packages/tts/README.md:69-95`; `docs/VOICE_GENERATION.md:7-14`) | Yes — optional downloads, not in the default install (`NOTICE:48-54`) | `colab/qwen-models.lock.json:6-11` says public Apache-2.0; `NOTICE:53-54` marks Apache-2.0 `[unverified]` | Pass with conflicting provenance; needs one authoritative statement |

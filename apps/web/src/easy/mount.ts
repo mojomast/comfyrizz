@@ -24,6 +24,11 @@ import { createSuperEasySession, type SuperEasySession } from './super-easy/sess
 import type { SuperEasyHost } from './super-easy/run.ts';
 import { localStageReadings, mergeLocalStages } from './super-easy/local-stages.ts';
 import { readStages, type StagesProgress } from './super-easy/stages.ts';
+import { buildGalleryModel, type GalleryItem } from './super-easy/gallery-model.ts';
+import { createLiveAssetGallery, mergeLiveGallery } from './super-easy/live-gallery.ts';
+import { createTakesApi } from '../takes/api.ts';
+import { readSuperEasySetup, saveSuperEasySetup, type SuperEasySetup } from './super-easy/setup.ts';
+import type { SuperEasyGenerateInput } from './super-easy/mount.ts';
 import { createAskDrawer, type AskDrawerController } from './ask-drawer.ts';
 import { mountEasyAgentSettings } from './agent-settings.ts';
 import { mountProjectName, type ProjectNameController } from './project-name.ts';
@@ -96,6 +101,14 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let shellSave: ShellSaveController | null = null;
   let ask: AskDrawerController | null = null;
   const procedure: ProcedureCapture = (deps.createCapture ?? createProcedureCapture)({ doc });
+  let liveGalleryItems: GalleryItem[] = [];
+  const liveGallery = createLiveAssetGallery({
+    api: createTakesApi({ apiFetch: host.apiFetch }),
+    onUpdate: (items) => {
+      liveGalleryItems = items;
+      superEasy?.render();
+    },
+  });
   let facts: StepFacts = {
     hasPackage: false,
     planApproved: false,
@@ -110,6 +123,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     state: () => store.get(),
     host,
     openSettings: () => settings?.open(),
+    onChatIdChange: (chatId) => store.patch({ chatId }),
     subscribe: (listener) => store.subscribe(() => listener()),
   });
 
@@ -164,6 +178,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   function destroySuperEasy(): void {
     superEasyTicket += 1;
+    liveGallery.stop();
+    liveGalleryItems = [];
     superEasySession?.stop();
     superEasySession = null;
     superEasy?.destroy();
@@ -173,9 +189,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   function superEasyRunHost(): SuperEasyHost {
     return {
       adoptBuiltPackage: (body) => host.adoptBuiltPackage(body),
+      getPackage: () => host.getPackage(),
       aiSelection: () => host.aiSelection(),
       editorStore: host.editorStore,
       refreshClips: () => host.refreshClips(),
+      renderMp4: (options) => host.renderMp4(options),
       announce: (text) => shell?.setStatus(text),
       rerender: () => superEasy?.render(),
     };
@@ -224,21 +242,95 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     await procedure.start({ title });
   }
 
-  async function onSuperEasyGenerate(input: { prompt: string; compute: 'cpu'; capture?: boolean }): Promise<void> {
+  async function openSuperEasySetup(): Promise<void> {
+    const { openDialog, confirmDialog } = await import('./dialog.ts');
+    const { renderCompute, mountCompute, computeBlockReason } = await import('./compute-choice.ts');
+    const saved = readSuperEasySetup();
+    let draft: SuperEasySetup = { ...saved, confirmed: false };
+    let status: any = null;
+    const hostId = `super-easy-setup-${Date.now()}`;
+    const opener = root.querySelector<HTMLElement>('[data-super-easy-setup]');
+    const computeHtml = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, soFarText: 'This cap is saved for later one-prompt runs; no spending approval is needed for each run.', idPrefix: hostId });
+    const pending = openDialog({
+      title: 'Set up your video maker',
+      bodyHtml: `<p>Connect once. Future prompts will use these choices without another approval.</p><div id="${hostId}">${computeHtml}</div><button type="button" class="btn btn-secondary" data-super-easy-ai-setup>Connect AI agent</button><p class="hint">API keys and Hugging Face tokens stay on this server. Your credit cap is saved, not your credentials.</p>`,
+      actions: [{ label: 'Cancel', value: 'cancel', kind: 'secondary' }, { label: 'Save setup', value: 'save', kind: 'primary' }],
+      opener,
+    });
+    const setupRoot = doc.getElementById(hostId);
+    const paint = () => {
+      if (setupRoot) setupRoot.innerHTML = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, soFarText: 'This cap is saved for later one-prompt runs; no spending approval is needed for each run.', idPrefix: hostId });
+    };
+    const unmount = setupRoot ? mountCompute(setupRoot, {
+      apiFetch: host.apiFetch,
+      colabStatus: async () => {
+        const response = await host.apiFetch('/api/colab/status');
+        return response.ok ? response.json() : null;
+      },
+      onChange: patch => {
+        const computeChanged = patch.compute !== undefined && patch.compute !== draft.compute;
+        draft = { ...draft, ...patch, spendCap: patch.spendCap === null ? Number.NaN : (patch.spendCap ?? draft.spendCap) };
+        if (computeChanged) paint();
+      },
+      onStatus: next => { status = next; paint(); },
+      idPrefix: hostId,
+    }) : () => {};
+    void (async () => {
+      try {
+        const response = await host.apiFetch('/api/colab/status');
+        status = response.ok ? await response.json() : null;
+      } catch { status = null; }
+      if (setupRoot?.isConnected) paint();
+    })();
+    opener?.ownerDocument.querySelector('[data-super-easy-ai-setup]')?.addEventListener('click', () => { void settings?.open(); }, { once: true });
+    const choice = await pending;
+    unmount();
+    if (choice !== 'save') return;
+    if (draft.compute === 'colab') {
+      try {
+        const selection = await settings?.selection();
+        if (!selection || selection.provider === 'none') throw new Error('Connect an AI agent first.');
+      } catch {
+        await settings?.open();
+        return;
+      }
+      const reason = computeBlockReason(draft, status);
+      if (reason) {
+        const retry = await confirmDialog({ title: 'Finish the connection checks', text: reason, confirmLabel: 'Back to setup', cancelLabel: 'Close', opener });
+        if (retry) await openSuperEasySetup();
+        return;
+      }
+      const approved = await confirmDialog({
+        title: 'Use Google Colab automatically?',
+        text: `Each new video can use up to ${draft.spendCap} Google Colab credits. You will not be asked again for each run. You can change this limit in setup.`,
+        confirmLabel: 'Save and use Google Colab', cancelLabel: 'Cancel', opener,
+      });
+      if (!approved) return;
+    }
+    const setup = { ...draft, spendCap: Number.isFinite(draft.spendCap) ? draft.spendCap : saved.spendCap, confirmed: true };
+    saveSuperEasySetup(setup);
+    store.patch({ compute: setup.compute, spendCap: setup.spendCap });
+    superEasy?.render();
+  }
+
+  async function onSuperEasyGenerate(input: SuperEasyGenerateInput): Promise<void> {
+    const setup = readSuperEasySetup();
+    store.patch({ compute: input.compute, spendCap: setup.spendCap });
     const session = ensureSuperEasySession();
     const status = session.status();
     if (status === 'running' || status === 'stopping') return;
     if (input.capture) {
       await startProcedure(input.prompt);
       procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: input.prompt }));
-      procedure.mark('compute', PROCEDURE_COPY.computeCpu);
+      procedure.mark('compute', input.compute === 'colab' ? PROCEDURE_COPY.computeColab : PROCEDURE_COPY.computeCpu);
     }
-    void session.generate({ prompt: input.prompt, compute: 'cpu' });
+    void session.generate({ prompt: input.prompt, compute: input.compute, motionModel: input.motionModel, setupConfirmed: input.setupConfirmed, proposalOnly: true });
   }
 
   function refreshSuperEasySnapshot(): void {
     const productionId = store.get().productionId;
     if (!productionId) return;
+    liveGallery.start(productionId);
     const ticket = ++superEasyTicket;
     void api.getProduction(productionId).then((snapshot) => {
       if (ticket !== superEasyTicket) return;
@@ -283,6 +375,19 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       }),
       snapshot: () => superEasySnapshot,
       onGenerate: (input) => onSuperEasyGenerate(input),
+      proposal: () => superEasySession?.proposal() ?? null,
+      onApproveProposal: () => { void superEasySession?.approveProposal(); },
+      onReviseProposal: (note) => { void superEasySession?.reviseProposal(note); },
+      setup: () => readSuperEasySetup(),
+      onMotionModelChange: (motionModel) => {
+        saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });
+        superEasy?.render();
+      },
+      onSetup: () => { void openSuperEasySetup(); },
+      onChangeAnything: (change = '') => {
+        openStudioFromSuperEasy('review');
+        void ask?.openAsk(change);
+      },
       captureArmed: () => readCaptureArmed(search()),
       onCaptureToggle: (armed) => writeCaptureArmed(armed),
       onMoreControl: () => openStudioFromSuperEasy(),
@@ -294,6 +399,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
       onExport: (packageId) => openStudioFromSuperEasy('export', packageId),
       stages: (snapshot) => superEasyStages(snapshot),
+      gallery: (snapshot) => mergeLiveGallery(buildGalleryModel(snapshot), liveGalleryItems),
       onMakeAnother: () => {
         resetPlanDecisionAnswers();
         store.startNew();

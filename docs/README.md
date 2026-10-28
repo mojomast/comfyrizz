@@ -18,6 +18,10 @@ Start with the [project README](../README.md).
 
 ## Guides
 
+Start with [One prompt setup](ONE_PROMPT.md), [Super Easy](ui/SUPER_EASY.md) and
+[Managed hackathon demo](DEPLOYED_DEMO.md). For recording, see
+[Procedure capture](ui/PROCEDURE_CAPTURE.md).
+
 [SPEC](SPEC.md) · [Agent providers](AGENT_PROVIDERS.md) · [Conversation agent](CONVERSATION_AGENT.md) ·
 [Agent cassette](AGENT_CASSETTE.md) · [Character creator](CHARACTER_CREATOR.md) ·
 [Timeline review](TIMELINE_REVIEW.md) · [Reference assets](REFERENCE_ASSETS.md) ·

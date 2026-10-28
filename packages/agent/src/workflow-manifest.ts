@@ -7,6 +7,7 @@ export const WORKFLOW_SHA256: Record<string, string> = {
   'workflows/fasth3_omni_ref2v_noclip.api.json': '48e3cb25af0626d47cd9e1ae67656ff3e4d5d0137414812ed2ed051aa0b1a02f',
   'workflows/fasth3_omni_ref2va.api.json': '8e6038252666a21233cb947bd43dc52b2a8eb1ceb18e995bd2ce1f79e6690b3f',
   'workflows/flux3_klein_img2img.api.json': '91d4b539ed813532895c278505bdb29efdc359fdd7a44b07191c79606be980aa',
+  'workflows/flux3_klein_ref2_edit.api.json': '0f01b4525609f7f72fa71cc77b1324551f5c99d577059ba2378eeffe0e53cfb1',
   'workflows/flux3_klein_ref_edit.api.json': 'ecf1b281737c8f3bad5afe7be79e76d7aa3595146b97a8df3e8098c21c080e09',
   'workflows/flux3_klein_t2i.api.json': 'e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689',
   'workflows/ltx25_a2v_2stage.api.json': '81b7701ecbe172df0e73ca19a3cbc9e236b84842c6ddf5aa928527c0c9e20f70',

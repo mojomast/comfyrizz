@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { routeAsset, routeBrief } from '../src/router.js';
 import { expandFluxCaption, expandVideoCaption, aspectFromSize, sourceDims } from '../src/caption.js';
-import { createToolset, generateSvgSchema, proposeSchema } from '../src/tools.js';
+import { createToolset, generateImageSchema, generateSvgSchema, proposeSchema } from '../src/tools.js';
 import { runAgent } from '../src/agent.js';
 import type { ChatChunk, ChatModel, ChatRequest } from '../src/types.js';
 
@@ -127,6 +127,16 @@ test('a plain string copy is lifted to a headline object (DeepSeek shape)', () =
   assert.deepEqual(kept.scenes?.[0].copy, { headline: 'A', items: ['one', 'two'] });
 });
 
+test('tools: deterministic text bounds avoid pointless model repair turns', () => {
+  const long = 'x'.repeat(300);
+  const parsed = proposeSchema.parse({ brief: 'x', proposal: { logline: long, look: long, soundtrack: long } });
+  assert.equal(parsed.proposal?.logline.length, 240);
+  assert.equal(parsed.proposal?.look.length, 100);
+  assert.equal(parsed.proposal?.soundtrack.length, 100);
+  const image = generateImageSchema.parse({ scene_id: 's1', intent: 'a map', style: long });
+  assert.equal(image.style?.length, 80);
+});
+
 test('tools: propose + edit package, SVG result, planned FLUX job', async () => {
   const tools = createToolset({
     generateSvg: intent => ({ svg: SVG, attempts: 2, repairs: 1, sanitizerVersion: '1.0.0' }),
@@ -218,10 +228,12 @@ test('C7: a styled diagram yields an SVG base plus a reference-edit image that p
 
   const plan = jobs.planJobs(draft);
   assert.deepEqual(jobs.checkJobsDoc(plan), []);
-  const refJob = plan.jobs.find((job: any) => job.asset === imageId);
-  assert.ok(refJob, 'a reference-edit still job is planned');
-  assert.deepEqual(refJob.fileInputs, [{ param: 'reference', from: 'package', path: draft.assets[svgId].file }]);
+  assert.ok(!plan.jobs.some((job: any) => job.asset === imageId), 'an orphan restyle never becomes a paid job');
   assert.ok(!plan.jobs.some((job: any) => job.asset === svgId), 'llm-svg stays CPU work, never a GPU job');
+  const explicit = jobs.planJobs(draft, { assets: [imageId] });
+  const refJob = explicit.jobs.find((job: any) => job.asset === imageId);
+  assert.ok(refJob, 'an explicitly selected reference edit remains plannable with its refs');
+  assert.deepEqual(refJob.fileInputs, [{ param: 'reference', from: 'package', path: draft.assets[svgId].file }]);
 });
 
 test('agent builds and edits a package and routes SVG vs FLUX on a mixed brief', async () => {
@@ -278,6 +290,18 @@ test('agent stops after the repair limit and the step cap', async () => {
   const loop = new ScriptedModel(step => [{ type: 'tool_call', id: `c${step}`, name: 'assets.route', args: { scene_id: 's', need: 'icon' } }, { type: 'done' }]);
   const capped = await runAgent({ model: loop, brief: 'icon', tools, maxSteps: 2 });
   assert.equal(capped.stopped, 'max_steps');
+});
+
+test('agent circuit-breaks a repeated invalid call instead of spending more model turns', async () => {
+  const tools = createToolset();
+  let step = 0;
+  const model = new ScriptedModel(() => [{ type: 'tool_call', id: `bad${step++}`, name: 'assets.route', args: { need: 'icon' } }, { type: 'done' }]);
+  const result = await runAgent({ model, brief: 'icon', tools, maxRepairs: 8 });
+  assert.equal(result.ok, false);
+  assert.equal(result.stopped, 'repair_limit');
+  assert.match(result.error ?? '', /repeated invalid tool call/);
+  assert.equal(result.toolCalls.length, 2);
+  assert.equal(result.toolCalls[1].error, 'duplicate_invalid_call');
 });
 
 test('runCpuSlice builds a six-scene package with four SVG assets and one GPU plan', async () => {
@@ -398,7 +422,7 @@ test('CAST1: "use the same mascot in every scene" adds a fictional cast ref to e
   assert.deepEqual(jobs.checkJobsDoc(plan), []);
   const introJob = plan.jobs.find((job: any) => job.asset === intro.asset.id);
   const heroJob = plan.jobs.find((job: any) => job.asset === hero.asset.id);
-  assert.equal(introJob.workflow, 'workflows/flux3_klein_ref_edit.api.json');
+  assert.equal(introJob.workflow, 'workflows/flux3_klein_ref2_edit.api.json');
   assert.equal(introJob.params.reference, svgId);
   assert.equal(introJob.params._reference_2, 'a_cast_pip');
   assert.equal(introJob.params.width, undefined);

@@ -21,7 +21,7 @@ import { ITERATION_PRESETS, effectivePolicyForShot } from './iteration.mjs';
 // Generators that run without a GPU. The agent search `generator: '` finds
 // llm-svg (CPU) and flux3-klein (GPU). Kokoro is a local voice engine, not a
 // package generator string in packages/agent/src.
-const CPU_GENERATORS = new Set(['llm-svg']);
+const CPU_GENERATORS = new Set(['llm-svg', 'procedural-audio']);
 
 const GENERATOR_MINUTES = Object.freeze({
   'flux3-klein': MEASURED_JOB_MINUTES.still,

@@ -32,6 +32,8 @@ const WORKING_LIMIT = 90;
 const WORKING_EVERY_MS = 9000;
 const DEFAULT_ASPECT = '16:9';
 const DEFAULT_REASON = 'Something went wrong.';
+export const EXPORT_CHANGE_ACTION = 'Change anything';
+export const EXPORT_CHANGE_HINT = 'Describe any change. Paid regeneration still asks first.';
 
 export interface ExportQa {
   passed?: boolean;
@@ -374,8 +376,11 @@ export function renderExportDone(input: ExportDoneOptions | string | null = {}):
 </figure>
 <div class="easy-export-actions">
 ${download}
+<button type="button" class="btn btn-secondary" data-easy-export-change>${escapeHtml(EXPORT_CHANGE_ACTION)}</button>
+<button type="button" class="btn btn-secondary" data-easy-export-editor>${escapeHtml(COPY.shell.openEditor)}</button>
 <button type="button" class="btn btn-secondary" data-easy-export-extras>${escapeHtml(COPY.export.extras)}</button>
 </div>
+<p class="hint easy-export-change-hint" data-easy-export-change-hint>${escapeHtml(EXPORT_CHANGE_HINT)}</p>
 ${warning}
 ${recovery}
 ${facts}
@@ -762,6 +767,11 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     if (button.hasAttribute('data-easy-export-another')) {
       event.preventDefault();
       ctx.go('review');
+      return;
+    }
+    if (button.hasAttribute('data-easy-export-change')) {
+      event.preventDefault();
+      ctx.openAsk?.();
       return;
     }
     if (button.hasAttribute('data-easy-export-editor')) {

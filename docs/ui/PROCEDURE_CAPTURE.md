@@ -1,6 +1,6 @@
 # Procedure capture: record a Generate run
 
-**Record this run** films Comfyrizz while it makes a video: the prompt, Generate, the Google Colab spend approval, the stage gauges (Plan, Characters, Shots, Voice, Video), and the finished video with its download. You can cut a demo from it without OBS or another screen recorder.
+**Record this run** films Comfyrizz while it makes a video: the prompt, motion-model choice, short creative proposal, **Make this film**, live generated assets, stage gauges and the finished video with its download. A self-host Google Colab cap is configured once in setup rather than re-approved on every initial run. You can cut a demo from it without OBS or another screen recorder.
 
 There are two ways to capture:
 
@@ -17,7 +17,7 @@ There are two ways to capture:
    - **Super Easy:** the box is under **Generate** on the home screen.
    - **Easy Studio:** the box is on the **Plan** step, below the plan. Recording starts when you approve it.
    - Adding `?capture=1` to the URL ticks it for you. The choice is kept for the rest of the browser tab's session.
-2. Press **Generate** (in Easy Studio, approve the plan). The browser asks what to share. Pick **This tab**; Chrome and Edge list it first. Sound is not recorded.
+2. Press **Generate**, review or revise the short proposal, then choose **Make this film** (in Easy Studio, approve the plan). The browser asks what to share. Pick **This tab**; Chrome and Edge list it first. Sound is not recorded.
 3. A small badge in the corner shows **Recording this run** and the latest step. It doubles as an on-screen caption in the recording.
 4. The recording stops by itself 4 seconds after the final video is ready (so the finished screen is in the shot), when the run stops with an error, or after 30 minutes. **Stop and save** ends it sooner.
 5. Two files land in your Downloads folder, both named after the prompt, for example `comfyrizz-procedure-a-friendly-robot-who-learns-to-bake-brea-20261027-031500`:
@@ -30,7 +30,7 @@ If you turn screen sharing down, or the browser cannot share a tab, the run is s
 
 - The prompt.
 - Where the video is made (This computer or Google Colab).
-- The spend approval, with the Google Colab unit cap when one was set.
+- The creative proposal and Make this film, plus the saved Google Colab unit cap when one was set.
 - Each Easy Studio step you visit.
 - Every stage change (for example `Shots: Running`, then `Shots: Done`).
 - Google Colab session lines (starting, making your shots, collecting, stopping, stopped).

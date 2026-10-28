@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { synthesizeFinishingWav } from './finishing-audio.js';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -30,6 +31,8 @@ import type { SvgIntentLike } from './svg.js';
 import type { ToolDef } from './types.js';
 import { cutdownPackage, type VoiceFn } from './cutdown.js';
 import { styleApplyFor, styleList, styleSuggest } from './style-recipes.js';
+import { classifyProductionIntent, type ProductionIntent } from './production-intent.js';
+import { parseMotionModel, resolveShotMotionModel, type MotionModel } from './motion-model.js';
 
 export interface AgentTool {
   definition: ToolDef;
@@ -61,12 +64,18 @@ export interface PlannedImage {
 
 export interface ToolsetOptions {
   initialPackage?: Record<string, any>;
+  /** Original brief constraints retained when an existing package is repaired without propose. */
+  initialIntent?: ProductionIntent;
   /** Wired to A5: autoFix(generate, intent) with sanitize/render-check. */
   generateSvg?: (intent: SvgIntentLike) => Promise<SvgAssetResult> | SvgAssetResult;
   /** Wired to the job planner; defaults to a caption + workflow plan, never a GPU run. */
   planImage?: (args: z.infer<typeof generateImageSchema>) => PlannedImage;
   /** Persist an SVG and return its package-relative path (C5 server). */
   persistSvg?: (assetId: string, svg: string, kind: string) => string | undefined;
+  /** Persist deterministic CPU audio conditioning; never calls a model or GPU. */
+  persistAudio?: (assetId: string, wav: Uint8Array, kind: 'silent-conditioning' | 'finishing-stem') => string | undefined;
+  /** Generated-film router. Auto selects H3 or LTX independently for each shot. */
+  motionModel?: MotionModel;
   /** Observe every package mutation; runCpuSlice uses this to return the draft. */
   onPackageChange?: (pkg: Record<string, any>) => void;
   /** Clock injection so tests are deterministic. */
@@ -95,9 +104,96 @@ function zodEnum(values: readonly string[]) {
   return z.enum(values as [string, ...string[]]);
 }
 
+const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list', 'split', 'compare', 'code'] as const;
+type SceneLayout = (typeof SCENE_LAYOUTS)[number];
+
+const PACKAGE_FPS = [24, 25, 30, 50, 60] as const;
+const FORMAT_PRESETS: Record<string, { width: number; height: number }> = {
+  '16:9': { width: 1920, height: 1080 },
+  '9:16': { width: 1080, height: 1920 },
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+};
+const UNSUPPORTED_ASPECTS = new Set(['4:3', '3:2', '5:4', '16:10', '21:9', '2:1', '2.39:1', '2.35:1', '1.85:1', '1.66:1']);
+
+interface PackageFormat {
+  width: number;
+  height: number;
+  fps: number;
+}
+
+function briefClauses(brief: string): string[] {
+  return brief.split(/[;!?\n]+|\.\s+/).map(clause => clause.trim()).filter(Boolean);
+}
+
+function negatedClause(clause: string): boolean {
+  return /\b(?:no|not|never|avoid|without|don'?t|cannot|can't)\b/i.test(clause);
+}
+
+function unsupportedFormatError(reasons: string[]): Error {
+  return Object.assign(
+    new Error(`Unsupported format: ${reasons.join(', ')} cannot be rendered. Use 1920x1080 at 30 fps and 16:9, or a supported WxH size such as 1080x1920 at 30 fps.`),
+    { name: 'UnsupportedFormatError', status: 422, code: 'UNSUPPORTED_FORMAT' },
+  );
+}
+
+function supportedSize(width: number, height: number): boolean {
+  return Number.isInteger(width) && Number.isInteger(height)
+    && width >= 64 && width <= 7680 && width % 2 === 0
+    && height >= 64 && height <= 4320 && height % 2 === 0;
+}
+
+/** Read the output size and fps the brief actually asks for; never silently fall back from a rejected format. */
+function resolveFormat(brief: string): PackageFormat {
+  const clauses = briefClauses(brief).filter(clause => !negatedClause(clause));
+  const reasons: string[] = [];
+  const addReason = (reason: string) => {
+    if (!reasons.includes(reason)) reasons.push(reason);
+  };
+  let size: { width: number; height: number } | undefined;
+  let preset: { width: number; height: number } | undefined;
+  let fps = 30;
+
+  for (const clause of clauses) {
+    for (const match of clause.matchAll(/\b(\d{1,2})\s*k\b/gi)) {
+      const resolution = Number(match[1]);
+      if (resolution >= 8) addReason(`${resolution}K resolution`);
+    }
+    for (const match of clause.matchAll(/\b(\d{1,3})\s*(?:fps\b|frames?\s+per\s+second)\b/gi)) {
+      const value = Number(match[1]);
+      if ((PACKAGE_FPS as readonly number[]).includes(value)) fps = value;
+      else addReason(`${value} fps`);
+    }
+    for (const match of clause.matchAll(/\b(\d{1,2}(?:\.\d+)?)\s*:\s*(\d{1,2}(?:\.\d+)?)\b/g)) {
+      const ratio = `${match[1]}:${match[2]}`;
+      const known = FORMAT_PRESETS[ratio];
+      if (known) {
+        preset = known;
+        continue;
+      }
+      const context = /\b(?:aspect|format|ratio|resolution)\b/i.test(clause);
+      if (UNSUPPORTED_ASPECTS.has(ratio) || match[1].includes('.') || match[2].includes('.') || context) addReason(`${ratio} aspect`);
+    }
+    for (const match of clause.matchAll(/\b(\d{2,5})\s*[x×]\s*(\d{2,5})\b/gi)) {
+      const width = Number(match[1]);
+      const height = Number(match[2]);
+      if (supportedSize(width, height)) size = { width, height };
+      else addReason(`${width}x${height} resolution`);
+    }
+  }
+
+  if (reasons.length > 0) throw unsupportedFormatError(reasons);
+  if (size) return { ...size, fps };
+  if (preset) return { ...preset, fps };
+  const words = clauses.join(' ');
+  if (/\b(?:vertical|portrait|9:16)\b/i.test(words)) return { width: 1080, height: 1920, fps };
+  if (/\b(?:square|1:1)\b/i.test(words)) return { width: 1080, height: 1080, fps };
+  return { width: 1920, height: 1080, fps };
+}
+
 const sceneSchema = z.object({
   id: z.string().min(1),
-  layout: z.enum(['title', 'hero', 'stat', 'chart', 'list']).optional(),
+  layout: z.enum(SCENE_LAYOUTS).optional(),
   preferredFrames: z.number().int().positive().optional(),
   // DeepSeek often sends `copy` as a plain headline string; accept it and lift it
   // to `{ headline }` so a common model shape is not a repair-loop failure.
@@ -107,9 +203,18 @@ const sceneSchema = z.object({
   narration: z.string().optional(),
 }).passthrough();
 
+function boundedText(max: number) {
+  return z.preprocess(value => typeof value === 'string' ? clampText(value, max) : value, z.string().min(1).max(max));
+}
+
 export const proposeSchema = z.object({
   brief: z.string().min(1),
-  title: z.string().min(1).max(120).optional(),
+  title: boundedText(120).optional(),
+  proposal: z.object({
+    logline: boundedText(240),
+    look: boundedText(100),
+    soundtrack: boundedText(100),
+  }).strict().optional(),
   motion: z.object({
     energy: zodEnum(motionVocab.energies).optional(),
     direction: zodEnum(motionVocab.directions).optional(),
@@ -157,14 +262,45 @@ export const generateImageSchema = z.object({
   /** Labelled frame: keep labels and lock the camera. */
   labelled: z.boolean().optional(),
   /** Target style for a reference edit (with refs): clay, glass, editorial, ... */
-  style: z.string().min(1).max(80).optional(),
+  style: boundedText(80).optional(),
+});
+
+export const generateVideoSchema = z.object({
+  scene_id: z.string().min(1),
+  motion_model: z.enum(['auto', 'h3', 'ltx', 'klein']).optional(),
+  subject: z.string().min(1).max(2000),
+  composition: z.string().min(1).max(4000),
+  action: z.string().min(1).max(4000),
+  camera: z.string().min(1).max(2000),
+  soundscape: z.string().min(1).max(2000),
+  characterCount: z.number().int().min(0).max(100),
+  /** Picture 1: recurring subject/identity reference (H3), or LTX start art. */
+  image: z.string().min(1).optional(),
+  /** Picture 2: composition/art-direction reference. Required by H3. */
+  reference: z.string().min(1).optional(),
+  /** Exact-line voice conditioning for dialogue. Wordless shots create silence. */
+  audio: z.string().min(1).optional(),
+  /** Required for LTX: this model generates no native audio track. */
+  finishing_sound: z.string().min(1).max(2000).optional(),
+  frames: z.number().int().positive().optional(),
+  seed: z.number().int().min(0).max(0xffffffff).optional(),
+  wordless: z.boolean().optional(),
+  media_index: z.union([z.literal(0), z.literal(1)]).optional(),
+  dialogue: z.object({
+    text: z.string().min(1).max(2000),
+    conditioningText: z.string().min(1).max(2000),
+    language: z.string().min(1).max(64),
+    voice: z.string().min(1).max(512),
+    delivery: z.string().min(1).max(2000),
+    offscreen: z.boolean().optional(),
+  }).strict().optional(),
 });
 
 export const sketchToRenderSchema = z.object({
   scene_id: z.string().min(1),
   kind: z.enum(['diagram', 'hero', 'background', 'illustration', 'plate', 'pattern', 'chart', 'vector', 'vector-anim']),
   intent: z.string().min(1),
-  style: z.string().min(1).max(80),
+  style: boundedText(80),
   palette: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/)).max(8).optional(),
   width: z.number().int().positive().max(4096).optional(),
   height: z.number().int().positive().max(4096).optional(),
@@ -217,12 +353,61 @@ function hashId(prefix: string, value: string): string {
   return `${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
 }
 
+/** A generation/render rejection is an actionable 422, never an untyped 500. */
+function svgAssetError(code: string, assetId: string, message: string): Error {
+  const error = Object.assign(new Error(`${assetId}: ${message}`), {
+    name: 'SvgAssetError',
+    status: 422,
+    code,
+    assetId,
+  });
+  return error;
+}
+
+export const SILENT_CONDITIONING_ASSET_ID = 'a_h3_silence_500ms_24k';
+const FASTH3_WORKFLOW = 'workflows/fasth3_omni_ref2va.api.json';
+const LTX_I2V_WORKFLOW = 'workflows/ltx25_i2v_2stage.api.json';
+
+/** A deterministic 0.5 s, mono, 24 kHz PCM16 RIFF/WAV conditioning signal. */
+export function silentConditioningWav(): Buffer {
+  const sampleRate = 24000;
+  const samples = sampleRate / 2;
+  const dataBytes = samples * 2;
+  const wav = Buffer.alloc(44 + dataBytes);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + dataBytes, 4);
+  wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(dataBytes, 40);
+  return wav;
+}
+
+function nextFastH3Frames(requested: number): number {
+  const base = Math.max(5, requested);
+  return base + ((5 - (base % 17) + 17) % 17);
+}
+
+function nextLtxFrames(requested: number): number {
+  const base = Math.max(1, requested);
+  return base + ((1 - (base % 8) + 8) % 8);
+}
+
+function meaningfulCopy(copy: unknown): boolean {
+  if (!copy || typeof copy !== 'object') return false;
+  return Object.values(copy).some(value => Array.isArray(value) ? value.length > 0 : typeof value === 'string' ? value.trim().length > 0 : value != null);
+}
+
 function baseParameters(properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
-const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list', 'split', 'compare', 'code'] as const;
-type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 const SCENE_KEYS = new Set([
   'id', 'layout', 'variant', 'preferredFrames', 'copy', 'data', 'background', 'foreground',
   'media_only', 'lower_third', 'transitionOut', 'motion', 'narration', 'narration_asset',
@@ -280,6 +465,132 @@ function loadCodeLayout(): Promise<CodeLayoutModule> {
   return codeLayoutPromise;
 }
 const SCENE_ID_RE = /^s[A-Za-z0-9_-]{0,63}$/;
+const DATASET_ID_RE = /^d[A-Za-z0-9_-]{0,63}$/;
+const DATASET_SOURCES = ['user', 'openverse', 'example', 'derived'] as const;
+const DATASET_MAX_VALUES = 64;
+
+type DatasetErrorCode =
+  | 'DATASETS_INVALID'
+  | 'DATASET_INVALID'
+  | 'DATASET_UNIT_REQUIRED'
+  | 'DATASET_VALUES_REQUIRED'
+  | 'DATASET_VALUE_INVALID'
+  | 'DATASET_SOURCE_INVALID';
+
+/** A dataset the tool cannot repair is an actionable 422, never invented values. */
+function datasetError(datasetId: string, code: DatasetErrorCode, message: string): Error {
+  return Object.assign(new Error(`${datasetId}: ${message}`), {
+    name: 'DatasetError',
+    status: 422,
+    code,
+    datasetId,
+  });
+}
+
+function datasetNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string' && /^[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i.test(raw.trim())) return Number(raw.trim());
+  return null;
+}
+
+/** A model-authored dataset key becomes the schema id `^d[A-Za-z0-9_-]{0,63}$`. */
+function normalizeDatasetId(raw: string): string {
+  const trimmed = raw.trim();
+  if (DATASET_ID_RE.test(trimmed)) return trimmed;
+  const body = trimmed.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const prefixed = !body ? 'd_data' : body.startsWith('d') ? body : `d_${body}`;
+  return prefixed.slice(0, 64);
+}
+
+function uniqueDatasetId(base: string, used: Set<string>): string {
+  let candidate = base;
+  for (let suffixNumber = 2; used.has(candidate); suffixNumber += 1) {
+    const suffix = `_${suffixNumber}`;
+    candidate = `${base.slice(0, Math.max(1, 64 - suffix.length))}${suffix}`;
+  }
+  return candidate;
+}
+
+function normalizeDatasetBody(raw: unknown, id: string): Record<string, any> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw datasetError(id, 'DATASET_INVALID', 'dataset must be an object with unit, values and source; never invent statistics.');
+  }
+  const dataset = raw as Record<string, unknown>;
+  const source = dataset.source === undefined
+    ? 'user'
+    : typeof dataset.source === 'string' ? dataset.source.trim().toLowerCase() : dataset.source;
+  if (typeof source !== 'string' || !(DATASET_SOURCES as readonly string[]).includes(source)) {
+    throw datasetError(id, 'DATASET_SOURCE_INVALID', 'dataset.source must be user, openverse, example or derived.');
+  }
+  const unit = typeof dataset.unit === 'string' ? dataset.unit.trim() : '';
+  if (!unit) {
+    throw datasetError(id, 'DATASET_UNIT_REQUIRED', 'dataset.unit is required (1-32 characters); keep the user-supplied unit instead of inventing one.');
+  }
+  const candidateValues = dataset.values && typeof dataset.values === 'object' && !Array.isArray(dataset.values)
+    ? Object.entries(dataset.values as Record<string, unknown>).map(([label, value]) => ({ label, value }))
+    : dataset.values;
+  if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
+    throw datasetError(id, 'DATASET_VALUES_REQUIRED', 'dataset.values must contain at least one user-supplied number; never invent statistics.');
+  }
+  const values = candidateValues.slice(0, DATASET_MAX_VALUES).map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}] must be { label, value }; never invent statistics.`);
+    }
+    const item = entry as Record<string, unknown>;
+    const label = typeof item.label === 'string' ? item.label.trim() : '';
+    if (!label) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}].label must be a non-empty string; never invent labels or statistics.`);
+    }
+    const value = datasetNumber(item.value);
+    if (value === null || Math.abs(value) > 1e12) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}].value must be a finite number within ±1e12; keep the user's value and never invent statistics.`);
+    }
+    return { label: label.slice(0, 64), value };
+  });
+
+  const normalized: Record<string, any> = { unit: unit.slice(0, 32), values, source };
+  if (typeof dataset.label === 'string' && dataset.label.trim()) normalized.label = dataset.label.trim().slice(0, 64);
+  if (typeof dataset.approved === 'boolean') normalized.approved = dataset.approved;
+  if (typeof dataset.source_url === 'string' && dataset.source_url.trim()) {
+    try {
+      const href = new URL(dataset.source_url.trim()).href;
+      if (href.length <= 512) normalized.source_url = href;
+    } catch {
+      // Drop an unusable optional source URL instead of failing the whole package.
+    }
+  }
+  if (typeof dataset.retrieved_at === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dataset.retrieved_at)
+    && !Number.isNaN(Date.parse(dataset.retrieved_at))) {
+    normalized.retrieved_at = dataset.retrieved_at;
+  }
+  if (typeof dataset.note === 'string' && dataset.note.trim()) normalized.note = dataset.note.trim().slice(0, 256);
+  return normalized;
+}
+
+/** Normalize every dataset key and value once, and keep the scene-reference aliases. */
+function normalizeDatasets(raw: unknown): { datasets: Record<string, any>; aliases: Map<string, string> } {
+  if (raw === undefined || raw === null) return { datasets: {}, aliases: new Map() };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw datasetError('datasets', 'DATASETS_INVALID', 'datasets must be an object keyed by dataset id.');
+  }
+  const entries = Object.entries(raw as Record<string, unknown>);
+  const used = new Set<string>();
+  const assigned = new Map<string, string>();
+  for (const [key] of entries) {
+    const id = uniqueDatasetId(normalizeDatasetId(key), used);
+    used.add(id);
+    assigned.set(key, id);
+  }
+  const datasets: Record<string, any> = {};
+  for (const [key, value] of entries) {
+    const id = assigned.get(key)!;
+    datasets[id] = normalizeDatasetBody(value, id);
+  }
+  const aliases = new Map(assigned);
+  for (const id of used) if (!aliases.has(id)) aliases.set(id, id);
+  return { datasets, aliases };
+}
 
 function clampText(value: unknown, max: number): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -339,12 +650,20 @@ function inferSceneLayout(scene: Record<string, any>): SceneLayout {
   return 'hero';
 }
 
+/** A scene that cannot render is an actionable 422, never a silent layout downgrade. */
+function sceneDataError(sceneId: string, layout: string, detail: string, code: 'SCENE_DATA_REQUIRED' | 'SCENE_DATASET_UNKNOWN' | 'SCENE_DATA_DISPLAY_INVALID'): Error {
+  return Object.assign(
+    new Error(`${sceneId}: layout ${layout} ${detail} Set data.dataset to a dataset id from datasets and data.display to bar, number or counter.`),
+    { name: 'SceneDataError', status: 422, code },
+  );
+}
+
 /**
  * Coerce a model-authored scene into the published package shape: a valid
  * layout, readable copy, a real dataset reference, a known variant/background,
  * and only schema-known keys. Assets that do not exist yet are dropped.
  */
-function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>): Record<string, any> {
+function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>, datasetAliases?: Map<string, string>): Record<string, any> {
   const source: Record<string, any> = { ...raw };
   const rawId = typeof source.id === 'string' ? source.id : '';
   const id = SCENE_ID_RE.test(rawId) ? rawId : `s_${hashId('', rawId || fallbackTitle).slice(0, 12)}`;
@@ -357,14 +676,23 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   if (!copy.headline && typeof source.headline === 'string') copy.headline = source.headline;
   for (const key of Object.keys(copy)) if (!COPY_KEYS.has(key)) delete copy[key];
 
-  let finalLayout: SceneLayout = layout;
+  const finalLayout: SceneLayout = layout;
   let data = source.data && typeof source.data === 'object' ? { ...source.data } : undefined;
-  if (data && (typeof data.dataset !== 'string' || !datasetIds.has(data.dataset))) data = undefined;
-  if (['stat', 'chart'].includes(finalLayout) && !data) finalLayout = Array.isArray(copy.items) && copy.items.length >= 2 ? 'list' : 'hero';
   if (data) {
+    const requestedDatasetId = typeof data.dataset === 'string' ? data.dataset.trim() : '';
+    if (!requestedDatasetId) throw sceneDataError(id, finalLayout, 'has data but no dataset id.', 'SCENE_DATA_REQUIRED');
+    const datasetId = datasetAliases?.get(requestedDatasetId) ?? requestedDatasetId;
+    if (!datasetIds.has(datasetId)) throw sceneDataError(id, finalLayout, `references unknown dataset "${requestedDatasetId}".`, 'SCENE_DATASET_UNKNOWN');
+    data.dataset = datasetId;
     for (const key of Object.keys(data)) if (key !== 'dataset' && key !== 'display') delete data[key];
+    if (data.display !== undefined && !['bar', 'number', 'counter'].includes(data.display)) {
+      throw sceneDataError(id, finalLayout, `has unsupported data.display "${String(data.display)}".`, 'SCENE_DATA_DISPLAY_INVALID');
+    }
     if (finalLayout === 'stat' && data.display === undefined) data.display = 'number';
     if (finalLayout === 'chart' && data.display === undefined) data.display = 'bar';
+  }
+  if (['stat', 'chart'].includes(finalLayout) && !data) {
+    throw sceneDataError(id, finalLayout, 'requires a dataset reference but none was provided.', 'SCENE_DATA_REQUIRED');
   }
 
   const limits = COPY_LIMITS[finalLayout];
@@ -444,6 +772,28 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   return scene;
 }
 
+function applyProductionIntentToScene(scene: Record<string, any>, intent: ProductionIntent): Record<string, any> {
+  if (!intent.generatedFilm) return scene;
+  const next = { ...scene };
+  if (intent.noCaptions) {
+    delete next.copy;
+    delete next.lower_third;
+    // Title/hero layouts require a headline. A copy-free list layout is the
+    // schema-supported shell; generate_video subsequently enables media_only.
+    if (['title', 'hero', 'stat', 'chart', 'code'].includes(next.layout)) {
+      next.layout = 'list';
+      delete next.variant;
+      delete next.data;
+      delete next.code;
+    }
+  }
+  if (intent.wordless) {
+    delete next.narration;
+    delete next.narration_asset;
+  }
+  return next;
+}
+
 function withMotionFixes<T extends Record<string, unknown>>(result: T, pkg: Record<string, any>): T {
   const fixes = motionFixInstructions(lintPackageMotion(pkg));
   if (fixes.length === 0) return result;
@@ -453,23 +803,34 @@ function withMotionFixes<T extends Record<string, unknown>>(result: T, pkg: Reco
 /** Acceptance phrase for CAST1. Fictional mascot only; never a real person or a user photo. */
 const SHARED_MASCOT_RE = /use the same mascot in every scene/i;
 const KLEIN_REF_CAP = 10;
-const MASCOT_SVG = [
-  '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">',
-  '<rect width="512" height="512" fill="#1b2440"/>',
-  '<circle cx="256" cy="210" r="116" fill="#6d8cff"/>',
-  '<circle cx="214" cy="190" r="16" fill="#0d0f14"/>',
-  '<circle cx="298" cy="190" r="16" fill="#0d0f14"/>',
-  '<path d="M214 246 Q256 286 298 246" fill="none" stroke="#0d0f14" stroke-width="10" stroke-linecap="round"/>',
-  '</svg>',
-].join('');
+
+/** The shared mascot follows the package theme palette so packaging never rejects it. */
+function sharedMascotSvg(palette?: readonly string[]): string {
+  const ink = palette?.[0] ?? '#0d0f14';
+  const background = palette?.[1] ?? ink;
+  const accent = palette?.[2] ?? palette?.[1] ?? ink;
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">',
+    `<rect width="512" height="512" fill="${background}"/>`,
+    `<circle cx="256" cy="210" r="116" fill="${accent}"/>`,
+    `<circle cx="214" cy="190" r="16" fill="${ink}"/>`,
+    `<circle cx="298" cy="190" r="16" fill="${ink}"/>`,
+    `<path d="M214 246 Q256 286 298 246" fill="none" stroke="${ink}" stroke-width="10" stroke-linecap="round"/>`,
+    '</svg>',
+  ].join('');
+}
 
 function briefWantsSharedMascot(brief: string): boolean {
   return SHARED_MASCOT_RE.test(brief);
 }
 
-function buildSharedMascot() {
-  const sha256 = createHash('sha256').update(MASCOT_SVG).digest('hex');
+function buildSharedMascot(palette: readonly string[] | undefined, persistSvg: ToolsetOptions['persistSvg']) {
+  const svg = sharedMascotSvg(palette);
+  const sha256 = createHash('sha256').update(svg).digest('hex');
   const assetId = 'a_cast_pip';
+  // Persist the bytes at propose time. Declaring a file without writing it made
+  // every later render fail with an untyped ENOENT during packaging (M10).
+  const file = persistSvg?.(assetId, svg, 'svg') ?? `assets/${assetId}.svg`;
   return {
     member: {
       id: 'c_pip',
@@ -482,9 +843,9 @@ function buildSharedMascot() {
       kind: 'svg',
       origin: 'generated',
       status: 'ready',
-      file: `assets/${assetId}.svg`,
+      file,
       sha256,
-      bytes: Buffer.byteLength(MASCOT_SVG),
+      bytes: Buffer.byteLength(svg),
       license: { id: 'CC0-1.0' },
       redistributable: true,
       gen: {
@@ -523,9 +884,15 @@ function mergeRefs(userRefs: string[], castRefs: string[]): string[] {
  * uploads) return a card request and never perform the action here.
  */
 export function createToolset(options: ToolsetOptions = {}): Record<string, AgentTool> {
-  const state: { package?: Record<string, any> } = {
+  const configuredMotionModel = parseMotionModel(options.motionModel, 'auto');
+  const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal'] } = {
     package: options.initialPackage ? structuredClone(options.initialPackage) : undefined,
+    intent: options.initialPackage ? options.initialIntent : undefined,
+    proposal: options.initialPackage?.proposal,
   };
+  // Rebuild the whole-film stem as each shot arrives. Using only the first
+  // shot's plan made otherwise different scenes share one generic sound bed.
+  const finishingSoundPlans = new Map<string, string>();
 
   const touch = () => {
     if (state.package) options.onPackageChange?.(state.package);
@@ -535,11 +902,18 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const rawTitle = args.title ?? args.brief.slice(0, 90);
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45).trimEnd()}…` : rawTitle;
     const id = hashId('pkg', args.brief);
-    const datasetIds = new Set(Object.keys(args.datasets ?? {}));
-    const scenes = args.scenes?.length
-      ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set()))
-      : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }];
-    const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot() : null;
+    const format = resolveFormat(args.brief);
+    const normalizedDatasets = normalizeDatasets(args.datasets);
+    const datasetIds = new Set(Object.keys(normalizedDatasets.datasets));
+    const intent = classifyProductionIntent(args.brief);
+    state.intent = intent;
+    state.proposal = args.proposal;
+    const scenes = (args.scenes?.length
+      ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set(), normalizedDatasets.aliases))
+      : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
+      .map(scene => applyProductionIntentToScene(scene, intent));
+    const theme = { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) };
+    const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot(theme.palette, options.persistSvg) : null;
     if (mascot) {
       for (const scene of scenes) scene.cast = [mascot.member.id];
     }
@@ -550,11 +924,12 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       id,
       title,
       createdAt: (options.now ?? (() => new Date().toISOString()))(),
-      format: { width: 1920, height: 1080, fps: 30 },
+      format,
       duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
-      theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) },
+      theme,
       voice: { enabled: false, engine: 'none' },
-      datasets: args.datasets ?? {},
+      datasets: normalizedDatasets.datasets,
+      ...(args.proposal ? { proposal: args.proposal } : {}),
       scenes,
       ...(mascot ? { cast: [mascot.member] } : {}),
       assets: { ...(options.brandAssets ?? {}), ...(mascot ? { [mascot.assetId]: mascot.asset } : {}) },
@@ -566,7 +941,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     if (motion) state.package.motion = motion;
     touch();
     return withMotionFixes(
-      { package: state.package, revision: state.package.revision, placeholders: scenes.length === 1 && !args.scenes ? ['duration', 'palette'] : [] },
+      { package: state.package, revision: state.package.revision, proposal: state.proposal ?? null, placeholders: scenes.length === 1 && !args.scenes ? ['duration', 'palette'] : [] },
       state.package,
     );
   };
@@ -574,17 +949,26 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   const edit = (args: z.infer<typeof editSchema>) => {
     if (!state.package) throw new Error('no package draft; call storyboard.propose first');
     const draft = state.package;
+    const normalizedDatasets = normalizeDatasets(draft.datasets);
+    const aliases = normalizedDatasets.aliases;
     const scenes: any[] = Array.isArray(draft.scenes) ? draft.scenes : [];
-    const index = scenes.findIndex(scene => scene?.id === args.scene_id);
+    const remappedScenes = scenes.map(scene => {
+      const currentDataset = typeof scene?.data?.dataset === 'string' ? scene.data.dataset : '';
+      const datasetId = currentDataset ? aliases.get(currentDataset) : undefined;
+      return datasetId && datasetId !== currentDataset
+        ? { ...scene, data: { ...scene.data, dataset: datasetId } }
+        : scene;
+    });
+    const index = remappedScenes.findIndex(scene => scene?.id === args.scene_id);
     if (index < 0) throw new Error(`scene ${args.scene_id} not found`);
-    const current = scenes[index] ?? {};
+    const current = remappedScenes[index] ?? {};
     const patch = args.patch as Record<string, any>;
-    const datasetIds = new Set(Object.keys(draft.datasets ?? {}));
+    const datasetIds = new Set(Object.keys(normalizedDatasets.datasets));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
-    const nextScenes = scenes.map((scene, sceneIndex) => sceneIndex === index
-      ? normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds)
+    const nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
+      ? applyProductionIntentToScene(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases), state.intent ?? classifyProductionIntent(''))
       : scene);
-    state.package = { ...draft, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
+    state.package = { ...draft, datasets: normalizedDatasets.datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
     return withMotionFixes(
       { package: state.package, revision: state.package.revision, scene_id: args.scene_id },
@@ -596,10 +980,16 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     routeAsset({ sceneId: args.scene_id, intent: args.need, kind: args.kind, animated: args.animated, transparent: args.transparent, source: args.source, style: args.style } as AssetNeed);
 
   const generateSvg = async (args: z.infer<typeof generateSvgSchema>) => {
+    // A5 and the packaging render-check must agree on one source of colour:
+    // the package theme. A model-supplied palette is only a pre-propose fallback.
+    const packagePalette = Array.isArray(state.package?.theme?.palette)
+      ? state.package.theme.palette.filter((color: unknown): color is string => typeof color === 'string')
+      : [];
+    const palette = packagePalette.length ? packagePalette : args.palette;
     const intent: SvgIntentLike = {
       kind: args.kind,
       prompt: args.intent,
-      ...(args.palette ? { palette: args.palette } : {}),
+      ...(palette ? { palette } : {}),
       ...(args.width ? { width: args.width } : {}),
       ...(args.height ? { height: args.height } : {}),
       ...(args.seed !== undefined ? { seed: args.seed } : {}),
@@ -610,8 +1000,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const sha256 = createHash('sha256').update(result.svg).digest('hex');
     const id = hashId('a_svg', `${args.scene_id}:${args.intent}:${sha256}`);
     const kind = args.kind === 'vector-anim' ? 'vector-anim' : 'svg';
-    const file = result.file ?? options.persistSvg?.(id, result.svg, kind) ?? `assets/${id}.svg`;
     const rawCheck = result.renderCheck;
+    const paletteOk = rawCheck ? rawCheck.outOfPaletteFraction == null || rawCheck.outOfPaletteFraction <= 0.5 : true;
     const renderCheck = rawCheck
       ? {
           ok: rawCheck.ok === true,
@@ -619,9 +1009,19 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(rawCheck.width ? { width: rawCheck.width } : {}),
           ...(rawCheck.height ? { height: rawCheck.height } : {}),
           blank: typeof rawCheck.opaqueFraction === 'number' ? rawCheck.opaqueFraction < 0.005 : false,
-          palette_ok: rawCheck.outOfPaletteFraction == null || rawCheck.outOfPaletteFraction <= 0.5,
+          palette_ok: paletteOk,
         }
       : { ok: true, version: result.sanitizerVersion ?? '1.0.0' };
+    if (!paletteOk) {
+      const fraction = typeof rawCheck?.outOfPaletteFraction === 'number' ? rawCheck.outOfPaletteFraction : null;
+      throw svgAssetError(
+        'SVG_PALETTE_MISMATCH',
+        id,
+        `render-check failed: out-of-palette${fraction === null ? '' : ` (${(fraction * 100).toFixed(0)}% of visible pixels)`}`,
+      );
+    }
+    if (!renderCheck.ok) throw svgAssetError('SVG_RENDER_CHECK_FAILED', id, 'render-check failed');
+    const file = result.file ?? options.persistSvg?.(id, result.svg, kind) ?? `assets/${id}.svg`;
     const asset = {
       kind,
       origin: 'generated',
@@ -669,8 +1069,20 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const planned = options.planImage?.(args) ?? {};
     const format = state.package?.format ?? {};
     const outputAspect = aspectFromSize(format.width, format.height);
-    const requestedAspect = (args.aspect as Aspect | undefined) ?? outputAspect;
-    const dims = sourceDims(requestedAspect);
+    const formatWidth = Number(format.width);
+    const formatHeight = Number(format.height);
+    const hasOutputSize = Number.isInteger(formatWidth) && formatWidth > 0 && Number.isInteger(formatHeight) && formatHeight > 0;
+    const requestedAspect = args.aspect as Aspect | undefined;
+    // Source stills must match the output frame exactly: i2v centre-crops a
+    // mismatched source. Portrait, square and 4:5 films always source at their
+    // own output aspect and dimensions; a landscape film keeps an explicit
+    // alternate framing for a deliberate crop.
+    const plannedAspect = requestedAspect && outputAspect === '16:9'
+      ? requestedAspect
+      : outputAspect;
+    const dims = plannedAspect === outputAspect && hasOutputSize
+      ? { width: formatWidth, height: formatHeight }
+      : sourceDims(plannedAspect);
     const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
     const cast = castRefsForScene(state.package, args.scene_id);
     const refs = mergeRefs(args.refs ?? [], cast.refs);
@@ -685,7 +1097,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           intent: args.intent,
           ...(args.style ? { style: args.style } : {}),
           ...(palette ? { palette } : {}),
-          aspect: requestedAspect,
+          aspect: plannedAspect,
         })
       : expandFluxCaption({
           intent: args.intent,
@@ -695,7 +1107,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(args.cutout ? { cutout: true } : {}),
           ...(args.text ? { text: true } : {}),
           ...(args.labelled ? { labelled: true } : {}),
-          aspect: requestedAspect,
+          aspect: plannedAspect,
         }));
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
     const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
@@ -734,20 +1146,33 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         workflow,
         ...(workflowSha256 ? { workflow_sha256: workflowSha256 } : {}),
         model: planned.model ?? 'flux-3-klein',
-        inputs: planned.inputs ?? defaultInputs,
+        inputs: planned.inputs
+          ? { ...planned.inputs, ...(plannedAspect === outputAspect && hasOutputSize ? { width: formatWidth, height: formatHeight } : {}) }
+          : defaultInputs,
         backend: planned.backend ?? 'colab:G4',
       },
     };
     if (state.package) {
-      const scenes = cast.ids.length
-        ? (Array.isArray(state.package.scenes) ? state.package.scenes : []).map((scene: any) => {
-            if (scene?.id !== args.scene_id) return scene;
-            const existing = Array.isArray(scene.cast) ? scene.cast : [];
-            const next = [...existing];
-            for (const castId of cast.ids) if (!next.includes(castId)) next.push(castId);
-            return next.length === existing.length ? scene : { ...scene, cast: next.slice(0, 8) };
-          })
-        : state.package.scenes;
+      const referenceOnly = (isRefEdit && cast.ids.length === 0) || /\b(?:reference|identity|cast|portrait|start[\s-]?frame)\b/i.test(args.kind ?? '');
+      const scenes = (Array.isArray(state.package.scenes) ? state.package.scenes : []).map((scene: any) => {
+        if (scene?.id !== args.scene_id) return scene;
+        let next = scene;
+        if (cast.ids.length) {
+          const existing = Array.isArray(next.cast) ? next.cast : [];
+          const castIds = [...existing];
+          for (const castId of cast.ids) if (!castIds.includes(castId)) castIds.push(castId);
+          if (castIds.length !== existing.length) next = { ...next, cast: castIds.slice(0, 8) };
+        }
+        if (!referenceOnly) {
+          const existing = Array.isArray(next.foreground) ? next.foreground : [];
+          if (!existing.some((item: any) => item?.asset === id)) {
+            const index = existing.length;
+            const placement = foregroundFor(args.scene_id, index) ?? { x: 0.5, y: 0.5 + index * 0.05, w: 0.5, anim: 'fade-in' as const };
+            next = { ...next, foreground: [...existing, { ...placement, asset: id }] };
+          }
+        }
+        return next;
+      });
       state.package = {
         ...state.package,
         scenes,
@@ -756,18 +1181,307 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       };
       touch();
     }
-    const aspectMismatch = args.aspect !== undefined && requestedAspect !== outputAspect;
+    const aspectMismatch = args.aspect !== undefined && plannedAspect !== outputAspect;
     return {
       scene_id: args.scene_id,
       asset: { id, ...asset },
       caption,
       reference_edit: isRefEdit,
-      source_aspect: requestedAspect,
+      source_aspect: plannedAspect,
       output_aspect: outputAspect,
       requires_approval: 'spend',
       note: aspectMismatch
-        ? `planned only; no GPU job was submitted. Source is ${requestedAspect} but the package output is ${outputAspect}: i2v will centre-crop.`
+        ? `planned only; no GPU job was submitted. Source is ${plannedAspect} but the package output is ${outputAspect}: i2v will centre-crop.`
         : 'planned only; no GPU job was submitted',
+    };
+  };
+
+  const generateVideo = (args: z.infer<typeof generateVideoSchema>) => {
+    if (!state.package) throw new Error('no package draft; call storyboard.propose first');
+    const sceneIndex = (Array.isArray(state.package.scenes) ? state.package.scenes : []).findIndex((scene: any) => scene?.id === args.scene_id);
+    if (sceneIndex < 0) throw new Error(`scene ${args.scene_id} not found`);
+    const intent = state.intent ?? classifyProductionIntent('');
+    const wordless = args.wordless ?? args.dialogue === undefined;
+    if (wordless && args.dialogue) throw new Error('wordless shots cannot also carry dialogue; remove dialogue or set wordless:false');
+    if (!wordless && !args.dialogue) throw new Error('wordless:false needs exact dialogue and ready conditioning audio');
+
+    const noText = intent.generatedFilm && intent.noCaptions
+      ? ' Every surface, garment and prop is plain and unmarked.'
+      : '';
+    const direction = {
+      subject: args.subject.trim(),
+      composition: `${args.composition.trim()}${noText}`,
+      action: args.action.trim(),
+      camera: args.camera.trim(),
+      soundscape: args.soundscape.trim(),
+      characterCount: args.characterCount,
+      ...(args.dialogue ? { dialogue: { ...args.dialogue } } : {}),
+    };
+    const model = resolveShotMotionModel(configuredMotionModel, args.motion_model, direction);
+    if (model === 'ltx' && args.dialogue) {
+      throw new Error('LTX-2.5 i2v does not generate synchronized dialogue; choose motion_model h3 for this shot or make it wordless with an explicit finishing sound plan');
+    }
+    if (model === 'klein' && args.dialogue) {
+      throw new Error('Klein stills + code motion does not accept H3 dialogue conditioning; put speech and sound in finishing_sound, or choose h3 for native AV');
+    }
+
+    const visualRef = (id: string | undefined, role: string, required: boolean): string | undefined => {
+      if (!id) {
+        if (required) throw new Error(`${model} needs ${role}. Call assets.generate_image for that role and pass its returned asset id; a FLUX still alone is not film completion.`);
+        return undefined;
+      }
+      const asset = state.package!.assets?.[id];
+      if (!asset) throw new Error(`${role} ${id} is not in the package. Create it with assets.generate_image, then pass the returned id to assets.generate_video.`);
+      if (asset.kind !== 'image') throw new Error(`${role} ${id} is ${asset.kind}; ${model} needs a raster image reference, not ${asset.kind}. Generate a proper image reference instead of substituting a still for video.`);
+      if (asset.status === 'ready') {
+        if (typeof asset.file !== 'string' || typeof asset.sha256 !== 'string') throw new Error(`${role} ${id} is ready but has no usable file/sha256; regenerate the image reference.`);
+      } else if (asset.status !== 'pending' || asset.gen?.generator !== 'flux3-klein') {
+        throw new Error(`${role} ${id} is ${asset.status}; provide a ready image or a pending FLUX image plan that the shot can depend on.`);
+      }
+      return id;
+    };
+
+    let image = visualRef(args.image, 'Picture 1 (subject/identity)', model === 'h3');
+    let reference = visualRef(args.reference, 'Picture 2 (composition/art direction)', model === 'h3');
+    if (model === 'ltx' && !image && !reference) {
+      throw new Error('LTX-2.5 i2v needs a start-frame image. Generate a shot image with assets.generate_image and pass it as image (or reference).');
+    }
+
+    const scene = state.package.scenes[sceneIndex];
+    const packageFps = Number(state.package.format?.fps ?? 30);
+    const slotSeconds = Number(scene.preferredFrames) / packageFps;
+    if (!(slotSeconds > 0.2)) throw new Error(`${args.scene_id}: set preferredFrames and package fps before planning a generated shot`);
+    const requestedFrames = args.frames ?? Math.max(1, Math.ceil(slotSeconds * 24));
+    let asset: Record<string, any>;
+    let id: string;
+    let resolvedFrames: number;
+    let outputFps = 24;
+    let finishingSound: string | undefined;
+
+    if (model === 'h3') {
+      let audio: string;
+      if (wordless) {
+        if (args.audio) throw new Error('wordless H3 shots use the shared silent conditioning asset; omit audio or provide dialogue with an exact-line clip');
+        const wav = silentConditioningWav();
+        const sha256 = createHash('sha256').update(wav).digest('hex');
+        const existing = state.package.assets?.[SILENT_CONDITIONING_ASSET_ID];
+        if (existing && (existing.kind !== 'audio' || existing.status !== 'ready' || existing.sha256 !== sha256)) {
+          throw new Error(`${SILENT_CONDITIONING_ASSET_ID} already exists with different content; replace the collision before planning wordless H3 shots`);
+        }
+        if (!existing) {
+          const file = options.persistAudio?.(SILENT_CONDITIONING_ASSET_ID, wav, 'silent-conditioning') ?? `assets/${SILENT_CONDITIONING_ASSET_ID}.wav`;
+          state.package.assets = {
+            ...(state.package.assets ?? {}),
+            [SILENT_CONDITIONING_ASSET_ID]: {
+              kind: 'audio', origin: 'upload', status: 'ready', file, sha256, bytes: wav.length,
+              license: { id: 'CC0-1.0' }, redistributable: true,
+              source: { provider: 'repo', id: 'comfyrizz/deterministic-silence-500ms-24k-mono' },
+              media: { durationSeconds: 0.5, audio: 'present', codec: 'pcm_s16le' },
+              notes: 'Deterministic digital silence for wordless FastH3 conditioning; no TTS model was run.',
+            },
+          };
+        }
+        audio = SILENT_CONDITIONING_ASSET_ID;
+      } else {
+        audio = args.audio ?? '';
+        const conditioning = state.package.assets?.[audio];
+        if (!args.audio || !conditioning || conditioning.kind !== 'audio' || conditioning.status !== 'ready'
+          || typeof conditioning.file !== 'string' || typeof conditioning.sha256 !== 'string'
+          || !(Number(conditioning.media?.durationSeconds) > 0)) {
+          throw new Error('H3 dialogue needs a ready exact-line audio asset with file, sha256 and measured media.durationSeconds; wordless shots can omit audio to reuse deterministic silence');
+        }
+      }
+      resolvedFrames = nextFastH3Frames(requestedFrames);
+      if (resolvedFrames > 362 || slotSeconds > resolvedFrames / 24 + 1 / 24) {
+        throw new Error(`${args.scene_id}: the ${slotSeconds.toFixed(3)} s editorial slot exceeds FastH3's legal 17n+5 source duration; shorten the shot or split coverage`);
+      }
+      id = hashId('a_vid', `${args.scene_id}:h3:${image}:${reference}:${audio}:${resolvedFrames}:${args.seed ?? 0}:${JSON.stringify(direction)}`);
+      asset = {
+        kind: 'video', origin: 'generated', status: 'pending',
+        license: { id: 'LicenseRef-MiniMax-H3-Community' }, redistributable: false,
+        model_license: { id: 'LicenseRef-MiniMax-H3-Community', url: 'https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE' },
+        notes: wordless
+          ? 'pending-GPU: FastH3 native AV; wordless means no speech, with the directed physical soundscape retained.'
+          : 'pending-GPU: FastH3 native AV with exact-line voice conditioning.',
+        gen: {
+          generator: 'fasth3-omni', workflow: FASTH3_WORKFLOW, workflow_sha256: WORKFLOW_SHA256[FASTH3_WORKFLOW], model: 'fasth3-omni',
+          direction: { ...direction, slotSeconds },
+          inputs: { image, reference, audio, width: 832, height: 480, frames: resolvedFrames, fps: 24, seed: args.seed ?? 0 },
+        },
+      };
+    } else if (model === 'ltx') {
+      finishingSound = args.finishing_sound?.trim();
+      if (!finishingSound) {
+        throw new Error('LTX-2.5 generates picture without native audio; pass finishing_sound with an explicit soundscape/music/SFX mix plan (or choose h3 for native AV)');
+      }
+      if (image && reference && image !== reference) {
+        // LTX has one start-image slot. Compile a real, traceable start-frame
+        // still from both shared roles rather than dropping either reference.
+        const start = planImage({
+          scene_id: args.scene_id,
+          kind: 'ltx-start-frame',
+          intent: `${args.subject}. ${args.composition}`,
+          refs: [reference!, image!],
+          ...(args.seed !== undefined ? { seed: args.seed } : {}),
+        });
+        const startId = start.asset.id;
+        const startAsset = state.package.assets[startId];
+        startAsset.gen.inputs.prompt = [
+          'Create the first frame of one continuous cinematic shot.',
+          `Identity and subject: ${args.subject}.`,
+          `Composition and art direction: ${args.composition}.`,
+          'Preserve the shared subject identity from Picture 2 and the composition from Picture 1.',
+          intent.generatedFilm && intent.noCaptions ? 'Every surface, garment and prop is plain and unmarked.' : 'Background surfaces are clean and unmarked.',
+        ].join(' ');
+        delete startAsset.gen.inputs.text;
+        startAsset.notes = 'pending-GPU: LTX start frame compiled from the shared identity and composition references; this still is an input, not film completion.';
+        image = startId;
+        reference = undefined;
+      } else {
+        image = image ?? reference;
+        reference = undefined;
+      }
+      resolvedFrames = nextLtxFrames(requestedFrames);
+      if (slotSeconds > resolvedFrames / 24 + 1 / 24) {
+        throw new Error(`${args.scene_id}: the ${slotSeconds.toFixed(3)} s slot is longer than the requested LTX source; omit frames to fit the scene or split the shot`);
+      }
+      const startAsset = state.package.assets[image!];
+      const outputAspect = aspectFromSize(state.package.format?.width, state.package.format?.height);
+      const fallbackDims = sourceDims(outputAspect);
+      const width = Number(startAsset?.gen?.inputs?.width ?? startAsset?.media?.width ?? fallbackDims.width);
+      const height = Number(startAsset?.gen?.inputs?.height ?? startAsset?.media?.height ?? fallbackDims.height);
+      const prompt = [
+        'Use the provided start image as the first frame.',
+        `${args.subject.trim()}. ${args.composition.trim()}.`,
+        `${args.action.trim()}. ${args.camera.trim()}.`,
+        'One continuous shot, no cuts.',
+        intent.generatedFilm && intent.noCaptions ? 'Every surface, garment and prop is plain and unmarked.' : 'Background surfaces are clean and unmarked.',
+      ].join(' ');
+      id = hashId('a_vid', `${args.scene_id}:ltx:${image}:${resolvedFrames}:${args.seed ?? 0}:${prompt}:${finishingSound}`);
+      asset = {
+        kind: 'video', origin: 'generated', status: 'pending',
+        license: { id: 'CC0-1.0' }, redistributable: true,
+        model_license: { id: 'LTX-2.x-Community', url: 'https://huggingface.co/Lightricks/LTX-2.5' },
+        media: { audio: 'none', fps: 24, frames: resolvedFrames },
+        notes: `pending-GPU: LTX-2.5 picture only; no native audio. Finishing sound plan: ${finishingSound}`,
+        gen: {
+          generator: 'ltx25', workflow: LTX_I2V_WORKFLOW, workflow_sha256: WORKFLOW_SHA256[LTX_I2V_WORKFLOW], model: 'ltx-2.5',
+          inputs: { image, prompt, width, height, frames: resolvedFrames, fps: 24, seed: args.seed ?? 0, strength: 0.85 },
+        },
+      };
+    } else {
+      finishingSound = args.finishing_sound?.trim();
+      if (!finishingSound) {
+        throw new Error('Klein stills + code motion generates no native audio; pass finishing_sound with an explicit soundscape/music/SFX mix plan');
+      }
+      const refs = [...new Set([image, reference].filter((value): value is string => typeof value === 'string' && value.length > 0))];
+      const keyframe = planImage({
+        scene_id: args.scene_id,
+        kind: 'klein-film-keyframe',
+        intent: `${args.subject}. ${args.composition}. Keyframe for: ${args.action}`,
+        refs,
+        ...(args.seed !== undefined ? { seed: args.seed } : {}),
+      });
+      id = keyframe.asset.id;
+      asset = state.package.assets[id];
+      asset.gen.inputs.prompt = `${asset.gen.inputs.prompt} Single still keyframe only; camera movement, transitions and timing are handled by Remotion. stills + code motion.`;
+      delete asset.gen.inputs.text;
+      asset.media = { ...(asset.media ?? {}), audio: 'none' };
+      asset.notes = `pending-GPU: Klein image keyframe only, not generated character animation. stills + code motion; Remotion handles camera movement, transitions and timing. Finishing sound plan: ${finishingSound}`;
+      resolvedFrames = Number(scene.preferredFrames);
+      outputFps = packageFps;
+    }
+
+    const scenes = state.package.scenes.map((candidate: any, index: number) => {
+      if (index !== sceneIndex) return candidate;
+      let next = applyProductionIntentToScene(candidate, intent);
+      const mediaIndex = args.media_index ?? 0;
+      const existingMedia = Array.isArray(next.media) && next.media.length === 2 ? next.media : [{ asset: id }, { asset: id }];
+      next.media = existingMedia.map((plate: any, plateIndex: number) => plateIndex === mediaIndex ? { asset: id } : plate);
+      next.background = { asset: id };
+      const hasEditorialCopy = Object.values(next.copy ?? {}).some(value =>
+        typeof value === 'string' ? value.trim().length > 0 : Array.isArray(value) && value.some(item => typeof item === 'string' && item.trim().length > 0));
+      // media_only still supports animated lower thirds. When the brief asks
+      // for Remotion typography, preserve full copy layouts too; an explicit
+      // media_only scene remains the cinematic lower-third-only choice.
+      next.media_only = candidate.media_only === true || !hasEditorialCopy;
+      if (intent.generatedFilm) next.foreground = [];
+      if (model === 'ltx') {
+        const note = `LTX finishing sound plan (picture has no native audio): ${finishingSound}`;
+        next.notes = clampText(next.notes && !next.notes.includes('LTX finishing sound plan') ? `${next.notes} ${note}` : note, 512);
+      }
+      if (model === 'klein') {
+        next.foreground = [{
+          asset: id, x: 0.5, y: 0.5, w: 1,
+          anim: /push|dolly|zoom|pan|tracking|drift/i.test(args.camera) ? 'ken-burns' as const : 'fade-in' as const,
+        }];
+        next.motion = normalizeSceneMotion({
+          ...(next.motion ?? {}), entry: next.motion?.entry ?? 'fadeUp', ease: next.motion?.ease ?? 'enter',
+          spring: next.motion?.spring ?? 'settle', stagger: next.motion?.stagger ?? 'none', emphasis: next.motion?.emphasis ?? 'none',
+        }) ?? { entry: 'fadeUp', ease: 'enter', spring: 'settle', stagger: 'none', emphasis: 'none' };
+        next.transitionOut = next.transitionOut ?? { type: 'fade', frames: 15 };
+        const note = `Klein stills + code motion; Remotion handles camera movement, transitions and timing. Finishing sound plan (no native audio): ${finishingSound}`;
+        next.notes = clampText(next.notes && !next.notes.includes('stills + code motion') ? `${next.notes} ${note}` : note, 512);
+      }
+      return next;
+    });
+    if (model === 'klein' && state.proposal) {
+      state.proposal = {
+        ...state.proposal,
+        look: clampText(`stills + code motion; ${state.proposal.look}`, 100)!,
+        soundtrack: clampText(`stills + code motion finishing sound: ${finishingSound}`, 100)!,
+      };
+    }
+    const compliance = model === 'klein' ? {
+      ...(state.package.compliance ?? {}),
+      warnings: [
+        ...(Array.isArray(state.package.compliance?.warnings) ? state.package.compliance.warnings : []).filter((note: string) => !note.startsWith('Proposal medium:') && !note.startsWith('Finishing sound plan (stills + code motion):')),
+        'Proposal medium: stills + code motion',
+        `Finishing sound plan (stills + code motion): ${finishingSound}`,
+      ].slice(-64),
+    } : state.package.compliance;
+    state.package = {
+      ...state.package,
+      compliance,
+      scenes,
+      assets: { ...(state.package.assets ?? {}), [id]: asset },
+      revision: Number(state.package.revision ?? 0) + 1,
+    };
+    if (finishingSound && model !== 'h3' && options.persistAudio) {
+      finishingSoundPlans.set(args.scene_id, finishingSound);
+      const combinedPlan = state.package.scenes
+        .map((scene: any) => finishingSoundPlans.get(scene.id))
+        .filter((plan: string | undefined): plan is string => Boolean(plan))
+        .join(' | ');
+      const seconds = scenes.reduce((sum: number, scene: any) => sum + (Number(scene.preferredFrames) || 0), 0) / packageFps;
+      const stem = synthesizeFinishingWav(combinedPlan, seconds, args.seed ?? 1);
+      const assetId = 'a_finishing_mix';
+      const file = options.persistAudio(assetId, stem.wav, 'finishing-stem') ?? `assets/${assetId}.wav`;
+      state.package.assets[assetId] = {
+        kind: 'audio', origin: 'generated', status: 'ready',
+        file, sha256: createHash('sha256').update(stem.wav).digest('hex'), bytes: stem.wav.length,
+        media: { durationSeconds: stem.durationSeconds },
+        gen: { generator: 'procedural-audio', model: 'deterministic-pcm-v2', inputs: { plan: combinedPlan, seed: args.seed ?? 1 } },
+        license: { id: 'CC0-1.0' }, redistributable: true,
+        notes: clampText(`Original deterministic procedural finishing stem; not native model audio. Whole-film plan: ${combinedPlan}`, 512),
+      };
+      state.package.audio = {
+        ...(state.package.audio ?? {}),
+        music: { asset: assetId, gain_db: configuredMotionModel === 'auto' ? -16 : -12, fade_in_seconds: 0.5, fade_out_seconds: 1, loop: false },
+      };
+    }
+    touch();
+    return {
+      scene_id: args.scene_id,
+      motion_model: model,
+      asset: { id, ...asset },
+      native_audio: model === 'h3',
+      ...(model === 'klein' ? { medium: 'stills + code motion', generated_character_animation: false, ...(state.proposal ? { proposal: state.proposal } : {}) } : {}),
+      ...(finishingSound ? { finishing_sound: finishingSound } : {}),
+      frames: resolvedFrames,
+      fps: outputFps,
+      requires_approval: 'spend',
+      note: 'planned only; no GPU job was submitted',
     };
   };
 
@@ -859,6 +1573,17 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       baseParameters({
         brief: { type: 'string' },
         title: { type: 'string' },
+        proposal: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'A short user-facing film proposal: one or two sentences, not technical production details.',
+          properties: {
+            logline: { type: 'string', maxLength: 240, description: 'Clear story summary in at most two sentences and 240 characters.' },
+            look: { type: 'string', maxLength: 100, description: 'Short visual style description, at most 100 characters.' },
+            soundtrack: { type: 'string', maxLength: 100, description: 'Short audio direction, including wordless sound when relevant, at most 100 characters.' },
+          },
+          required: ['logline', 'look', 'soundtrack'],
+        },
         motion: {
           type: 'object',
           additionalProperties: false,
@@ -868,6 +1593,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           },
         },
         scenes: { type: 'array', items: { type: 'object' } },
+        datasets: { type: 'object', additionalProperties: true, description: 'User datasets keyed by dataset id; plain names are normalized to the schema id form d_regions. Each dataset needs unit, values:[{label,value}] and source; source example needs approved:true. chart/stat/compare scenes reference data.dataset.' },
       }, ['brief']),
       proposeSchema,
       propose,
@@ -895,10 +1621,42 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ),
     'assets.generate_image': tool(
       'assets.generate_image',
-      'Plan a FLUX still with an expanded caption. This never runs a GPU job; spend needs approval.',
-      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string' } }, ['scene_id', 'intent']),
+      'Plan a FLUX 3 Image Klein still with an expanded caption (with refs: a Klein reference edit). This never runs a GPU job; spend needs approval.',
+      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, intent: { type: 'string', description: 'Klein prose, subject first: pose or action, setting, light and mood in one or two specific sentences. Describe what is visible, not what is absent. Style, palette, framing and the text guard are appended. With text:true, quote the exact words and their placement. With refs, say what changes and what stays.' }, seed: { type: 'number' }, refs: { type: 'array', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string', maxLength: 80, description: 'Optional short reference-edit style, at most 80 characters.' } }, ['scene_id', 'intent']),
       generateImageSchema,
       planImage,
+    ),
+    'assets.generate_video': tool(
+      'assets.generate_video',
+      'Plan one scene-referenced generated-film shot; never submits GPU work. motion_model auto routes character acting/dialogue/native sound to FastH3 and scenery/B-roll/camera-led shots to LTX-2.5. H3 requires image=identity and reference=composition plus exact-line audio for dialogue; wordless H3 reuses deterministic silent conditioning and still generates native soundscape. LTX requires a start image and finishing_sound because it emits no native audio. Explicit klein plans still keyframes only, labels stills + code motion, uses Remotion for camera/transitions/timing and requires finishing_sound. Conflicting explicit selections fail; no model is a fallback for another.',
+      baseParameters({
+        scene_id: { type: 'string' },
+        motion_model: { type: 'string', enum: ['auto', 'h3', 'ltx', 'klein'], description: 'Per-shot selection. Must agree with a non-auto configured motionModel.' },
+        subject: { type: 'string', description: 'Visible subject and stable identity, not a prompt tag. For a recurring character, the same verbatim identity sentence in every shot.' },
+        composition: { type: 'string', description: 'Framing, setting, spatial contacts and art direction, phrased as what is visible.' },
+        action: { type: 'string', description: 'One observable action in the present tense, in order and sized to the shot (for LTX: the motion that follows the start frame); auto uses character action to select H3.' },
+        camera: { type: 'string', description: 'Shot size and one camera move relative to the subject, or a static camera; auto uses camera-led scenery to select LTX.' },
+        soundscape: { type: 'string', description: 'Physical/native diegetic audio direction for H3 (ambience, contact sounds); score belongs in finishing. Wordless never means silent.' },
+        characterCount: { type: 'integer', minimum: 0 },
+        image: { type: 'string', description: 'Picture 1 subject/identity image asset id; LTX start art when reference is absent.' },
+        reference: { type: 'string', description: 'Picture 2 composition/art-direction image asset id. Required for H3.' },
+        audio: { type: 'string', description: 'Ready exact-line voice WAV asset for H3 dialogue. Omit for wordless silent conditioning.' },
+        finishing_sound: { type: 'string', description: 'Required LTX/Klein post-production sound plan; neither emits native audio. Name concrete ambience, effects and, when music is wanted, instruments, tempo and mood.' },
+        frames: { type: 'integer', minimum: 1, description: 'Requested source frames at 24 fps; snapped up to the selected model lattice and must cover the scene slot.' },
+        seed: { type: 'integer', minimum: 0 },
+        wordless: { type: 'boolean' },
+        media_index: { type: 'integer', enum: [0, 1], description: 'Which supported scene.media plate receives this video; defaults to 0.' },
+        dialogue: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            text: { type: 'string' }, conditioningText: { type: 'string' }, language: { type: 'string' },
+            voice: { type: 'string' }, delivery: { type: 'string' }, offscreen: { type: 'boolean' },
+          },
+          required: ['text', 'conditioningText', 'language', 'voice', 'delivery'],
+        },
+      }, ['scene_id', 'subject', 'composition', 'action', 'camera', 'soundscape', 'characterCount']),
+      generateVideoSchema,
+      generateVideo,
     ),
     'assets.sketch_to_render': tool(
       'assets.sketch_to_render',

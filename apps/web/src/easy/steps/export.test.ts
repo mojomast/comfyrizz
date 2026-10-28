@@ -534,3 +534,27 @@ test('corrupt saved JSON is reported and ignored instead of looking like a fresh
     stop();
   });
 });
+
+test('done actions open Ask and the editor in place without rerendering or exporting again', async () => {
+  const harness = exportHarness({ revision: 4, exportedRevision: 4, at: '2026-10-26T00:00:00.000Z' });
+  let asks = 0;
+  let editors = 0;
+  let rerenders = 0;
+  harness.ctx.openAsk = () => { asks += 1; };
+  harness.ctx.host.openEditor = () => { editors += 1; };
+  harness.ctx.rerender = () => { rerenders += 1; };
+  const stop = step.bind(harness.el, harness.ctx);
+  await flush();
+
+  const change = harness.fire('[data-easy-export-change]');
+  const editor = harness.fire('[data-easy-export-editor]');
+
+  assert.equal(change.prevented, true);
+  assert.equal(editor.prevented, true);
+  assert.equal(asks, 1);
+  assert.equal(editors, 1);
+  assert.equal(rerenders, 0);
+  assert.equal(harness.renders(), 0);
+  assert.match(harness.el.innerHTML, /data-easy-export-done/);
+  stop();
+});

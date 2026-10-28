@@ -383,12 +383,64 @@ test('disconnected Ask opens the visible AI settings instead of a hidden element
 
     await drawer.openAsk();
     const connect = root.querySelector('[data-easy-ask-connect]');
-    assert.ok(connect, 'disconnected Ask renders a Connect action');
+    assert.ok(connect, 'disconnected Ask shows a Connect action');
     assert.equal(dom.doc.activeElement, connect);
 
     click(connect);
     assert.equal(calls.visibleSettings, 1);
     assert.equal(calls.hostSettings, 0, 'the hidden editor trigger is not used');
+  } finally {
+    dom.restore();
+  }
+});
+
+test('returned chat binding survives its synchronous scope update and still applies the same package', async () => {
+  const dom = installDom();
+  try {
+    const root = dom.doc.createElement('div');
+    dom.doc.body.append(root);
+    const state = makeState({ chatId: null, provider: 'opencode-go' });
+    const calls = { hostSettings: 0, adopt: 0 };
+    const chats = [];
+    const persisted = [];
+    let scopeListener = null;
+    const drawer = createAskDrawer({
+      root,
+      state: () => state,
+      host: makeHost(state, calls),
+      createChat: fakeChatFactory(chats),
+      subscribe: (listener) => {
+        scopeListener = listener;
+        return () => { scopeListener = null; };
+      },
+      onChatIdChange: (chatId) => {
+        persisted.push(chatId);
+        state.chatId = chatId;
+        scopeListener?.();
+      },
+      log: () => {},
+    });
+
+    await drawer.openAsk();
+    assert.equal(chats[0].options.adoptPackageId, 'pkg_a');
+    chats[0].options.onConversationChange({ id: 'chat_returned_0001', projectId: 'pkg_a' });
+
+    assert.deepEqual(persisted, ['chat_returned_0001']);
+    assert.equal(state.chatId, 'chat_returned_0001');
+    assert.equal(chats[0].destroyed, false, 'the id binding is not a project switch');
+    assert.ok(root.querySelector('[data-easy-ask-drawer]'), 'the drawer stays open');
+
+    chats[0].options.applyProject({ package: { id: 'pkg_a' } });
+    assert.equal(calls.adopt, 1, 'the revised package is still in the live scope');
+
+    state.chatId = 'chat_other_0001';
+    state.packageId = 'pkg_b';
+    scopeListener();
+    chats[0].options.onConversationChange({ id: 'chat_late_0001', projectId: 'pkg_a' });
+    chats[0].options.applyProject({ package: { id: 'pkg_a' } });
+    assert.deepEqual(persisted, ['chat_returned_0001'], 'late old-project chat ids are ignored');
+    assert.equal(calls.adopt, 1, 'late old-project packages are ignored');
+    drawer.destroy();
   } finally {
     dom.restore();
   }

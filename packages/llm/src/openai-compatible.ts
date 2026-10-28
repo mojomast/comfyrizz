@@ -112,6 +112,7 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
         model: config.model,
         stream: true,
         stream_options: { include_usage: true },
+        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
         messages: wireMessages(request.system, request.messages),
         ...(request.tools.length ? { tools: wireTools(request.tools), tool_choice: 'auto' } : {}),
       };

@@ -74,6 +74,8 @@ test('structured direction reaches the sampler prompt and cache, not unmapped no
   assert.match(job.params.prompt, /<Subject 1> \(S1\).*<d>\[English\] Roof heavy\. Bear expensive\.<\/d>/);
   assert.match(job.params.prompt, /within 3\.50 seconds/);
   assert.match(job.params.prompt, /<Audio 1>: reference -/);
+  assert.match(job.params.prompt, /first clear appearance of <Subject 1>[\s\S]*without age or design drift: one armored bear/);
+  assert.ok(job.params.prompt.split('one armored bear').length - 1 >= 2, 'the identity is repeated in the detailed shot description');
   assert.doesNotMatch(job.params.prompt, /fully_copy/);
   pkg.assets.a_shot.gen.direction.dialogue.delivery = 'quietly threatening';
   assert.notEqual(planJobs(pkg).jobs[0].cacheKey, job.cacheKey);

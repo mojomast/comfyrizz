@@ -5,7 +5,7 @@ import { useGeneratedAssets, type InlineAsset } from './generated-assets-context
 
 export { GeneratedAssetsProvider, type InlineAsset } from './generated-assets-context';
 import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, palette, textColors, useFontFamily } from './theme';
-import { proceduralStyle } from './background-model.js';
+import { proceduralStyle, readableMediaScrim } from './background-model.js';
 import { statLines } from './stat-model.js';
 import { chartSeries } from './chart-model.js';
 import { LowerThird, MediaFill, MediaPanel, MissingMediaPlaceholder, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
@@ -71,7 +71,7 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
     const blobs = random.slice(0, 5).map((value, index) => ({
       x: 10 + value * 80,
       y: 15 + random[index + 5] * 70,
-      size: 34 + random[(index + 3) % 12] * 28,
+      size: 22 + random[(index + 3) % 12] * 18,
       tone: [accent, mid, soft][index % 3],
     }));
     return (
@@ -87,7 +87,7 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
               height: `${blob.size}%`,
               transform: 'translate(-50%, -50%)',
               borderRadius: '50%',
-              background: `radial-gradient(closest-side, ${blob.tone}66, transparent)`,
+              background: `radial-gradient(closest-side, ${blob.tone}24, transparent)`,
             }}
           />
         ))}
@@ -123,7 +123,7 @@ function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media
           {...(background?.speed !== undefined ? { speed: background.speed } : {})}
           {...(background?.trim ? { trim: background.trim } : {})}
         />
-        <Scrim opacity={resolved.scrim} />
+        <Scrim opacity={readableMediaScrim(scene, resolved.scrim)} />
       </>
     );
   }
@@ -167,6 +167,7 @@ function VectorAsset({ assetId, frame, entry }: { assetId: string; frame: number
 
 function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame: number }) {
   const { durationInFrames } = useVideoConfig();
+  const fullBleedMedia = (scene.foreground ?? []).some(item => item.frame !== 'pip' && (item.w ?? 0.4) >= 0.95 && isRenderableMedia(pkg.assets?.[item.asset]));
   return (
     <>
       {(scene.foreground ?? []).map((item, index) => {
@@ -205,6 +206,7 @@ function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame
           </div>
         );
       })}
+      {fullBleedMedia ? <Scrim opacity={readableMediaScrim(scene, scene.background?.scrim ?? 0)} zIndex={6} /> : null}
     </>
   );
 }

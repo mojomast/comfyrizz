@@ -21,12 +21,14 @@ function safeName(name) {
 export function replayProvider(initialCalls, { finalText = 'The package draft is ready.', model = 'local-compatible' } = {}) {
   let calls = initialCalls;
   let index = 0;
+  const requests = [];
   const server = createServer((request, response) => {
     let raw = '';
     request.on('data', chunk => {
       raw += chunk;
     });
     request.on('end', () => {
+      if (raw) requests.push(JSON.parse(raw));
       if (request.url?.endsWith('/models')) {
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ data: [{ id: model }] }));
@@ -70,6 +72,7 @@ export function replayProvider(initialCalls, { finalText = 'The package draft is
         get calls() {
           return index;
         },
+        requests,
         /** C13: reuse the same loopback URL for a second `/api/agent` run with a new script. */
         setCalls(nextCalls) {
           calls = nextCalls;

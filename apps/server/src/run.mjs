@@ -259,13 +259,15 @@ function durableAction(events, planHash, actionId) {
  *   stage `workflows/`, `package.json` and any on-disk assets where `runPackage` resolves them
  * @param {(context: {pkg: object, result: object, record: object}) => Promise<{revision?: number, render?: object}>} [options.onComplete]
  *   persist the applied package and render it; the return value lands on the run record
+ * @param {(pkg: object, context: {workDir: string, outputDir: string, runId: string, mode: string}) => Promise<void>} [options.prepareNarration]
+ *   synthesize and measure final-run narration before media planning; take runs skip it
  * @param {(context: {productionId: string|null, packageId: string|null}) => object|Promise<object|null>|null} [options.ledgerFor]
  *   resolve the production's persistent budget ledger; null or omitted keeps the in-memory behaviour
  * @param {{read: Function, list?: Function, readEvents: Function, commit: Function}|null} [options.productionStore]
  *   the IP17 production journal; when present, a package bound to a production must
  *   present the IP20 authority that dispatched its action slot
  */
-export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null, productionStore = null } = {}) {
+export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, prepareNarration = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null, productionStore = null } = {}) {
   if (typeof backendFactory !== 'function') throw new Error('createRunController needs a backendFactory');
   if (ledgerFor !== null && typeof ledgerFor !== 'function') throw new Error('ledgerFor must be a function');
   if (productionStore !== null && (typeof productionStore.read !== 'function' || typeof productionStore.readEvents !== 'function' || typeof productionStore.commit !== 'function')) {
@@ -1208,6 +1210,9 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         return;
       }
       record.status = 'running';
+      if (record.mode === 'final' && prepareNarration) {
+        await prepareNarration(pkg, { workDir: record.workDir, outputDir: record.outputDir, runId: record.runId, mode: record.mode });
+      }
       // H8's runPackage does plan -> estimate -> up -> health -> run -> collect -> apply -> teardown.
       const result = await instance.runPackage(pkg, {
         workDir: record.workDir,

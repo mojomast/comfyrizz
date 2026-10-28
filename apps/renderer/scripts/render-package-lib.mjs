@@ -21,17 +21,37 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '..', '..', '..');
 export const rendererDir = join(repoRoot, 'apps', 'renderer');
 
+/** A generated-asset packaging failure is an actionable 422, never an untyped 500. */
+function assetError(assetId, code, message) {
+  return Object.assign(new Error(`${assetId}: ${message}`), {
+    name: 'RenderPackageAssetError',
+    status: 422,
+    code,
+    assetId,
+  });
+}
+
 export function inlineGeneratedAssets(pkg, packageDir) {
   const assets = {};
   for (const [id, asset] of Object.entries(pkg.assets ?? {})) {
     const isVector = asset?.gen?.generator === 'llm-svg' || asset?.kind === 'svg' || asset?.kind === 'vector-anim';
     if (!isVector || typeof asset.file !== 'string') continue;
     const file = join(packageDir, asset.file);
-    const raw = readFileSync(file, 'utf8');
+    let raw;
+    try {
+      raw = readFileSync(file, 'utf8');
+    } catch {
+      throw assetError(id, 'SVG_ASSET_MISSING', `could not read ${asset.file}`);
+    }
     const sanitized = sanitizeSvg(raw);
-    if (!sanitized.ok) throw new Error(`${id}: sanitize failed: ${sanitized.errors.map(error => error.code).join(', ')}`);
+    if (!sanitized.ok) {
+      throw assetError(id, 'SVG_SANITIZE_FAILED', `sanitize failed: ${sanitized.errors.map(error => error.code).join(', ')}`);
+    }
     const check = renderCheck(sanitized.svg, { width: 512, palette: pkg.theme?.palette });
-    if (!check.ok) throw new Error(`${id}: render-check failed: ${check.errors.map(error => error.code).join(', ')}`);
+    if (!check.ok) {
+      const code = check.errors.some(error => error.code === 'out-of-palette') ? 'SVG_PALETTE_MISMATCH' : 'SVG_RENDER_CHECK_FAILED';
+      throw assetError(id, code, `render-check failed: ${check.errors.map(error => error.code).join(', ')}`);
+    }
     assets[id] = {
       kind: asset.kind ?? 'svg',
       svg: sanitized.svg,
@@ -186,7 +206,7 @@ export function preparePublicDir(pkg, packageDir) {
   cpSync(join(rendererDir, 'public', 'fonts'), join(temp, 'fonts'), { recursive: true });
   for (const file of assetFiles(pkg)) {
     const source = join(packageDir, file);
-    // Colab links generated media into the project. Remotion's bundle copy skips
+    // Google Colab links generated media into the project. Remotion's bundle copy skips
     // symlinks, so stage real bytes before handing the public directory to it.
     if (existsSync(source)) {
       const dest = join(temp, file);
@@ -198,7 +218,8 @@ export function preparePublicDir(pkg, packageDir) {
 }
 
 function remotionArguments({ still, compositionId, outputPath, propsPath, publicDir, frame, scale }) {
-  const browser = `--browser-executable=${resolveBrowserExecutable()}`;
+  const executable = resolveBrowserExecutable();
+  const browser = executable ? [`--browser-executable=${executable}`] : [];
   const scaleArg = scale ? [`--scale=${scale}`] : [];
   if (still) {
     return [
@@ -206,7 +227,7 @@ function remotionArguments({ still, compositionId, outputPath, propsPath, public
       `--props=${propsPath}`,
       `--public-dir=${publicDir}`,
       `--frame=${frame}`,
-      browser,
+      ...browser,
       '--log=error',
       ...scaleArg,
     ];
@@ -215,7 +236,7 @@ function remotionArguments({ still, compositionId, outputPath, propsPath, public
     'render', 'src/index.ts', compositionId, outputPath,
     `--props=${propsPath}`,
     `--public-dir=${publicDir}`,
-    browser,
+    ...browser,
     '--concurrency=2',
     '--log=error',
     ...scaleArg,

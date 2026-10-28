@@ -594,8 +594,21 @@ export function createProductionRoutes(options = {}) {
       if (actionPath.actionId !== null || method !== 'POST') {
         throw new RouteError('METHOD_NOT_ALLOWED', 'method not allowed', 405);
       }
-      const body = await readJsonBody(request);
+      let body = await readJsonBody(request);
       const context = await contextFor(request);
+      const payload = body?.payload;
+      const finalAction = Array.isArray(payload?.actions) && payload.actions.length === 1 ? payload.actions[0] : null;
+      if (finalAction?.kind === 'final' && typeof options.estimateFinalRun === 'function') {
+        const ceiling = await options.estimateFinalRun({ productionId: id, budgetUnits: payload.reservationCeiling, body });
+        body = {
+          ...body,
+          payload: {
+            ...payload,
+            reservationCeiling: ceiling,
+            actions: [{ ...finalAction, upperBound: ceiling }],
+          },
+        };
+      }
       const result = await actions.propose({ productionId: id, body, context });
       sendJson(response, result.duplicate ? 200 : 201, result);
       return;
@@ -629,6 +642,7 @@ export function createProductionRoutes(options = {}) {
           response.destroy?.(error);
           return true;
         }
+        if (mapError(error).status === 500) options.onError?.(error, { route: actionPath.resource, productionId: actionPath.id });
         sendError(response, error);
       }
       return true;

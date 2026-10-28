@@ -173,6 +173,10 @@ drift between shots**. The mitigations are:
 Use prompt mode for one-off or minor characters; recurring leads should stay on
 clip.
 
+## Identity consistency for recurring characters
+
+Reusing the same two images does not by itself prevent age or design drift. For a recurring lead, use a neutral full-body identity reference and repeat one **verbatim identity sentence** in every shot's `subject`: exact age, facial structure, skin tone, hair, outfit and body proportions. Do not abbreviate later shots to "the same character". The planner repeats that identity in `detailed_description` at the subject's first clear appearance, following MiniMax's full-reference guidance. A multi-view character sheet can help when the model needs more coverage, but identity remains a review requirement rather than a guarantee. Review a contact sheet for age/face/outfit continuity before approving the final render.
+
 ## Sources
 
 1. [FastH3 Omni Comfy model card](https://huggingface.co/FastVideo/FastH3-Omni-Comfy)

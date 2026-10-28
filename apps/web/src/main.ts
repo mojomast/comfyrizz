@@ -3130,9 +3130,18 @@ function init(opened: OpenedProject): void {
       logActivity(`Server: agent started${data.brief ? ` — ${data.brief.slice(0, 80)}` : ''}`);
     });
     stream.addEventListener('agent.event', event => {
-      const data = JSON.parse((event as MessageEvent).data) as { event?: { name?: string; ok?: boolean } };
-      const name = data.event?.name ?? 'step';
-      logActivity(`Agent ${name} ${data.event?.ok === false ? '✗' : '✓'}`);
+      const data = JSON.parse((event as MessageEvent).data) as { event?: Record<string, any> };
+      const detail = data.event ?? {};
+      const duration = typeof detail.durationMs === 'number' ? ` ${(detail.durationMs / 1000).toFixed(1)}s` : '';
+      if (detail.type === 'model_result') {
+        const first = typeof detail.firstChunkMs === 'number' ? `, first chunk ${(detail.firstChunkMs / 1000).toFixed(1)}s` : '';
+        logActivity(`Agent model step ${detail.step ?? '?'} ✓${duration}${first}`);
+      } else if (detail.type === 'runner_phase') {
+        logActivity(`Agent ${detail.phase ?? 'plan'} ${detail.status ?? 'updated'}${duration}${detail.ok === false ? ' ✗' : ''}`);
+      } else {
+        const name = detail.name ?? detail.milestone ?? detail.type ?? 'step';
+        logActivity(`Agent ${name} ${detail.ok === false ? '✗' : '✓'}${duration}`);
+      }
     });
     stream.addEventListener('agent.finished', event => {
       const data = JSON.parse((event as MessageEvent).data) as { svgAssets?: number; live?: boolean; fallback?: boolean };
@@ -3144,6 +3153,16 @@ function init(opened: OpenedProject): void {
     });
     void refreshSpend();
   }
+
+  document.querySelector('#chat-pane')?.addEventListener('click', event => {
+    const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('[data-agent-change-example]');
+    if (!button) return;
+    const prompt = $<HTMLTextAreaElement>('prompt');
+    if (!prompt) return;
+    prompt.value = button.dataset.agentChangeExample ?? '';
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    prompt.focus();
+  });
 
   projectChat = mountProjectChat({
     apiFetch: chatApiFetch,

@@ -26,7 +26,7 @@ weights under the model's own licence (`README.md`, "Credits and licences";
 
 | Model | Used for | Licence | Source |
 | --- | --- | --- | --- |
-| **FastH3 Omni / MiniMax-H3** | Experimental reference-conditioned video and audio | MiniMax-H3 Community License (territorial and commercial conditions; not MIT/Apache) | `docs/FASTH3_OMNI_TESTING.md`; `packages/schema/src/semantic.mjs` (`MODEL_LICENSES["fasth3-omni"]`); https://huggingface.co/collections/FastVideo/fasth3-omni ; https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE |
+| **FastH3 Omni / MiniMax-H3** | Reference-driven character motion and native audio in H3 and Auto routes | MiniMax-H3 Community License (territorial and commercial conditions; not MIT/Apache) | `workflows/fasth3_omni_ref2va.api.json`; `packages/schema/src/semantic.mjs` (`MODEL_LICENSES["fasth3-omni"]`); https://huggingface.co/FastVideo/FastH3-Omni-Comfy ; https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE |
 | **FLUX 3 Image Klein** | Stills, reference edits, sketch-to-render | **FLUX Kommunity License v1.0** | `docs/SPEC.md` §8.2 ("[verified, model card]"); model card https://huggingface.co/black-forest-labs/flux-3-image-klein ; release notes https://docs.bfl.ml/release-notes (Appendix A) |
 | **LTX-2.5** (22B distilled) | Text/image-to-video plates, ×2 upscale | **LTX-2.x Community License** | `docs/SPEC.md` §8.2; https://huggingface.co/Lightricks/LTX-2.5 and https://raw.githubusercontent.com/Lightricks/LTX-2/main/LICENSE-2_x (Appendix A) |
 | **Kokoro-82M** | Default CPU narration | Apache-2.0 **[unverified]** | `packages/schema/src/semantic.mjs` (`MODEL_LICENSES.kokoro`), `packages/tts/README.md`, `docs/SPEC.md` §6.9/§8.2; https://huggingface.co/hexgrad/Kokoro-82M |
@@ -48,8 +48,8 @@ Notes from the repository:
   the 12B text encoder are **[unverified]**; an earlier "Apache 2.0" statement
   on ltx.io conflicts with the licence text, and the licence text governs
   (`docs/SPEC.md` §8.2).
-- FastH3 Omni / MiniMax-H3: an **experimental** generator, off the production
-  path (`docs/FASTH3_OMNI_TESTING.md`). Its community licence carries
+- FastH3 Omni / MiniMax-H3: used for reference-driven character motion and
+  native audio in H3 and Auto routes. Its community licence carries
   territorial and commercial conditions, so output produced with it is not
   treated as CC0: the package schema defaults such an asset to
   `LicenseRef-MiniMax-H3-Community` with `redistributable: false`

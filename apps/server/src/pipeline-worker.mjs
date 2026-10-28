@@ -9,6 +9,7 @@ import { runQwenColab } from '../../../scripts/tts/qwen_colab.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPipeline } from '../../renderer/scripts/render-pipeline.mjs';
+import { resolveBrowserExecutable } from '../../renderer/scripts/browser-executable.mjs';
 import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { json, writeJson, preparePresenterInputs, correctPresenters, presenterScenes } from './pipeline-media.mjs';
@@ -92,7 +93,8 @@ async function main() {
     if (!validation.valid) throw new Error('Invalid pipeline input');
     await command('ffmpeg', ['-version']); await command('ffprobe', ['-version']);
     if (plan.voiced) await command(process.env.COMFYRIZZ_PYTHON || 'python3', ['-c', 'import numpy']);
-    if (!remoteRender && !existsSync(process.env.REMOTION_BROWSER || '/usr/bin/google-chrome') && render === renderPipeline) throw new Error('Configure REMOTION_BROWSER with an installed headless browser before starting generation.');
+    const configuredBrowser = typeof process.env.REMOTION_BROWSER === 'string' && process.env.REMOTION_BROWSER.trim() !== '';
+    if (!remoteRender && configuredBrowser && !existsSync(resolveBrowserExecutable()) && render === renderPipeline) throw new Error('REMOTION_BROWSER does not point to an installed headless browser. Fix the path or unset it to let Remotion manage a browser.');
     cpSync(join(repoRoot, 'workflows'), join(workDir, 'workflows'), { recursive: true });
     if (plan.presenters && syncnetReady) await command(process.env.COMFYRIZZ_SYNCNET_PYTHON, ['-c', 'import cv2, torch, numpy; assert hasattr(cv2, "CascadeClassifier")']);
     if (plan.voiced && !plan.remoteVoice) {
@@ -339,11 +341,14 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     try {
       report.probe = JSON.parse((await command('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,width,height,nb_read_frames,sample_rate:format=duration', '-of', 'json', join(runDir, 'video.mp4')])).stdout);
       const video = report.probe.streams.find(s => s.codec_type === 'video'), audio = report.probe.streams.find(s => s.codec_type === 'audio');
-      report.checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(report.probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !plan.voiced || Boolean(audio) };
-      if (plan.voiced) {
+      const audioRequired = plan.requiresAudio === true || plan.voiced;
+      report.checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(report.probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !audioRequired || Boolean(audio) };
+      if (audioRequired) {
         const measure = await command('ffmpeg', ['-hide_banner', '-nostats', '-i', join(runDir, 'video.mp4'), '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
         const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(measure.stderr);
         report.checks.nonSilentAudio = Boolean(mean) && Number(mean[1]) > -60;
+      }
+      if (plan.voiced) {
         const narrationPath = join(runDir, 'audio-verification.json');
         rmSync(narrationPath, { force: true });
         const verdict = await command(process.env.COMFYRIZZ_PYTHON || 'python3', [join(repoRoot, 'scripts/tts/verify_mix.py'), '--video', join(runDir, 'video.mp4'), '--narration', join(workDir, 'audio/narration.norm.wav'), '--out', narrationPath], { allowedCodes: [0, 2] });

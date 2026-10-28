@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { proceduralStyle } from '../src/background-model.js';
+import { proceduralStyle, readableMediaScrim } from '../src/background-model.js';
 
 const palette = ['#120b1f', '#2a1b45', '#f6a94a', '#fdf6ec'];
 
@@ -39,4 +39,12 @@ test('a short palette falls back safely instead of reading undefined', () => {
   const style = proceduralStyle('dots', ['#120b1f']);
   assert.equal(style.backgroundColor, '#120b1f');
   assert.doesNotMatch(style.backgroundImage, /undefined/);
+});
+
+test('generated media gets a readability scrim beneath editorial copy', () => {
+  assert.equal(readableMediaScrim({ copy: { headline: 'A chord' } }, 0), 0.42);
+  assert.equal(readableMediaScrim({ copy: { headline: 'A chord' } }, 0.6), 0.6);
+  assert.equal(readableMediaScrim({ copy: { headline: 'A chord' } }, 1), 0.85);
+  assert.equal(readableMediaScrim({ copy: {} }, 0), 0);
+  assert.equal(readableMediaScrim({ media_only: true, lower_third: { text: 'Ratio' } }, 0), 0.18);
 });

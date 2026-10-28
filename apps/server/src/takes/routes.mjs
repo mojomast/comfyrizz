@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { listClips } from './clips.mjs';
+import { finalGate } from './gate.mjs';
 import { buildCorrection } from './correction.mjs';
 import { MAX_NOTE_CHARS, TAKES_SCHEMA, VERDICTS, deriveClipState } from './model.mjs';
 import { applyTakeToPackage, previousTakeId, revertTake, selectTake } from './select.mjs';
@@ -287,7 +288,8 @@ function clipView(pkg, clip, doc) {
   const selectedId = effectiveSelected(entry);
   const selected = takes.find(take => take.takeId === selectedId) ?? null;
   const asset = pkg.assets?.[clip.assetId];
-  const state = deriveClipState({
+  const autoApproved = takes.length === 0 && finalGate(pkg, doc, [clip]).autoApproved === 1;
+  const state = autoApproved ? 'approved' : deriveClipState({
     clip: isPlainObject(asset) ? asset : clip,
     takes: entry ?? { selected: null, takes: [] },
     assetGen: isPlainObject(asset?.gen) ? asset.gen : undefined,

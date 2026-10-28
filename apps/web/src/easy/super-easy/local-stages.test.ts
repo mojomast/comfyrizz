@@ -40,8 +40,15 @@ test('after the plan the adopted package fills Characters, Shots and Voice hones
   assert.equal(stage(merged, 'render').status, 'waiting');
 });
 
-test('narration and a cast read as done', () => {
-  const pkg = { ...PKG, voice: { enabled: true, engine: 'kokoro' }, characters: [{ id: 'c1' }], scenes: [{ id: 's1', narration: 'Hello' }] };
+test('narration and a cast read as done only after measured audio is ready', () => {
+  const pending = { ...PKG, voice: { enabled: true, engine: 'kokoro' }, characters: [{ id: 'c1' }], scenes: [{ id: 's1', narration: 'Hello' }] };
+  const running = localStageReadings({ phase: 'run', pkg: pending, packageId: 'pkg_1' });
+  assert.equal(running.voice.status, 'running', 'narration text alone is not a finished voice stage');
+  const pkg = {
+    ...pending,
+    assets: { a_narration: { status: 'ready', file: 'audio/narration.norm.wav' } },
+    scenes: [{ id: 's1', narration: 'Hello', narration_asset: 'a_narration' }],
+  };
   const readings = localStageReadings({ phase: 'run', pkg, packageId: 'pkg_1' });
   assert.equal(readings.voice.status, 'done');
   assert.equal(readings.characters.status, 'done');

@@ -397,8 +397,8 @@
         "id": "CC0-1.0"
       },
       "model_license": {
-        "id": "Apache-2.0",
-        "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell"
+        "id": "LicenseRef-FLUX.3-Image-Klein",
+        "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein"
       },
       "redistributable": true,
       "notes": "pending-GPU: FLUX 3 Image Klein data still. The scene's procedural background is the CPU fallback until a spend is approved.",
@@ -423,8 +423,8 @@
         "id": "CC0-1.0"
       },
       "model_license": {
-        "id": "Apache-2.0",
-        "url": "https://huggingface.co/Lightricks/LTX-Video"
+        "id": "LicenseRef-LTX-2.5",
+        "url": "https://huggingface.co/Lightricks/LTX-2.5"
       },
       "redistributable": true,
       "notes": "pending-GPU: LTX-2.5 data plate. The scene's procedural background is the CPU fallback until a spend is approved.",

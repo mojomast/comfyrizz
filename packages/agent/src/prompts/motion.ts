@@ -258,6 +258,13 @@ export function motionSystemSection(): string {
     '3. Beats in order.',
     '4. Motion verbs, expressed only as vocabulary tokens: counts up is entry `countUp`, draws on is entry `drawOn`, wipes in is transition `wipe`, a push is transition `push`. A slow push-in is one `zoom` in or one `push`, not a camera path.',
     `5. Final hold: the last scene stays readable for at least ${reading.finalHoldSeconds} s after it settles. Hold the final frame.`,
+    'Auto motion route (only when motion_model is auto):',
+    '- FastH3: character acting, dialogue and native sound. LTX-2.5: scenery, establishing, B-roll and camera-led shots.',
+    '- Character evidence is characterCount together with the shot subject, never the composition or camera text. characterCount 0 is LTX unless the shot has dialogue or native sound.',
+    '- characterCount 1 or more with a person, a role noun (keeper, fisherman, diver) or a he/she/they subject plus an acted verb (places, lifts, carries, guides, rows, reaches, kneels) is FastH3. Camera drift words never outrank a character acting.',
+    '- Example LTX-2.5: subject "the lighthouse", action "scenery drifting", camera "a slow wide drift", characterCount 0.',
+    '- Example FastH3: subject "the same woman", action "she places the lantern", characterCount 1.',
+    '- Example LTX-2.5: subject "the cliff", action "the camera pans left past the cottage", composition mentions a woman, characterCount 1.',
     'Vocabulary (these lists are the package schema enums; do not invent tokens):',
     `- motion.energy: ${list(VOCABULARY.energies)}. Default ${defaults.energy}.`,
     `- motion.direction, the film's one current: ${list(VOCABULARY.directions)}. Default ${defaults.direction}. Reserve up for a conclusion.`,
@@ -301,6 +308,8 @@ export function normalizeSceneMotion(raw: unknown): Record<string, unknown> | un
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const src = raw as Record<string, unknown>;
   const allow: Record<string, readonly string[]> = {
+    recipe: ['sketch', 'paper-cut', 'morph', 'technical-flow', 'focus', 'kinetic'],
+    diagram: ['flow', 'hub'],
     entry: VOCABULARY.entries,
     ease: VOCABULARY.easing,
     spring: VOCABULARY.springs,
@@ -316,6 +325,39 @@ export function normalizeSceneMotion(raw: unknown): Record<string, unknown> | un
   if (typeof src.highlight === 'string') {
     const text = src.highlight.trim();
     if (text.length >= 1 && text.length <= 60) out.highlight = text;
+  }
+  if (Number.isInteger(src.seed) && Number(src.seed) >= 1 && Number(src.seed) <= 2147483647) out.seed = src.seed;
+  if (typeof src.intensity === 'number' && Number.isFinite(src.intensity) && src.intensity >= 0 && src.intensity <= 1) out.intensity = src.intensity;
+  if (Array.isArray(src.cue_phrases)) {
+    const phrases = src.cue_phrases
+      .filter((phrase): phrase is string => typeof phrase === 'string')
+      .map(phrase => phrase.trim())
+      .filter(phrase => phrase.length > 0 && phrase.length <= 600)
+      .slice(0, 6);
+    if (phrases.length > 0) out.cue_phrases = phrases;
+  }
+  if (Array.isArray(src.cue_seconds)) {
+    const seconds = src.cue_seconds
+      .filter((second): second is number => typeof second === 'number' && Number.isFinite(second) && second >= 0 && second <= 20)
+      .slice(0, 6);
+    if (seconds.length > 0) out.cue_seconds = seconds;
+  }
+  if (src.focus && typeof src.focus === 'object' && !Array.isArray(src.focus)) {
+    const focus = src.focus as Record<string, unknown>;
+    const values = ['x', 'y', 'width', 'height'].map(key => focus[key]);
+    if (values.every(value => typeof value === 'number' && Number.isFinite(value))) {
+      const [x, y, width, height] = values as number[];
+      if (x >= 0 && x <= 1 && y >= 0 && y <= 1 && width > 0 && width <= 1 && height > 0 && height <= 1 && x + width <= 1 + 1e-9 && y + height <= 1 + 1e-9) {
+        out.focus = { x, y, width, height };
+      }
+    }
+  }
+  if (src.morph && typeof src.morph === 'object' && !Array.isArray(src.morph)) {
+    const morph = src.morph as Record<string, unknown>;
+    const shapes = ['circle', 'square', 'triangle', 'blob'];
+    if (typeof morph.from === 'string' && shapes.includes(morph.from) && typeof morph.to === 'string' && shapes.includes(morph.to)) {
+      out.morph = { from: morph.from, to: morph.to };
+    }
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

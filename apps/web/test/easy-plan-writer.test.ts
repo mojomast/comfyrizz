@@ -53,6 +53,7 @@ function harness(options = {}) {
       adopted.push(body);
     },
     async aiSelection() {
+      if (options.selectionError) throw new Error(options.selectionError);
       return options.selection ?? { provider: 'none' };
     },
   };
@@ -127,6 +128,16 @@ test('offline is set when live is false and a disconnected provider is omitted',
   await writePlan(store.get(), { api, host, store });
   assert.equal(store.get().offline, true);
   assert.equal(calls[0].input.provider, undefined);
+});
+
+test('an invalid live provider is a visible agent error, never a silent scripted fallback', async () => {
+  const { calls, store, api, host } = harness({ selectionError: 'Configure a provider and model in AI settings first.' });
+  await writePlan(store.get(), { api, host, store });
+  assert.deepEqual(calls, [], 'no build request can silently omit the invalid active provider');
+  assert.equal(store.get().plan.status, 'error');
+  assert.equal(store.get().plan.errorAt, 'agent');
+  assert.match(store.get().plan.error, /Configure a provider and model/);
+  assert.equal(store.get().offline, false);
 });
 
 test('words-only staleness reruns from the plan call', async () => {

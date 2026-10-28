@@ -27,6 +27,9 @@ import {
   type SuperEasyProgressViewOptions,
 } from './progress-view.ts';
 import type { StagesProgress } from './stages.ts';
+import type { GalleryModel } from './gallery-model.ts';
+import { DEFAULT_SUPER_EASY_SETUP, type SuperEasySetup, type MotionModel } from './setup.ts';
+import { renderSuperEasyProposal, type SuperEasyProposal } from './proposal.ts';
 import { getMode, setMode } from '../../ui/mode.ts';
 import type { EasyState } from '../types.ts';
 
@@ -36,7 +39,9 @@ export type SuperEasyScreen = 'home' | 'progress';
 
 export interface SuperEasyGenerateInput {
   prompt: string;
-  compute: 'cpu';
+  compute: EasyState['compute'];
+  setupConfirmed?: boolean;
+  motionModel?: MotionModel;
   /** "Record this run" was ticked; the Generate click is the gesture that starts it. */
   capture?: boolean;
 }
@@ -70,12 +75,22 @@ export interface SuperEasyMountOptions {
   onReview?(packageId: string | null): void;
   /** Make the MP4 from the playable preview. Falls back to Review. */
   onExport?(packageId: string | null): void;
-  /** Gauges for this snapshot, when the caller knows more than the journal does. */
+  /** Gauges and real collected media, when the caller knows more than the journal does. */
   stages?(snapshot: unknown): StagesProgress | undefined;
+  gallery?(snapshot: unknown): GalleryModel | undefined;
   reducedMotion?: boolean;
   /** Offer "Record this run" on the home; returns whether it starts ticked. */
   captureArmed?(): boolean;
   onCaptureToggle?(armed: boolean): void;
+  /** Credential-free saved backend/cap preference and its one-time setup action. */
+  setup?(): SuperEasySetup;
+  onSetup?(): void;
+  onMotionModelChange?(model: MotionModel): void;
+  /** Open the current project's agent with an optional requested change. */
+  onChangeAnything?(change?: string): void;
+  proposal?(): SuperEasyProposal | null;
+  onApproveProposal?(): void;
+  onReviseProposal?(note: string): void;
 }
 
 export interface SuperEasyMountHandle {
@@ -161,12 +176,27 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
+    if (closest('[data-super-easy-approve-proposal]')) {
+      event.preventDefault();
+      options.onApproveProposal?.();
+      return;
+    }
+    if (closest('[data-super-easy-setup]')) {
+      event.preventDefault();
+      options.onSetup?.();
+      return;
+    }
     if (closest('[data-super-easy-export]')) {
       event.preventDefault();
       const packageId = options.state().packageId;
       if (options.onExport) options.onExport(packageId);
       else if (options.onReview) options.onReview(packageId);
       else options.onMoreControl(packageId);
+      return;
+    }
+    if (closest('[data-super-easy-change]')) {
+      event.preventDefault();
+      options.onChangeAnything?.();
       return;
     }
     if (closest('[data-super-easy-review]')) {
@@ -232,6 +262,19 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   };
 
   const onSubmit = (event: Event): void => {
+    if (closestOf(event.target)('[data-super-easy-revise-proposal]')) {
+      event.preventDefault();
+      const field = root.querySelector<HTMLTextAreaElement>('#super-easy-proposal-change');
+      const note = field?.value.trim() ?? '';
+      if (note) options.onReviseProposal?.(note);
+      return;
+    }
+    if (closestOf(event.target)('[data-super-easy-change-form]')) {
+      event.preventDefault();
+      const field = root.querySelector<HTMLTextAreaElement>('#super-easy-change');
+      options.onChangeAnything?.(field?.value.trim() ?? '');
+      return;
+    }
     if (!closestOf(event.target)('[data-super-easy-form]')) return;
     event.preventDefault();
     const field = root.querySelector<HTMLTextAreaElement>('#super-easy-prompt');
@@ -242,15 +285,25 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       return;
     }
     promptText = prompt;
+    const setup = options.setup?.() ?? DEFAULT_SUPER_EASY_SETUP;
+    if (setup.compute === 'colab' && !setup.confirmed) {
+      options.onSetup?.();
+      return;
+    }
     freshStart = false;
     const toggle = root.querySelector<HTMLInputElement>('[data-procedure-capture-toggle]');
     if (options.onGenerate) {
-      void options.onGenerate({ prompt, compute: 'cpu', ...(toggle ? { capture: toggle.checked === true } : {}) });
+      void options.onGenerate({ prompt, compute: setup.compute, motionModel: setup.motionModel ?? 'auto', ...(setup.compute === 'colab' ? { setupConfirmed: true } : {}), ...(toggle ? { capture: toggle.checked === true } : {}) });
     }
   };
 
   const onChange = (event: Event): void => {
-    const target = event.target as { checked?: boolean } | null;
+    const target = event.target as { checked?: boolean; value?: string } | null;
+    if (closestOf(event.target)('[data-super-easy-motion-model]')) {
+      const model = target?.value === 'h3' || target?.value === 'ltx' || target?.value === 'klein' ? target.value : 'auto';
+      options.onMotionModelChange?.(model);
+      return;
+    }
     if (!closestOf(event.target)('[data-procedure-capture-toggle]')) return;
     options.onCaptureToggle?.(target?.checked === true);
   };
@@ -259,8 +312,10 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     const state = options.state();
     const failure = options.failure?.() ?? null;
     const stages = options.stages?.(snapshot);
+    const gallery = options.gallery?.(snapshot);
     return {
       ...(stages === undefined ? {} : { stages }),
+      ...(gallery === undefined ? {} : { gallery }),
       ...(options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion }),
       packageId: state.packageId,
       search: currentSearch(),
@@ -298,7 +353,11 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     if (destroyed) return;
     const next = screenNow();
     current = next;
-    if (next === 'progress') {
+    const proposal = options.proposal?.() ?? null;
+    if (next === 'progress' && proposal) {
+      root.innerHTML = renderSuperEasyProposal(proposal);
+      progressKeys = null;
+    } else if (next === 'progress') {
       paintProgress();
     } else {
       progressKeys = null;
@@ -307,6 +366,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
         prompt: promptText,
         packageId: state.packageId,
         search: currentSearch(),
+        setup: options.setup?.() ?? DEFAULT_SUPER_EASY_SETUP,
         ...(options.captureArmed ? { capture: { armed: options.captureArmed() } } : {}),
       });
     }
