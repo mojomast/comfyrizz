@@ -22,7 +22,8 @@ const REPAIR_SYSTEM = [
   'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy, notes, narration or motion.cue_phrases. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
   'Narration-timed motion: when the brief asks for cue-timed motion, every scene needs a concise scene.narration and motion.cue_phrases copied verbatim from that scene narration.',
   'Never remove or blank scene.narration or motion.cue_phrases while fixing another field: add the narration first, then copy each cue phrase verbatim from it in the same storyboard.edit call.',
-  'A narration-timed scene with empty narration or no cue_phrases still fails completion even when its media, timing and aspect are correct.',
+  'When the user report supplies an exact narration sentence and cue phrases, copy them exactly: they are already brief-derived, concise and verbatim. Do not paraphrase or invent a replacement line.',
+  'A narration-timed scene with empty or whitespace-only narration, or cue_phrases that are not substrings, still fails completion even when its media, timing and aspect are correct.',
   'Explicit Klein medium: every shot needs its own scene-referenced FLUX 3 Image Klein still before the film is accepted. Plan it with assets.generate_video using motion_model klein; keep stills + code motion and never create H3/LTX jobs.',
   'Aspect and format: the package format must match the brief aspect and output size. When the repair facts report a brief/draft aspect mismatch, correct the package format without changing the story or model route.',
   'Source aspect: when the repair facts report a scene-referenced still whose dimensions do not match the package output, re-plan that still with assets.generate_image at the output size and pass the new asset to assets.generate_video. Never keep a mismatched still as the shot source or plan a 16:9 source for a portrait/square output.',
@@ -118,23 +119,97 @@ function repairPackageFacts(pkg, intent, briefAspect) {
   return facts.join('\n');
 }
 
+/**
+ * A narration-timed brief can still say the picture has no native dialogue.
+ * That is a sound constraint, not a request to drop narration; only an
+ * explicit wordless/no-narration request suppresses narration-timed planning.
+ */
+function explicitlyWordless(brief) {
+  return /\bwordless\b|\bno\b[^.!?\n]{0,70}\b(?:narration|speech|voice[\s-]?over)\b|\bwithout\s+(?:narration|speech|voice[\s-]?over)\b/i.test(String(brief ?? ''));
+}
+
+/** The brief the tools actually receive; keep narration on narration-timed briefs. */
+function planningBriefForNarration(brief, intent) {
+  if (!intent.requiresNarrationCues || explicitlyWordless(brief) || !intent.wordless) return brief;
+  return brief
+    .replace(/\bno\s+native\s+dialogue\b/gi, 'picture-only audio')
+    .replace(/\bno\s+(?:dialogue|speech|voice[\s-]?over)\b/gi, 'picture-only audio');
+}
+
+/** Narration-timed wording wins over a no-native-dialogue sound constraint. */
+function narrationTimedIntent(intent, brief) {
+  if (!intent.requiresNarrationCues || explicitlyWordless(brief) || !intent.wordless) return intent;
+  return { ...intent, wordless: false };
+}
+
+/** A concise, brief-derived sentence the model can copy verbatim. */
+function conciseNarration(text) {
+  const normalized = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  const sentence = /^[^.!?]{1,180}[.!?]/.exec(normalized)?.[0]?.trim() ?? normalized.slice(0, 180).trim();
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/** Cue phrases stay substrings of the narration, so they can be copied verbatim. */
+function cuePhrasesFromNarration(narration, index) {
+  const words = narration.split(/\s+/).filter(Boolean);
+  const phrase = words.length <= 2
+    ? narration
+    : index % 2 === 0
+      ? words.slice(0, 2).join(' ')
+      : words.slice(-2).join(' ');
+  const cleaned = phrase.replace(/^[^\w]+|[^\w]+$/g, '').trim();
+  return cleaned ? [cleaned.slice(0, 600)] : [];
+}
+
+function briefNarrationFallback(brief) {
+  const sentences = String(brief ?? '').split(/(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
+  const descriptive = sentences.find(sentence => !/^(?:create|make|generate|render|produce|draw|plan)\b/i.test(sentence)
+    && !/narration-timed|cue_phrases|finishing sound plan|no narration|wordless|no dialogue|no captions/i.test(sentence));
+  if (!descriptive) return '';
+  const topic = descriptive
+    .replace(/^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+/i, '')
+    .replace(/\bscenery[\s-]+only\b/gi, 'scenery')
+    .replace(/\bshots?\b/gi, '')
+    .replace(/\bno people\b/gi, '')
+    .replace(/[,.;]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (topic.split(' ').filter(Boolean).length < 3) return '';
+  return conciseNarration(`${topic.charAt(0).toUpperCase()}${topic.slice(1)} unfolds in this shot`);
+}
+
+/** The exact narration/cues a repair should use when a scene is still blank. */
+function narrationSuggestion(brief, pkg, scene, index) {
+  const existing = typeof scene?.narration === 'string' ? scene.narration.trim() : '';
+  if (existing) return { narration: existing, cuePhrases: cuePhrasesFromNarration(existing, index) };
+  const logline = conciseNarration(pkg?.proposal?.logline ?? '');
+  const usableLogline = logline && !/^A story built from your idea\.?$/i.test(logline) ? logline : '';
+  const fallback = usableLogline
+    || briefNarrationFallback(brief)
+    || conciseNarration(`${String(pkg?.title ?? 'The story').trim()} continues in this shot`);
+  return { narration: fallback, cuePhrases: cuePhrasesFromNarration(fallback, index) };
+}
+
 /** A narration-timed repair must fix narration and cue phrases together, per scene. */
-function narrationRepairGuide(pkg, intent) {
+function narrationRepairGuide(pkg, intent, brief) {
   if (!intent.requiresNarrationCues) return [];
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const lines = ['Narration-timed repair (hard requirement from the brief): every scene needs scene.narration plus motion.cue_phrases copied verbatim from that narration.'];
-  for (const scene of scenes) {
+  for (const [index, scene] of scenes.entries()) {
     const sceneId = scene?.id ?? '(missing id)';
     const narration = typeof scene?.narration === 'string' ? scene.narration.trim() : '';
     const cuePhrases = Array.isArray(scene?.motion?.cue_phrases)
       ? scene.motion.cue_phrases.filter(phrase => typeof phrase === 'string' && phrase.trim())
       : [];
+    const suggestion = narrationSuggestion(brief, pkg, scene, index);
+    const edit = `{scene_id:${JSON.stringify(sceneId)},patch:{narration:${JSON.stringify(suggestion.narration)},motion:{cue_phrases:${JSON.stringify(suggestion.cuePhrases)}}}}`;
     if (!narration) {
-      lines.push(`- ${sceneId}: scene.narration is missing. Call storyboard.edit {scene_id:"${sceneId}",patch:{narration:"one concise sentence from the brief",motion:{cue_phrases:["exact phrase from that sentence"]}}} before any asset call.`);
+      lines.push(`- ${sceneId}: scene.narration is missing. Call storyboard.edit ${edit} before any asset call. That sentence is concise and brief-derived, and each cue phrase is already a verbatim substring.`);
     } else if (cuePhrases.length === 0) {
-      lines.push(`- ${sceneId}: motion.cue_phrases is missing. Copy one or more exact phrases verbatim from its scene.narration; keep the narration unchanged.`);
+      lines.push(`- ${sceneId}: motion.cue_phrases is missing. Keep the narration unchanged and copy exact phrases from it; for example use motion:{cue_phrases:${JSON.stringify(suggestion.cuePhrases)}} (verbatim).`);
     } else if (cuePhrases.some(phrase => !narration.includes(phrase))) {
-      lines.push(`- ${sceneId}: every motion.cue_phrases entry must be copied verbatim from its scene.narration; keep the narration unchanged.`);
+      lines.push(`- ${sceneId}: every motion.cue_phrases entry must be copied verbatim from its scene.narration; keep the narration unchanged. Replace them with motion:{cue_phrases:${JSON.stringify(suggestion.cuePhrases)}} (verbatim).`);
     }
   }
   if (lines.length === 1) return [];
@@ -393,6 +468,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     const brandAssets = brand?.assets ?? null;
     const { runCpuSlice, classifyProductionIntent, parseMotionModel } = await import('../../../packages/agent/dist/src/index.js');
     const productionIntent = classifyProductionIntent(brief);
+    const intent = narrationTimedIntent(productionIntent, brief);
+    const planningBrief = planningBriefForNarration(brief, productionIntent);
     const briefSize = /\b(\d{2,5})\s*[x×]\s*(\d{2,5})\b/i.exec(brief);
     const briefAspect = briefSize ? aspectFromSize(Number(briefSize[1]), Number(briefSize[2])) : extractBrief(brief).aspect;
     let motionModel;
@@ -477,7 +554,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       onEvent?.({ type: 'runner_phase', phase, status: 'started', elapsedMs: Date.now() - runStartedAt });
       try {
         const result = await runCpuSlice({
-          brief: repairInstructions ? `${brief}\n\n${repairInstructions}` : brief,
+          brief: repairInstructions ? `${planningBrief}\n\n${repairInstructions}` : planningBrief,
           ...(repairInstructions ? { initialPackage: slice.package } : {}),
           ...(model ? { model } : {}),
           ...(brandKit ? { brand: brandKit } : {}),
@@ -502,8 +579,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         throw error;
       }
     };
-    const acceptable = candidate => productionIntent.generatedFilm
-      ? candidate.ok && generatedFilmCompletionProblems(candidate.package, productionIntent, motionModel).length === 0 && validatePackage(candidate.package).valid
+    const acceptable = candidate => intent.generatedFilm
+      ? candidate.ok && generatedFilmCompletionProblems(candidate.package, intent, motionModel).length === 0 && validatePackage(candidate.package).valid
       : motionGraphicsCompletionProblems(candidate).length === 0;
     const aggregateUsage = { input: 0, output: 0 };
     const absorbUsage = result => {
@@ -514,22 +591,22 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     absorbUsage(slice.result);
     const fallback = false;
     if (agentModel && !acceptable(slice)) {
-      if (productionIntent.generatedFilm) {
+      if (intent.generatedFilm) {
         const initialProblems = [
-          ...generatedFilmCompletionProblems(slice.package, productionIntent, motionModel),
+          ...generatedFilmCompletionProblems(slice.package, intent, motionModel),
           ...packageSchemaProblems(slice.package),
         ];
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: initialProblems, elapsedMs: Date.now() - runStartedAt });
-        const narrationGuide = narrationRepairGuide(slice.package, productionIntent);
+        const narrationGuide = narrationRepairGuide(slice.package, intent, brief);
         slice = await runOnce(agentModel, [
-          repairPackageFacts(slice.package, productionIntent, briefAspect),
+          repairPackageFacts(slice.package, intent, briefAspect),
           ...(narrationGuide.length ? [narrationGuide.join('\n')] : []),
           `Validation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`,
         ].join('\n\n'));
         absorbUsage(slice.result);
         if (!acceptable(slice)) {
           const problems = [
-            ...generatedFilmCompletionProblems(slice.package, productionIntent, motionModel),
+            ...generatedFilmCompletionProblems(slice.package, intent, motionModel),
             ...packageSchemaProblems(slice.package),
           ];
           onEvent?.({ type: 'runner_phase', phase: 'repair', status: 'validation', ok: false, problems, elapsedMs: Date.now() - runStartedAt });
@@ -544,7 +621,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: problemLines(initialProblems), elapsedMs: Date.now() - runStartedAt });
         const repairGuide = motionGraphicsRepairGuide(slice, initialProblems);
         slice = await runOnce(agentModel, [
-          repairPackageFacts(slice.package, productionIntent, briefAspect),
+          repairPackageFacts(slice.package, intent, briefAspect),
           ...(repairGuide.length ? [repairGuide.join('\n')] : []),
           `Validation report: the current motion-graphics package is incomplete. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`,
         ].join('\n\n'), MOTION_GRAPHICS_REPAIR_SYSTEM);
@@ -577,8 +654,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       error.errors = validation.errors;
       throw error;
     }
-    if (productionIntent.generatedFilm) {
-      const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
+    if (intent.generatedFilm) {
+      const problems = generatedFilmCompletionProblems(slice.package, intent, motionModel);
       if (problems.length) {
         const error = new Error(`generated-film plan is incomplete: ${problems.join('; ')}`);
         error.status = 422;
