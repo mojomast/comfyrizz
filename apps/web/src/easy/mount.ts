@@ -12,7 +12,7 @@ import { STEP_MODULES } from './steps/index.ts';
 import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, StepId } from './types.ts';
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
 import { writePlan } from './plan-writer.ts';
-import { invalidatePlanSnapshot } from './steps/plan.ts';
+import { invalidatePlanSnapshot, requestFullPlanReview } from './steps/plan.ts';
 import { resumeFacts } from './resume.ts';
 import { approveAndGenerate, resetPlanDecisionAnswers, retryShot } from './approve-generate.ts';
 import { runCpuGenerate } from './cpu-path.ts';
@@ -127,6 +127,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     onChatIdChange: (chatId) => store.patch({ chatId }),
     onReviewPlan: (productionId) => {
       invalidatePlanSnapshot(productionId);
+      const current = store.get();
+      store.patch({ plan: { ...current.plan, status: 'ready', error: null, errorAt: null, wordsChanged: false } });
+      requestFullPlanReview(productionId);
       ask?.close();
       go('plan');
     },
@@ -384,6 +387,12 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       proposal: () => superEasySession?.proposal() ?? null,
       onApproveProposal: () => { void superEasySession?.approveProposal(); },
       onReviseProposal: (note) => { void superEasySession?.reviseProposal(note); },
+      onReviewEditPlan: (packageId) => {
+        const current = store.get();
+        store.patch({ plan: { ...current.plan, status: 'ready', error: null, errorAt: null, wordsChanged: false } });
+        requestFullPlanReview(current.productionId ?? 'new');
+        openStudioFromSuperEasy('plan', packageId);
+      },
       setup: () => readSuperEasySetup(),
       onMotionModelChange: (motionModel) => {
         saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });

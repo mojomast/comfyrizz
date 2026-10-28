@@ -92,6 +92,7 @@ export interface SuperEasyMountOptions {
   proposal?(): SuperEasyProposal | null;
   onApproveProposal?(): void;
   onReviseProposal?(note: string): void;
+  onReviewEditPlan?(packageId: string | null): void;
 }
 
 export interface SuperEasyMountHandle {
@@ -178,6 +179,11 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
+    if (closest('[data-super-easy-review-edit-plan]')) {
+      event.preventDefault();
+      options.onReviewEditPlan?.(options.state().packageId);
+      return;
+    }
     if (closest('[data-super-easy-approve-proposal]')) {
       event.preventDefault();
       options.onApproveProposal?.();

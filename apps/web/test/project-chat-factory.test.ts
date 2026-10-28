@@ -427,7 +427,7 @@ test('clip corrections, audio and signed plans render actionable controls with t
     assert.ok(host.querySelector('[data-agent-console-toggle]'));
     assert.equal(host.querySelector('[data-confirm-clip="cp_fall"]').textContent.trim(), 'Prepare generation');
     assert.equal(host.querySelector('[data-confirm-clip="cp_audio"]').textContent.trim(), 'Apply change');
-    assert.equal(host.querySelector('[data-review-plan="prod_1"]').textContent.trim(), 'Review & authorize plan');
+    assert.equal(host.querySelector('[data-review-plan="prod_1"]').textContent.trim(), 'Review & edit full plan');
     assert.ok(host.querySelector('[data-clip-proposal="cp_audio"]'));
     host.querySelector('[data-review-plan="prod_1"]').dispatchEvent({ type: 'click', bubbles: true });
     assert.deepEqual(reviewed, ['prod_1']);

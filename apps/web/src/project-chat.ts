@@ -639,7 +639,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         : proposal.status === 'approval_required'
           ? `<button type="button" class="btn btn-sm btn-primary" data-authorize-clip="${esc(proposal.id)}">Authorize &amp; generate</button>`
           : proposal.status === 'plan_ready'
-            ? `<button type="button" class="btn btn-sm btn-primary" data-review-plan="${esc(proposal.productionId ?? '')}">Review &amp; authorize plan</button>`
+            ? `<button type="button" class="btn btn-sm btn-primary" data-review-plan="${esc(proposal.productionId ?? '')}">Review &amp; edit full plan</button>`
             : proposal.status === 'plan_pending'
               ? '<small>Creating the revision plan…</small>'
               : proposal.status === 'plan_error'

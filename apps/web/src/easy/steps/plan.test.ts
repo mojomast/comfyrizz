@@ -174,6 +174,13 @@ test('Plan exposes the agent console while writing and after resume', () => {
   assert.match(renderPlan(state), /data-agent-console/);
 });
 
+test('a ready plan offers the complete pre-GPU review and edit surface', () => {
+  const html = renderPlan(readyState());
+  assert.match(html, /data-easy-full-plan-review/u);
+  assert.match(html, /Review &amp; edit full plan/u);
+  assert.match(html, /every scene, prompt and GPU action/u);
+});
+
 test('a rejected approve records the actionable server error for the plan surface', async () => {
   const state = readyState();
   const deps = {

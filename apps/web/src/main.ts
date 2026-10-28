@@ -9,7 +9,7 @@ import { initShellLayout } from './ui/splitter';
 import { mountPalette } from './ui/palette.ts';
 import { createShellToastController } from './shell/toast.ts';
 import './shell/toast.css';
-import { registerCommand } from './editor/commands.ts';
+import { registerCommand, type EditorSidecar } from './editor/commands.ts';
 import { MODE_CHANGE_EVENT, mountModeToggle, setMode } from './ui/mode';
 import { getPrefs } from './ui/prefs';
 import { readIteration, setIteration } from './productions/client';
@@ -294,9 +294,9 @@ async function checkRecoveryOnBoot(opened: OpenedProject): Promise<void> {
 
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
 let editorApi: SceneTimelineHandle | null = null;
-function adoptEditorPackage(next: PackageV1): void {
+function adoptEditorPackage(next: PackageV1, editor?: EditorSidecar): void {
   pkg = next;
-  editorStore.replaceDocument({ package: next as never });
+  editorStore.replaceDocument({ package: next as never, ...(editor ? { editor } : {}) });
 }
 
 // When the local server is open, the seeded demo's references and cast belong
@@ -2561,12 +2561,14 @@ function adoptChatProject(project: ChatProject, built: boolean): void {
 function adoptBuiltPackage(body: any): void {
   pkg = body.package as PackageV1;
   timeline = body.timeline as Timeline;
-  adoptEditorPackage(pkg);
+  adoptEditorPackage(pkg, body.editor as EditorSidecar | undefined);
   // The agent route already persisted this revision; without the ack the
   // header reads a server-saved package as an unreachable server.
   if (Number.isSafeInteger(body.revision)) editorStore.noteSave({ type: 'ack', editSequence: 0, revision: body.revision });
-  generatedAssets = (body.generatedAssets ?? {}) as Record<string, InlineAsset>;
-  pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu as typeof pendingGpu : [];
+  if (body.preservePreviewState !== true) {
+    generatedAssets = (body.generatedAssets ?? {}) as Record<string, InlineAsset>;
+    pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu as typeof pendingGpu : [];
+  }
   scrub.max = String(timeline.durationInFrames - 1);
   renderStoryboard(); renderPalette(); renderAssets();
   takeInfoCache.clear(); takeUrlCache.clear(); previewClipMap = {}; previewAb = null;
@@ -3181,7 +3183,7 @@ function init(opened: OpenedProject): void {
       if (!response.ok) throw new Error(`Progress HTTP ${response.status}`);
       return await response.json();
     },
-    onReviewPlan: () => { document.querySelector('#sa-tab-generate')?.click(); },
+    onReviewPlan: () => { document.querySelector<HTMLElement>('#sa-tab-generate')?.click(); },
     getTurnContext: activeTurnContext,
     ...(opened.source === 'requested' ? {
       initialConversationId: opened.chatId,
