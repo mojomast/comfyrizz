@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURES, PLANNING_MODEL, PLANNING_PROVIDER } from './fixtures.mjs';
@@ -14,6 +15,12 @@ export const SMOKE_IDS = ['S02', 'D13', 'H24', 'X33'];
 export const PORTS = [4521, 4522, 4523, 4524, 4525, 4526];
 export const LIMITS = {
   attemptTimeoutMs: 8 * 60 * 1000,
+  // Must stay above attemptTimeoutMs: a live plan that is still burning tokens
+  // when the harness gives up must not lose its socket first, or the run is
+  // recorded as HTTP 0 / infrastructure. The worker receives this value as
+  // COMFYRIZZ_REQUEST_TIMEOUT_MS (see workerEnv).
+  serverRequestTimeoutMs: 30 * 60 * 1000,
+  progressPollMs: 5000,
   suiteDeadlineMs: 60 * 60 * 1000,
   smokeConcurrency: 2,
   initialConcurrency: 4,
@@ -66,6 +73,9 @@ export function assertAllowedRequest(method, path) {
 export function workerEnv({ port, runtimeDir, token, baseEnv = {} }) {
   if (!PORTS.includes(port)) throw new Error('refusing unexpected port');
   assertStressPath(runtimeDir);
+  if (LIMITS.serverRequestTimeoutMs < LIMITS.attemptTimeoutMs) {
+    throw new Error('server request timeout must cover the full attempt timeout');
+  }
   const env = {};
   for (const key of ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'TMPDIR']) {
     if (typeof baseEnv[key] === 'string' && baseEnv[key]) env[key] = baseEnv[key];
@@ -75,6 +85,7 @@ export function workerEnv({ port, runtimeDir, token, baseEnv = {} }) {
   env.COMFYRIZZ_RUNTIME = runtimeDir;
   env.COMFYRIZZ_TOKEN = token;
   env.COMFYRIZZ_DEMO = 'launch';
+  env.COMFYRIZZ_REQUEST_TIMEOUT_MS = String(LIMITS.serverRequestTimeoutMs);
   if (baseEnv.OPENCODE_GO_API_KEY) env.OPENCODE_GO_API_KEY = baseEnv.OPENCODE_GO_API_KEY;
   if (baseEnv.OPENCODE_API_KEY) env.OPENCODE_API_KEY = baseEnv.OPENCODE_API_KEY;
   return env;
@@ -205,27 +216,52 @@ function sleep(ms) {
   return new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 }
 
+/**
+ * Plain node:http keeps the client budget on AbortSignal.timeout alone. The
+ * global fetch implementation adds its own 300 s headers/body timeout, which
+ * silently aborts a live plan below LIMITS.attemptTimeoutMs even when the
+ * worker is configured with a longer requestTimeout.
+ */
 async function planningFetch(base, method, path, { token, body, timeoutMs }) {
   assertLoopback(base);
   assertAllowedRequest(method, path);
-  const response = await fetch(`${base}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      'x-comfyrizz-token': token,
-      origin: base,
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(timeoutMs),
+  const url = new URL(`${base}${path}`);
+  const payload = body === undefined ? null : JSON.stringify(body);
+  const response = await new Promise((resolveRequest, rejectRequest) => {
+    const request = httpRequest({
+      protocol: url.protocol,
+      hostname: url.hostname,
+      port: url.port,
+      path: `${url.pathname}${url.search}`,
+      method,
+      headers: {
+        'content-type': 'application/json',
+        'x-comfyrizz-token': token,
+        origin: base,
+        ...(payload === null ? {} : { 'content-length': Buffer.byteLength(payload) }),
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    }, incoming => {
+      const chunks = [];
+      incoming.on('data', chunk => chunks.push(chunk));
+      incoming.on('error', rejectRequest);
+      incoming.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let json;
+        try {
+          json = text ? JSON.parse(text) : {};
+        } catch {
+          resolveRequest({ status: incoming.statusCode ?? 0, malformed: true, body: {} });
+          return;
+        }
+        resolveRequest({ status: incoming.statusCode ?? 0, malformed: false, body: json });
+      });
+    });
+    request.on('error', rejectRequest);
+    if (payload === null) request.end();
+    else request.end(payload);
   });
-  const text = await response.text();
-  let json;
-  try {
-    json = text ? JSON.parse(text) : {};
-  } catch {
-    return { status: response.status, malformed: true, body: {} };
-  }
-  return { status: response.status, malformed: false, body: json };
+  return response;
 }
 
 function attemptFacts(fixture, http, events) {
@@ -266,6 +302,8 @@ async function runFixture(fixture, worker, { attempt = 1, rerun = false, concurr
   const events = [];
   let progressUsage = null;
   let firstChunkMs = null;
+  let lastProgressAt = null;
+  let progressTicks = 0;
   const base = `http://127.0.0.1:${worker.port}`;
   const poll = setInterval(async () => {
     try {
@@ -274,6 +312,8 @@ async function runFixture(fixture, worker, { attempt = 1, rerun = false, concurr
         timeoutMs: 10_000,
       });
       if (progress.status === 200) {
+        progressTicks += 1;
+        lastProgressAt = Date.now();
         progressUsage = progress.body?.usage ?? progressUsage;
         const safe = resanitizeEvents(progress.body?.recentEvents ?? []);
         events.push(...safe);
@@ -283,7 +323,7 @@ async function runFixture(fixture, worker, { attempt = 1, rerun = false, concurr
     } catch {
       // Progress is telemetry. A missed poll does not fail the attempt.
     }
-  }, 5000);
+  }, LIMITS.progressPollMs);
   let http;
   try {
     http = await planningFetch(base, 'POST', '/api/agent', {
@@ -356,6 +396,7 @@ async function runFixture(fixture, worker, { attempt = 1, rerun = false, concurr
     events,
     invalidTools: countInvalidTools(events),
     restart,
+    heartbeat: { ticks: progressTicks, lastProgressMs: lastProgressAt === null ? null : lastProgressAt - started },
     rerunDecision: decideRerun({
       expected: fixture.expect,
       fallback: judged.fallback,
@@ -501,6 +542,7 @@ async function executeGroup(fixtures, workers, options) {
     try {
       const outcome = await runFixture(fixture, worker, { attempt, rerun, concurrency: gate.concurrency });
       if (outcome.restart) {
+        console.warn(`worker ${worker.port} restart after transport (progress ticks=${outcome.heartbeat.ticks}, attempt=${LIMITS.attemptTimeoutMs}ms, server socket=${LIMITS.serverRequestTimeoutMs}ms)`);
         worker = await restartWorker(options.worktree, worker, options.runId, options.baseEnv);
       }
       results.push(outcome);
