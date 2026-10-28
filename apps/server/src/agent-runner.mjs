@@ -137,6 +137,51 @@ export function coverGeneratedFilmScenes(pkg) {
   return { package: next, splits };
 }
 
+function liveActionText(value) {
+  return String(value)
+    .replace(/handmade\s+plasticine/gi, 'photorealistic live-action')
+    .replace(/plasticine/gi, 'natural human')
+    .replace(/stop[\s-]motion/gi, 'live-action')
+    .replace(/claymation/gi, 'live-action')
+    .replace(/clay\s+figures?/gi, 'fictional human adult')
+    .replace(/clay/gi, 'real-world')
+    .replace(/puppets?/gi, 'human')
+    .replace(/cartoons?/gi, 'live-action')
+    .replace(/handmade/gi, 'real-world')
+    .replace(/miniatures?/gi, 'full-scale set')
+    .replace(/3D\s+render/gi, 'cinematic photography');
+}
+
+function sanitizeLiveActionValue(value) {
+  if (typeof value === 'string') return liveActionText(value);
+  if (Array.isArray(value)) return value.map(sanitizeLiveActionValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeLiveActionValue(item)]));
+  }
+  return value;
+}
+
+/** Correct a model's forbidden style substitution instead of rejecting it forever. */
+export function enforceLiveActionHumans(pkg) {
+  if (!pkg || typeof pkg !== 'object') return { package: pkg, changed: false };
+  const next = sanitizeLiveActionValue(pkg);
+  next.title = liveActionText(next.title ?? 'Live-action film');
+  if (next.proposal && typeof next.proposal === 'object') {
+    next.proposal.look = 'Photorealistic live-action fictional human adults with natural skin and real-world materials, cinematic natural light.';
+  }
+  for (const asset of Object.values(next.assets ?? {})) {
+    if (typeof asset?.gen?.inputs?.prompt === 'string') {
+      asset.gen.inputs.prompt = `Photorealistic live-action fictional human adults with natural skin and real-world materials. ${asset.gen.inputs.prompt}`;
+    }
+    if (typeof asset?.gen?.direction?.subject === 'string') {
+      asset.gen.direction.subject = `Photorealistic fictional human adult: ${asset.gen.direction.subject}`;
+    }
+  }
+  const changed = JSON.stringify(next) !== JSON.stringify(pkg);
+  if (changed) next.revision = Math.max(1, Number(next.revision) || 1) + 1;
+  return { package: changed ? next : pkg, changed };
+}
+
 function liveActionStyleConflict(pkg) {
   const texts = [pkg?.title, pkg?.proposal?.look];
   for (const asset of Object.values(pkg?.assets ?? {})) {
@@ -407,6 +452,13 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           onEvent: event => onEvent?.({ ...event, phase, runElapsedMs: Date.now() - runStartedAt }),
         });
         if (productionIntent.generatedFilm) {
+          if (productionIntent.liveActionHumans) {
+            const corrected = enforceLiveActionHumans(result.package);
+            if (corrected.changed) {
+              result = { ...result, package: corrected.package };
+              onEvent?.({ type: 'runner_phase', phase, status: 'creative_constraint', constraint: 'live_action_humans', elapsedMs: Date.now() - runStartedAt });
+            }
+          }
           const covered = coverGeneratedFilmScenes(result.package);
           if (covered.splits > 0) {
             const pendingGpu = result.pendingGpu.filter(item => item.generator === 'flux3-klein');

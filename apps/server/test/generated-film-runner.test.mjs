@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { coverGeneratedFilmScenes, createCpuAgentRunner, generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
+import { coverGeneratedFilmScenes, createCpuAgentRunner, enforceLiveActionHumans, generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
 import { replayProvider } from './fake-provider.mjs';
 
 const BRIEF = 'Create a 24-second wordless handcrafted miniature film in 4 shots. A mustard felt jerboa and a cobalt wooden bird restore an island lighthouse at dusk as a small boat approaches. Recurring tactile characters, clear physical action, cinematic camera moves, warm golden payoff, gentle coastal sound. No dialogue, captions, logos or real people.';
@@ -142,6 +142,28 @@ test('completion requires meaningful proposal fields and the requested duration'
   assert.ok(missing.some(problem => problem.includes('proposal.logline')));
   assert.ok(missing.some(problem => problem.includes('proposal.look')));
   assert.ok(missing.some(problem => problem.includes('proposal.soundtrack')));
+});
+
+test('live-action recovery rewrites clay styling instead of looping on validation', async () => {
+  const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
+  const original = {
+    title: 'Six Clay Wipeouts', revision: 4,
+    proposal: { logline: 'Clay skaters fall.', look: 'Plasticine stop-motion.', soundtrack: 'Clay clatter.' },
+    format: { fps: 30 },
+    scenes: [{ id: 's1', preferredFrames: 150, media: [] }],
+    assets: {
+      a_img: { kind: 'image', gen: { generator: 'flux3-klein', inputs: { prompt: 'A handmade clay figure in a tabletop skate park.' } } },
+    },
+  };
+  const corrected = enforceLiveActionHumans(original);
+  assert.equal(corrected.changed, true);
+  assert.match(corrected.package.proposal.look, /Photorealistic live-action fictional human adults/);
+  assert.match(corrected.package.assets.a_img.gen.inputs.prompt, /^Photorealistic live-action fictional human adults/);
+  assert.doesNotMatch(JSON.stringify(corrected.package), /clay|plasticine|stop-motion/i);
+  assert.match(original.proposal.look, /Plasticine/);
+  const intent = classifyProductionIntent('Create a live-action film with real humans.');
+  const problems = generatedFilmCompletionProblems(corrected.package, intent, 'auto');
+  assert.equal(problems.some(problem => problem.includes('real-human brief conflicts')), false, problems.join('\n'));
 });
 
 test('coverage splitter creates separate short generation shots while preserving duration', async () => {
