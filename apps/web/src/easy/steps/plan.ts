@@ -66,6 +66,10 @@ export function setPlanSnapshot(snapshot: unknown, productionId?: string | null)
   else fallbackSnapshot = snapshot;
 }
 
+export function invalidatePlanSnapshot(productionId: string | null): void {
+  if (typeof productionId === 'string' && productionId) loadedSnapshots.delete(productionId);
+}
+
 function snapshotFor(productionId: string | null): unknown {
   if (typeof productionId === 'string' && productionId && snapshots.has(productionId)) {
     return snapshots.get(productionId);

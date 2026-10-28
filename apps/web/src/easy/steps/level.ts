@@ -4,6 +4,7 @@ import { mountCompute, renderCompute, type ComputeColabStatus } from '../compute
 import { levelIntro, summaryForLevel } from '../level-copy.ts';
 import { mountEasyLevelPicker } from '../level-picker.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, Level, StepFacts } from '../types.ts';
+import { invalidatePlanSnapshot } from './plan.ts';
 
 export const LEVEL_SLOT = 'iteration-level-picker';
 const COLAB_STATUS_TTL_MS = 10_000;
@@ -216,6 +217,7 @@ export const step: EasyStepModule = {
     await pending;
     const next = ctx.store.get();
     if (next.plan.status === 'ready' || next.plan.status === 'error') {
+      invalidatePlanSnapshot(next.productionId);
       ctx.go('plan');
       return;
     }

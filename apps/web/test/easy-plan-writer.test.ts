@@ -193,6 +193,24 @@ test('Easy resume persists the selected level before re-pricing a paid plan', as
   assert.deepEqual(calls[2].body, { level: 'draft', compute: 'colab' });
 });
 
+test('an unchanged Easy plan still repairs a missing server level before re-pricing', async () => {
+  const store = memoryStore({
+    productionId: 'prod_1', packageId: 'pkg_1', compute: 'colab', level: 'draft', levelTouched: true,
+  });
+  store.patch({
+    planHash: planInputsHash(store.get()),
+    plan: { ...store.get().plan, status: 'ready' },
+  });
+  const { calls, api, host } = harness({
+    store,
+    iterationSnapshot: { productionId: 'prod_1', production: { id: 'prod_1', revision: 11 }, revision: 11, events: [] },
+  });
+  await writePlan(store.get(), { api, host, store }, { persistIteration: true });
+  assert.deepEqual(calls.map(call => call.kind), ['read-level', 'level', 'plan']);
+  assert.equal(calls.some(call => call.kind === 'build'), false, 'the creative package is reused');
+  assert.equal(calls[1].command.payload.policy.level, 'draft');
+});
+
 test('Easy resume does not rewrite a level already present on the server', async () => {
   const store = memoryStore({
     productionId: 'prod_1', packageId: 'pkg_1', compute: 'colab', level: 'draft', levelTouched: true,

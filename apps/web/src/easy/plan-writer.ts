@@ -60,13 +60,13 @@ function iterationPolicyOf(snapshot: any): Record<string, unknown> | null {
   return null;
 }
 
-async function persistIterationLevel(state: EasyState, api: PlanApi): Promise<void> {
-  if (state.compute !== 'colab' || !state.productionId) return;
+async function persistIterationLevel(state: EasyState, api: PlanApi): Promise<boolean> {
+  if (state.compute !== 'colab' || !state.productionId) return false;
   if (typeof api.getProduction !== 'function' || typeof api.sendCommand !== 'function') {
     throw new Error('The production connection cannot save the iteration level.');
   }
   const snapshot = await api.getProduction(state.productionId);
-  if (iterationPolicyOf(snapshot)?.level === state.level) return;
+  if (iterationPolicyOf(snapshot)?.level === state.level) return false;
   if (state.level === 'custom') throw new Error('Configure Custom in the Advanced editor before writing this plan.');
   const preset = ITERATION_PRESETS[state.level];
   if (!preset) throw new Error(`Unknown iteration level: ${state.level}`);
@@ -83,6 +83,7 @@ async function persistIterationLevel(state: EasyState, api: PlanApi): Promise<vo
     expected: { productionRevision: revision },
     payload: { policy: validateIterationPolicy(structuredClone(preset)) },
   });
+  return true;
 }
 
 async function connectedSelection(host: WritePlanDeps['host']): Promise<{ provider: string; model?: string } | undefined> {
@@ -123,7 +124,7 @@ export function plannerProgressAnnouncement(progress: any): string {
 
 export async function writePlan(state: EasyState, deps: WritePlanDeps, options: { stopAfterPackage?: boolean; persistIteration?: boolean } = {}): Promise<void> {
   const hash = planInputsHash(state);
-  if (state.plan.status === 'ready' && state.planHash === hash) return;
+  const unchanged = state.plan.status === 'ready' && state.planHash === hash;
 
   const startedGeneration = typeof deps.store.generation === 'function'
     ? deps.store.generation()
@@ -150,6 +151,21 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps, options: 
   };
 
   let phase = phaseFor(state);
+  let iterationReady = false;
+  if (unchanged) {
+    if (options.persistIteration !== true) return;
+    try {
+      const levelChanged = await persistIterationLevel(state, deps.api);
+      if (!levelChanged) return;
+      // The level affects take counts and price. Reuse the package, but issue a
+      // fresh action plan after iteration.set so the new plan is not stale.
+      phase = 3;
+      iterationReady = true;
+    } catch (error) {
+      fail('proposal', error);
+      return;
+    }
+  }
 
   if (phase <= 1) {
     if (!mark('writing')) return;
@@ -226,7 +242,7 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps, options: 
   try {
     const current = live();
     if (!current.productionId) throw new Error('missing production id');
-    if (options.persistIteration === true) await persistIterationLevel(current, deps.api);
+    if (options.persistIteration === true && !iterationReady) await persistIterationLevel(current, deps.api);
     await deps.api.proposeEasyPlan(current.productionId, {
       level: current.level,
       compute: current.compute,
