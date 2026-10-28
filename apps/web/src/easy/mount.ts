@@ -319,7 +319,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const setup = { ...draft, spendCap: Number.isFinite(draft.spendCap) ? draft.spendCap : saved.spendCap, confirmed: true };
     saveSuperEasySetup(setup);
     store.patch({ compute: setup.compute, spendCap: setup.spendCap });
-    superEasy?.render();
+    superEasy?.render({ forceHome: true });
   }
 
   async function onSuperEasyGenerate(input: SuperEasyGenerateInput): Promise<void> {
@@ -396,7 +396,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       setup: () => readSuperEasySetup(),
       onMotionModelChange: (motionModel) => {
         saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });
-        superEasy?.render();
+        superEasy?.render({ forceHome: true });
       },
       onSetup: () => { void openSuperEasySetup(); },
       onChangeAnything: (change = '') => {

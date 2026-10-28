@@ -30,6 +30,24 @@ test('a ready audio asset is used even when scenes do not reference it', () => {
   assert.equal(audio.assetId, 'a_music');
 });
 
+test('H3 silent conditioning is never selected as narration or reported as stray voice', () => {
+  const conditioning = {
+    kind: 'audio', origin: 'upload', status: 'ready', file: 'assets/a_h3_silence_500ms_24k.wav',
+    source: { provider: 'repo', id: 'comfyrizz/deterministic-silence-500ms-24k-mono' },
+  };
+  assert.equal(narrationAudio({ assets: { a_h3_silence_500ms_24k: conditioning }, scenes: [] }), null);
+  assert.deepEqual(unreferencedNarrationAssets({ audio: {}, assets: { a_h3_silence_500ms_24k: conditioning }, scenes: [] }), []);
+
+  const audio = narrationAudio({
+    assets: {
+      a_h3_silence_500ms_24k: conditioning,
+      a_narration: { kind: 'audio', status: 'ready', file: 'audio/narration.wav' },
+    },
+    scenes: [],
+  });
+  assert.equal(audio.assetId, 'a_narration');
+});
+
 test('scene narration_asset references win over other ready audio assets', () => {
   const audio = narrationAudio({
     assets: {

@@ -96,7 +96,7 @@ export interface SuperEasyMountOptions {
 }
 
 export interface SuperEasyMountHandle {
-  render(): void;
+  render(options?: { forceHome?: boolean }): void;
   screen(): SuperEasyScreen;
   destroy(): void;
 }
@@ -266,6 +266,8 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onInput = (event: Event): void => {
     if (!closestOf(event.target)('#super-easy-prompt')) return;
+    const field = event.target as HTMLTextAreaElement;
+    if (typeof field.value === 'string') promptText = field.value;
     showPromptError(false);
   };
 
@@ -359,9 +361,14 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     );
   }
 
-  const render = (): void => {
+  const render = (update: { forceHome?: boolean } = {}): void => {
     if (destroyed) return;
     const next = screenNow();
+    if (next === 'home' && current === 'home' && update.forceHome !== true && root.querySelector('[data-super-easy-home]')) {
+      // Gallery, snapshot and preference callbacks must not replace a prompt
+      // that is actively being composed. Setup changes opt into a full repaint.
+      return;
+    }
     current = next;
     const proposal = options.proposal?.() ?? null;
     if (next !== 'progress' || proposal) {
