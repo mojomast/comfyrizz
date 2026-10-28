@@ -316,7 +316,13 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     const acceptable = candidate => productionIntent.generatedFilm
       ? candidate.ok && generatedFilmCompletionProblems(candidate.package, productionIntent, motionModel).length === 0 && validatePackage(candidate.package).valid
       : candidate.svgAssets.length >= 4 && candidate.pendingGpu.length >= 1 && validatePackage(candidate.package).valid;
+    const aggregateUsage = { input: 0, output: 0 };
+    const absorbUsage = result => {
+      aggregateUsage.input += Number(result?.usage?.input) || 0;
+      aggregateUsage.output += Number(result?.usage?.output) || 0;
+    };
     let slice = await runOnce(agentModel);
+    absorbUsage(slice.result);
     let fallback = false;
     // Motion graphics retains the deterministic CPU fallback. A generated-film
     // miss is an actionable failure: substituting the SVG/FLUX script would
@@ -329,6 +335,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         ];
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: initialProblems, elapsedMs: Date.now() - runStartedAt });
         slice = await runOnce(agentModel, `${repairPackageFacts(slice.package, productionIntent)}\n\nValidation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`);
+        absorbUsage(slice.result);
         if (!acceptable(slice)) {
           const problems = [
             ...generatedFilmCompletionProblems(slice.package, productionIntent, motionModel),
@@ -343,6 +350,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         }
       } else {
         slice = await runOnce(null);
+        absorbUsage(slice.result);
         fallback = true;
       }
     }
@@ -376,7 +384,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       routes: slice.routes,
       pendingGpu: slice.pendingGpu,
       svgAssets: slice.svgAssets,
-      usage: { ...slice.result.usage, total: slice.result.usage.input + slice.result.usage.output },
+      usage: { input: aggregateUsage.input, output: aggregateUsage.output, total: aggregateUsage.input + aggregateUsage.output },
       events: slice.result.toolCalls.map(call => ({ name: call.name, ok: call.ok })),
     };
   };

@@ -36,6 +36,20 @@ test('agent progress tracks phases and timings without retaining private content
   assert.doesNotMatch(JSON.stringify(snapshot), /do-not-retain/);
 });
 
+test('cross-phase usage keeps the initial plan when repair reports its own total', () => {
+  const progress = createAgentProgress('usage-phases');
+  progress.update({ type: 'runner_phase', phase: 'initial', status: 'started' });
+  progress.update({ type: 'model_result', phase: 'initial', usage: { input: 10, output: 20 } });
+  progress.update({ type: 'model_result', phase: 'initial', usage: { input: 3, output: 4 } });
+  progress.update({ type: 'done', phase: 'initial', usage: { input: 13, output: 24 } });
+  progress.update({ type: 'runner_phase', phase: 'repair', status: 'started' });
+  progress.update({ type: 'model_result', phase: 'repair', usage: { input: 5, output: 6 } });
+  progress.update({ type: 'done', phase: 'repair', usage: { input: 5, output: 6 } });
+  progress.update({ type: 'error', phase: 'repair', code: 'max_steps', usage: { input: 5, output: 6 } });
+  assert.deepEqual(progress.snapshot().usage, { input: 18, output: 30, total: 48 });
+  assert.equal(progress.snapshot().usage.total, progress.snapshot().usage.input + progress.snapshot().usage.output);
+});
+
 test('schema failures include actionable validation details, not a generic placeholder', () => {
   const problems = packageSchemaProblems({});
   assert.ok(problems.length > 0);
