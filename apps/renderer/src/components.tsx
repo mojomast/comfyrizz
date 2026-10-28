@@ -71,7 +71,7 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
     const blobs = random.slice(0, 5).map((value, index) => ({
       x: 10 + value * 80,
       y: 15 + random[index + 5] * 70,
-      size: 34 + random[(index + 3) % 12] * 28,
+      size: 22 + random[(index + 3) % 12] * 18,
       tone: [accent, mid, soft][index % 3],
     }));
     return (
@@ -87,7 +87,7 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
               height: `${blob.size}%`,
               transform: 'translate(-50%, -50%)',
               borderRadius: '50%',
-              background: `radial-gradient(closest-side, ${blob.tone}66, transparent)`,
+              background: `radial-gradient(closest-side, ${blob.tone}24, transparent)`,
             }}
           />
         ))}

@@ -115,7 +115,7 @@ export function TechnicalFlow({ scene, pkg, frame, compact = false }: { scene: S
               border: `${active ? 3 : 2}px solid ${active ? colors[2] : 'rgba(255,255,255,0.18)'}`,
               background: `linear-gradient(135deg, ${colors[1]}f2, ${colors[0]}f2)`,
               boxShadow: active ? `0 0 42px ${colors[2]}33, 0 18px 44px rgba(0,0,0,0.32)` : '0 14px 36px rgba(0,0,0,0.28)',
-              opacity: 0.16 + reveal * 0.84,
+              opacity: 0.38 + reveal * 0.62,
               transform: `translateY(${(1 - reveal) * 20}px)`,
               display: 'flex',
               flexDirection: 'column',

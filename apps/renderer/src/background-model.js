@@ -32,7 +32,7 @@ export function proceduralStyle(pattern, colors) {
   if (pattern === 'dots') {
     return {
       backgroundColor: base,
-      backgroundImage: `radial-gradient(${accent} 2.5px, transparent 2.6px), radial-gradient(${soft} 1.5px, transparent 1.6px)`,
+      backgroundImage: `radial-gradient(${accent}26 2.5px, transparent 2.6px), radial-gradient(${soft}14 1.5px, transparent 1.6px)`,
       backgroundSize: '46px 46px, 46px 46px',
       backgroundPosition: '0 0, 23px 23px',
     };

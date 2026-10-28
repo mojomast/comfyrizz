@@ -198,7 +198,7 @@ export function LowerThird({ kicker, text, pkg }: { kicker?: string; text: strin
         position: 'absolute',
         left: 144,
         right: 144,
-        top: 150,
+        top: 200,
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
