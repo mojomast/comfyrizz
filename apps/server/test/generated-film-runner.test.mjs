@@ -198,6 +198,37 @@ test('coverage splitter creates separate short generation shots while preserving
   assert.equal(problems.some(problem => problem.includes('attached generated video covers')), false, problems.join('\n'));
 });
 
+test('coverage splitting keeps one opener and one outro instead of repeating bookends on every part', () => {
+  const video = (seed) => ({
+    kind: 'video', status: 'pending',
+    gen: { generator: 'ltx25', workflow: 'workflows/ltx25_i2v.api.json', inputs: { image: 'a_start', frames: 121, fps: 24, seed } },
+    media: { audio: 'none' },
+  });
+  const pkg = {
+    format: { fps: 30 }, revision: 2,
+    scenes: [
+      { id: 's1', layout: 'title', variant: 'centered', preferredFrames: 600, copy: { headline: 'THE ATLAS' }, motion: { recipe: 'kinetic', entry: 'maskRise' }, media: [{ asset: 'a_open' }] },
+      { id: 's2', layout: 'title', variant: 'outro', preferredFrames: 600, copy: { headline: 'HOME AGAIN' }, motion: { recipe: 'kinetic', entry: 'fadeUp' }, media: [{ asset: 'a_close' }], transitionOut: { type: 'fade', frames: 12 } },
+    ],
+    assets: { a_open: video(10), a_close: video(20) },
+  };
+  const covered = coverGeneratedFilmScenes(pkg);
+  assert.equal(covered.splits, 2);
+  assert.equal(covered.package.scenes.length, 8);
+  assert.equal(covered.package.scenes.reduce((sum, scene) => sum + scene.preferredFrames, 0), 1200);
+  assert.equal(covered.package.scenes[0].variant, 'centered');
+  assert.equal(covered.package.scenes[0].copy.headline, 'THE ATLAS');
+  assert.equal(covered.package.scenes.at(-1).variant, 'outro');
+  assert.equal(covered.package.scenes.at(-1).copy.headline, 'HOME AGAIN');
+  assert.equal(covered.package.scenes.at(-1).transitionOut, undefined);
+  for (const scene of covered.package.scenes.slice(1, -1)) {
+    assert.equal(scene.layout, 'list');
+    assert.equal(scene.media_only, true);
+    assert.equal(scene.copy, undefined);
+    assert.equal(scene.motion, undefined);
+  }
+});
+
 test('completion rejects clay substitutions for real humans and under-covered scene durations', async () => {
   const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
   const intent = classifyProductionIntent('Create a 2 minute live-action video with real humans.');

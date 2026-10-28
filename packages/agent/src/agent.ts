@@ -94,10 +94,12 @@ const DEFAULT_BASE = [
   '## Story and dialogue',
   '- For fictional shorts and miniseries, write a connected scene before dividing it into generation shots: character wants, conflicting tactics, subtext and a consequential turn. Replies respond to previous thoughts; vary line lengths and reserve listening/reaction time. More complex dialogue is not a string of longer one-liners. Preserve voice, intentional grammar, eyelines and story continuity. Table-read the exchange at natural speed; use only supported editorial controls for separate sound/picture cuts.',
   '',
-  '## Typography',
-  '- No-captions requests prohibit scene copy, headlines, lower thirds and generated text.',
-  '- When the brief requests Remotion typography, put the exact shot-specific words in scene.copy and/or lower_third, use media_only:true for lower-third-only shots, and keep generated footage free of lettering so Remotion owns every readable label. Typography must add narrative information (chapter, place, mechanism, changing measurement or musical cue), not repeat the logline as generic subtitles.',
-  '- Never add a title-only scene to a generated film: put opening typography on the first shot and give every scene its own generated shot media.',
+  '## Remotion editorial layer and typography',
+  '- No-captions, no-titles or text-free requests prohibit scene copy, headlines, title/end cards, lower thirds and generated text. Never override an explicit text prohibition.',
+  '- Unless text is prohibited, give generated films an editable Remotion title opener on the first AI-footage shot (layout:title, variant:centered) and an outro on the last AI-footage shot (layout:title, variant:outro). Keep the same shot ids, generated media, narration and preferredFrames: bookends never add runtime or replace footage. Do not add standalone title-only scenes.',
+  '- Put exact, meaningful shot-specific words in scene.copy and/or lower_third. Full title, kinetic and structured layouts require media_only:false; media_only:true is only for footage with a lower third or non-text decoration. Keep generated footage free of readable lettering whenever Remotion owns the text.',
+  '- Typography and structured visuals must add narrative information: a hook, chapter, place, mechanism, process, comparison, evidence window or changing measurement. Never repeat the logline as generic subtitles and never invent data for a chart.',
+  '- Default to hard cuts. Use one expressive motion gesture per scene, with short intentional transitions and a readable static hold; do not stack zoom, blur, particles and bouncing type on AI footage.',
 ].join('\n');
 
 /** Builder prompt. The motion and presenter sections are schema-derived; a caller-supplied system replaces them. */

@@ -10,6 +10,10 @@ export interface ProductionIntent {
   requiresNarrationCues: boolean;
   /** Live-action fictional humans, not a substituted stylized medium. */
   liveActionHumans: boolean;
+  /** Add editable Remotion opening/closing treatment to existing AI-footage shots. */
+  bookends: boolean;
+  /** Purpose-matched structured editorial treatment for the middle shots. */
+  structuredVisual: 'technical-flow' | 'sketch' | 'morph' | 'focus' | null;
   requestedSeconds: number | null;
   evidence: {
     generatedShots: boolean;
@@ -70,8 +74,8 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   const wordless = /\bwordless\b/i.test(text)
     || /\bno\b[^.!?\n]{0,70}\b(?:dialogue|narration|speech|voice[\s-]?over)\b/i.test(text)
     || /\bwithout\s+(?:dialogue|narration|speech|voice[\s-]?over)\b/i.test(text);
-  const noCaptions = /\bno\b[^.!?\n]{0,90}\b(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|copy)\b/i.test(text)
-    || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?)\b/i.test(text)
+  const noCaptions = /\bno\b[^.!?\n]{0,90}\b(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?|copy)\b/i.test(text)
+    || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?)\b/i.test(text)
     || /\btext[\s-]+free\b/i.test(text);
   const requiresNarrationCues = /\bcue_phrases\b|narration[\s-]+(?:linked|anchored)\s+(?:motion|animation|cues?)|timed\s+(?:to|with)\s+(?:the\s+)?narration/i.test(text);
   const liveActionHumans = positiveMatch(text, /\b(?:real\s+(?:humans?|people)|(?:realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?)|photoreal(?:istic)?(?:\s+humans?)?|live[\s-]*action)\b/i);
@@ -90,6 +94,12 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   // An explicit generated film may use Remotion overlays and motion graphics.
   // Procedural wording only wins when the brief is not explicitly a generated film.
   const generatedFilm = explicitGeneratedFilm || (!proceduralConstraint && (generatedShots || strongEvidence >= 2));
+  const structuredVisual = noCaptions ? null
+    : positiveMatch(text, /\b(?:mechanisms?|how\s+(?:a|an|the)\s+[\w\s-]+works?|sketch(?:book)?|draw[\s-]+on)\b/i) ? 'sketch'
+      : positiveMatch(text, /\b(?:technical[\s-]+flow|workflows?|process(?:es)?|architecture|cause[\s-]+and[\s-]+effect|pipelines?)\b/i) ? 'technical-flow'
+        : positiveMatch(text, /\b(?:before\s*(?:\/|and)\s*after|transformations?|compare|comparison|versus|vs\.?)\b/i) ? 'morph'
+          : positiveMatch(text, /\b(?:evidence|screenshots?|product\s+demos?|source\s+claims?|focus\s+windows?)\b/i) ? 'focus'
+            : null;
   return {
     kind: generatedFilm ? 'generated-film' : 'motion-graphics',
     generatedFilm,
@@ -97,6 +107,8 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     noCaptions,
     requiresNarrationCues,
     liveActionHumans,
+    bookends: generatedFilm && !noCaptions,
+    structuredVisual,
     requestedSeconds,
     evidence: { generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape, proceduralConstraint },
   };

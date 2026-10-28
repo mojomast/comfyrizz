@@ -80,6 +80,28 @@ function generatedClipSeconds(asset) {
   return frames > 0 && fps > 0 ? frames / fps : 0;
 }
 
+function withoutBookendPresentation(scene) {
+  const next = { ...scene, layout: 'list', media_only: true };
+  delete next.variant;
+  delete next.copy;
+  delete next.motion;
+  return next;
+}
+
+function outroPresentation(scene) {
+  const previousHeadline = scene.copy?.headline;
+  return {
+    ...scene,
+    variant: 'outro',
+    copy: {
+      ...(scene.copy ?? {}),
+      ...(previousHeadline && !scene.copy?.kicker ? { kicker: previousHeadline } : {}),
+      headline: 'The End',
+    },
+    motion: { ...(scene.motion ?? {}), recipe: scene.motion?.recipe ?? 'kinetic', entry: 'fadeUp' },
+  };
+}
+
 /** Split under-covered pending scenes into real generation shots before validation. */
 export function coverGeneratedFilmScenes(pkg) {
   if (!pkg || !Array.isArray(pkg.scenes)) return { package: pkg, splits: 0 };
@@ -88,7 +110,9 @@ export function coverGeneratedFilmScenes(pkg) {
   const scenes = [];
   const replacedAssetIds = new Set();
   let splits = 0;
-  for (const scene of next.scenes) {
+  const originalSceneCount = next.scenes.length;
+  for (let sceneIndex = 0; sceneIndex < next.scenes.length; sceneIndex += 1) {
+    const scene = next.scenes[sceneIndex];
     const fps = Number(next.format?.fps) > 0 ? Number(next.format.fps) : 30;
     const sceneFrames = Number(scene?.preferredFrames) || 0;
     const sceneSeconds = sceneFrames / fps;
@@ -117,18 +141,30 @@ export function coverGeneratedFilmScenes(pkg) {
       const media = { ...templatePlate, asset: assetId };
       delete media.speed;
       delete media.holdFrames;
-      scenes.push({
+      let partScene = {
         ...scene,
         id: `${scene.id}__part${part + 1}`,
         preferredFrames: Math.floor(sceneFrames / partCount) + (part < sceneFrames % partCount ? 1 : 0),
         media: [media],
-      });
+      };
+      const centered = scene.layout === 'title' && scene.variant === 'centered';
+      const outro = scene.layout === 'title' && scene.variant === 'outro';
+      const originalFirst = sceneIndex === 0;
+      const originalLast = sceneIndex === originalSceneCount - 1;
+      if (centered && originalFirst && originalLast && partCount > 1 && part === partCount - 1) {
+        partScene = outroPresentation(partScene);
+      } else if ((centered || outro)
+        && !((centered && originalFirst && part === 0) || (outro && originalLast && part === partCount - 1))) {
+        partScene = withoutBookendPresentation(partScene);
+      }
+      scenes.push(partScene);
     }
     replacedAssetIds.add(templateAssetId);
     splits += 1;
   }
   if (splits === 0) return { package: pkg, splits: 0 };
   next.scenes = scenes;
+  if (next.scenes.length > 0) delete next.scenes[next.scenes.length - 1].transitionOut;
   for (const assetId of replacedAssetIds) {
     const used = scenes.some(scene => (Array.isArray(scene?.media) ? scene.media : []).some(plate => plate?.asset === assetId));
     if (!used) delete next.assets[assetId];

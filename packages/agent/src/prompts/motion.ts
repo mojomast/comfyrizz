@@ -68,6 +68,10 @@ interface MotionLintModule {
   MOTION_DEFAULTS: { energy: string; direction: string; depthDirection: string; fps: number };
 }
 
+interface AnimationCatalogueModule {
+  ANIMATION_RECIPES: readonly { id: string; layouts: readonly string[] }[];
+}
+
 export interface MotionFixInstruction {
   code: string;
   severity: string;
@@ -207,6 +211,7 @@ for (const preset of STYLE_PRESETS) {
 }
 
 const motionLint: MotionLintModule = await import(pathToFileURL(join(schemaDir(), 'src', 'motion.mjs')).href);
+const animationCatalogue: AnimationCatalogueModule = await import(pathToFileURL(join(schemaDir(), 'src', 'animation.mjs')).href);
 
 for (const type of VOCABULARY.transitionTypes) {
   if (!motionLint.TRANSITIONS[type]) throw new Error(`schema transition ${type} has no linter duration band`);
@@ -249,6 +254,7 @@ export function motionSystemSection(): string {
     return `- ${energy}: ${types.join(', ')}`;
   });
   const bands = VOCABULARY.transitionTypes.map(type => band(type));
+  const recipeLines = animationCatalogue.ANIMATION_RECIPES.map(recipe => `- ${recipe.id}: ${recipe.layouts.join(', ')}`);
   return [
     '## Motion',
     'You pick motion parameters. You never write animation code: no Remotion, no CSS, no tweens, no springs written out as numbers. The renderer already implements every token below. Set package `motion` and each scene\'s `motion` and `transitionOut` with `storyboard.propose` and `storyboard.edit`.',
@@ -258,6 +264,13 @@ export function motionSystemSection(): string {
     '3. Beats in order.',
     '4. Motion verbs, expressed only as vocabulary tokens: counts up is entry `countUp`, draws on is entry `drawOn`, wipes in is transition `wipe`, a push is transition `push`. A slow push-in is one `zoom` in or one `push`, not a camera path.',
     `5. Final hold: the last scene stays readable for at least ${reading.finalHoldSeconds} s after it settles. Hold the final frame.`,
+    'Recipe by story purpose, never random variety: process or cause/effect → technical-flow; mechanism → sketch; before/after → morph or a compare layout; evidence/detail → focus; hook/chapter/conclusion → kinetic; history/profile/community → paper-cut.',
+    'Recommended recipe layouts (from the shared capability catalogue):',
+    ...recipeLines,
+    '- For a process, prefer technical-flow on list with editable items as nodes. scenes[].motion.diagram: flow | hub (connected steps or a shared hub).',
+    '- Bounded recipe fields: focus is {x,y,width,height}, normalized to the whole frame; x/y are 0..1, width/height are positive, and x + width <= 1 and y + height <= 1. morph is {from,to} using circle | square | triangle | blob only, not arbitrary media. seed is an integer 1..2147483647; intensity is 0..1.',
+    '- Timing cues: cue_phrases contains up to 6 exact phrases copied from that scene\'s narration in spoken order. Resolve them after narration timing; never invent alignment or claim estimated timing is forced alignment. Explicit scene-local cue_seconds take precedence over cue_phrases; clear stale seconds when switching to phrases.',
+    '- All meaningful text stays native, editable Remotion copy (including lower_third), never lettering baked into AI-generated pixels. Full typography requires media_only:false. media_only:true is for footage plus lower thirds/non-text decor, not full-layout typography.',
     'Vocabulary (these lists are the package schema enums; do not invent tokens):',
     `- motion.energy: ${list(VOCABULARY.energies)}. Default ${defaults.energy}.`,
     `- motion.direction, the film's one current: ${list(VOCABULARY.directions)}. Default ${defaults.direction}. Reserve up for a conclusion.`,
@@ -271,8 +284,10 @@ export function motionSystemSection(): string {
     'Numeric rules:',
     '- One focal point per frame. Decide what the viewer notices first, and do not animate a second element at the same time.',
     `- Reading hold, after the entrance settles: at least ${reading.minHoldSeconds} s, plus ${reading.perExtraWordSeconds} s for every word beyond ${reading.freeWords}. The final scene holds at least ${reading.finalHoldSeconds} s. Text that is meant to be read stays still.`,
-    `- ${budget - 1}-${budget} transition types in one film (none and cut do not count). One primary type covers most cuts; one or two accents are enough. Never a different type on every scene.`,
+    '- Hard cuts (cut, 0 frames) are the default; use another transition only when it expresses the relationship between adjacent beats. The actual final scene in scenes[] has no outgoing transition: omit transitionOut; never give it a positive-duration transition.',
+    `- If using non-cut transitions, use ${budget - 1}-${budget} transition types in one film (none and cut do not count). One primary type covers most cuts; one or two accents are enough. Never a different type on every scene.`,
     '- One current direction for ordinary next-point cuts. Do not reverse it on the next cut. up means conclusion, zoom in means deeper, zoom out means arrival.',
+    '- One expressive gesture per scene: one recipe or motion idea carries the beat; do not stack effects for variety.',
     '- One hero moment. Build to it.',
     `- Stillness before the climax: hold ${STILLNESS_BEFORE_CLIMAX.minSeconds}-${STILLNESS_BEFORE_CLIMAX.maxSeconds} s between an action and its result.`,
     '- No idle wobble. Do not bob, breathe, or float a foreground element to fill time. A plate or a procedural background may drift; the type stays still while it is read.',
