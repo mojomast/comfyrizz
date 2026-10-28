@@ -93,6 +93,36 @@ test('generated-film planning exposes only storyboard and generated-media tools'
   ]);
 });
 
+test('storyboard proposals and repairs retain narration-timed Remotion motion', async () => {
+  let draft: any;
+  const tools = createToolset({
+    motionModel: 'klein',
+    generateSvg: () => ({ svg: SVG }),
+    onPackageChange: pkg => { draft = pkg; },
+  });
+  await tools['storyboard.propose'].run({
+    brief: 'Create a narrated generated film with motion.cue_phrases copied verbatim from narration.',
+    title: 'The Geometry of a Chord',
+    proposal,
+    scenes: [{
+      ...shot('shot1'),
+      copy: { headline: 'Octave' },
+      narration: 'The string reveals an octave.',
+      motion: { recipe: 'kinetic', seed: 17, intensity: 0.6, entry: 'waterfall', cue_phrases: ['reveals an octave'] },
+    }],
+  });
+  assert.deepEqual(draft.scenes[0].motion, {
+    recipe: 'kinetic', seed: 17, intensity: 0.6, entry: 'waterfall', cue_phrases: ['reveals an octave'],
+  });
+  await tools['storyboard.edit'].run({
+    scene_id: 'shot1',
+    patch: { motion: { cue_phrases: ['The string'], cue_seconds: [1.25], diagram: 'flow' } },
+  });
+  assert.deepEqual(draft.scenes[0].motion, {
+    recipe: 'kinetic', seed: 17, intensity: 0.6, entry: 'waterfall', cue_phrases: ['The string'], cue_seconds: [1.25], diagram: 'flow',
+  });
+});
+
 test('wordless H3 reuses real silent conditioning, preserves native soundscape and scene.media', async () => {
   const writes: Uint8Array[] = [];
   const { tools, getDraft, identity, composition } = await filmTools('h3', [shot('shot1'), shot('shot2')], (_id, wav) => writes.push(wav));

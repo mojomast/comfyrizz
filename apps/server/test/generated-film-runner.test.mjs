@@ -141,6 +141,8 @@ test('narration-timed graphics require narration and exact cue phrases', async (
   };
   const problems = generatedFilmCompletionProblems(pkg, intent, 'klein');
   assert.ok(problems.some(problem => problem.includes('motion.cue_phrases')));
+  pkg.scenes[0].motion = { cue_phrases: ['Changes course'] };
+  assert.ok(generatedFilmCompletionProblems(pkg, intent, 'klein').some(problem => problem.includes('copied verbatim')));
   pkg.scenes[0].motion = { cue_phrases: ['changes course'] };
   assert.ok(!generatedFilmCompletionProblems(pkg, intent, 'klein').some(problem => problem.includes('motion.cue_phrases')));
 });

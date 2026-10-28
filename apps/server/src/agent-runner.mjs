@@ -88,6 +88,8 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
         problems.push(`${sceneId}: narration-timed motion graphics require a concise scene.narration sentence`);
       } else if (!Array.isArray(scene?.motion?.cue_phrases) || scene.motion.cue_phrases.filter(phrase => typeof phrase === 'string' && phrase.trim()).length === 0) {
         problems.push(`${sceneId}: narration-timed motion graphics require motion.cue_phrases copied verbatim from this scene's narration`);
+      } else if (scene.motion.cue_phrases.some(phrase => typeof phrase !== 'string' || !phrase.trim() || !scene.narration.includes(phrase))) {
+        problems.push(`${sceneId}: every motion.cue_phrases entry must be copied verbatim from this scene's narration`);
       }
     }
     const mediaAssets = (Array.isArray(scene?.media) ? scene.media : [])
