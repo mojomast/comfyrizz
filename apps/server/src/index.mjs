@@ -113,7 +113,7 @@ export function seedProjects(options = {}) {
 
 function startServer() {
   const port = Number(process.env.COMFYRIZZ_PORT ?? 4319);
-  const host = '127.0.0.1';
+  const host = process.env.COMFYRIZZ_HOST ?? '127.0.0.1';
   const runtimeDir = process.env.COMFYRIZZ_RUNTIME ?? join(repoRoot, 'apps', 'server', '.runtime');
   mkdirSync(runtimeDir, { recursive: true });
 
