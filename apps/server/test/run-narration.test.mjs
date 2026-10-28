@@ -78,7 +78,7 @@ test('narration is required only for enabled voice with scene text', () => {
   assert.equal(runNeedsNarration(pkg), false);
 });
 
-test('narration cannot silently expand an authored shot after media planning', async t => {
+test('narration reports small drift and rejects changes beyond the acceptance band', async t => {
   const root = mkdtempSync(join(tmpdir(), 'comfyrizz-run-narration-long-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const workDir = join(root, 'work');
@@ -90,10 +90,22 @@ test('narration cannot silently expand an authored shot after media planning', a
   pkg.scenes[0].preferredFrames = 30;
   pkg.assets.a_narration = { kind: 'audio', status: 'ready', file: 'audio/narration.norm.wav' };
   writeFileSync(join(packageDir, 'audio', 'narration.norm.wav'), 'wav');
-  writeFileSync(join(packageDir, 'audio', 'durations.json'), JSON.stringify({ scenes: { [sceneId]: { seconds: 2 } } }));
+  const durations = seconds => ({
+    version: 1, engine: 'kokoro-onnx', model: 'kokoro-v1.0.onnx', voices: 'voices-v1.0.bin',
+    voice: 'af_heart', language: 'en-us', speed: 1, sampleRate: 24000,
+    scenes: { [sceneId]: {
+      chunks: [{ text: 'A measured sentence.', spoken: 'A measured sentence.', seconds, samples: seconds * 24000, words: [{ text: 'A', start: 0, end: seconds }] }],
+      gapSeconds: 0.2, paddingSeconds: 0.5, seconds, file: `audio/narration/${sceneId}.wav`,
+    } },
+  });
+  writeFileSync(join(packageDir, 'audio', 'durations.json'), JSON.stringify(durations(2)));
+  const accepted = await prepareRunNarration({ pkg, workDir, outputDir, packageDir });
+  assert.equal(accepted.extendedScenes.length, 1);
+  assert.equal(accepted.extendedScenes[0].id, sceneId);
+  writeFileSync(join(packageDir, 'audio', 'durations.json'), JSON.stringify(durations(30)));
   await assert.rejects(
     () => prepareRunNarration({ pkg, workDir, outputDir, packageDir }),
-    /narration exceeds the authored 1\.00s shot duration/,
+    /acceptable range is .* seconds; shorten or rebalance/,
   );
 });
 

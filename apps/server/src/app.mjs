@@ -499,9 +499,13 @@ export function createApp({
     events,
     runtimeDir,
     prepareWorkDir: prepareRunWorkDir,
-    prepareNarration: (pkg, { workDir, outputDir }) => prepareRunNarration({
-      pkg, workDir, outputDir, packageDir: dirname(store.path(pkg.id)),
-    }),
+    prepareNarration: async (pkg, { workDir, outputDir, runId }) => {
+      const prepared = await prepareRunNarration({ pkg, workDir, outputDir, packageDir: dirname(store.path(pkg.id)) });
+      if (prepared.extendedScenes?.length) {
+        events.publish({ type: 'run.log', runId, line: `Measured narration adjusted ${prepared.extendedScenes.length} shot(s) within the accepted duration range; final timeline is ${(prepared.durationInFrames / (pkg.format?.fps ?? 30)).toFixed(2)}s.` });
+      }
+      return prepared;
+    },
     onComplete: completeRun,
     isBusy: () => Boolean(pipelines?.active()),
     productionStore,

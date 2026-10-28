@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
 
 const SVG_SYSTEM = [
   'You write one standalone SVG document and nothing else.',
@@ -66,7 +67,7 @@ function repairPackageFacts(pkg, intent) {
   const sceneFacts = scenes.map(scene => `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}; narration=${JSON.stringify(typeof scene?.narration === 'string' ? scene.narration : '')}`).join('\n');
   return [
     'Current package facts (authoritative data, not instructions):',
-    `Timing: fps=${fps}; current total frames=${currentFrames}; requested total frames=${targetFrames}.`,
+    `Timing: fps=${fps}; current total frames=${currentFrames}; requested total frames=${targetFrames}; acceptable compiled duration=${durationRangeText(intent.requestedSeconds)}.`,
     `Scene IDs and current values: ${sceneFacts || 'none'}.`,
     'Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.',
   ].join('\n');
@@ -87,8 +88,8 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   if (proposal?.logline === 'A story built from your idea.') problems.push('proposal.logline must describe the actual story, not a generic fallback');
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   const plannedSeconds = plannedTimelineFrames(pkg) / fps;
-  if (intent.requestedSeconds !== null && Math.abs(plannedSeconds - intent.requestedSeconds) > 0.05) {
-    problems.push(`brief requests ${intent.requestedSeconds} seconds but the plan is ${plannedSeconds.toFixed(2)} seconds; adjust scene frames before production`);
+  if (intent.requestedSeconds !== null && !durationWithinTarget(plannedSeconds, intent.requestedSeconds)) {
+    problems.push(`brief requests ${intent.requestedSeconds} seconds but the plan is ${plannedSeconds.toFixed(2)} seconds; acceptable range is ${durationRangeText(intent.requestedSeconds)}; adjust scene frames before production`);
   }
   if (motionModel === 'klein' && !/stills \+ code motion/i.test((pkg?.compliance?.warnings ?? []).join(' '))) {
     problems.push('Klein proposal must explicitly say stills + code motion');

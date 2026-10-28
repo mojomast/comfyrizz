@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
+import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
 
 function execute(command, args) {
   return new Promise((resolve, reject) => {
@@ -58,19 +59,20 @@ export async function prepareRunNarration({ pkg, workDir, outputDir, packageDir,
   const fps = Number(pkg.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   // Check the authored shot length, not the already-expanded measured timeline.
   // Silent expansion would change the requested film duration after GPU planning.
+  const extendedScenes = [];
   for (const scene of pkg.scenes ?? []) {
     const measured = durations.scenes?.[scene.id]?.seconds;
     const preferredFrames = Number(scene.preferredFrames);
     if (Number.isFinite(measured) && Number.isFinite(preferredFrames) && preferredFrames > 0 && measured > preferredFrames / fps + 0.001) {
-      throw new Error(`${scene.id}: narration exceeds the authored ${(preferredFrames / fps).toFixed(2)}s shot duration; shorten the line before media generation`);
+      extendedScenes.push({ id: scene.id, authoredSeconds: preferredFrames / fps, narrationSeconds: measured });
     }
   }
   const timeline = compileTimeline(pkg, narrationOptions(workDir));
-  if (Number.isFinite(authoredFrames) && timeline.durationInFrames !== authoredFrames) {
-    throw new Error(`Narration changed the compiled film duration from ${authoredFrames} to ${timeline.durationInFrames} frames; correct shot timing before media generation`);
+  if (Number.isFinite(authoredFrames) && !durationWithinTarget(timeline.durationInFrames / fps, authoredFrames / fps)) {
+    throw new Error(`Narration changed the compiled film to ${(timeline.durationInFrames / fps).toFixed(2)}s; acceptable range is ${durationRangeText(authoredFrames / fps)}; shorten or rebalance the lines before media generation`);
   }
   mkdirSync(outputDir, { recursive: true });
   cpSync(workAudio, join(outputDir, 'audio'), { recursive: true });
   cpSync(workAudio, packageAudio, { recursive: true });
-  return { voiced: true, timelineHash: timeline.hash, durationInFrames: timeline.durationInFrames };
+  return { voiced: true, timelineHash: timeline.hash, durationInFrames: timeline.durationInFrames, extendedScenes };
 }

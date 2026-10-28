@@ -130,7 +130,7 @@ test('completion requires meaningful proposal fields and the requested duration'
   assert.ok(missing.some(problem => problem.includes('proposal.soundtrack')));
 });
 
-test('completion validates compiled duration after transition overlaps', async () => {
+test('completion allows bounded transition drift and rejects larger duration misses', async () => {
   const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
   const intent = classifyProductionIntent('Create a 20-second wordless generated film in 4 scenery shots. No captions.');
   const pkg = {
@@ -144,7 +144,11 @@ test('completion validates compiled duration after transition overlaps', async (
     assets: {},
   };
   const problems = generatedFilmCompletionProblems(pkg, intent, 'ltx');
-  assert.ok(problems.some(problem => problem.includes('20 seconds but the plan is 18.53 seconds')), problems.join('\n'));
+  assert.ok(!problems.some(problem => problem.includes('20 seconds but the plan')), problems.join('\n'));
+  for (const scene of pkg.scenes) scene.preferredFrames = 225;
+  const excessive = generatedFilmCompletionProblems(pkg, intent, 'ltx');
+  assert.ok(excessive.some(problem => problem.includes('20 seconds but the plan is 28.53 seconds')), excessive.join('\n'));
+  assert.ok(excessive.some(problem => problem.includes('acceptable range is 17.00–23.00 seconds')), excessive.join('\n'));
 });
 
 test('narration-timed graphics require narration and exact cue phrases', async () => {
