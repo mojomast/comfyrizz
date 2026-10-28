@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prepareRunNarration, runNeedsNarration } from '../src/run-narration.mjs';
+import { mergeFinalRunMedia } from '../src/app.mjs';
 import { repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 
 const fixture = JSON.parse(readFileSync(join(repoRoot, 'examples', 'launch-demo', 'package.json'), 'utf8'));
@@ -75,4 +76,31 @@ test('narration is required only for enabled voice with scene text', () => {
   pkg.voice.enabled = true;
   for (const scene of pkg.scenes) delete scene.narration;
   assert.equal(runNeedsNarration(pkg), false);
+});
+
+test('final media merge retains new measured narration without overriding live edits', () => {
+  const baseline = narratedPackage();
+  const current = structuredClone(baseline);
+  const staged = structuredClone(baseline);
+  staged.assets.a_narration = { kind: 'audio', status: 'ready', file: 'audio/narration.norm.wav' };
+  staged.scenes[0].narration_asset = 'a_narration';
+  staged.scenes[0].narration_duration_frames = 60;
+  const generated = structuredClone(staged);
+  const merged = mergeFinalRunMedia({ staged, current, generated, baseline });
+  assert.equal(merged.assets.a_narration.status, 'ready');
+  assert.equal(merged.scenes[0].narration_asset, 'a_narration');
+  assert.equal(merged.scenes[0].narration_duration_frames, 60);
+
+  const edited = structuredClone(current);
+  edited.scenes[0].narration = 'The owner rewrote this while media was running.';
+  const preserved = mergeFinalRunMedia({ staged, current: edited, generated, baseline });
+  assert.equal(preserved.scenes[0].narration, edited.scenes[0].narration);
+  assert.equal(preserved.scenes[0].narration_asset, undefined);
+
+  const deleted = structuredClone(baseline);
+  deleted.assets.a_narration = { kind: 'audio', status: 'ready', file: 'audio/old.wav' };
+  const liveDeletion = structuredClone(deleted);
+  delete liveDeletion.assets.a_narration;
+  const notRestored = mergeFinalRunMedia({ staged, current: liveDeletion, generated, baseline: deleted });
+  assert.equal(notRestored.assets.a_narration, undefined);
 });

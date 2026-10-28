@@ -188,7 +188,7 @@ function assetEditedSinceBaseline({ baseline, current, pkg, assetId }) {
 // plate). mergeRunMedia deliberately refuses to replace an asset that was in the staged
 // package, but a ready asset absent from both the staged and the live package is a new
 // output and belongs in the rebased package.
-function mergeFinalRunMedia({ staged, current, generated }) {
+export function mergeFinalRunMedia({ staged, current, generated, baseline = null }) {
   const merged = mergeRunMedia({ staged, current, generated });
   if (!current) return merged;
   for (const [assetId, asset] of Object.entries(generated.assets ?? {})) {
@@ -196,6 +196,22 @@ function mergeFinalRunMedia({ staged, current, generated }) {
     if (staged.assets?.[assetId] !== undefined) continue;
     if (!asset || typeof asset !== 'object' || asset.status !== 'ready' || !asset.file) continue;
     merged.assets = { ...merged.assets, [assetId]: structuredClone(asset) };
+  }
+  // Narration is introduced by the final-run hook after the baseline snapshot.
+  // Keep it when the owner left narration untouched, but never undo an edit or
+  // deletion made while media was running.
+  const narration = generated.assets?.a_narration;
+  if (baseline && narration?.status === 'ready' && narration.file
+    && isDeepStrictEqual(baseline.assets?.a_narration, current.assets?.a_narration)) {
+    merged.assets = { ...merged.assets, a_narration: structuredClone(narration) };
+    merged.scenes = (current.scenes ?? []).map(scene => {
+      const before = baseline.scenes?.find(candidate => candidate.id === scene.id);
+      const after = generated.scenes?.find(candidate => candidate.id === scene.id);
+      if (!before || !after?.narration_asset || !isDeepStrictEqual(before.narration, scene.narration)
+        || !isDeepStrictEqual(before.narration_asset, scene.narration_asset)
+        || !isDeepStrictEqual(before.narration_duration_frames, scene.narration_duration_frames)) return scene;
+      return { ...scene, narration_asset: after.narration_asset, narration_duration_frames: after.narration_duration_frames ?? null };
+    });
   }
   return merged;
 }
@@ -305,6 +321,7 @@ export function createApp({
       runBaselines.set(options.runId, {
         revision: stored?.revision ?? pkg.revision ?? null,
         assets: stored ? JSON.parse(JSON.stringify(stored.assets ?? {})) : null,
+        scenes: stored ? JSON.parse(JSON.stringify(stored.scenes ?? [])) : null,
       });
     }
     mkdirSync(workDir, { recursive: true });
@@ -409,7 +426,7 @@ export function createApp({
     let copied = [];
     while (!saved) {
       const current = store.read(id);
-      const merged = mergeFinalRunMedia({ staged: pkg, current, generated: result.package });
+      const merged = mergeFinalRunMedia({ staged: pkg, current, generated: result.package, baseline });
       copied = copyNamedAssets({ pkg: changedRunMedia(current, merged), outputDir: record.outputDir, packageDir });
       try {
         saved = current ? store.save(id, merged, current.revision) : store.write(merged);
