@@ -17,6 +17,64 @@ function safeDetail(value, depth = 0) {
   return String(value ?? '').slice(0, 500);
 }
 
+function buildScene(scene) {
+  return {
+    id: String(scene?.id ?? '').slice(0, 200),
+    layout: String(scene?.layout ?? '').slice(0, 80),
+    preferredFrames: Number(scene?.preferredFrames) || 0,
+    headline: String(scene?.copy?.headline ?? '').slice(0, 300),
+    generationCalls: 0,
+  };
+}
+
+function updateBuild(state, event) {
+  const args = event.args && typeof event.args === 'object' ? event.args : {};
+  if (event.type === 'tool_call' && event.name === 'storyboard.propose') {
+    state.build = {
+      title: String(args.title ?? 'Untitled film').slice(0, 300),
+      proposal: args.proposal && typeof args.proposal === 'object' ? {
+        logline: String(args.proposal.logline ?? '').slice(0, 1000),
+        look: String(args.proposal.look ?? '').slice(0, 500),
+        soundtrack: String(args.proposal.soundtrack ?? '').slice(0, 500),
+      } : null,
+      scenes: Array.isArray(args.scenes) ? args.scenes.map(buildScene) : [],
+      assets: [],
+      coverageScenes: null,
+    };
+    return;
+  }
+  if (!state.build) return;
+  if (event.type === 'tool_call' && event.name === 'storyboard.edit') {
+    const scene = state.build.scenes.find(item => item.id === args.scene_id);
+    if (scene) {
+      if (Number(args.patch?.preferredFrames) > 0) scene.preferredFrames = Number(args.patch.preferredFrames);
+      if (typeof args.patch?.copy?.headline === 'string') scene.headline = args.patch.copy.headline.slice(0, 300);
+    }
+    return;
+  }
+  if (event.type === 'tool_call' && ['assets.generate_image', 'assets.generate_video'].includes(event.name)) {
+    const kind = event.name === 'assets.generate_video' ? 'video' : 'image';
+    state.build.assets.push({
+      tool: event.name,
+      kind,
+      sceneId: String(args.scene_id ?? '').slice(0, 200),
+      intent: String(args.intent ?? args.action ?? args.subject ?? '').slice(0, 800),
+      status: 'calling',
+    });
+    const scene = state.build.scenes.find(item => item.id === args.scene_id);
+    if (scene) scene.generationCalls += 1;
+    return;
+  }
+  if (event.type === 'tool_result' && ['assets.generate_image', 'assets.generate_video'].includes(event.name)) {
+    const asset = state.build.assets.findLast(item => item.tool === event.name && item.status === 'calling');
+    if (asset) asset.status = event.ok === true ? 'planned' : 'failed';
+    return;
+  }
+  if (event.type === 'runner_phase' && event.status === 'coverage') {
+    state.build.coverageScenes = Number(event.scenes) || null;
+  }
+}
+
 function sanitizedEvent(event) {
   const out = {};
   for (const [key, value] of Object.entries(event ?? {})) {
@@ -65,6 +123,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     usage: { input: 0, output: 0 },
     problems: null,
     message: null,
+    build: null,
   };
 
   function update(event) {
@@ -72,6 +131,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     const safe = sanitizedEvent(event);
     events.push({ at: new Date(now()).toISOString(), ...safe });
     if (events.length > HISTORY_LIMIT) events.shift();
+    updateBuild(state, safe);
     if (safe.type === 'runner_phase') {
       state.phase = safe.phase ?? state.phase;
       state.activity = safe.status === 'validation' ? 'validation' : `${state.phase}_${safe.status ?? 'updated'}`;

@@ -53,6 +53,26 @@ test('progress exposes the brief and tool arguments with secret-field redaction'
   assert.doesNotMatch(JSON.stringify(snapshot), /do-not-retain|raw model text/);
 });
 
+test('progress builds a live proposal, scene and asset view from tool calls', () => {
+  const progress = createAgentProgress('session-build', () => 1000);
+  progress.update({
+    type: 'tool_call', name: 'storyboard.propose',
+    args: {
+      title: 'Real Human Skaters',
+      proposal: { logline: 'Two skaters learn.', look: 'Photorealistic people.', soundtrack: 'Foley.' },
+      scenes: [{ id: 's1', layout: 'hero', preferredFrames: 150, copy: { headline: 'First fall' } }],
+    },
+  });
+  progress.update({ type: 'tool_call', name: 'assets.generate_video', args: { scene_id: 's1', action: 'A human skater falls.' } });
+  progress.update({ type: 'tool_result', name: 'assets.generate_video', ok: true });
+  const build = progress.snapshot().build;
+  assert.equal(build.title, 'Real Human Skaters');
+  assert.equal(build.proposal.look, 'Photorealistic people.');
+  assert.equal(build.scenes[0].generationCalls, 1);
+  assert.equal(build.assets[0].kind, 'video');
+  assert.equal(build.assets[0].status, 'planned');
+});
+
 test('schema failures include actionable validation details, not a generic placeholder', () => {
   const problems = packageSchemaProblems({});
   assert.ok(problems.length > 0);
