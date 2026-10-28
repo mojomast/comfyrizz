@@ -26,6 +26,7 @@ test('agent progress tracks phases and timings without retaining private content
   assert.equal(snapshot.lastModel.durationMs, 4000);
   assert.equal(snapshot.lastModel.firstChunkMs, 1000);
   assert.equal(snapshot.lastTool.durationMs, 125);
+  assert.deepEqual(snapshot.usage, { input: 10, output: 20, total: 30 });
   assert.equal(snapshot.status, 'failed');
   assert.equal(snapshot.elapsedMs, 4125);
   now += 5000;

@@ -1751,6 +1751,7 @@ export function createApp({
           fallback: Boolean(result.fallback),
           provider: result.provider ?? null,
           model: result.model ?? null,
+          usage: result.usage ?? { input: 0, output: 0, total: 0 },
         });
       } catch (error) {
         progress.finish('failed', error.message);
@@ -1758,6 +1759,7 @@ export function createApp({
         return sendJson(response, error.status ?? 500, {
           sessionId,
           error: error.message,
+          usage: progress.snapshot().usage,
           ...(Array.isArray(error.errors) ? { details: error.errors } : {}),
         });
       }

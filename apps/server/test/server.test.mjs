@@ -200,6 +200,8 @@ test('POST /api/agent runs the runner, validates and compiles the package', asyn
   assert.deepEqual(response.json.svgAssets, ['a_icon_check']);
   assert.ok(response.json.generatedAssets.a_icon_check.svg.includes('<svg'));
   assert.equal(response.json.live, false);
+  assert.equal(typeof response.json.usage.total, 'number');
+  assert.equal(response.json.usage.total, response.json.usage.input + response.json.usage.output);
   const progress = await request({ path: '/api/agent/progress?sessionId=agent-progress-test' });
   assert.equal(progress.status, 200);
   assert.equal(progress.json.status, 'done');

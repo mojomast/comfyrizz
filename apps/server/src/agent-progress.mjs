@@ -37,6 +37,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     milestone: null,
     lastModel: null,
     lastTool: null,
+    usage: { input: 0, output: 0 },
     problems: null,
     message: null,
   };
@@ -61,6 +62,10 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     } else if (safe.type === 'model_result') {
       state.activity = 'model_complete';
       state.lastModel = safe;
+      if (safe.usage) {
+        state.usage.input += safe.usage.input;
+        state.usage.output += safe.usage.output;
+      }
     } else if (safe.type === 'tool_call') {
       state.activity = 'tool_running';
       state.tool = safe.name ?? null;
@@ -75,6 +80,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
       state.message = safe.message ?? safe.code ?? 'agent error';
     } else if (safe.type === 'done') {
       state.activity = 'agent_done';
+      if (safe.usage) state.usage = { ...safe.usage };
     }
   }
 
@@ -91,6 +97,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
       startedAt: new Date(startedAt).toISOString(),
       updatedAt: new Date(now()).toISOString(),
       elapsedMs: Math.max(0, (finishedAt ?? now()) - startedAt),
+      usage: { ...state.usage, total: state.usage.input + state.usage.output },
       recentEvents: events.slice(-30),
     };
   }

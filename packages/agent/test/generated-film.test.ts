@@ -64,6 +64,9 @@ test('retained four-shot prompt is generated film; explicit procedural controls 
   assert.equal(intent.evidence.cinematicCameraOrAction, true);
   assert.equal(intent.evidence.nativeSoundscape, true);
   assert.equal(classifyProductionIntent('Create a cinematic 4-shot motion-graphics explainer with animated SVG charts, no narration.').kind, 'motion-graphics');
+  const hybrid = classifyProductionIntent('Create a 20-second narrated generated film in 4 shots with Remotion motion graphics, kinetic typography and native foley.');
+  assert.equal(hybrid.kind, 'generated-film');
+  assert.equal(hybrid.wordless, false);
   assert.equal(classifyProductionIntent('No SVG or charts. Create a generated film in 4 shots with a felt mascot and coastal sound.').kind, 'generated-film');
   assert.equal(parseMotionModel(undefined), 'auto');
   assert.throws(() => parseMotionModel('flux'), /motionModel/);

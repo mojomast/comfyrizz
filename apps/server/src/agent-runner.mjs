@@ -354,6 +354,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       routes: slice.routes,
       pendingGpu: slice.pendingGpu,
       svgAssets: slice.svgAssets,
+      usage: { ...slice.result.usage, total: slice.result.usage.input + slice.result.usage.output },
       events: slice.result.toolCalls.map(call => ({ name: call.name, ok: call.ok })),
     };
   };

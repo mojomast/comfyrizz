@@ -35,6 +35,10 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     text,
     /\b(?:motion[\s-]+graphics?|SVG|charts?|graphs?|vector(?:\s+|\s*-)*(?:animation|graphics?|art)|procedural(?:\s+|\s*-)*(?:animation|graphics?|video)|animated\s+(?:charts?|graphs?|diagrams?|infographics?)|data[\s-]+driven\s+(?:animation|video)|kinetic\s+typography)\b/i,
   );
+  const explicitGeneratedFilm = positiveMatch(
+    text,
+    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?))\b/i,
+  );
   const generatedShots = positiveMatch(
     text,
     /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
@@ -61,7 +65,9 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   const requestedSeconds = requestedSecondsMatch ? Number(requestedSecondsMatch[1]) : null;
   const strongEvidence = [generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape]
     .filter(Boolean).length;
-  const generatedFilm = !proceduralConstraint && (generatedShots || strongEvidence >= 2);
+  // An explicit generated film may use Remotion overlays and motion graphics.
+  // Procedural wording only wins when the brief is not explicitly a generated film.
+  const generatedFilm = explicitGeneratedFilm || (!proceduralConstraint && (generatedShots || strongEvidence >= 2));
   return {
     kind: generatedFilm ? 'generated-film' : 'motion-graphics',
     generatedFilm,
