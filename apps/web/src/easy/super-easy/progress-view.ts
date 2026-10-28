@@ -360,7 +360,7 @@ ${stages.stages.map(stageMarkup).join('\n')}
 ${gallerySlots.map((slot) => slot.html).join('\n')}
 </ul>`;
 
-  const actionsHtml = failure !== null
+  const primaryActionsHtml = failure !== null
     ? failureMarkup(failure)
     : finalReady
       ? renderSuperEasyDoneActions({
@@ -371,6 +371,11 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
       : previewReady
         ? previewMarkup()
         : '';
+  const startOverHtml = finalReady ? '' : `<div class="super-easy-progress-start-over">
+<button type="button" class="btn btn-secondary" data-super-easy-make-another>Stop and start a new prompt</button>
+<p class="hint">Return to the idea screen. Any active video run is cancelled.</p>
+</div>`;
+  const actionsHtml = `${primaryActionsHtml}${startOverHtml}`;
 
   const keys: SuperEasyProgressKeys = {
     live: progressLiveKey(stages, gallery, {

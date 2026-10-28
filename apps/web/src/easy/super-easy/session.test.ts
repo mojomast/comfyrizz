@@ -216,6 +216,29 @@ test('Stop cancels the watch once and ignores later updates', async () => {
   assert.equal(h.views.length, viewsAtStop, 'no view is pushed after Stop');
 });
 
+test('Stop cancels an active server run while leaving the generation screen', async () => {
+  const store = fakeStore();
+  const cancelled = [];
+  let finish;
+  const session = createSuperEasySession({
+    run: async (_input, deps) => {
+      deps.onRunStarted('run_active');
+      return new Promise(resolve => { finish = resolve; });
+    },
+    watch: () => () => {},
+    api: { cancelRun: async id => { cancelled.push(id); return {}; } },
+    host: {}, store, go() {},
+  });
+  const pending = session.generate({ prompt: 'A robot', compute: 'colab' });
+  await new Promise(resolve => setImmediate(resolve));
+  session.stop();
+  session.stop();
+  assert.deepEqual(cancelled, ['run_active']);
+  assert.equal(store.state.generate.status, 'stopped');
+  finish({ ok: false, code: 'RUN_FAILED', stage: 'run', message: 'Stopped by user.' });
+  await pending;
+});
+
 test('the final video marks the run done and stops the watch', async () => {
   const h = harness();
   await h.session.generate({ prompt: 'A friendly robot who bakes bread' });

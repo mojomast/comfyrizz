@@ -401,6 +401,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       stages: (snapshot) => superEasyStages(snapshot),
       gallery: (snapshot) => mergeLiveGallery(buildGalleryModel(snapshot), liveGalleryItems),
       onMakeAnother: () => {
+        superEasySession?.stop();
         resetPlanDecisionAnswers();
         store.startNew();
       },

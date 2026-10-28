@@ -691,3 +691,10 @@ test('a new gallery tile is keyed in place and does not replace a playing sample
   assert.deepEqual(fake.nodes.map((node) => node.id), ['character:character-1', 'shot:shot_1', 'voice:voice-1', 'final']);
   assert.match(voice.outerHTML, /<audio\b/u);
 });
+
+test('an active run always offers a way back to a new prompt', () => {
+  const html = superEasyProgressParts(partialSnapshot()).html;
+  assert.match(html, /data-super-easy-make-another/);
+  assert.match(html, /Stop and start a new prompt/);
+  assert.match(html, /Any active video run is cancelled/);
+});

@@ -204,6 +204,9 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     getRun(id: any) {
       return request('GET', `/api/run/${encodeURIComponent(id)}`);
     },
+    cancelRun(id: any) {
+      return request('POST', `/api/run/${encodeURIComponent(id)}/cancel`, {});
+    },
     async getRunVideo(id: any): Promise<Blob> {
       let response: Response;
       try {

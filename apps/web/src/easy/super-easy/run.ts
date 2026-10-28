@@ -35,6 +35,7 @@ export interface SuperEasyApi {
   dispatchAction(id: string, body: unknown): Promise<unknown>;
   startRun(body: unknown): Promise<unknown>;
   getRun(id: string): Promise<unknown>;
+  cancelRun?(id: string): Promise<unknown>;
   getRunVideo(id: string): Promise<Blob>;
   colabStatus(): Promise<{ backendId?: string } | null>;
 }
@@ -87,6 +88,8 @@ export interface RunSuperEasyDeps {
   setupConfirmed?: boolean;
   /** Told when the run moves on, so the gauges can move before the server journals anything. */
   onPhase?(stage: SuperEasyRunStage): void;
+  /** Expose the active run for Stop-and-start-over cancellation. */
+  onRunStarted?(runId: string): void;
 }
 
 export type SuperEasyRunFailureCode =
@@ -502,6 +505,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
       dispatchActions: compute !== 'colab' || hasPaidWork,
       onRunStarted(startedRunId) {
         runId = startedRunId;
+        deps.onRunStarted?.(startedRunId);
       },
     });
   } catch (error) {
