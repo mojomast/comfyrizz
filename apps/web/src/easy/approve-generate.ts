@@ -76,7 +76,8 @@ async function runApproval(run: () => Promise<string | undefined>): Promise<stri
   try {
     return recordFailure(await run());
   } catch (error) {
-    lastFailure = { message: COPY.plan.approveFailed };
+    const detail = error instanceof Error && typeof error.message === 'string' ? error.message.trim() : '';
+    lastFailure = { message: detail !== '' && detail !== 'OFFLINE' ? detail : COPY.plan.approveFailed };
     throw error;
   }
 }

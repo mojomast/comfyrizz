@@ -481,12 +481,19 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         snapshot = null;
       }
     }
-    const message = await approveAndGenerate(store.get(), {
-      api: api as never,
-      store,
-      snapshot,
-      go: (step) => go(step),
-    });
+    let message: string | undefined;
+    try {
+      message = await approveAndGenerate(store.get(), {
+        api: api as never,
+        store,
+        snapshot,
+        go: (step) => go(step),
+      });
+    } catch (error) {
+      message = error instanceof Error && error.message.trim() !== '' && error.message !== 'OFFLINE'
+        ? error.message
+        : COPY.plan.approveFailed;
+    }
     if (typeof message === 'string' && message) {
       procedure.fail(message);
       shell?.alert(message);
