@@ -104,9 +104,96 @@ function zodEnum(values: readonly string[]) {
   return z.enum(values as [string, ...string[]]);
 }
 
+const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list', 'split', 'compare', 'code'] as const;
+type SceneLayout = (typeof SCENE_LAYOUTS)[number];
+
+const PACKAGE_FPS = [24, 25, 30, 50, 60] as const;
+const FORMAT_PRESETS: Record<string, { width: number; height: number }> = {
+  '16:9': { width: 1920, height: 1080 },
+  '9:16': { width: 1080, height: 1920 },
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+};
+const UNSUPPORTED_ASPECTS = new Set(['4:3', '3:2', '5:4', '16:10', '21:9', '2:1', '2.39:1', '2.35:1', '1.85:1', '1.66:1']);
+
+interface PackageFormat {
+  width: number;
+  height: number;
+  fps: number;
+}
+
+function briefClauses(brief: string): string[] {
+  return brief.split(/[;!?\n]+|\.\s+/).map(clause => clause.trim()).filter(Boolean);
+}
+
+function negatedClause(clause: string): boolean {
+  return /\b(?:no|not|never|avoid|without|don'?t|cannot|can't)\b/i.test(clause);
+}
+
+function unsupportedFormatError(reasons: string[]): Error {
+  return Object.assign(
+    new Error(`Unsupported format: ${reasons.join(', ')} cannot be rendered. Use 1920x1080 at 30 fps and 16:9, or a supported WxH size such as 1080x1920 at 30 fps.`),
+    { name: 'UnsupportedFormatError', status: 422, code: 'UNSUPPORTED_FORMAT' },
+  );
+}
+
+function supportedSize(width: number, height: number): boolean {
+  return Number.isInteger(width) && Number.isInteger(height)
+    && width >= 64 && width <= 7680 && width % 2 === 0
+    && height >= 64 && height <= 4320 && height % 2 === 0;
+}
+
+/** Read the output size and fps the brief actually asks for; never silently fall back from a rejected format. */
+function resolveFormat(brief: string): PackageFormat {
+  const clauses = briefClauses(brief).filter(clause => !negatedClause(clause));
+  const reasons: string[] = [];
+  const addReason = (reason: string) => {
+    if (!reasons.includes(reason)) reasons.push(reason);
+  };
+  let size: { width: number; height: number } | undefined;
+  let preset: { width: number; height: number } | undefined;
+  let fps = 30;
+
+  for (const clause of clauses) {
+    for (const match of clause.matchAll(/\b(\d{1,2})\s*k\b/gi)) {
+      const resolution = Number(match[1]);
+      if (resolution >= 8) addReason(`${resolution}K resolution`);
+    }
+    for (const match of clause.matchAll(/\b(\d{1,3})\s*(?:fps\b|frames?\s+per\s+second)\b/gi)) {
+      const value = Number(match[1]);
+      if ((PACKAGE_FPS as readonly number[]).includes(value)) fps = value;
+      else addReason(`${value} fps`);
+    }
+    for (const match of clause.matchAll(/\b(\d{1,2}(?:\.\d+)?)\s*:\s*(\d{1,2}(?:\.\d+)?)\b/g)) {
+      const ratio = `${match[1]}:${match[2]}`;
+      const known = FORMAT_PRESETS[ratio];
+      if (known) {
+        preset = known;
+        continue;
+      }
+      const context = /\b(?:aspect|format|ratio|resolution)\b/i.test(clause);
+      if (UNSUPPORTED_ASPECTS.has(ratio) || match[1].includes('.') || match[2].includes('.') || context) addReason(`${ratio} aspect`);
+    }
+    for (const match of clause.matchAll(/\b(\d{2,5})\s*[x×]\s*(\d{2,5})\b/gi)) {
+      const width = Number(match[1]);
+      const height = Number(match[2]);
+      if (supportedSize(width, height)) size = { width, height };
+      else addReason(`${width}x${height} resolution`);
+    }
+  }
+
+  if (reasons.length > 0) throw unsupportedFormatError(reasons);
+  if (size) return { ...size, fps };
+  if (preset) return { ...preset, fps };
+  const words = clauses.join(' ');
+  if (/\b(?:vertical|portrait|9:16)\b/i.test(words)) return { width: 1080, height: 1920, fps };
+  if (/\b(?:square|1:1)\b/i.test(words)) return { width: 1080, height: 1080, fps };
+  return { width: 1920, height: 1080, fps };
+}
+
 const sceneSchema = z.object({
   id: z.string().min(1),
-  layout: z.enum(['title', 'hero', 'stat', 'chart', 'list']).optional(),
+  layout: z.enum(SCENE_LAYOUTS).optional(),
   preferredFrames: z.number().int().positive().optional(),
   // DeepSeek often sends `copy` as a plain headline string; accept it and lift it
   // to `{ headline }` so a common model shape is not a repair-loop failure.
@@ -321,8 +408,6 @@ function baseParameters(properties: Record<string, unknown>, required: string[])
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
-const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list', 'split', 'compare', 'code'] as const;
-type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 const SCENE_KEYS = new Set([
   'id', 'layout', 'variant', 'preferredFrames', 'copy', 'data', 'background', 'foreground',
   'media_only', 'lower_third', 'transitionOut', 'motion', 'narration', 'narration_asset',
@@ -439,6 +524,14 @@ function inferSceneLayout(scene: Record<string, any>): SceneLayout {
   return 'hero';
 }
 
+/** A scene that cannot render is an actionable 422, never a silent layout downgrade. */
+function sceneDataError(sceneId: string, layout: string, detail: string, code: 'SCENE_DATA_REQUIRED' | 'SCENE_DATASET_UNKNOWN' | 'SCENE_DATA_DISPLAY_INVALID'): Error {
+  return Object.assign(
+    new Error(`${sceneId}: layout ${layout} ${detail} Set data.dataset to a dataset id from datasets and data.display to bar, number or counter.`),
+    { name: 'SceneDataError', status: 422, code },
+  );
+}
+
 /**
  * Coerce a model-authored scene into the published package shape: a valid
  * layout, readable copy, a real dataset reference, a known variant/background,
@@ -457,14 +550,22 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   if (!copy.headline && typeof source.headline === 'string') copy.headline = source.headline;
   for (const key of Object.keys(copy)) if (!COPY_KEYS.has(key)) delete copy[key];
 
-  let finalLayout: SceneLayout = layout;
+  const finalLayout: SceneLayout = layout;
   let data = source.data && typeof source.data === 'object' ? { ...source.data } : undefined;
-  if (data && (typeof data.dataset !== 'string' || !datasetIds.has(data.dataset))) data = undefined;
-  if (['stat', 'chart'].includes(finalLayout) && !data) finalLayout = Array.isArray(copy.items) && copy.items.length >= 2 ? 'list' : 'hero';
   if (data) {
+    const datasetId = typeof data.dataset === 'string' ? data.dataset.trim() : '';
+    if (!datasetId) throw sceneDataError(id, finalLayout, 'has data but no dataset id.', 'SCENE_DATA_REQUIRED');
+    if (!datasetIds.has(datasetId)) throw sceneDataError(id, finalLayout, `references unknown dataset "${datasetId}".`, 'SCENE_DATASET_UNKNOWN');
+    data.dataset = datasetId;
     for (const key of Object.keys(data)) if (key !== 'dataset' && key !== 'display') delete data[key];
+    if (data.display !== undefined && !['bar', 'number', 'counter'].includes(data.display)) {
+      throw sceneDataError(id, finalLayout, `has unsupported data.display "${String(data.display)}".`, 'SCENE_DATA_DISPLAY_INVALID');
+    }
     if (finalLayout === 'stat' && data.display === undefined) data.display = 'number';
     if (finalLayout === 'chart' && data.display === undefined) data.display = 'bar';
+  }
+  if (['stat', 'chart'].includes(finalLayout) && !data) {
+    throw sceneDataError(id, finalLayout, 'requires a dataset reference but none was provided.', 'SCENE_DATA_REQUIRED');
   }
 
   const limits = COPY_LIMITS[finalLayout];
@@ -674,6 +775,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const rawTitle = args.title ?? args.brief.slice(0, 90);
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45).trimEnd()}…` : rawTitle;
     const id = hashId('pkg', args.brief);
+    const format = resolveFormat(args.brief);
     const datasetIds = new Set(Object.keys(args.datasets ?? {}));
     const intent = classifyProductionIntent(args.brief);
     state.intent = intent;
@@ -694,7 +796,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       id,
       title,
       createdAt: (options.now ?? (() => new Date().toISOString()))(),
-      format: { width: 1920, height: 1080, fps: 30 },
+      format,
       duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
       theme,
       voice: { enabled: false, engine: 'none' },
@@ -1340,6 +1442,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           },
         },
         scenes: { type: 'array', items: { type: 'object' } },
+        datasets: { type: 'object', additionalProperties: true, description: 'User datasets keyed by dataset id; chart/stat/compare scenes reference data.dataset.' },
       }, ['brief']),
       proposeSchema,
       propose,
