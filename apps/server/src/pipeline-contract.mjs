@@ -103,7 +103,12 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   const voiced = pkg.voice?.enabled === true && pkg.voice?.engine !== 'none' && pkg.scenes.some(s => s.narration?.trim());
   const presenters = selectedPresenterScenes(pkg).length > 0;
   const jobs = planJobs(pkg).jobs;
-  const requiresAudio = voiced || jobs.some(job => job.generator === 'fasth3-omni');
+  const finishedAudio = Boolean(
+    (pkg.audio?.music && typeof pkg.audio.music === 'object' && pkg.audio.music.enabled !== false && pkg.audio.music.asset)
+    || (pkg.audio?.ambience && typeof pkg.audio.ambience === 'object' && pkg.audio.ambience.enabled !== false)
+    || (Array.isArray(pkg.audio?.sfx) && pkg.audio.sfx.length > 0)
+  );
+  const requiresAudio = voiced || finishedAudio || jobs.some(job => job.generator === 'fasth3-omni');
   const remoteVoice = voiced && pkg.voice.engine === 'qwen3-tts' && options.narrationRuntime === 'colab';
   const gpuMedia = jobs.length > 0 || presenters;
   const issues = [];

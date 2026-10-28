@@ -132,11 +132,65 @@ test('ideaPrompt keeps the brief sentence order and skips decide answers', () =>
 
   assert.equal(
     ideaPrompt(state),
-    'A 30-second video for my bakery. Aspect: 16:9. Look: cinematic-dark. Music: instrumental bed. What should viewers do at the end? Visit the website',
+    'A 30-second video for my bakery. Aspect: 16:9. Look: cinematic-dark. Music: instrumental bed. Finishing narration: meaningful scene-specific Kokoro voiceover that preserves the native soundscape. What should viewers do at the end? Visit the website',
   );
 
   state.idea.sound = false;
   assert.ok(ideaPrompt(state).includes('No music.'));
+});
+
+test('ideaPrompt uses the selected duration but explicit typed durations win', () => {
+  const state = ideaState();
+  state.idea.text = 'A warm bakery launch with a friendly ending';
+  state.idea.lengthS = 60;
+  assert.match(ideaPrompt(state), /Length: about 60 seconds\./u);
+
+  state.idea.text = 'A 15-second bakery teaser with a warm ending';
+  state.idea.lengthS = 90;
+  const prompt = ideaPrompt(state);
+  assert.match(prompt, /A 15-second bakery teaser/u);
+  assert.doesNotMatch(prompt, /Length: about/u);
+});
+
+test('ideaPrompt defaults to meaningful Kokoro finishing narration without replacing native sound', () => {
+  const state = ideaState();
+  state.idea.text = 'A baker shapes a loaf as the morning market wakes up';
+  const prompt = ideaPrompt(state);
+  assert.match(prompt, /Finishing narration: meaningful scene-specific Kokoro voiceover that preserves the native soundscape\./u);
+  assert.doesNotMatch(prompt, /H3|native[ -]dialogue/iu);
+});
+
+test('explicit wordless and no-speech requests suppress automatic narration guidance', () => {
+  for (const text of [
+    'A wordless bakery story told through hands and warm light',
+    'A bakery story with no dialogue, just the morning market',
+    'A bakery story with no narration please',
+    'A bakery story with no speech at all',
+    'A bakery story with no voiceover',
+  ]) {
+    const state = ideaState();
+    state.idea.text = text;
+    state.narration.on = true;
+    const prompt = ideaPrompt(state);
+    assert.ok(prompt.startsWith(text));
+    assert.doesNotMatch(prompt, /Kokoro|Finishing narration:/u);
+  }
+});
+
+test('narration off adds no narration only when the prompt has no speech intent', () => {
+  const state = ideaState();
+  state.idea.text = 'A baker shapes a loaf as the morning market wakes up';
+  state.narration.on = false;
+  assert.match(ideaPrompt(state), /No narration\./u);
+
+  state.idea.text = 'A cheerful narrator introduces the morning bakery special';
+  assert.doesNotMatch(ideaPrompt(state), /No narration\./u);
+
+  state.idea.text = 'Two bakers speak on camera about their morning special';
+  assert.doesNotMatch(ideaPrompt(state), /No narration\./u);
+
+  state.idea.text = 'A wordless morning bakery story';
+  assert.doesNotMatch(ideaPrompt(state), /No narration\./u);
 });
 
 test('a short idea renders the tooShort message linked by aria-describedby', () => {

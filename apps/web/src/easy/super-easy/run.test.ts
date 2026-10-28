@@ -534,6 +534,23 @@ test('a final-plan failure stops before approval or dispatch', async () => {
   store.flush();
 });
 
+test('the selected duration reaches the store and brief unless the prompt types its own duration', async () => {
+  for (const options of [
+    { prompt: PROMPT, lengthS: 60, expected: 'Length: about 60 seconds.' },
+    { prompt: 'A 15-second bakery teaser with a warm ending', lengthS: 90, expected: null },
+  ]) {
+    const { api, host, calls, store } = harness();
+    const result = await runSuperEasy({ ...options, compute: 'cpu', proposalOnly: true }, { api, host, store, go: () => {} });
+    assert.equal(result.ok, true);
+    assert.equal(store.get().idea.lengthS, options.lengthS);
+    const brief = calls.find(call => call.kind === 'build').input.brief;
+    if (options.expected) assert.match(brief, new RegExp(options.expected, 'u'));
+    else assert.doesNotMatch(brief, /Length: about/u);
+    assert.match(brief, new RegExp(options.prompt, 'u'));
+    store.flush();
+  }
+});
+
 test('creative proposals can be revised for free and approved without rebuilding the package', async () => {
   const { api, host, calls, store } = harness();
   const first = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', proposalOnly: true }, { api, host, store, go: () => {} });

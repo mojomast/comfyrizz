@@ -174,6 +174,48 @@ test('Generate runs the one prompt, then watches that production', async () => {
   assert.match(h.session.progressHtml(), /data-super-easy-progress/u);
 });
 
+test('duration survives proposal revisions and approval in the same session input', async () => {
+  const store = fakeStore();
+  const inputs = [];
+  const session = createSuperEasySession({
+    async run(input) {
+      inputs.push(input);
+      if (input.proposalOnly) {
+        return {
+          ok: true,
+          proposal: {
+            basePrompt: input.basePrompt ?? input.prompt,
+            revisionNotes: input.revisionNotes ?? [],
+          },
+          snapshot: null,
+        };
+      }
+      return {
+        ok: true,
+        productionId: PRODUCTION_ID,
+        draftCommand: { kind: 'iteration.set' },
+        snapshot: { plan: { status: 'done' } },
+        cpu: { ok: true, step: 'review' },
+      };
+    },
+    watch: () => () => {},
+    api: {},
+    host: {},
+    store,
+    go() {},
+  });
+
+  await session.generate({ prompt: 'A friendly robot who bakes bread', compute: 'cpu', lengthS: 60, proposalOnly: true });
+  await session.reviseProposal('Make the ending playful');
+  await session.approveProposal();
+
+  assert.equal(inputs.length, 3);
+  assert.deepEqual(inputs.map(input => input.lengthS), [60, 60, 60]);
+  assert.deepEqual(inputs[1].revisionNotes, ['Make the ending playful']);
+  assert.deepEqual(inputs[2].revisionNotes, ['Make the ending playful']);
+  assert.equal(inputs[2].proposalOnly, false);
+});
+
 test('watch callbacks move the stages and fill the gallery', async () => {
   const h = harness();
   await h.session.generate({ prompt: 'A friendly robot who bakes bread' });
@@ -390,7 +432,7 @@ test('a planning failure is visible on the progress screen and can be retried', 
   };
   const h = harness({ runResult: failure });
 
-  await h.session.generate({ prompt: 'A friendly robot who bakes bread', compute: 'cpu' });
+  await h.session.generate({ prompt: 'A friendly robot who bakes bread', compute: 'cpu', lengthS: 90 });
 
   assert.equal(h.session.status(), 'error');
   assert.equal(h.errors.length, 1);
@@ -404,7 +446,9 @@ test('a planning failure is visible on the progress screen and can be retried', 
   const before = h.calls.filter((call) => call.kind === 'run').length;
   const retried = await h.session.retry();
   assert.equal(retried, failure);
-  assert.equal(h.calls.filter((call) => call.kind === 'run').length, before + 1);
+  const retries = h.calls.filter((call) => call.kind === 'run');
+  assert.equal(retries.length, before + 1);
+  assert.deepEqual(retries.map(call => call.input.lengthS), [90, 90]);
   assert.equal(h.session.status(), 'error');
 });
 

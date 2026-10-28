@@ -41,6 +41,7 @@ export type SuperEasyScreen = 'home' | 'progress';
 export interface SuperEasyGenerateInput {
   prompt: string;
   compute: EasyState['compute'];
+  lengthS?: EasyState['idea']['lengthS'];
   setupConfirmed?: boolean;
   motionModel?: MotionModel;
   /** "Record this run" was ticked; the Generate click is the gesture that starts it. */
@@ -87,6 +88,8 @@ export interface SuperEasyMountOptions {
   setup?(): SuperEasySetup;
   onSetup?(): void;
   onMotionModelChange?(model: MotionModel): void;
+  /** Keep the duration in the shared Easy idea, not a Super Easy-only preference. */
+  onLengthChange?(lengthS: EasyState['idea']['lengthS']): void;
   /** Open the current project's agent with an optional requested change. */
   onChangeAnything?(change?: string): void;
   proposal?(): SuperEasyProposal | null;
@@ -107,6 +110,10 @@ function closestOf(target: EventTarget | null): (selector: string) => Element | 
     return (selector) => candidate.closest?.(selector) ?? null;
   }
   return () => null;
+}
+
+function isLength(value: unknown): value is EasyState['idea']['lengthS'] {
+  return value === 15 || value === 30 || value === 60 || value === 90;
 }
 
 /**
@@ -301,14 +308,21 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       return;
     }
     freshStart = false;
+    const selectedLength = Number(root.querySelector<HTMLInputElement>('[data-super-easy-length]:checked')?.value);
+    const lengthS = isLength(selectedLength) ? selectedLength : options.state().idea.lengthS;
     const toggle = root.querySelector<HTMLInputElement>('[data-procedure-capture-toggle]');
     if (options.onGenerate) {
-      void options.onGenerate({ prompt, compute: setup.compute, motionModel: setup.motionModel ?? 'auto', ...(setup.compute === 'colab' ? { setupConfirmed: true } : {}), ...(toggle ? { capture: toggle.checked === true } : {}) });
+      void options.onGenerate({ prompt, compute: setup.compute, lengthS, motionModel: setup.motionModel ?? 'auto', ...(setup.compute === 'colab' ? { setupConfirmed: true } : {}), ...(toggle ? { capture: toggle.checked === true } : {}) });
     }
   };
 
   const onChange = (event: Event): void => {
     const target = event.target as { checked?: boolean; value?: string } | null;
+    if (closestOf(event.target)('[data-super-easy-length]')) {
+      const lengthS = Number(target?.value);
+      if (isLength(lengthS)) options.onLengthChange?.(lengthS);
+      return;
+    }
     if (closestOf(event.target)('[data-super-easy-motion-model]')) {
       const model = target?.value === 'h3' || target?.value === 'ltx' || target?.value === 'klein' ? target.value : 'auto';
       options.onMotionModelChange?.(model);
@@ -388,6 +402,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
         packageId: state.packageId,
         search: currentSearch(),
         setup: options.setup?.() ?? DEFAULT_SUPER_EASY_SETUP,
+        lengthS: state.idea.lengthS,
         ...(options.captureArmed ? { capture: { armed: options.captureArmed() } } : {}),
       });
     }

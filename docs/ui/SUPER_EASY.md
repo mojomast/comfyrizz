@@ -6,19 +6,30 @@ Studio and Advanced mode remain available when you want more control.
 ## Prompt → proposal → film
 
 1. Type one sentence, or choose **Try an example** or an idea chip.
-2. Choose a motion route before planning:
+2. Choose **15, 30, 60 or 90 seconds**. The credit-safe default is 30 seconds;
+   the choice survives proposal revisions, approval and retry. A duration typed
+   explicitly in the prompt takes precedence.
+3. Choose a motion route before planning:
    - **Auto** — Klein identity/keyframe art, LTX camera/scenery shots and H3
      character acting/native sound;
    - **MiniMax H3** — recurring characters and native sound;
    - **LTX-2.5** — cinematic motion plates;
    - **Klein only** — FLUX 3 Image Klein stills plus code motion and finishing sound.
-3. Press **Generate** to create a free creative plan.
-4. Review the short proposal: title, logline (at most two sentences), look,
+4. Press **Generate** to create a free creative plan.
+5. Review the short proposal: title, logline (at most two sentences), look,
    duration, soundtrack and model route. Choose **Revise proposal** for another
    free revision, or **Make this film** to start production.
 
 No production or paid run exists before **Make this film**. Revisions preserve the
 original prompt and notes instead of starting a different project.
+
+Unless the brief asks for wordless/no-speech output, Super Easy requests concise,
+scene-specific Kokoro finishing narration while preserving native sound. Before a
+generated-film plan is accepted, Comfyrizz also finalizes requested instrumental
+music as an original deterministic CPU stem, enables the H3 ambience bus, and
+makes the Remotion opener/outro visible. These editorial additions do not add
+visual takes or start GPU work. Explicit wordless, no-music and no-text choices
+remain authoritative.
 
 ## Setup once
 

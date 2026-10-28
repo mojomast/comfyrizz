@@ -8,6 +8,7 @@ const plans = [
   'Salt brine rake drag, rising storm gusts, distant thunder and individual rain impacts.',
   'Prepared player piano plinks, syncopated floor thumps and call-and-response in a station.',
   'Locksmith rain on a metal awning, brass key clicks, drawer roll and one final low piano note.',
+  'Warm felt piano, soft bass, gentle bell arpeggio and a restrained brushed pulse instrumental bed.',
 ];
 
 function digest(wav: Uint8Array) {

@@ -6,6 +6,8 @@ export { svgPipeline } from './svg.js';
 export type { AutoFixLike, SvgFixResult, SvgGeneratorLike, SvgIntentLike } from './svg.js';
 export {
   createToolset,
+  applyProductionIntentToScene,
+  applyGeneratedFilmPresentation,
   proposeSchema,
   editSchema,
   routeSchema,

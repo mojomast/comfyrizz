@@ -5,13 +5,16 @@
 // behind the more-control link. Draft is chosen under the hood by the caller.
 
 import { COPY } from './copy.ts';
+import { COPY as EASY_COPY } from '../copy.ts';
 import { superEasyBrandMarkup } from './brand.ts';
 import { escapeHtml } from '../components.ts';
 import { escapeToStudio } from './escape.ts';
 import { renderProcedureToggle } from '../procedure/toggle.ts';
 import type { SuperEasySetup } from './setup.ts';
+import type { EasyIdea } from '../types.ts';
 
 export const SUPER_EASY_MIN_PROMPT_CHARS = 10;
+const LENGTHS = [15, 30, 60, 90] as const satisfies readonly EasyIdea['lengthS'][];
 
 /** One-click starting prompts, keyed by `data-super-easy-idea`. */
 export const SUPER_EASY_IDEAS: Readonly<Record<string, string>> = COPY.ideas;
@@ -27,12 +30,22 @@ export interface SuperEasyHomeOptions {
   capture?: { armed: boolean };
   /** Saved setup preference; no API keys or tokens enter this view model. */
   setup?: SuperEasySetup;
+  /** Shared Easy idea duration; 30 seconds remains the credit-safe default. */
+  lengthS?: EasyIdea['lengthS'];
 }
 
 function ideaChips(): string {
   return Object.entries(SUPER_EASY_IDEAS)
     .map(([id, text]) => `<li><button type="button" class="super-easy-home-idea" data-super-easy-idea="${escapeHtml(id)}">${escapeHtml(text)}</button></li>`)
     .join('\n');
+}
+
+function lengthSegments(lengthS: EasyIdea['lengthS']): string {
+  const options = LENGTHS.map((seconds) => {
+    const checked = lengthS === seconds ? ' checked' : '';
+    return `<label class="easy-segment"><input class="easy-segment-input" type="radio" name="super-easy-length" value="${seconds}" data-super-easy-length${checked} /><span class="easy-segment-title">${escapeHtml(EASY_COPY.idea.lengths[seconds])}</span></label>`;
+  }).join('');
+  return `<fieldset class="easy-segmented super-easy-home-length"><legend class="easy-segment-legend">${escapeHtml(EASY_COPY.idea.length)}</legend><div class="easy-segment-row">${options}</div></fieldset>`;
 }
 
 /**
@@ -49,6 +62,7 @@ export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string 
   const hint = colab ? 'One sentence is enough. Your film is planned, generated, finished and ready to watch here.' : COPY.home.hint;
   const setupText = colab ? `Google Colab · up to ${options.setup?.spendCap} credits per video` : 'Connect your AI agent and Google Colab for generated films';
   const motionModel = options.setup?.motionModel ?? 'auto';
+  const lengthS = options.lengthS ?? 30;
   return `<section class="super-easy-home" aria-labelledby="super-easy-title" data-super-easy-home>
 ${superEasyBrandMarkup()}
 <h1 class="super-easy-home-title" id="super-easy-title">${escapeHtml(COPY.home.title)}</h1>
@@ -57,6 +71,7 @@ ${superEasyBrandMarkup()}
 <textarea class="super-easy-home-prompt" id="super-easy-prompt" name="prompt" rows="4" minlength="${SUPER_EASY_MIN_PROMPT_CHARS}" required placeholder="${escapeHtml(COPY.home.promptPlaceholder)}" aria-describedby="super-easy-prompt-hint">${escapeHtml(prompt)}</textarea>
 <p class="super-easy-home-hint" id="super-easy-prompt-hint">${escapeHtml(hint)}</p>
 <p class="super-easy-home-error" id="super-easy-prompt-error" role="alert" data-super-easy-prompt-error hidden>${escapeHtml(COPY.home.emptyPrompt)}</p>
+${lengthSegments(lengthS)}
 <div class="super-easy-home-actions">
 <button type="submit" class="btn btn-primary super-easy-home-generate" data-super-easy-generate>${escapeHtml(COPY.home.generate)}</button>
 <button type="button" class="btn btn-secondary super-easy-home-example" data-super-easy-example>${escapeHtml(COPY.home.tryExample)}</button>
