@@ -121,8 +121,10 @@ function safeTokenEqual(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+const CONFIGURED_HOSTS = new Set((process.env.COMFYRIZZ_ALLOWED_HOSTS ?? '').split(',').map(host => host.trim()).filter(Boolean));
+
 function hostAllowed(host) {
-  return typeof host === 'string' && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
+  return CONFIGURED_HOSTS.has(host) || (typeof host === 'string' && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host));
 }
 
 function sameOrigin(origin, host) {
