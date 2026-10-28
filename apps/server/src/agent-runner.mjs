@@ -159,7 +159,12 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       timeline: null,
       generatedAssets,
       routes: slice.routes,
-      pendingGpu: slice.pendingGpu,
+      pendingGpu: slice.pendingGpu.map(pending => {
+        const call = slice.result.toolCalls.find(item => item.name === 'assets.generate_image'
+          && item.ok && item.result?.asset?.id === pending.assetId);
+        return typeof call?.result?.scene_id === 'string'
+          ? { ...pending, sceneId: call.result.scene_id } : pending;
+      }),
       svgAssets: slice.svgAssets,
       events: slice.result.toolCalls.map(call => ({ name: call.name, ok: call.ok })),
     };

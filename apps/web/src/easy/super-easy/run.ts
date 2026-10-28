@@ -17,11 +17,14 @@ export interface SuperEasyApi {
   createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
   getProduction(id: string): Promise<unknown>;
+  getProductionWithEvents?(id: string): Promise<unknown>;
   sendCommand(id: string, command: unknown): Promise<unknown>;
   setSpendCap(id: string, body: { ceiling: number; expected: { productionRevision: number } }): Promise<unknown>;
   dispatchAction(id: string, body: unknown): Promise<unknown>;
   startRun(body: unknown): Promise<unknown>;
   colabStatus(): Promise<{ backendId?: string } | null>;
+  inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number }>;
+  guestResult?(id: string): Promise<{ status: string; url?: string }>;
 }
 
 export interface SuperEasyHost {
@@ -42,6 +45,7 @@ export interface RunSuperEasyInput {
   prompt: string;
   compute?: EasyState['compute'];
   cpu?: Pick<RunCpuGenerateOptions, 'timeoutMs' | 'pollMs' | 'setTimer' | 'clearTimer'>;
+  hostedInvite?: boolean;
 }
 
 export type SuperEasyRunStage = 'idea' | 'compute' | 'plan' | 'iteration' | 'approval' | 'run';
@@ -58,6 +62,8 @@ export interface RunSuperEasyDeps {
 export type SuperEasyRunFailureCode =
   | 'EMPTY_PROMPT'
   | 'GOOGLE_COLAB_CONFIRM_REQUIRED'
+  | 'INVITE_UNAVAILABLE'
+  | 'HOSTED_RUN_FAILED'
   | 'PLAN_FAILED'
   | 'ITERATION_SET_FAILED'
   | 'ITERATION_LEVEL_REQUIRED'
@@ -76,7 +82,7 @@ export interface SuperEasyRunSuccess {
   productionId: string;
   draftCommand: DraftLevelCommand;
   snapshot: unknown;
-  cpu: { ok: true; step: 'review' };
+  cpu?: { ok: true; step: 'review' };
 }
 
 export type SuperEasyRunResult = SuperEasyRunSuccess | SuperEasyRunFailure;
@@ -138,14 +144,32 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   const prompt = typeof input?.prompt === 'string' ? input.prompt.trim() : '';
   if (prompt === '') return failure('EMPTY_PROMPT', 'idea', EMPTY_PROMPT);
 
-  const compute = input.compute ?? 'cpu';
-  if (compute !== 'cpu') {
+  const hosted = input.hostedInvite === true;
+  const getProduction = (id: string): Promise<unknown> => hosted && deps.api.getProductionWithEvents
+    ? deps.api.getProductionWithEvents(id) : deps.api.getProduction(id);
+  const compute = hosted ? 'colab' : (input.compute ?? 'cpu');
+  if (compute !== 'cpu' && !hosted) {
     return failure('GOOGLE_COLAB_CONFIRM_REQUIRED', 'compute', GOOGLE_COLAB_CONFIRM_REQUIRED);
+  }
+
+  let budgetUnits: number | undefined;
+  if (hosted) {
+    try {
+      const session = await deps.api.inviteSession?.();
+      if (session?.role !== 'guest' || session.backendId !== 'colab'
+          || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits <= 0) {
+        return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+      }
+      budgetUnits = session.budgetUnits;
+    } catch {
+      return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+    }
   }
 
   deps.store.patch({
     idea: { ...deps.store.get().idea, text: prompt },
-    compute: 'cpu',
+    compute,
+    ...(budgetUnits === undefined ? {} : { spendCap: budgetUnits }),
     level: 'draft',
     levelTouched: true,
   });
@@ -172,7 +196,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   deps.onPhase?.('iteration');
   let before: unknown;
   try {
-    before = await deps.api.getProduction(productionId);
+    before = await getProduction(productionId);
   } catch (error) {
     return failure('ITERATION_SET_FAILED', 'iteration', messageOf(error, ITERATION_SET_FAILED));
   }
@@ -198,7 +222,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
 
   let snapshot: unknown;
   try {
-    snapshot = await deps.api.getProduction(productionId);
+    snapshot = await getProduction(productionId);
   } catch {
     return failure('ITERATION_LEVEL_REQUIRED', 'iteration', ITERATION_LEVEL_REQUIRED);
   }
@@ -222,7 +246,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
 
   deps.onPhase?.('approval');
   try {
-    snapshot = await deps.api.getProduction(productionId);
+    snapshot = await getProduction(productionId);
   } catch (error) {
     return failure('APPROVAL_FAILED', 'approval', messageOf(error, APPROVAL_FAILED));
   }
@@ -234,6 +258,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
       store: deps.store,
       snapshot,
       go: deps.go,
+      productionDispatchOnly: hosted,
     });
   } catch (error) {
     if (codeOf(error) === 'ITERATION_LEVEL_REQUIRED') {
@@ -247,6 +272,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
 
   deps.onPhase?.('run');
+  if (hosted) return { ok: true, productionId, draftCommand: built.command, snapshot };
   const cpu = await runCpuGenerate({
     host: deps.host,
     store: deps.store,

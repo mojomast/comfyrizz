@@ -23,6 +23,7 @@ export function createDemoInvites({
   ledger = null,
   guests = null,
   publicBaseUrl = process.env.COMFYRIZZ_PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL,
+  appPath = process.env.COMFYRIZZ_DEMO_APP_PATH || '/',
   now = () => Date.now(),
   sendJson,
   readJson,
@@ -60,7 +61,14 @@ export function createDemoInvites({
   }
 
   function resolveGuest(supplied) {
-    return guestSessions.match(supplied);
+    const guest = guestSessions.match(supplied);
+    if (!guest) return null;
+    const invite = inviteLedger.get(guest.inviteId);
+    if (!invite || invite.status === 'revoked' || invite.status === 'expired') {
+      guestSessions.revoke(supplied);
+      return null;
+    }
+    return guest;
   }
 
   /**
@@ -84,7 +92,7 @@ export function createDemoInvites({
       return { ok: false, status: 400, error: "demo guests may only use Google Colab", code: "INVITE_COLAB_ONLY" };
     }
     let committed = 0;
-    if (body.approved === true) {
+    {
       const c = inviteLedger.commit(guest.inviteId, budgetUnits);
       if (!c.ok) {
         return {
@@ -134,39 +142,46 @@ export function createDemoInvites({
     if (event.type === "run.settled") {
       const spent = Math.max(0, Number(event.units) || 0);
       const release = Math.max(0, roundCu(pending.committed - spent));
-      inviteLedger.settle(pending.inviteId, {
+      const result = inviteLedger.settle(pending.inviteId, {
         spent: Math.min(spent, pending.committed),
         release,
-        filmCompleted: spent > 0,
+        filmCompleted: pending.terminal?.type === 'run.finished',
       });
+      if (!result.ok) throw new Error(`invite settlement refused: ${result.reason}`);
       pending.committed = 0;
+      pending.spent = spent;
+      if (pending.terminal) {
+        finishPending(runId, pending);
+        return;
+      }
       pendingRuns.set(runId, pending);
       return;
     }
 
+    if (event.type === 'run.finished' || event.type === 'run.failed'
+        || event.type === 'run.cancelled' || event.type === 'run.refused') {
+      pending.terminal = event;
+      // Run controllers normally publish terminal events before run.settled.
+      // Never release an unknown reservation just because the run failed.
+      if (pending.committed > 0) pendingRuns.set(runId, pending);
+      else finishPending(runId, pending);
+    }
+  }
+
+  function finishPending(runId, pending) {
+    const event = pending.terminal;
     if (event.type === "run.finished") {
       inviteLedger.recordGeneration(pending.inviteId, {
         packageId: pending.packageId,
         prompt: pending.prompt,
         title: pending.title,
-        spentEstimateCu: 0,
+        spentEstimateCu: pending.spent ?? 0,
         status: "ready",
         showcase: true,
         runId,
         details: { status: event.status ?? "finished" },
       });
-      if (pending.committed > 0) {
-        inviteLedger.settle(pending.inviteId, { spent: pending.committed, release: 0, filmCompleted: true });
-        pending.committed = 0;
-      }
-      pendingRuns.delete(runId);
-      return;
-    }
-
-    if (event.type === "run.failed" || event.type === "run.cancelled" || event.type === "run.refused") {
-      if (pending.committed > 0) {
-        inviteLedger.settle(pending.inviteId, { spent: 0, release: pending.committed });
-      }
+    } else {
       if (event.type === "run.failed") {
         inviteLedger.recordGeneration(pending.inviteId, {
           packageId: pending.packageId,
@@ -178,8 +193,8 @@ export function createDemoInvites({
           details: { message: event.message ?? "failed" },
         });
       }
-      pendingRuns.delete(runId);
     }
+    pendingRuns.delete(runId);
   }
 
   function roundCu(value) {
@@ -216,7 +231,7 @@ export function createDemoInvites({
       });
       const budgetUnits = budgetUnitsFromInvite(redeemed.invite);
       // Prefer SPA shell with fragment token (same contract as owner URL).
-      const loc = `/?demo=1&mode=super-easy#token=${encodeURIComponent(session.guestToken)}`;
+      const loc = `${appPath}?demo=1&mode=super-easy#token=${encodeURIComponent(session.guestToken)}`;
       if (serveStatic && request.headers.accept && String(request.headers.accept).includes("text/html")) {
         response.writeHead(302, {
           location: loc,
@@ -260,7 +275,7 @@ export function createDemoInvites({
         expiresAt: session.expiresAt,
         invite: redeemed.invite,
         budgetUnits: budgetUnitsFromInvite(redeemed.invite),
-        openPath: `/?demo=1&mode=super-easy#token=${encodeURIComponent(session.guestToken)}`,
+        openPath: `${appPath}?demo=1&mode=super-easy#token=${encodeURIComponent(session.guestToken)}`,
         mode: "super-easy",
         backendId: "colab",
       });
@@ -274,7 +289,9 @@ export function createDemoInvites({
       const exclude = guest?.inviteId ?? null;
       const limit = Number(url.searchParams.get("limit") ?? 50);
       return reply(200, {
-        items: inviteLedger.showcase({ excludeInviteId: exclude, limit }),
+        items: inviteLedger.showcase({ excludeInviteId: exclude, limit }).map(item => ({
+          ...item, openPath: item.packageId ? `${appPath}#package=${encodeURIComponent(item.packageId)}` : null,
+        })),
         urlShape: `${publicBaseUrl}${INVITE_PATH_PREFIX}/<token>`,
       });
     }
@@ -301,7 +318,7 @@ export function createDemoInvites({
         prompt: hit.prompt,
         title: hit.title,
         details: hit.details,
-        openPath: `/#package=${encodeURIComponent(hit.packageId)}`,
+        openPath: `${appPath}#package=${encodeURIComponent(hit.packageId)}`,
         mode: "super-easy",
       });
     }
@@ -345,6 +362,11 @@ export function createDemoInvites({
     if (pathname === "/api/invites/summary" && request.method === "GET") {
       if (!ownerOk) return reply(401, { error: "unauthorized", code: "OWNER_REQUIRED" });
       return reply(200, inviteLedger.ownerSummary());
+    }
+
+    if (pathname === "/api/invites/admin-status" && request.method === "GET") {
+      if (!ownerOk) return reply(401, { error: "unauthorized", code: "OWNER_REQUIRED" });
+      return reply(200, { spendEnabled: process.env.COMFYRIZZ_INVITE_SPEND_ENABLED === '1' });
     }
 
     // Guest session self-status

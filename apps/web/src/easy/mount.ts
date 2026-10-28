@@ -186,6 +186,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const create = deps.createSession ?? createSuperEasySession;
     superEasySession = create({
       api: api as never,
+      watchFetch: host.apiFetch,
       host: superEasyRunHost(),
       store: {
         get: () => store.get(),
@@ -233,7 +234,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: input.prompt }));
       procedure.mark('compute', PROCEDURE_COPY.computeCpu);
     }
-    void session.generate({ prompt: input.prompt, compute: 'cpu' });
+    const hostedInvite = new URLSearchParams(search()).get('demo') === '1';
+    void session.generate({ prompt: input.prompt, compute: hostedInvite ? 'colab' : 'cpu', ...(hostedInvite ? { hostedInvite: true } : {}) });
   }
 
   function refreshSuperEasySnapshot(): void {

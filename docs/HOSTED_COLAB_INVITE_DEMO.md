@@ -1,5 +1,45 @@
 # Hosted Google Colab invite demo — state, design, next steps
 
+## Host integration update (2026-10-28)
+
+The sections below describe the original branch and should not be treated as
+the current deployment status. The owner API is available through a separate
+loopback listener behind a tailnet-only HTTPS endpoint. It requires the
+host-held owner token in `X-Comfyrizz-Token`; mint, summary, detail, and revoke
+are owner-only. The private `/admin/` dashboard requires the same token and
+keeps it in page memory only. Invite links are shown once when minted; the
+ledger stores only their hashes.
+
+Hosted guests use the production outbox, not the legacy `/api/run` path. Their
+productions and result tickets are invite-scoped; a guest can request a fresh
+ticket through `GET /api/invites/productions/:id/result`. The SQLite ledger
+persists ownership and estimated CU reservations. Terminal pipelines charge
+their reserved estimate, including uncertain failures; actual account usage is
+not yet independently attributable or proven to obey a hard CU cap.
+
+Spending is disabled. The public no-spend proxy is installed for
+`https://comfy.rizz.click/secretfriendsdemo/`, `/hosted-demo/`, and guest APIs.
+The private owner listener remains Tailscale-only. A public mint, redeem, plan,
+disabled-dispatch, reporting, restart, and revoke smoke passed with zero CU.
+Hosted `GET /api/demo/showcase` returns shared items from other invites with an
+`openApiPath`. A guest `POST` to that path creates a separate, viewer-owned
+package and returns its `openPath` plus a short-lived `videoUrl`. The source
+package and production remain inaccessible. The copy is read-only in the hosted
+guest profile; copied files are independent, while video tickets stop working
+when either invite is revoked or expires. Fake-worker success and failure,
+result ownership, revocation, and restart settlement have been tested; paid
+execution requires explicit Phase C approval. The guest showcase is currently
+an API surface, not a gallery in the Super Easy UI.
+
+The TLS-server nginx routes derive from `deploy/nginx-hosted-invite.conf`.
+The original live site configuration is preserved at
+`/etc/nginx/sites-available/comfy.rizz.click.pre-hosted-invite-20261028`.
+Access logging and token-bearing error logging are disabled on the invite,
+app and API routes and on the HTTP-to-HTTPS redirect server. Validate the
+complete live nginx configuration before reloading. Build the guest web app with
+`COMFYRIZZ_WEB_BASE=/hosted-demo/ npm run build` in `apps/web`;
+`COMFYRIZZ_DEMO_APP_PATH` controls server routing and does not set Vite's base.
+
 **Audience:** Kyle Durepos  
 **Clarification (t559u / pt559u, 2026-10-28 America/Toronto):** “colab demo” = **hosted mintable invite links** with a **Google Colab budget per link** for recipients — **not** the hackathon film cut.  
 **Comfy Cloud / API Phase 1:** deferred. Prefer the **Google Colab** path.  

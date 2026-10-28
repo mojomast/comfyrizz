@@ -107,7 +107,7 @@ function resolveTtlMs(opts) {
 /**
  * In-memory invite ledger. Swap for a durable store before multi-process host.
  */
-export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEFAULT_PUBLIC_BASE_URL } = {}) {
+export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEFAULT_PUBLIC_BASE_URL, initialState = null } = {}) {
   /** @type {Map<string, InviteRecord>} */
   const byHash = new Map();
   /** @type {Map<string, InviteRecord>} */
@@ -116,6 +116,30 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
   const generations = [];
   let seq = 0;
   let genSeq = 0;
+
+  if (initialState !== null) {
+    if (initialState.version !== 1 || !Array.isArray(initialState.invites)
+        || !Array.isArray(initialState.generations) || !Number.isSafeInteger(initialState.seq)
+        || initialState.seq < 0 || !Number.isSafeInteger(initialState.genSeq) || initialState.genSeq < 0) {
+      throw new Error('invalid persisted invite ledger');
+    }
+    for (const row of initialState.invites) {
+      if (!row || typeof row.id !== 'string' || !/^[a-f0-9]{64}$/.test(row.tokenHash)
+          || byId.has(row.id) || byHash.has(row.tokenHash)
+          || !['active', 'revoked', 'expired', 'exhausted'].includes(row.status)
+          || !Number.isFinite(row.spendCeilingCu) || row.spendCeilingCu <= 0
+          || !Number.isFinite(row.spentEstimateCu) || row.spentEstimateCu < 0
+          || !Number.isFinite(row.committedEstimateCu) || row.committedEstimateCu < 0
+          || !Number.isFinite(row.expiresAt) || !Number.isFinite(row.createdAt)
+          || !Number.isFinite(row.maxFilms) || row.maxFilms < 0
+          || !Number.isFinite(row.filmsCompleted) || row.filmsCompleted < 0) throw new Error('invalid persisted invite record');
+      byId.set(row.id, row);
+      byHash.set(row.tokenHash, row);
+    }
+    generations.push(...initialState.generations);
+    seq = initialState.seq;
+    genSeq = initialState.genSeq;
+  }
 
   function refreshStatus(row, at = now()) {
     if (row.status === "revoked") return row;
@@ -186,8 +210,10 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
       throw new TypeError("ttlSeconds, ttlDays, ttlMs, or expiresAt is required");
     }
     const spendCeilingCu = resolveSpendCeilingCu(opts);
-    if (!Number.isFinite(spendCeilingCu) || spendCeilingCu <= 0) {
-      throw new TypeError("cu / spendCeilingCu must be a positive number");
+    if (!Number.isFinite(spendCeilingCu) || spendCeilingCu < 0.001
+        || !Number.isSafeInteger(Math.round(spendCeilingCu * 1000))
+        || Math.abs(Math.round(spendCeilingCu * 1000) - spendCeilingCu * 1000) > 1e-7) {
+      throw new TypeError("cu / spendCeilingCu must be at least 0.001 and use at most three decimal places");
     }
     const maxFilms = opts.maxFilms == null ? 3 : Number(opts.maxFilms);
     if (!Number.isFinite(maxFilms) || maxFilms < 0) {
@@ -333,6 +359,13 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
   function recordGeneration(inviteId, entry = {}) {
     const row = byId.get(inviteId);
     if (!row) return { ok: false, reason: "unknown", generation: null };
+    if (typeof entry.runId === 'string' && entry.runId) {
+      const previous = generations.find(generation => generation.runId === entry.runId);
+      if (previous) {
+        if (previous.inviteId !== inviteId) throw new Error('generation run belongs to another invite');
+        return { ok: true, reason: 'already_recorded', generation: { ...previous } };
+      }
+    }
     genSeq += 1;
     const createdAt = now();
     /** @type {GenerationRecord} */
@@ -402,6 +435,7 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
   }
 
   return {
+    exportState: () => ({ version: 1, invites: [...byId.values()], generations, seq, genSeq }),
     mint,
     redeem,
     commit,

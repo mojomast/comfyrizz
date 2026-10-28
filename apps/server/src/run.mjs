@@ -1346,7 +1346,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
     }
   }
 
-  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null, productionId = null, userEventId = undefined, actor = undefined, idempotencyKey = undefined, authority = undefined, expected = undefined, entryPoint = 'run.start' }) {
+  async function start({ backendId, pkg, budgetUnits, approved = false, comfyuiUrl, ratePerHour = null, teardownMode = 'done', includeReady = false, assets = null, mode = 'final', corrections = null, productionId = null, userEventId = undefined, actor = undefined, idempotencyKey = undefined, authority = undefined, expected = undefined, entryPoint = 'run.start', onStarted = null }) {
     if (mode !== 'final' && mode !== 'take') throw new Error("mode must be 'final' or 'take'");
     if (activeRunId) return { error: 'run busy', runId: activeRunId, status: 409 };
     // IP08: claim the one-start guard synchronously, before the first await, so
@@ -1475,6 +1475,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           abort,
           signal: abort.signal,
         };
+        if (onStarted) onStarted(runId);
         runs.set(runId, record);
         activeRunId = runId;
         publish({ type: 'run.budget', runId, backendId, budget: preview.budget, estimate: preview.estimate, jobs: preview.jobs });
@@ -1581,6 +1582,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         abort,
         signal: abort.signal,
       };
+      if (onStarted) onStarted(runId);
       runs.set(runId, record);
       activeRunId = runId;
       publish({ type: 'run.budget', runId, backendId, budget: preview.budget, estimate: preview.estimate, jobs: preview.jobs });

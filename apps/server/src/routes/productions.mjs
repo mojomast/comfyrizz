@@ -96,6 +96,9 @@ function safeDetails(error) {
 }
 
 function mapError(error) {
+  if (error?.code === 'INVITE_RESOURCE_FORBIDDEN') {
+    return { status: 403, code: error.code, message: 'production is unavailable to this invite' };
+  }
   if (error instanceof RouteError) {
     return {
       status: Number.isSafeInteger(error.status) ? error.status : 500,
@@ -283,7 +286,7 @@ export function createProductionRoutes(options = {}) {
   if (!isPlainObject(options)) {
     throw new TypeError('createProductionRoutes options must be an object');
   }
-  const { store, handler, actions = null, contextFor, ledgerFor = null, readPackage = null } = options;
+  const { store, handler, actions = null, contextFor, ledgerFor = null, readPackage = null, inviteOwnership = null } = options;
   if (!store || typeof store.read !== 'function' || typeof store.readEvents !== 'function') {
     throw new TypeError('createProductionRoutes requires a production store');
   }
@@ -342,7 +345,9 @@ export function createProductionRoutes(options = {}) {
   async function handleCreate(request, response) {
     const envelope = assertCreateEnvelope(await readJsonBody(request));
     const context = await commandContext(request);
+    inviteOwnership?.prepareCreate(context, envelope);
     const result = await handler.execute(envelope, context);
+    inviteOwnership?.assertAccess(context, result.productionId);
     sendJson(response, result.duplicate ? 200 : 201, result);
   }
 
@@ -404,6 +409,10 @@ export function createProductionRoutes(options = {}) {
       throw new RouteError('PACKAGE_STORE_UNAVAILABLE', 'the package store is not configured', 500);
     }
     const body = assertEasyPlanBody(await readJsonBody(request));
+    const context = await commandContext(request);
+    if (inviteOwnership && context?.inviteId && body.compute !== 'colab') {
+      throw new RouteError('INVITE_COLAB_ONLY', 'invite productions require Google Colab', 403);
+    }
     const production = store.read(id);
     if (!production) throw new RouteError('NOT_FOUND', 'production does not exist', 404);
     if (typeof production.packageId !== 'string' || production.packageId === '') {
@@ -417,6 +426,16 @@ export function createProductionRoutes(options = {}) {
     }
     if (!pkg) throw new RouteError('NOT_FOUND', 'package does not exist', 404);
 
+    if (inviteOwnership && context?.inviteId) {
+      // Each outbox action currently runs the entire package, not only its
+      // named scene. Refuse multi-action packages instead of reserving a
+      // single scene's cost for a whole-package pipeline.
+      const full = planFromPackage({ pkg, level: body.level, compute: 'colab' });
+      if (full.actions.length !== 1 || (body.onlyShotIds && !body.onlyShotIds.includes(full.actions[0].targetId))) {
+        throw new RouteError('INVITE_PLAN_UNSUPPORTED', 'this invite requires a single Google Colab scene', 422);
+      }
+    }
+
     const described = planFromPackage({
       pkg,
       level: body.level,
@@ -429,7 +448,6 @@ export function createProductionRoutes(options = {}) {
     // Plan identity is server-owned. A client planId is ignored.
     const planId = `plan_${randomUUID().replaceAll('-', '')}`;
     const commandId = `cmd_easy_${randomUUID().replaceAll('-', '')}`;
-    const context = await commandContext(request);
     const result = await actions.propose({
       productionId: id,
       body: {
@@ -531,6 +549,12 @@ export function createProductionRoutes(options = {}) {
   async function handleCommand(request, response, id) {
     const envelope = assertCommandPathEnvelope(id, await readJsonBody(request));
     const context = await commandContext(request);
+    // Generic commands can directly journal action, budget and artifact facts.
+    // Hosted guests use the dedicated, server-validated action routes instead.
+    if (inviteOwnership && context?.inviteId
+        && !['iteration.set', 'plan.approve', 'plan.reject', 'production.cancel', 'action.cancel'].includes(envelope?.kind)) {
+      throw new RouteError('INVITE_COMMAND_FORBIDDEN', 'command is unavailable to this invite', 403);
+    }
     const result = await handler.execute(envelope, context);
     sendJson(response, 200, result);
   }
@@ -623,6 +647,11 @@ export function createProductionRoutes(options = {}) {
     const actionPath = matchActionPath(parsed.pathname);
     if (actionPath) {
       try {
+        const context = await commandContext(request);
+        inviteOwnership?.assertAccess(context, decodeId(actionPath.id));
+        if (inviteOwnership && context?.inviteId && actionPath.resource === 'action-plans') {
+          throw new RouteError('INVITE_SERVER_PLAN_REQUIRED', 'invite plans must be created by the server', 403);
+        }
         await handleAction(request, response, actionPath);
       } catch (error) {
         if (response.headersSent) {
@@ -648,6 +677,8 @@ export function createProductionRoutes(options = {}) {
         await handleCreate(request, response);
         return true;
       }
+
+      inviteOwnership?.assertAccess(await commandContext(request), id);
 
       if (action === 'events') {
         if (method !== 'GET' && method !== 'HEAD') {

@@ -12,8 +12,9 @@ import { createHash } from 'node:crypto';
 import {
   MEASURED_JOB_MINUTES,
   PRESENTER_MEASURED_JOB_MINUTES,
+  BOOTSTRAP_OVERHEAD_MINUTES,
 } from '../../../../packages/backends/src/colab-backend.mjs';
-import { nextJobUpperEstimate, rateForGpu } from '../../../../packages/backends/src/budget.mjs';
+import { nextJobUpperEstimate, rateForGpu, reserveUnitsFor } from '../../../../packages/backends/src/budget.mjs';
 import { canonicalJson } from './commands.mjs';
 import { sceneAssetIds } from '../../../../packages/agent/dist/src/scene-build.js';
 import { ITERATION_PRESETS, effectivePolicyForShot } from './iteration.mjs';
@@ -74,10 +75,10 @@ function upperBoundFor(assets, takes, ratePerHour) {
   }, 0) * takes;
   const upper = nextJobUpperEstimate({
     gpuMinutes: minutes,
-    overheadMinutes: 0,
+    overheadMinutes: BOOTSTRAP_OVERHEAD_MINUTES,
     ratePerHour,
   });
-  return typeof upper === 'number' && Number.isFinite(upper) ? upper : 0;
+  return typeof upper === 'number' && Number.isFinite(upper) ? normalizeNumber(upper + reserveUnitsFor(ratePerHour)) : 0;
 }
 
 function takesFor(level, sceneId) {
@@ -139,6 +140,7 @@ export function planFromPackage(input = {}) {
       id: `act_${scene.id}`,
       kind: 'shot.generate',
       targetId: scene.id,
+      backendId: 'colab',
       takes,
       upperBound,
       reuse: false,

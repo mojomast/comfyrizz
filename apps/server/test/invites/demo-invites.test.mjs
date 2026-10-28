@@ -67,6 +67,47 @@ test('mint requires cu + ttl and returns secretfriendsdemo public URL', async ()
   assert.equal(data.urlShape, 'https://comfy.rizz.click/secretfriendsdemo/<token>');
 });
 
+test('guest sessions stop authenticating when the invite expires or is revoked', () => {
+  let time = 1_700_000_000_000;
+  const { demo, ledger, guests } = makeInvites({ now: () => time });
+  const first = ledger.mint({ cu: 1, ttlMs: 1000 }).invite;
+  const session = guests.issue({ inviteId: first.id });
+  assert.ok(demo.resolveGuest(session.guestToken));
+  time += 1000;
+  assert.equal(demo.resolveGuest(session.guestToken), null);
+  const second = ledger.mint({ cu: 1, ttlMs: 1000 }).invite;
+  const revokedSession = guests.issue({ inviteId: second.id });
+  ledger.revoke(second.id);
+  assert.equal(demo.resolveGuest(revokedSession.guestToken), null);
+});
+
+test('failed runs keep the reservation until settlement and charge paid usage', () => {
+  const { demo, ledger } = makeInvites();
+  const { invite } = ledger.mint({ cu: 2, ttlDays: 1 });
+  const admitted = demo.admitGuestRun({ inviteId: invite.id }, { budgetUnits: 1, approved: false });
+  assert.equal(admitted.committed, 1);
+  demo.bindGuestRun('run_failure', { inviteId: invite.id, committed: 1 });
+  demo.onRunEvent({ type: 'run.failed', runId: 'run_failure', message: 'failed after allocation' });
+  assert.equal(ledger.get(invite.id).committedEstimateCu, 1);
+  demo.onRunEvent({ type: 'run.settled', runId: 'run_failure', units: 0.6 });
+  assert.equal(ledger.get(invite.id).spentEstimateCu, 0.6);
+  assert.equal(ledger.get(invite.id).committedEstimateCu, 0);
+  assert.equal(ledger.listGenerations(invite.id)[0].status, 'failed');
+});
+
+test('successful terminal event waits for settlement before recording generation', () => {
+  const { demo, ledger } = makeInvites();
+  const { invite } = ledger.mint({ cu: 2, ttlDays: 1 });
+  const admitted = demo.admitGuestRun({ inviteId: invite.id }, { budgetUnits: 1, approved: true });
+  demo.bindGuestRun('run_success', { inviteId: invite.id, committed: admitted.committed, packageId: 'pkg' });
+  demo.onRunEvent({ type: 'run.finished', runId: 'run_success', status: 'completed' });
+  assert.equal(ledger.get(invite.id).committedEstimateCu, 1);
+  demo.onRunEvent({ type: 'run.settled', runId: 'run_success', units: 0.6 });
+  assert.equal(ledger.get(invite.id).spentEstimateCu, 0.6);
+  assert.equal(ledger.get(invite.id).filmsCompleted, 1);
+  assert.equal(ledger.listGenerations(invite.id)[0].spentEstimateCu, 0.6);
+});
+
 test('redeem / expire / overspend + owner summary + showcase open', async () => {
   let t = 1_700_000_000_000;
   const { demo, ledger } = makeInvites({ now: () => t });

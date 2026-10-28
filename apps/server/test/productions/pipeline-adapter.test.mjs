@@ -23,6 +23,9 @@ import {
   mapPipelineStatus,
 } from '../../src/productions/pipeline-adapter.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
+import { createInviteProductionSpendGuard } from '../../src/invites/production-spend-guard.mjs';
+import { reconcileInvitePipeline } from '../../src/invites/production-reconcile.mjs';
+import { createDurableInviteLedger } from '../../../../packages/backends/src/durable-invite-ledger.mjs';
 
 const AT = '2026-10-23T12:00:00.000Z';
 const PRODUCTION_ID = 'prod_ip22';
@@ -235,6 +238,57 @@ test('a dispatch attempt id is deterministic and never clock- or counter-derived
   assert.match(first, /^att_[a-f0-9]{32}$/);
   assert.notEqual(first, attemptIdFor(PRODUCTION_ID, ACTION_ID, 'c'.repeat(64)));
   assert.notEqual(first, attemptIdFor(PRODUCTION_ID, 'act_other', PLAN_HASH));
+});
+
+test('concurrent invite dispatches reserve once and start one attributed run', async (t) => {
+  const { runtimeDir, store } = seed(t);
+  const ledger = createDurableInviteLedger({ path: join(runtimeDir, 'invites.sqlite') });
+  t.after(() => ledger.close());
+  const invite = ledger.mint({ cu: 1, ttlDays: 1 }).invite;
+  ledger.bindResource(invite.id, 'production', PRODUCTION_ID);
+  const controller = fakeController();
+  const guard = createInviteProductionSpendGuard({ ledger, spendEnabled: () => true, adapter: createPipelineAdapter({ store, controller }) });
+  const args = { productionId: PRODUCTION_ID, actionId: ACTION_ID, pkg: PACKAGE, input: { backendId: 'colab', budgetUnits: 0.7 }, sourceDir: '.' };
+  const outcomes = await Promise.all(Array.from({ length: 8 }, () => guard.admit(args)));
+  assert.equal(outcomes.filter(result => result.started).length, 1);
+  assert.equal(controller.starts.length, 1);
+  assert.equal(ledger.get(invite.id).committedEstimateCu, 0.7);
+  assert.equal(ledger.get(invite.id).remainingCu, 0.3);
+});
+
+test('invite reservation survives an unknown submission and restart adopts without charging twice', async (t) => {
+  const { runtimeDir, store } = seed(t);
+  let ledger = createDurableInviteLedger({ path: join(runtimeDir, 'invites.sqlite') });
+  t.after(() => ledger.close());
+  const invite = ledger.mint({ cu: 1, ttlDays: 1 }).invite;
+  ledger.bindResource(invite.id, 'production', PRODUCTION_ID);
+  const controller = fakeController();
+  const commit = store.commit;
+  store.commit = (productionId, input) => {
+    if ((input.events ?? []).some(event => event.data?.runId && event.data?.state === 'running')) {
+      store.commit = commit;
+      throw new Error('simulated post-submission crash');
+    }
+    return commit(productionId, input);
+  };
+  const args = { productionId: PRODUCTION_ID, actionId: ACTION_ID, pkg: PACKAGE, input: { backendId: 'colab', budgetUnits: 0.7 }, sourceDir: '.' };
+  const makeGuard = () => createInviteProductionSpendGuard({ ledger, spendEnabled: () => true, adapter: createPipelineAdapter({ store, controller }) });
+  await assert.rejects(makeGuard().admit(args), /simulated post-submission crash/);
+  ledger.close();
+  ledger = createDurableInviteLedger({ path: join(runtimeDir, 'invites.sqlite') });
+  assert.equal(ledger.get(invite.id).committedEstimateCu, 0.7);
+  const adopted = await makeGuard().admit(args);
+  assert.equal(adopted.started, false);
+  assert.equal(adopted.adopted, true);
+  assert.equal(controller.starts.length, 1);
+  const run = { ...controller.get('pipe_fake_1'), status: 'failed', packageId: PACKAGE.id };
+  reconcileInvitePipeline({ ledger, run });
+  reconcileInvitePipeline({ ledger, run });
+  assert.equal(ledger.get(invite.id).spentEstimateCu, 0.7);
+  assert.equal(ledger.get(invite.id).committedEstimateCu, 0);
+  assert.equal(ledger.listGenerations(invite.id).length, 1);
+  await assert.rejects(makeGuard().admit(args), /already settled/);
+  assert.equal(controller.starts.length, 1);
 });
 
 test('admit journals dispatching before start, and a crash before the run write adopts the run', async (t) => {

@@ -2,6 +2,7 @@ import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, readdirS
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { colabStatus } from './colab-status.mjs';
@@ -57,6 +58,12 @@ import { createPackageRoutes } from './routes/packages.mjs';
 import { createProductionStore } from './productions/store.mjs';
 import { createProductionAdmission } from './productions/admission.mjs';
 import { createPipelineAdapter } from './productions/pipeline-adapter.mjs';
+import { createInviteProductionSpendGuard } from './invites/production-spend-guard.mjs';
+import { createInviteProductionOwnership } from './invites/production-ownership.mjs';
+import { reconcileInvitePipeline } from './invites/production-reconcile.mjs';
+import { createGuestPackageBuilder } from './invites/guest-package-builder.mjs';
+import { guestProductionResult } from './invites/guest-result.mjs';
+import { createGuestShowcase } from './invites/guest-showcase.mjs';
 import { createOutboxExecutor } from './productions/outbox-execution.mjs';
 import { createCommandHandler } from './productions/commands.mjs';
 import { createBudgetLedger } from './productions/ledger.mjs';
@@ -119,14 +126,18 @@ function safeTokenEqual(given, expected) {
 }
 
 function hostAllowed(host) {
-  return typeof host === 'string' && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
+  if (typeof host !== 'string') return false;
+  if (/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)) return true;
+  const configured = (process.env.COMFYRIZZ_ALLOWED_HOSTS ?? '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+  return configured.includes(host.toLowerCase());
 }
 
 function sameOrigin(origin, host) {
   if (!origin) return false;
   try {
     const parsed = new URL(origin);
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.host === host;
+    const loopback = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
+    return (parsed.protocol === 'https:' || (loopback && parsed.protocol === 'http:')) && parsed.host === host;
   } catch {
     return false;
   }
@@ -245,6 +256,7 @@ export function createApp({
   mkdirSync(runtimeDir, { recursive: true });
   mkdirSync(mediaRoot, { recursive: true });
   const mediaTickets = createMediaTickets();
+  const guestMediaTickets = createMediaTickets();
   const rendersDir = join(runtimeDir, 'renders');
   const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
@@ -252,6 +264,7 @@ export function createApp({
   const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
   const events = new EventLog();
   const publishEntry = events.publish.bind(events);
+  let pipelines = null;
   /** @type {{ onRunEvent?: Function } | null} */
   let inviteRunHook = null;
   const pipelineIngested = new Set();
@@ -265,6 +278,11 @@ export function createApp({
     const entry = publishEntry(event);
     try {
       try { inviteRunHook?.onRunEvent?.(event); } catch { /* invite ledger must not break runs */ }
+      if (process.env.COMFYRIZZ_HOSTED_INVITES === '1' && pipelines && event?.type === 'pipeline.event') {
+        try {
+          reconcileInvitePipeline({ ledger: inviteLedger, run: pipelines.get(event.runId), readPackage: id => store.read(id) });
+        } catch (error) { console.error('[invite-pipeline-reconcile]', error.message); }
+      }
       if (event?.type === 'run.event' && event.event?.type === 'preview_ready') {
         const record = runs.get(event.runId);
         if (record) {
@@ -581,12 +599,18 @@ export function createApp({
   // RL10c: the pipeline controller takes the same shared slot for the whole life of a Google
   // Colab generation run, so an export or a render during the run is refused with the holder
   // instead of starting a second job on the same budget.
-  const pipelines = createPipelineController({
+  pipelines = createPipelineController({
     runtimeDir, events, stageInputs: stagePipelineInputs,
     ...(pipelineLaunch ? { launch: pipelineLaunch } : {}),
     operations,
     isBusy: () => Boolean(runs.status().activeRunId),
   });
+  if (process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
+    for (const run of pipelines.list()) {
+      try { reconcileInvitePipeline({ ledger: inviteLedger, run, readPackage: id => store.read(id) }); }
+      catch (error) { console.error('[invite-pipeline-reconcile]', error.message); }
+    }
+  }
 
   function takeDocFor(pkgId) {
     try {
@@ -909,7 +933,14 @@ export function createApp({
   // Durable attempt identity lives in the adapter; the executor claims each
   // entry, adopts an attributed run before dispatching, and never contacts
   // Google Colab itself.
-  const pipelineAdapter = createPipelineAdapter({ store: productionStore, controller: pipelines });
+  const basePipelineAdapter = createPipelineAdapter({ store: productionStore, controller: pipelines });
+  const pipelineAdapter = process.env.COMFYRIZZ_HOSTED_INVITES === '1'
+    ? createInviteProductionSpendGuard({
+      adapter: basePipelineAdapter,
+      ledger: inviteLedger,
+      spendEnabled: () => process.env.COMFYRIZZ_INVITE_SPEND_ENABLED === '1',
+    })
+    : basePipelineAdapter;
   const outboxExecutor = createOutboxExecutor({
     store: productionStore,
     adapter: pipelineAdapter,
@@ -1186,10 +1217,13 @@ export function createApp({
     store: productionStore,
     handler: commandHandler,
     actions: productionRouteActions,
-    contextFor: () => ({
-      actor: 'user',
-      userEventId: `ue_${randomUUID()}`,
-    }),
+    contextFor: (request) => {
+      const guest = process.env.COMFYRIZZ_HOSTED_INVITES === '1'
+        ? resolveActor(request, new URL(request.url, 'http://127.0.0.1')).guest : null;
+      return { actor: 'user', userEventId: `ue_${randomUUID()}`, ...(guest ? { inviteId: guest.inviteId } : {}) };
+    },
+    inviteOwnership: process.env.COMFYRIZZ_HOSTED_INVITES === '1'
+      ? createInviteProductionOwnership({ ledger: inviteLedger, store: productionStore }) : null,
     ledgerFor: (production) => createBudgetLedger({
       runtimeDir,
       ledgerId: production.budgetLedgerId,
@@ -1314,6 +1348,8 @@ export function createApp({
     } catch {
       return sendJson(response, 400, { error: 'bad path' });
     }
+    const appPath = process.env.COMFYRIZZ_DEMO_APP_PATH || '/';
+    if (appPath !== '/' && pathname.startsWith(appPath)) pathname = `/${pathname.slice(appPath.length)}`;
     if (pathname === '/') pathname = '/index.html';
     const file = resolve(webDist, `.${pathname}`);
     if (file !== webDist && !file.startsWith(webDist + sep)) return sendJson(response, 403, { error: 'forbidden' });
@@ -1340,6 +1376,9 @@ export function createApp({
     serveStatic,
   });
   inviteRunHook = demoInvites;
+  const guestShowcase = process.env.COMFYRIZZ_HOSTED_INVITES === '1'
+    ? createGuestShowcase({ ledger: inviteLedger, store, pipelines, tickets: guestMediaTickets,
+      appPath: process.env.COMFYRIZZ_DEMO_APP_PATH || '/' }) : null;
 
   function suppliedToken(request, url) {
     return request.headers['x-comfyrizz-token'] ?? bearer(request) ?? url.searchParams.get('token');
@@ -1353,10 +1392,31 @@ export function createApp({
     return { role: 'none', guest: null };
   }
 
-  async function handler(request, response) {
+  async function handler(request, response, privateAdmin = false) {
     const host = request.headers.host ?? '127.0.0.1';
     if (!hostAllowed(host)) return sendJson(response, 403, { error: 'host not allowed' });
     const url = new URL(request.url ?? '/', `http://${host}`);
+
+    // The owner dashboard is served only from the private listener and its
+    // configured tailnet host. API credentials are entered in the page and
+    // continue to be validated by the existing owner-only API routes.
+    if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
+      const adminHost = (process.env.COMFYRIZZ_ADMIN_HOST ?? '').toLowerCase();
+      if (process.env.COMFYRIZZ_HOSTED_INVITES !== '1' || !privateAdmin || !adminHost || host.toLowerCase() !== adminHost) {
+        return sendJson(response, 404, { error: 'not found' });
+      }
+      if (request.method !== 'GET' && request.method !== 'HEAD') return sendJson(response, 405, { error: 'method not allowed' });
+      const files = { '/admin': 'index.html', '/admin/': 'index.html', '/admin/dashboard.js': 'dashboard.js', '/admin/dashboard.css': 'dashboard.css' };
+      const name = files[url.pathname];
+      if (!name) return sendJson(response, 404, { error: 'not found' });
+      const file = fileURLToPath(new URL(`./invites/admin-dashboard/${name}`, import.meta.url));
+      return serveStaticFile(request, response, file, {
+        'content-type': MIME[extname(file)], 'cache-control': 'no-store',
+        'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+        'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
+        'x-robots-tag': 'noindex, nofollow, noarchive',
+      });
+    }
 
     if (url.pathname === '/api/health') {
       return sendJson(response, 200, { ok: true, service: 'comfyrizz-local' });
@@ -1364,6 +1424,8 @@ export function createApp({
 
     // Public invite redeem: /secretfriendsdemo/:token → Super Easy guest session.
     if (demoInvites.parseRedeemToken(url.pathname)) {
+      response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+      response.setHeader('Referrer-Policy', 'no-referrer');
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return sendJson(response, 405, { error: 'method not allowed' });
       }
@@ -1380,18 +1442,25 @@ export function createApp({
     // the API header. The ticket is not the API token and is not written to exports.
     const mediaGet = /^\/api\/media\/([a-f0-9]{32})$/.exec(url.pathname);
     if (mediaGet && (request.method === 'GET' || request.method === 'HEAD')) {
-      const file = mediaTickets.resolve(mediaGet[1]);
+      const file = mediaTickets.resolve(mediaGet[1]) ?? guestMediaTickets.resolve(mediaGet[1]);
       if (!file) return sendJson(response, 401, { error: 'media ticket expired' });
       return serveTicket(request, response, file);
     }
 
     // Public JSON redeem (no owner token).
     if (url.pathname === '/api/invites/redeem' && request.method === 'POST') {
+      if (!sameOrigin(request.headers.origin, host)) return sendJson(response, 403, { error: 'origin not allowed' });
       const handled = await demoInvites.handle(request, response, url, { ownerOk: false, guest: null });
       if (handled) return;
     }
 
     const actor = resolveActor(request, url);
+    if (actor.role === 'owner' && process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
+      const adminHost = (process.env.COMFYRIZZ_ADMIN_HOST ?? '').toLowerCase();
+      if (!privateAdmin || !adminHost || host.toLowerCase() !== adminHost) {
+        return sendJson(response, 403, { error: 'owner access requires the private admin host', code: 'PRIVATE_ADMIN_REQUIRED' });
+      }
+    }
     if (actor.role === 'none') {
       const denied = auth(request, url);
       if (denied) return sendJson(response, denied.status, { error: denied.error });
@@ -1407,15 +1476,68 @@ export function createApp({
     const ownerOk = actor.role === 'owner';
     const guest = actor.guest;
 
+    if (guest && guestShowcase) {
+      if (url.pathname === '/api/demo/showcase' && request.method === 'GET') {
+        return sendJson(response, 200, { items: guestShowcase.list(guest.inviteId, Number(url.searchParams.get('limit') ?? 50)) });
+      }
+      const showcaseOpen = /^\/api\/demo\/showcase\/([^/]+)\/open$/.exec(url.pathname);
+      if (showcaseOpen && request.method === 'POST') {
+        try {
+          const packageId = decodeURIComponent(showcaseOpen[1]);
+          if (!/^pkg_[a-f0-9]{32}$/.test(packageId)) return sendJson(response, 404, { error: 'showcase item not found', code: 'SHOWCASE_NOT_FOUND' });
+          const result = guestShowcase.open(guest.inviteId, packageId);
+          return result ? sendJson(response, 200, result) : sendJson(response, 404, { error: 'showcase item not found', code: 'SHOWCASE_NOT_FOUND' });
+        } catch (error) {
+          console.error('[showcase-open]', error.message);
+          return sendJson(response, 422, { error: 'showcase copy could not be opened', code: 'SHOWCASE_COPY_UNAVAILABLE' });
+        }
+      }
+      const copyGet = /^\/api\/package\/([A-Za-z0-9_.-]+)$/.exec(url.pathname);
+      if (copyGet && request.method === 'GET'
+          && inviteLedger.resourceOwner('showcase_copy', copyGet[1]) === guest.inviteId
+          && inviteLedger.resourceOwner('package', copyGet[1]) === guest.inviteId) {
+        const pkg = store.read(copyGet[1]);
+        return pkg ? sendJson(response, 200, { package: pkg, revision: pkg.revision }) : sendJson(response, 404, { error: 'package not found' });
+      }
+    }
+
     // Invite mint / list / showcase / session routes.
     {
       const handled = await demoInvites.handle(request, response, url, { ownerOk, guest });
       if (handled) return;
     }
 
+    const guestResult = /^\/api\/invites\/productions\/([A-Za-z0-9_.-]+)\/result$/.exec(url.pathname);
+    if (guestResult && request.method === 'GET' && guest && process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
+      const result = guestProductionResult({ inviteId: guest.inviteId, productionId: guestResult[1], ledger: inviteLedger, pipelines, tickets: guestMediaTickets });
+      return result ? sendJson(response, 200, result) : sendJson(response, 404, { error: 'production not found' });
+    }
+
     // Guests may not touch owner-only Colab auth / provider secrets surfaces.
     if (guest && (url.pathname.startsWith('/api/colab/auth') || url.pathname.startsWith('/api/providers/settings'))) {
       return sendJson(response, 403, { error: 'guest cannot manage Colab auth', code: 'GUEST_FORBIDDEN' });
+    }
+
+    // The local application exposes additional paid execution paths. Until all
+    // of them are bound to the invite ledger, the hosted profile must deny
+    // them rather than let a guest bypass the invite's compute ceiling.
+    if (guest && process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
+      const safeRead = request.method === 'GET' && ['/api/brief/presets', '/api/voice-options', '/api/animation-options'].includes(url.pathname);
+      // Hosted production actions must use the guarded outbox. The direct run
+      // route can race that path and has only in-memory guest attribution.
+      const safePost = request.method === 'POST' && ['/api/brief', '/api/agent'].includes(url.pathname);
+      const productionCreate = request.method === 'POST' && url.pathname === '/api/productions';
+      const productionRead = request.method === 'GET'
+        && /^\/api\/productions\/[^/]+(?:\/(?:events|spend-cap|actions(?:\/[^/]+)?))?$/.test(url.pathname);
+      const productionWrite = request.method === 'POST'
+        && /^\/api\/productions\/[^/]+\/(?:commands|easy-plan|spend-cap|actions)$/.test(url.pathname);
+      if (!safeRead && !safePost && !productionCreate && !productionRead && !productionWrite) {
+        return sendJson(response, 403, { error: 'route unavailable to hosted guests', code: 'GUEST_FORBIDDEN' });
+      }
+      if (request.method === 'POST' && /^\/api\/productions\/[^/]+\/actions$/.test(url.pathname)
+          && process.env.COMFYRIZZ_INVITE_SPEND_ENABLED !== '1') {
+        return sendJson(response, 403, { error: 'Google Colab spend is not enabled', code: 'INVITE_SPEND_DISABLED' });
+      }
     }
 
     if (url.pathname === '/api/media-ticket' && request.method === 'POST') {
@@ -1695,7 +1817,9 @@ export function createApp({
       try {
         // B1: a brand kit on the request overrides the brief's palette/font; the
         // logo bytes are written here so the asset exists before any agent run.
-        const brand = body.brand ? prepareBrand(body.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : null;
+        // Hosted guests have no access to the shared brand asset store.
+        const brand = body.brand && !(guest && process.env.COMFYRIZZ_HOSTED_INVITES === '1')
+          ? prepareBrand(body.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : null;
         const result = planBrief({ ...body, brand: brand?.kit ?? null });
         events.publish({ type: 'brief.planned', mode: result.mode, complete: result.complete, questions: result.questions.map(question => question.id) });
         return sendJson(response, 200, { ...result, brand: brand ? { theme: brand.theme, assets: Object.keys(brand.assets), warnings: brand.warnings } : null });
@@ -1744,6 +1868,24 @@ export function createApp({
     }
 
     if (url.pathname === '/api/agent' && request.method === 'POST') {
+      if (guest && process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
+        const body = await readJson(request);
+        try {
+          const build = createGuestPackageBuilder({ runtimeDir, store, ledger: inviteLedger });
+          const result = await build({ inviteId: guest.inviteId, brief: body.brief });
+          const timeline = compilePackage(result.package, dirname(store.path(result.package.id)));
+          return sendJson(response, 200, {
+            package: result.package, revision: result.package.revision, timeline,
+            generatedAssets: result.generatedAssets ?? {}, routes: result.routes ?? [],
+            pendingGpu: result.pendingGpu ?? [], svgAssets: result.svgAssets ?? [],
+            live: false, fallback: false, provider: 'scripted', model: 'scripted',
+          });
+        } catch (error) {
+          if (error instanceof TypeError) return sendJson(response, 400, { error: error.message });
+          console.error('[invite-package-build]', error.message);
+          return sendJson(response, 500, { error: 'guest package could not be built' });
+        }
+      }
       if (!agentRunner) return sendJson(response, 503, { error: 'agent runner not configured' });
       const body = await readJson(request);
       events.publish({ type: 'agent.started', brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });
@@ -1786,6 +1928,8 @@ export function createApp({
     if (url.pathname === '/api/run' && request.method === 'POST') {
       if (pipelines.active()) return sendJson(response, 409, { error: 'pipeline busy' });
       const body = await readJson(request);
+      let guestAdmit = null;
+      let guestBound = false;
       try {
         let pkg = null;
         if (body.package && typeof body.package === 'object') pkg = body.package;
@@ -1797,7 +1941,6 @@ export function createApp({
         }
         let backendId = body.backendId ?? 'colab';
         let budgetUnits = body.budgetUnits;
-        let guestAdmit = null;
         if (guest) {
           guestAdmit = demoInvites.admitGuestRun(guest, body);
           if (!guestAdmit.ok) {
@@ -1811,38 +1954,37 @@ export function createApp({
           backendId = guestAdmit.backendId;
           budgetUnits = guestAdmit.budgetUnits;
         }
+        const prompt = typeof pkg?.brief?.prompt === 'string' ? pkg.brief.prompt
+          : (typeof pkg?.title === 'string' ? pkg.title : '');
+        const title = typeof pkg?.title === 'string' ? pkg.title : '';
         const result = await runs.start({
           backendId,
           pkg,
           budgetUnits,
           approved: body.approved === true,
-          comfyuiUrl: body.comfyuiUrl,
-          ratePerHour: body.ratePerHour,
-          teardownMode: body.teardownMode,
+          comfyuiUrl: guest ? undefined : body.comfyuiUrl,
+          ratePerHour: guest ? undefined : body.ratePerHour,
+          teardownMode: guest ? 'done' : body.teardownMode,
           includeReady: body.includeReady === true,
           assets: body.assets,
           mode: body.mode,
           corrections: body.corrections,
           // IP24: one input shape. A bound package starts only with the IP20
           // authority and the revision it was dispatched against.
-          authority: body.authority,
-          expected: body.expected,
+          authority: guest ? undefined : body.authority,
+          expected: guest ? undefined : body.expected,
+          onStarted: guest && guestAdmit ? runId => {
+            demoInvites.bindGuestRun(runId, {
+              inviteId: guestAdmit.inviteId, committed: guestAdmit.committed,
+              packageId: pkg?.id ?? body.packageId ?? '', prompt, title,
+            });
+            guestBound = true;
+          } : null,
         });
         if (guest && guestAdmit) {
-          const prompt = typeof pkg?.brief?.prompt === 'string' ? pkg.brief.prompt
-            : (typeof pkg?.title === 'string' ? pkg.title : '');
-          const title = typeof pkg?.title === 'string' ? pkg.title : '';
           if (result?.approvalRequired || (Number.isSafeInteger(result?.status) && result.status >= 400) || result?.error) {
             demoInvites.releaseGuestCommit(guestAdmit.inviteId, guestAdmit.committed);
-          } else if (result?.runId && guestAdmit.committed > 0) {
-            demoInvites.bindGuestRun(result.runId, {
-              inviteId: guestAdmit.inviteId,
-              committed: guestAdmit.committed,
-              packageId: pkg?.id ?? body.packageId ?? '',
-              prompt,
-              title,
-            });
-          } else if (guestAdmit.committed > 0 && !result?.runId) {
+          } else if (guestAdmit.committed > 0 && !guestBound) {
             // Dry/estimate-only path: release reserve.
             demoInvites.releaseGuestCommit(guestAdmit.inviteId, guestAdmit.committed);
           }
@@ -1850,6 +1992,7 @@ export function createApp({
         const status = Number.isSafeInteger(result.status) && result.status >= 400 ? result.status : 200;
         return sendJson(response, status, result);
       } catch (error) {
+        if (guestAdmit?.committed > 0 && !guestBound) demoInvites.releaseGuestCommit(guestAdmit.inviteId, guestAdmit.committed);
         return sendJson(response, Number.isInteger(error?.status) ? error.status : 400, {
           error: error.message,
           ...(typeof error?.code === 'string' ? { code: error.code } : {}),
@@ -2132,17 +2275,19 @@ export function createApp({
     return sendJson(response, 404, { error: 'not found' });
   }
 
-  return {
-    invites: demoInvites,
-    handler: (request, response) => {
-      Promise.resolve(handler(request, response)).catch(error => {
+  const wrapHandler = privateAdmin => (request, response) => {
+      Promise.resolve(handler(request, response, privateAdmin)).catch(error => {
         if (response.headersSent) {
           response.destroy(error);
           return;
         }
         sendJson(response, error.status ?? 500, { error: error.message });
       });
-    },
+  };
+  return {
+    invites: demoInvites,
+    handler: wrapHandler(false),
+    privateAdminHandler: wrapHandler(true),
     store,
     takeStore,
     events,
@@ -2152,6 +2297,6 @@ export function createApp({
     exportsDir,
     sceneCacheDir,
     webDist,
-    close: () => { pipelines.close(); events.closeAll(); },
+    close: () => { guestMediaTickets.close(); pipelines.close(); events.closeAll(); },
   };
 }

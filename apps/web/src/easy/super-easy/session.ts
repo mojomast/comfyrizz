@@ -28,6 +28,7 @@ export interface SuperEasySessionOptions extends RunSuperEasyDeps {
   run?: typeof runSuperEasy;
   /** The production watch under test can be replaced; production defaults to `watchProduction`. */
   watch?: SuperEasyWatch;
+  watchFetch?: WatchProductionOptions['fetchImpl'];
   reducedMotion?: boolean;
   onProgress?(html: string, snapshot: unknown): void;
   onDone?(snapshot: unknown): void;
@@ -70,6 +71,8 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let failure: SuperEasyRunFailure | null = null;
   let lastInput: RunSuperEasyInput | null = null;
   let phase: SuperEasyPhase = 'idle';
+  let resultRequest = false;
+  let generation = 0;
 
   function patchStatus(next: EasyState['generate']['status']): void {
     status = next;
@@ -111,6 +114,31 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       return;
     }
     publish();
+    if (lastInput?.hostedInvite && typeof options.api.guestResult === 'function' && !resultRequest) {
+      const productionId = options.store.get().productionId;
+      if (productionId) {
+        const currentGeneration = generation;
+        resultRequest = true;
+        void options.api.guestResult(productionId).then(result => {
+          if (stopped || currentGeneration !== generation || status !== 'running') return;
+          if (result.status === 'failed') {
+            failure = { ok: false, code: 'HOSTED_RUN_FAILED', stage: 'run', message: 'The video could not be completed. Try again.' };
+            patchStatus('error');
+            cancelWatch();
+            publish();
+            options.onError?.(failure);
+          } else if (result.status === 'completed' && typeof result.url === 'string'
+              && /^\/api\/media\/[a-f0-9]{32}$/.test(result.url)) {
+            snapshot = { ...(snapshot && typeof snapshot === 'object' ? snapshot : {}), final: { status: 'ready', url: result.url } };
+            patchStatus('done');
+            cancelWatch();
+            publish();
+            options.onDone?.(snapshot);
+          }
+        }).catch(() => { /* The next production poll retries the result lookup. */ })
+          .finally(() => { if (currentGeneration === generation) resultRequest = false; });
+      }
+    }
   }
 
   async function generate(input: RunSuperEasyInput): Promise<SuperEasyRunResult> {
@@ -122,8 +150,11 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       prompt: input.prompt,
       compute: input.compute ?? 'cpu',
       ...(input.cpu === undefined ? {} : { cpu: input.cpu }),
+      ...(input.hostedInvite === true ? { hostedInvite: true } : {}),
     };
     lastInput = nextInput;
+    generation += 1;
+    resultRequest = false;
     stopped = false;
     preview = false;
     failure = null;
@@ -167,6 +198,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
     watchStop = watch({
       productionId: result.productionId,
+      ...(options.watchFetch ? { fetchImpl: options.watchFetch } : {}),
       onState,
     });
     if (stopped || status === 'done') cancelWatch();
@@ -185,6 +217,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     }
     if (stopped) return;
     stopped = true;
+    generation += 1;
     cancelWatch();
     patchStatus('stopped');
     publish();

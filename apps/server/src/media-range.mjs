@@ -114,7 +114,7 @@ export function createMediaTickets(options = {}) {
     pruneExpired(at);
     const ticket = randomBytes(16).toString('hex');
     const expires = at + ttlMs;
-    tickets.set(ticket, { file: row.file, mediaId: row.mediaId, artifactId: row.artifactId, expires });
+    tickets.set(ticket, { file: row.file, mediaId: row.mediaId, artifactId: row.artifactId, expires, authorize: row.authorize });
     return {
       ticket,
       expiresAt: new Date(expires).toISOString(),
@@ -131,6 +131,7 @@ export function createMediaTickets(options = {}) {
         throw new TypeError('mint options must be an object');
       }
       const { artifactId } = options;
+      if (options.authorize !== undefined && typeof options.authorize !== 'function') throw new TypeError('authorize must be a function');
       if (artifactId !== undefined && artifactId !== null
         && (typeof artifactId !== 'string' || artifactId.length === 0)) {
         throw new TypeError('artifactId must be a non-empty string');
@@ -138,13 +139,20 @@ export function createMediaTickets(options = {}) {
       const artifact = artifactId ?? null;
       const mediaId = mediaIdFor(artifact ?? file);
       remember(mediaId, artifact, file);
-      return issue({ mediaId, artifactId: artifact, file });
+      return issue({ mediaId, artifactId: artifact, file, authorize: options.authorize });
     },
 
     resolve(ticket) {
       if (typeof ticket !== 'string') return null;
       pruneExpired(now());
-      return tickets.get(ticket)?.file ?? null;
+      const row = tickets.get(ticket);
+      if (!row) return null;
+      if (row.authorize) {
+        try {
+          if (row.authorize() !== true) { tickets.delete(ticket); return null; }
+        } catch { tickets.delete(ticket); return null; }
+      }
+      return row.file;
     },
 
     inspect(ticket) {

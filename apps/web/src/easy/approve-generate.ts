@@ -101,6 +101,8 @@ interface ApproveDeps {
   snapshot?: unknown;
   context?: Record<string, unknown>;
   go?: Go;
+  /** Hosted invite actions are started by the server's guarded outbox. */
+  productionDispatchOnly?: boolean;
 }
 
 function productionId(state: EasyState): string {
@@ -221,9 +223,9 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
   }
 
   if (colab && built.ok === true) {
-    const status = await deps.api.colabStatus();
-    const backendId = runBackendId(status);
+    const backendId = deps.productionDispatchOnly ? 'colab' : runBackendId(await deps.api.colabStatus());
     const actions = card.actions.filter((action) => typeof action?.id === 'string' && action.id !== '');
+    if (deps.productionDispatchOnly && actions.length === 0) return 'This plan has no Google Colab work to run.';
     const dispatched: Array<{ actionId: string; response: unknown; revision: number }> = [];
     for (const action of actions) {
       const commandId = stableId('cmd_dispatch', [...identity, action.id, revision]);
@@ -242,7 +244,7 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
       revision = revisionOf(response, revision);
       dispatched.push({ actionId: action.id, response, revision });
     }
-    for (const item of dispatched) {
+    for (const item of deps.productionDispatchOnly ? [] : dispatched) {
       try {
         await deps.api.startRun({
           packageId: state.packageId,
