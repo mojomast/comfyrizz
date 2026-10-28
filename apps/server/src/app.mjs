@@ -1852,6 +1852,7 @@ export function createApp({
           provider: body.provider,
           model: body.model,
           motionModel: body.motionModel,
+          thinking: body.thinking,
           sessionId,
           runtimeDir,
           onEvent: event => {

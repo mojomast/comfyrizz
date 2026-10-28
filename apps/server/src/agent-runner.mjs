@@ -713,9 +713,14 @@ function createLlmSvgGenerator(model, sessionId) {
 export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOString(), providers = {}, resolveProviderConfig, motionModel: defaultMotionModel = 'auto' } = {}) {
   const packagesDir = join(runtimeDir, 'packages');
   const assetsDir = join(packagesDir, 'assets');
-  return async function runCpuAgent({ brief, brand, provider, model: modelName, motionModel: requestedMotionModel, sessionId = 'cpu-slice', onEvent } = {}) {
+  return async function runCpuAgent({ brief, brand, provider, model: modelName, motionModel: requestedMotionModel, thinking, sessionId = 'cpu-slice', onEvent } = {}) {
     if (typeof brief !== 'string' || brief.trim().length === 0) {
       const error = new Error('brief is required');
+      error.status = 400;
+      throw error;
+    }
+    if (thinking !== undefined && thinking !== 'enabled' && thinking !== 'disabled') {
+      const error = new Error('thinking must be enabled or disabled');
       error.status = 400;
       throw error;
     }
@@ -751,7 +756,10 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       resolved = resolveProviderConfig
         ? resolveProviderConfig(provider, modelName)
         : resolveProvider(provider, { ...override, ...(modelName ? { model: modelName } : {}) });
-      agentModel = createOpenAICompatibleModel(resolved);
+      agentModel = createOpenAICompatibleModel({
+        ...resolved,
+        ...(thinking === 'disabled' ? { thinking, reasoningEffort: undefined } : thinking === 'enabled' ? { thinking } : {}),
+      });
       live = true;
     }
     const persistSvg = (assetId, svg) => {

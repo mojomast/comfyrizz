@@ -59,5 +59,7 @@ export interface ResolvedProvider {
   headers: Record<string, string>;
   sessionHeader?: string;
   reasoningEffort?: 'low' | 'high' | 'max';
+  /** DeepSeek thinking-mode toggle; omitted preserves the provider default. */
+  thinking?: 'enabled' | 'disabled';
   status: ProviderPreset['status'];
 }
