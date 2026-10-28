@@ -5,7 +5,7 @@ import { useGeneratedAssets, type InlineAsset } from './generated-assets-context
 
 export { GeneratedAssetsProvider, type InlineAsset } from './generated-assets-context';
 import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, palette, textColors, useFontFamily } from './theme';
-import { proceduralStyle } from './background-model.js';
+import { proceduralStyle, readableMediaScrim } from './background-model.js';
 import { statLines } from './stat-model.js';
 import { chartSeries } from './chart-model.js';
 import { LowerThird, MediaFill, MediaPanel, MissingMediaPlaceholder, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
@@ -123,7 +123,7 @@ function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media
           {...(background?.speed !== undefined ? { speed: background.speed } : {})}
           {...(background?.trim ? { trim: background.trim } : {})}
         />
-        <Scrim opacity={resolved.scrim} />
+        <Scrim opacity={readableMediaScrim(scene, resolved.scrim)} />
       </>
     );
   }

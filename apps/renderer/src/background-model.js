@@ -49,3 +49,15 @@ export function proceduralStyle(pattern, colors) {
 
   return { background: `linear-gradient(140deg, ${base} 0%, ${mid} 58%, ${accent} 130%)` };
 }
+
+/** Keep editorial copy readable over bright generated stills and video. */
+export function readableMediaScrim(scene, scrim) {
+  const copy = scene?.copy && typeof scene.copy === 'object' ? scene.copy : {};
+  const editorial = Object.values(copy).some(value => typeof value === 'string'
+    ? value.trim().length > 0
+    : Array.isArray(value) && value.some(item => typeof item === 'string' && item.trim().length > 0));
+  const lowerThird = typeof scene?.lower_third?.text === 'string' && scene.lower_third.text.trim().length > 0;
+  const floor = editorial && scene?.media_only !== true ? 0.42 : lowerThird ? 0.18 : 0;
+  const current = typeof scrim === 'number' && Number.isFinite(scrim) ? scrim : 0;
+  return Math.min(0.85, Math.max(0, current, floor));
+}
