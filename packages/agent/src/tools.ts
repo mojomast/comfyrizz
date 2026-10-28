@@ -885,7 +885,7 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
     }
     copy.items = items.slice(0, requiredListItems ?? 6);
   }
-  if (!copy.headline && finalLayout !== 'code') copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline ?? 48);
+  if (!copy.headline && finalLayout !== 'code' && source.media_only !== true) copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline ?? 48);
   if (finalLayout === 'code' && !copy.headline) delete copy.headline;
 
   let variant = source.variant;
@@ -959,7 +959,7 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   return scene;
 }
 
-function applyProductionIntentToScene(scene: Record<string, any>, intent: ProductionIntent): Record<string, any> {
+export function applyProductionIntentToScene(scene: Record<string, any>, intent: ProductionIntent): Record<string, any> {
   if (!intent.generatedFilm) return scene;
   const next = { ...scene };
   if (intent.noCaptions) {
@@ -993,7 +993,7 @@ const STRUCTURED_LAYOUTS: Record<NonNullable<ProductionIntent['structuredVisual'
  * duration, narration and generated-media coverage while making the editorial
  * layer deterministic instead of hoping the model remembers every instruction.
  */
-function applyGeneratedFilmPresentation(scenes: Record<string, any>[], intent: ProductionIntent, title: string): Record<string, any>[] {
+export function applyGeneratedFilmPresentation(scenes: Record<string, any>[], intent: ProductionIntent, title: string): Record<string, any>[] {
   if (!intent.generatedFilm || scenes.length === 0) return scenes;
   let next: Record<string, any>[] = scenes.map((scene, index) => {
     const recipe = intent.structuredVisual;
@@ -1010,7 +1010,7 @@ function applyGeneratedFilmPresentation(scenes: Record<string, any>[], intent: P
   });
 
   const bookend = (scene: Record<string, any>, variant: 'centered' | 'outro', fallbackHeadline: string): Record<string, any> => {
-    if (!intent.bookends || !['title', 'hero'].includes(scene.layout)) return scene;
+    if (!intent.bookends) return scene;
     // An explicit lower-third-only opening/closing is a deliberate alternative.
     if (scene.media_only === true && scene.lower_third) return scene;
     const copy = { ...(scene.copy ?? {}) };
@@ -1737,10 +1737,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       next.background = { asset: id };
       const hasEditorialCopy = Object.values(next.copy ?? {}).some(value =>
         typeof value === 'string' ? value.trim().length > 0 : Array.isArray(value) && value.some(item => typeof item === 'string' && item.trim().length > 0));
-      // media_only still supports animated lower thirds. When the brief asks
-      // for Remotion typography, preserve full copy layouts too; an explicit
-      // media_only scene remains the cinematic lower-third-only choice.
-      next.media_only = candidate.media_only === true || !hasEditorialCopy;
+      // media_only supports footage-only shots and animated lower thirds. It
+      // must never hide meaningful full-layout copy left by the editorial pass.
+      next.media_only = !hasEditorialCopy;
       if (intent.generatedFilm) {
         // Preserve independent editable SVG/vector overlays. Only remove an
         // entry that duplicates the shot asset being attached as the background.

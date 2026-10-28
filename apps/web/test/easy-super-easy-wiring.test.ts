@@ -95,6 +95,8 @@ class FakeRoot {
     this.dataset = {};
     this.listeners = new Map();
     this.prompt = { value: '', focus() {} };
+    this.length = { value: '30' };
+    this.proposalChange = { value: '' };
     this.makeSimple = {
       handler: null,
       addEventListener(_type, handler) { this.handler = handler; },
@@ -104,6 +106,8 @@ class FakeRoot {
 
   querySelector(selector) {
     if (selector === '#super-easy-prompt') return this.prompt;
+    if (selector === '#super-easy-proposal-change') return this.proposalChange;
+    if (selector === '[data-super-easy-length]:checked') return this.length;
     if (selector === '[data-easy-make-simple]') return this.makeSimple;
     return null;
   }
@@ -123,6 +127,23 @@ class FakeRoot {
     const form = { closest: (selector) => (selector === '[data-super-easy-form]' ? {} : null) };
     for (const listener of Array.from(this.listeners.get('submit') ?? [])) {
       listener({ target: form, preventDefault() {} });
+    }
+  }
+
+  selectLength(seconds) {
+    this.length.value = String(seconds);
+    const target = {
+      value: this.length.value,
+      closest: (selector) => (selector === '[data-super-easy-length]' ? this.length : null),
+    };
+    for (const listener of Array.from(this.listeners.get('change') ?? [])) listener({ target });
+  }
+
+  revise(note) {
+    this.proposalChange.value = note;
+    const target = { closest: (selector) => (selector === '[data-super-easy-revise-proposal]' ? {} : null) };
+    for (const listener of Array.from(this.listeners.get('submit') ?? [])) {
+      listener({ target, preventDefault() {} });
     }
   }
 
@@ -205,7 +226,7 @@ function createBackend(options = {}) {
     const path = new URL(String(input), 'http://fake.local').pathname;
 
     if (path === '/api/agent' && method === 'POST') {
-      calls.push({ kind: 'build' });
+      calls.push({ kind: 'build', body: JSON.parse(String(init.body ?? '{}')) });
       if (buildGate) await buildGate;
       return json({ package: { id: 'pkg_1' }, live: true });
     }
@@ -449,6 +470,33 @@ test('Generate in the real Easy shell starts one Draft session on This computer'
     assert.match(shell.root.innerHTML, /data-super-easy-progress/u);
     assert.equal((shell.root.innerHTML.match(/data-super-easy-stage=/gu) ?? []).length, 5);
     assert.match(shell.root.innerHTML, /data-super-easy-overall-gauge/u);
+  } finally {
+    shell.dispose();
+    shell.restore();
+  }
+});
+
+test('the selected duration persists through proposal revision and approval briefs', async () => {
+  const backend = createBackend();
+  const shell = mountShell(backend);
+  try {
+    await waitFor(() => shell.root.dataset.superEasyView === 'home');
+    shell.root.selectLength(60);
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.revise('Make the ending more playful');
+    await waitFor(() => backend.calls.filter(call => call.kind === 'build').length === 2
+      && shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    await approveProposal(shell);
+    await waitFor(() => shell.watch() !== null);
+
+    const builds = backend.calls.filter(call => call.kind === 'build');
+    assert.equal(builds.length, 2);
+    for (const call of builds) {
+      assert.match(call.body.brief, /Length: about 60 seconds\./u);
+      assert.doesNotMatch(call.body.brief, /Length: about 30 seconds\./u);
+    }
+    assert.match(builds[1].body.brief, /Make the ending more playful/u);
   } finally {
     shell.dispose();
     shell.restore();

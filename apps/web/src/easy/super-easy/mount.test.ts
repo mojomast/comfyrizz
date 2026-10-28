@@ -183,7 +183,38 @@ test('Generate sends the trimmed prompt to This computer and never to Google Col
   });
 
   assert.equal(prevented, true);
-  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu', motionModel: 'auto' }]);
+  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu', lengthS: 30, motionModel: 'auto' }]);
+  handle.destroy();
+});
+
+test('duration changes persist to the shared idea and ride along with Generate', () => {
+  const { root, prompt } = fakeRoot();
+  const length = { value: '30' };
+  const baseQuery = root.querySelector;
+  root.querySelector = selector => selector === '[data-super-easy-length]:checked' ? length : baseQuery(selector);
+  const changes = [];
+  const calls = [];
+  const handle = mountSuperEasy({
+    root,
+    state: () => state(),
+    onMoreControl: () => {},
+    onLengthChange: lengthS => changes.push(lengthS),
+    onGenerate: input => calls.push(input),
+  });
+
+  length.value = '60';
+  root.fire('change', {
+    target: {
+      value: length.value,
+      closest: selector => selector === '[data-super-easy-length]' ? length : null,
+    },
+  });
+  prompt.value = 'A friendly robot who learns to bake bread';
+  root.fire('submit', { target: submitTarget(), preventDefault() {} });
+
+  assert.deepEqual(changes, [60]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].lengthS, 60);
   handle.destroy();
 });
 
@@ -202,7 +233,7 @@ test('confirmed setup forwards Google Colab once; unconfirmed setup opens setup 
   assert.deepEqual(calls, []);
   setup = { ...setup, confirmed: true };
   root.fire('submit', { target: submitTarget(), preventDefault() {} });
-  assert.deepEqual(calls, [{ prompt: prompt.value, compute: 'colab', motionModel: 'auto', setupConfirmed: true }]);
+  assert.deepEqual(calls, [{ prompt: prompt.value, compute: 'colab', lengthS: 30, motionModel: 'auto', setupConfirmed: true }]);
   handle.destroy();
 });
 
@@ -249,7 +280,7 @@ test('Record this run rides along with Generate and remembers the checkbox', () 
   toggle.checked = true;
   prompt.value = 'A friendly robot who learns to bake bread';
   root.fire('submit', { target: submitTarget(), preventDefault() {} });
-  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu', motionModel: 'auto', capture: true }]);
+  assert.deepEqual(calls, [{ prompt: 'A friendly robot who learns to bake bread', compute: 'cpu', lengthS: 30, motionModel: 'auto', capture: true }]);
   handle.destroy();
 });
 

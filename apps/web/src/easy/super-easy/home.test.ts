@@ -46,7 +46,25 @@ test('Super Easy shows one primary Generate button and no level picker', () => {
   assert.equal(count(html, /iteration-card/g), 0);
   assert.equal(count(html, /<select\b/g), 1, 'one motion-model selector, not an iteration-level or plan editor');
   assert.match(html, /data-super-easy-motion-model/u);
-  assert.equal(count(html, /<input\b/g), 0, 'the happy path is one text box');
+  assert.equal(count(html, /<input\b/g), 4, 'the only inputs are the duration choices');
+});
+
+test('Super Easy has an accessible duration group with the credit-safe 30 second default', () => {
+  const html = renderSuperEasyHome();
+  assert.match(html, /<fieldset[^>]*class="easy-segmented super-easy-home-length"/u);
+  assert.match(html, /<legend[^>]*>Length<\/legend>/u);
+  const lengths = html.match(/<input\b[^>]*data-super-easy-length[^>]*>/gu) ?? [];
+  assert.equal(lengths.length, 4);
+  for (const seconds of [15, 30, 60, 90]) {
+    assert.ok(lengths.some((input) => input.includes(`type="radio"`) && input.includes(`value="${seconds}"`)));
+  }
+  assert.ok(lengths.find((input) => input.includes('value="30"'))?.includes('checked'));
+  assert.equal(lengths.filter((input) => input.includes('checked')).length, 1);
+  assert.equal(count(html, /class="easy-segment"/g), 4, 'each radio has a visible label');
+
+  const selected = renderSuperEasyHome({ lengthS: 90 });
+  assert.match(selected, /value="90" data-super-easy-length checked/u);
+  assert.doesNotMatch(selected, /value="30" data-super-easy-length checked/u);
 });
 
 test('the prompt is a textarea with a real accessible label and the friendlier copy', () => {

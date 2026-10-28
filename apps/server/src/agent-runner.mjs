@@ -10,6 +10,7 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { aspectFromSize, extractBrief } from '../../../packages/agent/dist/src/index.js';
 import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
+import { finalizeGeneratedFilmEditorial } from './editorial-finalizer.mjs';
 
 const SVG_SYSTEM = [
   'You write one standalone SVG document and nothing else.',
@@ -170,7 +171,8 @@ export function coverGeneratedFilmScenes(pkg) {
     const uniqueAssetIds = [...new Set(videoPlates.map(plate => plate.asset))];
     const template = uniqueAssetIds.length === 1 ? next.assets[uniqueAssetIds[0]] : null;
     const clipSeconds = generatedClipSeconds(template);
-    if (!template || clipSeconds <= 0 || sceneSeconds <= 0 || sceneSeconds <= clipSeconds * 2) {
+    const sourceFps = Number(template?.gen?.inputs?.fps) > 0 ? Number(template.gen.inputs.fps) : 24;
+    if (!template || clipSeconds <= 0 || sceneSeconds <= 0 || sceneSeconds <= clipSeconds + 1 / sourceFps) {
       scenes.push(scene);
       continue;
     }
@@ -193,6 +195,17 @@ export function coverGeneratedFilmScenes(pkg) {
         preferredFrames: Math.floor(sceneFrames / partCount) + (part < sceneFrames % partCount ? 1 : 0),
         media: [media],
       };
+      if (part > 0) {
+        // A long editorial line belongs to the first part only. Continuations
+        // remain footage-only instead of synthesizing the same sentence again.
+        delete partScene.narration;
+        delete partScene.narration_asset;
+        delete partScene.narration_duration_frames;
+        if (partScene.motion) {
+          partScene.motion = { ...partScene.motion };
+          delete partScene.motion.cue_phrases;
+        }
+      }
       const centered = scene.layout === 'title' && scene.variant === 'centered';
       const outro = scene.layout === 'title' && scene.variant === 'outro';
       const originalFirst = sceneIndex === 0;
@@ -543,12 +556,37 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   if (intent.requestedSeconds !== null && !durationWithinTarget(plannedSeconds, intent.requestedSeconds)) {
     problems.push(`brief requests ${intent.requestedSeconds} seconds but the plan is ${plannedSeconds.toFixed(2)} seconds; acceptable range is ${durationRangeText(intent.requestedSeconds)}; adjust scene frames before production`);
   }
+  const narrated = scenes.some(scene => typeof scene?.narration === 'string' && scene.narration.trim());
+  if (intent.narrationRequested && !intent.wordless && !narrated) {
+    problems.push('brief requests Kokoro voiceover but scene.narration is missing; add concise scene-specific narration before production');
+  }
+  if (narrated && !intent.wordless && (pkg?.voice?.enabled !== true || !pkg?.voice?.engine || pkg.voice.engine === 'none')) {
+    problems.push('narrated film requires an enabled finishing voice (Kokoro by default) before production');
+  }
+  if (intent.musicRequested) {
+    const musicId = pkg?.audio?.music?.asset;
+    const music = typeof musicId === 'string' ? assets[musicId] : null;
+    if (!music || music.kind !== 'audio' || music.status !== 'ready' || typeof music.file !== 'string' || typeof music.sha256 !== 'string') {
+      problems.push('brief requests music but no ready whole-film music asset is configured; add the deterministic instrumental finishing stem before production');
+    }
+  }
+  if (intent.bookends) {
+    const first = scenes[0];
+    const last = scenes.at(-1);
+    if (first?.layout !== 'title' || first?.variant !== 'centered' || first?.media_only === true || !hasCopy(first?.copy)) {
+      problems.push('generated film requires a visible editable Remotion opening title');
+    }
+    if (last?.layout !== 'title' || last?.variant !== 'outro' || last?.media_only === true || !hasCopy(last?.copy)) {
+      problems.push('generated film requires a visible editable Remotion closing title');
+    }
+  }
   if (motionModel === 'klein' && !/stills \+ code motion/i.test((pkg?.compliance?.warnings ?? []).join(' '))) {
     problems.push('Klein proposal must explicitly say stills + code motion');
   }
   for (const scene of scenes) {
     const sceneId = scene?.id ?? '(unknown scene)';
-    if (intent.requiresNarrationCues) {
+    const narrationContinuation = /__part[2-9]\d*$/.test(sceneId) && !scene?.narration;
+    if (intent.requiresNarrationCues && !narrationContinuation) {
       if (typeof scene?.narration !== 'string' || !scene.narration.trim()) {
         problems.push(`${sceneId}: narration-timed motion graphics require a concise scene.narration sentence`);
       } else if (!Array.isArray(scene?.motion?.cue_phrases) || scene.motion.cue_phrases.filter(phrase => typeof phrase === 'string' && phrase.trim()).length === 0) {
@@ -562,6 +600,13 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
       .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
       .filter(Boolean);
     const videos = mediaAssets.filter(asset => asset.kind === 'video' && ['fasth3-omni', 'ltx25'].includes(asset.gen?.generator));
+    if (hasCopy(scene?.copy) && scene?.media_only === true) {
+      problems.push(`${sceneId}: meaningful Remotion copy is hidden by media_only; use a visible full layout or move the words to lower_third`);
+    }
+    const h3Ambience = videos.filter(asset => asset.gen?.generator === 'fasth3-omni' && !asset.gen?.direction?.dialogue);
+    if (h3Ambience.length > 0 && (!pkg?.audio?.ambience || typeof pkg.audio.ambience !== 'object' || pkg.audio.ambience.enabled === false)) {
+      problems.push(`${sceneId}: H3 native soundscape requires an enabled ambience bus; do not mute the only native-audio route`);
+    }
     if (motionModel === 'klein') {
       const stills = mediaAssets.filter(asset => asset.kind === 'image' && asset.gen?.generator === 'flux3-klein');
       if (stills.length === 0) problems.push(`${sceneId}: explicit Klein medium requires a scene-referenced FLUX 3 Image Klein still for every shot`);
@@ -597,7 +642,7 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
       const holdFrames = Number.isFinite(plate?.holdFrames) ? Math.max(0, Number(plate.holdFrames)) : 0;
       return total + (frames / mediaFps) / speed + holdFrames / fps;
     }, 0);
-    if (sceneSeconds > 0 && coveredSeconds > 0 && coveredSeconds * 2 < sceneSeconds) {
+    if (sceneSeconds > 0 && coveredSeconds > 0 && coveredSeconds + 1 / 24 < sceneSeconds) {
       problems.push(`${sceneId}: scene is ${sceneSeconds.toFixed(2)} seconds but attached generated video covers ${coveredSeconds.toFixed(2)} seconds; add enough generation clips or shorten the scene instead of stretching a short clip`);
     }
     for (const asset of videos) {
@@ -860,6 +905,11 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
             }
             result = { ...result, package: covered.package, pendingGpu };
             onEvent?.({ type: 'runner_phase', phase, status: 'coverage', splits: covered.splits, scenes: covered.package.scenes.length, elapsedMs: Date.now() - runStartedAt });
+          }
+          const finalized = finalizeGeneratedFilmEditorial(result.package, { intent, brief, assetsDir });
+          result = { ...result, package: finalized.package };
+          if (finalized.musicAdded || finalized.narrationEnabled || finalized.ambienceEnabled) {
+            onEvent?.({ type: 'runner_phase', phase, status: 'editorial', musicAdded: finalized.musicAdded, narrationEnabled: finalized.narrationEnabled, ambienceEnabled: finalized.ambienceEnabled, elapsedMs: Date.now() - runStartedAt });
           }
         }
         onEvent?.({ type: 'runner_phase', phase, status: 'completed', durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - runStartedAt, stopped: result.result.stopped ?? 'final' });

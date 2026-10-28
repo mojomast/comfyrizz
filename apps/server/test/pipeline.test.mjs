@@ -79,6 +79,19 @@ test('paid approval binds voice, project content and allocation ceilings', () =>
   assert.notEqual(planPipeline(pkg, { ...options, budgetUnits: 5 }).planHash, before.planHash);
 });
 
+test('a configured music-only mix requires final audio verification', () => {
+  const pkg = structuredClone(example);
+  assert.equal(planPipeline(pkg, { backendId: 'cpu' }).requiresAudio, false);
+  pkg.assets.a_score = {
+    kind: 'audio', origin: 'generated', status: 'ready', file: 'assets/score.wav',
+    sha256: '0'.repeat(64), bytes: 44, media: { durationSeconds: 1 },
+    gen: { generator: 'procedural-audio', model: 'deterministic-pcm-v2', inputs: { plan: 'test score', seed: 1 } },
+    license: { id: 'CC0-1.0' }, redistributable: true,
+  };
+  pkg.audio = { music: { asset: 'a_score' } };
+  assert.equal(planPipeline(pkg, { backendId: 'cpu' }).requiresAudio, true);
+});
+
 test('render location defaults to local and is part of the approved plan', () => {
   const local = planPipeline(example, { backendId: 'cpu' });
   assert.equal(local.options.renderLocation, 'local');

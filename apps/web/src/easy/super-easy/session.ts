@@ -153,6 +153,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     const nextInput: RunSuperEasyInput = {
       prompt: input.prompt,
       compute: input.compute ?? 'cpu',
+      ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }),
       motionModel: input.motionModel ?? 'auto',
       ...(input.setupConfirmed === undefined ? {} : { setupConfirmed: input.setupConfirmed }),
       ...(input.cpu === undefined ? {} : { cpu: input.cpu }),

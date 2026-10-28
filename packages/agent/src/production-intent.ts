@@ -6,6 +6,10 @@ export interface ProductionIntent {
   /** Wordless describes speech, never the presence of a native soundscape. */
   wordless: boolean;
   noCaptions: boolean;
+  /** Explicitly requests finishing narration rather than native H3 dialogue. */
+  narrationRequested: boolean;
+  /** Explicitly requests a score/music bed; soundscape alone does not imply music. */
+  musicRequested: boolean;
   /** Explicitly requires narration-anchored motion.cue_phrases on every scene. */
   requiresNarrationCues: boolean;
   /** Live-action fictional humans, not a substituted stylized medium. */
@@ -74,9 +78,12 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   const wordless = /\bwordless\b/i.test(text)
     || /\bno\b[^.!?\n]{0,70}\b(?:dialogue|narration|speech|voice[\s-]?over)\b/i.test(text)
     || /\bwithout\s+(?:dialogue|narration|speech|voice[\s-]?over)\b/i.test(text);
-  const noCaptions = /\bno\b[^.!?\n]{0,90}\b(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?|copy)\b/i.test(text)
+  const explicitRemotionCopy = positiveMatch(text, /\b(?:Remotion(?:\s+[\w-]+){0,3}\s+(?:titles?|title\s+cards?|end\s+cards?|headlines?|copy|captions?|lower\s+thirds?)|(?:titles?|title\s+cards?|end\s+cards?|headlines?|copy|captions?|lower\s+thirds?)\s+(?:in|with|using)\s+Remotion)\b/i);
+  const noCaptions = !explicitRemotionCopy && (/\bno\b[^.!?\n]{0,90}\b(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?|copy)\b/i.test(text)
     || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?)\b/i.test(text)
-    || /\btext[\s-]+free\b/i.test(text);
+    || /\btext[\s-]+free\b/i.test(text));
+  const narrationRequested = positiveMatch(text, /\b(?:narrat(?:ed|ion|or)|voice[\s-]?over|spoken\s+(?:script|narration)|Kokoro)\b/i);
+  const musicRequested = positiveMatch(text, /\b(?:music|soundtrack|score|instrumental(?:\s+bed)?|theme\s+song|BGM)\b/i);
   const requiresNarrationCues = /\bcue_phrases\b|narration[\s-]+(?:linked|anchored)\s+(?:motion|animation|cues?)|timed\s+(?:to|with)\s+(?:the\s+)?narration/i.test(text);
   const liveActionHumans = positiveMatch(text, /\b(?:real\s+(?:humans?|people)|(?:realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?)|photoreal(?:istic)?(?:\s+humans?)?|live[\s-]*action)\b/i);
   const requestedMinutesMatch = new RegExp(`\\b(${DURATION_NUMBER})[\\s-]+(?:minutes?|mins?)\\b`, 'i').exec(text);
@@ -105,6 +112,8 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     generatedFilm,
     wordless,
     noCaptions,
+    narrationRequested,
+    musicRequested,
     requiresNarrationCues,
     liveActionHumans,
     bookends: generatedFilm && !noCaptions,

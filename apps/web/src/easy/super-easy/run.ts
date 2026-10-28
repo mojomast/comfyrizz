@@ -67,6 +67,7 @@ export interface SuperEasyRunPollingOptions {
 export interface RunSuperEasyInput {
   prompt: string;
   compute?: EasyState['compute'];
+  lengthS?: EasyState['idea']['lengthS'];
   motionModel?: MotionModel;
   /** One-time guided setup confirmation; a per-click spend override is not accepted. */
   setupConfirmed?: boolean;
@@ -382,7 +383,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
 
   const current = deps.store.get();
   deps.store.patch({
-    idea: { ...current.idea, text: prompt },
+    idea: { ...current.idea, text: prompt, ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }) },
     compute,
     motionModel: input.motionModel ?? 'auto',
     level: 'draft',

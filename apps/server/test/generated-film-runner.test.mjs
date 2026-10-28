@@ -216,6 +216,38 @@ test('coverage splitting keeps one opener and one outro instead of repeating boo
   }
 });
 
+test('coverage splitting keeps narration and cue ownership on the first part only', async () => {
+  const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
+  const narration = 'The skater rises after the fall.';
+  const pkg = {
+    title: 'Getting Up',
+    proposal: { logline: 'A skater gets up.', look: 'Photorealistic live action.', soundtrack: 'Skateboard foley.' },
+    format: { fps: 30 }, revision: 3,
+    voice: { enabled: true, engine: 'kokoro', voice: 'af_heart' },
+    scenes: [{
+      id: 's1', layout: 'list', media_only: true, preferredFrames: 360, narration,
+      motion: { cue_phrases: ['rises after the fall'] }, media: [{ asset: 'a_ltx' }],
+      notes: 'LTX finishing sound plan: wheels, impact and room tone',
+    }],
+    assets: {
+      a_ltx: {
+        kind: 'video', status: 'pending',
+        gen: { generator: 'ltx25', workflow: 'workflows/ltx25_i2v.api.json', inputs: { image: 'a_start', frames: 121, fps: 24, seed: 8 } },
+        media: { audio: 'none' }, notes: 'finishing sound plan: wheels, impact and room tone',
+      },
+    },
+  };
+  const covered = coverGeneratedFilmScenes(pkg);
+  assert.equal(covered.splits, 1);
+  assert.equal(covered.package.scenes.length, 3);
+  assert.deepEqual(covered.package.scenes.map(scene => scene.narration), [narration, undefined, undefined]);
+  assert.deepEqual(covered.package.scenes.map(scene => scene.motion?.cue_phrases), [['rises after the fall'], undefined, undefined]);
+  const brief = 'Create a 12-second narrated generated film in 1 shot with motion.cue_phrases copied from narration. No music. No captions.';
+  const intent = classifyProductionIntent(brief);
+  const problems = generatedFilmCompletionProblems(covered.package, intent, 'ltx', brief);
+  assert.equal(problems.some(problem => /narration|cue_phrases|attached generated video covers/.test(problem)), false, problems.join('\n'));
+});
+
 test('completion rejects clay substitutions for real humans and under-covered scene durations', async () => {
   const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
   const intent = classifyProductionIntent('Create a 2 minute live-action video with real humans.');

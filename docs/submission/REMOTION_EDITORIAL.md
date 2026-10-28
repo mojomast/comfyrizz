@@ -9,7 +9,19 @@ Generated films now use Remotion as their editable editorial and motion-design l
 - Shot IDs, footage, narration, timing, total duration, and generated-media requirements do not change.
 - Explicit no-text, no-title, text-free, or no-caption requests disable automatic bookends.
 - Lower-third-only openings/closures and model-authored layouts/recipes remain valid choices.
-- Meaningful text remains native, editable Remotion copy. It is not baked into generated footage.
+- Meaningful text remains native, editable Remotion copy. It is not baked into generated footage or hidden by `media_only`.
+
+## Complete editorial finalization
+
+After model planning and duration coverage, a deterministic finalizer runs before the proposal can be accepted:
+
+- scenes with finishing narration receive an enabled Kokoro voice configuration; explicit wordless requests never gain speech;
+- an explicit music request receives a ready, original deterministic instrumental WAV, including all-H3 and mixed Auto films;
+- non-dialogue H3 footage receives an ambience bus so its native soundscape is not silently muted;
+- the first and last shots must have visible editable bookends when text is allowed;
+- requested duration, ready music, narration voice, native-audio routing and visible copy are completion requirements, not optional model suggestions.
+
+The instrumental score uses CPU-synthesized harmony, felt bass, bell arpeggio and a restrained pulse. It is original procedural audio, not a stock track or an AI music-model claim. These steps perform no visual generation and add no visual takes. Final-run narration is still synthesized and measured before media execution; the planning voice flag alone is not presented as finished speech.
 
 ## Purpose-driven structured visuals
 
@@ -33,10 +45,11 @@ Bookends live on existing generated shots rather than adding new scenes. If an u
 - only the first part carries the opener;
 - only the last part carries the outro;
 - intermediate parts are clean footage-only shots;
+- narration and narration-linked cue phrases belong to the first part only, so continuation clips never repeat the line;
 - a single long opening/closing shot can become an opener, clean middle footage, and an outro;
 - the actual final scene has no positive outgoing transition.
 
-This preserves requested duration and avoids repeated title cards or duplicated title-animation beats.
+Coverage is checked against the editorial slot rather than accepting a clip covering only half the scene and stretching/looping it. This preserves requested duration and avoids repeated title cards, duplicated title-animation beats, repeated narration, and extreme slow-motion fillers.
 
 ## Editable review
 

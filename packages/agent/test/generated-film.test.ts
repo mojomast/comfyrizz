@@ -67,6 +67,10 @@ test('retained four-shot prompt is generated film; explicit procedural controls 
   const hybrid = classifyProductionIntent('Create a 20-second narrated generated film in 4 shots with Remotion motion graphics, kinetic typography and native foley.');
   assert.equal(hybrid.kind, 'generated-film');
   assert.equal(hybrid.wordless, false);
+  assert.equal(hybrid.narrationRequested, true);
+  assert.equal(classifyProductionIntent('Create a generated film. Music: instrumental bed. Narration: Kokoro voiceover.').musicRequested, true);
+  assert.equal(classifyProductionIntent('Create a wordless generated film with native soundscape and no dialogue or music.').musicRequested, false);
+  assert.equal(classifyProductionIntent('Create a generated film with no generated titles; use exact Remotion titles instead.').noCaptions, false);
   assert.equal(classifyProductionIntent('Create a narrated generated film in 4 shots with motion.cue_phrases copied from narration.').requiresNarrationCues, true);
   assert.equal(classifyProductionIntent('No SVG or charts. Create a generated film in 4 shots with a felt mascot and coastal sound.').kind, 'generated-film');
   const liveAction = classifyProductionIntent('A funny 2 minute video featuring people getting hurt falling over. Make it live action please.');
