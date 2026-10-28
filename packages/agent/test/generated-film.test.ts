@@ -76,6 +76,10 @@ test('retained four-shot prompt is generated film; explicit procedural controls 
   assert.equal(liveAction.requestedSeconds, 120);
   assert.equal(classifyProductionIntent('A 1 minute and 30 second live-action short.').requestedSeconds, 90);
   assert.equal(classifyProductionIntent('A 1.5-minute live-action short.').requestedSeconds, 90);
+  const realisticHumans = classifyProductionIntent('A two minute skateboard film with realistic humans and a fisheye lens.');
+  assert.equal(realisticHumans.kind, 'generated-film');
+  assert.equal(realisticHumans.liveActionHumans, true);
+  assert.equal(realisticHumans.requestedSeconds, 120);
   assert.equal(classifyProductionIntent('Not live action: make a motion-graphics explainer with SVG charts.').kind, 'motion-graphics');
   assert.equal(parseMotionModel(undefined), 'auto');
   assert.throws(() => parseMotionModel('flux'), /motionModel/);

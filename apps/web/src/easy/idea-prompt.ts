@@ -8,9 +8,11 @@ export function ideaPrompt(state: EasyState): string {
   const text = String(state.idea.text ?? '').trim();
   if (text) sentences.push(text);
 
-  sentences.push(`Length: about ${state.idea.lengthS} seconds.`);
+  const hasExplicitDuration = /\b(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+(?:seconds?|minutes?|mins?)\b/i.test(text);
+  if (!hasExplicitDuration) sentences.push(`Length: about ${state.idea.lengthS} seconds.`);
   sentences.push(`Aspect: ${state.idea.aspect}.`);
-  sentences.push(`Look: ${state.idea.look}.`);
+  const liveActionLook = /\b(?:real\s+(?:humans?|people)|realistic\s+humans?|live[\s-]*action)\b/i.test(text);
+  sentences.push(`Look: ${liveActionLook ? 'photorealistic live-action fictional human adults, natural skin and real-world materials' : state.idea.look}.`);
   sentences.push(state.idea.sound ? `Music: ${MUSIC_BED}.` : 'No music.');
 
   for (const question of state.questions) {

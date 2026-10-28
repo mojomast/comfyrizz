@@ -48,6 +48,7 @@ const DEFAULT_BASE = [
   '- Treat the stated settings that follow the idea as hard defaults: "Length: about N seconds." means the scene preferredFrames sum to exactly N seconds at the package fps; "Aspect:" sets the output format; "Look:" is the style preset; "Characters:" names the cast. "Music: instrumental bed." means every finishing_sound names the score\'s instruments, tempo and mood alongside ambience and effects (for example "warm prepared piano, slow pulse, light rain on tin"); "No music." means finishing_sound lists ambience and effects only.',
   '- When the brief ends with "Creative revision requests", apply only those changes and keep every unrelated creative choice. Explicit live-action or real-human requests take precedence over an earlier stylized look.',
   '- For live-action or real-human requests, every proposal and asset prompt must describe photorealistic fictional human adults, natural skin and real-world materials. Never substitute clay, plasticine, stop-motion, puppets, cartoons or handmade-miniature styling.',
+  '- Preserve the requested action intensity and physical outcomes. Do not soften requested falls, collisions or injuries into gentler action, and do not add "nobody gets hurt" or "only pride is hurt" disclaimers unless the user asks for them.',
   '- The motion model (auto, h3, ltx or klein) is configured outside the brief. Omit motion_model on assets.generate_video to use it; never infer a different model from the brief wording.',
   '',
   '## Workflow',

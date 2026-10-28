@@ -32,6 +32,14 @@ function positiveMatch(text: string, pattern: RegExp): boolean {
   return false;
 }
 
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const DURATION_NUMBER = '(?:\\d{1,3}(?:\\.\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)';
+
+function durationNumber(value: string): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : NUMBER_WORDS[value.toLowerCase()] ?? Number.NaN;
+}
+
 /** Rule-first classification: an explicit procedural deliverable wins over film language. */
 export function classifyProductionIntent(brief: string): ProductionIntent {
   const text = String(brief ?? '');
@@ -41,11 +49,11 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   );
   const explicitGeneratedFilm = positiveMatch(
     text,
-    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|live[\s-]*action(?:\s+(?:film|video|footage|shots?))?)\b/i,
+    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|(?:live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|realistic\s+humans?))\b/i,
   );
   const generatedShots = positiveMatch(
     text,
-    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
+    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|(?:live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|realistic\s+humans?)|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
   );
   const recurringPhysicalCharacters = positiveMatch(
     text,
@@ -66,17 +74,17 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?)\b/i.test(text)
     || /\btext[\s-]+free\b/i.test(text);
   const requiresNarrationCues = /\bcue_phrases\b|narration[\s-]+(?:linked|anchored)\s+(?:motion|animation|cues?)|timed\s+(?:to|with)\s+(?:the\s+)?narration/i.test(text);
-  const liveActionHumans = positiveMatch(text, /\b(?:real\s+(?:humans?|people)|live[\s-]*action)\b/i);
-  const requestedMinutesMatch = /\b(\d{1,3}(?:\.\d+)?)[\s-]+(?:minutes?|mins?)\b/i.exec(text);
-  const requestedSecondsMatch = /\b(\d{1,3})[\s-]+seconds?\b/i.exec(text);
+  const liveActionHumans = positiveMatch(text, /\b(?:real\s+(?:humans?|people)|realistic\s+humans?|live[\s-]*action)\b/i);
+  const requestedMinutesMatch = new RegExp(`\\b(${DURATION_NUMBER})[\\s-]+(?:minutes?|mins?)\\b`, 'i').exec(text);
+  const requestedSecondsMatch = new RegExp(`\\b(${DURATION_NUMBER})[\\s-]+seconds?\\b`, 'i').exec(text);
   const adjacentSeconds = requestedMinutesMatch && requestedSecondsMatch
     && requestedSecondsMatch.index > requestedMinutesMatch.index
     && /^\s*(?:and\s+)?$/i.test(text.slice(requestedMinutesMatch.index + requestedMinutesMatch[0].length, requestedSecondsMatch.index))
-    ? Number(requestedSecondsMatch[1])
+    ? durationNumber(requestedSecondsMatch[1])
     : 0;
   const requestedSeconds = requestedMinutesMatch
-    ? Math.round(Number(requestedMinutesMatch[1]) * 60 + adjacentSeconds)
-    : requestedSecondsMatch ? Number(requestedSecondsMatch[1]) : null;
+    ? Math.round(durationNumber(requestedMinutesMatch[1]) * 60 + adjacentSeconds)
+    : requestedSecondsMatch ? durationNumber(requestedSecondsMatch[1]) : null;
   const strongEvidence = [generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape]
     .filter(Boolean).length;
   // An explicit generated film may use Remotion overlays and motion graphics.

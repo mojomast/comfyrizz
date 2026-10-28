@@ -134,6 +134,17 @@ test('an unchanged hash makes no calls', async () => {
   assert.equal(store.get().plan.status, 'ready');
 });
 
+test('an explicit duration in the idea is not overridden by the default length', async () => {
+  const store = memoryStore();
+  store.patch({ idea: { ...store.get().idea, text: 'A two minute skateboard film with realistic humans.', lengthS: 30 } });
+  const { calls, api, host } = harness({ store });
+  await writePlan(store.get(), { api, host, store });
+  assert.match(calls[0].input.brief, /two minute/);
+  assert.doesNotMatch(calls[0].input.brief, /Length: about 30 seconds/);
+  assert.doesNotMatch(calls[0].input.brief, /Look: clay/);
+  assert.match(calls[0].input.brief, /Look: photorealistic live-action fictional human adults/);
+});
+
 test('offline is set when live is false and a disconnected provider is omitted', async () => {
   const { calls, store, api, host } = harness({ live: false, selection: { provider: 'none' } });
   await writePlan(store.get(), { api, host, store });
