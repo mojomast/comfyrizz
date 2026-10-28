@@ -145,3 +145,15 @@ test('package media is served with byte ranges and rejects traversal', async () 
   const queryToken = await request({ path: `/api/package/${seed.id}/media?path=clip.mp4&token=${TOKEN}`, token: null });
   assert.equal(queryToken.status, 401, 'native media URLs must not carry the API token');
 });
+
+test('package media falls back to the package asset directory for standalone audio', async () => {
+  mkdirSync(join(runtime, 'packages', 'assets'), { recursive: true });
+  writeFileSync(join(runtime, 'packages', 'assets', 'a_finishing_mix.wav'), Buffer.from('0123456789'));
+  const ok = await request({
+    path: '/api/package/pkg_audio_fallback/media?path=assets/a_finishing_mix.wav',
+    headers: { range: 'bytes=2-5' },
+  });
+  assert.equal(ok.status, 206);
+  assert.equal(ok.buffer.toString('utf8'), '2345');
+  assert.match(String(ok.headers['content-type']), /audio\/wav/);
+});

@@ -104,9 +104,96 @@ function zodEnum(values: readonly string[]) {
   return z.enum(values as [string, ...string[]]);
 }
 
+const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list', 'split', 'compare', 'code'] as const;
+type SceneLayout = (typeof SCENE_LAYOUTS)[number];
+
+const PACKAGE_FPS = [24, 25, 30, 50, 60] as const;
+const FORMAT_PRESETS: Record<string, { width: number; height: number }> = {
+  '16:9': { width: 1920, height: 1080 },
+  '9:16': { width: 1080, height: 1920 },
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+};
+const UNSUPPORTED_ASPECTS = new Set(['4:3', '3:2', '5:4', '16:10', '21:9', '2:1', '2.39:1', '2.35:1', '1.85:1', '1.66:1']);
+
+interface PackageFormat {
+  width: number;
+  height: number;
+  fps: number;
+}
+
+function briefClauses(brief: string): string[] {
+  return brief.split(/[;!?\n]+|\.\s+/).map(clause => clause.trim()).filter(Boolean);
+}
+
+function negatedClause(clause: string): boolean {
+  return /\b(?:no|not|never|avoid|without|don'?t|cannot|can't)\b/i.test(clause);
+}
+
+function unsupportedFormatError(reasons: string[]): Error {
+  return Object.assign(
+    new Error(`Unsupported format: ${reasons.join(', ')} cannot be rendered. Use 1920x1080 at 30 fps and 16:9, or a supported WxH size such as 1080x1920 at 30 fps.`),
+    { name: 'UnsupportedFormatError', status: 422, code: 'UNSUPPORTED_FORMAT' },
+  );
+}
+
+function supportedSize(width: number, height: number): boolean {
+  return Number.isInteger(width) && Number.isInteger(height)
+    && width >= 64 && width <= 7680 && width % 2 === 0
+    && height >= 64 && height <= 4320 && height % 2 === 0;
+}
+
+/** Read the output size and fps the brief actually asks for; never silently fall back from a rejected format. */
+function resolveFormat(brief: string): PackageFormat {
+  const clauses = briefClauses(brief).filter(clause => !negatedClause(clause));
+  const reasons: string[] = [];
+  const addReason = (reason: string) => {
+    if (!reasons.includes(reason)) reasons.push(reason);
+  };
+  let size: { width: number; height: number } | undefined;
+  let preset: { width: number; height: number } | undefined;
+  let fps = 30;
+
+  for (const clause of clauses) {
+    for (const match of clause.matchAll(/\b(\d{1,2})\s*k\b/gi)) {
+      const resolution = Number(match[1]);
+      if (resolution >= 8) addReason(`${resolution}K resolution`);
+    }
+    for (const match of clause.matchAll(/\b(\d{1,3})\s*(?:fps\b|frames?\s+per\s+second)\b/gi)) {
+      const value = Number(match[1]);
+      if ((PACKAGE_FPS as readonly number[]).includes(value)) fps = value;
+      else addReason(`${value} fps`);
+    }
+    for (const match of clause.matchAll(/\b(\d{1,2}(?:\.\d+)?)\s*:\s*(\d{1,2}(?:\.\d+)?)\b/g)) {
+      const ratio = `${match[1]}:${match[2]}`;
+      const known = FORMAT_PRESETS[ratio];
+      if (known) {
+        preset = known;
+        continue;
+      }
+      const context = /\b(?:aspect|format|ratio|resolution)\b/i.test(clause);
+      if (UNSUPPORTED_ASPECTS.has(ratio) || match[1].includes('.') || match[2].includes('.') || context) addReason(`${ratio} aspect`);
+    }
+    for (const match of clause.matchAll(/\b(\d{2,5})\s*[x×]\s*(\d{2,5})\b/gi)) {
+      const width = Number(match[1]);
+      const height = Number(match[2]);
+      if (supportedSize(width, height)) size = { width, height };
+      else addReason(`${width}x${height} resolution`);
+    }
+  }
+
+  if (reasons.length > 0) throw unsupportedFormatError(reasons);
+  if (size) return { ...size, fps };
+  if (preset) return { ...preset, fps };
+  const words = clauses.join(' ');
+  if (/\b(?:vertical|portrait|9:16)\b/i.test(words)) return { width: 1080, height: 1920, fps };
+  if (/\b(?:square|1:1)\b/i.test(words)) return { width: 1080, height: 1080, fps };
+  return { width: 1920, height: 1080, fps };
+}
+
 const sceneSchema = z.object({
   id: z.string().min(1),
-  layout: z.enum(['title', 'hero', 'stat', 'chart', 'list']).optional(),
+  layout: z.enum(SCENE_LAYOUTS).optional(),
   preferredFrames: z.number().int().positive().optional(),
   // DeepSeek often sends `copy` as a plain headline string; accept it and lift it
   // to `{ headline }` so a common model shape is not a repair-loop failure.
@@ -266,6 +353,18 @@ function hashId(prefix: string, value: string): string {
   return `${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
 }
 
+/** A generation/render rejection is an actionable 422, never an untyped 500. */
+function svgAssetError(code: string, assetId: string, message: string): Error {
+  const error = Object.assign(new Error(`${assetId}: ${message}`), {
+    name: 'SvgAssetError',
+    status: 422,
+    code,
+    assetId,
+  });
+  return error;
+}
+
+
 export const SILENT_CONDITIONING_ASSET_ID = 'a_h3_silence_500ms_24k';
 const FASTH3_WORKFLOW = 'workflows/fasth3_omni_ref2va.api.json';
 const LTX_I2V_WORKFLOW = 'workflows/ltx25_i2v_2stage.api.json';
@@ -310,8 +409,6 @@ function baseParameters(properties: Record<string, unknown>, required: string[])
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
-const SCENE_LAYOUTS = ['title', 'hero', 'stat', 'chart', 'list', 'split', 'compare', 'code'] as const;
-type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 const SCENE_KEYS = new Set([
   'id', 'layout', 'variant', 'preferredFrames', 'copy', 'data', 'background', 'foreground',
   'media_only', 'lower_third', 'transitionOut', 'motion', 'narration', 'narration_asset',
@@ -369,6 +466,132 @@ function loadCodeLayout(): Promise<CodeLayoutModule> {
   return codeLayoutPromise;
 }
 const SCENE_ID_RE = /^s[A-Za-z0-9_-]{0,63}$/;
+const DATASET_ID_RE = /^d[A-Za-z0-9_-]{0,63}$/;
+const DATASET_SOURCES = ['user', 'openverse', 'example', 'derived'] as const;
+const DATASET_MAX_VALUES = 64;
+
+type DatasetErrorCode =
+  | 'DATASETS_INVALID'
+  | 'DATASET_INVALID'
+  | 'DATASET_UNIT_REQUIRED'
+  | 'DATASET_VALUES_REQUIRED'
+  | 'DATASET_VALUE_INVALID'
+  | 'DATASET_SOURCE_INVALID';
+
+/** A dataset the tool cannot repair is an actionable 422, never invented values. */
+function datasetError(datasetId: string, code: DatasetErrorCode, message: string): Error {
+  return Object.assign(new Error(`${datasetId}: ${message}`), {
+    name: 'DatasetError',
+    status: 422,
+    code,
+    datasetId,
+  });
+}
+
+function datasetNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string' && /^[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i.test(raw.trim())) return Number(raw.trim());
+  return null;
+}
+
+/** A model-authored dataset key becomes the schema id `^d[A-Za-z0-9_-]{0,63}$`. */
+function normalizeDatasetId(raw: string): string {
+  const trimmed = raw.trim();
+  if (DATASET_ID_RE.test(trimmed)) return trimmed;
+  const body = trimmed.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const prefixed = !body ? 'd_data' : body.startsWith('d') ? body : `d_${body}`;
+  return prefixed.slice(0, 64);
+}
+
+function uniqueDatasetId(base: string, used: Set<string>): string {
+  let candidate = base;
+  for (let suffixNumber = 2; used.has(candidate); suffixNumber += 1) {
+    const suffix = `_${suffixNumber}`;
+    candidate = `${base.slice(0, Math.max(1, 64 - suffix.length))}${suffix}`;
+  }
+  return candidate;
+}
+
+function normalizeDatasetBody(raw: unknown, id: string): Record<string, any> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw datasetError(id, 'DATASET_INVALID', 'dataset must be an object with unit, values and source; never invent statistics.');
+  }
+  const dataset = raw as Record<string, unknown>;
+  const source = dataset.source === undefined
+    ? 'user'
+    : typeof dataset.source === 'string' ? dataset.source.trim().toLowerCase() : dataset.source;
+  if (typeof source !== 'string' || !(DATASET_SOURCES as readonly string[]).includes(source)) {
+    throw datasetError(id, 'DATASET_SOURCE_INVALID', 'dataset.source must be user, openverse, example or derived.');
+  }
+  const unit = typeof dataset.unit === 'string' ? dataset.unit.trim() : '';
+  if (!unit) {
+    throw datasetError(id, 'DATASET_UNIT_REQUIRED', 'dataset.unit is required (1-32 characters); keep the user-supplied unit instead of inventing one.');
+  }
+  const candidateValues = dataset.values && typeof dataset.values === 'object' && !Array.isArray(dataset.values)
+    ? Object.entries(dataset.values as Record<string, unknown>).map(([label, value]) => ({ label, value }))
+    : dataset.values;
+  if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
+    throw datasetError(id, 'DATASET_VALUES_REQUIRED', 'dataset.values must contain at least one user-supplied number; never invent statistics.');
+  }
+  const values = candidateValues.slice(0, DATASET_MAX_VALUES).map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}] must be { label, value }; never invent statistics.`);
+    }
+    const item = entry as Record<string, unknown>;
+    const label = typeof item.label === 'string' ? item.label.trim() : '';
+    if (!label) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}].label must be a non-empty string; never invent labels or statistics.`);
+    }
+    const value = datasetNumber(item.value);
+    if (value === null || Math.abs(value) > 1e12) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}].value must be a finite number within ±1e12; keep the user's value and never invent statistics.`);
+    }
+    return { label: label.slice(0, 64), value };
+  });
+
+  const normalized: Record<string, any> = { unit: unit.slice(0, 32), values, source };
+  if (typeof dataset.label === 'string' && dataset.label.trim()) normalized.label = dataset.label.trim().slice(0, 64);
+  if (typeof dataset.approved === 'boolean') normalized.approved = dataset.approved;
+  if (typeof dataset.source_url === 'string' && dataset.source_url.trim()) {
+    try {
+      const href = new URL(dataset.source_url.trim()).href;
+      if (href.length <= 512) normalized.source_url = href;
+    } catch {
+      // Drop an unusable optional source URL instead of failing the whole package.
+    }
+  }
+  if (typeof dataset.retrieved_at === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dataset.retrieved_at)
+    && !Number.isNaN(Date.parse(dataset.retrieved_at))) {
+    normalized.retrieved_at = dataset.retrieved_at;
+  }
+  if (typeof dataset.note === 'string' && dataset.note.trim()) normalized.note = dataset.note.trim().slice(0, 256);
+  return normalized;
+}
+
+/** Normalize every dataset key and value once, and keep the scene-reference aliases. */
+function normalizeDatasets(raw: unknown): { datasets: Record<string, any>; aliases: Map<string, string> } {
+  if (raw === undefined || raw === null) return { datasets: {}, aliases: new Map() };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw datasetError('datasets', 'DATASETS_INVALID', 'datasets must be an object keyed by dataset id.');
+  }
+  const entries = Object.entries(raw as Record<string, unknown>);
+  const used = new Set<string>();
+  const assigned = new Map<string, string>();
+  for (const [key] of entries) {
+    const id = uniqueDatasetId(normalizeDatasetId(key), used);
+    used.add(id);
+    assigned.set(key, id);
+  }
+  const datasets: Record<string, any> = {};
+  for (const [key, value] of entries) {
+    const id = assigned.get(key)!;
+    datasets[id] = normalizeDatasetBody(value, id);
+  }
+  const aliases = new Map(assigned);
+  for (const id of used) if (!aliases.has(id)) aliases.set(id, id);
+  return { datasets, aliases };
+}
 
 function clampText(value: unknown, max: number): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -418,9 +641,59 @@ function sanitizeCodeBlock(block: any, fallbackRate: number): Record<string, any
   return { language, code, ...(highlights.length > 0 ? { highlights } : {}), typing: { charsPerSecond: rate } };
 }
 
+const COMPARISON_RE = /\bcompar(?:e|ison|ing)\b|\bversus\b|\bvs\.?\b|\bbefore\s*(?:and|&|\/|-|,)?\s*after\b/i;
+const SHARED_DATASET_RE = /(?:share|shared|single|same)[^.]{0,80}\bdatasets?\b|\bdatasets?\b[^.]{0,80}(?:share|shared|single|same)|\bone\s+(?:shared\s+)?(?:user\s+)?dataset\b/i;
+const ITEM_COUNT_WORDS: Record<string, number> = {
+  two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+};
+const LIST_ITEMS_RE = /\b(?:(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]item\s+list|list\s+scenes?\b[^.]{0,80}?\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+items?)\b/i;
+const LIST_HINT_RE = /\blist|bullet|steps|checklist|points\b/i;
+
+/** The item count a brief pins down, e.g. "one list scene with six items". */
+function briefListItems(brief: string): number | undefined {
+  const match = LIST_ITEMS_RE.exec(brief);
+  if (!match) return undefined;
+  const raw = (match[1] ?? match[2] ?? '').toLowerCase();
+  const count = ITEM_COUNT_WORDS[raw] ?? Number(raw);
+  return Number.isInteger(count) && count >= 2 && count <= 6 ? count : undefined;
+}
+
+function sceneItems(scene: Record<string, any>): unknown[] {
+  if (Array.isArray(scene.copy?.items)) return scene.copy.items;
+  return Array.isArray(scene.items) ? scene.items : [];
+}
+
+function sceneHintText(scene: Record<string, any>): string {
+  const copy = scene.copy && typeof scene.copy === 'object' ? scene.copy : {};
+  return [
+    scene.layout, scene.role, scene.id, scene.title, scene.headline,
+    copy.headline, copy.sub, copy.body,
+  ].filter((value): value is string => typeof value === 'string').join(' ').toLowerCase();
+}
+
+function briefWantsComparison(brief: string): boolean {
+  return COMPARISON_RE.test(brief);
+}
+
+function sceneHintsComparison(scene: Record<string, any>): boolean {
+  return COMPARISON_RE.test(sceneHintText(scene));
+}
+
+function comparisonPlates(): Array<Record<string, any>> {
+  return [{ procedural: { pattern: 'gradient' } }, { procedural: { pattern: 'grid' } }];
+}
+
+function ensureComparisonPlates(scene: Record<string, any>): Record<string, any> {
+  if (scene.layout === 'compare' && (!Array.isArray(scene.media) || scene.media.length !== 2)) {
+    scene.media = comparisonPlates();
+  }
+  return scene;
+}
+
 /** The live model often sends `role`/`title` and no `layout`; infer one. */
 function inferSceneLayout(scene: Record<string, any>): SceneLayout {
-  const hint = `${scene.layout ?? ''} ${scene.role ?? ''} ${scene.id ?? ''} ${scene.title ?? ''}`.toLowerCase();
+  const hint = sceneHintText(scene);
+  if (COMPARISON_RE.test(hint)) return 'compare';
   if (/outro|intro|title|cover|opening|closing|hook/.test(hint)) return 'title';
   if (/stat|metric|kpi|number|figure|score/.test(hint)) return 'stat';
   if (/chart|graph|bar|data|plot|trend/.test(hint)) return 'chart';
@@ -428,12 +701,143 @@ function inferSceneLayout(scene: Record<string, any>): SceneLayout {
   return 'hero';
 }
 
+function sameDatasetValues(values: unknown, expected: Array<{ label: string; value: number }>): boolean {
+  if (!Array.isArray(values) || values.length !== expected.length) return false;
+  return expected.every(item => values.some((entry: any) => entry?.label === item.label && entry?.value === item.value));
+}
+
+function briefSharedDataset(brief: string, normalizedDatasets: ReturnType<typeof normalizeDatasets>): { datasets: Record<string, any>; id: string } | null {
+  if (!SHARED_DATASET_RE.test(brief)) return null;
+  const values: Array<{ label: string; value: number }> = [];
+  const seen = new Set<string>();
+  for (const match of brief.matchAll(/(?:^|[.,;:]\s*|\band\s+)([A-Za-z][A-Za-z0-9 _&'\/-]{0,40}?)\s*=\s*(-?\d+(?:\.\d+)?)/g)) {
+    const label = match[1].trim().replace(/\s+/g, ' ');
+    const value = Number(match[2]);
+    if (!label || !Number.isFinite(value) || seen.has(label.toLowerCase())) continue;
+    if (/^(?:aspect|format|resolution|fps|length|duration|width|height|ratio)$/i.test(label)) continue;
+    seen.add(label.toLowerCase());
+    values.push({ label, value });
+  }
+  if (values.length === 0) return null;
+
+  const entries = Object.entries(normalizedDatasets.datasets);
+  const matching = entries.find(([, dataset]) => dataset.source === 'user' && sameDatasetValues(dataset.values, values));
+  const sameLabels = entries.find(([, dataset]) => dataset.source === 'user'
+    && Array.isArray(dataset.values)
+    && dataset.values.length === values.length
+    && values.every((item, index) => dataset.values[index]?.label === item.label));
+  const basisEntry = matching ?? sameLabels ?? entries.find(([, dataset]) => dataset.source === 'user');
+  const id = matching?.[0] ?? sameLabels?.[0] ?? basisEntry?.[0] ?? 'd_data';
+  const basis = basisEntry?.[1];
+  const dataset: Record<string, any> = {
+    unit: typeof basis?.unit === 'string' ? basis.unit : 'value',
+    values,
+    source: 'user',
+  };
+  if (typeof basis?.label === 'string') dataset.label = basis.label;
+  return { datasets: { [id]: dataset }, id };
+}
+
+function chooseComparisonScene(scenes: Array<Record<string, any>>, protectedScenes: Set<Record<string, any>> = new Set()): Record<string, any> | undefined {
+  const allowed = scenes.filter(scene => !protectedScenes.has(scene));
+  const hinted = allowed.find(scene => scene.layout !== 'compare' && scene.layout !== 'title' && sceneHintsComparison(scene));
+  if (hinted) return hinted;
+  const hintedAny = allowed.find(scene => scene.layout !== 'compare' && sceneHintsComparison(scene));
+  if (hintedAny) return hintedAny;
+  const nonCore = allowed.filter(scene => !['compare', 'chart', 'stat', 'title', 'code'].includes(scene.layout));
+  if (nonCore.length > 0) return nonCore[nonCore.length - 1];
+  const nonTitle = allowed.filter(scene => scene.layout !== 'title');
+  return nonTitle[nonTitle.length - 1] ?? allowed[allowed.length - 1];
+}
+
+/** The scene the brief's list bullet refers to: items first, then a list hint, then a non-title scene. */
+function chooseListScene(scenes: Array<Record<string, any>>): Record<string, any> | undefined {
+  return scenes.find(scene => scene.layout === 'list' && sceneItems(scene).length > 0)
+    ?? scenes.find(scene => sceneItems(scene).length > 0)
+    ?? scenes.find(scene => scene.layout === 'list')
+    ?? scenes.find(scene => LIST_HINT_RE.test(sceneHintText(scene)))
+    ?? scenes.find(scene => !['title', 'compare', 'code'].includes(scene.layout));
+}
+
+function preparePlanningScenes(rawScenes: Array<Record<string, any>>, brief: string, sharedDatasetId?: string, requiredListItems?: number): Array<Record<string, any>> {
+  const scenes = rawScenes.map(scene => ({ ...scene }));
+  for (const scene of scenes) {
+    if (!(SCENE_LAYOUTS as readonly string[]).includes(scene.layout)) scene.layout = inferSceneLayout(scene);
+  }
+  const protectedScenes = new Set<Record<string, any>>();
+  if (requiredListItems) {
+    const listScene = chooseListScene(scenes);
+    if (listScene) {
+      listScene.layout = 'list';
+      protectedScenes.add(listScene);
+    }
+  }
+  if ((briefWantsComparison(brief) || scenes.some(sceneHintsComparison)) && !scenes.some(scene => scene.layout === 'compare')) {
+    const candidate = chooseComparisonScene(scenes, protectedScenes);
+    if (candidate) {
+      candidate.layout = 'compare';
+      delete candidate.variant;
+      ensureComparisonPlates(candidate);
+    }
+  }
+  for (const scene of scenes) ensureComparisonPlates(scene);
+  if (sharedDatasetId) {
+    for (const scene of scenes) {
+      const display = scene.layout === 'stat' ? 'number' : 'bar';
+      scene.data = { dataset: sharedDatasetId, display };
+    }
+  }
+  return scenes;
+}
+
+function ensureComparisonScene(scenes: Array<Record<string, any>>, brief: string | undefined, protectedScenes: Set<Record<string, any>> = new Set()): Array<Record<string, any>> {
+  if (scenes.some(scene => scene.layout === 'compare')) return scenes;
+  if (!(brief && briefWantsComparison(brief)) && !scenes.some(sceneHintsComparison)) return scenes;
+  const candidate = chooseComparisonScene(scenes, protectedScenes);
+  if (!candidate) return scenes;
+  candidate.layout = 'compare';
+  delete candidate.variant;
+  ensureComparisonPlates(candidate);
+  if (candidate.copy?.headline) candidate.copy.headline = clampText(candidate.copy.headline, COPY_LIMITS.compare.headline);
+  return scenes;
+}
+
+/** A scene that cannot render is an actionable 422, never a silent layout downgrade. */
+function sceneDataError(sceneId: string, layout: string, detail: string, code: 'SCENE_DATA_REQUIRED' | 'SCENE_DATASET_UNKNOWN' | 'SCENE_DATA_DISPLAY_INVALID'): Error {
+  return Object.assign(
+    new Error(`${sceneId}: layout ${layout} ${detail} Set data.dataset to a dataset id from datasets and data.display to bar, number or counter.`),
+    { name: 'SceneDataError', status: 422, code },
+  );
+}
+
+/** The brief pinned the list length; dropping or inventing bullets is a 422, never a silent trim. */
+function sceneListItemsError(sceneId: string, required: number, supplied: number): Error {
+  return Object.assign(
+    new Error(`${sceneId}: the brief requires exactly ${required === 6 ? 'six' : required} items in the list scene, but the plan supplied ${supplied}. Return ${required} distinct strings in copy.items (or scene.items); the tool will not silently truncate or invent bullets.`),
+    { name: 'SceneListItemsError', status: 422, code: 'SCENE_LIST_ITEMS_REQUIRED' },
+  );
+}
+
+function clampListItem(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return clampText(String(value), 72);
+  return clampText(value, 72);
+}
+
+/** Recover line or semicolon separated bullets when a model put a six-item list in body/sub. */
+function itemsFromText(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(/\r?\n|;/)
+    .map(line => line.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean);
+}
+
 /**
  * Coerce a model-authored scene into the published package shape: a valid
  * layout, readable copy, a real dataset reference, a known variant/background,
  * and only schema-known keys. Assets that do not exist yet are dropped.
  */
-function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>): Record<string, any> {
+function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>, datasetAliases?: Map<string, string>, requiredListItems?: number): Record<string, any> {
   const source: Record<string, any> = { ...raw };
   const rawId = typeof source.id === 'string' ? source.id : '';
   const id = SCENE_ID_RE.test(rawId) ? rawId : `s_${hashId('', rawId || fallbackTitle).slice(0, 12)}`;
@@ -444,21 +848,43 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
     : source.copy && typeof source.copy === 'object' ? { ...source.copy } : {};
   if (!copy.headline && typeof source.title === 'string') copy.headline = source.title;
   if (!copy.headline && typeof source.headline === 'string') copy.headline = source.headline;
+  // The conversation-plan shape carries bullets at scene level; lift them so a
+  // list scene does not lose every item on the way into the package.
+  if (!Array.isArray(copy.items) && Array.isArray(source.items)) copy.items = [...source.items];
   for (const key of Object.keys(copy)) if (!COPY_KEYS.has(key)) delete copy[key];
 
-  let finalLayout: SceneLayout = layout;
+  const finalLayout: SceneLayout = layout;
   let data = source.data && typeof source.data === 'object' ? { ...source.data } : undefined;
-  if (data && (typeof data.dataset !== 'string' || !datasetIds.has(data.dataset))) data = undefined;
-  if (['stat', 'chart'].includes(finalLayout) && !data) finalLayout = Array.isArray(copy.items) && copy.items.length >= 2 ? 'list' : 'hero';
   if (data) {
+    const requestedDatasetId = typeof data.dataset === 'string' ? data.dataset.trim() : '';
+    if (!requestedDatasetId) throw sceneDataError(id, finalLayout, 'has data but no dataset id.', 'SCENE_DATA_REQUIRED');
+    const datasetId = datasetAliases?.get(requestedDatasetId) ?? requestedDatasetId;
+    if (!datasetIds.has(datasetId)) throw sceneDataError(id, finalLayout, `references unknown dataset "${requestedDatasetId}".`, 'SCENE_DATASET_UNKNOWN');
+    data.dataset = datasetId;
     for (const key of Object.keys(data)) if (key !== 'dataset' && key !== 'display') delete data[key];
+    if (data.display !== undefined && !['bar', 'number', 'counter'].includes(data.display)) {
+      throw sceneDataError(id, finalLayout, `has unsupported data.display "${String(data.display)}".`, 'SCENE_DATA_DISPLAY_INVALID');
+    }
     if (finalLayout === 'stat' && data.display === undefined) data.display = 'number';
     if (finalLayout === 'chart' && data.display === undefined) data.display = 'bar';
+  }
+  if (['stat', 'chart'].includes(finalLayout) && !data) {
+    throw sceneDataError(id, finalLayout, 'requires a dataset reference but none was provided.', 'SCENE_DATA_REQUIRED');
   }
 
   const limits = COPY_LIMITS[finalLayout];
   for (const [key, max] of Object.entries(limits)) if (copy[key] !== undefined) copy[key] = clampText(copy[key], max);
-  if (Array.isArray(copy.items)) copy.items = copy.items.map(item => clampText(item, 72)).filter(Boolean).slice(0, 6);
+  if (!Array.isArray(copy.items) && requiredListItems && finalLayout === 'list') {
+    const extracted = itemsFromText(copy.body);
+    copy.items = extracted.length > 0 ? extracted : itemsFromText(copy.sub);
+  }
+  if (Array.isArray(copy.items)) {
+    const items = copy.items.map(clampListItem).filter((item): item is string => Boolean(item));
+    if (requiredListItems && finalLayout === 'list' && items.length < requiredListItems) {
+      throw sceneListItemsError(id, requiredListItems, items.length);
+    }
+    copy.items = items.slice(0, requiredListItems ?? 6);
+  }
   if (!copy.headline && finalLayout !== 'code') copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline ?? 48);
   if (finalLayout === 'code' && !copy.headline) delete copy.headline;
 
@@ -621,23 +1047,34 @@ function withMotionFixes<T extends Record<string, unknown>>(result: T, pkg: Reco
 /** Acceptance phrase for CAST1. Fictional mascot only; never a real person or a user photo. */
 const SHARED_MASCOT_RE = /use the same mascot in every scene/i;
 const KLEIN_REF_CAP = 10;
-const MASCOT_SVG = [
-  '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">',
-  '<rect width="512" height="512" fill="#1b2440"/>',
-  '<circle cx="256" cy="210" r="116" fill="#6d8cff"/>',
-  '<circle cx="214" cy="190" r="16" fill="#0d0f14"/>',
-  '<circle cx="298" cy="190" r="16" fill="#0d0f14"/>',
-  '<path d="M214 246 Q256 286 298 246" fill="none" stroke="#0d0f14" stroke-width="10" stroke-linecap="round"/>',
-  '</svg>',
-].join('');
+
+/** The shared mascot follows the package theme palette so packaging never rejects it. */
+function sharedMascotSvg(palette?: readonly string[]): string {
+  const ink = palette?.[0] ?? '#0d0f14';
+  const background = palette?.[1] ?? ink;
+  const accent = palette?.[2] ?? palette?.[1] ?? ink;
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">',
+    `<rect width="512" height="512" fill="${background}"/>`,
+    `<circle cx="256" cy="210" r="116" fill="${accent}"/>`,
+    `<circle cx="214" cy="190" r="16" fill="${ink}"/>`,
+    `<circle cx="298" cy="190" r="16" fill="${ink}"/>`,
+    `<path d="M214 246 Q256 286 298 246" fill="none" stroke="${ink}" stroke-width="10" stroke-linecap="round"/>`,
+    '</svg>',
+  ].join('');
+}
 
 function briefWantsSharedMascot(brief: string): boolean {
   return SHARED_MASCOT_RE.test(brief);
 }
 
-function buildSharedMascot() {
-  const sha256 = createHash('sha256').update(MASCOT_SVG).digest('hex');
+function buildSharedMascot(palette: readonly string[] | undefined, persistSvg: ToolsetOptions['persistSvg']) {
+  const svg = sharedMascotSvg(palette);
+  const sha256 = createHash('sha256').update(svg).digest('hex');
   const assetId = 'a_cast_pip';
+  // Persist the bytes at propose time. Declaring a file without writing it made
+  // every later render fail with an untyped ENOENT during packaging (M10).
+  const file = persistSvg?.(assetId, svg, 'svg') ?? `assets/${assetId}.svg`;
   return {
     member: {
       id: 'c_pip',
@@ -650,9 +1087,9 @@ function buildSharedMascot() {
       kind: 'svg',
       origin: 'generated',
       status: 'ready',
-      file: `assets/${assetId}.svg`,
+      file,
       sha256,
-      bytes: Buffer.byteLength(MASCOT_SVG),
+      bytes: Buffer.byteLength(svg),
       license: { id: 'CC0-1.0' },
       redistributable: true,
       gen: {
@@ -686,13 +1123,29 @@ function mergeRefs(userRefs: string[], castRefs: string[]): string[] {
   return out;
 }
 
+/** Model-invented role names like shot_2_identity_reference are never asset ids. */
+const PLACEHOLDER_REF_RE = /identity|subject|character|cast|portrait|mascot|composition|art[_-]?direction|reference|start[_-]?frame|^shot[_-]?\d+/i;
+const IDENTITY_REF_RE = /identity|subject|character|cast|portrait|mascot/i;
+
+function isPlaceholderRef(id: string): boolean {
+  return PLACEHOLDER_REF_RE.test(id);
+}
+
+/** A reference that names no package asset is a 422 before semantic validation can fail. */
+function semanticRefError(sceneId: string, role: string, id: string): Error {
+  return Object.assign(
+    new Error(`${sceneId}: ${role} ${JSON.stringify(id)} is not an asset id in this package. Create the reference with assets.generate_image or assets.generate_svg and pass its returned id; invented placeholder names are rejected before the package can fail semantic validation.`),
+    { name: 'SemanticRefError', status: 422, code: 'SEM_REF_UNRESOLVED', assetId: id },
+  );
+}
+
 /**
  * Tools the model may call. Approval-requiring tools (spend, stock attach,
  * uploads) return a card request and never perform the action here.
  */
 export function createToolset(options: ToolsetOptions = {}): Record<string, AgentTool> {
   const configuredMotionModel = parseMotionModel(options.motionModel, 'auto');
-  const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal'] } = {
+  const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal']; brief?: string } = {
     package: options.initialPackage ? structuredClone(options.initialPackage) : undefined,
     intent: options.initialPackage ? options.initialIntent : undefined,
     proposal: options.initialPackage?.proposal,
@@ -700,24 +1153,87 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   // Rebuild the whole-film stem as each shot arrives. Using only the first
   // shot's plan made otherwise different scenes share one generic sound bed.
   const finishingSoundPlans = new Map<string, string>();
+  // Role of each planned image, so a later invented identity name can bind the
+  // real raster identity even when the package has no cast member.
+  const plannedImageRoles = new Map<string, { sceneId: string; kind: string }>();
 
   const touch = () => {
     if (state.package) options.onPackageChange?.(state.package);
+  };
+
+  /** A raster identity image already linked to this scene's cast, if one exists. */
+  const existingIdentityImageId = (sceneId: string, castIds: string[]): string | undefined => {
+    const assets = state.package?.assets ?? {};
+    const scene = (Array.isArray(state.package?.scenes) ? state.package.scenes : []).find((item: any) => item?.id === sceneId);
+    const sceneCast = new Set([
+      ...(Array.isArray(scene?.cast) ? scene.cast : []),
+      ...castIds,
+    ]);
+    const linked = Object.entries(assets).filter(([id, asset]: [string, any]) => {
+      if (asset?.kind !== 'image') return false;
+      if (typeof asset.cast === 'string' && sceneCast.has(asset.cast)) return true;
+      return (Array.isArray(scene?.foreground) && scene.foreground.some((item: any) => item?.asset === id))
+        || (Array.isArray(scene?.media) && scene.media.some((item: any) => item?.asset === id));
+    });
+    const plannedIdentity = Object.entries(assets).find(([id, asset]: [string, any]) => {
+      if (asset?.kind !== 'image') return false;
+      const role = plannedImageRoles.get(id);
+      return role?.sceneId === sceneId && IDENTITY_REF_RE.test(role.kind);
+    });
+    if (!linked.length && !plannedIdentity) return undefined;
+    const identity = linked.find(([, asset]: [string, any]) =>
+      IDENTITY_REF_RE.test(`${asset?.gen?.inputs?.prompt ?? ''} ${asset?.notes ?? ''}`));
+    return (identity ?? plannedIdentity ?? linked[0])[0];
+  };
+
+  /**
+   * Resolve a model-supplied reference to a real package asset. A placeholder
+   * identity name binds the scene's existing cast identity instead of entering
+   * the package as a dangling gen.inputs.reference.
+   */
+  const resolveReferenceId = (
+    raw: string,
+    sceneId: string,
+    role: string,
+    cast: { ids: string[]; refs: string[] },
+    rasterOnly = false,
+  ): string => {
+    const id = raw.trim();
+    if (state.package?.assets?.[id]) return id;
+    if (!isPlaceholderRef(id)) return id;
+    if (IDENTITY_REF_RE.test(id)) {
+      const castRef = cast.refs.find(ref => state.package?.assets?.[ref]);
+      if (!rasterOnly && castRef) return castRef;
+      const imageId = existingIdentityImageId(sceneId, cast.ids);
+      if (imageId) return imageId;
+      const castImage = cast.refs.find(ref => state.package?.assets?.[ref]?.kind === 'image');
+      if (castImage) return castImage;
+    }
+    throw semanticRefError(sceneId, role, id);
   };
 
   const propose = (args: z.infer<typeof proposeSchema>) => {
     const rawTitle = args.title ?? args.brief.slice(0, 90);
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45).trimEnd()}…` : rawTitle;
     const id = hashId('pkg', args.brief);
-    const datasetIds = new Set(Object.keys(args.datasets ?? {}));
+    const format = resolveFormat(args.brief);
+    const requiredListItems = briefListItems(args.brief);
+    const normalizedDatasets = normalizeDatasets(args.datasets);
+    const sharedDataset = briefSharedDataset(args.brief, normalizedDatasets);
+    const datasets = sharedDataset?.datasets ?? normalizedDatasets.datasets;
+    const datasetIds = new Set(Object.keys(datasets));
+    const datasetAliases = sharedDataset ? new Map([[sharedDataset.id, sharedDataset.id]]) : normalizedDatasets.aliases;
     const intent = classifyProductionIntent(args.brief);
     state.intent = intent;
+    state.brief = args.brief;
     state.proposal = args.proposal;
     const scenes = applyGeneratedFilmPresentation((args.scenes?.length
-      ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set()))
+      ? preparePlanningScenes(args.scenes, args.brief, sharedDataset?.id, requiredListItems)
+        .map(scene => ensureComparisonPlates(normalizeScene(scene, title, datasetIds, new Set(), datasetAliases, requiredListItems)))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
       .map(scene => applyProductionIntentToScene(scene, intent)), intent, title);
-    const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot() : null;
+    const theme = { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) };
+    const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot(theme.palette, options.persistSvg) : null;
     if (mascot) {
       for (const scene of scenes) scene.cast = [mascot.member.id];
     }
@@ -728,11 +1244,11 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       id,
       title,
       createdAt: (options.now ?? (() => new Date().toISOString()))(),
-      format: { width: 1920, height: 1080, fps: 30 },
+      format,
       duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
-      theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) },
+      theme,
       voice: { enabled: false, engine: 'none' },
-      datasets: args.datasets ?? {},
+      datasets,
       ...(args.proposal ? { proposal: args.proposal } : {}),
       scenes,
       ...(mascot ? { cast: [mascot.member] } : {}),
@@ -753,17 +1269,37 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   const edit = (args: z.infer<typeof editSchema>) => {
     if (!state.package) throw new Error('no package draft; call storyboard.propose first');
     const draft = state.package;
+    const requiredListItems = state.brief ? briefListItems(state.brief) : undefined;
+    const normalizedDatasets = normalizeDatasets(draft.datasets);
+    const sharedDataset = state.brief ? briefSharedDataset(state.brief, normalizedDatasets) : null;
+    const datasets = sharedDataset?.datasets ?? normalizedDatasets.datasets;
+    const aliases = sharedDataset ? new Map([[sharedDataset.id, sharedDataset.id]]) : normalizedDatasets.aliases;
     const scenes: any[] = Array.isArray(draft.scenes) ? draft.scenes : [];
-    const index = scenes.findIndex(scene => scene?.id === args.scene_id);
+    const remappedScenes = scenes.map(scene => {
+      if (sharedDataset) {
+        return { ...scene, data: { dataset: sharedDataset.id, display: scene?.layout === 'stat' ? 'number' : 'bar' } };
+      }
+      const currentDataset = typeof scene?.data?.dataset === 'string' ? scene.data.dataset : '';
+      const datasetId = currentDataset ? aliases.get(currentDataset) : undefined;
+      return datasetId && datasetId !== currentDataset
+        ? { ...scene, data: { ...scene.data, dataset: datasetId } }
+        : scene;
+    });
+    const index = remappedScenes.findIndex(scene => scene?.id === args.scene_id);
     if (index < 0) throw new Error(`scene ${args.scene_id} not found`);
-    const current = scenes[index] ?? {};
+    const current = remappedScenes[index] ?? {};
     const patch = args.patch as Record<string, any>;
-    const datasetIds = new Set(Object.keys(draft.datasets ?? {}));
+    const datasetIds = new Set(Object.keys(datasets));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
-    const nextScenes = applyGeneratedFilmPresentation(scenes.map((scene, sceneIndex) => sceneIndex === index
-      ? applyProductionIntentToScene(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds), state.intent ?? classifyProductionIntent(''))
-      : scene), state.intent ?? classifyProductionIntent(''), draft.title);
-    state.package = { ...draft, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
+    let nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
+      ? applyProductionIntentToScene(ensureComparisonPlates(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases, requiredListItems)), state.intent ?? classifyProductionIntent(''))
+      : scene);
+    for (const scene of nextScenes) ensureComparisonPlates(scene);
+    const patchSetsLayout = typeof patch.layout === 'string' && (SCENE_LAYOUTS as readonly string[]).includes(patch.layout);
+    const protectedLists = new Set<Record<string, any>>(requiredListItems ? nextScenes.filter(scene => scene.layout === 'list') : []);
+    if (!patchSetsLayout) nextScenes = ensureComparisonScene(nextScenes, state.brief, protectedLists);
+    nextScenes = applyGeneratedFilmPresentation(nextScenes, state.intent ?? classifyProductionIntent(''), draft.title);
+    state.package = { ...draft, datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
     return withMotionFixes(
       { package: state.package, revision: state.package.revision, scene_id: args.scene_id },
@@ -775,10 +1311,16 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     routeAsset({ sceneId: args.scene_id, intent: args.need, kind: args.kind, animated: args.animated, transparent: args.transparent, source: args.source, style: args.style } as AssetNeed);
 
   const generateSvg = async (args: z.infer<typeof generateSvgSchema>) => {
+    // A5 and the packaging render-check must agree on one source of colour:
+    // the package theme. A model-supplied palette is only a pre-propose fallback.
+    const packagePalette = Array.isArray(state.package?.theme?.palette)
+      ? state.package.theme.palette.filter((color: unknown): color is string => typeof color === 'string')
+      : [];
+    const palette = packagePalette.length ? packagePalette : args.palette;
     const intent: SvgIntentLike = {
       kind: args.kind,
       prompt: args.intent,
-      ...(args.palette ? { palette: args.palette } : {}),
+      ...(palette ? { palette } : {}),
       ...(args.width ? { width: args.width } : {}),
       ...(args.height ? { height: args.height } : {}),
       ...(args.seed !== undefined ? { seed: args.seed } : {}),
@@ -789,8 +1331,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const sha256 = createHash('sha256').update(result.svg).digest('hex');
     const id = hashId('a_svg', `${args.scene_id}:${args.intent}:${sha256}`);
     const kind = args.kind === 'vector-anim' ? 'vector-anim' : 'svg';
-    const file = result.file ?? options.persistSvg?.(id, result.svg, kind) ?? `assets/${id}.svg`;
     const rawCheck = result.renderCheck;
+    const paletteOk = rawCheck ? rawCheck.outOfPaletteFraction == null || rawCheck.outOfPaletteFraction <= 0.5 : true;
     const renderCheck = rawCheck
       ? {
           ok: rawCheck.ok === true,
@@ -798,9 +1340,19 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(rawCheck.width ? { width: rawCheck.width } : {}),
           ...(rawCheck.height ? { height: rawCheck.height } : {}),
           blank: typeof rawCheck.opaqueFraction === 'number' ? rawCheck.opaqueFraction < 0.005 : false,
-          palette_ok: rawCheck.outOfPaletteFraction == null || rawCheck.outOfPaletteFraction <= 0.5,
+          palette_ok: paletteOk,
         }
       : { ok: true, version: result.sanitizerVersion ?? '1.0.0' };
+    if (!paletteOk) {
+      const fraction = typeof rawCheck?.outOfPaletteFraction === 'number' ? rawCheck.outOfPaletteFraction : null;
+      throw svgAssetError(
+        'SVG_PALETTE_MISMATCH',
+        id,
+        `render-check failed: out-of-palette${fraction === null ? '' : ` (${(fraction * 100).toFixed(0)}% of visible pixels)`}`,
+      );
+    }
+    if (!renderCheck.ok) throw svgAssetError('SVG_RENDER_CHECK_FAILED', id, 'render-check failed');
+    const file = result.file ?? options.persistSvg?.(id, result.svg, kind) ?? `assets/${id}.svg`;
     const asset = {
       kind,
       origin: 'generated',
@@ -848,11 +1400,24 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const planned = options.planImage?.(args) ?? {};
     const format = state.package?.format ?? {};
     const outputAspect = aspectFromSize(format.width, format.height);
-    const requestedAspect = (args.aspect as Aspect | undefined) ?? outputAspect;
-    const dims = sourceDims(requestedAspect);
+    const formatWidth = Number(format.width);
+    const formatHeight = Number(format.height);
+    const hasOutputSize = Number.isInteger(formatWidth) && formatWidth > 0 && Number.isInteger(formatHeight) && formatHeight > 0;
+    const requestedAspect = args.aspect as Aspect | undefined;
+    // Source stills must match the output frame exactly: i2v centre-crops a
+    // mismatched source. Portrait, square and 4:5 films always source at their
+    // own output aspect and dimensions; a landscape film keeps an explicit
+    // alternate framing for a deliberate crop.
+    const plannedAspect = requestedAspect && outputAspect === '16:9'
+      ? requestedAspect
+      : outputAspect;
+    const dims = plannedAspect === outputAspect && hasOutputSize
+      ? { width: formatWidth, height: formatHeight }
+      : sourceDims(plannedAspect);
     const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
     const cast = castRefsForScene(state.package, args.scene_id);
-    const refs = mergeRefs(args.refs ?? [], cast.refs);
+    const requestedRefs = (args.refs ?? []).map(ref => resolveReferenceId(ref, args.scene_id, 'reference', cast));
+    const refs = mergeRefs(requestedRefs, cast.refs);
     const isRefEdit = refs.length > 0;
     // B1: the same STYLE_BLOCK goes on every image job, so a run does not drift
     // from the owner's palette/attributes after the first call.
@@ -864,7 +1429,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           intent: args.intent,
           ...(args.style ? { style: args.style } : {}),
           ...(palette ? { palette } : {}),
-          aspect: requestedAspect,
+          aspect: plannedAspect,
         })
       : expandFluxCaption({
           intent: args.intent,
@@ -874,9 +1439,10 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(args.cutout ? { cutout: true } : {}),
           ...(args.text ? { text: true } : {}),
           ...(args.labelled ? { labelled: true } : {}),
-          aspect: requestedAspect,
+          aspect: plannedAspect,
         }));
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
+    plannedImageRoles.set(id, { sceneId: args.scene_id, kind: args.kind ?? '' });
     const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
     // P-fix5: the jobs planner requires `gen.workflow_sha256`, so a package built by the
     // agent must stamp it. A caller-provided plan wins; otherwise the committed manifest
@@ -913,7 +1479,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         workflow,
         ...(workflowSha256 ? { workflow_sha256: workflowSha256 } : {}),
         model: planned.model ?? 'flux-3-klein',
-        inputs: planned.inputs ?? defaultInputs,
+        inputs: planned.inputs
+          ? { ...planned.inputs, ...(plannedAspect === outputAspect && hasOutputSize ? { width: formatWidth, height: formatHeight } : {}) }
+          : defaultInputs,
         backend: planned.backend ?? 'colab:G4',
       },
     };
@@ -946,17 +1514,17 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       };
       touch();
     }
-    const aspectMismatch = args.aspect !== undefined && requestedAspect !== outputAspect;
+    const aspectMismatch = args.aspect !== undefined && plannedAspect !== outputAspect;
     return {
       scene_id: args.scene_id,
       asset: { id, ...asset },
       caption,
       reference_edit: isRefEdit,
-      source_aspect: requestedAspect,
+      source_aspect: plannedAspect,
       output_aspect: outputAspect,
       requires_approval: 'spend',
       note: aspectMismatch
-        ? `planned only; no GPU job was submitted. Source is ${requestedAspect} but the package output is ${outputAspect}: i2v will centre-crop.`
+        ? `planned only; no GPU job was submitted. Source is ${plannedAspect} but the package output is ${outputAspect}: i2v will centre-crop.`
         : 'planned only; no GPU job was submitted',
     };
   };
@@ -990,20 +1558,22 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       throw new Error('Klein stills + code motion does not accept H3 dialogue conditioning; put speech and sound in finishing_sound, or choose h3 for native AV');
     }
 
+    const cast = castRefsForScene(state.package, args.scene_id);
     const visualRef = (id: string | undefined, role: string, required: boolean): string | undefined => {
       if (!id) {
         if (required) throw new Error(`${model} needs ${role}. Call assets.generate_image for that role and pass its returned asset id; a FLUX still alone is not film completion.`);
         return undefined;
       }
-      const asset = state.package!.assets?.[id];
-      if (!asset) throw new Error(`${role} ${id} is not in the package. Create it with assets.generate_image, then pass the returned id to assets.generate_video.`);
-      if (asset.kind !== 'image') throw new Error(`${role} ${id} is ${asset.kind}; ${model} needs a raster image reference, not ${asset.kind}. Generate a proper image reference instead of substituting a still for video.`);
+      const resolved = resolveReferenceId(id, args.scene_id, role, cast, true);
+      const asset = state.package!.assets?.[resolved];
+      if (!asset) throw semanticRefError(args.scene_id, role, resolved);
+      if (asset.kind !== 'image') throw new Error(`${role} ${resolved} is ${asset.kind}; ${model} needs a raster image reference, not ${asset.kind}. Generate a proper image reference instead of substituting a still for video.`);
       if (asset.status === 'ready') {
-        if (typeof asset.file !== 'string' || typeof asset.sha256 !== 'string') throw new Error(`${role} ${id} is ready but has no usable file/sha256; regenerate the image reference.`);
+        if (typeof asset.file !== 'string' || typeof asset.sha256 !== 'string') throw new Error(`${role} ${resolved} is ready but has no usable file/sha256; regenerate the image reference.`);
       } else if (asset.status !== 'pending' || asset.gen?.generator !== 'flux3-klein') {
-        throw new Error(`${role} ${id} is ${asset.status}; provide a ready image or a pending FLUX image plan that the shot can depend on.`);
+        throw new Error(`${role} ${resolved} is ${asset.status}; provide a ready image or a pending FLUX image plan that the shot can depend on.`);
       }
-      return id;
+      return resolved;
     };
 
     let image = visualRef(args.image, 'Picture 1 (subject/identity)', model === 'h3');
@@ -1365,6 +1935,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           },
         },
         scenes: { type: 'array', items: { type: 'object' } },
+        datasets: { type: 'object', additionalProperties: true, description: 'User datasets keyed by dataset id; plain names are normalized to the schema id form d_regions. Each dataset needs unit, values:[{label,value}] and source; source example needs approved:true. chart/stat/compare scenes reference data.dataset.' },
       }, ['brief']),
       proposeSchema,
       propose,

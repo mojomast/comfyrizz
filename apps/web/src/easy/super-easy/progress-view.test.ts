@@ -477,7 +477,7 @@ test('progress-view.css styles the preview card and moves running gauges', () =>
     '.super-easy-progress-stage-running .easy-progress::after',
     '@keyframes super-easy-progress-sweep',
     '.super-easy-progress-reduced-motion .easy-progress::after',
-    '#app[data-super-easy-view]',
+    '#easy-root[data-super-easy-view]',
     '@keyframes super-easy-asset-pop',
     'minmax(140px, 1fr)',
   ]) {
@@ -633,6 +633,12 @@ function keyedGalleryRoot(parts) {
 
   for (const slot of parts.gallerySlots) nodes.push(makeNode(slot.html));
 
+  const list = {
+    insertAdjacentHTML(position, value) {
+      if (position !== 'beforeend') throw new Error(`unexpected position ${position}`);
+      nodes.push(makeNode(value));
+    },
+  };
   const gallery = {
     get innerHTML() {
       return '';
@@ -641,11 +647,12 @@ function keyedGalleryRoot(parts) {
       fullWrites += 1;
     },
     querySelectorAll(selector) {
-      return selector === '[data-super-easy-gallery-item]' ? nodes.slice() : [];
+      if (selector === '[data-super-easy-gallery-item]') return nodes.slice();
+      if (selector === 'ul,ol') return [list];
+      return [];
     },
-    insertAdjacentHTML(position, value) {
-      if (position !== 'beforeend') throw new Error(`unexpected position ${position}`);
-      nodes.push(makeNode(value));
+    insertAdjacentHTML() {
+      throw new Error('new gallery tiles must be inserted into the list, not the section');
     },
   };
   const live = { textContent: '', setAttribute() {} };

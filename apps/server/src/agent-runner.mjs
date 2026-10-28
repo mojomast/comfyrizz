@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { aspectFromSize, extractBrief } from '../../../packages/agent/dist/src/index.js';
 import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
 
 const SVG_SYSTEM = [
@@ -19,7 +20,24 @@ const SVG_SYSTEM = [
 const REPAIR_SYSTEM = [
   'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded.',
   'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace or regenerate existing assets, change the story, or change the model route.',
-  'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy or notes. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
+  'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy, notes, narration or motion.cue_phrases. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
+  'Narration-timed motion: when the brief asks for cue-timed motion, every scene needs a concise scene.narration and motion.cue_phrases copied verbatim from that scene narration.',
+  'Never remove or blank scene.narration or motion.cue_phrases while fixing another field: add the narration first, then copy each cue phrase verbatim from it in the same storyboard.edit call.',
+  'When the user report supplies an exact narration sentence and cue phrases, copy them exactly: they are already brief-derived, concise and verbatim. Do not paraphrase or invent a replacement line.',
+  'A narration-timed scene with empty or whitespace-only narration, or cue_phrases that are not substrings, still fails completion even when its media, timing and aspect are correct.',
+  'Explicit Klein medium: every shot needs its own scene-referenced FLUX 3 Image Klein still before the film is accepted. Plan it with assets.generate_video using motion_model klein; keep stills + code motion and never create H3/LTX jobs.',
+  'Aspect and format: the package format must match the brief aspect and output size. When the repair facts report a brief/draft aspect mismatch, correct the package format without changing the story or model route.',
+  'Source aspect: when the repair facts report a scene-referenced still whose dimensions do not match the package output, re-plan that still with assets.generate_image at the output size and pass the new asset to assets.generate_video. Never keep a mismatched still as the shot source or plan a 16:9 source for a portrait/square output.',
+  'Tool errors: for invalid_arguments, correct only the fields named in issues[].path and resend; for tool_failed, supply the prerequisite the message names. Never resend identical arguments.',
+  'When the listed issues are fixed, stop calling tools and reply with one short sentence.',
+].join('\n');
+
+const MOTION_GRAPHICS_REPAIR_SYSTEM = [
+  'You are Comfyrizz performing one focused repair of an existing motion-graphics package. The package is already loaded.',
+  'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace existing ready assets, change the story, or change the model route.',
+  'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use assets.generate_svg for each missing ready llm-svg asset and assets.generate_image for the missing scene-referenced planned GPU still. Use storyboard.edit only for scene fields named in the issues.',
+  'SVG floor: keep at least 4 ready llm-svg assets in the package; never replace or drop one while adding the pending still.',
+  'Pending still floor: the package needs at least 1 scene-referenced planned GPU still. Call assets.generate_image with a scene_id and a scene kind such as illustration, texture or background. Reference, identity, cast, portrait or start-frame kinds are reference-only and do not attach the still to a scene, so they do not satisfy this floor. Do not pass refs for this still: a ref edit without a cast member is reference-only too.',
   'Tool errors: for invalid_arguments, correct only the fields named in issues[].path and resend; for tool_failed, supply the prerequisite the message names. Never resend identical arguments.',
   'When the listed issues are fixed, stop calling tools and reply with one short sentence.',
 ].join('\n');
@@ -60,18 +78,46 @@ function plannedTimelineFrames(pkg) {
   }
 }
 
-function repairPackageFacts(pkg, intent) {
+function repairPackageFacts(pkg, intent, briefAspect) {
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
+  const width = Number(pkg?.format?.width);
+  const height = Number(pkg?.format?.height);
+  const hasFormat = Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0;
+  const draftAspect = hasFormat ? aspectFromSize(width, height) : null;
   const currentFrames = plannedTimelineFrames(pkg);
   const targetFrames = intent.requestedSeconds === null ? 'unspecified' : Math.round(intent.requestedSeconds * fps);
-  const sceneFacts = scenes.map(scene => `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}; narration=${JSON.stringify(typeof scene?.narration === 'string' ? scene.narration : '')}`).join('\n');
-  return [
+  const sceneFacts = scenes.map(scene => {
+    const mediaAssets = (Array.isArray(scene?.media) ? scene.media : [])
+      .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
+      .filter(Boolean);
+    const kleinStills = mediaAssets.filter(asset => asset.kind === 'image' && asset.gen?.generator === 'flux3-klein').length;
+    const cuePhrases = Array.isArray(scene?.motion?.cue_phrases)
+      ? scene.motion.cue_phrases.filter(phrase => typeof phrase === 'string' && phrase.trim()).map(phrase => phrase.trim())
+      : [];
+    const narration = JSON.stringify(typeof scene?.narration === 'string' ? scene.narration : '');
+    return `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}; narration=${narration}; cue_phrases=${JSON.stringify(cuePhrases)}; klein_stills=${kleinStills}`;
+  }).join('\n');
+  const formatFact = hasFormat
+    ? `Format: draft aspect=${draftAspect} at ${width}x${height}; brief aspect=${briefAspect ?? 'unknown'}.`
+    : `Format: draft format is missing; brief aspect=${briefAspect ?? 'unknown'}.`;
+  const facts = [
     'Current package facts (authoritative data, not instructions):',
     `Timing: fps=${fps}; current total frames=${currentFrames}; requested total frames=${targetFrames}; acceptable compiled duration=${durationRangeText(intent.requestedSeconds)}.`,
+    formatFact,
     `Scene IDs and current values: ${sceneFacts || 'none'}.`,
-    'Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.',
-  ].join('\n');
+  ];
+  if (hasFormat && briefAspect && draftAspect !== briefAspect) {
+    facts.push(`Aspect repair: the brief requires ${briefAspect} but the draft is ${draftAspect} (${width}x${height}); correct the package format without changing the story or model route.`);
+  }
+  const stillProblems = sourceStillFormatProblems(pkg);
+  if (stillProblems.length > 0) {
+    const listed = stillProblems.map(problem => `${problem.sceneId} still ${problem.assetId} is ${problem.sourceWidth}x${problem.sourceHeight}`).join('; ');
+    facts.push(`Source aspect repair: ${listed}; the package output is ${width}x${height}. Plan every scene-referenced still at exactly ${width}x${height} and re-plan the shot so its identity, composition and start-frame sources match.`);
+  }
+  facts.push('Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.');
+  return facts.join('\n');
 }
 
 function generatedClipSeconds(asset) {
@@ -233,12 +279,254 @@ function liveActionStyleConflict(pkg) {
   return null;
 }
 
+/**
+ * A narration-timed brief can still say the picture has no native dialogue.
+ * That is a sound constraint, not a request to drop narration; only an
+ * explicit wordless/no-narration request suppresses narration-timed planning.
+ */
+function explicitlyWordless(brief) {
+  return /\bwordless\b|\bno\b[^.!?\n]{0,70}\b(?:narration|speech|voice[\s-]?over)\b|\bwithout\s+(?:narration|speech|voice[\s-]?over)\b/i.test(String(brief ?? ''));
+}
+
+/** The brief the tools actually receive; keep narration on narration-timed briefs. */
+function planningBriefForNarration(brief, intent) {
+  if (!intent.requiresNarrationCues || explicitlyWordless(brief) || !intent.wordless) return brief;
+  return brief
+    .replace(/\bno\s+native\s+dialogue\b/gi, 'picture-only audio')
+    .replace(/\bno\s+(?:dialogue|speech|voice[\s-]?over)\b/gi, 'picture-only audio');
+}
+
+/** Narration-timed wording wins over a no-native-dialogue sound constraint. */
+function narrationTimedIntent(intent, brief) {
+  if (!intent.requiresNarrationCues || explicitlyWordless(brief) || !intent.wordless) return intent;
+  return { ...intent, wordless: false };
+}
+
+/** A concise, brief-derived sentence the model can copy verbatim. */
+function conciseNarration(text) {
+  const normalized = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  const sentence = /^[^.!?]{1,180}[.!?]/.exec(normalized)?.[0]?.trim() ?? normalized.slice(0, 180).trim();
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/** Cue phrases stay substrings of the narration, so they can be copied verbatim. */
+function cuePhrasesFromNarration(narration, index) {
+  const words = narration.split(/\s+/).filter(Boolean);
+  const phrase = words.length <= 2
+    ? narration
+    : index % 2 === 0
+      ? words.slice(0, 2).join(' ')
+      : words.slice(-2).join(' ');
+  const cleaned = phrase.replace(/^[^\w]+|[^\w]+$/g, '').trim();
+  return cleaned ? [cleaned.slice(0, 600)] : [];
+}
+
+function briefNarrationFallback(brief) {
+  const sentences = String(brief ?? '').split(/(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
+  const descriptive = sentences.find(sentence => !/^(?:create|make|generate|render|produce|draw|plan)\b/i.test(sentence)
+    && !/narration-timed|cue_phrases|finishing sound plan|no narration|wordless|no dialogue|no captions/i.test(sentence));
+  if (!descriptive) return '';
+  const topic = descriptive
+    .replace(/^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+/i, '')
+    .replace(/\bscenery[\s-]+only\b/gi, 'scenery')
+    .replace(/\bshots?\b/gi, '')
+    .replace(/\bno people\b/gi, '')
+    .replace(/[,.;]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (topic.split(' ').filter(Boolean).length < 3) return '';
+  return conciseNarration(`${topic.charAt(0).toUpperCase()}${topic.slice(1)} unfolds in this shot`);
+}
+
+/** The exact narration/cues a repair should use when a scene is still blank. */
+function narrationSuggestion(brief, pkg, scene, index) {
+  const existing = typeof scene?.narration === 'string' ? scene.narration.trim() : '';
+  if (existing) return { narration: existing, cuePhrases: cuePhrasesFromNarration(existing, index) };
+  const logline = conciseNarration(pkg?.proposal?.logline ?? '');
+  const usableLogline = logline && !/^A story built from your idea\.?$/i.test(logline) ? logline : '';
+  const fallback = usableLogline
+    || briefNarrationFallback(brief)
+    || conciseNarration(`${String(pkg?.title ?? 'The story').trim()} continues in this shot`);
+  return { narration: fallback, cuePhrases: cuePhrasesFromNarration(fallback, index) };
+}
+
+/** A narration-timed repair must fix narration and cue phrases together, per scene. */
+function narrationRepairGuide(pkg, intent, brief) {
+  if (!intent.requiresNarrationCues) return [];
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const lines = ['Narration-timed repair (hard requirement from the brief): every scene needs scene.narration plus motion.cue_phrases copied verbatim from that narration.'];
+  for (const [index, scene] of scenes.entries()) {
+    const sceneId = scene?.id ?? '(missing id)';
+    const narration = typeof scene?.narration === 'string' ? scene.narration.trim() : '';
+    const cuePhrases = Array.isArray(scene?.motion?.cue_phrases)
+      ? scene.motion.cue_phrases.filter(phrase => typeof phrase === 'string' && phrase.trim())
+      : [];
+    const suggestion = narrationSuggestion(brief, pkg, scene, index);
+    const edit = `{scene_id:${JSON.stringify(sceneId)},patch:{narration:${JSON.stringify(suggestion.narration)},motion:{cue_phrases:${JSON.stringify(suggestion.cuePhrases)}}}}`;
+    if (!narration) {
+      lines.push(`- ${sceneId}: scene.narration is missing. Call storyboard.edit ${edit} before any asset call. That sentence is concise and brief-derived, and each cue phrase is already a verbatim substring.`);
+    } else if (cuePhrases.length === 0) {
+      lines.push(`- ${sceneId}: motion.cue_phrases is missing. Keep the narration unchanged and copy exact phrases from it; for example use motion:{cue_phrases:${JSON.stringify(suggestion.cuePhrases)}} (verbatim).`);
+    } else if (cuePhrases.some(phrase => !narration.includes(phrase))) {
+      lines.push(`- ${sceneId}: every motion.cue_phrases entry must be copied verbatim from its scene.narration; keep the narration unchanged. Replace them with motion:{cue_phrases:${JSON.stringify(suggestion.cuePhrases)}} (verbatim).`);
+    }
+  }
+  if (lines.length === 1) return [];
+  lines.push('Do not remove or blank scene.narration or motion.cue_phrases when fixing any other field.');
+  return lines;
+}
+
+/** M10: the brief can require one shared fictional mascot across every scene. */
+const SHARED_MASCOT_BRIEF_RE = /use the same mascot in every scene/i;
+const CAST_ID_RE = /^c[A-Za-z0-9_-]{0,63}$/;
+
+function briefRequiresSharedMascot(brief) {
+  return SHARED_MASCOT_BRIEF_RE.test(String(brief ?? ''));
+}
+
+/** The existing fictional mascot id, never a newly invented real person. */
+function sharedMascotCastId(pkg) {
+  const members = (Array.isArray(pkg?.cast) ? pkg.cast : [])
+    .filter(member => member && typeof member.id === 'string' && CAST_ID_RE.test(member.id));
+  if (members.length > 0) return members[0].id;
+  const counts = new Map();
+  for (const scene of Array.isArray(pkg?.scenes) ? pkg.scenes : []) {
+    for (const id of Array.isArray(scene?.cast) ? scene.cast : []) {
+      if (typeof id === 'string' && CAST_ID_RE.test(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  let best = null;
+  for (const [id, count] of counts) if (!best || count > best.count) best = { id, count };
+  // PS01's shared mascot id is the last-resort fictional default, never a person.
+  return best?.id ?? 'c_pip';
+}
+
+/** Missing or divergent scene.cast under a shared-mascot brief. */
+function sharedMascotGap(pkg, brief) {
+  if (!briefRequiresSharedMascot(brief)) return null;
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  if (scenes.length === 0) return null;
+  const castId = sharedMascotCastId(pkg);
+  const castRecorded = (Array.isArray(pkg?.cast) ? pkg.cast : [])
+    .some(member => member && member.id === castId);
+  const sceneIds = scenes
+    .filter(scene => !(Array.isArray(scene?.cast) && scene.cast.includes(castId)))
+    .map(scene => scene?.id ?? '(unknown scene)');
+  if (castRecorded && sceneIds.length === 0) return null;
+  return { castId, castRecorded, sceneIds };
+}
+
+function sharedMascotProblem(gap) {
+  const edits = gap.sceneIds
+    .map(sceneId => `{scene_id:${JSON.stringify(sceneId)},patch:{cast:[${JSON.stringify(gap.castId)}]}}`)
+    .join(', ');
+  const listed = gap.sceneIds.length > 0 ? `; missing from ${gap.sceneIds.join(', ')}` : '';
+  const subject = gap.castRecorded
+    ? `shared mascot cast ${JSON.stringify(gap.castId)} must appear in every scene${listed}`
+    : `the brief requires the same mascot in every scene but the package records no shared fictional cast ${JSON.stringify(gap.castId)}${listed || '; every scene already names it, so restore that cast entry'}`;
+  const instruction = edits
+    ? ` Call storyboard.edit with ${edits} so every scene shares that exact fictional cast id; never substitute a real person.`
+    : ' Keep that exact fictional cast id on every scene and restore its cast entry; never substitute a real person.';
+  return `${subject}.${instruction}`;
+}
+
+/** A shared-mascot repair must restore one fictional cast id on every scene. */
+function sharedMascotRepairGuide(pkg, brief) {
+  const gap = sharedMascotGap(pkg, brief);
+  if (!gap) return [];
+  return [
+    'Shared-mascot repair (hard requirement from the brief): every scene must carry the same one fictional mascot cast id; never a real person or user photo.',
+    `- SHARED_CAST_MISSING: ${sharedMascotProblem(gap)}`,
+    'Do not remove or blank the shared cast id from any scene while fixing another field.',
+  ];
+}
+
+function sceneReferencedPendingStills(pendingGpu) {
+  return (Array.isArray(pendingGpu) ? pendingGpu : []).filter(item => typeof item?.sceneId === 'string' && item.sceneId.length > 0);
+}
+
+/** Pending source stills a scene actually depends on, including shot input references. */
+function sourceImageIdsForScene(scene, assets) {
+  const ids = new Set();
+  const addImage = value => {
+    if (typeof value !== 'string') return;
+    if (assets[value]?.kind === 'image') ids.add(value);
+  };
+  const addReferenced = value => {
+    if (typeof value !== 'string') return;
+    const asset = assets[value];
+    if (asset?.kind === 'video') {
+      for (const input of Object.values(asset?.gen?.inputs ?? {})) addImage(input);
+    } else {
+      addImage(value);
+    }
+  };
+  for (const plate of Array.isArray(scene?.media) ? scene.media : []) addReferenced(plate?.asset);
+  addReferenced(scene?.background?.asset);
+  for (const item of Array.isArray(scene?.foreground) ? scene.foreground : []) addReferenced(item?.asset);
+  addReferenced(scene?.presenter_asset);
+  return ids;
+}
+
+/** Every source still must match the output exactly; otherwise i2v crops the shot. */
+function sourceStillFormatProblems(pkg) {
+  const width = Number(pkg?.format?.width);
+  const height = Number(pkg?.format?.height);
+  if (!(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) return [];
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
+  const problems = [];
+  for (const scene of scenes) {
+    const sceneId = scene?.id ?? '(unknown scene)';
+    for (const assetId of sourceImageIdsForScene(scene, assets)) {
+      const asset = assets[assetId];
+      if (asset?.status !== 'pending') continue;
+      const sourceWidth = Number(asset?.gen?.inputs?.width ?? asset?.media?.width);
+      const sourceHeight = Number(asset?.gen?.inputs?.height ?? asset?.media?.height);
+      if (!(sourceWidth > 0 && sourceHeight > 0)) continue;
+      if (sourceWidth === width && sourceHeight === height) continue;
+      problems.push({
+        sceneId,
+        assetId,
+        sourceWidth,
+        sourceHeight,
+        outputWidth: width,
+        outputHeight: height,
+        message: `${sceneId}: source still ${assetId} is ${sourceWidth}x${sourceHeight}, but the package output is ${width}x${height}; plan it at exactly ${width}x${height}`,
+      });
+    }
+  }
+  return problems;
+}
+
+function motionGraphicsRepairGuide(slice, problems) {
+  const codes = new Set(problems.map(problem => problem.code));
+  if (!codes.has('SVG_ASSET_FLOOR') && !codes.has('PENDING_GPU_MISSING')) return [];
+  const svgAssets = Array.isArray(slice?.svgAssets) ? slice.svgAssets : [];
+  const sceneReferenced = sceneReferencedPendingStills(slice?.pendingGpu);
+  const targetScene = Array.isArray(slice?.package?.scenes) && slice.package.scenes[0]?.id ? slice.package.scenes[0].id : 's1';
+  const lines = ['Motion-graphics repair floors (hard requirements from the validation report):'];
+  if (svgAssets.length < 4) {
+    lines.push(`- SVG floor: call assets.generate_svg until at least 4 ready llm-svg assets exist; got ${svgAssets.length}.`);
+  } else {
+    lines.push('- SVG floor: keep at least 4 ready llm-svg assets; do not replace or drop one.');
+  }
+  if (sceneReferenced.length < 1) {
+    lines.push(`- Pending GPU still repair: call assets.generate_image with scene_id "${targetScene}" and a scene kind such as illustration, texture or background. Do not pass refs and do not use reference, identity, cast, portrait or start-frame kinds; those are reference-only and do not satisfy this floor.`);
+  }
+  return lines;
+}
+
 /** Completion is shot-reachable: orphan pending GPU assets never satisfy it. */
-export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto') {
+export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto', brief = null) {
   const problems = [];
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
   if (scenes.length === 0) return ['generated film has no scenes/shots'];
+  const sharedGap = sharedMascotGap(pkg, brief);
+  if (sharedGap) problems.push(`SHARED_CAST_MISSING: ${sharedMascotProblem(sharedGap)}`);
+  for (const still of sourceStillFormatProblems(pkg)) problems.push(still.message);
   const proposal = pkg?.proposal;
   for (const field of ['logline', 'look', 'soundtrack']) {
     if (typeof proposal?.[field] !== 'string' || proposal[field].trim().length < 3) {
@@ -347,6 +635,57 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   return problems;
 }
 
+export function motionGraphicsCompletionProblems(slice, brief = null) {
+  const problems = [];
+  const sharedGap = sharedMascotGap(slice?.package, brief);
+  if (sharedGap) {
+    problems.push({
+      code: 'SHARED_CAST_MISSING',
+      message: sharedMascotProblem(sharedGap),
+      path: 'scenes[].cast',
+      castId: sharedGap.castId,
+      sceneIds: sharedGap.sceneIds,
+    });
+  }
+  const svgAssets = Array.isArray(slice?.svgAssets) ? slice.svgAssets : [];
+  if (svgAssets.length < 4) {
+    problems.push({
+      code: 'SVG_ASSET_FLOOR',
+      message: `motion graphics requires at least 4 ready llm-svg assets, got ${svgAssets.length}`,
+      path: 'assets',
+      count: svgAssets.length,
+      required: 4,
+    });
+  }
+  const sceneReferencedPending = sceneReferencedPendingStills(slice?.pendingGpu);
+  if (sceneReferencedPending.length < 1) {
+    problems.push({
+      code: 'PENDING_GPU_MISSING',
+      message: `motion graphics requires at least 1 scene-referenced planned GPU still, got ${sceneReferencedPending.length}`,
+      path: 'scenes[].media',
+      count: sceneReferencedPending.length,
+      required: 1,
+    });
+  }
+  for (const problem of Array.isArray(slice?.problems) ? slice.problems : []) {
+    const code = typeof problem?.code === 'string' ? problem.code : 'CPU_SLICE_PROBLEM';
+    if (code === 'SVG_ASSET_FLOOR') continue;
+    problems.push({
+      code,
+      message: typeof problem?.message === 'string' ? problem.message : String(problem),
+      path: 'package',
+    });
+  }
+  for (const message of packageSchemaProblems(slice?.package)) {
+    problems.push({ code: 'PACKAGE_SCHEMA', message, path: 'package' });
+  }
+  return problems;
+}
+
+function problemLines(problems) {
+  return problems.map(problem => `${problem.code}: ${problem.message}`);
+}
+
 function createLlmSvgGenerator(model, sessionId) {
   return async ({ intent, attempt, errors }) => {
     const prompt = [
@@ -384,9 +723,13 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     const brandAssets = brand?.assets ?? null;
     const { runCpuSlice, classifyProductionIntent, parseMotionModel } = await import('../../../packages/agent/dist/src/index.js');
     const productionIntent = classifyProductionIntent(brief);
+    const intent = narrationTimedIntent(productionIntent, brief);
+    const narrationPlanningBrief = planningBriefForNarration(brief, productionIntent);
     const planningBrief = productionIntent.liveActionHumans
-      ? `${brief}\n\nHard creative constraint: use photorealistic live-action fictional human adults with natural skin and real-world materials in the proposal and every image/video prompt. Do not substitute clay, plasticine, stop-motion, puppets, cartoons or handmade-miniature styling.`
-      : brief;
+      ? `${narrationPlanningBrief}\n\nHard creative constraint: use photorealistic live-action fictional human adults with natural skin and real-world materials in the proposal and every image/video prompt. Do not substitute clay, plasticine, stop-motion, puppets, cartoons or handmade-miniature styling.`
+      : narrationPlanningBrief;
+    const briefSize = /\b(\d{2,5})\s*[x×]\s*(\d{2,5})\b/i.exec(brief);
+    const briefAspect = briefSize ? aspectFromSize(Number(briefSize[1]), Number(briefSize[2])) : extractBrief(brief).aspect;
     let motionModel;
     try {
       motionModel = parseMotionModel(requestedMotionModel ?? defaultMotionModel, 'auto');
@@ -463,7 +806,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       };
     };
     const runStartedAt = Date.now();
-    const runOnce = async (model, repairInstructions = null) => {
+    const runOnce = async (model, repairInstructions = null, repairSystem = REPAIR_SYSTEM) => {
       const phase = repairInstructions ? 'repair' : 'initial';
       const phaseStartedAt = Date.now();
       onEvent?.({ type: 'runner_phase', phase, status: 'started', elapsedMs: Date.now() - runStartedAt });
@@ -481,7 +824,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           sessionId,
           now,
           ...(repairInstructions ? {
-            system: REPAIR_SYSTEM,
+            system: repairSystem,
           } : {}),
           // Initial planning is bounded separately from the much smaller edit-only repair.
           maxSteps: repairInstructions ? 8 : 16,
@@ -518,25 +861,36 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         throw error;
       }
     };
-    const acceptable = candidate => productionIntent.generatedFilm
-      ? candidate.ok && generatedFilmCompletionProblems(candidate.package, productionIntent, motionModel).length === 0 && validatePackage(candidate.package).valid
-      : candidate.svgAssets.length >= 4 && candidate.pendingGpu.length >= 1 && validatePackage(candidate.package).valid;
+    const acceptable = candidate => intent.generatedFilm
+      ? candidate.ok && generatedFilmCompletionProblems(candidate.package, intent, motionModel, brief).length === 0 && validatePackage(candidate.package).valid
+      : motionGraphicsCompletionProblems(candidate, brief).length === 0;
+    const aggregateUsage = { input: 0, output: 0 };
+    const absorbUsage = result => {
+      aggregateUsage.input += Number(result?.usage?.input) || 0;
+      aggregateUsage.output += Number(result?.usage?.output) || 0;
+    };
     let slice = await runOnce(agentModel);
-    let fallback = false;
-    // Motion graphics retains the deterministic CPU fallback. A generated-film
-    // miss is an actionable failure: substituting the SVG/FLUX script would
-    // silently change the requested deliverable and hide missing generated shots.
+    absorbUsage(slice.result);
+    const fallback = false;
     if (agentModel && !acceptable(slice)) {
-      if (productionIntent.generatedFilm) {
+      if (intent.generatedFilm) {
         const initialProblems = [
-          ...generatedFilmCompletionProblems(slice.package, productionIntent, motionModel),
+          ...generatedFilmCompletionProblems(slice.package, intent, motionModel, brief),
           ...packageSchemaProblems(slice.package),
         ];
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: initialProblems, elapsedMs: Date.now() - runStartedAt });
-        slice = await runOnce(agentModel, `${repairPackageFacts(slice.package, productionIntent)}\n\nValidation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`);
+        const narrationGuide = narrationRepairGuide(slice.package, intent, brief);
+        const sharedCastGuide = sharedMascotRepairGuide(slice.package, brief);
+        slice = await runOnce(agentModel, [
+          repairPackageFacts(slice.package, intent, briefAspect),
+          ...(narrationGuide.length ? [narrationGuide.join('\n')] : []),
+          ...(sharedCastGuide.length ? [sharedCastGuide.join('\n')] : []),
+          `Validation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`,
+        ].join('\n\n'));
+        absorbUsage(slice.result);
         if (!acceptable(slice)) {
           const problems = [
-            ...generatedFilmCompletionProblems(slice.package, productionIntent, motionModel),
+            ...generatedFilmCompletionProblems(slice.package, intent, motionModel, brief),
             ...packageSchemaProblems(slice.package),
           ];
           onEvent?.({ type: 'runner_phase', phase: 'repair', status: 'validation', ok: false, problems, elapsedMs: Date.now() - runStartedAt });
@@ -547,8 +901,40 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           throw error;
         }
       } else {
-        slice = await runOnce(null);
-        fallback = true;
+        const initialProblems = motionGraphicsCompletionProblems(slice, brief);
+        onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: problemLines(initialProblems), elapsedMs: Date.now() - runStartedAt });
+        const repairGuide = motionGraphicsRepairGuide(slice, initialProblems);
+        const sharedCastGuide = sharedMascotRepairGuide(slice.package, brief);
+        slice = await runOnce(agentModel, [
+          repairPackageFacts(slice.package, intent, briefAspect),
+          ...(repairGuide.length ? [repairGuide.join('\n')] : []),
+          ...(sharedCastGuide.length ? [sharedCastGuide.join('\n')] : []),
+          `Validation report: the current motion-graphics package is incomplete. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`,
+        ].join('\n\n'), MOTION_GRAPHICS_REPAIR_SYSTEM);
+        absorbUsage(slice.result);
+        if (!acceptable(slice)) {
+          const problems = motionGraphicsCompletionProblems(slice, brief);
+          const lines = problemLines(problems);
+          onEvent?.({ type: 'runner_phase', phase: 'repair', status: 'validation', ok: false, problems: lines, elapsedMs: Date.now() - runStartedAt });
+          const svgProblem = problems.find(problem => problem.code === 'SVG_ASSET_FLOOR');
+          const pendingProblem = problems.find(problem => problem.code === 'PENDING_GPU_MISSING');
+          const sharedCastProblem = problems.find(problem => problem.code === 'SHARED_CAST_MISSING');
+          const error = new Error(`motion graphics is incomplete after one repair: ${lines.join('; ') || slice.result.error || 'live agent did not finish'}`);
+          error.status = 422;
+          error.code = 'MOTION_GRAPHICS_INCOMPLETE';
+          error.errors = lines;
+          error.details = {
+            codes: problems.map(problem => problem.code),
+            svgCount: svgProblem?.count ?? (Array.isArray(slice.svgAssets) ? slice.svgAssets.length : 0),
+            requiredSvgCount: 4,
+            pendingGpuCount: pendingProblem?.count ?? (Array.isArray(slice.pendingGpu) ? slice.pendingGpu.length : 0),
+            requiredPendingGpuCount: 1,
+            castId: sharedCastProblem?.castId ?? null,
+            sceneIds: sharedCastProblem?.sceneIds ?? [],
+            problems: lines,
+          };
+          throw error;
+        }
       }
     }
     const validation = validatePackage(slice.package);
@@ -557,8 +943,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       error.errors = validation.errors;
       throw error;
     }
-    if (productionIntent.generatedFilm) {
-      const problems = generatedFilmCompletionProblems(slice.package, productionIntent, motionModel);
+    if (intent.generatedFilm) {
+      const problems = generatedFilmCompletionProblems(slice.package, intent, motionModel, brief);
       if (problems.length) {
         const error = new Error(`generated-film plan is incomplete: ${problems.join('; ')}`);
         error.status = 422;
@@ -581,7 +967,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       routes: slice.routes,
       pendingGpu: slice.pendingGpu,
       svgAssets: slice.svgAssets,
-      usage: { ...slice.result.usage, total: slice.result.usage.input + slice.result.usage.output },
+      usage: { input: aggregateUsage.input, output: aggregateUsage.output, total: aggregateUsage.input + aggregateUsage.output },
       events: slice.result.toolCalls.map(call => ({ name: call.name, ok: call.ok })),
     };
   };

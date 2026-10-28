@@ -125,6 +125,10 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
   const startedAt = now();
   let finishedAt = null;
   const events = [];
+  // Per-phase contribution so a repair `done` total cannot replace tokens already
+  // counted for the initial plan. Step usage is added; a phase-total event then
+  // replaces only that phase's contribution.
+  const phaseContribution = new Map();
   const state = {
     sessionId,
     status: 'running',
@@ -141,6 +145,27 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     message: null,
     build: null,
   };
+
+  function phaseName(event) {
+    if (typeof event?.phase === 'string' && event.phase) return event.phase;
+    return state.phase || 'initial';
+  }
+
+  function setPhaseUsage(phase, usage) {
+    const next = { input: Number(usage?.input) || 0, output: Number(usage?.output) || 0 };
+    const previous = phaseContribution.get(phase) ?? { input: 0, output: 0 };
+    state.usage.input += next.input - previous.input;
+    state.usage.output += next.output - previous.output;
+    phaseContribution.set(phase, next);
+  }
+
+  function addStepUsage(phase, usage) {
+    const previous = phaseContribution.get(phase) ?? { input: 0, output: 0 };
+    setPhaseUsage(phase, {
+      input: previous.input + (Number(usage?.input) || 0),
+      output: previous.output + (Number(usage?.output) || 0),
+    });
+  }
 
   function update(event) {
     if (event?.type === 'text') return;
@@ -164,10 +189,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     } else if (safe.type === 'model_result') {
       state.activity = 'model_complete';
       state.lastModel = safe;
-      if (safe.usage) {
-        state.usage.input += safe.usage.input;
-        state.usage.output += safe.usage.output;
-      }
+      if (safe.usage) addStepUsage(phaseName(safe), safe.usage);
     } else if (safe.type === 'tool_call') {
       state.activity = 'tool_running';
       state.tool = safe.name ?? null;
@@ -180,9 +202,10 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     } else if (safe.type === 'error') {
       state.activity = 'error';
       state.message = safe.message ?? safe.code ?? 'agent error';
+      if (safe.usage) setPhaseUsage(phaseName(safe), safe.usage);
     } else if (safe.type === 'done') {
       state.activity = 'agent_done';
-      if (safe.usage) state.usage = { ...safe.usage };
+      if (safe.usage) setPhaseUsage(phaseName(safe), safe.usage);
     }
   }
 

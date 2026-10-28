@@ -445,6 +445,7 @@ function patchGallery(container: ProgressElement, parts: SuperEasyProgressParts)
     return;
   }
 
+  const list = container.querySelectorAll?.('ul,ol')?.[0] ?? container;
   for (const slot of parts.gallerySlots) {
     if (existing.has(slot.id)) continue;
     const target = parts.gallerySlots
@@ -458,11 +459,11 @@ function patchGallery(container: ProgressElement, parts: SuperEasyProgressParts)
       }
       target.insertAdjacentHTML('beforebegin', slot.html);
     } else {
-      if (typeof container.insertAdjacentHTML !== 'function') {
+      if (typeof list.insertAdjacentHTML !== 'function') {
         container.innerHTML = parts.galleryHtml;
         return;
       }
-      container.insertAdjacentHTML('beforeend', slot.html);
+      list.insertAdjacentHTML('beforeend', slot.html);
     }
   }
 

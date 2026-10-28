@@ -20,6 +20,7 @@ import { loadAssetWorkflow } from './workflow.mjs';
 import { createQaRegistry } from './qa.mjs';
 import { sceneJobsPlan } from './scene.mjs';
 import { planBrief, refreshBrief, briefPresets } from './brief.mjs';
+import { preflightBrief } from './brief-preflight.mjs';
 import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
@@ -1819,6 +1820,19 @@ export function createApp({
     if (url.pathname === '/api/agent' && request.method === 'POST') {
       if (!agentRunner) return sendJson(response, 503, { error: 'agent runner not configured' });
       const body = await readJson(request);
+      // PS03: an unsatisfiable brief is refused here, before any planning tool
+      // call or provider spend. The response carries a typed code and details.
+      const refusal = preflightBrief(body);
+      if (refusal) {
+        return sendJson(response, refusal.status, {
+          error: refusal.message,
+          code: refusal.code,
+          details: refusal.details,
+          reason: refusal.reason,
+          conflict: refusal.conflict,
+          next_steps: refusal.next_steps,
+        });
+      }
       const sessionId = typeof body.sessionId === 'string' && body.sessionId.trim() ? body.sessionId.trim() : randomUUID();
       const progress = createAgentProgress(sessionId);
       const progressDir = join(runtimeDir, 'agent-progress');

@@ -1,6 +1,6 @@
 /* Super Easy replaces the fixed advanced-editor shell, so it must restore page scroll. */
-html:has(#app[data-super-easy-view]),
-body:has(#app[data-super-easy-view]) {
+html:has(#easy-root[data-super-easy-view]),
+body:has(#easy-root[data-super-easy-view]) {
   height: auto;
   min-height: 100%;
   max-height: none;
@@ -8,7 +8,7 @@ body:has(#app[data-super-easy-view]) {
   overflow-y: auto;
 }
 
-html body #app[data-super-easy-view] {
+html body #easy-root[data-super-easy-view] {
   display: flex;
   height: auto;
   min-height: 100vh;

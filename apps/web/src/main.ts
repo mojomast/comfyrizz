@@ -57,6 +57,7 @@ import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/pip-night-shift/package.json';
 import timelineJson from '../../../examples/pip-night-shift/timeline.json';
 import { mountPreview, updatePreview as updatePreviewBase } from './preview';
+import { previewMediaPlan, type PreviewAudioRequest } from './preview-media.ts';
 import { mountScriptAudioPanel, type ScriptAudioPanelHandle } from './editor/inspector/panel.ts';
 import { createTakesApi, type ClipSummary, type TakesResponse } from './takes/api.ts';
 import { createClipStore, mountRenderBar, withRenderOverride, type RenderBarHandle, type RenderGateSummary } from './takes/render-bar.ts';
@@ -756,9 +757,87 @@ function withTakePreview(nextPkg: PackageV1): PackageV1 {
   }
 }
 
-/** Every existing preview call goes through here so a take swap is never lost. */
+const previewMediaSources: Record<string, string> = {};
+const previewMediaKeys = new Map<string, string>();
+const previewMediaFailed = new Map<string, { key: string; at: number }>();
+const previewMediaFlights = new Map<string, Promise<void>>();
+let previewMediaPackageId: string | null = null;
+let previewMediaGeneration = 0;
+
+function revokePreviewUrl(file: string): void {
+  const url = previewMediaSources[file];
+  if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
+function resetPreviewMedia(nextPkg: PackageV1): void {
+  const packageId = String(nextPkg.id ?? '');
+  if (previewMediaPackageId !== packageId) {
+    previewMediaGeneration += 1;
+    for (const file of Object.keys(previewMediaSources)) revokePreviewUrl(file);
+    for (const key of Object.keys(previewMediaSources)) delete previewMediaSources[key];
+    previewMediaKeys.clear();
+    previewMediaFailed.clear();
+    previewMediaFlights.clear();
+    previewMediaPackageId = packageId;
+  }
+  for (const asset of Object.values<any>(nextPkg.assets ?? {})) {
+    const file = typeof asset?.file === 'string' ? asset.file : '';
+    const sha = typeof asset?.sha256 === 'string' ? asset.sha256 : '';
+    if (!file || !sha || asset?.kind !== 'audio') continue;
+    if (previewMediaSources[file] && previewMediaKeys.get(file) !== sha) {
+      revokePreviewUrl(file);
+      delete previewMediaSources[file];
+      previewMediaKeys.delete(file);
+    }
+  }
+}
+
+async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<void> {
+  const packageId = String(pkg.id ?? '');
+  const generation = previewMediaGeneration;
+  if (!packageId || requests.length === 0) return;
+  let changed = false;
+  await Promise.all(requests.map(async request => {
+    const failed = previewMediaFailed.get(request.file);
+    if (previewMediaSources[request.file] || previewMediaFlights.has(request.file)
+      || (failed && failed.key === request.cacheKey && Date.now() - failed.at < 30_000)) return;
+    const flight = (async () => {
+      try {
+        const response = await apiFetch(`/api/package/${encodeURIComponent(packageId)}/media?path=${encodeURIComponent(request.file)}`);
+        if (!response.ok) {
+          previewMediaFailed.set(request.file, { key: request.cacheKey, at: Date.now() });
+          return;
+        }
+        const url = URL.createObjectURL(await response.blob());
+        if (generation !== previewMediaGeneration || String(pkg.id ?? '') !== packageId) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        previewMediaSources[request.file] = url;
+        previewMediaKeys.set(request.file, request.cacheKey);
+        previewMediaFailed.delete(request.file);
+        changed = true;
+      } catch {
+        previewMediaFailed.set(request.file, { key: request.cacheKey, at: Date.now() });
+      } finally {
+        previewMediaFlights.delete(request.file);
+      }
+    })();
+    previewMediaFlights.set(request.file, flight);
+    await flight;
+  }));
+  if (changed && generation === previewMediaGeneration && String(pkg.id ?? '') === packageId) {
+    updatePreview(pkg, timeline, generatedAssets);
+  }
+}
+
+/** Every existing preview call goes through here so take swaps and audio sources are never lost. */
 function updatePreview(nextPkg: PackageV1, nextTimeline: Timeline, nextAssets?: Record<string, InlineAsset>): void {
-  updatePreviewBase(withTakePreview(nextPkg), nextTimeline, nextAssets);
+  resetPreviewMedia(nextPkg);
+  const previewPackage = withTakePreview(nextPkg);
+  const plan = previewMediaPlan(previewPackage, previewMediaSources);
+  updatePreviewBase(previewPackage, nextTimeline, nextAssets, plan.sources, plan.missingMedia);
+  void hydratePreviewAudio(plan.requests);
 }
 
 function previewClipFrom(clip: ClipSummary, data: TakesResponse): PreviewClip {
