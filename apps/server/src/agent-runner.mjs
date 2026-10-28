@@ -2,6 +2,7 @@
 // packages/vector. Offline it uses the deterministic scripted model; with a
 // provider it uses the live model for both planning and SVG markup, falling
 // back to the A5 stub if the model output cannot be parsed.
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
@@ -71,6 +72,69 @@ function repairPackageFacts(pkg, intent) {
     `Scene IDs and current values: ${sceneFacts || 'none'}.`,
     'Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.',
   ].join('\n');
+}
+
+function generatedClipSeconds(asset) {
+  const frames = Number(asset?.gen?.inputs?.frames);
+  const fps = Number(asset?.gen?.inputs?.fps);
+  return frames > 0 && fps > 0 ? frames / fps : 0;
+}
+
+/** Split under-covered pending scenes into real generation shots before validation. */
+export function coverGeneratedFilmScenes(pkg) {
+  if (!pkg || !Array.isArray(pkg.scenes)) return { package: pkg, splits: 0 };
+  const next = structuredClone(pkg);
+  next.assets = next.assets && typeof next.assets === 'object' ? next.assets : {};
+  const scenes = [];
+  const replacedAssetIds = new Set();
+  let splits = 0;
+  for (const scene of next.scenes) {
+    const fps = Number(next.format?.fps) > 0 ? Number(next.format.fps) : 30;
+    const sceneFrames = Number(scene?.preferredFrames) || 0;
+    const sceneSeconds = sceneFrames / fps;
+    const plates = Array.isArray(scene?.media) ? scene.media : [];
+    const videoPlates = plates.filter(plate => {
+      const asset = next.assets?.[plate?.asset];
+      return asset?.status === 'pending' && asset?.kind === 'video' && ['fasth3-omni', 'ltx25'].includes(asset?.gen?.generator);
+    });
+    const uniqueAssetIds = [...new Set(videoPlates.map(plate => plate.asset))];
+    const template = uniqueAssetIds.length === 1 ? next.assets[uniqueAssetIds[0]] : null;
+    const clipSeconds = generatedClipSeconds(template);
+    if (!template || clipSeconds <= 0 || sceneSeconds <= 0 || sceneSeconds <= clipSeconds * 2) {
+      scenes.push(scene);
+      continue;
+    }
+    const partCount = Math.min(40, Math.ceil(sceneSeconds / clipSeconds));
+    const templateAssetId = uniqueAssetIds[0];
+    const templatePlate = videoPlates[0];
+    for (let part = 0; part < partCount; part += 1) {
+      const suffix = `${scene.id}:${templateAssetId}:${part + 1}`;
+      const digest = createHash('sha256').update(suffix).digest('hex').slice(0, 16);
+      const assetId = `a_vid_${digest}`;
+      const asset = structuredClone(template);
+      if (Number.isFinite(Number(asset.gen?.inputs?.seed))) asset.gen.inputs.seed = Number(asset.gen.inputs.seed) + part;
+      next.assets[assetId] = asset;
+      const media = { ...templatePlate, asset: assetId };
+      delete media.speed;
+      delete media.holdFrames;
+      scenes.push({
+        ...scene,
+        id: `${scene.id}__part${part + 1}`,
+        preferredFrames: Math.floor(sceneFrames / partCount) + (part < sceneFrames % partCount ? 1 : 0),
+        media: [media],
+      });
+    }
+    replacedAssetIds.add(templateAssetId);
+    splits += 1;
+  }
+  if (splits === 0) return { package: pkg, splits: 0 };
+  next.scenes = scenes;
+  for (const assetId of replacedAssetIds) {
+    const used = scenes.some(scene => (Array.isArray(scene?.media) ? scene.media : []).some(plate => plate?.asset === assetId));
+    if (!used) delete next.assets[assetId];
+  }
+  next.revision = Math.max(1, Number(next.revision) || 1) + 1;
+  return { package: next, splits };
 }
 
 function liveActionStyleConflict(pkg) {
@@ -323,7 +387,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       const phaseStartedAt = Date.now();
       onEvent?.({ type: 'runner_phase', phase, status: 'started', elapsedMs: Date.now() - runStartedAt });
       try {
-        const result = await runCpuSlice({
+        let result = await runCpuSlice({
           brief: repairInstructions ? `${planningBrief}\n\n${repairInstructions}` : planningBrief,
           ...(repairInstructions ? { initialPackage: slice.package } : {}),
           ...(model ? { model } : {}),
@@ -342,6 +406,23 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           maxSteps: repairInstructions ? 8 : 16,
           onEvent: event => onEvent?.({ ...event, phase, runElapsedMs: Date.now() - runStartedAt }),
         });
+        if (productionIntent.generatedFilm) {
+          const covered = coverGeneratedFilmScenes(result.package);
+          if (covered.splits > 0) {
+            const pendingGpu = result.pendingGpu.filter(item => item.generator === 'flux3-klein');
+            const seen = new Set();
+            for (const scene of covered.package.scenes) {
+              for (const plate of Array.isArray(scene?.media) ? scene.media : []) {
+                const asset = covered.package.assets?.[plate?.asset];
+                if (seen.has(plate?.asset) || asset?.status !== 'pending' || !['fasth3-omni', 'ltx25'].includes(asset?.gen?.generator)) continue;
+                seen.add(plate.asset);
+                pendingGpu.push({ assetId: plate.asset, generator: asset.gen.generator, ...(asset.gen.workflow ? { workflow: asset.gen.workflow } : {}), sceneId: scene.id });
+              }
+            }
+            result = { ...result, package: covered.package, pendingGpu };
+            onEvent?.({ type: 'runner_phase', phase, status: 'coverage', splits: covered.splits, scenes: covered.package.scenes.length, elapsedMs: Date.now() - runStartedAt });
+          }
+        }
         onEvent?.({ type: 'runner_phase', phase, status: 'completed', durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - runStartedAt, stopped: result.result.stopped ?? 'final' });
         return result;
       } catch (error) {

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createCpuAgentRunner, generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
+import { coverGeneratedFilmScenes, createCpuAgentRunner, generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
 import { replayProvider } from './fake-provider.mjs';
 
 const BRIEF = 'Create a 24-second wordless handcrafted miniature film in 4 shots. A mustard felt jerboa and a cobalt wooden bird restore an island lighthouse at dusk as a small boat approaches. Recurring tactile characters, clear physical action, cinematic camera moves, warm golden payoff, gentle coastal sound. No dialogue, captions, logos or real people.';
@@ -142,6 +142,37 @@ test('completion requires meaningful proposal fields and the requested duration'
   assert.ok(missing.some(problem => problem.includes('proposal.logline')));
   assert.ok(missing.some(problem => problem.includes('proposal.look')));
   assert.ok(missing.some(problem => problem.includes('proposal.soundtrack')));
+});
+
+test('coverage splitter creates separate short generation shots while preserving duration', async () => {
+  const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
+  const pkg = {
+    title: 'Real Human Skaters',
+    proposal: { logline: 'A skater falls.', look: 'Photorealistic live-action humans.', soundtrack: 'Foley.' },
+    format: { fps: 30 }, revision: 20,
+    scenes: [{ id: 's1', preferredFrames: 600, media: [{ asset: 'a_vid_old' }], notes: 'LTX finishing sound plan: foley' }],
+    assets: {
+      a_vid_old: {
+        kind: 'video', status: 'pending',
+        gen: {
+          generator: 'ltx25', workflow: 'workflows/ltx25_i2v.api.json',
+          inputs: { image: 'a_start', frames: 121, fps: 24, seed: 201, prompt: 'Photorealistic human skater.' },
+        },
+        media: { audio: 'none' }, notes: 'finishing sound plan: foley',
+      },
+    },
+  };
+  const covered = coverGeneratedFilmScenes(pkg);
+  assert.equal(covered.splits, 1);
+  assert.equal(covered.package.scenes.length, 4);
+  assert.equal(covered.package.scenes.reduce((sum, scene) => sum + scene.preferredFrames, 0), 600);
+  assert.equal(covered.package.assets.a_vid_old, undefined);
+  const ids = covered.package.scenes.map(scene => scene.media[0].asset);
+  assert.equal(new Set(ids).size, 4);
+  assert.deepEqual(ids.map(id => covered.package.assets[id].gen.inputs.seed), [201, 202, 203, 204]);
+  const intent = classifyProductionIntent('Create a 20-second live-action film with real humans.');
+  const problems = generatedFilmCompletionProblems(covered.package, intent, 'auto');
+  assert.equal(problems.some(problem => problem.includes('attached generated video covers')), false, problems.join('\n'));
 });
 
 test('completion rejects clay substitutions for real humans and under-covered scene durations', async () => {
