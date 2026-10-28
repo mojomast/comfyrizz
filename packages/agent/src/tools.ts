@@ -640,14 +640,128 @@ function sanitizeCodeBlock(block: any, fallbackRate: number): Record<string, any
   return { language, code, ...(highlights.length > 0 ? { highlights } : {}), typing: { charsPerSecond: rate } };
 }
 
+const COMPARISON_RE = /\bcompar(?:e|ison|ing)\b|\bversus\b|\bvs\.?\b|\bbefore\s*(?:and|&|\/|-|,)?\s*after\b/i;
+const SHARED_DATASET_RE = /(?:share|shared|single|same)[^.]{0,80}\bdatasets?\b|\bdatasets?\b[^.]{0,80}(?:share|shared|single|same)|\bone\s+(?:shared\s+)?(?:user\s+)?dataset\b/i;
+
+function sceneHintText(scene: Record<string, any>): string {
+  const copy = scene.copy && typeof scene.copy === 'object' ? scene.copy : {};
+  return [
+    scene.layout, scene.role, scene.id, scene.title, scene.headline,
+    copy.headline, copy.sub, copy.body,
+  ].filter((value): value is string => typeof value === 'string').join(' ').toLowerCase();
+}
+
+function briefWantsComparison(brief: string): boolean {
+  return COMPARISON_RE.test(brief);
+}
+
+function sceneHintsComparison(scene: Record<string, any>): boolean {
+  return COMPARISON_RE.test(sceneHintText(scene));
+}
+
+function comparisonPlates(): Array<Record<string, any>> {
+  return [{ procedural: { pattern: 'gradient' } }, { procedural: { pattern: 'grid' } }];
+}
+
+function ensureComparisonPlates(scene: Record<string, any>): Record<string, any> {
+  if (scene.layout === 'compare' && (!Array.isArray(scene.media) || scene.media.length !== 2)) {
+    scene.media = comparisonPlates();
+  }
+  return scene;
+}
+
 /** The live model often sends `role`/`title` and no `layout`; infer one. */
 function inferSceneLayout(scene: Record<string, any>): SceneLayout {
-  const hint = `${scene.layout ?? ''} ${scene.role ?? ''} ${scene.id ?? ''} ${scene.title ?? ''}`.toLowerCase();
+  const hint = sceneHintText(scene);
+  if (COMPARISON_RE.test(hint)) return 'compare';
   if (/outro|intro|title|cover|opening|closing|hook/.test(hint)) return 'title';
   if (/stat|metric|kpi|number|figure|score/.test(hint)) return 'stat';
   if (/chart|graph|bar|data|plot|trend/.test(hint)) return 'chart';
   if (/list|bullet|steps|feature|checklist|points/.test(hint)) return 'list';
   return 'hero';
+}
+
+function sameDatasetValues(values: unknown, expected: Array<{ label: string; value: number }>): boolean {
+  if (!Array.isArray(values) || values.length !== expected.length) return false;
+  return expected.every(item => values.some((entry: any) => entry?.label === item.label && entry?.value === item.value));
+}
+
+function briefSharedDataset(brief: string, normalizedDatasets: ReturnType<typeof normalizeDatasets>): { datasets: Record<string, any>; id: string } | null {
+  if (!SHARED_DATASET_RE.test(brief)) return null;
+  const values: Array<{ label: string; value: number }> = [];
+  const seen = new Set<string>();
+  for (const match of brief.matchAll(/(?:^|[.,;:]\s*|\band\s+)([A-Za-z][A-Za-z0-9 _&'\/-]{0,40}?)\s*=\s*(-?\d+(?:\.\d+)?)/g)) {
+    const label = match[1].trim().replace(/\s+/g, ' ');
+    const value = Number(match[2]);
+    if (!label || !Number.isFinite(value) || seen.has(label.toLowerCase())) continue;
+    if (/^(?:aspect|format|resolution|fps|length|duration|width|height|ratio)$/i.test(label)) continue;
+    seen.add(label.toLowerCase());
+    values.push({ label, value });
+  }
+  if (values.length === 0) return null;
+
+  const entries = Object.entries(normalizedDatasets.datasets);
+  const matching = entries.find(([, dataset]) => dataset.source === 'user' && sameDatasetValues(dataset.values, values));
+  const sameLabels = entries.find(([, dataset]) => dataset.source === 'user'
+    && Array.isArray(dataset.values)
+    && dataset.values.length === values.length
+    && values.every((item, index) => dataset.values[index]?.label === item.label));
+  const basisEntry = matching ?? sameLabels ?? entries.find(([, dataset]) => dataset.source === 'user');
+  const id = matching?.[0] ?? sameLabels?.[0] ?? basisEntry?.[0] ?? 'd_data';
+  const basis = basisEntry?.[1];
+  const dataset: Record<string, any> = {
+    unit: typeof basis?.unit === 'string' ? basis.unit : 'value',
+    values,
+    source: 'user',
+  };
+  if (typeof basis?.label === 'string') dataset.label = basis.label;
+  return { datasets: { [id]: dataset }, id };
+}
+
+function chooseComparisonScene(scenes: Array<Record<string, any>>): Record<string, any> | undefined {
+  const hinted = scenes.find(scene => scene.layout !== 'compare' && scene.layout !== 'title' && sceneHintsComparison(scene));
+  if (hinted) return hinted;
+  const hintedAny = scenes.find(scene => scene.layout !== 'compare' && sceneHintsComparison(scene));
+  if (hintedAny) return hintedAny;
+  const nonCore = scenes.filter(scene => !['compare', 'chart', 'stat', 'title', 'code'].includes(scene.layout));
+  if (nonCore.length > 0) return nonCore[nonCore.length - 1];
+  const nonTitle = scenes.filter(scene => scene.layout !== 'title');
+  return nonTitle[nonTitle.length - 1] ?? scenes[scenes.length - 1];
+}
+
+function preparePlanningScenes(rawScenes: Array<Record<string, any>>, brief: string, sharedDatasetId?: string): Array<Record<string, any>> {
+  const scenes = rawScenes.map(scene => ({ ...scene }));
+  for (const scene of scenes) {
+    if (!(SCENE_LAYOUTS as readonly string[]).includes(scene.layout)) scene.layout = inferSceneLayout(scene);
+  }
+  if ((briefWantsComparison(brief) || scenes.some(sceneHintsComparison)) && !scenes.some(scene => scene.layout === 'compare')) {
+    const candidate = chooseComparisonScene(scenes);
+    if (candidate) {
+      candidate.layout = 'compare';
+      delete candidate.variant;
+      ensureComparisonPlates(candidate);
+    }
+  }
+  for (const scene of scenes) ensureComparisonPlates(scene);
+  if (sharedDatasetId) {
+    for (const scene of scenes) {
+      const display = scene.layout === 'stat' ? 'number' : 'bar';
+      scene.data = { dataset: sharedDatasetId, display };
+    }
+  }
+  return scenes;
+}
+
+function ensureComparisonScene(scenes: Array<Record<string, any>>, brief: string | undefined): Array<Record<string, any>> {
+  if (scenes.some(scene => scene.layout === 'compare')) return scenes;
+  if (!(brief && briefWantsComparison(brief)) && !scenes.some(sceneHintsComparison)) return scenes;
+  const candidate = chooseComparisonScene(scenes);
+  if (!candidate) return scenes;
+  candidate.layout = 'compare';
+  delete candidate.variant;
+  ensureComparisonPlates(candidate);
+  if (candidate.copy?.headline) candidate.copy.headline = clampText(candidate.copy.headline, COPY_LIMITS.compare.headline);
+  return scenes;
 }
 
 /** A scene that cannot render is an actionable 422, never a silent layout downgrade. */
@@ -885,7 +999,7 @@ function mergeRefs(userRefs: string[], castRefs: string[]): string[] {
  */
 export function createToolset(options: ToolsetOptions = {}): Record<string, AgentTool> {
   const configuredMotionModel = parseMotionModel(options.motionModel, 'auto');
-  const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal'] } = {
+  const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal']; brief?: string } = {
     package: options.initialPackage ? structuredClone(options.initialPackage) : undefined,
     intent: options.initialPackage ? options.initialIntent : undefined,
     proposal: options.initialPackage?.proposal,
@@ -904,12 +1018,17 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const id = hashId('pkg', args.brief);
     const format = resolveFormat(args.brief);
     const normalizedDatasets = normalizeDatasets(args.datasets);
-    const datasetIds = new Set(Object.keys(normalizedDatasets.datasets));
+    const sharedDataset = briefSharedDataset(args.brief, normalizedDatasets);
+    const datasets = sharedDataset?.datasets ?? normalizedDatasets.datasets;
+    const datasetIds = new Set(Object.keys(datasets));
+    const datasetAliases = sharedDataset ? new Map([[sharedDataset.id, sharedDataset.id]]) : normalizedDatasets.aliases;
     const intent = classifyProductionIntent(args.brief);
     state.intent = intent;
+    state.brief = args.brief;
     state.proposal = args.proposal;
     const scenes = (args.scenes?.length
-      ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set(), normalizedDatasets.aliases))
+      ? preparePlanningScenes(args.scenes, args.brief, sharedDataset?.id)
+        .map(scene => ensureComparisonPlates(normalizeScene(scene, title, datasetIds, new Set(), datasetAliases)))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
       .map(scene => applyProductionIntentToScene(scene, intent));
     const theme = { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) };
@@ -928,7 +1047,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
       theme,
       voice: { enabled: false, engine: 'none' },
-      datasets: normalizedDatasets.datasets,
+      datasets,
       ...(args.proposal ? { proposal: args.proposal } : {}),
       scenes,
       ...(mascot ? { cast: [mascot.member] } : {}),
@@ -950,9 +1069,14 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     if (!state.package) throw new Error('no package draft; call storyboard.propose first');
     const draft = state.package;
     const normalizedDatasets = normalizeDatasets(draft.datasets);
-    const aliases = normalizedDatasets.aliases;
+    const sharedDataset = state.brief ? briefSharedDataset(state.brief, normalizedDatasets) : null;
+    const datasets = sharedDataset?.datasets ?? normalizedDatasets.datasets;
+    const aliases = sharedDataset ? new Map([[sharedDataset.id, sharedDataset.id]]) : normalizedDatasets.aliases;
     const scenes: any[] = Array.isArray(draft.scenes) ? draft.scenes : [];
     const remappedScenes = scenes.map(scene => {
+      if (sharedDataset) {
+        return { ...scene, data: { dataset: sharedDataset.id, display: scene?.layout === 'stat' ? 'number' : 'bar' } };
+      }
       const currentDataset = typeof scene?.data?.dataset === 'string' ? scene.data.dataset : '';
       const datasetId = currentDataset ? aliases.get(currentDataset) : undefined;
       return datasetId && datasetId !== currentDataset
@@ -963,12 +1087,15 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     if (index < 0) throw new Error(`scene ${args.scene_id} not found`);
     const current = remappedScenes[index] ?? {};
     const patch = args.patch as Record<string, any>;
-    const datasetIds = new Set(Object.keys(normalizedDatasets.datasets));
+    const datasetIds = new Set(Object.keys(datasets));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
-    const nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
-      ? applyProductionIntentToScene(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases), state.intent ?? classifyProductionIntent(''))
+    let nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
+      ? applyProductionIntentToScene(ensureComparisonPlates(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases)), state.intent ?? classifyProductionIntent(''))
       : scene);
-    state.package = { ...draft, datasets: normalizedDatasets.datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
+    for (const scene of nextScenes) ensureComparisonPlates(scene);
+    const patchSetsLayout = typeof patch.layout === 'string' && (SCENE_LAYOUTS as readonly string[]).includes(patch.layout);
+    if (!patchSetsLayout) nextScenes = ensureComparisonScene(nextScenes, state.brief);
+    state.package = { ...draft, datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
     return withMotionFixes(
       { package: state.package, revision: state.package.revision, scene_id: args.scene_id },
