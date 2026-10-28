@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { createAgentProgress } from '../src/agent-progress.mjs';
 import { createCpuAgentRunner, generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
 import { replayProvider } from './fake-provider.mjs';
 
@@ -183,4 +184,36 @@ test('runner explicitly accepts Klein stills + code motion without H3/LTX jobs',
   assert.equal(still.kind, 'image');
   assert.match(still.notes, /stills \+ code motion/);
   assert.ok(!Object.values(result.package.assets).some(asset => ['fasth3-omni', 'ltx25'].includes(asset.gen?.generator)));
+});
+
+test('initial and repair token totals stay aggregated across both phases', async t => {
+  const badScene = { ...scenes[0], preferredFrames: 450 };
+  const { runner, provider } = await setup(t, [
+    { name: 'storyboard.propose', args: { brief: ONE_SHOT_BRIEF, title: 'The Lamp at Dusk', proposal, scenes: [badScene] } },
+  ]);
+  const repairCalls = [
+    { name: 'storyboard.edit', args: { scene_id: 'shot1', patch: { preferredFrames: 180 } } },
+    { name: 'assets.generate_video', args: { ...shotDirection('shot1'), motion_model: 'klein' } },
+  ];
+  let repaired = false;
+  const progress = createAgentProgress('aggregate-usage');
+  const result = await runner({
+    brief: ONE_SHOT_BRIEF,
+    provider: 'custom',
+    motionModel: 'klein',
+    onEvent: event => {
+      progress.update(event);
+      if (event.type === 'done' && !repaired) {
+        repaired = true;
+        provider.setCalls(repairCalls);
+      }
+    },
+  });
+  // Each scripted tool request reports 64/24 and each final text request reports 32/8.
+  // Initial plan: propose + final. Repair: edit + video + final.
+  assert.equal(repaired, true);
+  assert.equal(result.usage.input, 256);
+  assert.equal(result.usage.output, 88);
+  assert.equal(result.usage.total, 344);
+  assert.deepEqual(progress.snapshot().usage, { input: 256, output: 88, total: 344 });
 });
