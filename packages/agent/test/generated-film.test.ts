@@ -235,6 +235,7 @@ test('whole-film finishing stem accumulates every shot plan instead of freezing 
   assert.match(pkg.assets.a_finishing_mix.gen.inputs.plan, /brass bell answers/);
   assert.equal(pkg.assets.a_finishing_mix.gen.model, 'deterministic-pcm-v2');
   assert.equal(pkg.assets.a_finishing_mix.media.durationSeconds, 12);
+  assert.ok(pkg.assets.a_finishing_mix.notes.length <= 512, 'whole-film notes stay within the package schema limit');
   assert.equal(pkg.audio.music.gain_db, -12);
 });
 

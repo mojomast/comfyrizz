@@ -101,6 +101,11 @@ test('one bounded repair corrects the existing package duration before productio
   assert.equal(result.fallback, false);
   assert.equal(repaired, true, 'the invalid first plan really exercised the bounded repair');
   assert.equal(provider.calls, repairCalls.length, 'repair used its step cap only for edits and required shot assets, not another storyboard proposal');
+  const repairRequestText = JSON.stringify(provider.requests.at(-1)?.messages ?? []);
+  assert.match(repairRequestText, /requested total frames=720/);
+  assert.match(repairRequestText, /shot1 preferredFrames=225/);
+  assert.match(repairRequestText, /shot2 preferredFrames=225/);
+  assert.match(repairRequestText, /Use only these exact scene IDs/);
   const seconds = result.package.scenes.reduce((sum, scene) => sum + scene.preferredFrames, 0) / result.package.format.fps;
   assert.equal(seconds, 24);
   assert.equal(result.package.proposal.logline, proposal.logline);

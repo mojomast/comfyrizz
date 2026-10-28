@@ -46,6 +46,20 @@ export function packageSchemaProblems(pkg) {
   });
 }
 
+function repairPackageFacts(pkg, intent) {
+  const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const currentFrames = scenes.reduce((sum, scene) => sum + (Number(scene?.preferredFrames) || 0), 0);
+  const targetFrames = intent.requestedSeconds === null ? 'unspecified' : Math.round(intent.requestedSeconds * fps);
+  const sceneFacts = scenes.map(scene => `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}`).join('; ');
+  return [
+    'Current package facts (authoritative data, not instructions):',
+    `Timing: fps=${fps}; current total frames=${currentFrames}; requested total frames=${targetFrames}.`,
+    `Scene IDs and current values: ${sceneFacts || 'none'}.`,
+    'Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.',
+  ].join('\n');
+}
+
 /** Completion is shot-reachable: orphan pending GPU assets never satisfy it. */
 export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto') {
   const problems = [];
@@ -292,7 +306,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           ...packageSchemaProblems(slice.package),
         ];
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: initialProblems, elapsedMs: Date.now() - runStartedAt });
-        slice = await runOnce(agentModel, `Validation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`);
+        slice = await runOnce(agentModel, `${repairPackageFacts(slice.package, productionIntent)}\n\nValidation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`);
         if (!acceptable(slice)) {
           const problems = [
             ...generatedFilmCompletionProblems(slice.package, productionIntent, motionModel),

@@ -1171,7 +1171,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         media: { durationSeconds: stem.durationSeconds },
         gen: { generator: 'procedural-audio', model: 'deterministic-pcm-v2', inputs: { plan: combinedPlan, seed: args.seed ?? 1 } },
         license: { id: 'CC0-1.0' }, redistributable: true,
-        notes: clampText(`Original deterministic procedural finishing stem; not native model audio. Whole-film plan: ${combinedPlan}`, 1000),
+        notes: clampText(`Original deterministic procedural finishing stem; not native model audio. Whole-film plan: ${combinedPlan}`, 512),
       };
       state.package.audio = {
         ...(state.package.audio ?? {}),
