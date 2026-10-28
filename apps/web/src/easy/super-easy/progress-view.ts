@@ -89,10 +89,10 @@ export interface ProgressRoot {
 
 const VIDEO_URL = /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/iu;
 const PREVIEW_TITLE = 'Your preview is ready';
-const PREVIEW_BODY = 'Download MP4 makes the video file on this computer in about a minute. You can watch the preview while it works.';
-const PREVIEW_DOWNLOAD = 'Download MP4';
+const PREVIEW_BODY = 'Download preview MP4 makes a preview file on this computer in about a minute. It is not newly generated AI footage. You can watch the preview while it works.';
+const PREVIEW_DOWNLOAD = 'Download preview MP4';
 const PREVIEW_ACTION = 'Watch and review';
-const PREVIEW_LIVE = 'Preview ready. Download MP4 makes the video file.';
+const PREVIEW_LIVE = 'Preview ready. You can download a preview MP4.';
 
 function percent(fraction: number): number {
   if (!Number.isFinite(fraction)) return 0;

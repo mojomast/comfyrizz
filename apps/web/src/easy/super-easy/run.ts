@@ -20,6 +20,7 @@ const RUN_ID_REQUIRED = 'The paid final run did not return a run id.';
 const RUN_FAILED = 'The final video run did not finish.';
 const FINAL_VIDEO_FAILED = 'The finished MP4 could not be loaded.';
 const LOCAL_RENDER_FAILED = 'The local final render did not finish.';
+const GENERATED_MEDIA_REQUIRES_COLAB = 'This plan needs AI-generated footage. Choose Google Colab in Set up your video maker, then try approval again. This computer can only render footage that is already available.';
 const DEFAULT_RUN_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_RUN_POLL_MS = 1000;
 
@@ -95,6 +96,7 @@ export interface RunSuperEasyDeps {
 export type SuperEasyRunFailureCode =
   | 'EMPTY_PROMPT'
   | 'GOOGLE_COLAB_CONFIRM_REQUIRED'
+  | 'GENERATED_MEDIA_REQUIRES_COLAB'
   | 'PLAN_FAILED'
   | 'ITERATION_SET_FAILED'
   | 'ITERATION_LEVEL_REQUIRED'
@@ -195,6 +197,24 @@ function hasDraftIteration(snapshot: unknown): boolean {
 function isPaidAction(action: PlanCard['actions'][number]): boolean {
   if (!(typeof action.upperBound === 'number' && action.upperBound > 0)) return false;
   return !(action.kind === 'audition' && action.engine === 'kokoro');
+}
+
+function hasPendingGeneratedShots(pkg: unknown): boolean {
+  if (!isRecord(pkg)) return false;
+  const requiredAssetIds = new Set<string>();
+  const scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
+  for (const scene of scenes) {
+    if (!isRecord(scene) || !Array.isArray(scene.media)) continue;
+    for (const item of scene.media) {
+      if (isRecord(item) && typeof item.asset === 'string') requiredAssetIds.add(item.asset);
+    }
+  }
+  const assets = isRecord(pkg.assets) ? pkg.assets : {};
+  return Object.entries(assets).some(([id, asset]) => {
+    if (!requiredAssetIds.has(id) || !isRecord(asset) || asset.status === 'ready') return false;
+    const gen = isRecord(asset.gen) ? asset.gen : null;
+    return gen?.generator === 'flux3-klein' || gen?.generator === 'ltx25' || gen?.generator === 'fasth3-omni';
+  });
 }
 
 function finalPlanEnvelope(card: PlanCard, snapshot: unknown): Record<string, unknown> {
@@ -395,6 +415,9 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     return failure('PLAN_FAILED', 'plan', planned.plan.error || PLAN_FAILED);
   }
   const productionId = planned.productionId;
+  if (compute === 'cpu' && hasPendingGeneratedShots(deps.host.getPackage?.())) {
+    return failure('GENERATED_MEDIA_REQUIRES_COLAB', 'compute', GENERATED_MEDIA_REQUIRES_COLAB);
+  }
 
   deps.onPhase?.('iteration');
   let before: unknown;

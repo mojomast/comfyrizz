@@ -447,7 +447,7 @@ test('preview-ready has its own Review handoff and never claims the finished vid
   const html = renderSuperEasyProgress(partialSnapshot(), { previewReady: true });
 
   assert.match(html, /data-super-easy-preview-ready/u);
-  assert.match(html, /<button[^>]*class="btn btn-primary"[^>]*data-super-easy-export[^>]*>Download MP4<\/button>/u);
+  assert.match(html, /<button[^>]*class="btn btn-primary"[^>]*data-super-easy-export[^>]*>Download preview MP4<\/button>/u);
   assert.match(html, /<button[^>]*class="btn btn-secondary"[^>]*data-super-easy-review[^>]*>Watch and review<\/button>/u);
   assert.doesNotMatch(html, /data-super-easy-done-actions/u);
   assert.doesNotMatch(html, /data-super-easy-download/u);
