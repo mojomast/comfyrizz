@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
+import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 
 const SVG_SYSTEM = [
   'You write one standalone SVG document and nothing else.',
@@ -46,10 +47,21 @@ export function packageSchemaProblems(pkg) {
   });
 }
 
+function plannedTimelineFrames(pkg) {
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const fallback = scenes.reduce((sum, scene) => sum + (Number(scene?.preferredFrames) || 0), 0);
+  try {
+    const frames = Number(compileTimeline(pkg).durationInFrames);
+    return Number.isFinite(frames) && frames >= 0 ? frames : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function repairPackageFacts(pkg, intent) {
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
-  const currentFrames = scenes.reduce((sum, scene) => sum + (Number(scene?.preferredFrames) || 0), 0);
+  const currentFrames = plannedTimelineFrames(pkg);
   const targetFrames = intent.requestedSeconds === null ? 'unspecified' : Math.round(intent.requestedSeconds * fps);
   const sceneFacts = scenes.map(scene => `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}; narration=${JSON.stringify(typeof scene?.narration === 'string' ? scene.narration : '')}`).join('\n');
   return [
@@ -74,7 +86,7 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   }
   if (proposal?.logline === 'A story built from your idea.') problems.push('proposal.logline must describe the actual story, not a generic fallback');
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
-  const plannedSeconds = scenes.reduce((sum, scene) => sum + (Number(scene?.preferredFrames) || 0), 0) / fps;
+  const plannedSeconds = plannedTimelineFrames(pkg) / fps;
   if (intent.requestedSeconds !== null && Math.abs(plannedSeconds - intent.requestedSeconds) > 0.05) {
     problems.push(`brief requests ${intent.requestedSeconds} seconds but the plan is ${plannedSeconds.toFixed(2)} seconds; adjust scene frames before production`);
   }

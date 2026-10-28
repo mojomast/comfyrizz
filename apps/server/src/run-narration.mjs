@@ -28,6 +28,7 @@ export function runNeedsNarration(pkg) {
  */
 export async function prepareRunNarration({ pkg, workDir, outputDir, packageDir, runCommand = execute }) {
   if (!runNeedsNarration(pkg)) return { voiced: false };
+  const authoredFrames = Number(compileTimeline(pkg).durationInFrames);
   const workAudio = join(workDir, 'audio');
   const durationsPath = join(workAudio, 'durations.json');
   const narrationPath = join(workAudio, 'narration.norm.wav');
@@ -65,6 +66,9 @@ export async function prepareRunNarration({ pkg, workDir, outputDir, packageDir,
     }
   }
   const timeline = compileTimeline(pkg, narrationOptions(workDir));
+  if (Number.isFinite(authoredFrames) && timeline.durationInFrames !== authoredFrames) {
+    throw new Error(`Narration changed the compiled film duration from ${authoredFrames} to ${timeline.durationInFrames} frames; correct shot timing before media generation`);
+  }
   mkdirSync(outputDir, { recursive: true });
   cpSync(workAudio, join(outputDir, 'audio'), { recursive: true });
   cpSync(workAudio, packageAudio, { recursive: true });

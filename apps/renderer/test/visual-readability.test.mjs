@@ -19,3 +19,9 @@ test('lower-thirds clear wrapped headlines and future flow nodes remain readable
   const flow = read('recipes/TechnicalFlow.tsx');
   assert.match(flow, /opacity: 0\.38 \+ reveal \* 0\.62/);
 });
+
+test('full-bleed foreground media is scrimmed below copy, not below the media', () => {
+  const components = read('components.tsx');
+  assert.match(components, /fullBleedMedia/);
+  assert.match(components, /<Scrim opacity=\{readableMediaScrim\(scene, scene\.background\?\.scrim \?\? 0\)\} zIndex=\{6\}/);
+});

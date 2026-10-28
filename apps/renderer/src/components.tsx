@@ -167,6 +167,7 @@ function VectorAsset({ assetId, frame, entry }: { assetId: string; frame: number
 
 function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame: number }) {
   const { durationInFrames } = useVideoConfig();
+  const fullBleedMedia = (scene.foreground ?? []).some(item => item.frame !== 'pip' && (item.w ?? 0.4) >= 0.95 && isRenderableMedia(pkg.assets?.[item.asset]));
   return (
     <>
       {(scene.foreground ?? []).map((item, index) => {
@@ -205,6 +206,7 @@ function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame
           </div>
         );
       })}
+      {fullBleedMedia ? <Scrim opacity={readableMediaScrim(scene, scene.background?.scrim ?? 0)} zIndex={6} /> : null}
     </>
   );
 }

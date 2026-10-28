@@ -130,6 +130,23 @@ test('completion requires meaningful proposal fields and the requested duration'
   assert.ok(missing.some(problem => problem.includes('proposal.soundtrack')));
 });
 
+test('completion validates compiled duration after transition overlaps', async () => {
+  const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
+  const intent = classifyProductionIntent('Create a 20-second wordless generated film in 4 scenery shots. No captions.');
+  const pkg = {
+    proposal: { logline: 'A fire reaches a mineral break.', look: 'Blue-hour aerials.', soundtrack: 'Wind and embers.' },
+    format: { fps: 30 },
+    scenes: Array.from({ length: 4 }, (_, index) => ({
+      id: `shot${index + 1}`, layout: 'hero', preferredFrames: 150,
+      transitionOut: index === 0 ? { type: 'fade', frames: 14 } : index === 1 ? { type: 'blur', frames: 16 } : index === 2 ? { type: 'fade', frames: 14 } : { type: 'none' },
+      media: [],
+    })),
+    assets: {},
+  };
+  const problems = generatedFilmCompletionProblems(pkg, intent, 'ltx');
+  assert.ok(problems.some(problem => problem.includes('20 seconds but the plan is 18.53 seconds')), problems.join('\n'));
+});
+
 test('narration-timed graphics require narration and exact cue phrases', async () => {
   const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
   const intent = classifyProductionIntent('Create a 20-second narrated generated film in 4 shots with motion.cue_phrases copied verbatim from narration.');

@@ -220,7 +220,7 @@ export function LowerThird({ kicker, text, pkg }: { kicker?: string; text: strin
 }
 
 /** Scrim drawn between a media background and the layout text. */
-export function Scrim({ opacity }: { opacity: number }) {
+export function Scrim({ opacity, zIndex = 2 }: { opacity: number; zIndex?: number }) {
   if (opacity <= 0) return null;
-  return <AbsoluteFill style={{ background: `rgba(5,10,18,${opacity})`, zIndex: 2 }} />;
+  return <AbsoluteFill style={{ background: `rgba(5,10,18,${opacity})`, zIndex }} />;
 }
