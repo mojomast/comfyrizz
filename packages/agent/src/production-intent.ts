@@ -39,11 +39,11 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   );
   const explicitGeneratedFilm = positiveMatch(
     text,
-    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?))\b/i,
+    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|live[\s-]*action(?:\s+(?:film|video|footage|shots?))?)\b/i,
   );
   const generatedShots = positiveMatch(
     text,
-    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
+    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
   );
   const recurringPhysicalCharacters = positiveMatch(
     text,
@@ -64,8 +64,16 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?)\b/i.test(text)
     || /\btext[\s-]+free\b/i.test(text);
   const requiresNarrationCues = /\bcue_phrases\b|narration[\s-]+(?:linked|anchored)\s+(?:motion|animation|cues?)|timed\s+(?:to|with)\s+(?:the\s+)?narration/i.test(text);
+  const requestedMinutesMatch = /\b(\d{1,3}(?:\.\d+)?)[\s-]+(?:minutes?|mins?)\b/i.exec(text);
   const requestedSecondsMatch = /\b(\d{1,3})[\s-]+seconds?\b/i.exec(text);
-  const requestedSeconds = requestedSecondsMatch ? Number(requestedSecondsMatch[1]) : null;
+  const adjacentSeconds = requestedMinutesMatch && requestedSecondsMatch
+    && requestedSecondsMatch.index > requestedMinutesMatch.index
+    && /^\s*(?:and\s+)?$/i.test(text.slice(requestedMinutesMatch.index + requestedMinutesMatch[0].length, requestedSecondsMatch.index))
+    ? Number(requestedSecondsMatch[1])
+    : 0;
+  const requestedSeconds = requestedMinutesMatch
+    ? Math.round(Number(requestedMinutesMatch[1]) * 60 + adjacentSeconds)
+    : requestedSecondsMatch ? Number(requestedSecondsMatch[1]) : null;
   const strongEvidence = [generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape]
     .filter(Boolean).length;
   // An explicit generated film may use Remotion overlays and motion graphics.

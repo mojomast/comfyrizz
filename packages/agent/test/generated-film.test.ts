@@ -69,6 +69,13 @@ test('retained four-shot prompt is generated film; explicit procedural controls 
   assert.equal(hybrid.wordless, false);
   assert.equal(classifyProductionIntent('Create a narrated generated film in 4 shots with motion.cue_phrases copied from narration.').requiresNarrationCues, true);
   assert.equal(classifyProductionIntent('No SVG or charts. Create a generated film in 4 shots with a felt mascot and coastal sound.').kind, 'generated-film');
+  const liveAction = classifyProductionIntent('A funny 2 minute video featuring people getting hurt falling over. Make it live action please.');
+  assert.equal(liveAction.kind, 'generated-film');
+  assert.equal(liveAction.evidence.generatedShots, true);
+  assert.equal(liveAction.requestedSeconds, 120);
+  assert.equal(classifyProductionIntent('A 1 minute and 30 second live-action short.').requestedSeconds, 90);
+  assert.equal(classifyProductionIntent('A 1.5-minute live-action short.').requestedSeconds, 90);
+  assert.equal(classifyProductionIntent('Not live action: make a motion-graphics explainer with SVG charts.').kind, 'motion-graphics');
   assert.equal(parseMotionModel(undefined), 'auto');
   assert.throws(() => parseMotionModel('flux'), /motionModel/);
 });
