@@ -7,6 +7,7 @@
 // survive frequent fraction events.
 
 import { COPY, fill } from './copy.ts';
+import { superEasyBrandMarkup } from './brand.ts';
 import { COPY as EASY_COPY } from '../copy.ts';
 import { renderSuperEasyDoneActions } from './escape.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
@@ -376,7 +377,8 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
 <button type="button" class="btn btn-secondary" data-super-easy-make-another>Stop and start a new prompt</button>
 <p class="hint">Return to the idea screen. Any active video run is cancelled.</p>
 </div>`;
-  const actionsHtml = `${primaryActionsHtml}${startOverHtml}`;
+  const studioHtml = finalReady ? '' : `<div class="super-easy-progress-mode-actions"><button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button><span class="hint">Switch views without stopping your work.</span></div>`;
+  const actionsHtml = `${studioHtml}${primaryActionsHtml}${startOverHtml}`;
 
   const keys: SuperEasyProgressKeys = {
     live: progressLiveKey(stages, gallery, {
@@ -389,6 +391,7 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
   };
 
   const html = `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress data-super-easy-live-key="${escapeHtml(keys.live)}" data-super-easy-chrome-key="${escapeHtml(keys.chrome)}" data-super-easy-gallery-key="${escapeHtml(keys.gallery)}" data-super-easy-actions-key="${escapeHtml(keys.actions)}" aria-labelledby="super-easy-progress-title">
+${superEasyBrandMarkup()}
 <h1 class="super-easy-progress-title" id="super-easy-progress-title">${escapeHtml(COPY.making.title)}</h1>
 <p class="super-easy-progress-subtitle">${escapeHtml(COPY.making.subtitle)}</p>
 ${agentConsoleMarkup()}

@@ -1,3 +1,5 @@
+import { superEasyBrandMarkup } from './brand.ts';
+
 export interface SuperEasyProposal {
   packageId: string | null;
   title: string;
@@ -45,6 +47,7 @@ export function renderSuperEasyProposal(proposal: SuperEasyProposal): string {
   const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
   const model = proposal.motionModel === 'h3' ? 'MiniMax H3' : proposal.motionModel === 'ltx' ? 'LTX-2.5' : proposal.motionModel === 'klein' ? 'Klein only: stills + code motion' : 'Auto: Klein + H3 + LTX';
   return `<section class="super-easy-proposal" data-super-easy-proposal>
+${superEasyBrandMarkup()}
 <p class="super-easy-proposal-eyebrow">Your film proposal</p>
 <h1>${escape(proposal.title)}</h1>
 <p class="super-easy-proposal-logline">${escape(proposal.logline)}</p>

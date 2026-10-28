@@ -8,6 +8,8 @@ test('the initial proposal offers a complete edit review before any paid generat
     look: 'Photorealistic', soundtrack: 'Percussion', seconds: 12, shots: 2,
     basePrompt: 'A short film', revisionNotes: [],
   });
+  assert.match(html, /class="super-easy-brand" aria-label="Comfyrizz"/u);
+  assert.match(html, /class="super-easy-brand-name">Comfyrizz<\/span>/u);
   assert.match(html, /data-super-easy-review-edit-plan/u);
   assert.match(html, /Review &amp; edit full plan/u);
   assert.match(html, /data-super-easy-approve-proposal/u);

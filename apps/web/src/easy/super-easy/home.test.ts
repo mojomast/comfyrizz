@@ -22,6 +22,13 @@ function tagWith(html: string, attribute: string): string {
   return match[0];
 }
 
+test('Super Easy shows the Comfyrizz brand on the home screen', () => {
+  const html = renderSuperEasyHome();
+  assert.match(html, /class="super-easy-brand" aria-label="Comfyrizz"/u);
+  assert.match(html, /class="super-easy-brand-name">Comfyrizz<\/span>/u);
+  assert.match(html, /AI film studio/u);
+});
+
 test('Super Easy shows one primary Generate button and no level picker', () => {
   const html = renderSuperEasyHome();
 

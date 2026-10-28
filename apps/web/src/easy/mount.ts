@@ -185,12 +185,16 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     if (player) adoptPlayer(slot, player);
   }
 
-  function destroySuperEasy(): void {
+  function destroySuperEasy(stopSession = false): void {
     superEasyTicket += 1;
     liveGallery.stop();
     liveGalleryItems = [];
-    superEasySession?.stop();
-    superEasySession = null;
+    if (stopSession) {
+      superEasySession?.stop();
+      superEasySession = null;
+    }
+    // Mode switches park the session so an in-flight plan/proposal/run can be
+    // resumed. Only a new project or the final app teardown may stop it.
     superEasy?.destroy();
     superEasy = null;
   }
@@ -417,6 +421,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       gallery: (snapshot) => mergeLiveGallery(buildGalleryModel(snapshot), liveGalleryItems),
       onMakeAnother: () => {
         superEasySession?.stop();
+        superEasySession = null;
         resetPlanDecisionAnswers();
         store.startNew();
       },
@@ -620,7 +625,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     showStep(step);
   }
 
-  function makeItSimple(): void {
+  function makeItSimple(event?: Event): void {
+    event?.preventDefault();
     setPreferStudio(false);
     const url = escapeToHome(search());
     view?.history?.pushState({}, '', url === '' ? './' : url);
@@ -633,6 +639,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   function startNewVideo(event: Event): void {
     event.preventDefault();
+    superEasySession?.stop();
+    superEasySession = null;
     resetPlanDecisionAnswers();
     store.startNew();
     refreshVideoName();
@@ -655,7 +663,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStep();
     stopStepper();
     releasePlayer();
-    destroySuperEasy();
+    destroySuperEasy(true);
     root.innerHTML = renderHomeScreen([]);
     bindMakeItSimple();
     bindNewVideo();
@@ -717,6 +725,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onSettings: () => { void settings?.open(); },
       onOpenEditor: () => host.openEditor(),
     });
+    bindMakeItSimple();
     const nameHost = root.querySelector<HTMLElement>('[data-easy-name]');
     if (nameHost) {
       projectName = mountProjectName(nameHost, {
@@ -737,10 +746,22 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     showStep(route.step);
   }
 
+  function clearEditorViewForEasy(): void {
+    const params = new URLSearchParams(search().replace(/^\?/, ''));
+    if (!params.has('view')) return;
+    params.delete('view');
+    const query = params.toString();
+    const url = query ? `?${query}` : (view?.location?.pathname ?? './');
+    if (view?.history?.replaceState) view.history.replaceState({}, '', url);
+    else if (view?.history?.pushState) view.history.pushState({}, '', url);
+    else globalThis.history?.replaceState?.({}, '', url);
+  }
+
   function applyShell(mode: Mode): void {
     const html = doc.documentElement;
     const app = doc.getElementById('app');
     if (mode === 'easy') {
+      clearEditorViewForEasy();
       html.dataset.shell = 'easy';
       root.hidden = false;
       if (app) {
@@ -809,7 +830,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStep();
     stopStepper();
     releasePlayer();
-    destroySuperEasy();
+    destroySuperEasy(true);
     ask?.destroy();
     settings?.destroy();
     destroyShellChrome();

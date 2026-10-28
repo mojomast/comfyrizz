@@ -94,6 +94,12 @@ function gallerySnapshot() {
   };
 }
 
+test('the progress screen keeps the Comfyrizz brand visible', () => {
+  const html = renderSuperEasyProgress(partialSnapshot());
+  assert.match(html, /class="super-easy-brand" aria-label="Comfyrizz"/u);
+  assert.match(html, /class="super-easy-brand-name">Comfyrizz<\/span>/u);
+});
+
 test('the overall gauge and one gauge per stage render from the stage model', () => {
   const html = renderSuperEasyProgress(partialSnapshot());
 
@@ -702,8 +708,11 @@ test('a new gallery tile is keyed in place and does not replace a playing sample
   assert.match(voice.outerHTML, /<audio\b/u);
 });
 
-test('an active run always offers a way back to a new prompt', () => {
+test('an active run offers both a Studio escape and a way back to a new prompt', () => {
   const html = superEasyProgressParts(partialSnapshot()).html;
+  assert.match(html, /data-super-easy-more-control/);
+  assert.match(html, /Open in Studio/);
+  assert.match(html, /Switch views without stopping your work/);
   assert.match(html, /data-super-easy-make-another/);
   assert.match(html, /Stop and start a new prompt/);
   assert.match(html, /Any active video run is cancelled/);
