@@ -142,7 +142,7 @@ test('an explicit duration in the idea is not overridden by the default length',
   assert.match(calls[0].input.brief, /two minute/);
   assert.doesNotMatch(calls[0].input.brief, /Length: about 30 seconds/);
   assert.doesNotMatch(calls[0].input.brief, /Look: clay/);
-  assert.match(calls[0].input.brief, /Look: photorealistic live-action fictional human adults/);
+  assert.match(calls[0].input.brief, /Look: photorealistic live-action humans/);
 });
 
 test('offline is set when live is false and a disconnected provider is omitted', async () => {

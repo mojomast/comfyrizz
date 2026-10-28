@@ -12,7 +12,7 @@ export function ideaPrompt(state: EasyState): string {
   if (!hasExplicitDuration) sentences.push(`Length: about ${state.idea.lengthS} seconds.`);
   sentences.push(`Aspect: ${state.idea.aspect}.`);
   const liveActionLook = /\b(?:real\s+(?:humans?|people)|realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?|live[\s-]*action)\b/i.test(text);
-  sentences.push(`Look: ${liveActionLook ? 'photorealistic live-action fictional human adults, natural skin and real-world materials' : state.idea.look}.`);
+  sentences.push(`Look: ${liveActionLook ? 'photorealistic live-action humans, natural skin and real-world materials' : state.idea.look}.`);
   sentences.push(state.idea.sound ? `Music: ${MUSIC_BED}.` : 'No music.');
 
   for (const question of state.questions) {

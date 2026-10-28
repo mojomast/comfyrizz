@@ -1,6 +1,6 @@
 import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve, sep } from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
@@ -1732,7 +1732,28 @@ export function createApp({
 
     if (url.pathname === '/api/agent/progress' && request.method === 'GET') {
       const sessionId = url.searchParams.get('sessionId') ?? '';
-      if (!sessionId) return sendJson(response, 400, { error: 'sessionId is required' });
+      if (!sessionId) {
+        const latest = Array.from(agentProgress.values()).at(-1);
+        if (latest) return sendJson(response, 200, latest.snapshot());
+        const progressDir = join(runtimeDir, 'agent-progress');
+        const files = existsSync(progressDir)
+          ? readdirSync(progressDir).filter(file => file.endsWith('.json')).sort((left, right) => {
+              try {
+                return statSync(join(progressDir, right)).mtimeMs - statSync(join(progressDir, left)).mtimeMs;
+              } catch {
+                return 0;
+              }
+            })
+          : [];
+        if (files.length > 0) {
+          try {
+            return sendJson(response, 200, JSON.parse(readFileSync(join(progressDir, files[0]), 'utf8')));
+          } catch {
+            // Fall through to the same not-found response as an empty registry.
+          }
+        }
+        return sendJson(response, 404, { error: 'no planning sessions found' });
+      }
       const progress = agentProgress.get(sessionId);
       if (!progress) return sendJson(response, 404, { error: 'planning session not found' });
       return sendJson(response, 200, progress.snapshot());
@@ -1743,7 +1764,12 @@ export function createApp({
       const body = await readJson(request);
       const sessionId = typeof body.sessionId === 'string' && body.sessionId.trim() ? body.sessionId.trim() : randomUUID();
       const progress = createAgentProgress(sessionId);
+      const progressDir = join(runtimeDir, 'agent-progress');
+      mkdirSync(progressDir, { recursive: true });
+      const progressFile = join(progressDir, `${createHash('sha256').update(sessionId).digest('hex')}.json`);
+      const persistProgress = () => writeFileSync(progressFile, JSON.stringify(progress.snapshot(), null, 2));
       progress.update({ type: 'request', brief: typeof body.brief === 'string' ? body.brief : '' });
+      persistProgress();
       if (agentProgress.size >= 100) agentProgress.delete(agentProgress.keys().next().value);
       agentProgress.set(sessionId, progress);
       events.publish({ type: 'agent.started', sessionId, brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });
@@ -1759,12 +1785,14 @@ export function createApp({
           runtimeDir,
           onEvent: event => {
             progress.update(event);
+            if (event.type !== 'text') persistProgress();
             events.publish({ type: 'agent.event', sessionId, event });
           },
         });
         const saved = store.write(result.package);
         const timeline = compilePackage(saved, dirname(store.path(saved.id)));
         progress.finish('done');
+        persistProgress();
         events.publish({ type: 'agent.finished', sessionId, packageId: saved.id, revision: saved.revision, svgAssets: result.svgAssets?.length ?? 0, live: Boolean(result.live) });
         return sendJson(response, 200, {
           sessionId,
@@ -1783,6 +1811,7 @@ export function createApp({
         });
       } catch (error) {
         progress.finish('failed', error.message);
+        persistProgress();
         events.publish({ type: 'agent.failed', sessionId, message: error.message });
         return sendJson(response, error.status ?? 500, {
           sessionId,

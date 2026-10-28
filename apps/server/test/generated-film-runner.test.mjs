@@ -157,7 +157,8 @@ test('live-action recovery rewrites clay styling instead of looping on validatio
   };
   const corrected = enforceLiveActionHumans(original);
   assert.equal(corrected.changed, true);
-  assert.match(corrected.package.proposal.look, /Photorealistic live-action fictional human adults/);
+  assert.match(corrected.package.proposal.look, /Photorealistic live-action humans/);
+  assert.ok(corrected.package.proposal.look.length <= 100);
   assert.match(corrected.package.assets.a_img.gen.inputs.prompt, /^Photorealistic live-action fictional human adults/);
   assert.doesNotMatch(JSON.stringify(corrected.package), /clay|plasticine|stop-motion/i);
   assert.match(original.proposal.look, /Plasticine/);

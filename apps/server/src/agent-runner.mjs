@@ -167,7 +167,7 @@ export function enforceLiveActionHumans(pkg) {
   const next = sanitizeLiveActionValue(pkg);
   next.title = liveActionText(next.title ?? 'Live-action film');
   if (next.proposal && typeof next.proposal === 'object') {
-    next.proposal.look = 'Photorealistic live-action fictional human adults with natural skin and real-world materials, cinematic natural light.';
+    next.proposal.look = 'Photorealistic live-action humans, natural skin and real-world materials.';
   }
   for (const asset of Object.values(next.assets ?? {})) {
     if (typeof asset?.gen?.inputs?.prompt === 'string') {
