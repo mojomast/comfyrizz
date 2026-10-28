@@ -304,6 +304,18 @@ test('agent circuit-breaks a repeated invalid call instead of spending more mode
   assert.equal(result.toolCalls[1].error, 'duplicate_invalid_call');
 });
 
+test('runCpuSlice returns an incomplete live motion-graphics plan for server fallback', async () => {
+  const { runCpuSlice } = await import('../src/cpu-slice.js');
+  const brief = 'A calm launch video with an icon, a diagram, a pattern and animated bars, plus a nebula illustration.';
+  const model = new ScriptedModel(step => step === 0
+    ? [{ type: 'tool_call', id: 'propose', name: 'storyboard.propose', args: { brief, title: 'Calm launch' } }]
+    : [{ type: 'text', delta: 'done' }]);
+  const slice = await runCpuSlice({ brief, model, generateSvg: () => ({ svg: SVG }) });
+  assert.equal(slice.live, true);
+  assert.equal(slice.svgAssets.length, 0);
+  assert.equal(slice.package.title, 'Calm launch');
+});
+
 test('runCpuSlice builds a six-scene package with four SVG assets and one GPU plan', async () => {
   const { runCpuSlice } = await import('../src/cpu-slice.js');
   const slice = await runCpuSlice({

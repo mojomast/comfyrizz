@@ -115,7 +115,10 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
   const svgAssets = Object.entries(pkg.assets ?? {})
     .filter(([, asset]: [string, any]) => asset?.gen?.generator === 'llm-svg' && asset.status === 'ready')
     .map(([id]) => id);
-  if (!intent.generatedFilm && svgAssets.length < 4) throw new Error(`CPU slice needs at least 4 ready llm-svg assets, got ${svgAssets.length}`);
+  // A live motion-graphics plan may be incomplete; return it so the server can
+  // apply its deterministic CPU fallback. The scripted path itself must keep
+  // this invariant and fail loudly if its built-in script ever regresses.
+  if (!intent.generatedFilm && !options.model && svgAssets.length < 4) throw new Error(`CPU slice needs at least 4 ready llm-svg assets, got ${svgAssets.length}`);
   const { reachableAssetIds } = await import(new URL('../../../jobs/src/reachable.mjs', import.meta.url).href) as {
     reachableAssetIds: (pkg: Record<string, any>) => Set<string>;
   };

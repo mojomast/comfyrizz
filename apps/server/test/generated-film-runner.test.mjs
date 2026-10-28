@@ -44,6 +44,20 @@ test('FLUX-only generated-film output is rejected with no scripted fallback', as
   assert.equal(provider.calls, calls.length + 2, 'one live plan and one bounded repair, never the defaultCpuScript fallback');
 });
 
+test('incomplete live motion graphics reaches the deterministic CPU fallback', async t => {
+  const brief = 'A calm product launch video with a check icon, flow diagram, dot pattern and animated bars.';
+  const calls = [
+    { name: 'storyboard.propose', args: { brief, title: 'Calm launch' } },
+  ];
+  const { provider, runner } = await setup(t, calls);
+  const result = await runner({ brief, provider: 'custom' });
+  assert.equal(result.fallback, true);
+  assert.equal(result.svgAssets.length, 4);
+  assert.equal(result.pendingGpu.length, 1);
+  assert.equal(result.package.scenes.length, 6);
+  assert.equal(provider.calls, calls.length + 1, 'fallback planning is local and spends no more provider tokens');
+});
+
 test('runner accepts real wordless H3 completion and persists silent conditioning', async t => {
   const calls = [
     { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: [scenes[0]] } },
