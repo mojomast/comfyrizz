@@ -642,6 +642,25 @@ function sanitizeCodeBlock(block: any, fallbackRate: number): Record<string, any
 
 const COMPARISON_RE = /\bcompar(?:e|ison|ing)\b|\bversus\b|\bvs\.?\b|\bbefore\s*(?:and|&|\/|-|,)?\s*after\b/i;
 const SHARED_DATASET_RE = /(?:share|shared|single|same)[^.]{0,80}\bdatasets?\b|\bdatasets?\b[^.]{0,80}(?:share|shared|single|same)|\bone\s+(?:shared\s+)?(?:user\s+)?dataset\b/i;
+const ITEM_COUNT_WORDS: Record<string, number> = {
+  two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+};
+const LIST_ITEMS_RE = /\b(?:(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]item\s+list|list\s+scenes?\b[^.]{0,80}?\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+items?)\b/i;
+const LIST_HINT_RE = /\blist|bullet|steps|checklist|points\b/i;
+
+/** The item count a brief pins down, e.g. "one list scene with six items". */
+function briefListItems(brief: string): number | undefined {
+  const match = LIST_ITEMS_RE.exec(brief);
+  if (!match) return undefined;
+  const raw = (match[1] ?? match[2] ?? '').toLowerCase();
+  const count = ITEM_COUNT_WORDS[raw] ?? Number(raw);
+  return Number.isInteger(count) && count >= 2 && count <= 6 ? count : undefined;
+}
+
+function sceneItems(scene: Record<string, any>): unknown[] {
+  if (Array.isArray(scene.copy?.items)) return scene.copy.items;
+  return Array.isArray(scene.items) ? scene.items : [];
+}
 
 function sceneHintText(scene: Record<string, any>): string {
   const copy = scene.copy && typeof scene.copy === 'object' ? scene.copy : {};
@@ -718,24 +737,42 @@ function briefSharedDataset(brief: string, normalizedDatasets: ReturnType<typeof
   return { datasets: { [id]: dataset }, id };
 }
 
-function chooseComparisonScene(scenes: Array<Record<string, any>>): Record<string, any> | undefined {
-  const hinted = scenes.find(scene => scene.layout !== 'compare' && scene.layout !== 'title' && sceneHintsComparison(scene));
+function chooseComparisonScene(scenes: Array<Record<string, any>>, protectedScenes: Set<Record<string, any>> = new Set()): Record<string, any> | undefined {
+  const allowed = scenes.filter(scene => !protectedScenes.has(scene));
+  const hinted = allowed.find(scene => scene.layout !== 'compare' && scene.layout !== 'title' && sceneHintsComparison(scene));
   if (hinted) return hinted;
-  const hintedAny = scenes.find(scene => scene.layout !== 'compare' && sceneHintsComparison(scene));
+  const hintedAny = allowed.find(scene => scene.layout !== 'compare' && sceneHintsComparison(scene));
   if (hintedAny) return hintedAny;
-  const nonCore = scenes.filter(scene => !['compare', 'chart', 'stat', 'title', 'code'].includes(scene.layout));
+  const nonCore = allowed.filter(scene => !['compare', 'chart', 'stat', 'title', 'code'].includes(scene.layout));
   if (nonCore.length > 0) return nonCore[nonCore.length - 1];
-  const nonTitle = scenes.filter(scene => scene.layout !== 'title');
-  return nonTitle[nonTitle.length - 1] ?? scenes[scenes.length - 1];
+  const nonTitle = allowed.filter(scene => scene.layout !== 'title');
+  return nonTitle[nonTitle.length - 1] ?? allowed[allowed.length - 1];
 }
 
-function preparePlanningScenes(rawScenes: Array<Record<string, any>>, brief: string, sharedDatasetId?: string): Array<Record<string, any>> {
+/** The scene the brief's list bullet refers to: items first, then a list hint, then a non-title scene. */
+function chooseListScene(scenes: Array<Record<string, any>>): Record<string, any> | undefined {
+  return scenes.find(scene => scene.layout === 'list' && sceneItems(scene).length > 0)
+    ?? scenes.find(scene => sceneItems(scene).length > 0)
+    ?? scenes.find(scene => scene.layout === 'list')
+    ?? scenes.find(scene => LIST_HINT_RE.test(sceneHintText(scene)))
+    ?? scenes.find(scene => !['title', 'compare', 'code'].includes(scene.layout));
+}
+
+function preparePlanningScenes(rawScenes: Array<Record<string, any>>, brief: string, sharedDatasetId?: string, requiredListItems?: number): Array<Record<string, any>> {
   const scenes = rawScenes.map(scene => ({ ...scene }));
   for (const scene of scenes) {
     if (!(SCENE_LAYOUTS as readonly string[]).includes(scene.layout)) scene.layout = inferSceneLayout(scene);
   }
+  const protectedScenes = new Set<Record<string, any>>();
+  if (requiredListItems) {
+    const listScene = chooseListScene(scenes);
+    if (listScene) {
+      listScene.layout = 'list';
+      protectedScenes.add(listScene);
+    }
+  }
   if ((briefWantsComparison(brief) || scenes.some(sceneHintsComparison)) && !scenes.some(scene => scene.layout === 'compare')) {
-    const candidate = chooseComparisonScene(scenes);
+    const candidate = chooseComparisonScene(scenes, protectedScenes);
     if (candidate) {
       candidate.layout = 'compare';
       delete candidate.variant;
@@ -752,10 +789,10 @@ function preparePlanningScenes(rawScenes: Array<Record<string, any>>, brief: str
   return scenes;
 }
 
-function ensureComparisonScene(scenes: Array<Record<string, any>>, brief: string | undefined): Array<Record<string, any>> {
+function ensureComparisonScene(scenes: Array<Record<string, any>>, brief: string | undefined, protectedScenes: Set<Record<string, any>> = new Set()): Array<Record<string, any>> {
   if (scenes.some(scene => scene.layout === 'compare')) return scenes;
   if (!(brief && briefWantsComparison(brief)) && !scenes.some(sceneHintsComparison)) return scenes;
-  const candidate = chooseComparisonScene(scenes);
+  const candidate = chooseComparisonScene(scenes, protectedScenes);
   if (!candidate) return scenes;
   candidate.layout = 'compare';
   delete candidate.variant;
@@ -772,12 +809,34 @@ function sceneDataError(sceneId: string, layout: string, detail: string, code: '
   );
 }
 
+/** The brief pinned the list length; dropping or inventing bullets is a 422, never a silent trim. */
+function sceneListItemsError(sceneId: string, required: number, supplied: number): Error {
+  return Object.assign(
+    new Error(`${sceneId}: the brief requires exactly ${required === 6 ? 'six' : required} items in the list scene, but the plan supplied ${supplied}. Return ${required} distinct strings in copy.items (or scene.items); the tool will not silently truncate or invent bullets.`),
+    { name: 'SceneListItemsError', status: 422, code: 'SCENE_LIST_ITEMS_REQUIRED' },
+  );
+}
+
+function clampListItem(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return clampText(String(value), 72);
+  return clampText(value, 72);
+}
+
+/** Recover line or semicolon separated bullets when a model put a six-item list in body/sub. */
+function itemsFromText(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(/\r?\n|;/)
+    .map(line => line.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean);
+}
+
 /**
  * Coerce a model-authored scene into the published package shape: a valid
  * layout, readable copy, a real dataset reference, a known variant/background,
  * and only schema-known keys. Assets that do not exist yet are dropped.
  */
-function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>, datasetAliases?: Map<string, string>): Record<string, any> {
+function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>, datasetAliases?: Map<string, string>, requiredListItems?: number): Record<string, any> {
   const source: Record<string, any> = { ...raw };
   const rawId = typeof source.id === 'string' ? source.id : '';
   const id = SCENE_ID_RE.test(rawId) ? rawId : `s_${hashId('', rawId || fallbackTitle).slice(0, 12)}`;
@@ -788,6 +847,9 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
     : source.copy && typeof source.copy === 'object' ? { ...source.copy } : {};
   if (!copy.headline && typeof source.title === 'string') copy.headline = source.title;
   if (!copy.headline && typeof source.headline === 'string') copy.headline = source.headline;
+  // The conversation-plan shape carries bullets at scene level; lift them so a
+  // list scene does not lose every item on the way into the package.
+  if (!Array.isArray(copy.items) && Array.isArray(source.items)) copy.items = [...source.items];
   for (const key of Object.keys(copy)) if (!COPY_KEYS.has(key)) delete copy[key];
 
   const finalLayout: SceneLayout = layout;
@@ -811,7 +873,17 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
 
   const limits = COPY_LIMITS[finalLayout];
   for (const [key, max] of Object.entries(limits)) if (copy[key] !== undefined) copy[key] = clampText(copy[key], max);
-  if (Array.isArray(copy.items)) copy.items = copy.items.map(item => clampText(item, 72)).filter(Boolean).slice(0, 6);
+  if (!Array.isArray(copy.items) && requiredListItems && finalLayout === 'list') {
+    const extracted = itemsFromText(copy.body);
+    copy.items = extracted.length > 0 ? extracted : itemsFromText(copy.sub);
+  }
+  if (Array.isArray(copy.items)) {
+    const items = copy.items.map(clampListItem).filter((item): item is string => Boolean(item));
+    if (requiredListItems && finalLayout === 'list' && items.length < requiredListItems) {
+      throw sceneListItemsError(id, requiredListItems, items.length);
+    }
+    copy.items = items.slice(0, requiredListItems ?? 6);
+  }
   if (!copy.headline && finalLayout !== 'code') copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline ?? 48);
   if (finalLayout === 'code' && !copy.headline) delete copy.headline;
 
@@ -1087,6 +1159,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45).trimEnd()}…` : rawTitle;
     const id = hashId('pkg', args.brief);
     const format = resolveFormat(args.brief);
+    const requiredListItems = briefListItems(args.brief);
     const normalizedDatasets = normalizeDatasets(args.datasets);
     const sharedDataset = briefSharedDataset(args.brief, normalizedDatasets);
     const datasets = sharedDataset?.datasets ?? normalizedDatasets.datasets;
@@ -1097,8 +1170,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     state.brief = args.brief;
     state.proposal = args.proposal;
     const scenes = (args.scenes?.length
-      ? preparePlanningScenes(args.scenes, args.brief, sharedDataset?.id)
-        .map(scene => ensureComparisonPlates(normalizeScene(scene, title, datasetIds, new Set(), datasetAliases)))
+      ? preparePlanningScenes(args.scenes, args.brief, sharedDataset?.id, requiredListItems)
+        .map(scene => ensureComparisonPlates(normalizeScene(scene, title, datasetIds, new Set(), datasetAliases, requiredListItems)))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
       .map(scene => applyProductionIntentToScene(scene, intent));
     const theme = { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) };
@@ -1138,6 +1211,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   const edit = (args: z.infer<typeof editSchema>) => {
     if (!state.package) throw new Error('no package draft; call storyboard.propose first');
     const draft = state.package;
+    const requiredListItems = state.brief ? briefListItems(state.brief) : undefined;
     const normalizedDatasets = normalizeDatasets(draft.datasets);
     const sharedDataset = state.brief ? briefSharedDataset(state.brief, normalizedDatasets) : null;
     const datasets = sharedDataset?.datasets ?? normalizedDatasets.datasets;
@@ -1160,11 +1234,12 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const datasetIds = new Set(Object.keys(datasets));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
     let nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
-      ? applyProductionIntentToScene(ensureComparisonPlates(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases)), state.intent ?? classifyProductionIntent(''))
+      ? applyProductionIntentToScene(ensureComparisonPlates(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases, requiredListItems)), state.intent ?? classifyProductionIntent(''))
       : scene);
     for (const scene of nextScenes) ensureComparisonPlates(scene);
     const patchSetsLayout = typeof patch.layout === 'string' && (SCENE_LAYOUTS as readonly string[]).includes(patch.layout);
-    if (!patchSetsLayout) nextScenes = ensureComparisonScene(nextScenes, state.brief);
+    const protectedLists = new Set<Record<string, any>>(requiredListItems ? nextScenes.filter(scene => scene.layout === 'list') : []);
+    if (!patchSetsLayout) nextScenes = ensureComparisonScene(nextScenes, state.brief, protectedLists);
     state.package = { ...draft, datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
     return withMotionFixes(
