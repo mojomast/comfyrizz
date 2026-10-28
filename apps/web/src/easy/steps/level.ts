@@ -5,6 +5,7 @@ import { levelIntro, summaryForLevel } from '../level-copy.ts';
 import { mountEasyLevelPicker } from '../level-picker.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, Level, StepFacts } from '../types.ts';
 import { invalidatePlanSnapshot } from './plan.ts';
+import { agentConsoleMarkup, mountAgentConsole } from '../agent-console.ts';
 
 export const LEVEL_SLOT = 'iteration-level-picker';
 const COLAB_STATUS_TTL_MS = 10_000;
@@ -88,6 +89,7 @@ export function renderLevel(state: EasyState, options: RenderLevelOptions = {}):
   return `<div class="easy-level" data-easy-level>
 <div class="easy-level-compute" data-easy-compute>${computeHtml(state, null, true)}</div>
 <div class="easy-level-picker" data-il-slot="${LEVEL_SLOT}">${pickerContent}</div>
+${agentConsoleMarkup()}
 </div>`;
 }
 
@@ -178,6 +180,7 @@ export const step: EasyStepModule = {
     }
 
     el.addEventListener('click', onClick);
+    const stopAgentConsole = mountAgentConsole(el);
     paintCompute();
     syncPrimary();
     void readColabStatus(ctx).then((next) => {
@@ -193,6 +196,7 @@ export const step: EasyStepModule = {
       el.removeEventListener('click', onClick);
       stopCompute?.();
       picker?.destroy?.();
+      stopAgentConsole();
     };
   },
 

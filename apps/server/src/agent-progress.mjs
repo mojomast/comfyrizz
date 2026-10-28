@@ -1,11 +1,36 @@
 const HISTORY_LIMIT = 80;
+const SECRET_FIELD = /(?:api[_-]?key|authorization|cookie|credential|secret|token)/i;
+
+function safeDetail(value, depth = 0) {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') return value.slice(0, 4000);
+  if (depth >= 4) return '[truncated]';
+  if (Array.isArray(value)) return value.slice(0, 30).map(item => safeDetail(item, depth + 1));
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [key, item] of Object.entries(value).slice(0, 50)) {
+      if (SECRET_FIELD.test(key)) out[key] = '[redacted]';
+      else out[key] = safeDetail(item, depth + 1);
+    }
+    return out;
+  }
+  return String(value ?? '').slice(0, 500);
+}
 
 function sanitizedEvent(event) {
   const out = {};
   for (const [key, value] of Object.entries(event ?? {})) {
-    // Tool arguments, streamed text/reasoning and full results are deliberately
-    // excluded: progress needs timing metadata, not private creative content.
-    if (['args', 'delta', 'result'].includes(key)) continue;
+    // Streamed text/reasoning and full results stay out. Tool arguments and the
+    // user's own brief are useful debugging detail after secret-field redaction.
+    if (key === 'args') {
+      out.args = safeDetail(value);
+      continue;
+    }
+    if (['delta', 'result'].includes(key)) continue;
+    if (key === 'brief' && typeof value === 'string') {
+      out.brief = value.slice(0, 6000);
+      continue;
+    }
     if (key === 'problems' && Array.isArray(value)) {
       out.problems = value.slice(0, 30).map(problem => String(problem).slice(0, 500));
     } else if (key === 'issues' && Array.isArray(value)) {
@@ -43,6 +68,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
   };
 
   function update(event) {
+    if (event?.type === 'text') return;
     const safe = sanitizedEvent(event);
     events.push({ at: new Date(now()).toISOString(), ...safe });
     if (events.length > HISTORY_LIMIT) events.shift();

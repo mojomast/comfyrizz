@@ -3,6 +3,7 @@ import { randomUUID } from '../uuid.ts';
 import { planInputsHash } from './store.ts';
 import type { EasyHost, EasyState } from './types.ts';
 import { ITERATION_PRESETS, validateIterationPolicy } from '../../../server/src/productions/iteration.mjs';
+import { publishAgentProgress } from './agent-console.ts';
 
 type PlanApi = {
   buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein'; sessionId?: string }): Promise<any>;
@@ -174,11 +175,15 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps, options: 
       const provider = await connectedSelection(deps.host);
       if (!currentSession()) return;
       const sessionId = randomUUID();
+      publishAgentProgress({ sessionId, status: 'running', activity: 'starting', elapsedMs: 0, recentEvents: [], usage: { input: 0, output: 0, total: 0 } });
       const pollProgress = async () => {
         if (!deps.api.getAgentProgress) return;
         try {
           const progress = await deps.api.getAgentProgress(sessionId);
-          if (currentSession()) deps.host.announce?.(plannerProgressAnnouncement(progress));
+          if (currentSession()) {
+            publishAgentProgress(progress);
+            deps.host.announce?.(plannerProgressAnnouncement(progress));
+          }
         } catch {
           // Planning remains authoritative; telemetry must never fail the run.
         }
@@ -194,7 +199,10 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps, options: 
           ...(provider ? { provider } : {}),
         });
       } finally {
-        if (progressTimer) clearInterval(progressTimer);
+        if (progressTimer) {
+          clearInterval(progressTimer);
+          void pollProgress();
+        }
       }
       if (!currentSession()) return;
       const builtPackageId = packageIdOf(body);

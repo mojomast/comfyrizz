@@ -36,6 +36,23 @@ test('agent progress tracks phases and timings without retaining private content
   assert.doesNotMatch(JSON.stringify(snapshot), /do-not-retain/);
 });
 
+test('progress exposes the brief and tool arguments with secret-field redaction', () => {
+  const progress = createAgentProgress('session-detail', () => 1000);
+  progress.update({ type: 'request', brief: 'A robot opens a shop.' });
+  progress.update({
+    type: 'tool_call', name: 'assets.generate_video', step: 1,
+    args: { intent: 'A brass robot opens a shop', nested: { apiKey: 'do-not-retain', safe: true } },
+  });
+  progress.update({ type: 'text', delta: 'raw model text must not flood history' });
+  const snapshot = progress.snapshot();
+  assert.equal(snapshot.recentEvents[0].brief, 'A robot opens a shop.');
+  assert.equal(snapshot.recentEvents[1].args.intent, 'A brass robot opens a shop');
+  assert.equal(snapshot.recentEvents[1].args.nested.apiKey, '[redacted]');
+  assert.equal(snapshot.recentEvents[1].args.nested.safe, true);
+  assert.equal(snapshot.recentEvents.length, 2);
+  assert.doesNotMatch(JSON.stringify(snapshot), /do-not-retain|raw model text/);
+});
+
 test('schema failures include actionable validation details, not a generic placeholder', () => {
   const problems = packageSchemaProblems({});
   assert.ok(problems.length > 0);

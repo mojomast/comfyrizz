@@ -32,6 +32,7 @@ import { DEFAULT_SUPER_EASY_SETUP, type SuperEasySetup, type MotionModel } from 
 import { renderSuperEasyProposal, type SuperEasyProposal } from './proposal.ts';
 import { getMode, setMode } from '../../ui/mode.ts';
 import type { EasyState } from '../types.ts';
+import { mountAgentConsole } from '../agent-console.ts';
 
 export const SUPER_EASY_EXAMPLE_PROMPT = COPY.home.promptPlaceholder;
 
@@ -130,6 +131,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   let promptText = options.state().idea.text ?? '';
   let destroyed = false;
   let progressKeys: SuperEasyProgressKeys | null = null;
+  let stopAgentConsole: (() => void) | null = null;
 
   function currentSearch(): string {
     if (options.search) return options.search();
@@ -338,6 +340,8 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     if (!mounted) {
       const parts = superEasyProgressParts(snapshot, viewOptions);
       root.innerHTML = parts.html;
+      stopAgentConsole?.();
+      stopAgentConsole = mountAgentConsole(root);
       progressKeys = parts.keys;
       return;
     }
@@ -354,6 +358,10 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     const next = screenNow();
     current = next;
     const proposal = options.proposal?.() ?? null;
+    if (next !== 'progress' || proposal) {
+      stopAgentConsole?.();
+      stopAgentConsole = null;
+    }
     if (next === 'progress' && proposal) {
       root.innerHTML = renderSuperEasyProposal(proposal);
       progressKeys = null;
@@ -397,6 +405,8 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       root.removeEventListener('submit', onSubmit);
       root.removeEventListener('change', onChange);
       root.removeEventListener('input', onInput);
+      stopAgentConsole?.();
+      stopAgentConsole = null;
       root.innerHTML = '';
       progressKeys = null;
       delete root.dataset.superEasyView;

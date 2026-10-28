@@ -1743,6 +1743,7 @@ export function createApp({
       const body = await readJson(request);
       const sessionId = typeof body.sessionId === 'string' && body.sessionId.trim() ? body.sessionId.trim() : randomUUID();
       const progress = createAgentProgress(sessionId);
+      progress.update({ type: 'request', brief: typeof body.brief === 'string' ? body.brief : '' });
       if (agentProgress.size >= 100) agentProgress.delete(agentProgress.keys().next().value);
       agentProgress.set(sessionId, progress);
       events.publish({ type: 'agent.started', sessionId, brief: typeof body.brief === 'string' ? body.brief.slice(0, 160) : null });

@@ -10,6 +10,7 @@ import { COPY, fill } from './copy.ts';
 import { COPY as EASY_COPY } from '../copy.ts';
 import { renderSuperEasyDoneActions } from './escape.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
+import { agentConsoleMarkup } from '../agent-console.ts';
 import {
   readStages,
   STAGE_STATUS_TEXT,
@@ -390,6 +391,7 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
   const html = `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress data-super-easy-live-key="${escapeHtml(keys.live)}" data-super-easy-chrome-key="${escapeHtml(keys.chrome)}" data-super-easy-gallery-key="${escapeHtml(keys.gallery)}" data-super-easy-actions-key="${escapeHtml(keys.actions)}" aria-labelledby="super-easy-progress-title">
 <h1 class="super-easy-progress-title" id="super-easy-progress-title">${escapeHtml(COPY.making.title)}</h1>
 <p class="super-easy-progress-subtitle">${escapeHtml(COPY.making.subtitle)}</p>
+${agentConsoleMarkup()}
 <p class="super-easy-progress-live" role="status" aria-live="polite" aria-atomic="true" data-super-easy-live data-super-easy-live-key="${escapeHtml(keys.live)}">${escapeHtml(liveText)}</p>
 <section class="super-easy-progress-gallery" aria-label="${escapeHtml(COPY.gallery.empty)}" data-super-easy-gallery>
 ${galleryHtml}

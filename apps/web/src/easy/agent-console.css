@@ -1,0 +1,50 @@
+.agent-console {
+  margin: 0.9rem 0;
+  border: 1px solid var(--line, #303747);
+  border-radius: 0.65rem;
+  background: #0c111b;
+  color: #dce5f3;
+  text-align: left;
+}
+.agent-console > summary {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  font-weight: 650;
+}
+.agent-console-current {
+  color: #9fb0c9;
+  font-size: 0.78rem;
+  font-weight: 450;
+}
+.agent-console-body { padding: 0 0.85rem 0.75rem; }
+.agent-console-events {
+  max-height: 19rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.76rem;
+}
+.agent-console-event { padding: 0.45rem 0; border-top: 1px solid #202a3a; }
+.agent-console-event-line { display: flex; gap: 0.65rem; }
+.agent-console-event-line time { min-width: 3rem; color: #7f93af; }
+.agent-console pre {
+  max-height: 12rem;
+  margin: 0.45rem 0 0 3.65rem;
+  padding: 0.55rem;
+  overflow: auto;
+  border-radius: 0.35rem;
+  background: #070b12;
+  color: #c8d7eb;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-console-arguments > summary { margin: 0.35rem 0 0 3.65rem; color: #91a7c4; cursor: pointer; }
+.agent-console-problems { margin: 0.35rem 0 0 4.5rem; color: #ffb4a8; }
+.agent-console-empty, .agent-console-usage { color: #8ea2bd; }
+.agent-console-usage { margin: 0.65rem 0 0; font-size: 0.75rem; }
