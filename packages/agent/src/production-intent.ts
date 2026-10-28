@@ -8,6 +8,8 @@ export interface ProductionIntent {
   noCaptions: boolean;
   /** Explicitly requires narration-anchored motion.cue_phrases on every scene. */
   requiresNarrationCues: boolean;
+  /** Live-action fictional humans, not a substituted stylized medium. */
+  liveActionHumans: boolean;
   requestedSeconds: number | null;
   evidence: {
     generatedShots: boolean;
@@ -64,6 +66,7 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?)\b/i.test(text)
     || /\btext[\s-]+free\b/i.test(text);
   const requiresNarrationCues = /\bcue_phrases\b|narration[\s-]+(?:linked|anchored)\s+(?:motion|animation|cues?)|timed\s+(?:to|with)\s+(?:the\s+)?narration/i.test(text);
+  const liveActionHumans = positiveMatch(text, /\b(?:real\s+(?:humans?|people)|live[\s-]*action)\b/i);
   const requestedMinutesMatch = /\b(\d{1,3}(?:\.\d+)?)[\s-]+(?:minutes?|mins?)\b/i.exec(text);
   const requestedSecondsMatch = /\b(\d{1,3})[\s-]+seconds?\b/i.exec(text);
   const adjacentSeconds = requestedMinutesMatch && requestedSecondsMatch
@@ -85,6 +88,7 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     wordless,
     noCaptions,
     requiresNarrationCues,
+    liveActionHumans,
     requestedSeconds,
     evidence: { generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape, proceduralConstraint },
   };

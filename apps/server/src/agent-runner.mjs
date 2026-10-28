@@ -73,6 +73,21 @@ function repairPackageFacts(pkg, intent) {
   ].join('\n');
 }
 
+function liveActionStyleConflict(pkg) {
+  const texts = [pkg?.title, pkg?.proposal?.look];
+  for (const asset of Object.values(pkg?.assets ?? {})) {
+    texts.push(asset?.gen?.inputs?.prompt, asset?.gen?.direction?.subject, asset?.gen?.direction?.composition);
+  }
+  const pattern = /\b(?:clay(?:mation)?|plasticine|stop[\s-]motion|puppets?|cartoons?|handmade(?:\s+miniatures?)?)\b/ig;
+  for (const text of texts.filter(value => typeof value === 'string')) {
+    for (const match of text.matchAll(pattern)) {
+      const prefix = text.slice(Math.max(0, (match.index ?? 0) - 30), match.index);
+      if (!/\b(?:no|not|without|avoid)\s+(?:[\w-]+\s+){0,2}$/i.test(prefix)) return match[0];
+    }
+  }
+  return null;
+}
+
 /** Completion is shot-reachable: orphan pending GPU assets never satisfy it. */
 export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto') {
   const problems = [];
@@ -86,6 +101,10 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
     }
   }
   if (proposal?.logline === 'A story built from your idea.') problems.push('proposal.logline must describe the actual story, not a generic fallback');
+  if (intent.liveActionHumans) {
+    const conflict = liveActionStyleConflict(pkg);
+    if (conflict) problems.push(`live-action real-human brief conflicts with ${conflict} styling; use photorealistic fictional humans, natural skin and real-world materials in the proposal and every asset prompt`);
+  }
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   const plannedSeconds = plannedTimelineFrames(pkg) / fps;
   if (intent.requestedSeconds !== null && !durationWithinTarget(plannedSeconds, intent.requestedSeconds)) {
@@ -105,7 +124,8 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
         problems.push(`${sceneId}: every motion.cue_phrases entry must be copied verbatim from this scene's narration`);
       }
     }
-    const mediaAssets = (Array.isArray(scene?.media) ? scene.media : [])
+    const mediaPlates = Array.isArray(scene?.media) ? scene.media : [];
+    const mediaAssets = mediaPlates
       .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
       .filter(Boolean);
     const videos = mediaAssets.filter(asset => asset.kind === 'video' && ['fasth3-omni', 'ltx25'].includes(asset.gen?.generator));
@@ -133,6 +153,19 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
         || Object.values(assets).some(asset => asset.gen?.generator === 'flux3-klein');
       problems.push(`${sceneId}: ${fluxOnly ? 'FLUX stills are not generated-film completion; ' : ''}attach a planned/ready H3 or LTX video through scene.media`);
       continue;
+    }
+    const sceneSeconds = Number(scene?.preferredFrames) > 0 ? Number(scene.preferredFrames) / fps : 0;
+    const coveredSeconds = Array.from(new Set(videos)).reduce((total, asset) => {
+      const plate = mediaPlates.find(item => assets[item?.asset] === asset);
+      const frames = Number(asset.gen?.inputs?.frames);
+      const mediaFps = Number(asset.gen?.inputs?.fps);
+      if (!(frames > 0) || !(mediaFps > 0)) return total;
+      const speed = Number(plate?.speed) > 0 ? Number(plate.speed) : 1;
+      const holdFrames = Number.isFinite(plate?.holdFrames) ? Math.max(0, Number(plate.holdFrames)) : 0;
+      return total + (frames / mediaFps) / speed + holdFrames / fps;
+    }, 0);
+    if (sceneSeconds > 0 && coveredSeconds > 0 && coveredSeconds * 2 < sceneSeconds) {
+      problems.push(`${sceneId}: scene is ${sceneSeconds.toFixed(2)} seconds but attached generated video covers ${coveredSeconds.toFixed(2)} seconds; add enough generation clips or shorten the scene instead of stretching a short clip`);
     }
     for (const asset of videos) {
       const generator = asset.gen.generator;
@@ -206,6 +239,9 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     const brandAssets = brand?.assets ?? null;
     const { runCpuSlice, classifyProductionIntent, parseMotionModel } = await import('../../../packages/agent/dist/src/index.js');
     const productionIntent = classifyProductionIntent(brief);
+    const planningBrief = productionIntent.liveActionHumans
+      ? `${brief}\n\nHard creative constraint: use photorealistic live-action fictional human adults with natural skin and real-world materials in the proposal and every image/video prompt. Do not substitute clay, plasticine, stop-motion, puppets, cartoons or handmade-miniature styling.`
+      : brief;
     let motionModel;
     try {
       motionModel = parseMotionModel(requestedMotionModel ?? defaultMotionModel, 'auto');
@@ -288,7 +324,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       onEvent?.({ type: 'runner_phase', phase, status: 'started', elapsedMs: Date.now() - runStartedAt });
       try {
         const result = await runCpuSlice({
-          brief: repairInstructions ? `${brief}\n\n${repairInstructions}` : brief,
+          brief: repairInstructions ? `${planningBrief}\n\n${repairInstructions}` : planningBrief,
           ...(repairInstructions ? { initialPackage: slice.package } : {}),
           ...(model ? { model } : {}),
           ...(brandKit ? { brand: brandKit } : {}),

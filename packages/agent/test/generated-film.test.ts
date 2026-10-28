@@ -72,6 +72,7 @@ test('retained four-shot prompt is generated film; explicit procedural controls 
   const liveAction = classifyProductionIntent('A funny 2 minute video featuring people getting hurt falling over. Make it live action please.');
   assert.equal(liveAction.kind, 'generated-film');
   assert.equal(liveAction.evidence.generatedShots, true);
+  assert.equal(liveAction.liveActionHumans, true);
   assert.equal(liveAction.requestedSeconds, 120);
   assert.equal(classifyProductionIntent('A 1 minute and 30 second live-action short.').requestedSeconds, 90);
   assert.equal(classifyProductionIntent('A 1.5-minute live-action short.').requestedSeconds, 90);

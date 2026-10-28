@@ -144,6 +144,32 @@ test('completion requires meaningful proposal fields and the requested duration'
   assert.ok(missing.some(problem => problem.includes('proposal.soundtrack')));
 });
 
+test('completion rejects clay substitutions for real humans and under-covered scene durations', async () => {
+  const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
+  const intent = classifyProductionIntent('Create a 2 minute live-action video with real humans.');
+  const pkg = {
+    title: 'Six Clay Wipeouts',
+    proposal: { logline: 'Human skaters fall.', look: 'Plasticine stop-motion.', soundtrack: 'Foley.' },
+    format: { fps: 30 },
+    scenes: [{ id: 's1', preferredFrames: 600, media: [{ asset: 'a_video' }] }],
+    assets: {
+      a_video: {
+        kind: 'video',
+        gen: {
+          generator: 'ltx25', workflow: 'workflows/ltx25_i2v.api.json',
+          inputs: { image: 'a_start', frames: 153, fps: 24 },
+        },
+        media: { audio: 'none' },
+        notes: 'finishing sound plan: foley',
+      },
+    },
+  };
+  pkg.scenes[0].notes = 'LTX finishing sound plan: foley';
+  const problems = generatedFilmCompletionProblems(pkg, intent, 'auto');
+  assert.ok(problems.some(problem => problem.includes('real-human brief conflicts')), problems.join('\n'));
+  assert.ok(problems.some(problem => problem.includes('scene is 20.00 seconds') && problem.includes('covers 6.38 seconds')), problems.join('\n'));
+});
+
 test('completion allows bounded transition drift and rejects larger duration misses', async () => {
   const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
   const intent = classifyProductionIntent('Create a 20-second wordless generated film in 4 scenery shots. No captions.');
