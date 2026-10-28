@@ -465,6 +465,132 @@ function loadCodeLayout(): Promise<CodeLayoutModule> {
   return codeLayoutPromise;
 }
 const SCENE_ID_RE = /^s[A-Za-z0-9_-]{0,63}$/;
+const DATASET_ID_RE = /^d[A-Za-z0-9_-]{0,63}$/;
+const DATASET_SOURCES = ['user', 'openverse', 'example', 'derived'] as const;
+const DATASET_MAX_VALUES = 64;
+
+type DatasetErrorCode =
+  | 'DATASETS_INVALID'
+  | 'DATASET_INVALID'
+  | 'DATASET_UNIT_REQUIRED'
+  | 'DATASET_VALUES_REQUIRED'
+  | 'DATASET_VALUE_INVALID'
+  | 'DATASET_SOURCE_INVALID';
+
+/** A dataset the tool cannot repair is an actionable 422, never invented values. */
+function datasetError(datasetId: string, code: DatasetErrorCode, message: string): Error {
+  return Object.assign(new Error(`${datasetId}: ${message}`), {
+    name: 'DatasetError',
+    status: 422,
+    code,
+    datasetId,
+  });
+}
+
+function datasetNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string' && /^[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i.test(raw.trim())) return Number(raw.trim());
+  return null;
+}
+
+/** A model-authored dataset key becomes the schema id `^d[A-Za-z0-9_-]{0,63}$`. */
+function normalizeDatasetId(raw: string): string {
+  const trimmed = raw.trim();
+  if (DATASET_ID_RE.test(trimmed)) return trimmed;
+  const body = trimmed.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const prefixed = !body ? 'd_data' : body.startsWith('d') ? body : `d_${body}`;
+  return prefixed.slice(0, 64);
+}
+
+function uniqueDatasetId(base: string, used: Set<string>): string {
+  let candidate = base;
+  for (let suffixNumber = 2; used.has(candidate); suffixNumber += 1) {
+    const suffix = `_${suffixNumber}`;
+    candidate = `${base.slice(0, Math.max(1, 64 - suffix.length))}${suffix}`;
+  }
+  return candidate;
+}
+
+function normalizeDatasetBody(raw: unknown, id: string): Record<string, any> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw datasetError(id, 'DATASET_INVALID', 'dataset must be an object with unit, values and source; never invent statistics.');
+  }
+  const dataset = raw as Record<string, unknown>;
+  const source = dataset.source === undefined
+    ? 'user'
+    : typeof dataset.source === 'string' ? dataset.source.trim().toLowerCase() : dataset.source;
+  if (typeof source !== 'string' || !(DATASET_SOURCES as readonly string[]).includes(source)) {
+    throw datasetError(id, 'DATASET_SOURCE_INVALID', 'dataset.source must be user, openverse, example or derived.');
+  }
+  const unit = typeof dataset.unit === 'string' ? dataset.unit.trim() : '';
+  if (!unit) {
+    throw datasetError(id, 'DATASET_UNIT_REQUIRED', 'dataset.unit is required (1-32 characters); keep the user-supplied unit instead of inventing one.');
+  }
+  const candidateValues = dataset.values && typeof dataset.values === 'object' && !Array.isArray(dataset.values)
+    ? Object.entries(dataset.values as Record<string, unknown>).map(([label, value]) => ({ label, value }))
+    : dataset.values;
+  if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
+    throw datasetError(id, 'DATASET_VALUES_REQUIRED', 'dataset.values must contain at least one user-supplied number; never invent statistics.');
+  }
+  const values = candidateValues.slice(0, DATASET_MAX_VALUES).map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}] must be { label, value }; never invent statistics.`);
+    }
+    const item = entry as Record<string, unknown>;
+    const label = typeof item.label === 'string' ? item.label.trim() : '';
+    if (!label) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}].label must be a non-empty string; never invent labels or statistics.`);
+    }
+    const value = datasetNumber(item.value);
+    if (value === null || Math.abs(value) > 1e12) {
+      throw datasetError(id, 'DATASET_VALUE_INVALID', `dataset.values[${index}].value must be a finite number within ±1e12; keep the user's value and never invent statistics.`);
+    }
+    return { label: label.slice(0, 64), value };
+  });
+
+  const normalized: Record<string, any> = { unit: unit.slice(0, 32), values, source };
+  if (typeof dataset.label === 'string' && dataset.label.trim()) normalized.label = dataset.label.trim().slice(0, 64);
+  if (typeof dataset.approved === 'boolean') normalized.approved = dataset.approved;
+  if (typeof dataset.source_url === 'string' && dataset.source_url.trim()) {
+    try {
+      const href = new URL(dataset.source_url.trim()).href;
+      if (href.length <= 512) normalized.source_url = href;
+    } catch {
+      // Drop an unusable optional source URL instead of failing the whole package.
+    }
+  }
+  if (typeof dataset.retrieved_at === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dataset.retrieved_at)
+    && !Number.isNaN(Date.parse(dataset.retrieved_at))) {
+    normalized.retrieved_at = dataset.retrieved_at;
+  }
+  if (typeof dataset.note === 'string' && dataset.note.trim()) normalized.note = dataset.note.trim().slice(0, 256);
+  return normalized;
+}
+
+/** Normalize every dataset key and value once, and keep the scene-reference aliases. */
+function normalizeDatasets(raw: unknown): { datasets: Record<string, any>; aliases: Map<string, string> } {
+  if (raw === undefined || raw === null) return { datasets: {}, aliases: new Map() };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw datasetError('datasets', 'DATASETS_INVALID', 'datasets must be an object keyed by dataset id.');
+  }
+  const entries = Object.entries(raw as Record<string, unknown>);
+  const used = new Set<string>();
+  const assigned = new Map<string, string>();
+  for (const [key] of entries) {
+    const id = uniqueDatasetId(normalizeDatasetId(key), used);
+    used.add(id);
+    assigned.set(key, id);
+  }
+  const datasets: Record<string, any> = {};
+  for (const [key, value] of entries) {
+    const id = assigned.get(key)!;
+    datasets[id] = normalizeDatasetBody(value, id);
+  }
+  const aliases = new Map(assigned);
+  for (const id of used) if (!aliases.has(id)) aliases.set(id, id);
+  return { datasets, aliases };
+}
 
 function clampText(value: unknown, max: number): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -537,7 +663,7 @@ function sceneDataError(sceneId: string, layout: string, detail: string, code: '
  * layout, readable copy, a real dataset reference, a known variant/background,
  * and only schema-known keys. Assets that do not exist yet are dropped.
  */
-function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>): Record<string, any> {
+function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>, datasetAliases?: Map<string, string>): Record<string, any> {
   const source: Record<string, any> = { ...raw };
   const rawId = typeof source.id === 'string' ? source.id : '';
   const id = SCENE_ID_RE.test(rawId) ? rawId : `s_${hashId('', rawId || fallbackTitle).slice(0, 12)}`;
@@ -553,9 +679,10 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   const finalLayout: SceneLayout = layout;
   let data = source.data && typeof source.data === 'object' ? { ...source.data } : undefined;
   if (data) {
-    const datasetId = typeof data.dataset === 'string' ? data.dataset.trim() : '';
-    if (!datasetId) throw sceneDataError(id, finalLayout, 'has data but no dataset id.', 'SCENE_DATA_REQUIRED');
-    if (!datasetIds.has(datasetId)) throw sceneDataError(id, finalLayout, `references unknown dataset "${datasetId}".`, 'SCENE_DATASET_UNKNOWN');
+    const requestedDatasetId = typeof data.dataset === 'string' ? data.dataset.trim() : '';
+    if (!requestedDatasetId) throw sceneDataError(id, finalLayout, 'has data but no dataset id.', 'SCENE_DATA_REQUIRED');
+    const datasetId = datasetAliases?.get(requestedDatasetId) ?? requestedDatasetId;
+    if (!datasetIds.has(datasetId)) throw sceneDataError(id, finalLayout, `references unknown dataset "${requestedDatasetId}".`, 'SCENE_DATASET_UNKNOWN');
     data.dataset = datasetId;
     for (const key of Object.keys(data)) if (key !== 'dataset' && key !== 'display') delete data[key];
     if (data.display !== undefined && !['bar', 'number', 'counter'].includes(data.display)) {
@@ -776,12 +903,13 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45).trimEnd()}…` : rawTitle;
     const id = hashId('pkg', args.brief);
     const format = resolveFormat(args.brief);
-    const datasetIds = new Set(Object.keys(args.datasets ?? {}));
+    const normalizedDatasets = normalizeDatasets(args.datasets);
+    const datasetIds = new Set(Object.keys(normalizedDatasets.datasets));
     const intent = classifyProductionIntent(args.brief);
     state.intent = intent;
     state.proposal = args.proposal;
     const scenes = (args.scenes?.length
-      ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set()))
+      ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set(), normalizedDatasets.aliases))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
       .map(scene => applyProductionIntentToScene(scene, intent));
     const theme = { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) };
@@ -800,7 +928,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
       theme,
       voice: { enabled: false, engine: 'none' },
-      datasets: args.datasets ?? {},
+      datasets: normalizedDatasets.datasets,
       ...(args.proposal ? { proposal: args.proposal } : {}),
       scenes,
       ...(mascot ? { cast: [mascot.member] } : {}),
@@ -821,17 +949,26 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   const edit = (args: z.infer<typeof editSchema>) => {
     if (!state.package) throw new Error('no package draft; call storyboard.propose first');
     const draft = state.package;
+    const normalizedDatasets = normalizeDatasets(draft.datasets);
+    const aliases = normalizedDatasets.aliases;
     const scenes: any[] = Array.isArray(draft.scenes) ? draft.scenes : [];
-    const index = scenes.findIndex(scene => scene?.id === args.scene_id);
+    const remappedScenes = scenes.map(scene => {
+      const currentDataset = typeof scene?.data?.dataset === 'string' ? scene.data.dataset : '';
+      const datasetId = currentDataset ? aliases.get(currentDataset) : undefined;
+      return datasetId && datasetId !== currentDataset
+        ? { ...scene, data: { ...scene.data, dataset: datasetId } }
+        : scene;
+    });
+    const index = remappedScenes.findIndex(scene => scene?.id === args.scene_id);
     if (index < 0) throw new Error(`scene ${args.scene_id} not found`);
-    const current = scenes[index] ?? {};
+    const current = remappedScenes[index] ?? {};
     const patch = args.patch as Record<string, any>;
-    const datasetIds = new Set(Object.keys(draft.datasets ?? {}));
+    const datasetIds = new Set(Object.keys(normalizedDatasets.datasets));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
-    const nextScenes = scenes.map((scene, sceneIndex) => sceneIndex === index
-      ? applyProductionIntentToScene(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds), state.intent ?? classifyProductionIntent(''))
+    const nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
+      ? applyProductionIntentToScene(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases), state.intent ?? classifyProductionIntent(''))
       : scene);
-    state.package = { ...draft, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
+    state.package = { ...draft, datasets: normalizedDatasets.datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
     return withMotionFixes(
       { package: state.package, revision: state.package.revision, scene_id: args.scene_id },
@@ -1442,7 +1579,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           },
         },
         scenes: { type: 'array', items: { type: 'object' } },
-        datasets: { type: 'object', additionalProperties: true, description: 'User datasets keyed by dataset id; chart/stat/compare scenes reference data.dataset.' },
+        datasets: { type: 'object', additionalProperties: true, description: 'User datasets keyed by dataset id; plain names are normalized to the schema id form d_regions. Each dataset needs unit, values:[{label,value}] and source; source example needs approved:true. chart/stat/compare scenes reference data.dataset.' },
       }, ['brief']),
       proposeSchema,
       propose,
