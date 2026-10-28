@@ -640,14 +640,165 @@ function sanitizeCodeBlock(block: any, fallbackRate: number): Record<string, any
   return { language, code, ...(highlights.length > 0 ? { highlights } : {}), typing: { charsPerSecond: rate } };
 }
 
+const COMPARISON_RE = /\bcompar(?:e|ison|ing)\b|\bversus\b|\bvs\.?\b|\bbefore\s*(?:and|&|\/|-|,)?\s*after\b/i;
+const SHARED_DATASET_RE = /(?:share|shared|single|same)[^.]{0,80}\bdatasets?\b|\bdatasets?\b[^.]{0,80}(?:share|shared|single|same)|\bone\s+(?:shared\s+)?(?:user\s+)?dataset\b/i;
+const ITEM_COUNT_WORDS: Record<string, number> = {
+  two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+};
+const LIST_ITEMS_RE = /\b(?:(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]item\s+list|list\s+scenes?\b[^.]{0,80}?\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+items?)\b/i;
+const LIST_HINT_RE = /\blist|bullet|steps|checklist|points\b/i;
+
+/** The item count a brief pins down, e.g. "one list scene with six items". */
+function briefListItems(brief: string): number | undefined {
+  const match = LIST_ITEMS_RE.exec(brief);
+  if (!match) return undefined;
+  const raw = (match[1] ?? match[2] ?? '').toLowerCase();
+  const count = ITEM_COUNT_WORDS[raw] ?? Number(raw);
+  return Number.isInteger(count) && count >= 2 && count <= 6 ? count : undefined;
+}
+
+function sceneItems(scene: Record<string, any>): unknown[] {
+  if (Array.isArray(scene.copy?.items)) return scene.copy.items;
+  return Array.isArray(scene.items) ? scene.items : [];
+}
+
+function sceneHintText(scene: Record<string, any>): string {
+  const copy = scene.copy && typeof scene.copy === 'object' ? scene.copy : {};
+  return [
+    scene.layout, scene.role, scene.id, scene.title, scene.headline,
+    copy.headline, copy.sub, copy.body,
+  ].filter((value): value is string => typeof value === 'string').join(' ').toLowerCase();
+}
+
+function briefWantsComparison(brief: string): boolean {
+  return COMPARISON_RE.test(brief);
+}
+
+function sceneHintsComparison(scene: Record<string, any>): boolean {
+  return COMPARISON_RE.test(sceneHintText(scene));
+}
+
+function comparisonPlates(): Array<Record<string, any>> {
+  return [{ procedural: { pattern: 'gradient' } }, { procedural: { pattern: 'grid' } }];
+}
+
+function ensureComparisonPlates(scene: Record<string, any>): Record<string, any> {
+  if (scene.layout === 'compare' && (!Array.isArray(scene.media) || scene.media.length !== 2)) {
+    scene.media = comparisonPlates();
+  }
+  return scene;
+}
+
 /** The live model often sends `role`/`title` and no `layout`; infer one. */
 function inferSceneLayout(scene: Record<string, any>): SceneLayout {
-  const hint = `${scene.layout ?? ''} ${scene.role ?? ''} ${scene.id ?? ''} ${scene.title ?? ''}`.toLowerCase();
+  const hint = sceneHintText(scene);
+  if (COMPARISON_RE.test(hint)) return 'compare';
   if (/outro|intro|title|cover|opening|closing|hook/.test(hint)) return 'title';
   if (/stat|metric|kpi|number|figure|score/.test(hint)) return 'stat';
   if (/chart|graph|bar|data|plot|trend/.test(hint)) return 'chart';
   if (/list|bullet|steps|feature|checklist|points/.test(hint)) return 'list';
   return 'hero';
+}
+
+function sameDatasetValues(values: unknown, expected: Array<{ label: string; value: number }>): boolean {
+  if (!Array.isArray(values) || values.length !== expected.length) return false;
+  return expected.every(item => values.some((entry: any) => entry?.label === item.label && entry?.value === item.value));
+}
+
+function briefSharedDataset(brief: string, normalizedDatasets: ReturnType<typeof normalizeDatasets>): { datasets: Record<string, any>; id: string } | null {
+  if (!SHARED_DATASET_RE.test(brief)) return null;
+  const values: Array<{ label: string; value: number }> = [];
+  const seen = new Set<string>();
+  for (const match of brief.matchAll(/(?:^|[.,;:]\s*|\band\s+)([A-Za-z][A-Za-z0-9 _&'\/-]{0,40}?)\s*=\s*(-?\d+(?:\.\d+)?)/g)) {
+    const label = match[1].trim().replace(/\s+/g, ' ');
+    const value = Number(match[2]);
+    if (!label || !Number.isFinite(value) || seen.has(label.toLowerCase())) continue;
+    if (/^(?:aspect|format|resolution|fps|length|duration|width|height|ratio)$/i.test(label)) continue;
+    seen.add(label.toLowerCase());
+    values.push({ label, value });
+  }
+  if (values.length === 0) return null;
+
+  const entries = Object.entries(normalizedDatasets.datasets);
+  const matching = entries.find(([, dataset]) => dataset.source === 'user' && sameDatasetValues(dataset.values, values));
+  const sameLabels = entries.find(([, dataset]) => dataset.source === 'user'
+    && Array.isArray(dataset.values)
+    && dataset.values.length === values.length
+    && values.every((item, index) => dataset.values[index]?.label === item.label));
+  const basisEntry = matching ?? sameLabels ?? entries.find(([, dataset]) => dataset.source === 'user');
+  const id = matching?.[0] ?? sameLabels?.[0] ?? basisEntry?.[0] ?? 'd_data';
+  const basis = basisEntry?.[1];
+  const dataset: Record<string, any> = {
+    unit: typeof basis?.unit === 'string' ? basis.unit : 'value',
+    values,
+    source: 'user',
+  };
+  if (typeof basis?.label === 'string') dataset.label = basis.label;
+  return { datasets: { [id]: dataset }, id };
+}
+
+function chooseComparisonScene(scenes: Array<Record<string, any>>, protectedScenes: Set<Record<string, any>> = new Set()): Record<string, any> | undefined {
+  const allowed = scenes.filter(scene => !protectedScenes.has(scene));
+  const hinted = allowed.find(scene => scene.layout !== 'compare' && scene.layout !== 'title' && sceneHintsComparison(scene));
+  if (hinted) return hinted;
+  const hintedAny = allowed.find(scene => scene.layout !== 'compare' && sceneHintsComparison(scene));
+  if (hintedAny) return hintedAny;
+  const nonCore = allowed.filter(scene => !['compare', 'chart', 'stat', 'title', 'code'].includes(scene.layout));
+  if (nonCore.length > 0) return nonCore[nonCore.length - 1];
+  const nonTitle = allowed.filter(scene => scene.layout !== 'title');
+  return nonTitle[nonTitle.length - 1] ?? allowed[allowed.length - 1];
+}
+
+/** The scene the brief's list bullet refers to: items first, then a list hint, then a non-title scene. */
+function chooseListScene(scenes: Array<Record<string, any>>): Record<string, any> | undefined {
+  return scenes.find(scene => scene.layout === 'list' && sceneItems(scene).length > 0)
+    ?? scenes.find(scene => sceneItems(scene).length > 0)
+    ?? scenes.find(scene => scene.layout === 'list')
+    ?? scenes.find(scene => LIST_HINT_RE.test(sceneHintText(scene)))
+    ?? scenes.find(scene => !['title', 'compare', 'code'].includes(scene.layout));
+}
+
+function preparePlanningScenes(rawScenes: Array<Record<string, any>>, brief: string, sharedDatasetId?: string, requiredListItems?: number): Array<Record<string, any>> {
+  const scenes = rawScenes.map(scene => ({ ...scene }));
+  for (const scene of scenes) {
+    if (!(SCENE_LAYOUTS as readonly string[]).includes(scene.layout)) scene.layout = inferSceneLayout(scene);
+  }
+  const protectedScenes = new Set<Record<string, any>>();
+  if (requiredListItems) {
+    const listScene = chooseListScene(scenes);
+    if (listScene) {
+      listScene.layout = 'list';
+      protectedScenes.add(listScene);
+    }
+  }
+  if ((briefWantsComparison(brief) || scenes.some(sceneHintsComparison)) && !scenes.some(scene => scene.layout === 'compare')) {
+    const candidate = chooseComparisonScene(scenes, protectedScenes);
+    if (candidate) {
+      candidate.layout = 'compare';
+      delete candidate.variant;
+      ensureComparisonPlates(candidate);
+    }
+  }
+  for (const scene of scenes) ensureComparisonPlates(scene);
+  if (sharedDatasetId) {
+    for (const scene of scenes) {
+      const display = scene.layout === 'stat' ? 'number' : 'bar';
+      scene.data = { dataset: sharedDatasetId, display };
+    }
+  }
+  return scenes;
+}
+
+function ensureComparisonScene(scenes: Array<Record<string, any>>, brief: string | undefined, protectedScenes: Set<Record<string, any>> = new Set()): Array<Record<string, any>> {
+  if (scenes.some(scene => scene.layout === 'compare')) return scenes;
+  if (!(brief && briefWantsComparison(brief)) && !scenes.some(sceneHintsComparison)) return scenes;
+  const candidate = chooseComparisonScene(scenes, protectedScenes);
+  if (!candidate) return scenes;
+  candidate.layout = 'compare';
+  delete candidate.variant;
+  ensureComparisonPlates(candidate);
+  if (candidate.copy?.headline) candidate.copy.headline = clampText(candidate.copy.headline, COPY_LIMITS.compare.headline);
+  return scenes;
 }
 
 /** A scene that cannot render is an actionable 422, never a silent layout downgrade. */
@@ -658,12 +809,34 @@ function sceneDataError(sceneId: string, layout: string, detail: string, code: '
   );
 }
 
+/** The brief pinned the list length; dropping or inventing bullets is a 422, never a silent trim. */
+function sceneListItemsError(sceneId: string, required: number, supplied: number): Error {
+  return Object.assign(
+    new Error(`${sceneId}: the brief requires exactly ${required === 6 ? 'six' : required} items in the list scene, but the plan supplied ${supplied}. Return ${required} distinct strings in copy.items (or scene.items); the tool will not silently truncate or invent bullets.`),
+    { name: 'SceneListItemsError', status: 422, code: 'SCENE_LIST_ITEMS_REQUIRED' },
+  );
+}
+
+function clampListItem(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return clampText(String(value), 72);
+  return clampText(value, 72);
+}
+
+/** Recover line or semicolon separated bullets when a model put a six-item list in body/sub. */
+function itemsFromText(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(/\r?\n|;/)
+    .map(line => line.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean);
+}
+
 /**
  * Coerce a model-authored scene into the published package shape: a valid
  * layout, readable copy, a real dataset reference, a known variant/background,
  * and only schema-known keys. Assets that do not exist yet are dropped.
  */
-function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>, datasetAliases?: Map<string, string>): Record<string, any> {
+function normalizeScene(raw: Record<string, any>, fallbackTitle: string, datasetIds: Set<string>, assetIds: Set<string>, datasetAliases?: Map<string, string>, requiredListItems?: number): Record<string, any> {
   const source: Record<string, any> = { ...raw };
   const rawId = typeof source.id === 'string' ? source.id : '';
   const id = SCENE_ID_RE.test(rawId) ? rawId : `s_${hashId('', rawId || fallbackTitle).slice(0, 12)}`;
@@ -674,6 +847,9 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
     : source.copy && typeof source.copy === 'object' ? { ...source.copy } : {};
   if (!copy.headline && typeof source.title === 'string') copy.headline = source.title;
   if (!copy.headline && typeof source.headline === 'string') copy.headline = source.headline;
+  // The conversation-plan shape carries bullets at scene level; lift them so a
+  // list scene does not lose every item on the way into the package.
+  if (!Array.isArray(copy.items) && Array.isArray(source.items)) copy.items = [...source.items];
   for (const key of Object.keys(copy)) if (!COPY_KEYS.has(key)) delete copy[key];
 
   const finalLayout: SceneLayout = layout;
@@ -697,7 +873,17 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
 
   const limits = COPY_LIMITS[finalLayout];
   for (const [key, max] of Object.entries(limits)) if (copy[key] !== undefined) copy[key] = clampText(copy[key], max);
-  if (Array.isArray(copy.items)) copy.items = copy.items.map(item => clampText(item, 72)).filter(Boolean).slice(0, 6);
+  if (!Array.isArray(copy.items) && requiredListItems && finalLayout === 'list') {
+    const extracted = itemsFromText(copy.body);
+    copy.items = extracted.length > 0 ? extracted : itemsFromText(copy.sub);
+  }
+  if (Array.isArray(copy.items)) {
+    const items = copy.items.map(clampListItem).filter((item): item is string => Boolean(item));
+    if (requiredListItems && finalLayout === 'list' && items.length < requiredListItems) {
+      throw sceneListItemsError(id, requiredListItems, items.length);
+    }
+    copy.items = items.slice(0, requiredListItems ?? 6);
+  }
   if (!copy.headline && finalLayout !== 'code') copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline ?? 48);
   if (finalLayout === 'code' && !copy.headline) delete copy.headline;
 
@@ -879,13 +1065,29 @@ function mergeRefs(userRefs: string[], castRefs: string[]): string[] {
   return out;
 }
 
+/** Model-invented role names like shot_2_identity_reference are never asset ids. */
+const PLACEHOLDER_REF_RE = /identity|subject|character|cast|portrait|mascot|composition|art[_-]?direction|reference|start[_-]?frame|^shot[_-]?\d+/i;
+const IDENTITY_REF_RE = /identity|subject|character|cast|portrait|mascot/i;
+
+function isPlaceholderRef(id: string): boolean {
+  return PLACEHOLDER_REF_RE.test(id);
+}
+
+/** A reference that names no package asset is a 422 before semantic validation can fail. */
+function semanticRefError(sceneId: string, role: string, id: string): Error {
+  return Object.assign(
+    new Error(`${sceneId}: ${role} ${JSON.stringify(id)} is not an asset id in this package. Create the reference with assets.generate_image or assets.generate_svg and pass its returned id; invented placeholder names are rejected before the package can fail semantic validation.`),
+    { name: 'SemanticRefError', status: 422, code: 'SEM_REF_UNRESOLVED', assetId: id },
+  );
+}
+
 /**
  * Tools the model may call. Approval-requiring tools (spend, stock attach,
  * uploads) return a card request and never perform the action here.
  */
 export function createToolset(options: ToolsetOptions = {}): Record<string, AgentTool> {
   const configuredMotionModel = parseMotionModel(options.motionModel, 'auto');
-  const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal'] } = {
+  const state: { package?: Record<string, any>; intent?: ProductionIntent; proposal?: z.infer<typeof proposeSchema>['proposal']; brief?: string } = {
     package: options.initialPackage ? structuredClone(options.initialPackage) : undefined,
     intent: options.initialPackage ? options.initialIntent : undefined,
     proposal: options.initialPackage?.proposal,
@@ -893,9 +1095,63 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   // Rebuild the whole-film stem as each shot arrives. Using only the first
   // shot's plan made otherwise different scenes share one generic sound bed.
   const finishingSoundPlans = new Map<string, string>();
+  // Role of each planned image, so a later invented identity name can bind the
+  // real raster identity even when the package has no cast member.
+  const plannedImageRoles = new Map<string, { sceneId: string; kind: string }>();
 
   const touch = () => {
     if (state.package) options.onPackageChange?.(state.package);
+  };
+
+  /** A raster identity image already linked to this scene's cast, if one exists. */
+  const existingIdentityImageId = (sceneId: string, castIds: string[]): string | undefined => {
+    const assets = state.package?.assets ?? {};
+    const scene = (Array.isArray(state.package?.scenes) ? state.package.scenes : []).find((item: any) => item?.id === sceneId);
+    const sceneCast = new Set([
+      ...(Array.isArray(scene?.cast) ? scene.cast : []),
+      ...castIds,
+    ]);
+    const linked = Object.entries(assets).filter(([id, asset]: [string, any]) => {
+      if (asset?.kind !== 'image') return false;
+      if (typeof asset.cast === 'string' && sceneCast.has(asset.cast)) return true;
+      return (Array.isArray(scene?.foreground) && scene.foreground.some((item: any) => item?.asset === id))
+        || (Array.isArray(scene?.media) && scene.media.some((item: any) => item?.asset === id));
+    });
+    const plannedIdentity = Object.entries(assets).find(([id, asset]: [string, any]) => {
+      if (asset?.kind !== 'image') return false;
+      const role = plannedImageRoles.get(id);
+      return role?.sceneId === sceneId && IDENTITY_REF_RE.test(role.kind);
+    });
+    if (!linked.length && !plannedIdentity) return undefined;
+    const identity = linked.find(([, asset]: [string, any]) =>
+      IDENTITY_REF_RE.test(`${asset?.gen?.inputs?.prompt ?? ''} ${asset?.notes ?? ''}`));
+    return (identity ?? plannedIdentity ?? linked[0])[0];
+  };
+
+  /**
+   * Resolve a model-supplied reference to a real package asset. A placeholder
+   * identity name binds the scene's existing cast identity instead of entering
+   * the package as a dangling gen.inputs.reference.
+   */
+  const resolveReferenceId = (
+    raw: string,
+    sceneId: string,
+    role: string,
+    cast: { ids: string[]; refs: string[] },
+    rasterOnly = false,
+  ): string => {
+    const id = raw.trim();
+    if (state.package?.assets?.[id]) return id;
+    if (!isPlaceholderRef(id)) return id;
+    if (IDENTITY_REF_RE.test(id)) {
+      const castRef = cast.refs.find(ref => state.package?.assets?.[ref]);
+      if (!rasterOnly && castRef) return castRef;
+      const imageId = existingIdentityImageId(sceneId, cast.ids);
+      if (imageId) return imageId;
+      const castImage = cast.refs.find(ref => state.package?.assets?.[ref]?.kind === 'image');
+      if (castImage) return castImage;
+    }
+    throw semanticRefError(sceneId, role, id);
   };
 
   const propose = (args: z.infer<typeof proposeSchema>) => {
@@ -903,13 +1159,19 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45).trimEnd()}…` : rawTitle;
     const id = hashId('pkg', args.brief);
     const format = resolveFormat(args.brief);
+    const requiredListItems = briefListItems(args.brief);
     const normalizedDatasets = normalizeDatasets(args.datasets);
-    const datasetIds = new Set(Object.keys(normalizedDatasets.datasets));
+    const sharedDataset = briefSharedDataset(args.brief, normalizedDatasets);
+    const datasets = sharedDataset?.datasets ?? normalizedDatasets.datasets;
+    const datasetIds = new Set(Object.keys(datasets));
+    const datasetAliases = sharedDataset ? new Map([[sharedDataset.id, sharedDataset.id]]) : normalizedDatasets.aliases;
     const intent = classifyProductionIntent(args.brief);
     state.intent = intent;
+    state.brief = args.brief;
     state.proposal = args.proposal;
     const scenes = (args.scenes?.length
-      ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set(), normalizedDatasets.aliases))
+      ? preparePlanningScenes(args.scenes, args.brief, sharedDataset?.id, requiredListItems)
+        .map(scene => ensureComparisonPlates(normalizeScene(scene, title, datasetIds, new Set(), datasetAliases, requiredListItems)))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
       .map(scene => applyProductionIntentToScene(scene, intent));
     const theme = { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) };
@@ -928,7 +1190,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
       theme,
       voice: { enabled: false, engine: 'none' },
-      datasets: normalizedDatasets.datasets,
+      datasets,
       ...(args.proposal ? { proposal: args.proposal } : {}),
       scenes,
       ...(mascot ? { cast: [mascot.member] } : {}),
@@ -949,10 +1211,16 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   const edit = (args: z.infer<typeof editSchema>) => {
     if (!state.package) throw new Error('no package draft; call storyboard.propose first');
     const draft = state.package;
+    const requiredListItems = state.brief ? briefListItems(state.brief) : undefined;
     const normalizedDatasets = normalizeDatasets(draft.datasets);
-    const aliases = normalizedDatasets.aliases;
+    const sharedDataset = state.brief ? briefSharedDataset(state.brief, normalizedDatasets) : null;
+    const datasets = sharedDataset?.datasets ?? normalizedDatasets.datasets;
+    const aliases = sharedDataset ? new Map([[sharedDataset.id, sharedDataset.id]]) : normalizedDatasets.aliases;
     const scenes: any[] = Array.isArray(draft.scenes) ? draft.scenes : [];
     const remappedScenes = scenes.map(scene => {
+      if (sharedDataset) {
+        return { ...scene, data: { dataset: sharedDataset.id, display: scene?.layout === 'stat' ? 'number' : 'bar' } };
+      }
       const currentDataset = typeof scene?.data?.dataset === 'string' ? scene.data.dataset : '';
       const datasetId = currentDataset ? aliases.get(currentDataset) : undefined;
       return datasetId && datasetId !== currentDataset
@@ -963,12 +1231,16 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     if (index < 0) throw new Error(`scene ${args.scene_id} not found`);
     const current = remappedScenes[index] ?? {};
     const patch = args.patch as Record<string, any>;
-    const datasetIds = new Set(Object.keys(normalizedDatasets.datasets));
+    const datasetIds = new Set(Object.keys(datasets));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
-    const nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
-      ? applyProductionIntentToScene(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases), state.intent ?? classifyProductionIntent(''))
+    let nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
+      ? applyProductionIntentToScene(ensureComparisonPlates(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases, requiredListItems)), state.intent ?? classifyProductionIntent(''))
       : scene);
-    state.package = { ...draft, datasets: normalizedDatasets.datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
+    for (const scene of nextScenes) ensureComparisonPlates(scene);
+    const patchSetsLayout = typeof patch.layout === 'string' && (SCENE_LAYOUTS as readonly string[]).includes(patch.layout);
+    const protectedLists = new Set<Record<string, any>>(requiredListItems ? nextScenes.filter(scene => scene.layout === 'list') : []);
+    if (!patchSetsLayout) nextScenes = ensureComparisonScene(nextScenes, state.brief, protectedLists);
+    state.package = { ...draft, datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
     return withMotionFixes(
       { package: state.package, revision: state.package.revision, scene_id: args.scene_id },
@@ -1085,7 +1357,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       : sourceDims(plannedAspect);
     const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
     const cast = castRefsForScene(state.package, args.scene_id);
-    const refs = mergeRefs(args.refs ?? [], cast.refs);
+    const requestedRefs = (args.refs ?? []).map(ref => resolveReferenceId(ref, args.scene_id, 'reference', cast));
+    const refs = mergeRefs(requestedRefs, cast.refs);
     const isRefEdit = refs.length > 0;
     // B1: the same STYLE_BLOCK goes on every image job, so a run does not drift
     // from the owner's palette/attributes after the first call.
@@ -1110,6 +1383,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           aspect: plannedAspect,
         }));
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
+    plannedImageRoles.set(id, { sceneId: args.scene_id, kind: args.kind ?? '' });
     const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
     // P-fix5: the jobs planner requires `gen.workflow_sha256`, so a package built by the
     // agent must stamp it. A caller-provided plan wins; otherwise the committed manifest
@@ -1225,20 +1499,22 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       throw new Error('Klein stills + code motion does not accept H3 dialogue conditioning; put speech and sound in finishing_sound, or choose h3 for native AV');
     }
 
+    const cast = castRefsForScene(state.package, args.scene_id);
     const visualRef = (id: string | undefined, role: string, required: boolean): string | undefined => {
       if (!id) {
         if (required) throw new Error(`${model} needs ${role}. Call assets.generate_image for that role and pass its returned asset id; a FLUX still alone is not film completion.`);
         return undefined;
       }
-      const asset = state.package!.assets?.[id];
-      if (!asset) throw new Error(`${role} ${id} is not in the package. Create it with assets.generate_image, then pass the returned id to assets.generate_video.`);
-      if (asset.kind !== 'image') throw new Error(`${role} ${id} is ${asset.kind}; ${model} needs a raster image reference, not ${asset.kind}. Generate a proper image reference instead of substituting a still for video.`);
+      const resolved = resolveReferenceId(id, args.scene_id, role, cast, true);
+      const asset = state.package!.assets?.[resolved];
+      if (!asset) throw semanticRefError(args.scene_id, role, resolved);
+      if (asset.kind !== 'image') throw new Error(`${role} ${resolved} is ${asset.kind}; ${model} needs a raster image reference, not ${asset.kind}. Generate a proper image reference instead of substituting a still for video.`);
       if (asset.status === 'ready') {
-        if (typeof asset.file !== 'string' || typeof asset.sha256 !== 'string') throw new Error(`${role} ${id} is ready but has no usable file/sha256; regenerate the image reference.`);
+        if (typeof asset.file !== 'string' || typeof asset.sha256 !== 'string') throw new Error(`${role} ${resolved} is ready but has no usable file/sha256; regenerate the image reference.`);
       } else if (asset.status !== 'pending' || asset.gen?.generator !== 'flux3-klein') {
-        throw new Error(`${role} ${id} is ${asset.status}; provide a ready image or a pending FLUX image plan that the shot can depend on.`);
+        throw new Error(`${role} ${resolved} is ${asset.status}; provide a ready image or a pending FLUX image plan that the shot can depend on.`);
       }
-      return id;
+      return resolved;
     };
 
     let image = visualRef(args.image, 'Picture 1 (subject/identity)', model === 'h3');
