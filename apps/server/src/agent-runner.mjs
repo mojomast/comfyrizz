@@ -10,6 +10,16 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { aspectFromSize, extractBrief } from '../../../packages/agent/dist/src/index.js';
 import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
+import {
+  HYBRID_CORRECTION_SYSTEM,
+  addUsage,
+  buildCorrectionPrompt,
+  correctionCalledPropose,
+  extractPackageContext,
+  hybridPlanningCorrectionEnabled,
+  normalizeCorrectionFailures,
+  phaseUsageBundle,
+} from './hybrid-planning-correction.mjs';
 
 const SVG_SYSTEM = [
   'You write one standalone SVG document and nothing else.',
@@ -713,7 +723,7 @@ function createLlmSvgGenerator(model, sessionId) {
 export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOString(), providers = {}, resolveProviderConfig, motionModel: defaultMotionModel = 'auto' } = {}) {
   const packagesDir = join(runtimeDir, 'packages');
   const assetsDir = join(packagesDir, 'assets');
-  return async function runCpuAgent({ brief, brand, provider, model: modelName, motionModel: requestedMotionModel, thinking, sessionId = 'cpu-slice', onEvent } = {}) {
+  return async function runCpuAgent({ brief, brand, provider, model: modelName, motionModel: requestedMotionModel, thinking, planningCorrection, sessionId = 'cpu-slice', onEvent } = {}) {
     if (typeof brief !== 'string' || brief.trim().length === 0) {
       const error = new Error('brief is required');
       error.status = 400;
@@ -723,6 +733,21 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       const error = new Error('thinking must be enabled or disabled');
       error.status = 400;
       throw error;
+    }
+    if (planningCorrection) {
+      if (!hybridPlanningCorrectionEnabled()) {
+        const error = new Error('hybrid planning correction is disabled');
+        error.status = 400;
+        error.code = 'HYBRID_CORRECTION_DISABLED';
+        throw error;
+      }
+      if (thinking === 'disabled') {
+        const error = new Error('hybrid planning correction requires thinking enabled');
+        error.status = 400;
+        error.code = 'HYBRID_CORRECTION_THINKING';
+        throw error;
+      }
+      thinking = 'enabled';
     }
     const brandKit = brand?.kit ?? null;
     const brandAssets = brand?.assets ?? null;
@@ -814,8 +839,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       };
     };
     const runStartedAt = Date.now();
-    const runOnce = async (model, repairInstructions = null, repairSystem = REPAIR_SYSTEM) => {
-      const phase = repairInstructions ? 'repair' : 'initial';
+    const runOnce = async (model, repairInstructions = null, repairSystem = REPAIR_SYSTEM, phaseName = null) => {
+      const phase = phaseName ?? (repairInstructions ? 'repair' : 'initial');
       const phaseStartedAt = Date.now();
       onEvent?.({ type: 'runner_phase', phase, status: 'started', elapsedMs: Date.now() - runStartedAt });
       try {
@@ -873,13 +898,51 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       ? candidate.ok && generatedFilmCompletionProblems(candidate.package, intent, motionModel, brief).length === 0 && validatePackage(candidate.package).valid
       : motionGraphicsCompletionProblems(candidate, brief).length === 0;
     const aggregateUsage = { input: 0, output: 0 };
-    const absorbUsage = result => {
-      aggregateUsage.input += Number(result?.usage?.input) || 0;
-      aggregateUsage.output += Number(result?.usage?.output) || 0;
+    const phases = phaseUsageBundle();
+    const absorbUsage = (result, phase) => {
+      addUsage(aggregateUsage, result?.usage);
+      if (phases[phase]) addUsage(phases[phase], result?.usage);
     };
-    let slice = await runOnce(agentModel);
-    absorbUsage(slice.result);
-    const fallback = false;
+    let hybrid = null;
+    let slice;
+    if (planningCorrection) {
+      const draft = planningCorrection.package;
+      if (!draft || typeof draft !== 'object' || typeof draft.id !== 'string') {
+        const error = new Error('planningCorrection.package is required');
+        error.status = 400;
+        error.code = 'HYBRID_CORRECTION_INVALID';
+        throw error;
+      }
+      const failures = normalizeCorrectionFailures(planningCorrection.failures);
+      const context = extractPackageContext(draft);
+      const correctionPrompt = buildCorrectionPrompt({ brief, failures, context });
+      slice = {
+        ok: true,
+        package: structuredClone(draft),
+        routes: [],
+        pendingGpu: [],
+        svgAssets: [],
+        result: { usage: { input: 0, output: 0 }, toolCalls: [] },
+      };
+      slice = await runOnce(agentModel, correctionPrompt, HYBRID_CORRECTION_SYSTEM, 'correction');
+      absorbUsage(slice.result, 'correction');
+      const toolEvents = (slice.result.toolCalls ?? []).map(call => ({ name: call.name, ok: call.ok }));
+      const fullReplan = correctionCalledPropose(toolEvents);
+      hybrid = {
+        applied: true,
+        fullReplan,
+        discarded: fullReplan,
+        phase: 'correction',
+      };
+      if (fullReplan) {
+        slice = {
+          ...slice,
+          package: structuredClone(draft),
+        };
+      }
+    } else {
+    slice = await runOnce(agentModel);
+    absorbUsage(slice.result, 'initial');
     if (agentModel && !acceptable(slice)) {
       if (intent.generatedFilm) {
         const initialProblems = [
@@ -895,7 +958,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           ...(sharedCastGuide.length ? [sharedCastGuide.join('\n')] : []),
           `Validation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`,
         ].join('\n\n'));
-        absorbUsage(slice.result);
+        absorbUsage(slice.result, 'repair');
         if (!acceptable(slice)) {
           const problems = [
             ...generatedFilmCompletionProblems(slice.package, intent, motionModel, brief),
@@ -919,7 +982,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           ...(sharedCastGuide.length ? [sharedCastGuide.join('\n')] : []),
           `Validation report: the current motion-graphics package is incomplete. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`,
         ].join('\n\n'), MOTION_GRAPHICS_REPAIR_SYSTEM);
-        absorbUsage(slice.result);
+        absorbUsage(slice.result, 'repair');
         if (!acceptable(slice)) {
           const problems = motionGraphicsCompletionProblems(slice, brief);
           const lines = problemLines(problems);
@@ -945,13 +1008,15 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         }
       }
     }
+    }
+    const fallback = false;
     const validation = validatePackage(slice.package);
     if (!validation.valid) {
       const error = new Error('agent produced an invalid package');
       error.errors = validation.errors;
       throw error;
     }
-    if (intent.generatedFilm) {
+    if (intent.generatedFilm && !planningCorrection) {
       const problems = generatedFilmCompletionProblems(slice.package, intent, motionModel, brief);
       if (problems.length) {
         const error = new Error(`generated-film plan is incomplete: ${problems.join('; ')}`);
@@ -961,7 +1026,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
         throw error;
       }
     }
-    const generatedAssets = inlineGeneratedAssets(slice.package, packagesDir);
+    const generatedAssets = planningCorrection ? {} : inlineGeneratedAssets(slice.package, packagesDir);
     return {
       ok: slice.ok,
       live,
@@ -975,8 +1040,14 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       routes: slice.routes,
       pendingGpu: slice.pendingGpu,
       svgAssets: slice.svgAssets,
-      usage: { input: aggregateUsage.input, output: aggregateUsage.output, total: aggregateUsage.input + aggregateUsage.output },
+      usage: {
+        input: aggregateUsage.input,
+        output: aggregateUsage.output,
+        total: aggregateUsage.input + aggregateUsage.output,
+        phases,
+      },
       events: slice.result.toolCalls.map(call => ({ name: call.name, ok: call.ok })),
+      ...(hybrid ? { hybrid } : {}),
     };
   };
 }

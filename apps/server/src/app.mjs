@@ -70,6 +70,7 @@ import { createProductionCoordinator } from './productions/coordinator.mjs';
 import { createProductionRoutes } from './routes/productions.mjs';
 import { createPreferencesStore } from './productions/preferences.mjs';
 import { createIterationRoutes } from './productions/iteration-routes.mjs';
+import { readPlanningCorrection } from './hybrid-planning-correction.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 // IP11: a completion save races with edits. Re-read the latest package and reapply the
@@ -1820,6 +1821,13 @@ export function createApp({
     if (url.pathname === '/api/agent' && request.method === 'POST') {
       if (!agentRunner) return sendJson(response, 503, { error: 'agent runner not configured' });
       const body = await readJson(request);
+      const correctionGate = readPlanningCorrection(body);
+      if (correctionGate.error) {
+        return sendJson(response, correctionGate.status, {
+          error: correctionGate.error,
+          code: correctionGate.code,
+        });
+      }
       // PS03: an unsatisfiable brief is refused here, before any planning tool
       // call or provider spend. The response carries a typed code and details.
       const refusal = preflightBrief(body);
@@ -1832,6 +1840,13 @@ export function createApp({
           conflict: refusal.conflict,
           next_steps: refusal.next_steps,
         });
+      }
+      let correctionPackage = null;
+      if (correctionGate.value) {
+        correctionPackage = store.read(correctionGate.value.packageId);
+        if (!correctionPackage) {
+          return sendJson(response, 404, { error: 'package not found', code: 'PACKAGE_NOT_FOUND' });
+        }
       }
       const sessionId = typeof body.sessionId === 'string' && body.sessionId.trim() ? body.sessionId.trim() : randomUUID();
       const progress = createAgentProgress(sessionId);
@@ -1853,6 +1868,12 @@ export function createApp({
           model: body.model,
           motionModel: body.motionModel,
           thinking: body.thinking,
+          ...(correctionGate.value ? {
+            planningCorrection: {
+              package: correctionPackage,
+              failures: correctionGate.value.failures,
+            },
+          } : {}),
           sessionId,
           runtimeDir,
           onEvent: event => {
@@ -1880,6 +1901,7 @@ export function createApp({
           provider: result.provider ?? null,
           model: result.model ?? null,
           usage: result.usage ?? { input: 0, output: 0, total: 0 },
+          ...(result.hybrid ? { hybrid: result.hybrid } : {}),
         });
       } catch (error) {
         progress.finish('failed', error.message);
