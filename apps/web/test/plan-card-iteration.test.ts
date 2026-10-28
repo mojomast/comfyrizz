@@ -110,6 +110,18 @@ test('Approve is hidden until a level is set and the picker is inline', () => {
   assert.equal('command' in approval, false);
 });
 
+test('a resumed paid plan without an iteration field also requires a level', () => {
+  const card = readPlanCard(state({
+    production: { id: PRODUCTION_ID, revision: 4 },
+  }));
+  assert.equal(card.iterationRequired, true);
+  assert.equal(card.canApprove, false);
+  assert.equal(approvePlan(card).code, 'ITERATION_LEVEL_REQUIRED');
+  const html = renderPlanCard(card, { iterationRead: readFixture() });
+  assert.equal(html.includes('data-plan-approve'), false);
+  assert.match(html, /data-il-slot="iteration-level-picker"/);
+});
+
 test('a free plan still approves when no iteration level is set', () => {
   const card = readPlanCard(state({
     events: [paidPlan()],

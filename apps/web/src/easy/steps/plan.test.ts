@@ -20,7 +20,7 @@ const PLAN_HASH = 'c'.repeat(64);
 function snapshot() {
   return {
     productionId: PRODUCTION_ID,
-    production: { id: PRODUCTION_ID, revision: 4 },
+    production: { id: PRODUCTION_ID, revision: 4, iteration: { policy: { level: 'draft' }, level: 'draft' } },
     revision: 4,
     gap: false,
     stale: false,

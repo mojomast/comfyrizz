@@ -257,10 +257,6 @@ function isPaidAction(action: PlanCardAction): boolean {
   return true;
 }
 
-function productionDeclaresIteration(production: Record<string, unknown>): boolean {
-  return Object.prototype.hasOwnProperty.call(production, 'iteration');
-}
-
 function policyFromProduction(production: Record<string, unknown>): boolean {
   return isPlainObject(production.iteration)
     && isPlainObject((production.iteration as Record<string, unknown>).policy);
@@ -453,17 +449,13 @@ export function readPlanCard(
   const plan = parsed.plan;
   const approval = approvalState(plan, events);
   const paid = plan.actions.some(isPaidAction);
-  const gateActive = options.iterationRequired === true
-    || options.iterationLevelChanged === true
-    || productionDeclaresIteration(production)
-    || events.some((event) => isPlainObject(event) && event.type === 'iteration.set');
   const hasPolicy = policyFromProduction(production)
     || events.some((event) => isPlainObject(event) && event.type === 'iteration.set');
   const iterationLevelChanged = paid && (options.iterationLevelChanged === true || levelChangedByJournal);
-  const iterationRequired = paid && !iterationLevelChanged && (
-    options.iterationRequired === true
-    || (gateActive && !hasPolicy)
-  );
+  // Paid approval always requires a server-side level. Resumed/legacy
+  // productions may omit `production.iteration` entirely; that absence must
+  // show the picker rather than bypassing the gate and failing after spend-cap.
+  const iterationRequired = paid && !iterationLevelChanged && (options.iterationRequired === true || !hasPolicy);
   return finalizeCard({
     ...baseCard(productionId, 'ready'),
     revision,

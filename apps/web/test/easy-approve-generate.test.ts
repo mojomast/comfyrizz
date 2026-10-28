@@ -37,7 +37,7 @@ function snapshot(overrides = {}, actions = [
 ]) {
   return {
     productionId: PRODUCTION_ID,
-    production: { id: PRODUCTION_ID, revision: 4 },
+    production: { id: PRODUCTION_ID, revision: 4, iteration: { policy: { level: 'balanced' }, level: 'balanced' } },
     revision: 4,
     events: [planEvent(actions)],
     gap: false,
