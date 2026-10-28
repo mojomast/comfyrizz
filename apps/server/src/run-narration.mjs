@@ -54,13 +54,17 @@ export async function prepareRunNarration({ pkg, workDir, outputDir, packageDir,
 
   if (!existsSync(durationsPath) || !existsSync(narrationPath)) throw new Error('Narration preparation did not produce measured audio and durations');
   const durations = JSON.parse(readFileSync(durationsPath, 'utf8'));
-  const timeline = compileTimeline(pkg, narrationOptions(workDir));
-  for (const scene of timeline.scenes) {
+  const fps = Number(pkg.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
+  // Check the authored shot length, not the already-expanded measured timeline.
+  // Silent expansion would change the requested film duration after GPU planning.
+  for (const scene of pkg.scenes ?? []) {
     const measured = durations.scenes?.[scene.id]?.seconds;
-    if (Number.isFinite(measured) && scene.durationInFrames / timeline.fps + 0.001 < measured) {
-      throw new Error(`${scene.id}: narration exceeds scene duration`);
+    const preferredFrames = Number(scene.preferredFrames);
+    if (Number.isFinite(measured) && Number.isFinite(preferredFrames) && preferredFrames > 0 && measured > preferredFrames / fps + 0.001) {
+      throw new Error(`${scene.id}: narration exceeds the authored ${(preferredFrames / fps).toFixed(2)}s shot duration; shorten the line before media generation`);
     }
   }
+  const timeline = compileTimeline(pkg, narrationOptions(workDir));
   mkdirSync(outputDir, { recursive: true });
   cpSync(workAudio, join(outputDir, 'audio'), { recursive: true });
   cpSync(workAudio, packageAudio, { recursive: true });

@@ -78,6 +78,25 @@ test('narration is required only for enabled voice with scene text', () => {
   assert.equal(runNeedsNarration(pkg), false);
 });
 
+test('narration cannot silently expand an authored shot after media planning', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'comfyrizz-run-narration-long-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const workDir = join(root, 'work');
+  const outputDir = join(root, 'out');
+  const packageDir = join(root, 'package');
+  for (const dir of [workDir, outputDir, join(packageDir, 'audio')]) mkdirSync(dir, { recursive: true });
+  const pkg = narratedPackage();
+  const sceneId = pkg.scenes[0].id;
+  pkg.scenes[0].preferredFrames = 30;
+  pkg.assets.a_narration = { kind: 'audio', status: 'ready', file: 'audio/narration.norm.wav' };
+  writeFileSync(join(packageDir, 'audio', 'narration.norm.wav'), 'wav');
+  writeFileSync(join(packageDir, 'audio', 'durations.json'), JSON.stringify({ scenes: { [sceneId]: { seconds: 2 } } }));
+  await assert.rejects(
+    () => prepareRunNarration({ pkg, workDir, outputDir, packageDir }),
+    /narration exceeds the authored 1\.00s shot duration/,
+  );
+});
+
 test('final media merge retains new measured narration without overriding live edits', () => {
   const baseline = narratedPackage();
   const current = structuredClone(baseline);
