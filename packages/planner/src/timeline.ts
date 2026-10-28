@@ -214,6 +214,8 @@ export interface Timeline {
 export class TimelineError extends Error {
   readonly code: string;
   readonly sceneId?: string;
+  /** A package/plan problem is client-correctable, so routes answer 422 instead of a naked 500. */
+  readonly status = 422;
   constructor(code: string, message: string, sceneId?: string) {
     super(message);
     this.name = 'TimelineError';

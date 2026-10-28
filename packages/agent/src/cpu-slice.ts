@@ -55,6 +55,27 @@ function cpuSliceError(code: string, message: string): Error {
   return Object.assign(new Error(message), { name: 'CpuSliceError', status: 422, code });
 }
 
+/** Preserve an already typed failure; otherwise make the untyped one an actionable 422. */
+function cpuSliceFailure(error: unknown): Error {
+  if (error && typeof error === 'object') {
+    const candidate = error as { status?: unknown };
+    if (Number.isInteger(candidate.status)) return error as Error;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return cpuSliceError('CPU_SLICE_FAILED', message.trim() || 'CPU slice failed without an error message.');
+}
+
+/** The final scene has no next scene, so its outgoing transition is a cut (0 overlap), not a 500. */
+function clearFinalSceneTransition(pkg: Record<string, any>): void {
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const transition = scenes.at(-1)?.transitionOut;
+  if (!transition || typeof transition !== 'object') return;
+  const frames = Number(transition.frames);
+  if (transition.type === 'cut' && frames === 0) return;
+  if (transition.type === 'none' && !(frames > 0)) return;
+  scenes[scenes.length - 1].transitionOut = { type: 'cut', frames: 0 };
+}
+
 /** The offline plan: route and generate four vector assets, then plan one FLUX still. */
 export function defaultCpuScript(brief: string): ScriptedCall[] {
   const scenes = defaultCpuScenes(brief);
@@ -79,6 +100,14 @@ export function defaultCpuScript(brief: string): ScriptedCall[] {
  * raster need left as a pending-GPU plan plus a procedural fallback.
  */
 export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceResult> {
+  try {
+    return await planCpuSlice(options);
+  } catch (error) {
+    throw cpuSliceFailure(error);
+  }
+}
+
+async function planCpuSlice(options: CpuSliceOptions): Promise<CpuSliceResult> {
   const intent = classifyProductionIntent(options.brief);
   const motionModel = parseMotionModel(options.motionModel, 'auto');
   if (intent.generatedFilm && !options.model) {
@@ -119,6 +148,7 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
   });
   const pkg = draft ?? (result.toolCalls.find(call => call.name === 'storyboard.propose')?.result as any)?.package;
   if (!pkg) throw cpuSliceError('PACKAGE_DRAFT_MISSING', 'agent did not produce a package draft');
+  clearFinalSceneTransition(pkg);
   const now = options.now ?? (() => new Date().toISOString());
   pkg.$schema = pkg.$schema ?? 'https://comfyrizz.example/schema/package-v1.json';
   pkg.createdAt = pkg.createdAt ?? now();
