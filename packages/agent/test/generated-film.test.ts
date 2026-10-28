@@ -69,6 +69,28 @@ test('retained four-shot prompt is generated film; explicit procedural controls 
   assert.equal(hybrid.wordless, false);
   assert.equal(classifyProductionIntent('Create a narrated generated film in 4 shots with motion.cue_phrases copied from narration.').requiresNarrationCues, true);
   assert.equal(classifyProductionIntent('No SVG or charts. Create a generated film in 4 shots with a felt mascot and coastal sound.').kind, 'generated-film');
+  const liveAction = classifyProductionIntent('A funny 2 minute video featuring people getting hurt falling over. Make it live action please.');
+  assert.equal(liveAction.kind, 'generated-film');
+  assert.equal(liveAction.evidence.generatedShots, true);
+  assert.equal(liveAction.liveActionHumans, true);
+  assert.equal(liveAction.requestedSeconds, 120);
+  assert.equal(classifyProductionIntent('A 1 minute and 30 second live-action short.').requestedSeconds, 90);
+  assert.equal(classifyProductionIntent('A 1.5-minute live-action short.').requestedSeconds, 90);
+  const realisticHumans = classifyProductionIntent('A two minute skateboard film with realistic humans and a fisheye lens.');
+  assert.equal(realisticHumans.kind, 'generated-film');
+  assert.equal(realisticHumans.liveActionHumans, true);
+  assert.equal(realisticHumans.requestedSeconds, 120);
+  const skateboardFilm = classifyProductionIntent('A two minute skateboard film where people take massive slams.');
+  assert.equal(skateboardFilm.kind, 'generated-film');
+  assert.equal(skateboardFilm.requestedSeconds, 120);
+  const photorealisticHumans = classifyProductionIntent('A skateboard video with photorealistic humans and a fisheye lens.');
+  assert.equal(photorealisticHumans.kind, 'generated-film');
+  assert.equal(photorealisticHumans.liveActionHumans, true);
+  const explainer = classifyProductionIntent('An explainer video explaining our product with generated visuals.');
+  assert.equal(explainer.kind, 'generated-film');
+  const proceduralExplainer = classifyProductionIntent('An explainer video with animated charts and kinetic typography.');
+  assert.equal(proceduralExplainer.kind, 'motion-graphics');
+  assert.equal(classifyProductionIntent('Not live action: make a motion-graphics explainer with SVG charts.').kind, 'motion-graphics');
   assert.equal(parseMotionModel(undefined), 'auto');
   assert.throws(() => parseMotionModel('flux'), /motionModel/);
 });
@@ -289,6 +311,89 @@ test('requested Remotion typography survives generated-video planning', async ()
   assert.equal(pkg.scenes[1].media_only, false);
   assert.equal(pkg.scenes[1].copy.headline, 'REDRAWN');
   assert.equal(pkg.scenes[1].copy.sub, 'One reflection returns.');
+});
+
+test('generated films gain editable Remotion bookends without changing shots, media or duration', async () => {
+  const brief = 'Create an 18-second cinematic generated film in 3 shots about a cartographer restoring a river atlas, with native sound and a strong opening and closing.';
+  const scenes = [
+    { id: 'shot1', layout: 'hero', preferredFrames: 120, copy: { headline: 'THE ATLAS', sub: 'A river remembered.' } },
+    { id: 'shot2', layout: 'hero', preferredFrames: 240, copy: { headline: 'THE CURRENT' } },
+    { id: 'shot3', layout: 'hero', preferredFrames: 180, copy: { headline: 'HOME AGAIN' }, transitionOut: { type: 'fade', frames: 12 } },
+  ];
+  const intent = classifyProductionIntent(brief);
+  assert.equal(intent.bookends, true);
+  const { tools, getDraft, identity, composition } = await filmTools('h3', scenes, undefined, brief);
+  const before = getDraft();
+  assert.deepEqual(before.scenes.map((scene: any) => scene.id), ['shot1', 'shot2', 'shot3']);
+  assert.deepEqual(before.scenes.map((scene: any) => scene.preferredFrames), [120, 240, 180]);
+  assert.equal(before.scenes[0].layout, 'title');
+  assert.equal(before.scenes[0].variant, 'centered');
+  assert.equal(before.scenes[0].copy.headline, 'THE ATLAS');
+  assert.equal(before.scenes[0].motion.recipe, 'kinetic');
+  assert.equal(before.scenes[0].motion.entry, 'maskRise');
+  assert.equal(before.scenes[1].layout, 'hero');
+  assert.equal(before.scenes[2].layout, 'title');
+  assert.equal(before.scenes[2].variant, 'outro');
+  assert.equal(before.scenes[2].motion.entry, 'fadeUp');
+  assert.equal(before.scenes[2].transitionOut, undefined);
+
+  await tools['assets.generate_video'].run(direction(identity, composition, { motion_model: 'h3', wordless: true }));
+  await tools['assets.generate_video'].run({ ...direction(identity, composition), scene_id: 'shot3', motion_model: 'h3', wordless: true });
+  const pkg = getDraft();
+  assert.equal(pkg.scenes[0].media_only, false);
+  assert.equal(pkg.scenes[2].media_only, false);
+  assert.equal(pkg.scenes[0].background.asset, pkg.scenes[0].media[0].asset);
+  assert.equal(pkg.scenes[2].background.asset, pkg.scenes[2].media[0].asset);
+  assert.equal(pkg.scenes[0].copy.headline, 'THE ATLAS');
+  assert.equal(pkg.scenes[2].copy.headline, 'HOME AGAIN');
+  assert.equal(pkg.scenes.reduce((sum: number, scene: any) => sum + scene.preferredFrames, 0), 540);
+});
+
+test('generated-video attachment preserves independent editable vector overlays', async () => {
+  const brief = 'Create a 12-second generated film in 2 shots about an atlas, with editable Remotion titles and a vector compass overlay.';
+  const { tools, getDraft, identity, composition } = await filmTools('h3', [shot('shot1'), shot('shot2')], undefined, brief);
+  const vector = await tools['assets.generate_svg'].run({ scene_id: 'shot1', kind: 'icon', intent: 'A precise compass rose with no letters.' }) as any;
+  await tools['storyboard.edit'].run({
+    scene_id: 'shot1',
+    patch: { foreground: [{ asset: vector.asset.id, x: 0.82, y: 0.24, w: 0.18, anim: 'fade-in' }] },
+  });
+  await tools['assets.generate_video'].run(direction(identity, composition, { motion_model: 'h3', wordless: true }));
+  const scene = getDraft().scenes[0];
+  assert.ok(scene.foreground.some((item: any) => item.asset === vector.asset.id));
+  assert.ok(scene.foreground.every((item: any) => item.asset !== scene.background.asset));
+  assert.equal(scene.media[0].asset, scene.background.asset);
+});
+
+test('explicit no-text films stay free of automatic editorial copy', async () => {
+  let draft: any;
+  const tools = createToolset({ motionModel: 'h3', onPackageChange: pkg => { draft = pkg; } });
+  await tools['storyboard.propose'].run({
+    brief: RETAINED_FILM_BRIEF,
+    title: 'The Lamp at Dusk', proposal,
+    scenes: [shot('shot1'), { ...shot('shot2'), transitionOut: { type: 'fade', frames: 12 } }],
+  });
+  assert.ok(draft.scenes.every((scene: any) => !scene.copy && !scene.motion?.recipe));
+  assert.ok(draft.scenes.every((scene: any) => scene.layout !== 'title'));
+  assert.equal(draft.scenes[1].transitionOut, undefined);
+});
+
+test('structured editorial intent selects a purpose-matched middle-shot recipe', async () => {
+  const brief = 'Create a generated film in 3 shots explaining a bicycle derailleur mechanism with sketch animation, clean generated footage and editable Remotion titles.';
+  assert.equal(classifyProductionIntent(brief).structuredVisual, 'sketch');
+  assert.equal(classifyProductionIntent('Create a generated film explaining a caching workflow and cause and effect.').structuredVisual, 'technical-flow');
+  let draft: any;
+  const tools = createToolset({ motionModel: 'h3', onPackageChange: pkg => { draft = pkg; } });
+  await tools['storyboard.propose'].run({
+    brief, title: 'The Derailleur', proposal,
+    scenes: [
+      { id: 'shot1', layout: 'hero', preferredFrames: 120, copy: { headline: 'SHIFT' } },
+      { id: 'shot2', layout: 'hero', preferredFrames: 180, copy: { headline: 'GUIDE THE CHAIN', body: 'The cage moves the chain between cogs.' } },
+      { id: 'shot3', layout: 'hero', preferredFrames: 120, copy: { headline: 'IN SYNC' } },
+    ],
+  });
+  assert.equal(draft.scenes[0].motion.recipe, 'kinetic');
+  assert.equal(draft.scenes[1].motion.recipe, 'sketch');
+  assert.equal(draft.scenes[2].motion.recipe, 'kinetic');
 });
 
 test('auto route is deterministic and explicit non-auto conflicts are refused', async () => {

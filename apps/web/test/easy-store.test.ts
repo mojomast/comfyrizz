@@ -33,7 +33,7 @@ test('defaults equal Appendix B', () => {
     chatId: null,
     productionId: null,
     offline: false,
-    idea: { text: '', lengthS: 30, aspect: '16:9', look: 'clay', sound: true },
+    idea: { text: '', lengthS: 30, aspect: '16:9', look: 'cinematic-dark', sound: true },
     questions: [],
     questionsAsked: false,
     answers: {},

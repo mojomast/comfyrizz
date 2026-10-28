@@ -5,6 +5,7 @@
 // behind the more-control link. Draft is chosen under the hood by the caller.
 
 import { COPY } from './copy.ts';
+import { superEasyBrandMarkup } from './brand.ts';
 import { escapeHtml } from '../components.ts';
 import { escapeToStudio } from './escape.ts';
 import { renderProcedureToggle } from '../procedure/toggle.ts';
@@ -49,6 +50,7 @@ export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string 
   const setupText = colab ? `Google Colab · up to ${options.setup?.spendCap} credits per video` : 'Connect your AI agent and Google Colab for generated films';
   const motionModel = options.setup?.motionModel ?? 'auto';
   return `<section class="super-easy-home" aria-labelledby="super-easy-title" data-super-easy-home>
+${superEasyBrandMarkup()}
 <h1 class="super-easy-home-title" id="super-easy-title">${escapeHtml(COPY.home.title)}</h1>
 <form class="super-easy-home-form" data-super-easy-form novalidate>
 <label class="super-easy-home-label" for="super-easy-prompt">${escapeHtml(COPY.home.promptLabel)}</label>

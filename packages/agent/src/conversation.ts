@@ -576,6 +576,7 @@ export async function runConversationTurn(options: {
   clips?: ConversationClips | null;
   characters?: ConversationCharacters | null;
   production?: ProductionToolContext | null;
+  onEvent?: (event: { type: string; [key: string]: unknown }) => void;
   build: (plan: ConversationPlan) => Promise<{ packageId: string; revision: number }>;
 }): Promise<{ reply: string; plan: ConversationPlan | null; built: boolean; trace: ConversationTrace; warning?: string }> {
   let plan = options.plan;
@@ -618,12 +619,16 @@ export async function runConversationTurn(options: {
   };
   const finish = (reply: string, stop = 'final', warning?: string) => {
     trace.repairs = repairs; trace.elapsedMs = Date.now() - started; trace.stop = stop;
+    options.onEvent?.({ type: 'done', stop, usage: { ...trace.usage } });
     return { reply, plan, built, trace, ...(warning ? { warning } : {}) };
   };
   const buildSummary = () => `The project now contains “${plan!.title}”: ${plan!.scenes.length} scenes with on-screen copy, narration script and visual directions. You can preview it now or tell me what to change. Audio, GPU generation and MP4 export are separate steps.`;
   try {
   for (let step = 0; step < 6; step += 1) {
     trace.steps = step + 1;
+    options.onEvent?.({ type: 'step', step: step + 1, maxSteps: 6 });
+    const modelStarted = Date.now();
+    const usageBefore = { ...trace.usage };
     const selected = options.skillsEnabled === false ? { text: '', skills: [] } : composeConversationSkills({ hasPlan: Boolean(plan), hasProject: Boolean(options.projectContext), mode: options.mode });
     for (const skill of selected.skills) if (!trace.skills.some(s => s.id === skill.id)) trace.skills.push(skill);
     const system = `${SYSTEM}\nMode: ${options.mode === 'express' ? 'Express: minimize questions and act using reasonable assumptions.' : 'Chat: collaborate, then build when ready.'}\n${selected.text}${references ? `\n${REFERENCE_RULES}` : ''}${clips ? `\n${CLIP_RULES}` : ''}${characters ? `\n${CHARACTER_RULES}` : ''}${production ? `\n${PRODUCTION_SYSTEM_PROMPT}` : ''}${built ? '\nThe build succeeded. Summarize the result in plain language now; do not call more tools.' : ''}`;
@@ -648,6 +653,12 @@ export async function runConversationTurn(options: {
       if (chunk.type === 'usage') { trace.usage.input += chunk.input; trace.usage.output += chunk.output; }
       if (text.length > 24000 || calls.length > 12 || JSON.stringify(calls).length > 120000) throw new Error('Agent response exceeded the conversation limit');
     }
+    options.onEvent?.({
+      type: 'model_result',
+      durationMs: Date.now() - modelStarted,
+      toolCalls: calls.map(call => call.name),
+      usage: { input: trace.usage.input - usageBefore.input, output: trace.usage.output - usageBefore.output },
+    });
     if (!calls.length) {
       if (!text.trim()) {
         if (built) return finish(buildSummary(), 'built-summary');
@@ -658,6 +669,8 @@ export async function runConversationTurn(options: {
     messages.push({ role: 'assistant', content: text, tool_calls: calls, ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}) });
     for (const call of calls) {
       let result: unknown;
+      const toolStarted = Date.now();
+      options.onEvent?.({ type: 'tool_call', name: call.name, args: call.args });
       try {
         if (built) result = { skipped: 'Project already built this turn' };
         else if (references && referenceTools && isReferenceToolName(call.name)) {
@@ -723,6 +736,12 @@ export async function runConversationTurn(options: {
           result = { error: (error as Error).message, instruction: `Repair ${repairs} of 2: change only the arguments this error names, keep the rest, and retry. Never resend identical arguments. Do not claim the failed operation succeeded.` };
         }
       }
+      const traced = trace.tools.at(-1);
+      options.onEvent?.({
+        type: 'tool_result', name: call.name, ok: traced?.ok === true,
+        durationMs: Date.now() - toolStarted,
+        ...(traced && !traced.ok && traced.error ? { message: traced.error } : {}),
+      });
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
     }
     // Give the model one final turn after a successful build so its reply can

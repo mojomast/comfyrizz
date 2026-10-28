@@ -77,6 +77,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let phase: SuperEasyPhase = 'idle';
   let objectUrl: string | null = null;
   let proposal: SuperEasyProposal | null = null;
+  let activeRunId: string | null = null;
 
   function finalBlobUrl(value: unknown): string | null {
     const url = buildGalleryModel(value).final.url;
@@ -161,6 +162,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(input.revisionNotes === undefined ? {} : { revisionNotes: input.revisionNotes }),
     };
     lastInput = nextInput;
+    activeRunId = null;
     stopped = false;
     proposal = null;
     preview = false;
@@ -174,6 +176,10 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
     const result = await run(nextInput, {
       ...options,
+      onRunStarted(runId) {
+        activeRunId = runId;
+        options.onRunStarted?.(runId);
+      },
       onPhase(next) {
         if (stopped) return;
         phase = next;
@@ -181,6 +187,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
         publish();
       },
     });
+    activeRunId = null;
 
     if (stopped) {
       if (result.ok) revokeUrl(finalBlobUrl(result.snapshot));
@@ -263,6 +270,9 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     }
     if (stopped) return;
     stopped = true;
+    const runId = activeRunId;
+    activeRunId = null;
+    if (runId) void options.api.cancelRun?.(runId).catch(() => {});
     cancelWatch();
     revokeObjectUrl();
     patchStatus('stopped');

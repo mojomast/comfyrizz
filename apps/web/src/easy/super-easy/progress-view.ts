@@ -7,9 +7,11 @@
 // survive frequent fraction events.
 
 import { COPY, fill } from './copy.ts';
+import { superEasyBrandMarkup } from './brand.ts';
 import { COPY as EASY_COPY } from '../copy.ts';
 import { renderSuperEasyDoneActions } from './escape.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
+import { agentConsoleMarkup } from '../agent-console.ts';
 import {
   readStages,
   STAGE_STATUS_TEXT,
@@ -89,10 +91,10 @@ export interface ProgressRoot {
 
 const VIDEO_URL = /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/iu;
 const PREVIEW_TITLE = 'Your preview is ready';
-const PREVIEW_BODY = 'Download MP4 makes the video file on this computer in about a minute. You can watch the preview while it works.';
-const PREVIEW_DOWNLOAD = 'Download MP4';
+const PREVIEW_BODY = 'Download preview MP4 makes a preview file on this computer in about a minute. It is not newly generated AI footage. You can watch the preview while it works.';
+const PREVIEW_DOWNLOAD = 'Download preview MP4';
 const PREVIEW_ACTION = 'Watch and review';
-const PREVIEW_LIVE = 'Preview ready. Download MP4 makes the video file.';
+const PREVIEW_LIVE = 'Preview ready. You can download a preview MP4.';
 
 function percent(fraction: number): number {
   if (!Number.isFinite(fraction)) return 0;
@@ -360,7 +362,7 @@ ${stages.stages.map(stageMarkup).join('\n')}
 ${gallerySlots.map((slot) => slot.html).join('\n')}
 </ul>`;
 
-  const actionsHtml = failure !== null
+  const primaryActionsHtml = failure !== null
     ? failureMarkup(failure)
     : finalReady
       ? renderSuperEasyDoneActions({
@@ -371,6 +373,12 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
       : previewReady
         ? previewMarkup()
         : '';
+  const startOverHtml = finalReady ? '' : `<div class="super-easy-progress-start-over">
+<button type="button" class="btn btn-secondary" data-super-easy-make-another>Stop and start a new prompt</button>
+<p class="hint">Return to the idea screen. Any active video run is cancelled.</p>
+</div>`;
+  const studioHtml = finalReady ? '' : `<div class="super-easy-progress-mode-actions"><button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button><span class="hint">Switch views without stopping your work.</span></div>`;
+  const actionsHtml = `${studioHtml}${primaryActionsHtml}${startOverHtml}`;
 
   const keys: SuperEasyProgressKeys = {
     live: progressLiveKey(stages, gallery, {
@@ -383,8 +391,10 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
   };
 
   const html = `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress data-super-easy-live-key="${escapeHtml(keys.live)}" data-super-easy-chrome-key="${escapeHtml(keys.chrome)}" data-super-easy-gallery-key="${escapeHtml(keys.gallery)}" data-super-easy-actions-key="${escapeHtml(keys.actions)}" aria-labelledby="super-easy-progress-title">
+${superEasyBrandMarkup()}
 <h1 class="super-easy-progress-title" id="super-easy-progress-title">${escapeHtml(COPY.making.title)}</h1>
 <p class="super-easy-progress-subtitle">${escapeHtml(COPY.making.subtitle)}</p>
+${agentConsoleMarkup()}
 <p class="super-easy-progress-live" role="status" aria-live="polite" aria-atomic="true" data-super-easy-live data-super-easy-live-key="${escapeHtml(keys.live)}">${escapeHtml(liveText)}</p>
 <section class="super-easy-progress-gallery" aria-label="${escapeHtml(COPY.gallery.empty)}" data-super-easy-gallery>
 ${galleryHtml}
@@ -438,6 +448,7 @@ function patchGallery(container: ProgressElement, parts: SuperEasyProgressParts)
     return;
   }
 
+  const list = container.querySelectorAll?.('ul,ol')?.[0] ?? container;
   for (const slot of parts.gallerySlots) {
     if (existing.has(slot.id)) continue;
     const target = parts.gallerySlots
@@ -451,11 +462,11 @@ function patchGallery(container: ProgressElement, parts: SuperEasyProgressParts)
       }
       target.insertAdjacentHTML('beforebegin', slot.html);
     } else {
-      if (typeof container.insertAdjacentHTML !== 'function') {
+      if (typeof list.insertAdjacentHTML !== 'function') {
         container.innerHTML = parts.galleryHtml;
         return;
       }
-      container.insertAdjacentHTML('beforeend', slot.html);
+      list.insertAdjacentHTML('beforeend', slot.html);
     }
   }
 

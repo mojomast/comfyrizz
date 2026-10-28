@@ -1,5 +1,6 @@
 import './style.css';
 import './project-chat.css';
+import './easy/agent-console.css';
 import './characters/characters.css';
 import './ui/look-picker.css';
 import './productions/cards/iteration-card.css';
@@ -8,7 +9,7 @@ import { initShellLayout } from './ui/splitter';
 import { mountPalette } from './ui/palette.ts';
 import { createShellToastController } from './shell/toast.ts';
 import './shell/toast.css';
-import { registerCommand } from './editor/commands.ts';
+import { registerCommand, type EditorSidecar } from './editor/commands.ts';
 import { MODE_CHANGE_EVENT, mountModeToggle, setMode } from './ui/mode';
 import { getPrefs } from './ui/prefs';
 import { readIteration, setIteration } from './productions/client';
@@ -31,6 +32,7 @@ import colabHistoryJson from '../../../examples/pip-night-shift/colab-history.js
 import { readRunSnapshot } from './run-progress.ts';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
+import { agentConsoleMarkup, mountAgentConsole } from './easy/agent-console.ts';
 import { createReferenceApi } from './references/api.ts';
 import { createCharacterApi } from './characters/api.ts';
 import { mountCharactersTab } from './characters/mount.ts';
@@ -55,6 +57,7 @@ import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import pkgJson from '../../../examples/pip-night-shift/package.json';
 import timelineJson from '../../../examples/pip-night-shift/timeline.json';
 import { mountPreview, updatePreview as updatePreviewBase } from './preview';
+import { previewMediaPlan, type PreviewAudioRequest } from './preview-media.ts';
 import { mountScriptAudioPanel, type ScriptAudioPanelHandle } from './editor/inspector/panel.ts';
 import { createTakesApi, type ClipSummary, type TakesResponse } from './takes/api.ts';
 import { createClipStore, mountRenderBar, withRenderOverride, type RenderBarHandle, type RenderGateSummary } from './takes/render-bar.ts';
@@ -292,9 +295,9 @@ async function checkRecoveryOnBoot(opened: OpenedProject): Promise<void> {
 
 let timeline = structuredClone(timelineJson) as unknown as Timeline;
 let editorApi: SceneTimelineHandle | null = null;
-function adoptEditorPackage(next: PackageV1): void {
+function adoptEditorPackage(next: PackageV1, editor?: EditorSidecar): void {
   pkg = next;
-  editorStore.replaceDocument({ package: next as never });
+  editorStore.replaceDocument({ package: next as never, ...(editor ? { editor } : {}) });
 }
 
 // When the local server is open, the seeded demo's references and cast belong
@@ -754,9 +757,87 @@ function withTakePreview(nextPkg: PackageV1): PackageV1 {
   }
 }
 
-/** Every existing preview call goes through here so a take swap is never lost. */
+const previewMediaSources: Record<string, string> = {};
+const previewMediaKeys = new Map<string, string>();
+const previewMediaFailed = new Map<string, { key: string; at: number }>();
+const previewMediaFlights = new Map<string, Promise<void>>();
+let previewMediaPackageId: string | null = null;
+let previewMediaGeneration = 0;
+
+function revokePreviewUrl(file: string): void {
+  const url = previewMediaSources[file];
+  if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
+function resetPreviewMedia(nextPkg: PackageV1): void {
+  const packageId = String(nextPkg.id ?? '');
+  if (previewMediaPackageId !== packageId) {
+    previewMediaGeneration += 1;
+    for (const file of Object.keys(previewMediaSources)) revokePreviewUrl(file);
+    for (const key of Object.keys(previewMediaSources)) delete previewMediaSources[key];
+    previewMediaKeys.clear();
+    previewMediaFailed.clear();
+    previewMediaFlights.clear();
+    previewMediaPackageId = packageId;
+  }
+  for (const asset of Object.values<any>(nextPkg.assets ?? {})) {
+    const file = typeof asset?.file === 'string' ? asset.file : '';
+    const sha = typeof asset?.sha256 === 'string' ? asset.sha256 : '';
+    if (!file || !sha || asset?.kind !== 'audio') continue;
+    if (previewMediaSources[file] && previewMediaKeys.get(file) !== sha) {
+      revokePreviewUrl(file);
+      delete previewMediaSources[file];
+      previewMediaKeys.delete(file);
+    }
+  }
+}
+
+async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<void> {
+  const packageId = String(pkg.id ?? '');
+  const generation = previewMediaGeneration;
+  if (!packageId || requests.length === 0) return;
+  let changed = false;
+  await Promise.all(requests.map(async request => {
+    const failed = previewMediaFailed.get(request.file);
+    if (previewMediaSources[request.file] || previewMediaFlights.has(request.file)
+      || (failed && failed.key === request.cacheKey && Date.now() - failed.at < 30_000)) return;
+    const flight = (async () => {
+      try {
+        const response = await apiFetch(`/api/package/${encodeURIComponent(packageId)}/media?path=${encodeURIComponent(request.file)}`);
+        if (!response.ok) {
+          previewMediaFailed.set(request.file, { key: request.cacheKey, at: Date.now() });
+          return;
+        }
+        const url = URL.createObjectURL(await response.blob());
+        if (generation !== previewMediaGeneration || String(pkg.id ?? '') !== packageId) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        previewMediaSources[request.file] = url;
+        previewMediaKeys.set(request.file, request.cacheKey);
+        previewMediaFailed.delete(request.file);
+        changed = true;
+      } catch {
+        previewMediaFailed.set(request.file, { key: request.cacheKey, at: Date.now() });
+      } finally {
+        previewMediaFlights.delete(request.file);
+      }
+    })();
+    previewMediaFlights.set(request.file, flight);
+    await flight;
+  }));
+  if (changed && generation === previewMediaGeneration && String(pkg.id ?? '') === packageId) {
+    updatePreview(pkg, timeline, generatedAssets);
+  }
+}
+
+/** Every existing preview call goes through here so take swaps and audio sources are never lost. */
 function updatePreview(nextPkg: PackageV1, nextTimeline: Timeline, nextAssets?: Record<string, InlineAsset>): void {
-  updatePreviewBase(withTakePreview(nextPkg), nextTimeline, nextAssets);
+  resetPreviewMedia(nextPkg);
+  const previewPackage = withTakePreview(nextPkg);
+  const plan = previewMediaPlan(previewPackage, previewMediaSources);
+  updatePreviewBase(previewPackage, nextTimeline, nextAssets, plan.sources, plan.missingMedia);
+  void hydratePreviewAudio(plan.requests);
 }
 
 function previewClipFrom(clip: ClipSummary, data: TakesResponse): PreviewClip {
@@ -2559,12 +2640,14 @@ function adoptChatProject(project: ChatProject, built: boolean): void {
 function adoptBuiltPackage(body: any): void {
   pkg = body.package as PackageV1;
   timeline = body.timeline as Timeline;
-  adoptEditorPackage(pkg);
+  adoptEditorPackage(pkg, body.editor as EditorSidecar | undefined);
   // The agent route already persisted this revision; without the ack the
   // header reads a server-saved package as an unreachable server.
   if (Number.isSafeInteger(body.revision)) editorStore.noteSave({ type: 'ack', editSequence: 0, revision: body.revision });
-  generatedAssets = (body.generatedAssets ?? {}) as Record<string, InlineAsset>;
-  pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu as typeof pendingGpu : [];
+  if (body.preservePreviewState !== true) {
+    generatedAssets = (body.generatedAssets ?? {}) as Record<string, InlineAsset>;
+    pendingGpu = Array.isArray(body.pendingGpu) ? body.pendingGpu as typeof pendingGpu : [];
+  }
   scrub.max = String(timeline.durationInFrames - 1);
   renderStoryboard(); renderPalette(); renderAssets();
   takeInfoCache.clear(); takeUrlCache.clear(); previewClipMap = {}; previewAb = null;
@@ -3164,8 +3247,22 @@ function init(opened: OpenedProject): void {
     prompt.focus();
   });
 
+  const chatConsoleHost = document.createElement('div');
+  chatConsoleHost.innerHTML = agentConsoleMarkup();
+  const chatConsoleRoot = chatConsoleHost.firstElementChild;
+  if (chatConsoleRoot) {
+    $('chat-pane').prepend(chatConsoleRoot);
+    mountAgentConsole($('chat-pane'));
+  }
+
   projectChat = mountProjectChat({
     apiFetch: chatApiFetch,
+    getAgentProgress: async sessionId => {
+      const response = await chatApiFetch(`/api/agent/progress?sessionId=${encodeURIComponent(sessionId)}`);
+      if (!response.ok) throw new Error(`Progress HTTP ${response.status}`);
+      return await response.json();
+    },
+    onReviewPlan: () => { document.querySelector<HTMLElement>('#sa-tab-generate')?.click(); },
     getTurnContext: activeTurnContext,
     ...(opened.source === 'requested' ? {
       initialConversationId: opened.chatId,

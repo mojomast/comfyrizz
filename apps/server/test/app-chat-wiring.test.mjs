@@ -249,7 +249,7 @@ test('an unbound package still regenerates through the legacy run controller and
   assert.ok(app.events.entries.some(event => event.type === 'clip.take.landed' && event.runId === proposal.runId));
 });
 
-test('a production-bound package never starts from chat even with a legacy-approved plan hash', { timeout: 30_000 }, async t => {
+test('a production-bound correction creates a trusted plan but never starts from chat', { timeout: 30_000 }, async t => {
   const { app, api, pkg, runtimeDir, takeId } = await setup(t);
   const planHash = await approvedPlanHash(app, pkg);
 
@@ -272,8 +272,10 @@ test('a production-bound package never starts from chat even with a legacy-appro
   const response = await chatTurn(api, 'turn-bound-2601');
   assert.equal(response.status, 200, JSON.stringify(response.body));
   const proposal = response.body.conversation.clipProposals.find(item => item.id === 'cp_correct_ip26');
-  assert.equal(proposal.status, 'approval_required');
-  assert.equal(proposal.planHash, null);
+  assert.equal(proposal.status, 'plan_ready');
+  assert.match(proposal.planHash, /^[a-f0-9]{64}$/);
+  assert.match(proposal.planId, /^plan_/);
+  assert.equal(proposal.productionId, productionId);
   assert.equal(proposal.runId, undefined);
   assert.equal(proposal.queued, undefined);
 
@@ -289,9 +291,12 @@ test('a production-bound package never starts from chat even with a legacy-appro
 
   const afterSnapshot = await api(`/api/productions/${productionId}`);
   const afterEvents = await api(`/api/productions/${productionId}/events`);
-  assert.deepEqual(afterSnapshot.body, beforeSnapshot.body, 'the production snapshot is unchanged');
-  assert.deepEqual(afterEvents.body, beforeEvents.body, 'the production journal is unchanged');
-  assert.deepEqual(ledger.snapshot(), beforeLedger, 'the production budget ledger is unchanged');
+  assert.ok(afterSnapshot.body.revision > beforeSnapshot.body.revision, 'the signed plan is journaled');
+  const planEvent = afterEvents.body.events.find(event => event.type === 'plan.proposed' && event.data?.planHash === proposal.planHash);
+  assert.ok(planEvent, 'the exact chat correction plan is in the production journal');
+  assert.equal(planEvent.data.id, proposal.planId);
+  assert.ok(planEvent.data.actions.length > 0, 'the corrected shot has a dispatchable generation action');
+  assert.deepEqual(ledger.snapshot(), beforeLedger, 'plan creation still reserves no spend');
 
   const legacy = app.runs.approve(planHash);
   assert.equal(legacy.approved, true, 'the legacy hash approval existed, and still cannot authorise a bound run');

@@ -364,6 +364,7 @@ function svgAssetError(code: string, assetId: string, message: string): Error {
   return error;
 }
 
+
 export const SILENT_CONDITIONING_ASSET_ID = 'a_h3_silence_500ms_24k';
 const FASTH3_WORKFLOW = 'workflows/fasth3_omni_ref2va.api.json';
 const LTX_I2V_WORKFLOW = 'workflows/ltx25_i2v_2stage.api.json';
@@ -980,6 +981,63 @@ function applyProductionIntentToScene(scene: Record<string, any>, intent: Produc
   return next;
 }
 
+const STRUCTURED_LAYOUTS: Record<NonNullable<ProductionIntent['structuredVisual']>, readonly SceneLayout[]> = {
+  'technical-flow': ['hero', 'list', 'chart'],
+  sketch: ['title', 'hero', 'list', 'chart', 'code'],
+  morph: ['title', 'hero', 'compare', 'list'],
+  focus: ['hero', 'split', 'compare', 'chart', 'code'],
+};
+
+/**
+ * Keep AI footage and Remotion editorial work on the same shots. This preserves
+ * duration, narration and generated-media coverage while making the editorial
+ * layer deterministic instead of hoping the model remembers every instruction.
+ */
+function applyGeneratedFilmPresentation(scenes: Record<string, any>[], intent: ProductionIntent, title: string): Record<string, any>[] {
+  if (!intent.generatedFilm || scenes.length === 0) return scenes;
+  let next: Record<string, any>[] = scenes.map((scene, index) => {
+    const recipe = intent.structuredVisual;
+    const reservedBookend = intent.bookends
+      && ['title', 'hero'].includes(scene.layout)
+      && !(scene.media_only === true && scene.lower_third)
+      && (index === 0 || index === scenes.length - 1);
+    if (reservedBookend) return { ...scene };
+    if (!recipe || intent.noCaptions || scene.media_only === true || scene.motion?.recipe) return { ...scene };
+    if (!STRUCTURED_LAYOUTS[recipe].includes(scene.layout) || !meaningfulCopy(scene.copy)) return { ...scene };
+    const styled: Record<string, any> = { ...scene, motion: { ...(scene.motion ?? {}), recipe } };
+    delete styled.media_only;
+    return styled;
+  });
+
+  const bookend = (scene: Record<string, any>, variant: 'centered' | 'outro', fallbackHeadline: string): Record<string, any> => {
+    if (!intent.bookends || !['title', 'hero'].includes(scene.layout)) return scene;
+    // An explicit lower-third-only opening/closing is a deliberate alternative.
+    if (scene.media_only === true && scene.lower_third) return scene;
+    const copy = { ...(scene.copy ?? {}) };
+    if (!clampText(copy.headline, 48)) copy.headline = clampText(fallbackHeadline, 48);
+    if (variant === 'outro' && copy.headline === 'The End' && !copy.kicker) copy.kicker = clampText(title, 48);
+    const styled: Record<string, any> = {
+      ...scene,
+      layout: 'title' as const,
+      variant,
+      copy,
+      motion: {
+        ...(scene.motion ?? {}),
+        recipe: scene.motion?.recipe ?? 'kinetic',
+        entry: scene.motion?.entry ?? (variant === 'outro' ? 'fadeUp' : 'maskRise'),
+      },
+    };
+    delete styled.media_only;
+    return styled;
+  };
+
+  next[0] = bookend(next[0], 'centered', title);
+  if (next.length > 1) next[next.length - 1] = bookend(next[next.length - 1], 'outro', 'The End');
+  // A positive outgoing transition on the true last scene is never valid.
+  delete next[next.length - 1].transitionOut;
+  return next;
+}
+
 function withMotionFixes<T extends Record<string, unknown>>(result: T, pkg: Record<string, any>): T {
   const fixes = motionFixInstructions(lintPackageMotion(pkg));
   if (fixes.length === 0) return result;
@@ -1169,11 +1227,11 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     state.intent = intent;
     state.brief = args.brief;
     state.proposal = args.proposal;
-    const scenes = (args.scenes?.length
+    const scenes = applyGeneratedFilmPresentation((args.scenes?.length
       ? preparePlanningScenes(args.scenes, args.brief, sharedDataset?.id, requiredListItems)
         .map(scene => ensureComparisonPlates(normalizeScene(scene, title, datasetIds, new Set(), datasetAliases, requiredListItems)))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
-      .map(scene => applyProductionIntentToScene(scene, intent));
+      .map(scene => applyProductionIntentToScene(scene, intent)), intent, title);
     const theme = { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) };
     const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot(theme.palette, options.persistSvg) : null;
     if (mascot) {
@@ -1240,6 +1298,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const patchSetsLayout = typeof patch.layout === 'string' && (SCENE_LAYOUTS as readonly string[]).includes(patch.layout);
     const protectedLists = new Set<Record<string, any>>(requiredListItems ? nextScenes.filter(scene => scene.layout === 'list') : []);
     if (!patchSetsLayout) nextScenes = ensureComparisonScene(nextScenes, state.brief, protectedLists);
+    nextScenes = applyGeneratedFilmPresentation(nextScenes, state.intent ?? classifyProductionIntent(''), draft.title);
     state.package = { ...draft, datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
     return withMotionFixes(
@@ -1668,6 +1727,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       outputFps = packageFps;
     }
 
+    const sceneCount = state.package.scenes.length;
     const scenes = state.package.scenes.map((candidate: any, index: number) => {
       if (index !== sceneIndex) return candidate;
       let next = applyProductionIntentToScene(candidate, intent);
@@ -1681,7 +1741,12 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       // for Remotion typography, preserve full copy layouts too; an explicit
       // media_only scene remains the cinematic lower-third-only choice.
       next.media_only = candidate.media_only === true || !hasEditorialCopy;
-      if (intent.generatedFilm) next.foreground = [];
+      if (intent.generatedFilm) {
+        // Preserve independent editable SVG/vector overlays. Only remove an
+        // entry that duplicates the shot asset being attached as the background.
+        next.foreground = (Array.isArray(next.foreground) ? next.foreground : [])
+          .filter((item: any) => item?.asset !== id);
+      }
       if (model === 'ltx') {
         const note = `LTX finishing sound plan (picture has no native audio): ${finishingSound}`;
         next.notes = clampText(next.notes && !next.notes.includes('LTX finishing sound plan') ? `${next.notes} ${note}` : note, 512);
@@ -1690,12 +1755,13 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         next.foreground = [{
           asset: id, x: 0.5, y: 0.5, w: 1,
           anim: /push|dolly|zoom|pan|tracking|drift/i.test(args.camera) ? 'ken-burns' as const : 'fade-in' as const,
-        }];
+        }, ...(Array.isArray(next.foreground) ? next.foreground : [])].slice(0, 12);
         next.motion = normalizeSceneMotion({
           ...(next.motion ?? {}), entry: next.motion?.entry ?? 'fadeUp', ease: next.motion?.ease ?? 'enter',
           spring: next.motion?.spring ?? 'settle', stagger: next.motion?.stagger ?? 'none', emphasis: next.motion?.emphasis ?? 'none',
         }) ?? { entry: 'fadeUp', ease: 'enter', spring: 'settle', stagger: 'none', emphasis: 'none' };
-        next.transitionOut = next.transitionOut ?? { type: 'fade', frames: 15 };
+        if (sceneIndex < sceneCount - 1) next.transitionOut = next.transitionOut ?? { type: 'fade', frames: 15 };
+        else delete next.transitionOut;
         const note = `Klein stills + code motion; Remotion handles camera movement, transitions and timing. Finishing sound plan (no native audio): ${finishingSound}`;
         next.notes = clampText(next.notes && !next.notes.includes('stills + code motion') ? `${next.notes} ${note}` : note, 512);
       }

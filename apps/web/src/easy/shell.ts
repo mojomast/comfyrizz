@@ -69,7 +69,7 @@ export function renderShell({ videoName, saveStatus }: ShellModel): string {
   const status = String(saveStatus ?? '').trim() || COPY.shell.saved;
   return `<div class="easy-shell" data-easy-shell>
 <header class="easy-header">
-<a class="easy-logo" href="/"><span aria-hidden="true">◆</span> ${escapeHtml(LOGO_LABEL)}</a>
+<a class="easy-logo" href="/" data-easy-make-simple aria-label="Comfyrizz — return to Super Easy"><span aria-hidden="true">◆</span> ${escapeHtml(LOGO_LABEL)}</a>
 <span class="easy-name" data-easy-name>${escapeHtml(name)}</span>
 <span class="easy-save" data-easy-save aria-live="polite" aria-atomic="true">${escapeHtml(status)}</span>
 <div class="easy-header-actions">

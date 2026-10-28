@@ -83,7 +83,7 @@ function ensureStyle(doc: Document): void {
     }
     const link = doc.createElement('link');
     link.rel = 'stylesheet';
-    link.href = '/src/ui/palette.css';
+    link.href = new URL('./palette.css', import.meta.url).href;
     link.dataset.paletteStyle = 'true';
     doc.head?.append(link);
     installedStyle = true;

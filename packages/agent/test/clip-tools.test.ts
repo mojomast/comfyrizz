@@ -100,6 +100,10 @@ function fakeContext(overrides: Partial<ClipToolContext> = {}): FakeContext {
       calls.push({ name: 'proposeVerdict', value: verdict });
       return { ok: true, proposalId: 'pr_verdict', diff: [{ path: 'takes[2].verdict', before: 'unreviewed', after: verdict.verdict }] };
     },
+    proposeAudio: (input: { note: string; plan: string }): ClipProposalResult => {
+      calls.push({ name: 'proposeAudio', value: input });
+      return { ok: true, proposalId: 'pr_audio' };
+    },
     readiness: () => ({ ok: false, approved: 1, total: 3, blocking: [{ clipId: 's1:a_hero', state: 'review' }, { clipId: 's3:a_presenter', state: 'planned' }] }),
     ...overrides,
   } as FakeContext;
@@ -130,6 +134,7 @@ test('TR10: clip tools expose OpenAI-style schemas for every clip operation', ()
     'clip_propose_correction',
     'clip_propose_select',
     'clip_propose_verdict',
+    'clip_propose_finishing_audio',
     'clip_render_readiness',
   ]);
   for (const tool of CLIP_TOOLS) {
@@ -144,6 +149,7 @@ test('TR10: clip tools expose OpenAI-style schemas for every clip operation', ()
   assert.deepEqual((byName.get('clip_propose_correction')!.parameters as any).required, ['clip_id', 'note']);
   assert.deepEqual((byName.get('clip_propose_select')!.parameters as any).required, ['clip_id', 'take_n', 'reason']);
   assert.deepEqual((byName.get('clip_propose_verdict')!.parameters as any).required, ['clip_id', 'verdict', 'reason']);
+  assert.deepEqual((byName.get('clip_propose_finishing_audio')!.parameters as any).required, ['note', 'plan']);
   assert.deepEqual((byName.get('clip_propose_verdict')!.parameters as any).properties.verdict.enum, [...CLIP_VERDICTS]);
   assert.deepEqual((byName.get('clip_render_readiness')!.parameters as any).properties, {});
   assert.equal((byName.get('clip_propose_correction')!.parameters as any).properties.clip_id.maxLength, CLIP_ID_MAX_CHARS);
@@ -287,6 +293,21 @@ test('TR10: propose_select and propose_verdict only record proposals', async () 
   assert.deepEqual(verdict.verdict, { clipId: 's1:a_hero', verdict: 'approved', reason: 'Logo is readable now.' });
 
   assert.deepEqual(ctx.calls.map(call => call.name), ['proposeSelect', 'proposeVerdict']);
+});
+
+test('TR10: finishing audio is an explicit procedural proposal, never a claimed AI foley render', async () => {
+  const ctx = fakeContext();
+  const result = await runClipTool({
+    name: 'clip_propose_finishing_audio',
+    args: { note: 'Add impact foley and a percussion bed.', plan: 's1: board clatter | s2: heavy concrete impact, percussion' },
+  }, ctx);
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, false);
+  assert.equal(result.proposalId, 'pr_audio');
+  assert.equal((result.audio as { synthesis?: string } | undefined)?.synthesis, 'deterministic-procedural-pcm');
+  assert.match(String(result.message), /final render is separate/);
+  assert.match(String(result.message), /no AI foley/);
+  assert.deepEqual(ctx.calls.map(call => call.name), ['proposeAudio']);
 });
 
 test('TR10: malformed and unknown clip calls return errors without throwing or recording', async () => {

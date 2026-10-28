@@ -29,6 +29,7 @@ export interface AskDrawerOptions {
   createChat?: typeof createProjectChat;
   /** Persist the server-returned binding (normally `store.patch({ chatId })`). */
   onChatIdChange?: (chatId: string) => void;
+  onReviewPlan?: (productionId: string) => void;
   log?: (message: string) => void;
   onError?: (error: unknown) => void;
 }
@@ -112,12 +113,6 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
   function onClick(event: Event): void {
     const target = event.target;
     if (!(target instanceof HTMLElement) || !aside) return;
-    const build = target.closest('#project-plan-build');
-    if (build && aside.contains(build)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      return;
-    }
     const closeButton = target.closest('[data-easy-ask-close]');
     if (closeButton && aside.contains(closeButton)) {
       event.preventDefault();
@@ -243,6 +238,12 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
       const isLiveScope = () => current === operation && askScopeKey(readScope()) === liveScopeKey;
       chat = createChat(chatHost, {
         apiFetch: (input, init) => options.host.apiFetch(input, init),
+        getAgentProgress: async (sessionId) => {
+          const response = await options.host.apiFetch(`/api/agent/progress?sessionId=${encodeURIComponent(sessionId)}`);
+          if (!response.ok) throw new Error(`Progress HTTP ${response.status}`);
+          return await response.json();
+        },
+        onReviewPlan: (productionId) => options.onReviewPlan?.(productionId),
         applyProject: (project) => {
           // A late reply from the previous project must never replace the
           // project the user switched to while the turn was in flight.

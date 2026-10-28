@@ -8,6 +8,23 @@
   align-items: start;
 }
 
+.easy-plan-review-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+}
+
+.easy-plan-review-bar span {
+  flex: 1 1 260px;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
 .easy-plan-shots,
 .easy-plan-preview,
 .easy-plan-cost,

@@ -47,6 +47,17 @@ function harness(options = {}) {
       if (options.fail === 'plan') throw new Error('plan down');
       return { ok: true };
     },
+    async getProduction(id) {
+      calls.push({ kind: 'read-level', id });
+      return options.iterationSnapshot ?? {
+        productionId: 'prod_1', production: { id: 'prod_1', revision: 7 }, revision: 7, events: [],
+      };
+    },
+    async sendCommand(id, command) {
+      calls.push({ kind: 'level', id, command });
+      if (options.fail === 'level') throw new Error('level down');
+      return { revision: 8 };
+    },
   };
   const host = {
     adoptBuiltPackage(body) {
@@ -123,6 +134,17 @@ test('an unchanged hash makes no calls', async () => {
   assert.equal(store.get().plan.status, 'ready');
 });
 
+test('an explicit duration in the idea is not overridden by the default length', async () => {
+  const store = memoryStore();
+  store.patch({ idea: { ...store.get().idea, text: 'A two minute skateboard film with photorealistic humans.', lengthS: 30 } });
+  const { calls, api, host } = harness({ store });
+  await writePlan(store.get(), { api, host, store });
+  assert.match(calls[0].input.brief, /two minute/);
+  assert.doesNotMatch(calls[0].input.brief, /Length: about 30 seconds/);
+  assert.doesNotMatch(calls[0].input.brief, /Look: clay/);
+  assert.match(calls[0].input.brief, /Look: photorealistic live-action humans/);
+});
+
 test('offline is set when live is false and a disconnected provider is omitted', async () => {
   const { calls, store, api, host } = harness({ live: false, selection: { provider: 'none' } });
   await writePlan(store.get(), { api, host, store });
@@ -161,4 +183,59 @@ test('words-only staleness reruns from the plan call', async () => {
   assert.deepEqual(calls, ['plan']);
   assert.equal(store.get().plan.status, 'ready');
   assert.equal(store.get().plan.wordsChanged, false);
+});
+
+test('Easy resume persists the selected level before re-pricing a paid plan', async () => {
+  const store = memoryStore({
+    productionId: 'prod_1', packageId: 'pkg_1', compute: 'colab', level: 'draft', levelTouched: true,
+  });
+  store.patch({ plan: { ...store.get().plan, status: 'stale', wordsChanged: true } });
+  const { calls, api, host } = harness({
+    store,
+    iterationSnapshot: { productionId: 'prod_1', production: { id: 'prod_1', revision: 11 }, revision: 11, events: [] },
+  });
+  await writePlan(store.get(), { api, host, store }, { persistIteration: true });
+  assert.deepEqual(calls.map(call => call.kind), ['read-level', 'level', 'plan']);
+  const level = calls[1].command;
+  assert.equal(level.kind, 'iteration.set');
+  assert.equal(level.payload.policy.level, 'draft');
+  assert.deepEqual(level.expected, { productionRevision: 11 });
+  assert.equal(Object.hasOwn(level, 'actor'), false);
+  assert.deepEqual(calls[2].body, { level: 'draft', compute: 'colab' });
+});
+
+test('an unchanged Easy plan still repairs a missing server level before re-pricing', async () => {
+  const store = memoryStore({
+    productionId: 'prod_1', packageId: 'pkg_1', compute: 'colab', level: 'draft', levelTouched: true,
+  });
+  store.patch({
+    planHash: planInputsHash(store.get()),
+    plan: { ...store.get().plan, status: 'ready' },
+  });
+  const { calls, api, host } = harness({
+    store,
+    iterationSnapshot: { productionId: 'prod_1', production: { id: 'prod_1', revision: 11 }, revision: 11, events: [] },
+  });
+  await writePlan(store.get(), { api, host, store }, { persistIteration: true });
+  assert.deepEqual(calls.map(call => call.kind), ['read-level', 'level', 'plan']);
+  assert.equal(calls.some(call => call.kind === 'build'), false, 'the creative package is reused');
+  assert.equal(calls[1].command.payload.policy.level, 'draft');
+});
+
+test('Easy resume does not rewrite a level already present on the server', async () => {
+  const store = memoryStore({
+    productionId: 'prod_1', packageId: 'pkg_1', compute: 'colab', level: 'draft', levelTouched: true,
+  });
+  store.patch({ plan: { ...store.get().plan, status: 'stale', wordsChanged: true } });
+  const { calls, api, host } = harness({
+    store,
+    iterationSnapshot: {
+      productionId: 'prod_1',
+      production: { id: 'prod_1', revision: 11, iteration: { policy: { level: 'draft' } } },
+      revision: 11,
+      events: [],
+    },
+  });
+  await writePlan(store.get(), { api, host, store }, { persistIteration: true });
+  assert.deepEqual(calls.map(call => call.kind), ['read-level', 'plan']);
 });

@@ -404,6 +404,38 @@ test('reference and cast proposals render the existing Accept and Reject control
   }
 });
 
+test('clip corrections, audio and signed plans render actionable controls with the activity drawer', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    const proposed = conversation({
+      clipProposals: [
+        { id: 'cp_fall', kind: 'correction', clipId: 's2', status: 'proposed', change: { note: 'Hit the ground harder.' } },
+        { id: 'cp_audio', kind: 'audio', clipId: 'soundtrack', status: 'proposed', change: { note: 'Add percussion and impact foley.' } },
+        { id: 'cp_plan', kind: 'correction', clipId: 's3', status: 'plan_ready', productionId: 'prod_1', planId: 'plan_1', planHash: 'a'.repeat(64) },
+      ],
+    });
+    const reviewed = [];
+    const chat = create(host, {
+      initialConversationId: CHAT_ID,
+      onReviewPlan: id => reviewed.push(id),
+      apiFetch: async () => jsonResponse({ conversation: proposed, reply: '', built: false }),
+    });
+    await chat.ready;
+
+    assert.ok(host.querySelector('[data-agent-console-toggle]'));
+    assert.equal(host.querySelector('[data-confirm-clip="cp_fall"]').textContent.trim(), 'Prepare generation');
+    assert.equal(host.querySelector('[data-confirm-clip="cp_audio"]').textContent.trim(), 'Apply change');
+    assert.equal(host.querySelector('[data-review-plan="prod_1"]').textContent.trim(), 'Review & edit full plan');
+    assert.ok(host.querySelector('[data-clip-proposal="cp_audio"]'));
+    host.querySelector('[data-review-plan="prod_1"]').dispatchEvent({ type: 'click', bubbles: true });
+    assert.deepEqual(reviewed, ['prod_1']);
+  } finally {
+    dom.restore();
+  }
+});
+
 test('destroy removes the submit listener and empties the host', async () => {
   const dom = installDom();
   try {

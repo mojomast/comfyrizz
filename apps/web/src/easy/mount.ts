@@ -12,6 +12,7 @@ import { STEP_MODULES } from './steps/index.ts';
 import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, StepId } from './types.ts';
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
 import { writePlan } from './plan-writer.ts';
+import { invalidatePlanSnapshot, requestFullPlanReview } from './steps/plan.ts';
 import { resumeFacts } from './resume.ts';
 import { approveAndGenerate, resetPlanDecisionAnswers, retryShot } from './approve-generate.ts';
 import { runCpuGenerate } from './cpu-path.ts';
@@ -124,6 +125,14 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     host,
     openSettings: () => settings?.open(),
     onChatIdChange: (chatId) => store.patch({ chatId }),
+    onReviewPlan: (productionId) => {
+      invalidatePlanSnapshot(productionId);
+      const current = store.get();
+      store.patch({ plan: { ...current.plan, status: 'ready', error: null, errorAt: null, wordsChanged: false } });
+      requestFullPlanReview(productionId);
+      ask?.close();
+      go('plan');
+    },
     subscribe: (listener) => store.subscribe(() => listener()),
   });
 
@@ -176,12 +185,16 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     if (player) adoptPlayer(slot, player);
   }
 
-  function destroySuperEasy(): void {
+  function destroySuperEasy(stopSession = false): void {
     superEasyTicket += 1;
     liveGallery.stop();
     liveGalleryItems = [];
-    superEasySession?.stop();
-    superEasySession = null;
+    if (stopSession) {
+      superEasySession?.stop();
+      superEasySession = null;
+    }
+    // Mode switches park the session so an in-flight plan/proposal/run can be
+    // resumed. Only a new project or the final app teardown may stop it.
     superEasy?.destroy();
     superEasy = null;
   }
@@ -310,7 +323,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const setup = { ...draft, spendCap: Number.isFinite(draft.spendCap) ? draft.spendCap : saved.spendCap, confirmed: true };
     saveSuperEasySetup(setup);
     store.patch({ compute: setup.compute, spendCap: setup.spendCap });
-    superEasy?.render();
+    superEasy?.render({ forceHome: true });
   }
 
   async function onSuperEasyGenerate(input: SuperEasyGenerateInput): Promise<void> {
@@ -328,9 +341,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   function refreshSuperEasySnapshot(): void {
-    const productionId = store.get().productionId;
+    const { productionId, packageId } = store.get();
     if (!productionId) return;
-    liveGallery.start(productionId);
+    if (packageId) liveGallery.start(packageId);
     const ticket = ++superEasyTicket;
     void api.getProduction(productionId).then((snapshot) => {
       if (ticket !== superEasyTicket) return;
@@ -378,10 +391,16 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       proposal: () => superEasySession?.proposal() ?? null,
       onApproveProposal: () => { void superEasySession?.approveProposal(); },
       onReviseProposal: (note) => { void superEasySession?.reviseProposal(note); },
+      onReviewEditPlan: (packageId) => {
+        const current = store.get();
+        store.patch({ plan: { ...current.plan, status: 'ready', error: null, errorAt: null, wordsChanged: false } });
+        requestFullPlanReview(current.productionId ?? 'new');
+        openStudioFromSuperEasy('plan', packageId);
+      },
       setup: () => readSuperEasySetup(),
       onMotionModelChange: (motionModel) => {
         saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });
-        superEasy?.render();
+        superEasy?.render({ forceHome: true });
       },
       onSetup: () => { void openSuperEasySetup(); },
       onChangeAnything: (change = '') => {
@@ -401,6 +420,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       stages: (snapshot) => superEasyStages(snapshot),
       gallery: (snapshot) => mergeLiveGallery(buildGalleryModel(snapshot), liveGalleryItems),
       onMakeAnother: () => {
+        superEasySession?.stop();
+        superEasySession = null;
         resetPlanDecisionAnswers();
         store.startNew();
       },
@@ -480,12 +501,19 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         snapshot = null;
       }
     }
-    const message = await approveAndGenerate(store.get(), {
-      api: api as never,
-      store,
-      snapshot,
-      go: (step) => go(step),
-    });
+    let message: string | undefined;
+    try {
+      message = await approveAndGenerate(store.get(), {
+        api: api as never,
+        store,
+        snapshot,
+        go: (step) => go(step),
+      });
+    } catch (error) {
+      message = error instanceof Error && error.message.trim() !== '' && error.message !== 'OFFLINE'
+        ? error.message
+        : COPY.plan.approveFailed;
+    }
     if (typeof message === 'string' && message) {
       procedure.fail(message);
       shell?.alert(message);
@@ -533,7 +561,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       go,
       rerender: () => showStep(currentStep),
       dialogs: {},
-      writePlan: () => writePlan(store.get(), { api, host, store }),
+      writePlan: () => writePlan(store.get(), { api, host, store }, { persistIteration: true }),
       approveAndGenerate: () => approveFromStudio(),
       retryShot: async (shotId, chip) => {
         const pending = await retryShot(store.get(), { api: api as never, store, go: (step) => go(step) }, shotId, chip);
@@ -597,7 +625,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     showStep(step);
   }
 
-  function makeItSimple(): void {
+  function makeItSimple(event?: Event): void {
+    event?.preventDefault();
     setPreferStudio(false);
     const url = escapeToHome(search());
     view?.history?.pushState({}, '', url === '' ? './' : url);
@@ -610,6 +639,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   function startNewVideo(event: Event): void {
     event.preventDefault();
+    superEasySession?.stop();
+    superEasySession = null;
     resetPlanDecisionAnswers();
     store.startNew();
     refreshVideoName();
@@ -632,7 +663,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStep();
     stopStepper();
     releasePlayer();
-    destroySuperEasy();
+    destroySuperEasy(true);
     root.innerHTML = renderHomeScreen([]);
     bindMakeItSimple();
     bindNewVideo();
@@ -694,6 +725,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onSettings: () => { void settings?.open(); },
       onOpenEditor: () => host.openEditor(),
     });
+    bindMakeItSimple();
     const nameHost = root.querySelector<HTMLElement>('[data-easy-name]');
     if (nameHost) {
       projectName = mountProjectName(nameHost, {
@@ -714,10 +746,22 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     showStep(route.step);
   }
 
+  function clearEditorViewForEasy(): void {
+    const params = new URLSearchParams(search().replace(/^\?/, ''));
+    if (!params.has('view')) return;
+    params.delete('view');
+    const query = params.toString();
+    const url = query ? `?${query}` : (view?.location?.pathname ?? './');
+    if (view?.history?.replaceState) view.history.replaceState({}, '', url);
+    else if (view?.history?.pushState) view.history.pushState({}, '', url);
+    else globalThis.history?.replaceState?.({}, '', url);
+  }
+
   function applyShell(mode: Mode): void {
     const html = doc.documentElement;
     const app = doc.getElementById('app');
     if (mode === 'easy') {
+      clearEditorViewForEasy();
       html.dataset.shell = 'easy';
       root.hidden = false;
       if (app) {
@@ -786,7 +830,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStep();
     stopStepper();
     releasePlayer();
-    destroySuperEasy();
+    destroySuperEasy(true);
     ask?.destroy();
     settings?.destroy();
     destroyShellChrome();

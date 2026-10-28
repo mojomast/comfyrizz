@@ -65,7 +65,7 @@ function approvalEvent(type, dataOverrides = {}) {
 function state(overrides = {}) {
   return {
     productionId: PRODUCTION_ID,
-    production: { id: PRODUCTION_ID, revision: 4 },
+    production: { id: PRODUCTION_ID, revision: 4, iteration: { policy: { level: 'balanced' }, level: 'balanced' } },
     revision: 4,
     lastSequence: 3,
     targetSequence: 3,

@@ -32,6 +32,7 @@ import { DEFAULT_SUPER_EASY_SETUP, type SuperEasySetup, type MotionModel } from 
 import { renderSuperEasyProposal, type SuperEasyProposal } from './proposal.ts';
 import { getMode, setMode } from '../../ui/mode.ts';
 import type { EasyState } from '../types.ts';
+import { mountAgentConsole } from '../agent-console.ts';
 
 export const SUPER_EASY_EXAMPLE_PROMPT = COPY.home.promptPlaceholder;
 
@@ -91,10 +92,11 @@ export interface SuperEasyMountOptions {
   proposal?(): SuperEasyProposal | null;
   onApproveProposal?(): void;
   onReviseProposal?(note: string): void;
+  onReviewEditPlan?(packageId: string | null): void;
 }
 
 export interface SuperEasyMountHandle {
-  render(): void;
+  render(options?: { forceHome?: boolean }): void;
   screen(): SuperEasyScreen;
   destroy(): void;
 }
@@ -130,6 +132,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   let promptText = options.state().idea.text ?? '';
   let destroyed = false;
   let progressKeys: SuperEasyProgressKeys | null = null;
+  let stopAgentConsole: (() => void) | null = null;
 
   function currentSearch(): string {
     if (options.search) return options.search();
@@ -176,6 +179,11 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
+    if (closest('[data-super-easy-review-edit-plan]')) {
+      event.preventDefault();
+      options.onReviewEditPlan?.(options.state().packageId);
+      return;
+    }
     if (closest('[data-super-easy-approve-proposal]')) {
       event.preventDefault();
       options.onApproveProposal?.();
@@ -258,6 +266,8 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onInput = (event: Event): void => {
     if (!closestOf(event.target)('#super-easy-prompt')) return;
+    const field = event.target as HTMLTextAreaElement;
+    if (typeof field.value === 'string') promptText = field.value;
     showPromptError(false);
   };
 
@@ -338,6 +348,8 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     if (!mounted) {
       const parts = superEasyProgressParts(snapshot, viewOptions);
       root.innerHTML = parts.html;
+      stopAgentConsole?.();
+      stopAgentConsole = mountAgentConsole(root);
       progressKeys = parts.keys;
       return;
     }
@@ -349,11 +361,20 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     );
   }
 
-  const render = (): void => {
+  const render = (update: { forceHome?: boolean } = {}): void => {
     if (destroyed) return;
     const next = screenNow();
+    if (next === 'home' && current === 'home' && update.forceHome !== true && root.querySelector('[data-super-easy-home]')) {
+      // Gallery, snapshot and preference callbacks must not replace a prompt
+      // that is actively being composed. Setup changes opt into a full repaint.
+      return;
+    }
     current = next;
     const proposal = options.proposal?.() ?? null;
+    if (next !== 'progress' || proposal) {
+      stopAgentConsole?.();
+      stopAgentConsole = null;
+    }
     if (next === 'progress' && proposal) {
       root.innerHTML = renderSuperEasyProposal(proposal);
       progressKeys = null;
@@ -397,6 +418,8 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       root.removeEventListener('submit', onSubmit);
       root.removeEventListener('change', onChange);
       root.removeEventListener('input', onInput);
+      stopAgentConsole?.();
+      stopAgentConsole = null;
       root.innerHTML = '';
       progressKeys = null;
       delete root.dataset.superEasyView;

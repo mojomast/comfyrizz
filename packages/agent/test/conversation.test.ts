@@ -78,6 +78,19 @@ test('reasoning is retained per tool step through build and summary, never in re
   assert.doesNotMatch(JSON.stringify(result), /opaque/);
 });
 
+test('live conversation telemetry reports model completion and token usage', async () => {
+  const { model } = fake([[{ type: 'usage', input: 10, output: 2 }, text('Done.')]]);
+  const events: Array<Record<string, unknown>> = [];
+  await runConversationTurn({
+    model, plan: null, messages: [{ role: 'user', content: 'Question' }], sessionId: 'telemetry-test',
+    signal: AbortSignal.timeout(5000), onEvent: event => events.push(event),
+    build: async () => ({ packageId: 'pkg_test', revision: 1 }),
+  });
+  assert.deepEqual(events.map(event => event.type), ['step', 'model_result', 'done']);
+  assert.deepEqual(events[1].usage, { input: 10, output: 2 });
+  assert.deepEqual(events[2].usage, { input: 10, output: 2 });
+});
+
 test('partial correction preserves all omitted fields; invalid patch is atomic', () => {
   const original = plan();
   const result = patchConversationPlan(original, { scenePatches: [{ id: 's2', changes: { headline: 'Light starts the flow' } }] });

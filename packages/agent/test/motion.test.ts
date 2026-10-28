@@ -95,6 +95,53 @@ test('motion prompt lists the schema enums and the shot-list rules', () => {
   }
 });
 
+test('motion prompt uses the shared recipe IDs and recommended layouts', async () => {
+  const prompt = motionSystemSection();
+  const { ANIMATION_RECIPES } = await import(new URL('../../../schema/src/animation.mjs', import.meta.url).href);
+  assert.ok(ANIMATION_RECIPES.length > 0);
+  for (const recipe of ANIMATION_RECIPES) {
+    assert.ok(prompt.includes(`- ${recipe.id}: ${recipe.layouts.join(', ')}`), `${recipe.id} layouts drifted from the catalogue`);
+  }
+  assert.match(prompt, /process or cause\/effect → technical-flow/);
+  assert.match(prompt, /mechanism → sketch/);
+  assert.match(prompt, /before\/after → morph or a compare layout/);
+  assert.match(prompt, /evidence\/detail → focus/);
+  assert.match(prompt, /hook\/chapter\/conclusion → kinetic/);
+});
+
+test('motion prompt bounds diagram, focus, and morph fields', () => {
+  const prompt = motionSystemSection();
+  assert.match(prompt, /scenes\[\]\.motion\.diagram: flow \| hub/);
+  assert.ok(prompt.includes('focus is {x,y,width,height}'));
+  assert.ok(prompt.includes('x + width <= 1 and y + height <= 1'));
+  assert.ok(prompt.includes('morph is {from,to} using circle | square | triangle | blob only'));
+  assert.match(prompt, /not arbitrary media/);
+});
+
+test('motion prompt keeps narration cues exact and explicit seconds authoritative', () => {
+  const prompt = motionSystemSection();
+  assert.match(prompt, /cue_phrases contains up to 6 exact phrases copied from that scene's narration in spoken order/);
+  assert.match(prompt, /never invent alignment/);
+  assert.match(prompt, /cue_seconds take precedence over cue_phrases/);
+  assert.match(prompt, /clear stale seconds when switching to phrases/);
+});
+
+test('motion prompt separates full typography from media-only footage', () => {
+  const prompt = motionSystemSection();
+  assert.match(prompt, /native, editable Remotion copy/);
+  assert.match(prompt, /never lettering baked into AI-generated pixels/);
+  assert.match(prompt, /Full typography requires media_only:false/);
+  assert.match(prompt, /media_only:true is for footage plus lower thirds\/non-text decor/);
+});
+
+test('motion prompt defaults to cuts and forbids a final outgoing transition', () => {
+  const prompt = motionSystemSection();
+  assert.match(prompt, /Hard cuts \(cut, 0 frames\) are the default/);
+  assert.match(prompt, /actual final scene in scenes\[\] has no outgoing transition/);
+  assert.match(prompt, /never give it a positive-duration transition/);
+  assert.match(prompt, /One expressive gesture per scene/);
+});
+
 test('a scripted brief produces motion fields that lint with zero errors', async () => {
   const { lintMotion } = await import(new URL('../../../schema/src/motion.mjs', import.meta.url).href);
   const { validatePackage } = await import(new URL('../../../schema/src/index.mjs', import.meta.url).href);
@@ -194,10 +241,12 @@ test('unknown motion tokens are dropped and motion stays on the scene', async ()
       variant: 'centered',
       motion: { entry: 'wiggle', ease: 'enter', emphasis: 'none' },
       transitionOut: { type: 'spin', frames: 10, direction: 'left' },
+    }, {
+      id: 's_tail', layout: 'hero', preferredFrames: 90, copy: { headline: 'Closing' },
     }],
   }) as { package: any };
   assert.equal(proposed.package.scenes[0].motion.ease, 'enter');
-  assert.equal(proposed.package.scenes[0].motion.entry, undefined);
+  assert.equal(proposed.package.scenes[0].motion.entry, 'maskRise', 'the invalid token falls back to the opener default');
   assert.equal(proposed.package.scenes[0].transitionOut, undefined);
   const edited = await tools['storyboard.edit'].run({
     scene_id: 's_title',

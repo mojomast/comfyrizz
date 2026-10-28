@@ -94,6 +94,12 @@ function gallerySnapshot() {
   };
 }
 
+test('the progress screen keeps the Comfyrizz brand visible', () => {
+  const html = renderSuperEasyProgress(partialSnapshot());
+  assert.match(html, /class="super-easy-brand" aria-label="Comfyrizz"/u);
+  assert.match(html, /class="super-easy-brand-name">Comfyrizz<\/span>/u);
+});
+
 test('the overall gauge and one gauge per stage render from the stage model', () => {
   const html = renderSuperEasyProgress(partialSnapshot());
 
@@ -447,7 +453,7 @@ test('preview-ready has its own Review handoff and never claims the finished vid
   const html = renderSuperEasyProgress(partialSnapshot(), { previewReady: true });
 
   assert.match(html, /data-super-easy-preview-ready/u);
-  assert.match(html, /<button[^>]*class="btn btn-primary"[^>]*data-super-easy-export[^>]*>Download MP4<\/button>/u);
+  assert.match(html, /<button[^>]*class="btn btn-primary"[^>]*data-super-easy-export[^>]*>Download preview MP4<\/button>/u);
   assert.match(html, /<button[^>]*class="btn btn-secondary"[^>]*data-super-easy-review[^>]*>Watch and review<\/button>/u);
   assert.doesNotMatch(html, /data-super-easy-done-actions/u);
   assert.doesNotMatch(html, /data-super-easy-download/u);
@@ -477,6 +483,9 @@ test('progress-view.css styles the preview card and moves running gauges', () =>
     '.super-easy-progress-stage-running .easy-progress::after',
     '@keyframes super-easy-progress-sweep',
     '.super-easy-progress-reduced-motion .easy-progress::after',
+    '#easy-root[data-super-easy-view]',
+    '@keyframes super-easy-asset-pop',
+    'minmax(140px, 1fr)',
   ]) {
     assert.ok(css.includes(selector), `missing ${selector}`);
   }
@@ -630,6 +639,12 @@ function keyedGalleryRoot(parts) {
 
   for (const slot of parts.gallerySlots) nodes.push(makeNode(slot.html));
 
+  const list = {
+    insertAdjacentHTML(position, value) {
+      if (position !== 'beforeend') throw new Error(`unexpected position ${position}`);
+      nodes.push(makeNode(value));
+    },
+  };
   const gallery = {
     get innerHTML() {
       return '';
@@ -638,11 +653,12 @@ function keyedGalleryRoot(parts) {
       fullWrites += 1;
     },
     querySelectorAll(selector) {
-      return selector === '[data-super-easy-gallery-item]' ? nodes.slice() : [];
+      if (selector === '[data-super-easy-gallery-item]') return nodes.slice();
+      if (selector === 'ul,ol') return [list];
+      return [];
     },
-    insertAdjacentHTML(position, value) {
-      if (position !== 'beforeend') throw new Error(`unexpected position ${position}`);
-      nodes.push(makeNode(value));
+    insertAdjacentHTML() {
+      throw new Error('new gallery tiles must be inserted into the list, not the section');
     },
   };
   const live = { textContent: '', setAttribute() {} };
@@ -690,4 +706,14 @@ test('a new gallery tile is keyed in place and does not replace a playing sample
   assert.equal(fake.nodes.find((node) => node.id === 'final'), final, 'the final tile node is kept');
   assert.deepEqual(fake.nodes.map((node) => node.id), ['character:character-1', 'shot:shot_1', 'voice:voice-1', 'final']);
   assert.match(voice.outerHTML, /<audio\b/u);
+});
+
+test('an active run offers both a Studio escape and a way back to a new prompt', () => {
+  const html = superEasyProgressParts(partialSnapshot()).html;
+  assert.match(html, /data-super-easy-more-control/);
+  assert.match(html, /Open in Studio/);
+  assert.match(html, /Switch views without stopping your work/);
+  assert.match(html, /data-super-easy-make-another/);
+  assert.match(html, /Stop and start a new prompt/);
+  assert.match(html, /Any active video run is cancelled/);
 });

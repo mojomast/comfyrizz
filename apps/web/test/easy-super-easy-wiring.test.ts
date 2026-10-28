@@ -95,10 +95,16 @@ class FakeRoot {
     this.dataset = {};
     this.listeners = new Map();
     this.prompt = { value: '', focus() {} };
+    this.makeSimple = {
+      handler: null,
+      addEventListener(_type, handler) { this.handler = handler; },
+      click() { this.handler?.({ preventDefault() {} }); },
+    };
   }
 
   querySelector(selector) {
     if (selector === '#super-easy-prompt') return this.prompt;
+    if (selector === '[data-easy-make-simple]') return this.makeSimple;
     return null;
   }
 
@@ -236,6 +242,12 @@ function createBackend(options = {}) {
         revision += 1;
       }
       return json({ revision });
+    }
+    const clipsMatch = /^\/api\/package\/([^/]+)\/clips$/u.exec(path);
+    if (clipsMatch && method === 'GET') {
+      const packageId = decodeURIComponent(clipsMatch[1]);
+      calls.push({ kind: 'clips', packageId });
+      return json({ packageId, revision: 1, clips: [] });
     }
     if (path === '/api/colab/status') {
       calls.push({ kind: 'colab-status' });
@@ -415,8 +427,11 @@ test('Generate in the real Easy shell starts one Draft session on This computer'
     shell.root.submit(PROMPT);
     await approveProposal(shell);
     await waitFor(() => shell.watch() !== null);
+    await waitFor(() => backend.calls.some((call) => call.kind === 'clips'));
 
     assert.equal(shell.createCalls(), 1);
+    assert.ok(backend.calls.filter((call) => call.kind === 'clips').every((call) => call.packageId === 'pkg_1'));
+    assert.equal(backend.calls.some((call) => call.kind === 'clips' && call.packageId === PRODUCTION_ID), false);
     const plans = backend.calls.filter((call) => call.kind === 'plan');
     assert.ok(plans.length >= 2);
     for (const call of plans) assert.deepEqual(call.body, { level: 'draft', compute: 'cpu' });
@@ -494,7 +509,31 @@ test('a second Generate while one runs does not start a second session', async (
   }
 });
 
-test('navigation away cancels the running watch exactly once', async () => {
+test('Studio and Super Easy mode switches park and resume the same planning session', async () => {
+  const backend = createBackend({ holdBuild: true });
+  const shell = mountShell(backend);
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => backend.calls.filter((call) => call.kind === 'build').length === 1);
+    shell.root.click('[data-super-easy-more-control]');
+    assert.match(shell.root.innerHTML, /data-easy-shell/u);
+    assert.equal(shell.createCalls(), 1);
+
+    shell.root.makeSimple.click();
+    await waitFor(() => shell.root.dataset.superEasyView === 'progress');
+    backend.releaseBuild();
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+
+    assert.equal(shell.createCalls(), 1, 'returning to Super Easy must reuse the parked session');
+    assert.equal(backend.calls.filter((call) => call.kind === 'build').length, 1, 'returning must not restart planning');
+    assert.match(shell.root.innerHTML, /Your film proposal/u);
+  } finally {
+    shell.dispose();
+    shell.restore();
+  }
+});
+
+test('navigation away and back preserves the same watch and finished work', async () => {
   const backend = createBackend();
   const shell = mountShell(backend);
   try {
@@ -504,10 +543,13 @@ test('navigation away cancels the running watch exactly once', async () => {
     assert.equal(shell.stopCalls(), 0);
 
     shell.navigate();
-    await waitFor(() => shell.stopCalls() === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
     shell.navigate();
     await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(shell.stopCalls(), 1);
+    assert.equal(shell.stopCalls(), 0, 'mode/navigation changes must not cancel the parked watch');
+    shell.watch().onState(finalWatchState());
+    assert.match(shell.root.innerHTML, /data-super-easy-gallery-item="final"/u);
+    assert.match(shell.root.innerHTML, /src="\/media\/final\.mp4"/u);
   } finally {
     shell.dispose();
     shell.restore();

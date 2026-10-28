@@ -81,7 +81,7 @@ function harness(options = {}) {
     async buildVideo(input) {
       calls.push({ kind: 'build', input });
       if (options.fail === 'build') throw new Error('agent down');
-      return { package: { id: 'pkg_1' }, live: true, timeline: { scenes: [] } };
+      return { package: options.builtPackage ?? { id: 'pkg_1' }, live: true, timeline: { scenes: [] } };
     },
     async createProduction(input) {
       calls.push({ kind: 'production', input });
@@ -321,6 +321,25 @@ test('an empty prompt makes no calls', async () => {
   if (result.ok === true) return;
   assert.equal(result.code, 'EMPTY_PROMPT');
   assert.deepEqual(calls, []);
+  store.flush();
+});
+
+test('This computer refuses to approve pending AI footage as a local preview', async () => {
+  const builtPackage = {
+    id: 'pkg_film',
+    scenes: [{ id: 's1', media: [{ asset: 'a_video' }] }],
+    assets: { a_video: { kind: 'video', status: 'pending', gen: { generator: 'ltx25' } } },
+  };
+  const { api, host, calls, store } = harness({ builtPackage });
+  const result = await runSuperEasy({ prompt: PROMPT, compute: 'cpu' }, { api, host, store, go: () => {} });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.code, 'GENERATED_MEDIA_REQUIRES_COLAB');
+  assert.equal(result.stage, 'compute');
+  assert.match(result.message, /Choose Google Colab/);
+  assert.equal(calls.some(call => call.kind === 'command'), false, 'no iteration or plan approval');
+  assert.equal(calls.some(call => call.kind === 'dispatch' || call.kind === 'run'), false);
+  assert.equal(calls.some(call => call.kind === 'go' && call.step === 'review'), false, 'no false preview/download state');
   store.flush();
 });
 

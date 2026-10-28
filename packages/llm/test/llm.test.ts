@@ -116,6 +116,17 @@ test('OpenCode Go DeepSeek defaults to explicit max reasoning on the wire', asyn
   assert.equal(body.reasoning_effort, 'max');
 });
 
+test('DeepSeek thinking mode can be explicitly disabled on the wire', async () => {
+  let body: any;
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+  }) as typeof fetch;
+  const provider = resolveProvider('custom', { env: {}, baseUrl: 'http://mock/v1', model: 'deepseek-flash' });
+  await collect(createOpenAICompatibleModel({ ...provider, thinking: 'disabled', fetchImpl, maxRetries: 0 }));
+  assert.deepEqual(body.thinking, { type: 'disabled' });
+});
+
 test('assembles fragmented tool arguments and emits only a complete call', async () => {
   const fetchImpl = (async () => sse([
     { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'pi' } }] } }] },

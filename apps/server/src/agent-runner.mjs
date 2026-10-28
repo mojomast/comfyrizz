@@ -2,6 +2,7 @@
 // packages/vector. Offline it uses the deterministic scripted model; with a
 // provider it uses the live model for both planning and SVG markup, falling
 // back to the A5 stub if the model output cannot be parsed.
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
@@ -117,6 +118,165 @@ function repairPackageFacts(pkg, intent, briefAspect) {
   }
   facts.push('Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.');
   return facts.join('\n');
+}
+
+function generatedClipSeconds(asset) {
+  const frames = Number(asset?.gen?.inputs?.frames);
+  const fps = Number(asset?.gen?.inputs?.fps);
+  return frames > 0 && fps > 0 ? frames / fps : 0;
+}
+
+function withoutBookendPresentation(scene) {
+  const next = { ...scene, layout: 'list', media_only: true };
+  delete next.variant;
+  delete next.copy;
+  delete next.motion;
+  return next;
+}
+
+function outroPresentation(scene) {
+  const previousHeadline = scene.copy?.headline;
+  return {
+    ...scene,
+    variant: 'outro',
+    copy: {
+      ...(scene.copy ?? {}),
+      ...(previousHeadline && !scene.copy?.kicker ? { kicker: previousHeadline } : {}),
+      headline: 'The End',
+    },
+    motion: { ...(scene.motion ?? {}), recipe: scene.motion?.recipe ?? 'kinetic', entry: 'fadeUp' },
+  };
+}
+
+/** Split under-covered pending scenes into real generation shots before validation. */
+export function coverGeneratedFilmScenes(pkg) {
+  if (!pkg || !Array.isArray(pkg.scenes)) return { package: pkg, splits: 0 };
+  const next = structuredClone(pkg);
+  next.assets = next.assets && typeof next.assets === 'object' ? next.assets : {};
+  const scenes = [];
+  const replacedAssetIds = new Set();
+  let splits = 0;
+  const originalSceneCount = next.scenes.length;
+  for (let sceneIndex = 0; sceneIndex < next.scenes.length; sceneIndex += 1) {
+    const scene = next.scenes[sceneIndex];
+    const fps = Number(next.format?.fps) > 0 ? Number(next.format.fps) : 30;
+    const sceneFrames = Number(scene?.preferredFrames) || 0;
+    const sceneSeconds = sceneFrames / fps;
+    const plates = Array.isArray(scene?.media) ? scene.media : [];
+    const videoPlates = plates.filter(plate => {
+      const asset = next.assets?.[plate?.asset];
+      return asset?.status === 'pending' && asset?.kind === 'video' && ['fasth3-omni', 'ltx25'].includes(asset?.gen?.generator);
+    });
+    const uniqueAssetIds = [...new Set(videoPlates.map(plate => plate.asset))];
+    const template = uniqueAssetIds.length === 1 ? next.assets[uniqueAssetIds[0]] : null;
+    const clipSeconds = generatedClipSeconds(template);
+    if (!template || clipSeconds <= 0 || sceneSeconds <= 0 || sceneSeconds <= clipSeconds * 2) {
+      scenes.push(scene);
+      continue;
+    }
+    const partCount = Math.min(40, Math.ceil(sceneSeconds / clipSeconds));
+    const templateAssetId = uniqueAssetIds[0];
+    const templatePlate = videoPlates[0];
+    for (let part = 0; part < partCount; part += 1) {
+      const suffix = `${scene.id}:${templateAssetId}:${part + 1}`;
+      const digest = createHash('sha256').update(suffix).digest('hex').slice(0, 16);
+      const assetId = `a_vid_${digest}`;
+      const asset = structuredClone(template);
+      if (Number.isFinite(Number(asset.gen?.inputs?.seed))) asset.gen.inputs.seed = Number(asset.gen.inputs.seed) + part;
+      next.assets[assetId] = asset;
+      const media = { ...templatePlate, asset: assetId };
+      delete media.speed;
+      delete media.holdFrames;
+      let partScene = {
+        ...scene,
+        id: `${scene.id}__part${part + 1}`,
+        preferredFrames: Math.floor(sceneFrames / partCount) + (part < sceneFrames % partCount ? 1 : 0),
+        media: [media],
+      };
+      const centered = scene.layout === 'title' && scene.variant === 'centered';
+      const outro = scene.layout === 'title' && scene.variant === 'outro';
+      const originalFirst = sceneIndex === 0;
+      const originalLast = sceneIndex === originalSceneCount - 1;
+      if (centered && originalFirst && originalLast && partCount > 1 && part === partCount - 1) {
+        partScene = outroPresentation(partScene);
+      } else if ((centered || outro)
+        && !((centered && originalFirst && part === 0) || (outro && originalLast && part === partCount - 1))) {
+        partScene = withoutBookendPresentation(partScene);
+      }
+      scenes.push(partScene);
+    }
+    replacedAssetIds.add(templateAssetId);
+    splits += 1;
+  }
+  if (splits === 0) return { package: pkg, splits: 0 };
+  next.scenes = scenes;
+  if (next.scenes.length > 0) delete next.scenes[next.scenes.length - 1].transitionOut;
+  for (const assetId of replacedAssetIds) {
+    const used = scenes.some(scene => (Array.isArray(scene?.media) ? scene.media : []).some(plate => plate?.asset === assetId));
+    if (!used) delete next.assets[assetId];
+  }
+  next.revision = Math.max(1, Number(next.revision) || 1) + 1;
+  return { package: next, splits };
+}
+
+function liveActionText(value) {
+  return String(value)
+    .replace(/handmade\s+plasticine/gi, 'photorealistic live-action')
+    .replace(/plasticine/gi, 'natural human')
+    .replace(/stop[\s-]motion/gi, 'live-action')
+    .replace(/claymation/gi, 'live-action')
+    .replace(/clay\s+figures?/gi, 'fictional human adult')
+    .replace(/clay/gi, 'real-world')
+    .replace(/puppets?/gi, 'human')
+    .replace(/cartoons?/gi, 'live-action')
+    .replace(/handmade/gi, 'real-world')
+    .replace(/miniatures?/gi, 'full-scale set')
+    .replace(/3D\s+render/gi, 'cinematic photography');
+}
+
+function sanitizeLiveActionValue(value) {
+  if (typeof value === 'string') return liveActionText(value);
+  if (Array.isArray(value)) return value.map(sanitizeLiveActionValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeLiveActionValue(item)]));
+  }
+  return value;
+}
+
+/** Correct a model's forbidden style substitution instead of rejecting it forever. */
+export function enforceLiveActionHumans(pkg) {
+  if (!pkg || typeof pkg !== 'object') return { package: pkg, changed: false };
+  const next = sanitizeLiveActionValue(pkg);
+  next.title = liveActionText(next.title ?? 'Live-action film');
+  if (next.proposal && typeof next.proposal === 'object') {
+    next.proposal.look = 'Photorealistic live-action humans, natural skin and real-world materials.';
+  }
+  for (const asset of Object.values(next.assets ?? {})) {
+    if (typeof asset?.gen?.inputs?.prompt === 'string') {
+      asset.gen.inputs.prompt = `Photorealistic live-action fictional human adults with natural skin and real-world materials. ${asset.gen.inputs.prompt}`;
+    }
+    if (typeof asset?.gen?.direction?.subject === 'string') {
+      asset.gen.direction.subject = `Photorealistic fictional human adult: ${asset.gen.direction.subject}`;
+    }
+  }
+  const changed = JSON.stringify(next) !== JSON.stringify(pkg);
+  if (changed) next.revision = Math.max(1, Number(next.revision) || 1) + 1;
+  return { package: changed ? next : pkg, changed };
+}
+
+function liveActionStyleConflict(pkg) {
+  const texts = [pkg?.title, pkg?.proposal?.look];
+  for (const asset of Object.values(pkg?.assets ?? {})) {
+    texts.push(asset?.gen?.inputs?.prompt, asset?.gen?.direction?.subject, asset?.gen?.direction?.composition);
+  }
+  const pattern = /\b(?:clay(?:mation)?|plasticine|stop[\s-]motion|puppets?|cartoons?|handmade(?:\s+miniatures?)?)\b/ig;
+  for (const text of texts.filter(value => typeof value === 'string')) {
+    for (const match of text.matchAll(pattern)) {
+      const prefix = text.slice(Math.max(0, (match.index ?? 0) - 30), match.index);
+      if (!/\b(?:no|not|without|avoid)\s+(?:[\w-]+\s+){0,2}$/i.test(prefix)) return match[0];
+    }
+  }
+  return null;
 }
 
 /**
@@ -374,6 +534,10 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
     }
   }
   if (proposal?.logline === 'A story built from your idea.') problems.push('proposal.logline must describe the actual story, not a generic fallback');
+  if (intent.liveActionHumans) {
+    const conflict = liveActionStyleConflict(pkg);
+    if (conflict) problems.push(`live-action real-human brief conflicts with ${conflict} styling; use photorealistic fictional humans, natural skin and real-world materials in the proposal and every asset prompt`);
+  }
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   const plannedSeconds = plannedTimelineFrames(pkg) / fps;
   if (intent.requestedSeconds !== null && !durationWithinTarget(plannedSeconds, intent.requestedSeconds)) {
@@ -393,7 +557,8 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
         problems.push(`${sceneId}: every motion.cue_phrases entry must be copied verbatim from this scene's narration`);
       }
     }
-    const mediaAssets = (Array.isArray(scene?.media) ? scene.media : [])
+    const mediaPlates = Array.isArray(scene?.media) ? scene.media : [];
+    const mediaAssets = mediaPlates
       .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
       .filter(Boolean);
     const videos = mediaAssets.filter(asset => asset.kind === 'video' && ['fasth3-omni', 'ltx25'].includes(asset.gen?.generator));
@@ -421,6 +586,19 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
         || Object.values(assets).some(asset => asset.gen?.generator === 'flux3-klein');
       problems.push(`${sceneId}: ${fluxOnly ? 'FLUX stills are not generated-film completion; ' : ''}attach a planned/ready H3 or LTX video through scene.media`);
       continue;
+    }
+    const sceneSeconds = Number(scene?.preferredFrames) > 0 ? Number(scene.preferredFrames) / fps : 0;
+    const coveredSeconds = Array.from(new Set(videos)).reduce((total, asset) => {
+      const plate = mediaPlates.find(item => assets[item?.asset] === asset);
+      const frames = Number(asset.gen?.inputs?.frames);
+      const mediaFps = Number(asset.gen?.inputs?.fps);
+      if (!(frames > 0) || !(mediaFps > 0)) return total;
+      const speed = Number(plate?.speed) > 0 ? Number(plate.speed) : 1;
+      const holdFrames = Number.isFinite(plate?.holdFrames) ? Math.max(0, Number(plate.holdFrames)) : 0;
+      return total + (frames / mediaFps) / speed + holdFrames / fps;
+    }, 0);
+    if (sceneSeconds > 0 && coveredSeconds > 0 && coveredSeconds * 2 < sceneSeconds) {
+      problems.push(`${sceneId}: scene is ${sceneSeconds.toFixed(2)} seconds but attached generated video covers ${coveredSeconds.toFixed(2)} seconds; add enough generation clips or shorten the scene instead of stretching a short clip`);
     }
     for (const asset of videos) {
       const generator = asset.gen.generator;
@@ -535,9 +713,14 @@ function createLlmSvgGenerator(model, sessionId) {
 export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOString(), providers = {}, resolveProviderConfig, motionModel: defaultMotionModel = 'auto' } = {}) {
   const packagesDir = join(runtimeDir, 'packages');
   const assetsDir = join(packagesDir, 'assets');
-  return async function runCpuAgent({ brief, brand, provider, model: modelName, motionModel: requestedMotionModel, sessionId = 'cpu-slice', onEvent } = {}) {
+  return async function runCpuAgent({ brief, brand, provider, model: modelName, motionModel: requestedMotionModel, thinking, sessionId = 'cpu-slice', onEvent } = {}) {
     if (typeof brief !== 'string' || brief.trim().length === 0) {
       const error = new Error('brief is required');
+      error.status = 400;
+      throw error;
+    }
+    if (thinking !== undefined && thinking !== 'enabled' && thinking !== 'disabled') {
+      const error = new Error('thinking must be enabled or disabled');
       error.status = 400;
       throw error;
     }
@@ -546,7 +729,10 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     const { runCpuSlice, classifyProductionIntent, parseMotionModel } = await import('../../../packages/agent/dist/src/index.js');
     const productionIntent = classifyProductionIntent(brief);
     const intent = narrationTimedIntent(productionIntent, brief);
-    const planningBrief = planningBriefForNarration(brief, productionIntent);
+    const narrationPlanningBrief = planningBriefForNarration(brief, productionIntent);
+    const planningBrief = productionIntent.liveActionHumans
+      ? `${narrationPlanningBrief}\n\nHard creative constraint: use photorealistic live-action fictional human adults with natural skin and real-world materials in the proposal and every image/video prompt. Do not substitute clay, plasticine, stop-motion, puppets, cartoons or handmade-miniature styling.`
+      : narrationPlanningBrief;
     const briefSize = /\b(\d{2,5})\s*[x×]\s*(\d{2,5})\b/i.exec(brief);
     const briefAspect = briefSize ? aspectFromSize(Number(briefSize[1]), Number(briefSize[2])) : extractBrief(brief).aspect;
     let motionModel;
@@ -570,7 +756,10 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       resolved = resolveProviderConfig
         ? resolveProviderConfig(provider, modelName)
         : resolveProvider(provider, { ...override, ...(modelName ? { model: modelName } : {}) });
-      agentModel = createOpenAICompatibleModel(resolved);
+      agentModel = createOpenAICompatibleModel({
+        ...resolved,
+        ...(thinking === 'disabled' ? { thinking, reasoningEffort: undefined } : thinking === 'enabled' ? { thinking } : {}),
+      });
       live = true;
     }
     const persistSvg = (assetId, svg) => {
@@ -630,7 +819,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       const phaseStartedAt = Date.now();
       onEvent?.({ type: 'runner_phase', phase, status: 'started', elapsedMs: Date.now() - runStartedAt });
       try {
-        const result = await runCpuSlice({
+        let result = await runCpuSlice({
           brief: repairInstructions ? `${planningBrief}\n\n${repairInstructions}` : planningBrief,
           ...(repairInstructions ? { initialPackage: slice.package } : {}),
           ...(model ? { model } : {}),
@@ -649,6 +838,30 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           maxSteps: repairInstructions ? 8 : 16,
           onEvent: event => onEvent?.({ ...event, phase, runElapsedMs: Date.now() - runStartedAt }),
         });
+        if (productionIntent.generatedFilm) {
+          if (productionIntent.liveActionHumans) {
+            const corrected = enforceLiveActionHumans(result.package);
+            if (corrected.changed) {
+              result = { ...result, package: corrected.package };
+              onEvent?.({ type: 'runner_phase', phase, status: 'creative_constraint', constraint: 'live_action_humans', elapsedMs: Date.now() - runStartedAt });
+            }
+          }
+          const covered = coverGeneratedFilmScenes(result.package);
+          if (covered.splits > 0) {
+            const pendingGpu = result.pendingGpu.filter(item => item.generator === 'flux3-klein');
+            const seen = new Set();
+            for (const scene of covered.package.scenes) {
+              for (const plate of Array.isArray(scene?.media) ? scene.media : []) {
+                const asset = covered.package.assets?.[plate?.asset];
+                if (seen.has(plate?.asset) || asset?.status !== 'pending' || !['fasth3-omni', 'ltx25'].includes(asset?.gen?.generator)) continue;
+                seen.add(plate.asset);
+                pendingGpu.push({ assetId: plate.asset, generator: asset.gen.generator, ...(asset.gen.workflow ? { workflow: asset.gen.workflow } : {}), sceneId: scene.id });
+              }
+            }
+            result = { ...result, package: covered.package, pendingGpu };
+            onEvent?.({ type: 'runner_phase', phase, status: 'coverage', splits: covered.splits, scenes: covered.package.scenes.length, elapsedMs: Date.now() - runStartedAt });
+          }
+        }
         onEvent?.({ type: 'runner_phase', phase, status: 'completed', durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - runStartedAt, stopped: result.result.stopped ?? 'final' });
         return result;
       } catch (error) {

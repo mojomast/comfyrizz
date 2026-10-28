@@ -40,7 +40,9 @@ function fakeRoot() {
       listeners.get(type)?.delete(handler);
     },
     querySelector(selector) {
-      return selector === '#super-easy-prompt' ? prompt : null;
+      if (selector === '#super-easy-prompt') return prompt;
+      if (selector === '[data-super-easy-home]') return root.innerHTML.includes('data-super-easy-home') ? {} : null;
+      return null;
     },
     fire(type, event) {
       for (const handler of listeners.get(type) ?? []) handler(event);
@@ -82,6 +84,34 @@ test('first paint is the Super Easy home, never the Easy studio or its player sl
   assert.doesNotMatch(root.innerHTML, /data-easy-shell/u);
   assert.doesNotMatch(root.innerHTML, /data-easy-player/u);
 
+  handle.destroy();
+});
+
+test('background home updates preserve the active prompt and only setup forces a repaint', () => {
+  const { root, prompt } = fakeRoot();
+  let setup = { compute: 'cpu', spendCap: 10, confirmed: false };
+  const handle = mountSuperEasy({
+    root,
+    state: () => state(),
+    onMoreControl: () => {},
+    setup: () => setup,
+  });
+  const initial = root.innerHTML;
+  prompt.value = 'A skater learns to fall safely';
+  root.fire('input', {
+    target: {
+      value: prompt.value,
+      closest: selector => (selector === '#super-easy-prompt' ? prompt : null),
+    },
+  });
+
+  handle.render();
+  assert.equal(root.innerHTML, initial, 'a background update must not replace the focused textarea');
+
+  setup = { compute: 'colab', spendCap: 12, confirmed: true };
+  handle.render({ forceHome: true });
+  assert.notEqual(root.innerHTML, initial, 'an explicit setup change can repaint');
+  assert.match(root.innerHTML, /A skater learns to fall safely/u, 'the typed prompt survives the setup repaint');
   handle.destroy();
 });
 

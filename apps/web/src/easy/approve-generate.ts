@@ -76,7 +76,8 @@ async function runApproval(run: () => Promise<string | undefined>): Promise<stri
   try {
     return recordFailure(await run());
   } catch (error) {
-    lastFailure = { message: COPY.plan.approveFailed };
+    const detail = error instanceof Error && typeof error.message === 'string' ? error.message.trim() : '';
+    lastFailure = { message: detail !== '' && detail !== 'OFFLINE' ? detail : COPY.plan.approveFailed };
     throw error;
   }
 }
@@ -248,7 +249,7 @@ async function approveBody(
     const actions = card.actions.filter((action) => typeof action?.id === 'string'
       && action.id !== ''
       && (options.runMode !== 'final' || isPaidAction(action)));
-    const dispatched: Array<{ actionId: string; response: unknown; revision: number }> = [];
+    const dispatched: Array<{ actionId: string; assetIds: string[]; response: unknown; revision: number }> = [];
     for (const action of actions) {
       const commandId = stableId('cmd_dispatch', [...identity, action.id, revision]);
       let response: unknown;
@@ -264,14 +265,26 @@ async function approveBody(
         response = null;
       }
       revision = revisionOf(response, revision);
-      dispatched.push({ actionId: action.id, response, revision });
+      dispatched.push({
+        actionId: action.id,
+        assetIds: Array.isArray(action.assetIds) ? action.assetIds.filter((id): id is string => typeof id === 'string' && id !== '') : [],
+        response,
+        revision,
+      });
     }
     for (const item of dispatched) {
       try {
+        // Later dispatches advance the production revision. An action's revision
+        // from dispatch time is therefore stale by the time its run starts.
+        const current = await deps.api.getProduction(id);
+        const expectedRevision = revisionOf(current, revision);
         const started = await deps.api.startRun({
           packageId: state.packageId,
           backendId,
           mode: options.runMode === 'final' ? 'final' : 'take',
+          ...(options.runMode !== 'final' && item.assetIds.length > 0
+            ? { includeReady: true, assets: item.assetIds }
+            : {}),
           budgetUnits: state.spendCap,
           authority: {
             productionId: id,
@@ -279,8 +292,9 @@ async function approveBody(
             planHash: card.planHash,
             actionId: item.actionId,
           },
-          expected: { productionRevision: item.revision },
+          expected: { productionRevision: expectedRevision },
         });
+        revision = revisionOf(started, expectedRevision);
         const runId = started && typeof started === 'object'
           ? (started as { runId?: unknown }).runId
           : null;
