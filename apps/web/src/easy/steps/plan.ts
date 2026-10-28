@@ -15,6 +15,7 @@ import {
 import { loadSyncnetBanner } from '../syncnet-notice.ts';
 import { bindPlanDecision, planDecisionAnswers, takeApprovalFailure } from '../approve-generate.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
+import { agentConsoleMarkup, mountAgentConsole } from '../agent-console.ts';
 
 const PREVIEW_TITLE = 'Preview';
 const EMPTY_PREVIEW = 'Preview appears after you generate.';
@@ -322,6 +323,7 @@ function loadingHtml(status: 'writing' | 'building' | 'proposing'): string {
   return `<div class="easy-plan easy-plan-loading" data-easy-plan>
 ${renderSkeleton(4, message)}
 <p class="easy-plan-status" data-easy-plan-status role="status">${escapeHtml(message)}</p>
+${agentConsoleMarkup()}
 </div>`;
 }
 
@@ -348,6 +350,7 @@ ${renderErrorState({
       data: { 'data-easy-plan-retry': '' },
     },
   })}
+${agentConsoleMarkup()}
 </div>`;
 }
 
@@ -384,6 +387,7 @@ export function renderPlan(state: EasyState, _facts?: StepFacts, options: PlanRe
 ${notice}
 ${approvalErrorBlock}
 ${offlineBanner(state)}
+${agentConsoleMarkup()}
 <div class="easy-two-col easy-plan-grid">
 ${renderShots(state, card, scenes)}
 ${renderPreview(state)}
@@ -446,6 +450,7 @@ export const step: EasyStepModule = {
 
   bind(el: HTMLElement, ctx: EasyStepContext) {
     let disposed = false;
+    const stopAgentConsole = mountAgentConsole(el);
 
     const registered = ctx.host.getPackage();
     if (registered !== registeredPackage) {
@@ -618,6 +623,7 @@ export const step: EasyStepModule = {
       el.removeEventListener('click', onClick);
       el.removeEventListener('input', onInput);
       el.removeEventListener('change', onChange);
+      stopAgentConsole();
     };
   },
 

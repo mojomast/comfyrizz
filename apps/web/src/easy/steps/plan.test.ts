@@ -167,6 +167,13 @@ test('a failed approve starts an inline error with a Try again button', () => {
   assert.ok(html.includes(COPY.errors.tryAgain), 'the retry action is labelled');
 });
 
+test('Plan exposes the agent console while writing and after resume', () => {
+  const state = readyState();
+  assert.match(renderPlan(state), /data-agent-console/);
+  state.plan = { ...state.plan, status: 'writing' };
+  assert.match(renderPlan(state), /data-agent-console/);
+});
+
 test('a rejected approve records the actionable server error for the plan surface', async () => {
   const state = readyState();
   const deps = {
