@@ -1,4 +1,5 @@
 import { clipsPath } from '../takes/api.ts';
+import { randomUUID } from '../uuid.ts';
 
 export class EasyApiError extends Error {
   status: number;
@@ -157,8 +158,8 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     },
     async createProduction({ conversationId, packageId }: { conversationId: any; packageId: any }) {
       return request('POST', '/api/productions', {
-        commandId: crypto.randomUUID(),
-        idempotencyKey: crypto.randomUUID(),
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
         kind: 'production.create',
         expected: { productionRevision: 0 },
         payload: { conversationId, packageId },
@@ -181,7 +182,7 @@ export function createEasyApi(fetchImpl: FetchImpl) {
       return request('POST', `/api/productions/${encodeURIComponent(id)}/action-plans`, body);
     },
     setSpendCap(id: any, body: { ceiling: any; expected?: { productionRevision?: number }; commandId?: string; idempotencyKey?: string }) {
-      const commandId = typeof body.commandId === 'string' && body.commandId.trim() !== '' ? body.commandId : crypto.randomUUID();
+      const commandId = typeof body.commandId === 'string' && body.commandId.trim() !== '' ? body.commandId : randomUUID();
       const idempotencyKey = typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim() !== '' ? body.idempotencyKey : commandId;
       const productionRevision = body.expected?.productionRevision;
       if (!Number.isSafeInteger(productionRevision) || (productionRevision as number) < 0) {

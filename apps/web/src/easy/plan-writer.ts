@@ -1,4 +1,5 @@
 import { ideaPrompt } from './idea-prompt.ts';
+import { randomUUID } from '../uuid.ts';
 import { planInputsHash } from './store.ts';
 import type { EasyHost, EasyState } from './types.ts';
 
@@ -117,7 +118,7 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps, options: 
       const current = live();
       const provider = await connectedSelection(deps.host);
       if (!currentSession()) return;
-      const sessionId = crypto.randomUUID();
+      const sessionId = randomUUID();
       const pollProgress = async () => {
         if (!deps.api.getAgentProgress) return;
         try {

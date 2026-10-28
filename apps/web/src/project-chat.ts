@@ -3,6 +3,7 @@ import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import type { InlineAsset } from '../../renderer/src/components';
 import { sceneNumberOf, slotLabel, type ReferenceAssignment } from './references/panel.ts';
 import { isRecoveryConflict, recoveryPanelHtml, recoveryRequest, type RecoveryConflict } from './chat-recovery.ts';
+import { randomUUID } from './uuid.ts';
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -790,7 +791,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   const loaded = load();
 
   function ensureConversationId(): string {
-    conversationId ??= `chat_${crypto.randomUUID()}`;
+    conversationId ??= `chat_${randomUUID()}`;
     localStorage.setItem(STORAGE_KEY, conversationId);
     return conversationId;
   }
@@ -869,7 +870,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({
           conversationId: ensureConversationId(),
-          turnId: crypto.randomUUID(),
+          turnId: randomUUID(),
           baseRevision: conversation?.revision ?? 0,
           ...(kind === 'reference'
             ? { rejectAssignments: [proposalId] }
@@ -1035,7 +1036,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     options.append('user', text.trim());
     try {
       const provider = await options.provider();
-      pending = { conversationId: ensureConversationId(), turnId: crypto.randomUUID(), message: text, mode,
+      pending = { conversationId: ensureConversationId(), turnId: randomUUID(), message: text, mode,
         provider: provider.provider, model: provider.model,
         ...(conversation ? { baseRevision: conversation.revision } : {}),
         ...(options.adoptPackageId && !conversation?.projectId ? { adoptPackageId: options.adoptPackageId } : {}),

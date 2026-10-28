@@ -1,4 +1,5 @@
 import { writePlan } from '../plan-writer.ts';
+import { randomUUID } from '../../uuid.ts';
 import { approveAndGenerate } from '../approve-generate.ts';
 import { runCpuGenerate, type CpuHost, type RunCpuGenerateOptions } from '../cpu-path.ts';
 import { readPlanCard, type PlanCard } from '../../productions/cards/plan-card.ts';
@@ -201,7 +202,7 @@ function finalPlanEnvelope(card: PlanCard, snapshot: unknown): Record<string, un
     || expectedProductionRevision === null) {
     throw new Error(FINAL_PLAN_FAILED);
   }
-  const suffix = crypto.randomUUID().replaceAll('-', '');
+  const suffix = randomUUID().replaceAll('-', '');
   const commandId = `cmd_super_easy_final_${suffix}`;
   return {
     commandId,
