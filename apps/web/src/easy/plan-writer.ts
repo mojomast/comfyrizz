@@ -2,12 +2,15 @@ import { ideaPrompt } from './idea-prompt.ts';
 import { randomUUID } from '../uuid.ts';
 import { planInputsHash } from './store.ts';
 import type { EasyHost, EasyState } from './types.ts';
+import { ITERATION_PRESETS, validateIterationPolicy } from '../../../server/src/productions/iteration.mjs';
 
 type PlanApi = {
   buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein'; sessionId?: string }): Promise<any>;
   getAgentProgress?(sessionId: string): Promise<any>;
   createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
+  getProduction?(id: string): Promise<any>;
+  sendCommand?(id: string, command: unknown): Promise<unknown>;
 };
 
 type PlanStore = {
@@ -46,6 +49,42 @@ function productionIdOf(body: any): string | null {
   return null;
 }
 
+function iterationPolicyOf(snapshot: any): Record<string, unknown> | null {
+  const direct = snapshot?.production?.iteration?.policy;
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) return direct;
+  const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type === 'iteration.set' && event.data?.policy && typeof event.data.policy === 'object') return event.data.policy;
+  }
+  return null;
+}
+
+async function persistIterationLevel(state: EasyState, api: PlanApi): Promise<void> {
+  if (state.compute !== 'colab' || !state.productionId) return;
+  if (typeof api.getProduction !== 'function' || typeof api.sendCommand !== 'function') {
+    throw new Error('The production connection cannot save the iteration level.');
+  }
+  const snapshot = await api.getProduction(state.productionId);
+  if (iterationPolicyOf(snapshot)?.level === state.level) return;
+  if (state.level === 'custom') throw new Error('Configure Custom in the Advanced editor before writing this plan.');
+  const preset = ITERATION_PRESETS[state.level];
+  if (!preset) throw new Error(`Unknown iteration level: ${state.level}`);
+  const revision = Number.isSafeInteger(snapshot?.revision)
+    ? snapshot.revision
+    : snapshot?.production?.revision;
+  if (!Number.isSafeInteger(revision) || revision < 0) throw new Error('The production revision is unavailable; reload before choosing a level.');
+  const suffix = `${state.level}_${revision}_${encodeURIComponent(state.productionId)}`;
+  await api.sendCommand(state.productionId, {
+    commandId: `cmd_iteration_set_${suffix}`,
+    idempotencyKey: `idem_iteration_set_${suffix}`,
+    kind: 'iteration.set',
+    productionId: state.productionId,
+    expected: { productionRevision: revision },
+    payload: { policy: validateIterationPolicy(structuredClone(preset)) },
+  });
+}
+
 async function connectedSelection(host: WritePlanDeps['host']): Promise<{ provider: string; model?: string } | undefined> {
   const selection = await host.aiSelection();
   if (!selection?.provider || selection.provider === 'none') return undefined;
@@ -82,7 +121,7 @@ export function plannerProgressAnnouncement(progress: any): string {
   return `Planning ${phase}${step}${elapsed}`;
 }
 
-export async function writePlan(state: EasyState, deps: WritePlanDeps, options: { stopAfterPackage?: boolean } = {}): Promise<void> {
+export async function writePlan(state: EasyState, deps: WritePlanDeps, options: { stopAfterPackage?: boolean; persistIteration?: boolean } = {}): Promise<void> {
   const hash = planInputsHash(state);
   if (state.plan.status === 'ready' && state.planHash === hash) return;
 
@@ -187,6 +226,7 @@ export async function writePlan(state: EasyState, deps: WritePlanDeps, options: 
   try {
     const current = live();
     if (!current.productionId) throw new Error('missing production id');
+    if (options.persistIteration === true) await persistIterationLevel(current, deps.api);
     await deps.api.proposeEasyPlan(current.productionId, {
       level: current.level,
       compute: current.compute,

@@ -541,7 +541,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       go,
       rerender: () => showStep(currentStep),
       dialogs: {},
-      writePlan: () => writePlan(store.get(), { api, host, store }),
+      writePlan: () => writePlan(store.get(), { api, host, store }, { persistIteration: true }),
       approveAndGenerate: () => approveFromStudio(),
       retryShot: async (shotId, chip) => {
         const pending = await retryShot(store.get(), { api: api as never, store, go: (step) => go(step) }, shotId, chip);
