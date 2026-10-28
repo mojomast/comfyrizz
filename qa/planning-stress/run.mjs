@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURES, PLANNING_MODEL, PLANNING_PROVIDER } from './fixtures.mjs';
@@ -380,6 +380,13 @@ function linkBuild(sourceRoot, worktree) {
     'packages/sources/dist',
     'packages/tts/dist',
   ];
+  for (const workspace of ['packages', 'apps']) {
+    const root = join(sourceRoot, workspace);
+    if (!existsSync(root)) continue;
+    for (const name of readdirSync(root)) {
+      links.push(join(workspace, name, 'node_modules'));
+    }
+  }
   for (const relative of links) {
     const from = join(sourceRoot, relative);
     const to = join(worktree, relative);
