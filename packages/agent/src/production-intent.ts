@@ -53,7 +53,7 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   );
   const generatedShots = positiveMatch(
     text,
-    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|(?:live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|(?:realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?))|(?:film|movie)|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
+    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|(?:live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|(?:realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?))|(?:film|movie|explainer\s+video|video\s+(?:explaining|about))|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
   );
   const recurringPhysicalCharacters = positiveMatch(
     text,

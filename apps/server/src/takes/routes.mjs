@@ -552,10 +552,17 @@ export function createTakeRoutes(options = {}) {
     adopt(pkg);
     const clips = await clipsFor(pkg);
     const doc = takeStore.read(pkgId) ?? emptyDoc(pkgId);
+    const timelineAssets = new Set(clips.map(clip => clip.assetId));
+    const references = Object.entries(doc.clips ?? {}).flatMap(([assetId, entry]) => {
+      if (timelineAssets.has(assetId) || pkg.assets?.[assetId]?.kind !== 'image') return [];
+      const take = effectiveSelected(entry) ?? activeTakes(entry).at(-1)?.takeId ?? null;
+      return take ? [{ assetId, takeId: take, kind: 'image', state: 'review' }] : [];
+    });
     return sendJson(response, 200, {
       packageId: pkgId,
       revision: pkg.revision ?? null,
       clips: clips.map(clip => clipView(pkg, clip, doc)),
+      references,
     });
   }
 
@@ -1009,9 +1016,14 @@ export function createTakeRoutes(options = {}) {
 
   async function handleTicket(response, pkgId, clipId, takeId) {
     const pkg = readPackage(pkgId);
-    const { clip } = await clipFor(pkg, clipId);
+    const clips = await clipsFor(pkg);
+    const clip = clips.find(candidate => candidate.clipId === clipId);
     const doc = takeStore.read(pkgId);
-    const take = activeTakes(doc?.clips?.[clip.assetId]).find(candidate => candidate.takeId === takeId);
+    // Reference stills are not timeline clips, but their verified takes use the
+    // same short-lived ticket boundary as video takes.
+    const assetId = clip?.assetId ?? (doc?.clips?.[clipId] ? clipId : null);
+    if (!assetId) throw new RouteError(404, 'UNKNOWN_CLIP', 'clip not found');
+    const take = activeTakes(doc?.clips?.[assetId]).find(candidate => candidate.takeId === takeId);
     if (!take) throw new RouteError(404, 'UNKNOWN_TAKE', 'take is not in this clip');
     if (!mediaTickets || typeof mediaTickets.mint !== 'function') {
       throw new RouteError(503, 'MEDIA_UNAVAILABLE', 'media tickets are not available');

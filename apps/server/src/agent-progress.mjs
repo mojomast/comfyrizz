@@ -29,6 +29,22 @@ function buildScene(scene) {
 
 function updateBuild(state, event) {
   const args = event.args && typeof event.args === 'object' ? event.args : {};
+  if (event.type === 'tool_call' && ['clip_propose_correction', 'clip_propose_finishing_audio'].includes(event.name)) {
+    state.build ??= { title: 'Requested clip changes', proposal: null, scenes: [], assets: [], changes: [], coverageScenes: null };
+    state.build.changes ??= [];
+    state.build.changes.push({
+      clipId: String(args.clip_id ?? (event.name === 'clip_propose_finishing_audio' ? 'soundtrack' : '')).slice(0, 200),
+      note: String(args.note ?? '').slice(0, 1000),
+      promptAppend: String(args.prompt_append ?? args.plan ?? '').slice(0, 2000),
+      status: 'calling',
+    });
+    return;
+  }
+  if (event.type === 'tool_result' && ['clip_propose_correction', 'clip_propose_finishing_audio'].includes(event.name) && state.build?.changes) {
+    const change = state.build.changes.findLast(item => item.status === 'calling');
+    if (change) change.status = event.ok === true ? 'proposed' : 'failed';
+    return;
+  }
   if (event.type === 'tool_call' && event.name === 'storyboard.propose') {
     state.build = {
       title: String(args.title ?? 'Untitled film').slice(0, 300),

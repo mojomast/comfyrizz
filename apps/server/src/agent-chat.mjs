@@ -12,6 +12,8 @@ import { buildManifest, manifestBlock as referenceManifestBlock } from './refere
 import { validateAssignment } from './references/assign.mjs';
 import { listClips } from './takes/clips.mjs';
 import { buildCorrection } from './takes/correction.mjs';
+import { applyProceduralFinishingAudio } from './procedural-audio.mjs';
+import { sceneAssetIds } from '../../../packages/agent/dist/src/scene-build.js';
 import { InvalidPackageError } from './store.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { deriveClipState, TAKES_SCHEMA, VERDICTS } from './takes/model.mjs';
@@ -24,6 +26,12 @@ import { IterationScopeError, normalizeTargetSet, scopeIdKind, toPromptHint, val
 
 function fail(status, message, extra) { throw Object.assign(new Error(message), { status }, extra); }
 const clone = value => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
+
+function correctionSceneId(pkg, proposal) {
+  const scene = (pkg?.scenes ?? []).find(item => item?.id === proposal?.clipId
+    || sceneAssetIds(item).includes(proposal?.assetId));
+  return scene?.id ?? String(proposal?.clipId ?? '').split(':')[0];
+}
 
 /** The reference store mirrors confirmed placements only; proposals stay in the session. */
 function confirmedAssignments(assignments, refs) {
@@ -598,6 +606,11 @@ export function createProjectChat({
   function response(session, built = false) {
     const pkg = session.projectId ? store.read(session.projectId) : null;
     const { lastTurnId, lastTurnBuilt, previousPlan, adoptionPending, brand, ...conversation } = session;
+    if (Array.isArray(conversation.clipProposals)) {
+      conversation.clipProposals = conversation.clipProposals.map(proposal => proposal?.status === 'approval_required' && !proposal?.planHash
+        ? { ...proposal, status: 'proposed' }
+        : proposal);
+    }
     return {
       conversation,
       reply: session.messages.at(-1)?.role === 'assistant' ? session.messages.at(-1).content : '',
@@ -778,6 +791,17 @@ export function createProjectChat({
       return { ok: true, proposalId: proposal.id };
     };
 
+    const proposeAudio = input => {
+      const note = String(input?.note ?? '').trim();
+      const plan = String(input?.plan ?? '').trim();
+      if (!note || !plan) return { ok: false, error: 'note and plan are required' };
+      const proposal = record({
+        kind: 'audio', clipId: 'soundtrack', note,
+        change: { by: 'agent', note, plan },
+      });
+      return { ok: true, proposalId: proposal.id };
+    };
+
     return {
       block: clipManifestBlock(rows),
       manifest: rows,
@@ -786,6 +810,7 @@ export function createProjectChat({
       proposeCorrection,
       proposeSelect,
       proposeVerdict,
+      proposeAudio,
       readiness: gate,
     };
   }
@@ -873,11 +898,115 @@ export function createProjectChat({
     return state;
   }
 
-  async function send(input) {
+  async function authorizeClipProposals(input, id) {
+    const ids = new Set(input.confirmClipProposals ?? []);
+    if (!ids.size) fail(400, 'Choose at least one generation to authorize');
+    let session;
+    let proposals;
+    let baseRevision;
+    withLock(id, () => {
+      const conflict = recoverLocked(id);
+      if (conflict) fail(409, 'RECOVERY_CONFLICT', { code: 'RECOVERY_CONFLICT', recoveryConflict: conflict });
+      session = read(id);
+      if (!session) fail(404, 'Conversation not found');
+      if (input.turnId && input.turnId === session.lastTurnId) {
+        baseRevision = -1;
+        return;
+      }
+      if (input.baseRevision !== undefined && input.baseRevision !== session.revision) {
+        fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision: session.revision });
+      }
+      baseRevision = session.revision;
+      proposals = clone(session.clipProposals ?? []);
+    });
+    if (baseRevision === -1) return response(session, Boolean(session.lastTurnBuilt));
+    const selected = proposals.filter(proposal => ids.has(proposal?.id));
+    if (!selected.length) fail(404, 'No matching generation proposals remain');
+    const started = [];
+    const queued = [];
+    for (const proposal of selected) {
+      try {
+        if (proposal.kind !== 'correction' || proposal.status !== 'approval_required') {
+          throw new Error('this proposal is not waiting for spend approval');
+        }
+        if (typeof proposal.planHash !== 'string' || !proposal.planHash) throw new Error('the generation plan is missing; prepare it again');
+        if (typeof runs?.approve !== 'function' || typeof runs?.start !== 'function') throw new Error('clip regeneration is not available in chat');
+        const pkg = store.read(session.projectId);
+        if (!pkg) throw new Error('the project no longer exists');
+        const entry = takes.read(pkg.id)?.clips?.[proposal.assetId];
+        const built = buildCorrection(pkg, proposal.assetId, proposal.change, { takesCount: activeTakes(entry).length });
+        proposal.diff = built.diff;
+        proposal.correction = built.correction;
+        runs.approve(proposal.planHash);
+        let result;
+        try {
+          result = await runs.start({
+            backendId: 'colab', pkg: built.package, assets: [proposal.assetId], includeReady: true,
+            mode: 'take', corrections: { [proposal.assetId]: built.correction }, approved: true,
+          });
+        } catch (error) {
+          if (!isBusyError(error)) throw error;
+          result = { error: 'run busy', status: 409, planHash: proposal.planHash };
+        }
+        if (isBusyResult(result)) {
+          recordQueued(takes, pkg.id, proposal.assetId, built.correction, result?.planHash ?? proposal.planHash, 'colab');
+          proposal.status = 'confirmed';
+          proposal.queued = true;
+          proposal.confirmedAt = new Date().toISOString();
+          queued.push(proposal.clipId);
+        } else if (result?.approvalRequired || (result?.requiresApproval && result?.approved === false)) {
+          proposal.planHash = result.planHash ?? proposal.planHash;
+          proposal.estimate = result.estimate ?? proposal.estimate;
+          throw new Error('the plan changed after review; authorize the updated plan');
+        } else if (result?.refused) {
+          throw new Error(result.message ?? 'the backend refused this regeneration');
+        } else {
+          recordStarted(takes, pkg.id, proposal.assetId, result);
+          proposal.status = 'confirmed';
+          proposal.queued = false;
+          proposal.runId = result?.runId ?? null;
+          proposal.confirmedAt = new Date().toISOString();
+          started.push(proposal.clipId);
+        }
+        publishEvent(events, {
+          type: proposal.queued ? 'clip.queued' : 'clip.job', packageId: pkg.id, clipId: proposal.clipId,
+          assetId: proposal.assetId, backendId: 'colab', runId: result?.runId,
+          state: result?.status ?? 'starting', progress: 0,
+        });
+      } catch (error) {
+        proposal.lastError = String(error?.message ?? 'the generation could not be authorized').slice(0, 300);
+      }
+    }
+    const reply = [
+      started.length ? `Started generation for ${started.join(', ')}.` : '',
+      queued.length ? `Queued generation for ${queued.join(', ')}.` : '',
+      !started.length && !queued.length ? 'No generation started. Review the proposal errors and try again.' : '',
+    ].filter(Boolean).join(' ');
+    let committed;
+    withLock(id, () => {
+      const latest = read(id);
+      if (!latest || latest.revision !== baseRevision) {
+        fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision: latest?.revision ?? null });
+      }
+      const now = new Date().toISOString();
+      committed = {
+        ...latest, revision: baseRevision + 1, clipProposals: proposals,
+        messages: [...latest.messages,
+          { role: 'user', content: String(input.message ?? 'Authorize the reviewed generations.'), at: now },
+          { role: 'assistant', content: reply, at: now }],
+        lastTurnId: input.turnId ?? null, lastTurnBuilt: false,
+      };
+      writeCas(committed, baseRevision);
+      appendJournal(id, committed, false);
+    });
+    return response(committed);
+  }
+
+  async function send(input, turnHooks = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'A chat message is required');
     const id = input.conversationId ?? `chat_${randomUUID()}`;
     if (!validId(id)) fail(400, 'Invalid conversation ID');
-    if (input.action !== undefined && input.action !== 'build') fail(400, 'Unknown conversation action');
+    if (input.action !== undefined && !['build', 'authorizeClipProposals'].includes(input.action)) fail(400, 'Unknown conversation action');
     if (input.turnId !== undefined && (typeof input.turnId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(input.turnId))) fail(400, 'Invalid turn ID');
     if (input.adoptPackageId !== undefined && (typeof input.adoptPackageId !== 'string'
       || !/^[A-Za-z0-9_.-]{1,128}$/.test(input.adoptPackageId))) {
@@ -925,6 +1054,7 @@ export function createProjectChat({
     if (active.has(id)) fail(409, 'This conversation already has a turn in progress');
     active.add(id);
     try {
+      if (input.action === 'authorizeClipProposals') return await authorizeClipProposals(input, id);
       // A rejection-only request is a decision, not a conversation turn: it
       // commits under the same lock and journal, but never resolves a provider
       // or calls the model.
@@ -1036,7 +1166,11 @@ export function createProjectChat({
         current = session.projectId ? store.read(session.projectId) : null;
         capturedPackageRevision = current ? current.revision : null;
         simCurrent = current;
-        clipProposals = Array.isArray(session.clipProposals) ? clone(session.clipProposals) : [];
+        clipProposals = Array.isArray(session.clipProposals)
+          ? clone(session.clipProposals).map(proposal => proposal?.status === 'approval_required' && !proposal?.planHash
+            ? { ...proposal, status: 'proposed' }
+            : proposal)
+          : [];
         cast = Array.isArray(session.cast) ? clone(session.cast) : [];
         castPlacements = Array.isArray(session.castPlacements) ? clone(session.castPlacements) : [];
         castProposals = Array.isArray(session.castProposals) ? clone(session.castProposals) : [];
@@ -1103,8 +1237,8 @@ export function createProjectChat({
                   packageId: simCurrent.id, assetId: proposal.assetId, takeId: proposal.takeId,
                   verdict: proposal.verdict, reason: proposal.reason,
                 });
-              } else if (proposal.kind === 'correction') {
-                if (!simCurrent) throw new Error('no project to regenerate');
+              } else if (proposal.kind === 'correction' || proposal.kind === 'audio') {
+                if (!simCurrent) throw new Error(proposal.kind === 'audio' ? 'no project to score' : 'no project to regenerate');
                 if (iterationScope && scopeTargetsClip(iterationScope, proposal)) {
                   proposal.change = {
                     ...(isPlainObject(proposal.change) ? proposal.change : {}),
@@ -1147,14 +1281,37 @@ export function createProjectChat({
 
       // Corrections start their run before the model sees the conversation, as
       // they did before the commit split. Phase C contains no await.
+      const boundCorrections = [];
       for (const proposal of corrections) {
         const now = new Date().toISOString();
         try {
+          if (proposal.kind === 'audio') {
+            const applied = applyProceduralFinishingAudio(simCurrent, {
+              plan: proposal.change?.plan,
+              assetsDir: join(runtimeDir, 'packages', 'assets'),
+            });
+            simCurrent = applied.package;
+            packageChanged = true;
+            proposal.assetId = applied.assetId;
+            proposal.durationSeconds = applied.durationSeconds;
+            proposal.status = 'confirmed';
+            proposal.confirmedAt = now;
+            continue;
+          }
           if (typeof runs?.start !== 'function') throw new Error('clip regeneration is not available in chat');
           const entry = takes.read(simCurrent.id)?.clips?.[proposal.assetId];
           const built = buildCorrection(simCurrent, proposal.assetId, proposal.change, { takesCount: activeTakes(entry).length });
           proposal.diff = built.diff;
           proposal.correction = built.correction;
+          const bound = production?.findBound?.(simCurrent) ?? null;
+          if (bound && typeof production?.proposeCorrection === 'function') {
+            const saved = store.save(simCurrent.id, built.package, capturedPackageRevision);
+            simCurrent = saved;
+            capturedPackageRevision = saved.revision;
+            proposal.status = 'plan_pending';
+            boundCorrections.push({ proposal, productionId: bound.id });
+            continue;
+          }
           let result;
           try {
             result = await runs.start({
@@ -1199,6 +1356,31 @@ export function createProjectChat({
           }
         } catch (error) {
           proposal.lastError = String(error?.message ?? 'the proposal could not be applied').slice(0, 300);
+        }
+      }
+      if (boundCorrections.length) {
+        const productionId = boundCorrections[0].productionId;
+        try {
+          const planned = await production.proposeCorrection({
+            productionId,
+            pkg: simCurrent,
+            sceneIds: boundCorrections.map(item => correctionSceneId(simCurrent, item.proposal)),
+            commandId: `cmd_chat_${input.turnId ?? randomUUID()}`,
+            userEventId: `ue_${input.turnId ?? randomUUID()}`,
+          });
+          for (const { proposal } of boundCorrections) {
+            proposal.status = 'plan_ready';
+            proposal.productionId = productionId;
+            proposal.planId = planned.plan?.id ?? null;
+            proposal.planHash = planned.plan?.planHash ?? null;
+            proposal.estimate = planned.plan ?? null;
+            delete proposal.lastError;
+          }
+        } catch (error) {
+          for (const { proposal } of boundCorrections) {
+            proposal.status = 'plan_error';
+            proposal.lastError = String(error?.message ?? 'the production plan could not be created').slice(0, 300);
+          }
         }
       }
 
@@ -1439,6 +1621,7 @@ export function createProjectChat({
           })),
         } : null,
         build,
+        onEvent: event => turnHooks.onEvent?.(event),
       });
       const draftChanged = JSON.stringify(result.plan) !== JSON.stringify(rebased.plan);
       const finalPackage = pendingBuild ?? (packageChanged ? simCurrent : null);

@@ -113,6 +113,12 @@ test('chat builds a real project from conversation copy and storyboard', { timeo
   assert.equal(first.body.project.timeline.scenes.length, 3);
   assert.deepEqual(first.body.conversation.messages.map(message => message.role), ['user', 'assistant']);
   assert.doesNotMatch(JSON.stringify(first.body), new RegExp(KEY));
+  const progress = await api('/api/agent/progress?sessionId=turn-one-123');
+  assert.equal(progress.status, 200);
+  assert.equal(progress.body.status, 'done');
+  assert.equal(typeof progress.body.usage.total, 'number');
+  assert.ok(progress.body.recentEvents.some(event => event.type === 'tool_call' && event.name === 'project_build'));
+  assert.ok(progress.body.recentEvents.every(event => !JSON.stringify(event).includes('private fixture')));
 
   const conversationId = first.body.conversation.id;
   assert.ok(existsSync(join(runtimeDir, 'conversations', `${conversationId}.json`)));

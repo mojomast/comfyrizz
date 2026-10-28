@@ -1,3 +1,22 @@
+/* Super Easy replaces the fixed advanced-editor shell, so it must restore page scroll. */
+html:has(#app[data-super-easy-view]),
+body:has(#app[data-super-easy-view]) {
+  height: auto;
+  min-height: 100%;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+html body #app[data-super-easy-view] {
+  display: flex;
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-height: none;
+  overflow: visible;
+}
+
 .super-easy-progress,
 .super-easy-progress *,
 .super-easy-progress *::before,
@@ -210,8 +229,8 @@
 
 .super-easy-progress-slots {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -232,7 +251,16 @@
   border-color: var(--accent);
 }
 
-.super-easy-progress-slot-final {
+.super-easy-progress-slot-ready {
+  animation: super-easy-asset-pop 220ms ease-out both;
+}
+
+@keyframes super-easy-asset-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.super-easy-progress-slot-final.super-easy-progress-slot-ready {
   grid-column: 1 / -1;
 }
 
@@ -404,7 +432,8 @@
 }
 
 .super-easy-progress-reduced-motion .easy-progress-fill,
-.super-easy-progress-reduced-motion .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder {
+.super-easy-progress-reduced-motion .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder,
+.super-easy-progress-reduced-motion .super-easy-progress-slot-ready {
   transition: none;
   animation: none;
 }
@@ -415,7 +444,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .super-easy-progress .easy-progress-fill,
-  .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder {
+  .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder,
+  .super-easy-progress .super-easy-progress-slot-ready {
     transition: none;
     animation: none;
   }

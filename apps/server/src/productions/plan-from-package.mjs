@@ -148,6 +148,7 @@ export function planFromPackage(input = {}) {
       targetId: scene.id,
       takes,
       upperBound,
+      assetIds: assets.map(asset => asset.assetId),
       reuse: false,
       effectiveInputHash,
       seed: seedFor(effectiveInputHash),

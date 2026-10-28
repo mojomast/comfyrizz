@@ -50,6 +50,24 @@ test('live gallery collects only landed media and caches short-lived tickets', a
   gallery.stop();
 });
 
+test('landed visual references pop into the live gallery before final collection', async () => {
+  const api = fakeApi('generating');
+  api.listClips = async () => ({
+    packageId: 'pkg', revision: 1, clips: [clip('generating')],
+    references: [{ assetId: 'a_character_ref', takeId: 'take-ref', kind: 'image', state: 'review' }],
+  });
+  let items: any[] = [];
+  const gallery = createLiveAssetGallery({ api, onUpdate: next => { items = next; }, pollMs: 60000 });
+  gallery.start('pkg');
+  await gallery.refresh();
+  assert.equal(items[0].id, 'character:a_character_ref');
+  assert.equal(items[0].kind, 'character');
+  assert.equal(items[0].state, 'ready');
+  assert.equal(items[0].url, '/api/media/ticket');
+  assert.equal(items[1].state, 'loading');
+  gallery.stop();
+});
+
 test('a planned clip is pending and no take or ticket request is made', async () => {
   const api = fakeApi('generating');
   let items: any[] = [];

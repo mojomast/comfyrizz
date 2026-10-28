@@ -10,6 +10,7 @@ import { createHfTokenSettings } from './hf-token-settings.mjs';
 import { handleHfTokenRoutes } from './hf-token-routes.mjs';
 import { readColabProgress } from '../../../packages/backends/src/colab-progress.mjs';
 import { createRunController } from './run.mjs';
+import { planFromPackage } from './productions/plan-from-package.mjs';
 import { prepareRunNarration } from './run-narration.mjs';
 import { createExporter } from './export.mjs';
 import { buildDataset } from './dataset.mjs';
@@ -312,6 +313,30 @@ export function createApp({
     return entry;
   };
 
+  function trackConversationProgress(sessionId, brief) {
+    const progress = createAgentProgress(sessionId);
+    const progressDir = join(runtimeDir, 'agent-progress');
+    mkdirSync(progressDir, { recursive: true });
+    const progressFile = join(progressDir, `${createHash('sha256').update(sessionId).digest('hex')}.json`);
+    const persist = () => writeFileSync(progressFile, JSON.stringify(progress.snapshot(), null, 2));
+    progress.update({ type: 'request', brief });
+    persist();
+    if (agentProgress.size >= 100) agentProgress.delete(agentProgress.keys().next().value);
+    agentProgress.set(sessionId, progress);
+    return {
+      onEvent(event) {
+        progress.update(event);
+        if (event.type !== 'text') persist();
+        events.publish({ type: 'agent.event', sessionId, event });
+      },
+      finish(status, message = null) {
+        progress.finish(status, message);
+        persist();
+        events.publish({ type: status === 'done' ? 'agent.finished' : 'agent.failed', sessionId, ...(message ? { message } : {}) });
+      },
+    };
+  }
+
   // C9: stage where H8's runPackage resolves relative paths: the package JSON, the repo's
   // workflow graphs, and any assets the package already has on disk.
   async function prepareRunWorkDir(pkg, workDir, options = {}) {
@@ -560,6 +585,29 @@ export function createApp({
       findBound: findBoundProduction,
       read: productionId => productionStore.read(productionId),
       command: (envelope, attribution) => commandHandler.execute(envelope, attribution),
+      proposeCorrection: async ({ productionId, pkg, sceneIds, commandId, userEventId }) => {
+        const production = productionStore.read(productionId);
+        if (!production) throw Object.assign(new Error('production not found'), { status: 404 });
+        const described = planFromPackage({
+          pkg,
+          level: production.iteration?.policy?.level ?? production.iteration?.level ?? 'draft',
+          compute: 'colab', productionId, revision: production.revision,
+          onlyShotIds: sceneIds,
+        });
+        return productionActions.propose({
+          productionId,
+          body: {
+            commandId, idempotencyKey: commandId,
+            expected: { productionRevision: production.revision },
+            payload: {
+              planId: `plan_${randomUUID().replaceAll('-', '')}`, revision: 0,
+              reservationCeiling: described.reservationCeiling, collectAndStopReserve: 0,
+              requiredDecisions: described.requiredDecisions, actions: described.actions,
+            },
+          },
+          context: { actor: 'user', userEventId },
+        });
+      },
     },
   });
   // UX10/UX15: a package owned by a production reaches take, select, revert and
@@ -1540,11 +1588,20 @@ export function createApp({
 
     const chatMatch = /^\/api\/agent\/chat(?:\/([^/]+))?$/.exec(url.pathname);
     if (chatMatch) {
+      let conversationProgress = null;
       try {
         if (request.method === 'GET' && chatMatch[1]) return sendJson(response, 200, projectChat.get(chatMatch[1]));
-        if (request.method === 'POST' && !chatMatch[1]) return sendJson(response, 200, await projectChat.send(await readJson(request)));
+        if (request.method === 'POST' && !chatMatch[1]) {
+          const body = await readJson(request);
+          const progressId = typeof body.turnId === 'string' && body.turnId ? body.turnId : `chat_${randomUUID()}`;
+          conversationProgress = trackConversationProgress(progressId, typeof body.message === 'string' ? body.message : '');
+          const result = await projectChat.send(body, { onEvent: conversationProgress.onEvent });
+          conversationProgress.finish('done');
+          return sendJson(response, 200, result);
+        }
         return sendJson(response, 405, { error: 'method not allowed' });
       } catch (error) {
+        conversationProgress?.finish('failed', error.message);
         return sendJson(response, error.status ?? 502, {
           error: providerSettings ? providerSettings.redact(error.message) : error.message,
           ...(error.code ? { code: error.code } : {}),

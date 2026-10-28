@@ -1,5 +1,6 @@
 import './style.css';
 import './project-chat.css';
+import './easy/agent-console.css';
 import './characters/characters.css';
 import './ui/look-picker.css';
 import './productions/cards/iteration-card.css';
@@ -31,6 +32,7 @@ import colabHistoryJson from '../../../examples/pip-night-shift/colab-history.js
 import { readRunSnapshot } from './run-progress.ts';
 import { mountAgentSettings } from './agent-settings';
 import { mountProjectChat, type ChatProject } from './project-chat';
+import { agentConsoleMarkup, mountAgentConsole } from './easy/agent-console.ts';
 import { createReferenceApi } from './references/api.ts';
 import { createCharacterApi } from './characters/api.ts';
 import { mountCharactersTab } from './characters/mount.ts';
@@ -3164,8 +3166,22 @@ function init(opened: OpenedProject): void {
     prompt.focus();
   });
 
+  const chatConsoleHost = document.createElement('div');
+  chatConsoleHost.innerHTML = agentConsoleMarkup();
+  const chatConsoleRoot = chatConsoleHost.firstElementChild;
+  if (chatConsoleRoot) {
+    $('chat-pane').prepend(chatConsoleRoot);
+    mountAgentConsole($('chat-pane'));
+  }
+
   projectChat = mountProjectChat({
     apiFetch: chatApiFetch,
+    getAgentProgress: async sessionId => {
+      const response = await chatApiFetch(`/api/agent/progress?sessionId=${encodeURIComponent(sessionId)}`);
+      if (!response.ok) throw new Error(`Progress HTTP ${response.status}`);
+      return await response.json();
+    },
+    onReviewPlan: () => { document.querySelector('#sa-tab-generate')?.click(); },
     getTurnContext: activeTurnContext,
     ...(opened.source === 'requested' ? {
       initialConversationId: opened.chatId,

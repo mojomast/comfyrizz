@@ -249,7 +249,7 @@ async function approveBody(
     const actions = card.actions.filter((action) => typeof action?.id === 'string'
       && action.id !== ''
       && (options.runMode !== 'final' || isPaidAction(action)));
-    const dispatched: Array<{ actionId: string; response: unknown; revision: number }> = [];
+    const dispatched: Array<{ actionId: string; assetIds: string[]; response: unknown; revision: number }> = [];
     for (const action of actions) {
       const commandId = stableId('cmd_dispatch', [...identity, action.id, revision]);
       let response: unknown;
@@ -265,7 +265,12 @@ async function approveBody(
         response = null;
       }
       revision = revisionOf(response, revision);
-      dispatched.push({ actionId: action.id, response, revision });
+      dispatched.push({
+        actionId: action.id,
+        assetIds: Array.isArray(action.assetIds) ? action.assetIds.filter((id): id is string => typeof id === 'string' && id !== '') : [],
+        response,
+        revision,
+      });
     }
     for (const item of dispatched) {
       try {
@@ -277,6 +282,9 @@ async function approveBody(
           packageId: state.packageId,
           backendId,
           mode: options.runMode === 'final' ? 'final' : 'take',
+          ...(options.runMode !== 'final' && item.assetIds.length > 0
+            ? { includeReady: true, assets: item.assetIds }
+            : {}),
           budgetUnits: state.spendCap,
           authority: {
             productionId: id,

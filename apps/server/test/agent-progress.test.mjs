@@ -73,6 +73,19 @@ test('progress builds a live proposal, scene and asset view from tool calls', ()
   assert.equal(build.assets[0].status, 'planned');
 });
 
+test('progress builds visible clip and audio change records from chat tools', () => {
+  const progress = createAgentProgress('session-chat-build', () => 1000);
+  progress.update({ type: 'tool_call', name: 'clip_propose_correction', args: { clip_id: 's2', note: 'Harder fall', prompt_append: 'Full-weight impact.' } });
+  progress.update({ type: 'tool_result', name: 'clip_propose_correction', ok: true });
+  progress.update({ type: 'tool_call', name: 'clip_propose_finishing_audio', args: { note: 'Add sound', plan: 'Concrete impact | percussion' } });
+  progress.update({ type: 'tool_result', name: 'clip_propose_finishing_audio', ok: true });
+  const changes = progress.snapshot().build.changes;
+  assert.deepEqual(changes.map(change => change.status), ['proposed', 'proposed']);
+  assert.equal(changes[0].clipId, 's2');
+  assert.equal(changes[1].clipId, 'soundtrack');
+  assert.match(changes[1].promptAppend, /percussion/);
+});
+
 test('schema failures include actionable validation details, not a generic placeholder', () => {
   const problems = packageSchemaProblems({});
   assert.ok(problems.length > 0);

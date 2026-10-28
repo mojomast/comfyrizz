@@ -111,6 +111,7 @@ export interface ClipsResponse {
   packageId: string;
   revision: number | null;
   clips: ClipSummary[];
+  references?: Array<{ assetId: string; takeId: string; kind: 'image'; state: 'review' }>;
 }
 
 export interface TakesResponse {
@@ -845,6 +846,7 @@ export function createTakesApi(options: CreateTakesApiOptions): TakesApi {
         packageId: textValue(body.packageId) || packageId,
         revision: typeof body.revision === 'number' ? body.revision : null,
         clips: Array.isArray(body.clips) ? body.clips : [],
+        references: Array.isArray(body.references) ? body.references as ClipsResponse['references'] : [],
       };
     },
 

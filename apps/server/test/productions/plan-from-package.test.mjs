@@ -98,6 +98,7 @@ test('onlyShotIds limits the plan to that scene', () => {
   });
   assert.equal(plan.actions.length, 1);
   assert.equal(plan.actions[0].targetId, 's2');
+  assert.ok(plan.actions[0].assetIds.length > 0, 'dispatch is scoped to the corrected scene assets');
   assert.equal(plan.actions[0].note, 'warmer');
 });
 

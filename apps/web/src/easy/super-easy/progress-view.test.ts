@@ -477,6 +477,9 @@ test('progress-view.css styles the preview card and moves running gauges', () =>
     '.super-easy-progress-stage-running .easy-progress::after',
     '@keyframes super-easy-progress-sweep',
     '.super-easy-progress-reduced-motion .easy-progress::after',
+    '#app[data-super-easy-view]',
+    '@keyframes super-easy-asset-pop',
+    'minmax(140px, 1fr)',
   ]) {
     assert.ok(css.includes(selector), `missing ${selector}`);
   }

@@ -32,8 +32,8 @@ function planEvent(actions) {
 }
 
 function snapshot(overrides = {}, actions = [
-  { id: 'act_1', kind: 'shot.generate', targetId: 'shot_1', upperBound: 4, reuse: false },
-  { id: 'act_2', kind: 'shot.generate', targetId: 'shot_2', upperBound: 5, reuse: false },
+  { id: 'act_1', kind: 'shot.generate', targetId: 'shot_1', upperBound: 4, assetIds: ['a_1'], reuse: false },
+  { id: 'act_2', kind: 'shot.generate', targetId: 'shot_2', upperBound: 5, assetIds: ['a_2'], reuse: false },
 ]) {
   return {
     productionId: PRODUCTION_ID,
@@ -144,6 +144,8 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
     assert.equal(call.body.authority.planId, 'plan_1');
     assert.equal(call.body.authority.planHash, PLAN_HASH);
   }
+  assert.deepEqual(runs.map(call => call.body.assets), [['a_1'], ['a_2']]);
+  assert.ok(runs.every(call => call.body.includeReady === true));
   assert.deepEqual(
     calls.filter((item) => item.kind === 'dispatch').map((item) => item.body.payload),
     [

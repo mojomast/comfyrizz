@@ -76,10 +76,11 @@ ${argumentsMarkup(event)}${problemsMarkup(event)}
 
 export function agentConsoleBuildMarkup(progress: AgentProgressSnapshot | null): string {
   const build = progress?.build;
-  if (!build) return '<p class="agent-console-empty">The Build view appears after storyboard.propose.</p>';
+  if (!build) return '<p class="agent-console-empty">The Build view appears after the first project or clip-change tool call.</p>';
   const proposal = build.proposal && typeof build.proposal === 'object' ? build.proposal : {};
   const scenes = Array.isArray(build.scenes) ? build.scenes : [];
   const assets = Array.isArray(build.assets) ? build.assets : [];
+  const changes = Array.isArray(build.changes) ? build.changes : [];
   return `<section class="agent-console-build-summary">
 <h3>${escapeHtml(build.title ?? 'Untitled film')}</h3>
 <p>${escapeHtml(proposal.logline ?? '')}</p>
@@ -87,6 +88,7 @@ export function agentConsoleBuildMarkup(progress: AgentProgressSnapshot | null):
 ${build.coverageScenes ? `<p class="agent-console-coverage">Coverage split: ${build.coverageScenes} total shots</p>` : ''}
 </section>
 <section><h3>Scenes · ${scenes.length}</h3><ol class="agent-console-build-scenes">${scenes.map((scene: Record<string, any>) => `<li><strong>${escapeHtml(scene.id)}</strong><span>${escapeHtml(scene.headline || scene.layout || '')}</span><small>${scene.preferredFrames ?? 0} frames · ${scene.generationCalls ?? 0} generation call${scene.generationCalls === 1 ? '' : 's'}</small></li>`).join('')}</ol></section>
+${changes.length ? `<section><h3>Clip changes · ${changes.length}</h3><ol class="agent-console-build-assets">${changes.map((change: Record<string, any>) => `<li data-status="${escapeHtml(change.status)}"><strong>${escapeHtml(change.clipId)}</strong><span>${escapeHtml(change.promptAppend || change.note)}</span><small>${escapeHtml(change.status)}</small></li>`).join('')}</ol></section>` : ''}
 <section><h3>Assets · ${assets.length}</h3><ol class="agent-console-build-assets">${assets.map((asset: Record<string, any>) => `<li data-status="${escapeHtml(asset.status)}"><strong>${escapeHtml(asset.kind)} · ${escapeHtml(asset.sceneId)}</strong><span>${escapeHtml(asset.intent)}</span><small>${escapeHtml(asset.status)}</small></li>`).join('')}</ol></section>`;
 }
 
@@ -152,8 +154,8 @@ export function mountAgentConsole(root: ParentNode): () => void {
   closeButton.addEventListener('click', onClose);
   for (const tab of tabs) tab.addEventListener('click', onTab);
   dragHandle.addEventListener('pointerdown', onPointerDown);
-  doc.addEventListener('pointermove', onPointerMove);
-  doc.addEventListener('pointerup', onPointerUp);
+  doc.addEventListener?.('pointermove', onPointerMove);
+  doc.addEventListener?.('pointerup', onPointerUp);
 
   const paint = (progress: AgentProgressSnapshot | null) => {
     if (events) events.innerHTML = eventsMarkup(progress);
@@ -176,7 +178,7 @@ export function mountAgentConsole(root: ParentNode): () => void {
     closeButton.removeEventListener('click', onClose);
     for (const tab of tabs) tab.removeEventListener('click', onTab);
     dragHandle.removeEventListener('pointerdown', onPointerDown);
-    doc.removeEventListener('pointermove', onPointerMove);
-    doc.removeEventListener('pointerup', onPointerUp);
+    doc.removeEventListener?.('pointermove', onPointerMove);
+    doc.removeEventListener?.('pointerup', onPointerUp);
   };
 }

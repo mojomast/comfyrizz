@@ -27,16 +27,16 @@ function labelFor(sceneId: string, index: number): string {
 
 /** Merge live take media without replacing characters, voice or the final film. */
 export function mergeLiveGallery(base: GalleryModel, live: readonly GalleryItem[]): GalleryModel {
-  const liveShots = new Map(live.filter(item => item.kind === 'shot').map(item => [item.id, item]));
+  const liveMedia = new Map(live.filter(item => item.kind === 'shot' || item.kind === 'character').map(item => [item.id, item]));
   const used = new Set<string>();
   const items = base.items.map((item, index) => {
-    const replacement = item.kind === 'shot' ? liveShots.get(item.id) : undefined;
+    const replacement = item.kind === 'shot' || item.kind === 'character' ? liveMedia.get(item.id) : undefined;
     if (!replacement) return { ...item, index };
     used.add(item.id);
     if (replacement.state !== 'ready' && item.state === 'ready') return { ...item, index };
     return { ...replacement, index, highlighted: item.highlighted };
   });
-  for (const item of liveShots.values()) {
+  for (const item of liveMedia.values()) {
     if (used.has(item.id) || items.some(existing => existing.id === item.id)) continue;
     items.push({ ...item, index: items.length, highlighted: false });
   }
@@ -76,6 +76,28 @@ export function createLiveAssetGallery(options: LiveGalleryOptions): LiveGallery
     return { url: ticket.url, takeState: 'ready' };
   }
 
+  async function referenceFor(packageIdValue: string, reference: NonNullable<ClipsResponse['references']>[number], index: number): Promise<GalleryItem> {
+    const base = {
+      id: `character:${reference.assetId}`,
+      kind: 'character' as const,
+      label: `Visual reference ${index + 1}`,
+      highlighted: false,
+      index,
+    };
+    try {
+      const cached = ticketCache.get(reference.takeId);
+      if (cached && cached.expiresAt > Date.now() + 60_000) {
+        return { ...base, state: 'ready', url: cached.url, reason: null };
+      }
+      const ticket = await options.api.takeTicket(packageIdValue, reference.assetId, reference.takeId);
+      const expiresAt = ticket.expiresAt ? Date.parse(ticket.expiresAt) : Date.now() + 10 * 60_000;
+      ticketCache.set(reference.takeId, { url: ticket.url, expiresAt });
+      return { ...base, state: 'ready', url: ticket.url, reason: null };
+    } catch {
+      return { ...base, state: 'loading', url: null, reason: null };
+    }
+  }
+
   async function update(): Promise<void> {
     const id = packageId;
     const ticket = generation;
@@ -107,7 +129,8 @@ export function createLiveAssetGallery(options: LiveGalleryOptions): LiveGallery
           return { ...base, state: 'loading', url: null, reason: null };
         }
       }));
-      if (generation === ticket && packageId === id) options.onUpdate(items);
+      const references = await Promise.all((result.references ?? []).map((reference, index) => referenceFor(id, reference, index)));
+      if (generation === ticket && packageId === id) options.onUpdate([...references, ...items]);
     } catch (error) {
       if (generation === ticket && packageId === id) options.onError?.(error as Error);
     }

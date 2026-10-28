@@ -418,6 +418,26 @@ test('TR08: a take ticket mints a media URL for the take file only', async (t) =
   assert.equal(missing.json.code, 'UNKNOWN_TAKE');
 });
 
+test('TR08: non-timeline visual references appear live and use the same take-ticket boundary', async (t) => {
+  const ctx = setup(t);
+  const pkg = ctx.store.read(ctx.pkg.id);
+  pkg.assets.a_character_ref = clone(pkg.assets.a_plate1_still);
+  ctx.store.save(pkg.id, pkg, pkg.revision);
+  const source = join(ctx.root, 'character.png');
+  writeFileSync(source, 'real reference bytes');
+  const take = ctx.takeStore.addTake(ctx.pkg.id, 'a_character_ref', {
+    srcPath: source, media: { width: 1024, height: 576 }, gen: { generator: 'flux3-klein' }, runId: 'run_reference',
+  });
+  const listed = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips`);
+  assert.equal(listed.status, 200);
+  assert.deepEqual(listed.json.references, [{ assetId: 'a_character_ref', takeId: take.takeId, kind: 'image', state: 'review' }]);
+  assert.ok(listed.json.clips.every(clip => clip.assetId !== 'a_character_ref'), 'references do not become approval clips');
+  const ticket = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/a_character_ref/takes/${take.takeId}/ticket`, { method: 'POST' });
+  assert.equal(ticket.status, 200);
+  assert.equal(ticket.json.takeId, take.takeId);
+  assert.ok(ctx.mints.at(-1).endsWith('.png'));
+});
+
 test('TR08: invalid JSON is a client error and unknown clip routes are 404', async (t) => {
   const ctx = setup(t);
   const broken = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/regenerate`, { body: '{' });
