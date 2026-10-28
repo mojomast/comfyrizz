@@ -23,6 +23,14 @@ const REPAIR_SYSTEM = [
   'When the listed issues are fixed, stop calling tools and reply with one short sentence.',
 ].join('\n');
 
+const MOTION_GRAPHICS_REPAIR_SYSTEM = [
+  'You are Comfyrizz performing one focused repair of an existing motion-graphics package. The package is already loaded.',
+  'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace existing ready assets, change the story, or change the model route.',
+  'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use assets.generate_svg for each missing ready llm-svg asset and assets.generate_image for the missing scene-referenced planned GPU still. Use storyboard.edit only for scene fields named in the issues.',
+  'Tool errors: for invalid_arguments, correct only the fields named in issues[].path and resend; for tool_failed, supply the prerequisite the message names. Never resend identical arguments.',
+  'When the listed issues are fixed, stop calling tools and reply with one short sentence.',
+].join('\n');
+
 function extractSvg(text) {
   const match = /<svg[\s\S]*?<\/svg>/i.exec(text);
   return match ? match[0] : null;
@@ -169,6 +177,47 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   return problems;
 }
 
+export function motionGraphicsCompletionProblems(slice) {
+  const problems = [];
+  const svgAssets = Array.isArray(slice?.svgAssets) ? slice.svgAssets : [];
+  if (svgAssets.length < 4) {
+    problems.push({
+      code: 'SVG_ASSET_FLOOR',
+      message: `motion graphics requires at least 4 ready llm-svg assets, got ${svgAssets.length}`,
+      path: 'assets',
+      count: svgAssets.length,
+      required: 4,
+    });
+  }
+  const pendingGpu = Array.isArray(slice?.pendingGpu) ? slice.pendingGpu : [];
+  if (pendingGpu.length < 1) {
+    problems.push({
+      code: 'PENDING_GPU_MISSING',
+      message: `motion graphics requires at least 1 scene-referenced planned GPU still, got ${pendingGpu.length}`,
+      path: 'scenes[].media',
+      count: pendingGpu.length,
+      required: 1,
+    });
+  }
+  for (const problem of Array.isArray(slice?.problems) ? slice.problems : []) {
+    const code = typeof problem?.code === 'string' ? problem.code : 'CPU_SLICE_PROBLEM';
+    if (code === 'SVG_ASSET_FLOOR') continue;
+    problems.push({
+      code,
+      message: typeof problem?.message === 'string' ? problem.message : String(problem),
+      path: 'package',
+    });
+  }
+  for (const message of packageSchemaProblems(slice?.package)) {
+    problems.push({ code: 'PACKAGE_SCHEMA', message, path: 'package' });
+  }
+  return problems;
+}
+
+function problemLines(problems) {
+  return problems.map(problem => `${problem.code}: ${problem.message}`);
+}
+
 function createLlmSvgGenerator(model, sessionId) {
   return async ({ intent, attempt, errors }) => {
     const prompt = [
@@ -282,7 +331,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       };
     };
     const runStartedAt = Date.now();
-    const runOnce = async (model, repairInstructions = null) => {
+    const runOnce = async (model, repairInstructions = null, repairSystem = REPAIR_SYSTEM) => {
       const phase = repairInstructions ? 'repair' : 'initial';
       const phaseStartedAt = Date.now();
       onEvent?.({ type: 'runner_phase', phase, status: 'started', elapsedMs: Date.now() - runStartedAt });
@@ -300,7 +349,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           sessionId,
           now,
           ...(repairInstructions ? {
-            system: REPAIR_SYSTEM,
+            system: repairSystem,
           } : {}),
           // Initial planning is bounded separately from the much smaller edit-only repair.
           maxSteps: repairInstructions ? 8 : 16,
@@ -323,10 +372,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     };
     let slice = await runOnce(agentModel);
     absorbUsage(slice.result);
-    let fallback = false;
-    // Motion graphics retains the deterministic CPU fallback. A generated-film
-    // miss is an actionable failure: substituting the SVG/FLUX script would
-    // silently change the requested deliverable and hide missing generated shots.
+    const fallback = false;
     if (agentModel && !acceptable(slice)) {
       if (productionIntent.generatedFilm) {
         const initialProblems = [
@@ -349,9 +395,30 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           throw error;
         }
       } else {
-        slice = await runOnce(null);
+        const initialProblems = motionGraphicsCompletionProblems(slice);
+        onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: problemLines(initialProblems), elapsedMs: Date.now() - runStartedAt });
+        slice = await runOnce(agentModel, `${repairPackageFacts(slice.package, productionIntent)}\n\nValidation report: the current motion-graphics package is incomplete. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`, MOTION_GRAPHICS_REPAIR_SYSTEM);
         absorbUsage(slice.result);
-        fallback = true;
+        if (!acceptable(slice)) {
+          const problems = motionGraphicsCompletionProblems(slice);
+          const lines = problemLines(problems);
+          onEvent?.({ type: 'runner_phase', phase: 'repair', status: 'validation', ok: false, problems: lines, elapsedMs: Date.now() - runStartedAt });
+          const svgProblem = problems.find(problem => problem.code === 'SVG_ASSET_FLOOR');
+          const pendingProblem = problems.find(problem => problem.code === 'PENDING_GPU_MISSING');
+          const error = new Error(`motion graphics is incomplete after one repair: ${lines.join('; ') || slice.result.error || 'live agent did not finish'}`);
+          error.status = 422;
+          error.code = 'MOTION_GRAPHICS_INCOMPLETE';
+          error.errors = lines;
+          error.details = {
+            codes: problems.map(problem => problem.code),
+            svgCount: svgProblem?.count ?? (Array.isArray(slice.svgAssets) ? slice.svgAssets.length : 0),
+            requiredSvgCount: 4,
+            pendingGpuCount: pendingProblem?.count ?? (Array.isArray(slice.pendingGpu) ? slice.pendingGpu.length : 0),
+            requiredPendingGpuCount: 1,
+            problems: lines,
+          };
+          throw error;
+        }
       }
     }
     const validation = validatePackage(slice.package);
