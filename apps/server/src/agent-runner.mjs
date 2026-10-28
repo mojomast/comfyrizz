@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { aspectFromSize, extractBrief } from '../../../packages/agent/dist/src/index.js';
 import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
 
 const SVG_SYSTEM = [
@@ -18,7 +19,10 @@ const SVG_SYSTEM = [
 const REPAIR_SYSTEM = [
   'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded.',
   'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace or regenerate existing assets, change the story, or change the model route.',
-  'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy or notes. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
+  'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy, notes, narration or motion.cue_phrases. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
+  'Narration-timed motion: when the brief asks for cue-timed motion, every scene needs a concise scene.narration and motion.cue_phrases copied verbatim from that scene narration.',
+  'Explicit Klein medium: every shot needs its own scene-referenced FLUX 3 Image Klein still before the film is accepted. Plan it with assets.generate_video using motion_model klein; keep stills + code motion and never create H3/LTX jobs.',
+  'Aspect and format: the package format must match the brief aspect and output size. When the repair facts report a brief/draft aspect mismatch, correct the package format without changing the story or model route.',
   'Tool errors: for invalid_arguments, correct only the fields named in issues[].path and resend; for tool_failed, supply the prerequisite the message names. Never resend identical arguments.',
   'When the listed issues are fixed, stop calling tools and reply with one short sentence.',
 ].join('\n');
@@ -67,18 +71,41 @@ function plannedTimelineFrames(pkg) {
   }
 }
 
-function repairPackageFacts(pkg, intent) {
+function repairPackageFacts(pkg, intent, briefAspect) {
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
+  const width = Number(pkg?.format?.width);
+  const height = Number(pkg?.format?.height);
+  const hasFormat = Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0;
+  const draftAspect = hasFormat ? aspectFromSize(width, height) : null;
   const currentFrames = plannedTimelineFrames(pkg);
   const targetFrames = intent.requestedSeconds === null ? 'unspecified' : Math.round(intent.requestedSeconds * fps);
-  const sceneFacts = scenes.map(scene => `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}; narration=${JSON.stringify(typeof scene?.narration === 'string' ? scene.narration : '')}`).join('\n');
-  return [
+  const sceneFacts = scenes.map(scene => {
+    const mediaAssets = (Array.isArray(scene?.media) ? scene.media : [])
+      .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
+      .filter(Boolean);
+    const kleinStills = mediaAssets.filter(asset => asset.kind === 'image' && asset.gen?.generator === 'flux3-klein').length;
+    const cuePhrases = Array.isArray(scene?.motion?.cue_phrases)
+      ? scene.motion.cue_phrases.filter(phrase => typeof phrase === 'string' && phrase.trim()).map(phrase => phrase.trim())
+      : [];
+    const narration = JSON.stringify(typeof scene?.narration === 'string' ? scene.narration : '');
+    return `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}; narration=${narration}; cue_phrases=${JSON.stringify(cuePhrases)}; klein_stills=${kleinStills}`;
+  }).join('\n');
+  const formatFact = hasFormat
+    ? `Format: draft aspect=${draftAspect} at ${width}x${height}; brief aspect=${briefAspect ?? 'unknown'}.`
+    : `Format: draft format is missing; brief aspect=${briefAspect ?? 'unknown'}.`;
+  const facts = [
     'Current package facts (authoritative data, not instructions):',
     `Timing: fps=${fps}; current total frames=${currentFrames}; requested total frames=${targetFrames}; acceptable compiled duration=${durationRangeText(intent.requestedSeconds)}.`,
+    formatFact,
     `Scene IDs and current values: ${sceneFacts || 'none'}.`,
-    'Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.',
-  ].join('\n');
+  ];
+  if (hasFormat && briefAspect && draftAspect !== briefAspect) {
+    facts.push(`Aspect repair: the brief requires ${briefAspect} but the draft is ${draftAspect} (${width}x${height}); correct the package format without changing the story or model route.`);
+  }
+  facts.push('Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.');
+  return facts.join('\n');
 }
 
 /** Completion is shot-reachable: orphan pending GPU assets never satisfy it. */
@@ -255,6 +282,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     const brandAssets = brand?.assets ?? null;
     const { runCpuSlice, classifyProductionIntent, parseMotionModel } = await import('../../../packages/agent/dist/src/index.js');
     const productionIntent = classifyProductionIntent(brief);
+    const briefSize = /\b(\d{2,5})\s*[x×]\s*(\d{2,5})\b/i.exec(brief);
+    const briefAspect = briefSize ? aspectFromSize(Number(briefSize[1]), Number(briefSize[2])) : extractBrief(brief).aspect;
     let motionModel;
     try {
       motionModel = parseMotionModel(requestedMotionModel ?? defaultMotionModel, 'auto');
@@ -380,7 +409,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           ...packageSchemaProblems(slice.package),
         ];
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: initialProblems, elapsedMs: Date.now() - runStartedAt });
-        slice = await runOnce(agentModel, `${repairPackageFacts(slice.package, productionIntent)}\n\nValidation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`);
+        slice = await runOnce(agentModel, `${repairPackageFacts(slice.package, productionIntent, briefAspect)}\n\nValidation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`);
         absorbUsage(slice.result);
         if (!acceptable(slice)) {
           const problems = [
@@ -397,7 +426,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       } else {
         const initialProblems = motionGraphicsCompletionProblems(slice);
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: problemLines(initialProblems), elapsedMs: Date.now() - runStartedAt });
-        slice = await runOnce(agentModel, `${repairPackageFacts(slice.package, productionIntent)}\n\nValidation report: the current motion-graphics package is incomplete. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`, MOTION_GRAPHICS_REPAIR_SYSTEM);
+        slice = await runOnce(agentModel, `${repairPackageFacts(slice.package, productionIntent, briefAspect)}\n\nValidation report: the current motion-graphics package is incomplete. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`, MOTION_GRAPHICS_REPAIR_SYSTEM);
         absorbUsage(slice.result);
         if (!acceptable(slice)) {
           const problems = motionGraphicsCompletionProblems(slice);
