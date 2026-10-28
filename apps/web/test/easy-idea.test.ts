@@ -132,7 +132,7 @@ test('ideaPrompt keeps the brief sentence order and skips decide answers', () =>
 
   assert.equal(
     ideaPrompt(state),
-    'A 30-second video for my bakery. Length: about 30 seconds. Aspect: 16:9. Look: clay. Music: instrumental bed. What should viewers do at the end? Visit the website',
+    'A 30-second video for my bakery. Aspect: 16:9. Look: cinematic-dark. Music: instrumental bed. What should viewers do at the end? Visit the website',
   );
 
   state.idea.sound = false;

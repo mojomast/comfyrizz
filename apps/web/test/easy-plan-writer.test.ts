@@ -136,7 +136,7 @@ test('an unchanged hash makes no calls', async () => {
 
 test('an explicit duration in the idea is not overridden by the default length', async () => {
   const store = memoryStore();
-  store.patch({ idea: { ...store.get().idea, text: 'A two minute skateboard film with realistic humans.', lengthS: 30 } });
+  store.patch({ idea: { ...store.get().idea, text: 'A two minute skateboard film with photorealistic humans.', lengthS: 30 } });
   const { calls, api, host } = harness({ store });
   await writePlan(store.get(), { api, host, store });
   assert.match(calls[0].input.brief, /two minute/);

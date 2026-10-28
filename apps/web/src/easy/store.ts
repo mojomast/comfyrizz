@@ -15,7 +15,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function defaultIdea() {
-  return { text: '', lengthS: 30 as 15 | 30 | 60 | 90, aspect: '16:9' as const, look: 'clay' as const, sound: true };
+  return { text: '', lengthS: 30 as 15 | 30 | 60 | 90, aspect: '16:9' as const, look: 'cinematic-dark' as const, sound: true };
 }
 
 function defaultNarration() {

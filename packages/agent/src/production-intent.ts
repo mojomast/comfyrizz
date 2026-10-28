@@ -49,11 +49,11 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   );
   const explicitGeneratedFilm = positiveMatch(
     text,
-    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|(?:live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|realistic\s+humans?))\b/i,
+    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|(?:live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|(?:realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?)))\b/i,
   );
   const generatedShots = positiveMatch(
     text,
-    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|(?:live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|realistic\s+humans?)|(?:film|movie)|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
+    /\b(?:AI[\s-]+generated\s+(?:film|video|shots?)|generated\s+(?:film|shots?)|(?:live[\s-]*action(?:\s+(?:film|video|footage|shots?))?|(?:realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?))|(?:film|movie)|short\s+film|cinematic\s+(?:short|film|sequence)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]+shots?\b|film\s+in\s+(?:\d+|one|two|three|four|five|six)[\s-]+shots?)\b/i,
   );
   const recurringPhysicalCharacters = positiveMatch(
     text,
@@ -74,7 +74,7 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?)\b/i.test(text)
     || /\btext[\s-]+free\b/i.test(text);
   const requiresNarrationCues = /\bcue_phrases\b|narration[\s-]+(?:linked|anchored)\s+(?:motion|animation|cues?)|timed\s+(?:to|with)\s+(?:the\s+)?narration/i.test(text);
-  const liveActionHumans = positiveMatch(text, /\b(?:real\s+(?:humans?|people)|realistic\s+humans?|live[\s-]*action)\b/i);
+  const liveActionHumans = positiveMatch(text, /\b(?:real\s+(?:humans?|people)|(?:realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?)|photoreal(?:istic)?(?:\s+humans?)?|live[\s-]*action)\b/i);
   const requestedMinutesMatch = new RegExp(`\\b(${DURATION_NUMBER})[\\s-]+(?:minutes?|mins?)\\b`, 'i').exec(text);
   const requestedSecondsMatch = new RegExp(`\\b(${DURATION_NUMBER})[\\s-]+seconds?\\b`, 'i').exec(text);
   const adjacentSeconds = requestedMinutesMatch && requestedSecondsMatch
