@@ -993,6 +993,22 @@ function mergeRefs(userRefs: string[], castRefs: string[]): string[] {
   return out;
 }
 
+/** Model-invented role names like shot_2_identity_reference are never asset ids. */
+const PLACEHOLDER_REF_RE = /identity|subject|character|cast|portrait|mascot|composition|art[_-]?direction|reference|start[_-]?frame|^shot[_-]?\d+/i;
+const IDENTITY_REF_RE = /identity|subject|character|cast|portrait|mascot/i;
+
+function isPlaceholderRef(id: string): boolean {
+  return PLACEHOLDER_REF_RE.test(id);
+}
+
+/** A reference that names no package asset is a 422 before semantic validation can fail. */
+function semanticRefError(sceneId: string, role: string, id: string): Error {
+  return Object.assign(
+    new Error(`${sceneId}: ${role} ${JSON.stringify(id)} is not an asset id in this package. Create the reference with assets.generate_image or assets.generate_svg and pass its returned id; invented placeholder names are rejected before the package can fail semantic validation.`),
+    { name: 'SemanticRefError', status: 422, code: 'SEM_REF_UNRESOLVED', assetId: id },
+  );
+}
+
 /**
  * Tools the model may call. Approval-requiring tools (spend, stock attach,
  * uploads) return a card request and never perform the action here.
@@ -1007,9 +1023,63 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   // Rebuild the whole-film stem as each shot arrives. Using only the first
   // shot's plan made otherwise different scenes share one generic sound bed.
   const finishingSoundPlans = new Map<string, string>();
+  // Role of each planned image, so a later invented identity name can bind the
+  // real raster identity even when the package has no cast member.
+  const plannedImageRoles = new Map<string, { sceneId: string; kind: string }>();
 
   const touch = () => {
     if (state.package) options.onPackageChange?.(state.package);
+  };
+
+  /** A raster identity image already linked to this scene's cast, if one exists. */
+  const existingIdentityImageId = (sceneId: string, castIds: string[]): string | undefined => {
+    const assets = state.package?.assets ?? {};
+    const scene = (Array.isArray(state.package?.scenes) ? state.package.scenes : []).find((item: any) => item?.id === sceneId);
+    const sceneCast = new Set([
+      ...(Array.isArray(scene?.cast) ? scene.cast : []),
+      ...castIds,
+    ]);
+    const linked = Object.entries(assets).filter(([id, asset]: [string, any]) => {
+      if (asset?.kind !== 'image') return false;
+      if (typeof asset.cast === 'string' && sceneCast.has(asset.cast)) return true;
+      return (Array.isArray(scene?.foreground) && scene.foreground.some((item: any) => item?.asset === id))
+        || (Array.isArray(scene?.media) && scene.media.some((item: any) => item?.asset === id));
+    });
+    const plannedIdentity = Object.entries(assets).find(([id, asset]: [string, any]) => {
+      if (asset?.kind !== 'image') return false;
+      const role = plannedImageRoles.get(id);
+      return role?.sceneId === sceneId && IDENTITY_REF_RE.test(role.kind);
+    });
+    if (!linked.length && !plannedIdentity) return undefined;
+    const identity = linked.find(([, asset]: [string, any]) =>
+      IDENTITY_REF_RE.test(`${asset?.gen?.inputs?.prompt ?? ''} ${asset?.notes ?? ''}`));
+    return (identity ?? plannedIdentity ?? linked[0])[0];
+  };
+
+  /**
+   * Resolve a model-supplied reference to a real package asset. A placeholder
+   * identity name binds the scene's existing cast identity instead of entering
+   * the package as a dangling gen.inputs.reference.
+   */
+  const resolveReferenceId = (
+    raw: string,
+    sceneId: string,
+    role: string,
+    cast: { ids: string[]; refs: string[] },
+    rasterOnly = false,
+  ): string => {
+    const id = raw.trim();
+    if (state.package?.assets?.[id]) return id;
+    if (!isPlaceholderRef(id)) return id;
+    if (IDENTITY_REF_RE.test(id)) {
+      const castRef = cast.refs.find(ref => state.package?.assets?.[ref]);
+      if (!rasterOnly && castRef) return castRef;
+      const imageId = existingIdentityImageId(sceneId, cast.ids);
+      if (imageId) return imageId;
+      const castImage = cast.refs.find(ref => state.package?.assets?.[ref]?.kind === 'image');
+      if (castImage) return castImage;
+    }
+    throw semanticRefError(sceneId, role, id);
   };
 
   const propose = (args: z.infer<typeof proposeSchema>) => {
@@ -1212,7 +1282,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       : sourceDims(plannedAspect);
     const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
     const cast = castRefsForScene(state.package, args.scene_id);
-    const refs = mergeRefs(args.refs ?? [], cast.refs);
+    const requestedRefs = (args.refs ?? []).map(ref => resolveReferenceId(ref, args.scene_id, 'reference', cast));
+    const refs = mergeRefs(requestedRefs, cast.refs);
     const isRefEdit = refs.length > 0;
     // B1: the same STYLE_BLOCK goes on every image job, so a run does not drift
     // from the owner's palette/attributes after the first call.
@@ -1237,6 +1308,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           aspect: plannedAspect,
         }));
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
+    plannedImageRoles.set(id, { sceneId: args.scene_id, kind: args.kind ?? '' });
     const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
     // P-fix5: the jobs planner requires `gen.workflow_sha256`, so a package built by the
     // agent must stamp it. A caller-provided plan wins; otherwise the committed manifest
@@ -1352,20 +1424,22 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       throw new Error('Klein stills + code motion does not accept H3 dialogue conditioning; put speech and sound in finishing_sound, or choose h3 for native AV');
     }
 
+    const cast = castRefsForScene(state.package, args.scene_id);
     const visualRef = (id: string | undefined, role: string, required: boolean): string | undefined => {
       if (!id) {
         if (required) throw new Error(`${model} needs ${role}. Call assets.generate_image for that role and pass its returned asset id; a FLUX still alone is not film completion.`);
         return undefined;
       }
-      const asset = state.package!.assets?.[id];
-      if (!asset) throw new Error(`${role} ${id} is not in the package. Create it with assets.generate_image, then pass the returned id to assets.generate_video.`);
-      if (asset.kind !== 'image') throw new Error(`${role} ${id} is ${asset.kind}; ${model} needs a raster image reference, not ${asset.kind}. Generate a proper image reference instead of substituting a still for video.`);
+      const resolved = resolveReferenceId(id, args.scene_id, role, cast, true);
+      const asset = state.package!.assets?.[resolved];
+      if (!asset) throw semanticRefError(args.scene_id, role, resolved);
+      if (asset.kind !== 'image') throw new Error(`${role} ${resolved} is ${asset.kind}; ${model} needs a raster image reference, not ${asset.kind}. Generate a proper image reference instead of substituting a still for video.`);
       if (asset.status === 'ready') {
-        if (typeof asset.file !== 'string' || typeof asset.sha256 !== 'string') throw new Error(`${role} ${id} is ready but has no usable file/sha256; regenerate the image reference.`);
+        if (typeof asset.file !== 'string' || typeof asset.sha256 !== 'string') throw new Error(`${role} ${resolved} is ready but has no usable file/sha256; regenerate the image reference.`);
       } else if (asset.status !== 'pending' || asset.gen?.generator !== 'flux3-klein') {
-        throw new Error(`${role} ${id} is ${asset.status}; provide a ready image or a pending FLUX image plan that the shot can depend on.`);
+        throw new Error(`${role} ${resolved} is ${asset.status}; provide a ready image or a pending FLUX image plan that the shot can depend on.`);
       }
-      return id;
+      return resolved;
     };
 
     let image = visualRef(args.image, 'Picture 1 (subject/identity)', model === 'h3');
