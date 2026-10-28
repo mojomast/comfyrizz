@@ -237,6 +237,12 @@ function createBackend(options = {}) {
       }
       return json({ revision });
     }
+    const clipsMatch = /^\/api\/package\/([^/]+)\/clips$/u.exec(path);
+    if (clipsMatch && method === 'GET') {
+      const packageId = decodeURIComponent(clipsMatch[1]);
+      calls.push({ kind: 'clips', packageId });
+      return json({ packageId, revision: 1, clips: [] });
+    }
     if (path === '/api/colab/status') {
       calls.push({ kind: 'colab-status' });
       return json({ signedIn: false });
@@ -415,8 +421,11 @@ test('Generate in the real Easy shell starts one Draft session on This computer'
     shell.root.submit(PROMPT);
     await approveProposal(shell);
     await waitFor(() => shell.watch() !== null);
+    await waitFor(() => backend.calls.some((call) => call.kind === 'clips'));
 
     assert.equal(shell.createCalls(), 1);
+    assert.ok(backend.calls.filter((call) => call.kind === 'clips').every((call) => call.packageId === 'pkg_1'));
+    assert.equal(backend.calls.some((call) => call.kind === 'clips' && call.packageId === PRODUCTION_ID), false);
     const plans = backend.calls.filter((call) => call.kind === 'plan');
     assert.ok(plans.length >= 2);
     for (const call of plans) assert.deepEqual(call.body, { level: 'draft', compute: 'cpu' });

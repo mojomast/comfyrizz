@@ -328,9 +328,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   function refreshSuperEasySnapshot(): void {
-    const productionId = store.get().productionId;
+    const { productionId, packageId } = store.get();
     if (!productionId) return;
-    liveGallery.start(productionId);
+    if (packageId) liveGallery.start(packageId);
     const ticket = ++superEasyTicket;
     void api.getProduction(productionId).then((snapshot) => {
       if (ticket !== superEasyTicket) return;
