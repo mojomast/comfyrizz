@@ -32,6 +32,12 @@ export interface CpuSliceOptions {
   brandAssets?: Record<string, unknown>;
 }
 
+export interface CpuSliceProblem {
+  code: string;
+  message: string;
+  assetId?: string;
+}
+
 export interface CpuSliceResult {
   ok: boolean;
   live: boolean;
@@ -39,7 +45,14 @@ export interface CpuSliceResult {
   routes: Array<{ sceneId?: string; tool: string }>;
   pendingGpu: Array<{ assetId: string; generator: string; workflow?: string; sceneId?: string }>;
   svgAssets: string[];
+  /** Actionable completion gaps; the runner repairs or refuses with these codes. */
+  problems: CpuSliceProblem[];
   result: RunAgentResult;
+}
+
+/** A slice completion gap is an actionable 422, never an untyped 500. */
+function cpuSliceError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { name: 'CpuSliceError', status: 422, code });
 }
 
 /** The offline plan: route and generate four vector assets, then plan one FLUX still. */
@@ -69,7 +82,7 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
   const intent = classifyProductionIntent(options.brief);
   const motionModel = parseMotionModel(options.motionModel, 'auto');
   if (intent.generatedFilm && !options.model) {
-    throw new Error('generated-film planning requires a live model and scene-referenced generated shots; the scripted defaultCpuScript is motion-graphics-only and is not an acceptable fallback');
+    throw cpuSliceError('GENERATED_FILM_REQUIRES_MODEL', 'generated-film planning requires a live model and scene-referenced generated shots; the scripted defaultCpuScript is motion-graphics-only and is not an acceptable fallback');
   }
   let draft: Record<string, any> | undefined = options.initialPackage ? structuredClone(options.initialPackage) : undefined;
   const stylePreset = /Look:\s*([a-z-]+)/i.exec(options.brief)?.[1] as StylePreset | undefined;
@@ -105,7 +118,7 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   });
   const pkg = draft ?? (result.toolCalls.find(call => call.name === 'storyboard.propose')?.result as any)?.package;
-  if (!pkg) throw new Error('agent did not produce a package draft');
+  if (!pkg) throw cpuSliceError('PACKAGE_DRAFT_MISSING', 'agent did not produce a package draft');
   const now = options.now ?? (() => new Date().toISOString());
   pkg.$schema = pkg.$schema ?? 'https://comfyrizz.example/schema/package-v1.json';
   pkg.createdAt = pkg.createdAt ?? now();
@@ -115,7 +128,13 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
   const svgAssets = Object.entries(pkg.assets ?? {})
     .filter(([, asset]: [string, any]) => asset?.gen?.generator === 'llm-svg' && asset.status === 'ready')
     .map(([id]) => id);
-  if (!intent.generatedFilm && svgAssets.length < 4) throw new Error(`CPU slice needs at least 4 ready llm-svg assets, got ${svgAssets.length}`);
+  const problems: CpuSliceProblem[] = [];
+  if (!intent.generatedFilm && svgAssets.length < 4) {
+    problems.push({
+      code: 'SVG_ASSET_FLOOR',
+      message: `CPU slice needs at least 4 ready llm-svg assets, got ${svgAssets.length}`,
+    });
+  }
   const { reachableAssetIds } = await import(new URL('../../../jobs/src/reachable.mjs', import.meta.url).href) as {
     reachableAssetIds: (pkg: Record<string, any>) => Set<string>;
   };
@@ -136,12 +155,13 @@ export async function runCpuSlice(options: CpuSliceOptions): Promise<CpuSliceRes
       return { ...(value?.sceneId ? { sceneId: value.sceneId } : {}), tool: value?.tool ?? 'unknown' };
     });
   return {
-    ok: result.stopped !== 'model_error' && result.stopped !== 'aborted',
+    ok: result.stopped !== 'model_error' && result.stopped !== 'aborted' && problems.length === 0,
     live,
     package: pkg,
     routes,
     pendingGpu,
     svgAssets,
+    problems,
     result,
   };
 }

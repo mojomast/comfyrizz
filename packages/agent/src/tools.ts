@@ -266,6 +266,17 @@ function hashId(prefix: string, value: string): string {
   return `${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
 }
 
+/** A generation/render rejection is an actionable 422, never an untyped 500. */
+function svgAssetError(code: string, assetId: string, message: string): Error {
+  const error = Object.assign(new Error(`${assetId}: ${message}`), {
+    name: 'SvgAssetError',
+    status: 422,
+    code,
+    assetId,
+  });
+  return error;
+}
+
 export const SILENT_CONDITIONING_ASSET_ID = 'a_h3_silence_500ms_24k';
 const FASTH3_WORKFLOW = 'workflows/fasth3_omni_ref2va.api.json';
 const LTX_I2V_WORKFLOW = 'workflows/ltx25_i2v_2stage.api.json';
@@ -564,23 +575,34 @@ function withMotionFixes<T extends Record<string, unknown>>(result: T, pkg: Reco
 /** Acceptance phrase for CAST1. Fictional mascot only; never a real person or a user photo. */
 const SHARED_MASCOT_RE = /use the same mascot in every scene/i;
 const KLEIN_REF_CAP = 10;
-const MASCOT_SVG = [
-  '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">',
-  '<rect width="512" height="512" fill="#1b2440"/>',
-  '<circle cx="256" cy="210" r="116" fill="#6d8cff"/>',
-  '<circle cx="214" cy="190" r="16" fill="#0d0f14"/>',
-  '<circle cx="298" cy="190" r="16" fill="#0d0f14"/>',
-  '<path d="M214 246 Q256 286 298 246" fill="none" stroke="#0d0f14" stroke-width="10" stroke-linecap="round"/>',
-  '</svg>',
-].join('');
+
+/** The shared mascot follows the package theme palette so packaging never rejects it. */
+function sharedMascotSvg(palette?: readonly string[]): string {
+  const ink = palette?.[0] ?? '#0d0f14';
+  const background = palette?.[1] ?? ink;
+  const accent = palette?.[2] ?? palette?.[1] ?? ink;
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">',
+    `<rect width="512" height="512" fill="${background}"/>`,
+    `<circle cx="256" cy="210" r="116" fill="${accent}"/>`,
+    `<circle cx="214" cy="190" r="16" fill="${ink}"/>`,
+    `<circle cx="298" cy="190" r="16" fill="${ink}"/>`,
+    `<path d="M214 246 Q256 286 298 246" fill="none" stroke="${ink}" stroke-width="10" stroke-linecap="round"/>`,
+    '</svg>',
+  ].join('');
+}
 
 function briefWantsSharedMascot(brief: string): boolean {
   return SHARED_MASCOT_RE.test(brief);
 }
 
-function buildSharedMascot() {
-  const sha256 = createHash('sha256').update(MASCOT_SVG).digest('hex');
+function buildSharedMascot(palette: readonly string[] | undefined, persistSvg: ToolsetOptions['persistSvg']) {
+  const svg = sharedMascotSvg(palette);
+  const sha256 = createHash('sha256').update(svg).digest('hex');
   const assetId = 'a_cast_pip';
+  // Persist the bytes at propose time. Declaring a file without writing it made
+  // every later render fail with an untyped ENOENT during packaging (M10).
+  const file = persistSvg?.(assetId, svg, 'svg') ?? `assets/${assetId}.svg`;
   return {
     member: {
       id: 'c_pip',
@@ -593,9 +615,9 @@ function buildSharedMascot() {
       kind: 'svg',
       origin: 'generated',
       status: 'ready',
-      file: `assets/${assetId}.svg`,
+      file,
       sha256,
-      bytes: Buffer.byteLength(MASCOT_SVG),
+      bytes: Buffer.byteLength(svg),
       license: { id: 'CC0-1.0' },
       redistributable: true,
       gen: {
@@ -660,7 +682,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       ? args.scenes.map(scene => normalizeScene(scene, title, datasetIds, new Set()))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
       .map(scene => applyProductionIntentToScene(scene, intent));
-    const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot() : null;
+    const theme = { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) };
+    const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot(theme.palette, options.persistSvg) : null;
     if (mascot) {
       for (const scene of scenes) scene.cast = [mascot.member.id];
     }
@@ -673,7 +696,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       createdAt: (options.now ?? (() => new Date().toISOString()))(),
       format: { width: 1920, height: 1080, fps: 30 },
       duration: { mode: 'flexible', flexibleCeilingFrames: 2700 },
-      theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'], font: 'Inter', ...brandTheme(options.brand) },
+      theme,
       voice: { enabled: false, engine: 'none' },
       datasets: args.datasets ?? {},
       ...(args.proposal ? { proposal: args.proposal } : {}),
@@ -718,10 +741,16 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     routeAsset({ sceneId: args.scene_id, intent: args.need, kind: args.kind, animated: args.animated, transparent: args.transparent, source: args.source, style: args.style } as AssetNeed);
 
   const generateSvg = async (args: z.infer<typeof generateSvgSchema>) => {
+    // A5 and the packaging render-check must agree on one source of colour:
+    // the package theme. A model-supplied palette is only a pre-propose fallback.
+    const packagePalette = Array.isArray(state.package?.theme?.palette)
+      ? state.package.theme.palette.filter((color: unknown): color is string => typeof color === 'string')
+      : [];
+    const palette = packagePalette.length ? packagePalette : args.palette;
     const intent: SvgIntentLike = {
       kind: args.kind,
       prompt: args.intent,
-      ...(args.palette ? { palette: args.palette } : {}),
+      ...(palette ? { palette } : {}),
       ...(args.width ? { width: args.width } : {}),
       ...(args.height ? { height: args.height } : {}),
       ...(args.seed !== undefined ? { seed: args.seed } : {}),
@@ -732,8 +761,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const sha256 = createHash('sha256').update(result.svg).digest('hex');
     const id = hashId('a_svg', `${args.scene_id}:${args.intent}:${sha256}`);
     const kind = args.kind === 'vector-anim' ? 'vector-anim' : 'svg';
-    const file = result.file ?? options.persistSvg?.(id, result.svg, kind) ?? `assets/${id}.svg`;
     const rawCheck = result.renderCheck;
+    const paletteOk = rawCheck ? rawCheck.outOfPaletteFraction == null || rawCheck.outOfPaletteFraction <= 0.5 : true;
     const renderCheck = rawCheck
       ? {
           ok: rawCheck.ok === true,
@@ -741,9 +770,19 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(rawCheck.width ? { width: rawCheck.width } : {}),
           ...(rawCheck.height ? { height: rawCheck.height } : {}),
           blank: typeof rawCheck.opaqueFraction === 'number' ? rawCheck.opaqueFraction < 0.005 : false,
-          palette_ok: rawCheck.outOfPaletteFraction == null || rawCheck.outOfPaletteFraction <= 0.5,
+          palette_ok: paletteOk,
         }
       : { ok: true, version: result.sanitizerVersion ?? '1.0.0' };
+    if (!paletteOk) {
+      const fraction = typeof rawCheck?.outOfPaletteFraction === 'number' ? rawCheck.outOfPaletteFraction : null;
+      throw svgAssetError(
+        'SVG_PALETTE_MISMATCH',
+        id,
+        `render-check failed: out-of-palette${fraction === null ? '' : ` (${(fraction * 100).toFixed(0)}% of visible pixels)`}`,
+      );
+    }
+    if (!renderCheck.ok) throw svgAssetError('SVG_RENDER_CHECK_FAILED', id, 'render-check failed');
+    const file = result.file ?? options.persistSvg?.(id, result.svg, kind) ?? `assets/${id}.svg`;
     const asset = {
       kind,
       origin: 'generated',
