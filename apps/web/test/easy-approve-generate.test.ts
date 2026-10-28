@@ -93,7 +93,9 @@ function fakeApi(extra = {}) {
     },
     async startRun(body) {
       calls.push({ kind: 'run', body });
-      return { runId: 'run_1' };
+      assert.equal(body.expected.productionRevision, nextRevision);
+      nextRevision += 1;
+      return { runId: 'run_1', revision: nextRevision };
     },
     async colabStatus() {
       calls.push({ kind: 'colab-status' });
@@ -101,7 +103,10 @@ function fakeApi(extra = {}) {
     },
     async getProduction(id) {
       calls.push({ kind: 'refetch', id });
-      return extra.refetch ?? snapshot();
+      return extra.refetch ?? snapshot({
+        production: { id: PRODUCTION_ID, revision: nextRevision, iteration: { policy: { level: 'balanced' }, level: 'balanced' } },
+        revision: nextRevision,
+      });
     },
     async proposeEasyPlan(id, body) {
       calls.push({ kind: 'propose', id, body });
@@ -128,7 +133,7 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
   assert.equal(runs.length, 2);
   assert.deepEqual(
     runs.map((call) => call.body.expected.productionRevision),
-    [7, 8],
+    [8, 9],
   );
   for (const call of runs) {
     assert.equal(call.body.budgetUnits, 12);

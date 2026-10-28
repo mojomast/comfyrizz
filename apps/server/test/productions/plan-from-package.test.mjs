@@ -54,6 +54,21 @@ test('draft gives takes 1', () => {
   assert.deepEqual(plan.actions.map((action) => action.takes), [1, 1]);
 });
 
+test('action bounds include startup and collect/stop overhead used by run admission', () => {
+  const plan = planFromPackage({ pkg: packageFixture(), level: 'draft', compute: 'colab' });
+  assert.deepEqual(plan.actions.map(action => action.upperBound), [1.721, 1.791]);
+  assert.equal(plan.reservationCeiling, 3.512);
+});
+
+test('H3 action bounds use clip-duration pricing plus overhead', () => {
+  const pkg = {
+    scenes: [{ id: 's_h3', background: { asset: 'a_h3' } }],
+    assets: { a_h3: { gen: { generator: 'fasth3-omni', inputs: { frames: 124, fps: 24 } } } },
+  };
+  const plan = planFromPackage({ pkg, level: 'draft', compute: 'colab' });
+  assert.equal(plan.actions[0].upperBound, 1.915);
+});
+
 test('CPU compute gives zero actions and a ceiling of 0', () => {
   const plan = planFromPackage({ pkg: packageFixture(), level: 'balanced', compute: 'cpu' });
   assert.deepEqual(plan.actions, []);

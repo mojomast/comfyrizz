@@ -269,6 +269,10 @@ async function approveBody(
     }
     for (const item of dispatched) {
       try {
+        // Later dispatches advance the production revision. An action's revision
+        // from dispatch time is therefore stale by the time its run starts.
+        const current = await deps.api.getProduction(id);
+        const expectedRevision = revisionOf(current, revision);
         const started = await deps.api.startRun({
           packageId: state.packageId,
           backendId,
@@ -280,8 +284,9 @@ async function approveBody(
             planHash: card.planHash,
             actionId: item.actionId,
           },
-          expected: { productionRevision: item.revision },
+          expected: { productionRevision: expectedRevision },
         });
+        revision = revisionOf(started, expectedRevision);
         const runId = started && typeof started === 'object'
           ? (started as { runId?: unknown }).runId
           : null;

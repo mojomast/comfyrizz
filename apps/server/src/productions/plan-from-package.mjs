@@ -10,10 +10,12 @@
 import { createHash } from 'node:crypto';
 
 import {
+  BOOTSTRAP_OVERHEAD_MINUTES,
   MEASURED_JOB_MINUTES,
   PRESENTER_MEASURED_JOB_MINUTES,
 } from '../../../../packages/backends/src/colab-backend.mjs';
-import { nextJobUpperEstimate, rateForGpu } from '../../../../packages/backends/src/budget.mjs';
+import { nextJobUpperEstimate, rateForGpu, reserveUnitsFor } from '../../../../packages/backends/src/budget.mjs';
+import { fasth3JobMinutes } from '../../../../packages/backends/src/fasth3-profile.mjs';
 import { canonicalJson } from './commands.mjs';
 import { sceneAssetIds } from '../../../../packages/agent/dist/src/scene-build.js';
 import { ITERATION_PRESETS, effectivePolicyForShot } from './iteration.mjs';
@@ -69,15 +71,20 @@ function seedFor(hash) {
 function upperBoundFor(assets, takes, ratePerHour) {
   const minutes = assets.reduce((total, asset) => {
     const generator = asset.gen?.generator;
-    const jobMinutes = GENERATOR_MINUTES[generator] ?? 1;
+    const jobMinutes = generator === 'fasth3-omni'
+      ? fasth3JobMinutes({ frames: asset.gen?.inputs?.frames, fps: asset.gen?.inputs?.fps })
+      : GENERATOR_MINUTES[generator] ?? 1;
     return total + jobMinutes;
   }, 0) * takes;
   const upper = nextJobUpperEstimate({
     gpuMinutes: minutes,
-    overheadMinutes: 0,
+    overheadMinutes: BOOTSTRAP_OVERHEAD_MINUTES,
     ratePerHour,
   });
-  return typeof upper === 'number' && Number.isFinite(upper) ? upper : 0;
+  if (typeof upper !== 'number' || !Number.isFinite(upper)) return 0;
+  // Run admission compares the whole increment: job upper estimate plus the
+  // collect/stop reserve. The approved action slot must cover both.
+  return normalizeNumber(upper + reserveUnitsFor(ratePerHour));
 }
 
 function takesFor(level, sceneId) {
