@@ -43,6 +43,7 @@ import { handleMedia } from './media-route.mjs';
 import { readEditor, validateEditor, writeEditor } from './editor-sidecar.mjs';
 import { serveStaticFile } from './static-file.mjs';
 import { createPipelineController } from './pipeline.mjs';
+import { createDemoInvites } from './invites/demo-invites.mjs';
 import { planPipeline, syncnetDiagnostics } from './pipeline-contract.mjs';
 import { stagePipelineInputs } from './pipeline-media.mjs';
 import { createOperationCoordinator } from './operations.mjs';
@@ -222,6 +223,8 @@ export function createApp({
   // and only after the same python + kokoro_onnx probe the pipeline worker
   // uses succeeds; a failed probe keeps the route at 503.
   auditionSynth = null,
+  inviteLedger = null,
+  publicBaseUrl = process.env.COMFYRIZZ_PUBLIC_BASE_URL || undefined,
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   // Local Remotion renders run on a worker. Callers that pass their own render
@@ -249,6 +252,8 @@ export function createApp({
   const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
   const events = new EventLog();
   const publishEntry = events.publish.bind(events);
+  /** @type {{ onRunEvent?: Function } | null} */
+  let inviteRunHook = null;
   const pipelineIngested = new Set();
   const runPackages = new Map();
   // IP11: runId -> { revision, assets } captured from the stored package before staging.
@@ -259,6 +264,7 @@ export function createApp({
   events.publish = (event) => {
     const entry = publishEntry(event);
     try {
+      try { inviteRunHook?.onRunEvent?.(event); } catch { /* invite ledger must not break runs */ }
       if (event?.type === 'run.event' && event.event?.type === 'preview_ready') {
         const record = runs.get(event.runId);
         if (record) {
@@ -1326,6 +1332,27 @@ export function createApp({
     return serveStaticFile(request, response, file, headers);
   }
 
+  const demoInvites = createDemoInvites({
+    ledger: inviteLedger ?? undefined,
+    publicBaseUrl,
+    sendJson,
+    readJson,
+    serveStatic,
+  });
+  inviteRunHook = demoInvites;
+
+  function suppliedToken(request, url) {
+    return request.headers['x-comfyrizz-token'] ?? bearer(request) ?? url.searchParams.get('token');
+  }
+
+  function resolveActor(request, url) {
+    const supplied = suppliedToken(request, url);
+    if (safeTokenEqual(supplied, token)) return { role: 'owner', guest: null };
+    const guest = demoInvites.resolveGuest(supplied);
+    if (guest) return { role: 'guest', guest };
+    return { role: 'none', guest: null };
+  }
+
   async function handler(request, response) {
     const host = request.headers.host ?? '127.0.0.1';
     if (!hostAllowed(host)) return sendJson(response, 403, { error: 'host not allowed' });
@@ -1334,6 +1361,16 @@ export function createApp({
     if (url.pathname === '/api/health') {
       return sendJson(response, 200, { ok: true, service: 'comfyrizz-local' });
     }
+
+    // Public invite redeem: /secretfriendsdemo/:token → Super Easy guest session.
+    if (demoInvites.parseRedeemToken(url.pathname)) {
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        return sendJson(response, 405, { error: 'method not allowed' });
+      }
+      const handled = await demoInvites.handle(request, response, url, { ownerOk: false, guest: null });
+      if (handled) return;
+    }
+
     if (!url.pathname.startsWith('/api/')) {
       if (request.method !== 'GET' && request.method !== 'HEAD') return sendJson(response, 405, { error: 'method not allowed' });
       return serveStatic(request, response, url);
@@ -1348,8 +1385,38 @@ export function createApp({
       return serveTicket(request, response, file);
     }
 
-    const denied = auth(request, url);
-    if (denied) return sendJson(response, denied.status, { error: denied.error });
+    // Public JSON redeem (no owner token).
+    if (url.pathname === '/api/invites/redeem' && request.method === 'POST') {
+      const handled = await demoInvites.handle(request, response, url, { ownerOk: false, guest: null });
+      if (handled) return;
+    }
+
+    const actor = resolveActor(request, url);
+    if (actor.role === 'none') {
+      const denied = auth(request, url);
+      if (denied) return sendJson(response, denied.status, { error: denied.error });
+    } else {
+      // Still enforce host + same-origin for state-changing requests.
+      const hostDenied = hostAllowed(request.headers.host) ? null : { error: 'host not allowed', status: 403 };
+      if (hostDenied) return sendJson(response, hostDenied.status, { error: hostDenied.error });
+      if (!sameOrigin(request.headers.origin, request.headers.host ?? '127.0.0.1')
+        && request.method !== 'GET' && request.method !== 'HEAD') {
+        return sendJson(response, 403, { error: 'origin not allowed' });
+      }
+    }
+    const ownerOk = actor.role === 'owner';
+    const guest = actor.guest;
+
+    // Invite mint / list / showcase / session routes.
+    {
+      const handled = await demoInvites.handle(request, response, url, { ownerOk, guest });
+      if (handled) return;
+    }
+
+    // Guests may not touch owner-only Colab auth / provider secrets surfaces.
+    if (guest && (url.pathname.startsWith('/api/colab/auth') || url.pathname.startsWith('/api/providers/settings'))) {
+      return sendJson(response, 403, { error: 'guest cannot manage Colab auth', code: 'GUEST_FORBIDDEN' });
+    }
 
     if (url.pathname === '/api/media-ticket' && request.method === 'POST') {
       const body = await readJson(request);
@@ -1728,10 +1795,26 @@ export function createApp({
         } else {
           return sendJson(response, 400, { error: 'packageId or package required' });
         }
+        let backendId = body.backendId ?? 'colab';
+        let budgetUnits = body.budgetUnits;
+        let guestAdmit = null;
+        if (guest) {
+          guestAdmit = demoInvites.admitGuestRun(guest, body);
+          if (!guestAdmit.ok) {
+            return sendJson(response, guestAdmit.status ?? 403, {
+              error: guestAdmit.error,
+              code: guestAdmit.code,
+              reason: guestAdmit.reason,
+              invite: guestAdmit.invite ?? null,
+            });
+          }
+          backendId = guestAdmit.backendId;
+          budgetUnits = guestAdmit.budgetUnits;
+        }
         const result = await runs.start({
-          backendId: body.backendId ?? 'colab',
+          backendId,
           pkg,
-          budgetUnits: body.budgetUnits,
+          budgetUnits,
           approved: body.approved === true,
           comfyuiUrl: body.comfyuiUrl,
           ratePerHour: body.ratePerHour,
@@ -1745,6 +1828,25 @@ export function createApp({
           authority: body.authority,
           expected: body.expected,
         });
+        if (guest && guestAdmit) {
+          const prompt = typeof pkg?.brief?.prompt === 'string' ? pkg.brief.prompt
+            : (typeof pkg?.title === 'string' ? pkg.title : '');
+          const title = typeof pkg?.title === 'string' ? pkg.title : '';
+          if (result?.approvalRequired || (Number.isSafeInteger(result?.status) && result.status >= 400) || result?.error) {
+            demoInvites.releaseGuestCommit(guestAdmit.inviteId, guestAdmit.committed);
+          } else if (result?.runId && guestAdmit.committed > 0) {
+            demoInvites.bindGuestRun(result.runId, {
+              inviteId: guestAdmit.inviteId,
+              committed: guestAdmit.committed,
+              packageId: pkg?.id ?? body.packageId ?? '',
+              prompt,
+              title,
+            });
+          } else if (guestAdmit.committed > 0 && !result?.runId) {
+            // Dry/estimate-only path: release reserve.
+            demoInvites.releaseGuestCommit(guestAdmit.inviteId, guestAdmit.committed);
+          }
+        }
         const status = Number.isSafeInteger(result.status) && result.status >= 400 ? result.status : 200;
         return sendJson(response, status, result);
       } catch (error) {
@@ -2031,6 +2133,7 @@ export function createApp({
   }
 
   return {
+    invites: demoInvites,
     handler: (request, response) => {
       Promise.resolve(handler(request, response)).catch(error => {
         if (response.headersSent) {
