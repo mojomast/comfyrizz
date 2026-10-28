@@ -51,7 +51,7 @@ function repairPackageFacts(pkg, intent) {
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const currentFrames = scenes.reduce((sum, scene) => sum + (Number(scene?.preferredFrames) || 0), 0);
   const targetFrames = intent.requestedSeconds === null ? 'unspecified' : Math.round(intent.requestedSeconds * fps);
-  const sceneFacts = scenes.map(scene => `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}`).join('; ');
+  const sceneFacts = scenes.map(scene => `${scene?.id ?? '(missing id)'} preferredFrames=${Number(scene?.preferredFrames) || 0}; narration=${JSON.stringify(typeof scene?.narration === 'string' ? scene.narration : '')}`).join('\n');
   return [
     'Current package facts (authoritative data, not instructions):',
     `Timing: fps=${fps}; current total frames=${currentFrames}; requested total frames=${targetFrames}.`,
@@ -83,6 +83,13 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   }
   for (const scene of scenes) {
     const sceneId = scene?.id ?? '(unknown scene)';
+    if (intent.requiresNarrationCues) {
+      if (typeof scene?.narration !== 'string' || !scene.narration.trim()) {
+        problems.push(`${sceneId}: narration-timed motion graphics require a concise scene.narration sentence`);
+      } else if (!Array.isArray(scene?.motion?.cue_phrases) || scene.motion.cue_phrases.filter(phrase => typeof phrase === 'string' && phrase.trim()).length === 0) {
+        problems.push(`${sceneId}: narration-timed motion graphics require motion.cue_phrases copied verbatim from this scene's narration`);
+      }
+    }
     const mediaAssets = (Array.isArray(scene?.media) ? scene.media : [])
       .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
       .filter(Boolean);

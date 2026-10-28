@@ -130,6 +130,21 @@ test('completion requires meaningful proposal fields and the requested duration'
   assert.ok(missing.some(problem => problem.includes('proposal.soundtrack')));
 });
 
+test('narration-timed graphics require narration and exact cue phrases', async () => {
+  const { classifyProductionIntent } = await import('../../../packages/agent/dist/src/index.js');
+  const intent = classifyProductionIntent('Create a 20-second narrated generated film in 4 shots with motion.cue_phrases copied verbatim from narration.');
+  const pkg = {
+    proposal: { logline: 'A mapped river changes course.', look: 'Indigo atlas pages.', soundtrack: 'Paper and water.' },
+    format: { fps: 30 },
+    scenes: [{ id: 'shot1', preferredFrames: 150, narration: 'The river changes course.', media: [] }],
+    assets: {},
+  };
+  const problems = generatedFilmCompletionProblems(pkg, intent, 'klein');
+  assert.ok(problems.some(problem => problem.includes('motion.cue_phrases')));
+  pkg.scenes[0].motion = { cue_phrases: ['changes course'] };
+  assert.ok(!generatedFilmCompletionProblems(pkg, intent, 'klein').some(problem => problem.includes('motion.cue_phrases')));
+});
+
 test('runner explicitly accepts Klein stills + code motion without H3/LTX jobs', async t => {
   const calls = [
     { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: [scenes[0]] } },
