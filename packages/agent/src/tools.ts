@@ -1069,8 +1069,20 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const planned = options.planImage?.(args) ?? {};
     const format = state.package?.format ?? {};
     const outputAspect = aspectFromSize(format.width, format.height);
-    const requestedAspect = (args.aspect as Aspect | undefined) ?? outputAspect;
-    const dims = sourceDims(requestedAspect);
+    const formatWidth = Number(format.width);
+    const formatHeight = Number(format.height);
+    const hasOutputSize = Number.isInteger(formatWidth) && formatWidth > 0 && Number.isInteger(formatHeight) && formatHeight > 0;
+    const requestedAspect = args.aspect as Aspect | undefined;
+    // Source stills must match the output frame exactly: i2v centre-crops a
+    // mismatched source. Portrait, square and 4:5 films always source at their
+    // own output aspect and dimensions; a landscape film keeps an explicit
+    // alternate framing for a deliberate crop.
+    const plannedAspect = requestedAspect && outputAspect === '16:9'
+      ? requestedAspect
+      : outputAspect;
+    const dims = plannedAspect === outputAspect && hasOutputSize
+      ? { width: formatWidth, height: formatHeight }
+      : sourceDims(plannedAspect);
     const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
     const cast = castRefsForScene(state.package, args.scene_id);
     const refs = mergeRefs(args.refs ?? [], cast.refs);
@@ -1085,7 +1097,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           intent: args.intent,
           ...(args.style ? { style: args.style } : {}),
           ...(palette ? { palette } : {}),
-          aspect: requestedAspect,
+          aspect: plannedAspect,
         })
       : expandFluxCaption({
           intent: args.intent,
@@ -1095,7 +1107,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(args.cutout ? { cutout: true } : {}),
           ...(args.text ? { text: true } : {}),
           ...(args.labelled ? { labelled: true } : {}),
-          aspect: requestedAspect,
+          aspect: plannedAspect,
         }));
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
     const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
@@ -1134,7 +1146,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         workflow,
         ...(workflowSha256 ? { workflow_sha256: workflowSha256 } : {}),
         model: planned.model ?? 'flux-3-klein',
-        inputs: planned.inputs ?? defaultInputs,
+        inputs: planned.inputs
+          ? { ...planned.inputs, ...(plannedAspect === outputAspect && hasOutputSize ? { width: formatWidth, height: formatHeight } : {}) }
+          : defaultInputs,
         backend: planned.backend ?? 'colab:G4',
       },
     };
@@ -1167,17 +1181,17 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       };
       touch();
     }
-    const aspectMismatch = args.aspect !== undefined && requestedAspect !== outputAspect;
+    const aspectMismatch = args.aspect !== undefined && plannedAspect !== outputAspect;
     return {
       scene_id: args.scene_id,
       asset: { id, ...asset },
       caption,
       reference_edit: isRefEdit,
-      source_aspect: requestedAspect,
+      source_aspect: plannedAspect,
       output_aspect: outputAspect,
       requires_approval: 'spend',
       note: aspectMismatch
-        ? `planned only; no GPU job was submitted. Source is ${requestedAspect} but the package output is ${outputAspect}: i2v will centre-crop.`
+        ? `planned only; no GPU job was submitted. Source is ${plannedAspect} but the package output is ${outputAspect}: i2v will centre-crop.`
         : 'planned only; no GPU job was submitted',
     };
   };

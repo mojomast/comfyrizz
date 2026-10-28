@@ -25,6 +25,7 @@ const REPAIR_SYSTEM = [
   'A narration-timed scene with empty narration or no cue_phrases still fails completion even when its media, timing and aspect are correct.',
   'Explicit Klein medium: every shot needs its own scene-referenced FLUX 3 Image Klein still before the film is accepted. Plan it with assets.generate_video using motion_model klein; keep stills + code motion and never create H3/LTX jobs.',
   'Aspect and format: the package format must match the brief aspect and output size. When the repair facts report a brief/draft aspect mismatch, correct the package format without changing the story or model route.',
+  'Source aspect: when the repair facts report a scene-referenced still whose dimensions do not match the package output, re-plan that still with assets.generate_image at the output size and pass the new asset to assets.generate_video. Never keep a mismatched still as the shot source or plan a 16:9 source for a portrait/square output.',
   'Tool errors: for invalid_arguments, correct only the fields named in issues[].path and resend; for tool_failed, supply the prerequisite the message names. Never resend identical arguments.',
   'When the listed issues are fixed, stop calling tools and reply with one short sentence.',
 ].join('\n');
@@ -108,6 +109,11 @@ function repairPackageFacts(pkg, intent, briefAspect) {
   if (hasFormat && briefAspect && draftAspect !== briefAspect) {
     facts.push(`Aspect repair: the brief requires ${briefAspect} but the draft is ${draftAspect} (${width}x${height}); correct the package format without changing the story or model route.`);
   }
+  const stillProblems = sourceStillFormatProblems(pkg);
+  if (stillProblems.length > 0) {
+    const listed = stillProblems.map(problem => `${problem.sceneId} still ${problem.assetId} is ${problem.sourceWidth}x${problem.sourceHeight}`).join('; ');
+    facts.push(`Source aspect repair: ${listed}; the package output is ${width}x${height}. Plan every scene-referenced still at exactly ${width}x${height} and re-plan the shot so its identity, composition and start-frame sources match.`);
+  }
   facts.push('Use only these exact scene IDs for storyboard.edit; do not invent aliases or guess scene names.');
   return facts.join('\n');
 }
@@ -140,6 +146,60 @@ function sceneReferencedPendingStills(pendingGpu) {
   return (Array.isArray(pendingGpu) ? pendingGpu : []).filter(item => typeof item?.sceneId === 'string' && item.sceneId.length > 0);
 }
 
+/** Pending source stills a scene actually depends on, including shot input references. */
+function sourceImageIdsForScene(scene, assets) {
+  const ids = new Set();
+  const addImage = value => {
+    if (typeof value !== 'string') return;
+    if (assets[value]?.kind === 'image') ids.add(value);
+  };
+  const addReferenced = value => {
+    if (typeof value !== 'string') return;
+    const asset = assets[value];
+    if (asset?.kind === 'video') {
+      for (const input of Object.values(asset?.gen?.inputs ?? {})) addImage(input);
+    } else {
+      addImage(value);
+    }
+  };
+  for (const plate of Array.isArray(scene?.media) ? scene.media : []) addReferenced(plate?.asset);
+  addReferenced(scene?.background?.asset);
+  for (const item of Array.isArray(scene?.foreground) ? scene.foreground : []) addReferenced(item?.asset);
+  addReferenced(scene?.presenter_asset);
+  return ids;
+}
+
+/** Every source still must match the output exactly; otherwise i2v crops the shot. */
+function sourceStillFormatProblems(pkg) {
+  const width = Number(pkg?.format?.width);
+  const height = Number(pkg?.format?.height);
+  if (!(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) return [];
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
+  const problems = [];
+  for (const scene of scenes) {
+    const sceneId = scene?.id ?? '(unknown scene)';
+    for (const assetId of sourceImageIdsForScene(scene, assets)) {
+      const asset = assets[assetId];
+      if (asset?.status !== 'pending') continue;
+      const sourceWidth = Number(asset?.gen?.inputs?.width ?? asset?.media?.width);
+      const sourceHeight = Number(asset?.gen?.inputs?.height ?? asset?.media?.height);
+      if (!(sourceWidth > 0 && sourceHeight > 0)) continue;
+      if (sourceWidth === width && sourceHeight === height) continue;
+      problems.push({
+        sceneId,
+        assetId,
+        sourceWidth,
+        sourceHeight,
+        outputWidth: width,
+        outputHeight: height,
+        message: `${sceneId}: source still ${assetId} is ${sourceWidth}x${sourceHeight}, but the package output is ${width}x${height}; plan it at exactly ${width}x${height}`,
+      });
+    }
+  }
+  return problems;
+}
+
 function motionGraphicsRepairGuide(slice, problems) {
   const codes = new Set(problems.map(problem => problem.code));
   if (!codes.has('SVG_ASSET_FLOOR') && !codes.has('PENDING_GPU_MISSING')) return [];
@@ -164,6 +224,7 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
   if (scenes.length === 0) return ['generated film has no scenes/shots'];
+  for (const still of sourceStillFormatProblems(pkg)) problems.push(still.message);
   const proposal = pkg?.proposal;
   for (const field of ['logline', 'look', 'soundtrack']) {
     if (typeof proposal?.[field] !== 'string' || proposal[field].trim().length < 3) {
