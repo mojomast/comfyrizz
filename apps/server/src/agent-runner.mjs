@@ -217,6 +217,71 @@ function narrationRepairGuide(pkg, intent, brief) {
   return lines;
 }
 
+/** M10: the brief can require one shared fictional mascot across every scene. */
+const SHARED_MASCOT_BRIEF_RE = /use the same mascot in every scene/i;
+const CAST_ID_RE = /^c[A-Za-z0-9_-]{0,63}$/;
+
+function briefRequiresSharedMascot(brief) {
+  return SHARED_MASCOT_BRIEF_RE.test(String(brief ?? ''));
+}
+
+/** The existing fictional mascot id, never a newly invented real person. */
+function sharedMascotCastId(pkg) {
+  const members = (Array.isArray(pkg?.cast) ? pkg.cast : [])
+    .filter(member => member && typeof member.id === 'string' && CAST_ID_RE.test(member.id));
+  if (members.length > 0) return members[0].id;
+  const counts = new Map();
+  for (const scene of Array.isArray(pkg?.scenes) ? pkg.scenes : []) {
+    for (const id of Array.isArray(scene?.cast) ? scene.cast : []) {
+      if (typeof id === 'string' && CAST_ID_RE.test(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  let best = null;
+  for (const [id, count] of counts) if (!best || count > best.count) best = { id, count };
+  // PS01's shared mascot id is the last-resort fictional default, never a person.
+  return best?.id ?? 'c_pip';
+}
+
+/** Missing or divergent scene.cast under a shared-mascot brief. */
+function sharedMascotGap(pkg, brief) {
+  if (!briefRequiresSharedMascot(brief)) return null;
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  if (scenes.length === 0) return null;
+  const castId = sharedMascotCastId(pkg);
+  const castRecorded = (Array.isArray(pkg?.cast) ? pkg.cast : [])
+    .some(member => member && member.id === castId);
+  const sceneIds = scenes
+    .filter(scene => !(Array.isArray(scene?.cast) && scene.cast.includes(castId)))
+    .map(scene => scene?.id ?? '(unknown scene)');
+  if (castRecorded && sceneIds.length === 0) return null;
+  return { castId, castRecorded, sceneIds };
+}
+
+function sharedMascotProblem(gap) {
+  const edits = gap.sceneIds
+    .map(sceneId => `{scene_id:${JSON.stringify(sceneId)},patch:{cast:[${JSON.stringify(gap.castId)}]}}`)
+    .join(', ');
+  const listed = gap.sceneIds.length > 0 ? `; missing from ${gap.sceneIds.join(', ')}` : '';
+  const subject = gap.castRecorded
+    ? `shared mascot cast ${JSON.stringify(gap.castId)} must appear in every scene${listed}`
+    : `the brief requires the same mascot in every scene but the package records no shared fictional cast ${JSON.stringify(gap.castId)}${listed || '; every scene already names it, so restore that cast entry'}`;
+  const instruction = edits
+    ? ` Call storyboard.edit with ${edits} so every scene shares that exact fictional cast id; never substitute a real person.`
+    : ' Keep that exact fictional cast id on every scene and restore its cast entry; never substitute a real person.';
+  return `${subject}.${instruction}`;
+}
+
+/** A shared-mascot repair must restore one fictional cast id on every scene. */
+function sharedMascotRepairGuide(pkg, brief) {
+  const gap = sharedMascotGap(pkg, brief);
+  if (!gap) return [];
+  return [
+    'Shared-mascot repair (hard requirement from the brief): every scene must carry the same one fictional mascot cast id; never a real person or user photo.',
+    `- SHARED_CAST_MISSING: ${sharedMascotProblem(gap)}`,
+    'Do not remove or blank the shared cast id from any scene while fixing another field.',
+  ];
+}
+
 function sceneReferencedPendingStills(pendingGpu) {
   return (Array.isArray(pendingGpu) ? pendingGpu : []).filter(item => typeof item?.sceneId === 'string' && item.sceneId.length > 0);
 }
@@ -294,11 +359,13 @@ function motionGraphicsRepairGuide(slice, problems) {
 }
 
 /** Completion is shot-reachable: orphan pending GPU assets never satisfy it. */
-export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto') {
+export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto', brief = null) {
   const problems = [];
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
   if (scenes.length === 0) return ['generated film has no scenes/shots'];
+  const sharedGap = sharedMascotGap(pkg, brief);
+  if (sharedGap) problems.push(`SHARED_CAST_MISSING: ${sharedMascotProblem(sharedGap)}`);
   for (const still of sourceStillFormatProblems(pkg)) problems.push(still.message);
   const proposal = pkg?.proposal;
   for (const field of ['logline', 'look', 'soundtrack']) {
@@ -390,8 +457,18 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   return problems;
 }
 
-export function motionGraphicsCompletionProblems(slice) {
+export function motionGraphicsCompletionProblems(slice, brief = null) {
   const problems = [];
+  const sharedGap = sharedMascotGap(slice?.package, brief);
+  if (sharedGap) {
+    problems.push({
+      code: 'SHARED_CAST_MISSING',
+      message: sharedMascotProblem(sharedGap),
+      path: 'scenes[].cast',
+      castId: sharedGap.castId,
+      sceneIds: sharedGap.sceneIds,
+    });
+  }
   const svgAssets = Array.isArray(slice?.svgAssets) ? slice.svgAssets : [];
   if (svgAssets.length < 4) {
     problems.push({
@@ -580,8 +657,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       }
     };
     const acceptable = candidate => intent.generatedFilm
-      ? candidate.ok && generatedFilmCompletionProblems(candidate.package, intent, motionModel).length === 0 && validatePackage(candidate.package).valid
-      : motionGraphicsCompletionProblems(candidate).length === 0;
+      ? candidate.ok && generatedFilmCompletionProblems(candidate.package, intent, motionModel, brief).length === 0 && validatePackage(candidate.package).valid
+      : motionGraphicsCompletionProblems(candidate, brief).length === 0;
     const aggregateUsage = { input: 0, output: 0 };
     const absorbUsage = result => {
       aggregateUsage.input += Number(result?.usage?.input) || 0;
@@ -593,20 +670,22 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
     if (agentModel && !acceptable(slice)) {
       if (intent.generatedFilm) {
         const initialProblems = [
-          ...generatedFilmCompletionProblems(slice.package, intent, motionModel),
+          ...generatedFilmCompletionProblems(slice.package, intent, motionModel, brief),
           ...packageSchemaProblems(slice.package),
         ];
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: initialProblems, elapsedMs: Date.now() - runStartedAt });
         const narrationGuide = narrationRepairGuide(slice.package, intent, brief);
+        const sharedCastGuide = sharedMascotRepairGuide(slice.package, brief);
         slice = await runOnce(agentModel, [
           repairPackageFacts(slice.package, intent, briefAspect),
           ...(narrationGuide.length ? [narrationGuide.join('\n')] : []),
+          ...(sharedCastGuide.length ? [sharedCastGuide.join('\n')] : []),
           `Validation report: the current generated-film package failed validation. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${initialProblems.join('\n- ')}`,
         ].join('\n\n'));
         absorbUsage(slice.result);
         if (!acceptable(slice)) {
           const problems = [
-            ...generatedFilmCompletionProblems(slice.package, intent, motionModel),
+            ...generatedFilmCompletionProblems(slice.package, intent, motionModel, brief),
             ...packageSchemaProblems(slice.package),
           ];
           onEvent?.({ type: 'runner_phase', phase: 'repair', status: 'validation', ok: false, problems, elapsedMs: Date.now() - runStartedAt });
@@ -617,21 +696,24 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           throw error;
         }
       } else {
-        const initialProblems = motionGraphicsCompletionProblems(slice);
+        const initialProblems = motionGraphicsCompletionProblems(slice, brief);
         onEvent?.({ type: 'runner_phase', phase: 'initial', status: 'validation', ok: false, problems: problemLines(initialProblems), elapsedMs: Date.now() - runStartedAt });
         const repairGuide = motionGraphicsRepairGuide(slice, initialProblems);
+        const sharedCastGuide = sharedMascotRepairGuide(slice.package, brief);
         slice = await runOnce(agentModel, [
           repairPackageFacts(slice.package, intent, briefAspect),
           ...(repairGuide.length ? [repairGuide.join('\n')] : []),
+          ...(sharedCastGuide.length ? [sharedCastGuide.join('\n')] : []),
           `Validation report: the current motion-graphics package is incomplete. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`,
         ].join('\n\n'), MOTION_GRAPHICS_REPAIR_SYSTEM);
         absorbUsage(slice.result);
         if (!acceptable(slice)) {
-          const problems = motionGraphicsCompletionProblems(slice);
+          const problems = motionGraphicsCompletionProblems(slice, brief);
           const lines = problemLines(problems);
           onEvent?.({ type: 'runner_phase', phase: 'repair', status: 'validation', ok: false, problems: lines, elapsedMs: Date.now() - runStartedAt });
           const svgProblem = problems.find(problem => problem.code === 'SVG_ASSET_FLOOR');
           const pendingProblem = problems.find(problem => problem.code === 'PENDING_GPU_MISSING');
+          const sharedCastProblem = problems.find(problem => problem.code === 'SHARED_CAST_MISSING');
           const error = new Error(`motion graphics is incomplete after one repair: ${lines.join('; ') || slice.result.error || 'live agent did not finish'}`);
           error.status = 422;
           error.code = 'MOTION_GRAPHICS_INCOMPLETE';
@@ -642,6 +724,8 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
             requiredSvgCount: 4,
             pendingGpuCount: pendingProblem?.count ?? (Array.isArray(slice.pendingGpu) ? slice.pendingGpu.length : 0),
             requiredPendingGpuCount: 1,
+            castId: sharedCastProblem?.castId ?? null,
+            sceneIds: sharedCastProblem?.sceneIds ?? [],
             problems: lines,
           };
           throw error;
@@ -655,7 +739,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       throw error;
     }
     if (intent.generatedFilm) {
-      const problems = generatedFilmCompletionProblems(slice.package, intent, motionModel);
+      const problems = generatedFilmCompletionProblems(slice.package, intent, motionModel, brief);
       if (problems.length) {
         const error = new Error(`generated-film plan is incomplete: ${problems.join('; ')}`);
         error.status = 422;
