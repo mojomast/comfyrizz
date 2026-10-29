@@ -822,3 +822,44 @@ completed runner/conditioning fixes plus verified bundled collection. It retains
 the exact 45-second multi-shot brief and nine-credit all-in ceiling. Credits
 recovery and Neon re-export remain CPU-only, separate from this sole GPU worker.
 No successful new output or spending is inferred from the assignment.
+
+**Embedded evidence recovery implemented and verified:** read-only validation of
+the actual failed credits run accepts all 12 original outputs and all six
+embedded video graphs against pinned workflows, submitted parameters and consumed
+image hashes. All three paired captures match after removing only the explicitly
+audited `LoadImage.is_changed` annotation. Missing sidecar files remain missing;
+templates serve only as comparators, never as fabricated captured evidence.
+
+The authenticated recovery page requires an explicit action against reviewed
+revision 20. It creates a new `recovery_<uuid>` operation, preserves original failed
+run/settlement/source bytes, records separate receipts with `captureSource`, raw
+metadata/media hashes and normalization evidence, and uses existing CAS apply/save
+and real rendering. Changed review state, mismatched graphs/parameters, incomplete
+evidence or unconfirmed shutdown fail before import. No provider/backend/GPU path
+is invoked. **56 focused tests passed**, and an actual browser click with the real
+CPU renderer produced a verified **three-second synthetic fixture** download.
+This fixture is not the actual credits film.
+
+Actual 45-second CPU recovery/render is assigned under
+`/tmp/opencode/easy-colab-acceptance/credits-recovered/`, independently of the sole
+speaking-film GPU worker. A discoverable recovery action in the normal Super Easy
+failure/reopen flow is also being integrated; the direct authenticated recovery
+page is the currently tested entry point. No actual credits MP4 is claimed yet.
+
+**Actual Neon revised MP4, with a newly exposed receipt gap:** the normal browser
+Review → Keep all three → Export → Download path completed a **253.3-second CPU
+render**. The movie is 12.000 seconds, 1920×1080, 360 frames at 30 fps, silent;
+timed frames show KEEP IT ELECTRIC and preserved effects. Full 1× playback took
+12.008 seconds; reload retained r14, 3/3 kept and enabled Export. All six generated
+media hashes and package timing are unchanged, with no new generation/provider
+requests observed. Evidence:
+`/tmp/opencode/easy-colab-acceptance/neon-reexport-fixed/READY.md`.
+
+That editor `/api/render` route did not create a trusted render receipt or durable
+artifact. Its UI reported “This export cannot be reopened after reload” and
+“Delivery facts not recorded for this file.” The MP4 is preserved with SHA-256
+`04fc5eb8b1e37319cbc8ad0eab46ec0bb424ee36b44331bd8afdfc668ee7ae2a`, but no revised
+Tailscale link was published. Server-owned receipt/durable export recording and a
+fresh normal render are being implemented; no receipt will be fabricated for the
+old export. New namespace:
+`/tmp/opencode/easy-colab-acceptance/neon-reexport-receipted/`.

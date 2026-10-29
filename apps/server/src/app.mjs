@@ -11,6 +11,7 @@ import { createHfTokenSettings } from './hf-token-settings.mjs';
 import { handleHfTokenRoutes } from './hf-token-routes.mjs';
 import { readColabProgress } from '../../../packages/backends/src/colab-progress.mjs';
 import { createRunController } from './run.mjs';
+import { createDownloadedOutputRecovery, recoveryPage } from './downloaded-output-recovery.mjs';
 import { planFromPackage } from './productions/plan-from-package.mjs';
 import { shotDispatchProblem } from './productions/shot-dispatch-safety.mjs';
 import { prepareRunNarration } from './run-narration.mjs';
@@ -408,6 +409,9 @@ export function createApp({
     }
     const id = pkg.id;
     const packageDir = dirname(store.path(id));
+    if (record.strictSourcePackage && !isDeepStrictEqual(store.read(id), record.strictSourcePackage)) {
+      throw Object.assign(new Error('The reviewed package changed before recovery could apply its media.'), { code: 'RECOVERY_STALE', status: 409 });
+    }
     copyGenerationReceipts({ pkg: result.package, sourceDir: result.verification?.dir ?? result.collect?.local ?? record.outputDir, packageDir });
     if (record.mode === 'take') {
       if (record.expectedJobs) {
@@ -514,12 +518,15 @@ export function createApp({
     let copied = [];
     while (!saved) {
       const current = store.read(id);
+      if (record.strictSourcePackage && !isDeepStrictEqual(current, record.strictSourcePackage)) {
+        throw Object.assign(new Error('The reviewed package changed before recovery could apply its media.'), { code: 'RECOVERY_STALE', status: 409 });
+      }
       const merged = mergeFinalRunMedia({ staged: pkg, current, generated: result.package, baseline });
       copied = copyNamedAssets({ pkg: changedRunMedia(current, merged), outputDir: record.outputDir, packageDir });
       try {
         saved = current ? store.save(id, merged, current.revision) : store.write(merged);
       } catch (error) {
-        if (!(error instanceof ConflictError) || attempt >= MAX_CAS_ATTEMPTS) throw error;
+        if (record.strictSourcePackage || !(error instanceof ConflictError) || attempt >= MAX_CAS_ATTEMPTS) throw error;
         attempt += 1;
       }
     }
@@ -608,6 +615,7 @@ export function createApp({
       return executeProductionCommand(envelope, attribution);
     },
   };
+  let recoveries = null;
   const runs = createRunController({
     backendFactory: effectiveBackendFactory,
     events,
@@ -621,7 +629,7 @@ export function createApp({
       return prepared;
     },
     onComplete: completeRun,
-    isBusy: () => Boolean(pipelines?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
+    isBusy: () => Boolean(pipelines?.active() || recoveries?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
     productionStore,
     readPackage: id => store.read(id),
     ledgerFor: ({ productionId }) => {
@@ -631,6 +639,9 @@ export function createApp({
       return createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId });
     },
   });
+  recoveries = createDownloadedOutputRecovery({ runtimeDir, store, productionStore, completeRun,
+    isBusy: () => Boolean(runs.status().activeRunId || pipelines?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
+    publish: event => events.publish(event) });
   // IP26: chat is a thin adapter over the same run path. A package bound to a
   // production never starts a paid run from chat, not even with a legacy plan
   // hash approval: the production plan card dispatches the IP20 action slot.
@@ -766,7 +777,7 @@ export function createApp({
     runtimeDir, events, stageInputs: stagePipelineInputs,
     ...(pipelineLaunch ? { launch: pipelineLaunch } : {}),
     operations,
-    isBusy: () => Boolean(runs.status().activeRunId) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
+    isBusy: () => Boolean(runs.status().activeRunId || recoveries?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
   });
 
   function takeDocFor(pkgId) {
@@ -2290,9 +2301,26 @@ export function createApp({
       }
     }
 
-    const runMatch = /^\/api\/run\/([^/]+)$/.exec(url.pathname);
+    const recoveryMatch = /^\/api\/run\/([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\/recovery(\/view)?$/.exec(url.pathname);
+    if (recoveryMatch && ['GET', 'POST'].includes(request.method)) {
+      try {
+        if (request.method === 'POST') {
+          const body = await readJson(request);
+          if (recoveryMatch[2] || Object.keys(body).some(key => key !== 'baseRevision')) return sendJson(response, 400, { error: 'Only the reviewed baseRevision is accepted.' });
+          return sendJson(response, 202, recoveries.start(recoveryMatch[1], body));
+        }
+        const source = recoveries.inspect(recoveryMatch[1]);
+        if (recoveryMatch[2]) {
+          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+          return response.end(recoveryPage(recoveryMatch[1], source.pkg.revision));
+        }
+        return sendJson(response, 200, { runId: source.old.runId, packageId: source.pkg.id, baseRevision: source.pkg.revision,
+          additionalGenerationCredits: 0, action: 'recover_downloaded_outputs', view: `/api/run/${source.old.runId}/recovery/view` });
+      } catch (error) { return sendJson(response, error.status ?? 422, { error: error.message, code: error.code ?? 'RECOVERY_NOT_AVAILABLE' }); }
+    }
+    const runMatch = /^\/api\/run\/([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/.exec(url.pathname);
     if (runMatch && request.method === 'GET') {
-      const record = runs.get(runMatch[1]);
+      const record = runs.get(runMatch[1]) ?? readJsonFile(join(runtimeDir, 'runs', runMatch[1], 'state.json'));
       if (!record) return sendJson(response, 404, { error: 'run not found' });
       return sendJson(response, 200, { run: record });
     }

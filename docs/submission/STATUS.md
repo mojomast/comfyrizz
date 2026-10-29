@@ -28,12 +28,23 @@ Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
   Full 1× player execution and sampled visual inspection are recorded, not
   continuous human viewing. Local evidence is linked from the reliability plan;
   a private Tailscale link is not a judge-accessible public artifact.
-- **Remaining acceptance gaps:** the Neon caption-only chat edit saved correctly,
-  but revised export is blocked by a production-selection request missing its
-  command/idempotency key. Citrus and both 45-second show videos remain planning
-  failures; H3 exact-line audio conditioning and exact timeline repair need work.
-  Broad server-suite sign-off, public-demo validation and submission packaging
-  remain outstanding. Latest full agent/web checks passed 578/1,642 tests.
+- **Presentation fixes:** exact-duration repair, measured H3 dialogue conditioning,
+  production-bound Keep requests and historical take-freshness recovery are
+  implemented. Neon now passes actual browser Keep → Export → Download → reload
+  with its revised caption, but that editor export route still needs a durable
+  final receipt/artifact; the completed revised MP4 is not yet shared as accepted.
+- **45-second show films:** credits now plan exactly 45 seconds and all 12 image/
+  video outputs were generated and collected with matching hashes. Three missing
+  workflow sidecars blocked import/export. Verified recovery from actual embedded
+  MP4 workflow metadata is being used for a separate CPU-only recovery operation.
+  Bundled collection is implemented for subsequent multi-shot runs; the speaking
+  film is being retried with it. No new completed show film is claimed yet.
+- **Verification:** full agent/web/server checks passed **578 / 1,645 / 2,132**
+  tests, with one web and four server skips. Bundled collection separately passed
+  **230 backend tests**, one Windows-only skip. Later recovery/export UI changes
+  need their own checks. Public-demo validation, full audiovisual acceptance and
+  submission packaging remain outstanding; details and source boundaries are in
+  the reliability log.
 
 Current details and artifact placeholders: [Deadline handoff](DEADLINE_HANDOFF.md).
 The sections below retain the earlier implementation/verification snapshot.

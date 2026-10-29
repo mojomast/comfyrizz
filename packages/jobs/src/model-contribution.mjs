@@ -5,6 +5,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
+import { canonical } from './plan.mjs';
 import { canonicalJson, compileTimeline } from '../../planner/dist/src/index.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -113,6 +116,152 @@ export function recordGenerationReceipts({ manifest, jobsDoc, outputDir, package
     }
   }
   return recorded;
+}
+
+function recoveryError(message) {
+  return Object.assign(new Error(`Downloaded output recovery refused: ${message}`), { code: 'RECOVERY_EVIDENCE_INVALID', status: 422 });
+}
+
+/** Read-only, fail-closed validation for a SERVER-OWNED completed run. This is not
+ * an upload importer. The caller must bind these documents to its durable run.
+ * Expected graphs are used only for comparison; never saved as captured evidence. */
+export function verifyRecoveredGeneration({ manifest, jobsDoc, outputDir, workDir, backend }) {
+  const fail = message => { throw recoveryError(message); };
+  if (!['colab', 'byo-comfyui'].includes(backend) || !manifest?.run_id || manifest.complete !== true
+    || !jobsDoc?.jobs?.length || manifest.jobsHash !== jobsDoc.hash
+    || digest(canonical({ ...jobsDoc, hash: undefined })) !== jobsDoc.hash
+    || manifest.packageId !== jobsDoc.packageId || manifest.revision !== jobsDoc.revision) fail('run/jobs identity or completion mismatch');
+  const entries = new Map((manifest.jobs ?? []).map(entry => [entry.job, entry]));
+  if (entries.size !== jobsDoc.jobs.length || manifest.jobs.length !== entries.size
+    || new Set(jobsDoc.jobs.map(job => job.id)).size !== entries.size
+    || manifest.counts?.succeeded !== entries.size
+    || Object.entries(manifest.counts).some(([status, count]) => status !== 'succeeded' && count !== 0)) fail('job set or completion counts mismatch');
+  const verified = new Map();
+  // Check every byte before extracting graphs or issuing any receipts.
+  for (const job of jobsDoc.jobs) {
+    const entry = entries.get(job.id), output = entry?.outputs?.[0];
+    if (entry?.status !== 'succeeded' || !entry.job_id || !entry.attempt_id || entry.cache_key !== job.cacheKey
+      || entry.outputs?.length !== 1 || output?.workflow_submitted !== true
+      || output.relative !== job.output || output.workflow !== job.output.replace(/\.[^/.]+$/, '.workflow.api.json')
+      || !(output.measured?.width >= 64 && output.measured?.height >= 64)) fail(`${job.id}: incomplete submitted output`);
+    const file = safeFile(outputDir, output.relative);
+    if (!file || !hashPattern.test(output.sha256 ?? '') || statSync(file).size !== output.bytes
+      || digest(readFileSync(file)) !== output.sha256) fail(`${job.id}: missing or changed media`);
+    const eligible = eligibleJob(job);
+    // Workflow staging normally uses a server-owned symlink to the repository.
+    // eligibleJob has already allowlisted this exact relative path.
+    if (!eligible || !existsSync(join(workDir, job.workflow)) || digest(readFileSync(join(workDir, job.workflow))) !== job.workflowSha256) fail(`${job.id}: pinned workflow mismatch`);
+    verified.set(job.id, { job, entry, output, file, eligible });
+  }
+  const captures = [];
+  for (const item of verified.values()) {
+    const { job, entry, output, file, eligible } = item;
+    // Bounded first implementation: these have an audited runner mapping and
+    // original captures. Other workflows fail closed until explicitly covered.
+    if (!['workflows/flux3_klein_t2i.api.json', 'workflows/ltx25_i2v_2stage.api.json'].includes(job.workflow)
+      || job.paramsSource) fail(`${job.id}: unsupported recovery workflow`);
+    const mappingName = job.workflow.replace(/\.json$/, '.params.json');
+    const mapBytes = readFileSync(join(root, mappingName));
+    const stagedMap = join(workDir, mappingName);
+    if (!existsSync(stagedMap) || digest(readFileSync(stagedMap)) !== digest(mapBytes)) fail(`${job.id}: parameter map mismatch`);
+    const mapping = JSON.parse(mapBytes);
+    const expected = structuredClone(eligible.nodes), params = { ...job.params };
+    const consumed = output.conditioning_inputs;
+    if (!Array.isArray(consumed) || consumed.length !== (job.fileInputs ?? []).length) fail(`${job.id}: conditioning count mismatch`);
+    const annotationHashes = new Map();
+    for (const input of job.fileInputs ?? []) {
+      const target = mapping.map[input.param];
+      if (input.from !== 'job' || !job.deps?.includes(input.job) || !mapping.files?.includes(input.param)
+        || !Array.isArray(target) || Array.isArray(target[0])) fail(`${job.id}: unsupported conditioning binding`);
+      const dependency = verified.get(input.job);
+      const matches = consumed.filter(value => value.nodeId === target[0] && value.input === target[1]);
+      const value = matches[0];
+      if (!dependency || dependency.output.relative !== input.path || matches.length !== 1
+        || value.sha256 !== dependency.output.sha256 || value.bytes !== dependency.output.bytes
+        || typeof value.uploadedName !== 'string' || !value.uploadedName) fail(`${job.id}: consumed image mismatch`);
+      params[input.param] = value.uploadedName;
+      annotationHashes.set(target[0], value.sha256);
+    }
+    for (const name of mapping.files ?? []) if (!(job.fileInputs ?? []).some(input => input.param === name)) fail(`${job.id}: missing file input`);
+    for (const [name, value] of Object.entries(params)) {
+      const target = mapping.map[name];
+      if (!target) {
+        if (!['upscale', 'cutout', 'frames_seconds', 'text', 'allowText'].includes(name)) fail(`${job.id}: unmapped parameter ${name}`);
+        continue;
+      }
+      for (const [id, field, options] of Array.isArray(target[0]) ? target : [target]) {
+        let mapped = value;
+        if (options) {
+          if (Object.keys(options).join() !== 'mul' || typeof value !== 'number') fail(`${job.id}: unsupported parameter transform`);
+          // These mappings halve even lattice dimensions; refuse rounding ambiguity.
+          mapped = value * options.mul;
+          if (!Number.isInteger(mapped)) fail(`${job.id}: nonintegral parameter transform`);
+        }
+        expected[id].inputs[field] = mapped;
+      }
+    }
+    const sidecar = safeFile(outputDir, output.workflow);
+    let raw, captureSource, normalized, normalization = [], pairedCaptureSha256 = null;
+    if (job.output.endsWith('.mp4')) {
+      let probe;
+      try { probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format_tags=prompt', '-of', 'json', file], { timeout: 15000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' })); }
+      catch { fail(`${job.id}: embedded metadata unreadable`); }
+      raw = probe.format?.tags?.prompt;
+      if (typeof raw !== 'string' || !raw) fail(`${job.id}: embedded prompt missing`);
+      captureSource = 'embedded-mp4';
+      try { normalized = JSON.parse(raw); } catch { fail(`${job.id}: invalid embedded graph`); }
+      if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) fail(`${job.id}: invalid embedded graph`);
+      for (const [id, node] of Object.entries(normalized)) {
+        if (!node || typeof node !== 'object' || Array.isArray(node)) fail(`${job.id}: invalid embedded node`);
+        if (!Object.hasOwn(node, 'is_changed')) continue;
+        if (node.class_type !== 'LoadImage' || !annotationHashes.has(id)
+          || !isDeepStrictEqual(node.is_changed, [annotationHashes.get(id)])) fail(`${job.id}: unexpected runtime annotation`);
+        normalization.push({ nodeId: id, field: 'is_changed', value: node.is_changed });
+        delete node.is_changed;
+      }
+      if (sidecar) {
+        const bytes = readFileSync(sidecar);
+        let paired;
+        try { paired = JSON.parse(bytes); } catch { fail(`${job.id}: invalid paired capture`); }
+        if (!isDeepStrictEqual(paired, normalized)) fail(`${job.id}: captured and embedded graphs disagree`);
+        pairedCaptureSha256 = digest(bytes);
+      }
+    } else {
+      if (!sidecar) fail(`${job.id}: captured graph missing`);
+      raw = readFileSync(sidecar, 'utf8'); captureSource = 'captured-workflow';
+      try { normalized = JSON.parse(raw); } catch { fail(`${job.id}: invalid captured graph`); }
+    }
+    if (!isDeepStrictEqual(normalized, expected)) fail(`${job.id}: submitted graph differs from pinned workflow and approved parameters`);
+    const receipt = { schema: MODEL_CONTRIBUTION_POLICY, status: 'succeeded', backend,
+      runId: manifest.run_id, jobId: entry.job_id, attemptId: entry.attempt_id, plannedJobId: job.id,
+      jobsHash: jobsDoc.hash, workflow: job.workflow, workflowSha256: job.workflowSha256,
+      capturedWorkflowSha256: digest(raw), captureSource, generator: job.generator, model: job.model ?? null,
+      family: eligible.family, checkpoint: eligible.checkpoint, outputSha256: output.sha256,
+      bytes: output.bytes, measured: output.measured,
+      conditioning: { params: job.params ?? null, deps: job.deps ?? [], refSha256: job.refSha256 ?? null,
+        consumed, fileInputs: job.fileInputs ?? [] },
+      recovery: { schema: 'comfyrizz.embedded-recovery/v1', rawMediaSha256: output.sha256,
+        rawMetadataSha256: digest(raw), normalizedGraphSha256: digest(canonical(normalized)),
+        parameterMapSha256: digest(mapBytes), normalization, pairedCaptureSha256 },
+    };
+    captures.push({ receipt, raw });
+  }
+  return captures;
+}
+
+/** Explicit alternate collection source. No fallback in the existing recorder.
+ * Validate the entire run before writing any evidence, into a NEW recovery dir. */
+export function recordRecoveredGenerationReceipts({ packageDir, evidenceDir, recoveryId, ...options }) {
+  if (!packageDir || !evidenceDir || !/^recovery_[a-f0-9-]+$/.test(recoveryId ?? '')) throw recoveryError('new recovery operation required');
+  const captures = verifyRecoveredGeneration(options);
+  mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
+  for (const { receipt, raw } of captures) {
+    const source = `${receipt.outputSha256}.${receipt.captureSource === 'embedded-mp4' ? 'prompt' : 'capture'}.json`;
+    writeFileSync(join(evidenceDir, source), raw, { mode: 0o600, flag: 'wx' });
+    receipt.recovery = { ...receipt.recovery, operationId: recoveryId, source };
+    writeReceipt(packageDir, receipt);
+  }
+  return captures.map(({ receipt }) => receipt);
 }
 
 /** Copy only pre-existing trusted records during server-owned staging/copy. Never import ZIP receipts. */
