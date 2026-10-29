@@ -82,6 +82,13 @@ export interface ToolsetOptions {
   persistSvg?: (assetId: string, svg: string, kind: string) => string | undefined;
   /** Persist deterministic CPU audio conditioning; never calls a model or GPU. */
   persistAudio?: (assetId: string, wav: Uint8Array, kind: 'silent-conditioning' | 'finishing-stem') => string | undefined;
+  /** Local CPU exact-line conditioning, persisted and byte/probe verified by the server. Never final narration. */
+  prepareDialogueAudio?: (request: {
+    text: string; language: string; voice: string; character: string;
+    previousVoice?: string;
+    existing?: { id: string; asset: Record<string, any> };
+    signal?: AbortSignal;
+  }) => Promise<{ id: string; asset: Record<string, any> }>;
   /** Generated-film router. Auto selects H3 or LTX independently for each shot. */
   motionModel?: MotionModel;
   /** Observe every package mutation; runCpuSlice uses this to return the draft. */
@@ -1712,7 +1719,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     };
   };
 
-  const generateVideo = (args: z.infer<typeof generateVideoSchema>) => {
+  const generateVideo = (args: z.infer<typeof generateVideoSchema>, context?: { signal?: AbortSignal }, audioVerified = false): any => {
     if (!state.package) throw new Error('no package draft; call storyboard.propose first');
     const sceneIndex = (Array.isArray(state.package.scenes) ? state.package.scenes : []).findIndex((scene: any) => scene?.id === args.scene_id);
     if (sceneIndex < 0) throw new Error(`scene ${args.scene_id} not found`);
@@ -1784,6 +1791,36 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     let finishingSound: string | undefined;
 
     if (model === 'h3') {
+      resolvedFrames = nextFastH3Frames(requestedFrames);
+      if (resolvedFrames > 362 || slotSeconds > resolvedFrames / 24 + 1 / 24) {
+        throw new Error(`${args.scene_id}: the ${slotSeconds.toFixed(3)} s editorial slot exceeds FastH3's legal 17n+5 source duration; shorten the shot or split coverage`);
+      }
+      if (!wordless && args.dialogue) {
+        if (args.dialogue.text !== args.dialogue.conditioningText) {
+          throw new Error('H3 conditioningText must exactly match dialogue.text. Preserve the provided words; do not paraphrase or shorten the line.');
+        }
+        if (args.characterCount !== 1 && !args.dialogue.offscreen) {
+          throw new Error('H3 dialogue requires one visible speaker; split multi-character coverage or explicitly use an offscreen speaker.');
+        }
+        if (options.prepareDialogueAudio && !audioVerified) {
+          const character = cast.ids[0] ?? image!;
+          const previous = Object.values(state.package.assets ?? {}).find((entry: any) =>
+            entry?.gen?.generator === 'kokoro' && entry.gen.inputs?.character === character) as any;
+          if (args.audio && !state.package.assets?.[args.audio]) throw new Error(`H3 conditioning asset ${args.audio} not found; omit audio to prepare the exact line locally.`);
+          return options.prepareDialogueAudio({
+            text: args.dialogue.text, language: args.dialogue.language, voice: args.dialogue.voice, character,
+            ...(previous?.gen.inputs.voice ? { previousVoice: previous.gen.inputs.voice } : {}),
+            ...(args.audio ? { existing: { id: args.audio, asset: state.package.assets[args.audio] } } : {}),
+            signal: context?.signal,
+          }).then(({ id: audioId, asset: conditioning }) => {
+            context?.signal?.throwIfAborted();
+            if (!state.package) throw new Error('package draft disappeared while preparing dialogue');
+            state.package.assets = { ...(state.package.assets ?? {}), [audioId]: conditioning };
+            touch();
+            return generateVideo({ ...args, audio: audioId }, context, true);
+          });
+        }
+      }
       let audio: string;
       if (wordless) {
         if (args.audio) throw new Error('wordless H3 shots use the shared silent conditioning asset; omit audio or provide dialogue with an exact-line clip');
@@ -1813,12 +1850,18 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         if (!args.audio || !conditioning || conditioning.kind !== 'audio' || conditioning.status !== 'ready'
           || typeof conditioning.file !== 'string' || typeof conditioning.sha256 !== 'string'
           || !(Number(conditioning.media?.durationSeconds) > 0)) {
-          throw new Error('H3 dialogue needs a ready exact-line audio asset with file, sha256 and measured media.durationSeconds; wordless shots can omit audio to reuse deterministic silence');
+          throw new Error('H3 dialogue needs a ready exact-line audio asset with file, sha256 and measured media.durationSeconds; enable the server local Kokoro conditioning callback and omit audio to prepare it automatically');
         }
-      }
-      resolvedFrames = nextFastH3Frames(requestedFrames);
-      if (resolvedFrames > 362 || slotSeconds > resolvedFrames / 24 + 1 / 24) {
-        throw new Error(`${args.scene_id}: the ${slotSeconds.toFixed(3)} s editorial slot exceeds FastH3's legal 17n+5 source duration; shorten the shot or split coverage`);
+        if (conditioning.gen?.inputs?.text !== args.dialogue!.text) {
+          throw new Error('H3 audio provenance must match this exact dialogue text; omit audio to prepare the correct line.');
+        }
+        const measured = Number(conditioning.media.durationSeconds);
+        if (measured + 0.2 > slotSeconds + 1 / 24) {
+          throw Object.assign(new Error(`${args.scene_id}: exact dialogue audio ${audio} measures ${measured.toFixed(3)} s at natural speed and needs ${Math.ceil((measured + 0.2) * packageFps)} scene frames including reaction, but has ${scene.preferredFrames}. Reallocate shot durations or split dialogue across coverage while preserving every exact word and the film's exact total duration. Do not shorten, rewrite, accelerate, mute or substitute LTX.`), {
+            code: 'DIALOGUE_AUDIO_TOO_LONG', sceneId: args.scene_id, audioAssetId: audio,
+            measuredSeconds: measured, requiredFrames: Math.ceil((measured + 0.2) * packageFps),
+          });
+        }
       }
       id = hashId('a_vid', `${args.scene_id}:h3:${image}:${reference}:${audio}:${resolvedFrames}:${args.seed ?? 0}:${JSON.stringify(direction)}`);
       asset = {
@@ -2020,6 +2063,13 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       motion_model: model,
       asset: { id, ...asset },
       native_audio: model === 'h3',
+      ...(model === 'h3' && !wordless ? { dialogue_conditioning: {
+        asset: asset.gen.inputs.audio,
+        sha256: state.package.assets[asset.gen.inputs.audio].sha256,
+        durationSeconds: state.package.assets[asset.gen.inputs.audio].media.durationSeconds,
+        voice: state.package.assets[asset.gen.inputs.audio].gen?.inputs?.voice,
+        minimumSceneFrames: Math.ceil((Number(state.package.assets[asset.gen.inputs.audio].media.durationSeconds) + 0.2) * packageFps),
+      } } : {}),
       ...(model === 'klein' ? { medium: 'stills + code motion', generated_character_animation: false, ...(state.proposal ? { proposal: state.proposal } : {}) } : {}),
       ...(finishingSound ? { finishing_sound: finishingSound } : {}),
       frames: resolvedFrames,
@@ -2411,7 +2461,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ),
     'assets.generate_video': tool(
       'assets.generate_video',
-      'Plan one scene-referenced generated-film shot; never submits GPU work. motion_model auto routes character acting/dialogue/native sound to FastH3 and scenery/B-roll/camera-led shots to LTX-2.5. H3 requires image=identity and reference=composition plus exact-line audio for dialogue; wordless H3 reuses deterministic silent conditioning and still generates native soundscape. LTX requires a start image and finishing_sound because it emits no native audio. Explicit klein plans still keyframes only, labels stills + code motion, uses Remotion for camera/transitions/timing and requires finishing_sound. Conflicting explicit selections fail; no model is a fallback for another.',
+      'Plan one scene-referenced generated-film shot; never submits GPU work. motion_model auto routes character acting/dialogue/native sound to FastH3 and scenery/B-roll/camera-led shots to LTX-2.5. H3 requires image=identity and reference=composition. For dialogue omit audio: the server automatically synthesizes the exact dialogue.text using local CPU Kokoro at natural speed, measures and registers conditioning before planning H3 native synchronized speech. conditioningText must equal text verbatim. Reuse the same identity image/cast and voice for recurring characters. If measured speech is too long, reallocate shot durations or split exact words across coverage, preserving the full dialogue and total film duration. This conditioning is not a narration/finishing track. Wordless H3 reuses deterministic silent conditioning and still generates native soundscape. LTX requires a start image and finishing_sound because it emits no native audio. Explicit klein plans still keyframes only, labels stills + code motion, uses Remotion for camera/transitions/timing and requires finishing_sound. Conflicting explicit selections fail; no model is a fallback for another.',
       baseParameters({
         scene_id: { type: 'string' },
         motion_model: { type: 'string', enum: ['auto', 'h3', 'ltx', 'klein'], description: 'Per-shot selection. Must agree with a non-auto configured motionModel.' },
@@ -2423,7 +2473,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         characterCount: { type: 'integer', minimum: 0 },
         image: { type: 'string', description: 'Picture 1 subject/identity image asset id; LTX start art when reference is absent.' },
         reference: { type: 'string', description: 'Picture 2 composition/art-direction image asset id. Required for H3.' },
-        audio: { type: 'string', description: 'Ready exact-line voice WAV asset for H3 dialogue. Omit for wordless silent conditioning.' },
+        audio: { type: 'string', description: 'Omit to automatically prepare exact-line local Kokoro conditioning for H3 dialogue (or silence for wordless). An explicit existing audio ID must pass server byte/hash/path/text verification.' },
         finishing_sound: { type: 'string', description: 'Required LTX/Klein post-production sound plan; neither emits native audio. Name concrete ambience, effects and, when music is wanted, instruments, tempo and mood.' },
         frames: { type: 'integer', minimum: 1, description: 'Requested source frames at 24 fps; snapped up to the selected model lattice and must cover the scene slot.' },
         seed: { type: 'integer', minimum: 0 },
@@ -2433,13 +2483,13 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           type: 'object', additionalProperties: false,
           properties: {
             text: { type: 'string' }, conditioningText: { type: 'string' }, language: { type: 'string' },
-            voice: { type: 'string' }, delivery: { type: 'string' }, offscreen: { type: 'boolean' },
+            voice: { type: 'string', description: 'Stable Kokoro voice ID for conditioning, e.g. af_heart (US female), am_michael (US male), bf_emma (British female), bm_george (British male), ff_siwis (French). Reuse per character. Free-form H3 voice direction uses a fixed local language-default voice, reported in dialogue_conditioning.' }, delivery: { type: 'string' }, offscreen: { type: 'boolean' },
           },
           required: ['text', 'conditioningText', 'language', 'voice', 'delivery'],
         },
       }, ['scene_id', 'subject', 'composition', 'action', 'camera', 'soundscape', 'characterCount']),
       generateVideoSchema,
-      generateVideo,
+      (args, context) => generateVideo(args, context),
     ),
     'assets.sketch_to_render': tool(
       'assets.sketch_to_render',

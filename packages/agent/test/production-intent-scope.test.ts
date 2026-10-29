@@ -42,7 +42,7 @@ test('exact speaking brief permits a native H3 dialogue plan using the supplied 
   const pkg = { ...draft.package, assets: {
     a_identity: readyAsset('image', 'assets/identity.png'),
     a_composition: readyAsset('image', 'assets/composition.png'),
-    a_line: { ...readyAsset('audio', 'assets/line.wav'), media: { durationSeconds: 3 } },
+    a_line: { ...readyAsset('audio', 'assets/line.wav'), media: { durationSeconds: 3 }, gen: { inputs: { text: 'Yesterday, the signal went silent.' } } },
   } };
   let planned: any;
   const tools = createToolset({ initialPackage: pkg, initialIntent: intent, motionModel: 'h3', onPackageChange: value => { planned = value; } });
@@ -52,7 +52,7 @@ test('exact speaking brief permits a native H3 dialogue plan using the supplied 
     action: 'Mara speaks the line while touching the tuning knob.', camera: 'Slow push in.',
     soundscape: 'Quiet room tone and faint radio hiss.', characterCount: 1,
     image: 'a_identity', reference: 'a_composition', audio: 'a_line', wordless: false,
-    dialogue: { text: 'Yesterday, the signal went silent.', speaker: 'Mara Vale' },
+    dialogue: { text: 'Yesterday, the signal went silent.', conditioningText: 'Yesterday, the signal went silent.', language: 'en-us', voice: 'af_heart', delivery: 'quietly' },
   }) as any;
   assert.equal(result.asset.gen.generator, 'fasth3-omni');
   assert.equal(result.asset.gen.inputs.audio, 'a_line');

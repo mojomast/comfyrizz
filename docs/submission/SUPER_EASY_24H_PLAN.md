@@ -695,3 +695,46 @@ acceptance batch **2.41 spent / 17.59 remaining**; character/credits batch **0
 spent / 18 remaining**. Account **210.28**, zero sessions/assignments and 0.00/hr.
 VM/watchdog/harnesses stopped; copied credentials removed. Provider monetary
 charges remain separately unmeasured. These blockers are carried into the PR.
+
+### Presentation-readiness follow-up: timing and native speech preparation
+
+The user authorized continuing toward a presentable Super Easy workflow. Exact
+planning repair now exposes source/overlap/speech constraints and offers one
+bounded provider-led `storyboard.repair_timing` pass (at most three turns). All
+existing scene windows and overlaps are authored atomically, preserving sources,
+copy, playback and transition types. Exact requests retain their requested shots
+instead of splitting short sources into duplicate credits. Insufficient source
+coverage, explicit locked timing, truncated speech and incomplete repairs still
+fail before a proposal or paid approval is saved.
+
+The real runner with a fake SSE provider now repairs the captured **1374/1350**
+credits and **348/360** Citrus errors to six/three scenes at their exact targets.
+The helper is registered in the production runner, not an offline package-edit
+workaround. The integrated runner/editorial/dialogue suite passes **87 tests with
+one opt-in skip**, and the full agent suite remains **578 passing**.
+
+H3 dialogue without an audio argument now prepares exact-line local Kokoro
+conditioning through a server-owned callback. It registers only real WAV bytes,
+SHA-256 and probed duration, preserves exact text/natural speed and recurring voice,
+and requires enough shot time. Provided conditioning is verified against its
+server-owned path, bytes, text, voice and measured duration. Cancellation and
+timeouts are bounded; this creates conditioning, not a detached final narrator.
+
+A separate real offline CPU measurement synthesized all nine exact monologue
+sentences at `af_heart`, speed 1: **27.012001 seconds of speech**. With per-shot
+padding, minima total **868 of 1350 frames at 30 fps**. The longest line measures
+**5.646667 seconds**, requiring **176 frames**, so uniform 150-frame shots are
+rejected. A measured regression accepts a provider-authored redistribution while
+preserving all words and the 45-second total. These WAV measurements do not prove
+generated lip sync or human audio acceptance; production must prepare its own
+conditioning through the normal tool flow.
+
+Fresh bounded 45-second credits/speaking retries are assigned under
+`/tmp/opencode/easy-colab-acceptance/presentation-show-films/`, using the completed
+timing/conditioning files over the immutable PR baseline. Each retains its
+nine-credit all-in ceiling and normal UI approval. The saved-Neon re-export remains
+paused: production-bound selection requests are fixed in focused HTTP tests, but
+two historical take fingerprints were already stale in original r13, before the
+caption edit. That collection/freshness discrepancy is being investigated without
+rewriting original evidence or weakening approval/freshness checks. No new live
+success or spend is inferred from this assignment.

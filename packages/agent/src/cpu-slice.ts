@@ -17,6 +17,7 @@ export interface CpuSliceOptions {
   generateSvg?: (intent: SvgIntentLike) => Promise<SvgAssetResult> | SvgAssetResult;
   persistSvg?: ToolsetOptions['persistSvg'];
   persistAudio?: ToolsetOptions['persistAudio'];
+  prepareDialogueAudio?: ToolsetOptions['prepareDialogueAudio'];
   motionModel?: MotionModel;
   /** Existing package for one bounded semantic-repair pass. */
   initialPackage?: Record<string, unknown>;
@@ -433,6 +434,7 @@ async function planCpuSlice(options: CpuSliceOptions): Promise<CpuSliceResult> {
     initialIntent: intent,
     ...(options.persistSvg ? { persistSvg: options.persistSvg } : {}),
     ...(options.persistAudio ? { persistAudio: options.persistAudio } : {}),
+    ...(options.prepareDialogueAudio ? { prepareDialogueAudio: options.prepareDialogueAudio } : {}),
     motionModel,
     ...(options.planImage ? { planImage: options.planImage } : {}),
     ...(options.now ? { now: options.now } : {}),

@@ -8,15 +8,16 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
-import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { aspectFromSize, extractBrief, isVideoType } from '../../../packages/agent/dist/src/index.js';
 import { classifyAudioIntent } from '../../../packages/agent/dist/src/production-intent.js';
 import { reachableAssetIds } from '../../../packages/jobs/src/reachable.mjs';
 import { sceneShotPlates, plannedShotProblems } from './scene-shot-plates.mjs';
 import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
+import { EXACT_PLANNING_GUIDANCE, compilePlanningTimeline, overlapFrames, planningTimingFacts, planningTimingGuide, repairPlanningTiming, videoCoverageSeconds } from './planning-timing-repair.mjs';
 import { finalizeGeneratedFilmEditorial } from './editorial-finalizer.mjs';
 import { editorialBriefProblems } from './editorial-brief-contract.mjs';
 import { finalizeSketchAudio } from './sketch-audio.mjs';
+import { createDialogueConditioner } from './dialogue-conditioning.mjs';
 import { isConversationId, loadConversationContext } from './conversation-context.mjs';
 import { reviseNarration } from './narration-revision.mjs';
 import { reviseProposal } from './proposal-revision.mjs';
@@ -38,7 +39,7 @@ const SVG_SYSTEM = [
 
 const REPAIR_SYSTEM = [
   'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded.',
-  'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace or regenerate existing assets, change the story, or change the model route.',
+  'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace or regenerate ready assets, change the story, or change the model route. An under-covered pending shot may be re-planned with sufficient source frames, preserving its existing references and creative direction.',
   'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy, notes, narration or motion.cue_phrases. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
   'Preserve explicit ordered copy lists, natural materials and motion intensity. Do not add feature captions, new styling or generated lettering while repairing duration or placement. A generated source image is not a substitute for its requested visible action clip. Inspect drawings only on scenes that already contain drawing elements; this is not a video inspection tool.',
   'Narration-timed motion: when the brief asks for cue-timed motion, every scene needs a concise scene.narration and motion.cue_phrases copied verbatim from that scene narration.',
@@ -139,14 +140,7 @@ export function packageSchemaProblems(pkg) {
 }
 
 function plannedTimelineFrames(pkg) {
-  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
-  const fallback = scenes.reduce((sum, scene) => sum + (Number(scene?.preferredFrames) || 0), 0);
-  try {
-    const frames = Number(compileTimeline(pkg).durationInFrames);
-    return Number.isFinite(frames) && frames >= 0 ? frames : fallback;
-  } catch {
-    return fallback;
-  }
+  return planningTimingFacts(pkg).currentFrames;
 }
 
 export function repairPackageFacts(pkg, intent, briefAspect) {
@@ -178,6 +172,7 @@ export function repairPackageFacts(pkg, intent, briefAspect) {
     `Timing: fps=${fps}; current total frames=${currentFrames}; requested total frames=${targetFrames}; acceptable compiled duration=${durationRangeText(intent.requestedSeconds)}.`,
     formatFact,
     `Scene IDs and current values: ${sceneFacts || 'none'}.`,
+    ...planningTimingGuide(pkg),
   ];
   if (hasFormat && briefAspect && draftAspect !== briefAspect) {
     facts.push(`Aspect repair: the brief requires ${briefAspect} but the draft is ${draftAspect} (${width}x${height}); correct the package format without changing the story or model route.`);
@@ -639,7 +634,7 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
   }
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   if (pkg?.duration?.exact) {
-    try { compileTimeline(pkg); } catch (error) { problems.push(error.message); }
+    try { compilePlanningTimeline(pkg); } catch (error) { problems.push(error.message); }
   }
   const plannedSeconds = plannedTimelineFrames(pkg) / fps;
   if (intent.requestedSeconds !== null && !durationWithinTarget(plannedSeconds, intent.requestedSeconds)) {
@@ -723,19 +718,12 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
     }
     const sceneSeconds = Number(scene?.preferredFrames) > 0 ? Number(scene.preferredFrames) / fps : 0;
     const coverages = mediaPlates.filter(plate => videos.includes(assets[plate.asset])).map(plate => {
-      const asset = assets[plate.asset];
-      const frames = Number(asset.gen?.inputs?.frames);
-      const mediaFps = Number(asset.gen?.inputs?.fps);
-      if (!(frames > 0) || !(mediaFps > 0)) return 0;
-      const speed = Number(plate?.speed) > 0 ? Number(plate.speed) : 1;
-      const start = Math.max(0, Number(plate.trim?.startSeconds) || 0);
-      const end = Number.isFinite(plate.trim?.endSeconds) ? Math.min(frames / mediaFps, plate.trim.endSeconds) : frames / mediaFps;
-      return Math.max(0, end - start) / speed;
+      return videoCoverageSeconds(pkg, plate);
     });
     // Split/compare plates play simultaneously. Summing their durations would
     // accept two short clips as coverage for one long scene.
     const coveredSeconds = coverages.length ? Math.min(...coverages) : 0;
-    if (sceneSeconds > 0 && coveredSeconds > 0 && coveredSeconds + 1 / 24 < sceneSeconds) {
+    if (sceneSeconds > 0 && coveredSeconds + 1e-7 < sceneSeconds) {
       problems.push(`${sceneId}: scene is ${sceneSeconds.toFixed(2)} seconds but attached generated video covers ${coveredSeconds.toFixed(2)} seconds; add enough generation clips or shorten the scene instead of stretching a short clip`);
     }
     for (const asset of videos) {
@@ -752,6 +740,12 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
         const audio = assets[asset.gen.inputs?.audio];
         if (!audio || audio.kind !== 'audio' || audio.status !== 'ready' || typeof audio.file !== 'string') {
           problems.push(`${sceneId}: H3 shot lacks required ready audio conditioning; wordless shots must use the deterministic silent WAV`);
+        }
+        if (asset.gen.direction?.dialogue) {
+          const measured = Number(audio?.media?.durationSeconds);
+          const minimum = Math.ceil((measured + 0.2) * fps) + overlapFrames(scene);
+          if (!(measured > 0)) problems.push(`${sceneId}: native dialogue requires measured conditioning audio before duration can be approved`);
+          else if (Number(scene.preferredFrames) < minimum) problems.push(`${sceneId}: measured native dialogue needs at least ${minimum} project frames including natural reaction padding and outgoing overlap; preserve the exact words and natural playback speed`);
         }
         if (!asset.gen.inputs?.image || !asset.gen.inputs?.reference) problems.push(`${sceneId}: H3 shot lacks its identity/composition image references`);
       } else {
@@ -800,7 +794,7 @@ export function motionGraphicsCompletionProblems(slice, brief = null, intent = n
   const scenesForTiming = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   if (pkg?.duration?.exact) {
-    try { compileTimeline(pkg); } catch (error) { problems.push({ code: 'DURATION_MISMATCH', message: error.message, path: 'scenes' }); }
+    try { compilePlanningTimeline(pkg); } catch (error) { problems.push({ code: 'DURATION_MISMATCH', message: error.message, path: 'scenes' }); }
   }
   const seconds = plannedTimelineFrames(pkg) / fps;
   if (intent?.requestedSeconds != null && !durationWithinTarget(seconds, intent.requestedSeconds)) {
@@ -1101,6 +1095,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       writeFileSync(join(assetsDir, `${assetId}.wav`), wav);
       return `assets/${assetId}.wav`;
     };
+    const prepareDialogueAudio = createDialogueConditioner({ assetsDir, signal });
     const svgUsage = { input: 0, output: 0, requests: 0, reportedRequests: 0 };
     const generateSvg = async intent => {
       signal?.throwIfAborted();
@@ -1147,13 +1142,14 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           ...(agentModel ? { generateSvg } : {}),
           persistSvg,
           persistAudio,
+          prepareDialogueAudio,
           motionModel,
           initialIntent: intent,
           ...(videoType !== undefined ? { videoType } : {}),
           sessionId,
           signal,
           now,
-          systemSuffix: MODEL_CONTRIBUTION_PROMPT,
+          systemSuffix: `${MODEL_CONTRIBUTION_PROMPT}${intent.exactDuration ? `\n\n${EXACT_PLANNING_GUIDANCE}` : ''}`,
           ...(repairInstructions ? {
             system: preset
               ? `${repairSystem}\n\nSelected video type: ${preset.label} (${preset.id}). Preserve its creative requirements during repair:\n${preset.plannerPrompt}\nThe focused repair rules above take precedence over any instruction to rebuild the package.`
@@ -1195,7 +1191,10 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
               onEvent?.({ type: 'runner_phase', phase, status: 'creative_constraint', constraint: 'live_action_humans', elapsedMs: Date.now() - runStartedAt });
             }
           }
-          const covered = coverGeneratedFilmScenes(result.package);
+          // Exact briefs need provider-authored coverage for their original shots.
+          // Splitting them duplicates credits and changes both overlap arithmetic
+          // and the requested shot count before the repair sees the actual plan.
+          const covered = intent.exactDuration ? { package: result.package, splits: 0 } : coverGeneratedFilmScenes(result.package);
           if (covered.splits > 0) {
             const pendingGpu = result.pendingGpu.filter(item => item.generator === 'flux3-klein');
             const seen = new Set();
@@ -1223,6 +1222,19 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
             throw Object.assign(new Error(`Exact duration ${intent.requestedSeconds} seconds is not representable at ${fps} fps; choose a duration on a frame boundary.`), { status: 422, code: 'EXACT_DURATION_UNREPRESENTABLE' });
           }
           result = { ...result, package: { ...result.package, duration: { mode: 'target', targetFrames: Math.round(frames), exact: true } } };
+          if (repairInstructions && model && result.result.ok) {
+            const timing = await repairPlanningTiming(result.package, {
+              model: withRepairAdmissionRetry(model), brief, requestedSeconds: intent.requestedSeconds, signal, sessionId,
+              onEvent: event => onEvent?.({ ...event, phase, repairKind: 'exact_timing', runElapsedMs: Date.now() - runStartedAt }),
+            });
+            if (timing.result) {
+              accumulateUsage(result.result.usage, timing.result.usage);
+              result.result.toolCalls.push(...timing.result.toolCalls);
+              result = { ...result, package: timing.package };
+              onEvent?.({ type: 'runner_phase', phase, status: 'exact_timing', ok: !planningTimingFacts(timing.package).error,
+                currentFrames: plannedTimelineFrames(timing.package), targetFrames: Math.round(frames), elapsedMs: Date.now() - runStartedAt });
+            }
+          }
         }
         if (!intent.generatedFilm) {
           result = { ...result, problems: [...result.problems, ...plannedShotProblems(result.package, plannedVideoShots)] };
@@ -1464,7 +1476,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       provider: resolved?.name ?? 'scripted',
       model: resolved?.model ?? 'scripted',
       package: slice.package,
-      timeline: null,
+      timeline: slice.package.duration?.exact ? compilePlanningTimeline(slice.package) : null,
       generatedAssets,
       routes: slice.routes,
       pendingGpu: slice.pendingGpu,
