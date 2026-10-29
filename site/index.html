@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>comfyrizz — open-weights film production, made Super Easy</title>
-<meta name="description" content="Comfyrizz makes videos with FLUX, LTX and experimental MiniMax FastH3 Omni workflows via Comfy. Open source, MIT. Independent of Comfy.org.">
+<meta name="description" content="Make films with Comfyrizz in Super Easy or Hermes chat. Explore the Hermes plugin, new model routes, live asset previews, and agent-powered revisions. Open source.">
 <meta name="theme-color" content="#14112B">
 <link rel="canonical" href="https://comfy.rizz.click/">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/comfyrizz-symbol-180.png">
 <meta property="og:title" content="comfyrizz — one prompt to finished MP4">
-<meta property="og:description" content="Open-weights film production, made Super Easy.">
+<meta property="og:description" content="From brief to film in Super Easy or Hermes chat. Open-weight models, live previews, and agent-powered revisions.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://comfy.rizz.click/">
 <meta property="og:image" content="https://comfy.rizz.click/assets/social-card.png">
@@ -20,6 +20,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="styles-v3.css">
 <link rel="stylesheet" href="effects.css">
+<link rel="stylesheet" href="site-refresh.css?v=2">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -32,7 +33,9 @@
     <nav aria-label="Primary">
       <a href="#how">How it works</a>
       <a href="#showcase">Showcase</a>
-      <a href="#open">Open weights</a>
+      <a href="#hermes">Hermes</a>
+      <a href="#new">What’s new</a>
+      <a class="nav-source" href="https://github.com/mojomast/comfyrizz">GitHub <span aria-hidden="true">↗</span></a>
     </nav>
   </div>
 </header>
@@ -41,55 +44,111 @@
   <section class="hero" id="top">
     <div class="wrap hero-grid">
       <div>
-        <p class="eyebrow"><span aria-hidden="true" class="status-dot"></span>Open-weights film production</p>
-        <h1>One prompt. <span class="mint">Finished MP4.</span></h1>
-        <p class="lede">comfyrizz makes open-weight film production with FLUX, LTX and experimental MiniMax FastH3 Omni workflows through Comfy, Super Easy. Describe the video; get the cut.</p>
+        <p class="eyebrow"><span aria-hidden="true" class="status-dot"></span>Independent. Open source. Yours.</p>
+        <h1>Big idea.<br>Small brief.<br><span class="mint">Roll film.</span></h1>
+        <p class="lede">Take your idea from a few words to a finished cut. Open-weight visuals, exact text, and a timeline you can make your own.</p>
         <div class="cta">
-          <a class="btn primary" href="https://github.com/mojomast/comfyrizz" rel="noopener">View on GitHub</a>
-          <a class="btn secondary" href="#showcase">Watch the showcase <span aria-hidden="true">&darr;</span></a>
+          <a class="btn primary" href="#showcase"><span aria-hidden="true">▶</span> Watch the film</a>
+          <a class="btn secondary" href="https://github.com/mojomast/comfyrizz">Explore the code <span aria-hidden="true">↗</span></a>
         </div>
-        <p class="access-note">Judge access &middot; invite-only</p>
-        <p class="fine">Independent open-source project. Not made by or affiliated with Comfy.org.</p>
+        <p class="access-note">MIT-licensed code <span aria-hidden="true">·</span> Open-weight models <span aria-hidden="true">·</span> MP4 export</p>
+        <a class="release-link" href="#hermes">New: make films in Hermes chat <span aria-hidden="true">↗</span></a>
       </div>
-      <figure class="hero-art">
-        <img src="assets/comfyrizz-symbol.svg" alt="comfyrizz Kinetic ZZ symbol: two interlocking lightning-bolt Z shapes in violet and mint" width="320" height="320">
+      <figure class="film-card">
+        <div class="film-bar"><span><span class="status-dot" aria-hidden="true"></span> THE COMFYRIZZ CUT</span><span>01 / DEMO REEL</span></div>
+        <a class="film-preview" href="#showcase" aria-label="Jump to the demo reel player">
+          <img src="assets/showcase-demo-poster.jpg" alt="A frame from the Comfyrizz demo reel" width="1920" height="1080" fetchpriority="high">
+          <span class="play-label"><span aria-hidden="true">▶</span> Meet your next creative tool</span>
+        </a>
+        <figcaption><strong>A little brief. A whole world.</strong><span>1080p <span aria-hidden="true">/</span> ~99 seconds</span></figcaption>
+        <div class="film-timeline" aria-hidden="true"><span>STORY</span><i></i><i></i><i></i><i></i><span>EXPORT ↗</span></div>
       </figure>
     </div>
   </section>
 
+  <div class="stack-strip"><div class="wrap"><span class="section-label">A creative stack, in the open</span><span>FLUX <small>stills</small></span><span>LTX <small>motion</small></span><span>Comfy <small>workflows</small></span><span>Remotion <small>finish</small></span></div></div>
+
   <section class="light" id="how" aria-labelledby="how-h">
     <div class="wrap">
       <p class="section-label">From brief to film</p>
-      <h2 id="how-h">How it works</h2>
-      <p class="section-intro">A creative workflow that keeps the story in your hands.</p>
+      <h2 id="how-h">Less setup.<br>More storytelling.</h2>
+      <p class="section-intro">Start in Super Easy. Follow the plan, review the work, and keep creative control from first frame to final cut.</p>
       <ol class="steps">
-        <li><span class="n" aria-hidden="true">01</span><h3>Prompt</h3><p>Chat a short brief. The agent plans scenes, look and script.</p></li>
-        <li><span class="n" aria-hidden="true">02</span><h3>Generate</h3><p>FLUX stills and LTX motion plates render through Comfy; experimental FastH3 Omni workflows can generate video and audio.</p></li>
-        <li><span class="n" aria-hidden="true">03</span><h3>Export</h3><p>Exact text and captions are drawn by code. Out comes an MP4.</p></li>
+        <li><span class="n" aria-hidden="true">01</span><h3>Give it a direction.</h3><p>A story, a mood, a short brief. Build a plan for the scenes, look, and script before committing to a render.</p><span class="step-tag">YOUR IDEA → A PLAN</span></li>
+        <li><span class="n" aria-hidden="true">02</span><h3>Bring the frames to life.</h3><p>Create stills with FLUX and motion with LTX through Comfy workflows. Preview the work and shape the cut.</p><span class="step-tag">OPEN WEIGHTS → VISUALS</span></li>
+        <li><span class="n" aria-hidden="true">03</span><h3>Make it a film.</h3><p>Code-rendered text, captions, and a Remotion finish bring everything together. Export an MP4 ready to share.</p><span class="step-tag">YOUR TIMELINE → MP4</span></li>
       </ol>
+    </div>
+  </section>
+
+  <section class="dark hermes-section" id="hermes" aria-labelledby="hermes-h">
+    <div class="wrap two">
+      <div>
+        <p class="section-label">Introducing the Hermes plugin · v0.1.0</p>
+        <h2 id="hermes-h">Your chat.<br>Your director’s chair.</h2>
+        <p class="sub">Bring Comfyrizz into Hermes. Brief a film, revise the plan, follow generation, export the cut, and ask for a retake—all from the conversation.</p>
+        <p class="hermes-detail">One film skill and a local MCP server connect Hermes to your running Comfyrizz engine. Review the spend card and explicitly accept generation before paid work begins. Paid retakes get their own acceptance.</p>
+        <div class="cta">
+          <a class="btn primary" href="https://github.com/mojomast/comfyrizz-hermes">Get the Hermes plugin <span aria-hidden="true">↗</span></a>
+          <a class="btn secondary" href="https://github.com/mojomast/comfyrizz-hermes#prerequisites">Setup requirements</a>
+        </div>
+        <p class="plugin-note">MIT · Node.js 22+ · Separate local Comfyrizz engine required. Install from a checkout today; catalog installation is documented for when it is listed.</p>
+      </div>
+      <div class="plugin-panel">
+        <p class="section-label">The production loop</p>
+        <ol class="chat-loop">
+          <li><span>01 / DIRECT</span><strong>Brief → plan → revise</strong><p>Shape the story in chat before generating takes.</p></li>
+          <li><span>02 / APPROVE</span><strong>Spend card → explicit accept</strong><p>Accept the planned generation, then follow the job and review its takes.</p></li>
+          <li><span>03 / FINISH</span><strong>Assemble → export → retake</strong><p>Finish on CPU. Give an individual shot another pass when it needs one.</p></li>
+        </ol>
+        <div class="plugin-install">
+          <h3>From a plugin checkout</h3>
+          <pre><code>hermes plugins install . --no-enable
+hermes plugins enable comfyrizz
+hermes plugins list</code></pre>
+          <p>Configure the local engine connection using the <a href="https://github.com/mojomast/comfyrizz-hermes#environment">environment guide</a>, restart Hermes, then ask for <code>comfyrizz_status</code>. A <code>stub: true</code> response means the engine is not connected yet.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="light" id="new" aria-labelledby="new-h">
+    <div class="wrap">
+      <p class="section-label">What’s new in the open-source app</p>
+      <h2 id="new-h">More ways to create.<br>More room to refine.</h2>
+      <p class="section-intro">The latest Comfyrizz source adds a richer one-prompt workflow, live previews, and focused revisions. These features are available through your own installation; the hosted invite demo has its own availability.</p>
+      <div class="feature-grid">
+        <article><span class="step-tag">01 / CREATIVE DIRECTION</span><h3>Review the idea first.</h3><p>Super Easy proposes a title, logline, look, duration, and soundtrack. Revise the creative proposal before choosing <strong>Make this film</strong>.</p></article>
+        <article><span class="step-tag">02 / MODEL CHOICE</span><h3>Four routes. Your call.</h3><p>Choose Auto, H3, LTX, or Klein only. Auto combines identity art, scenery motion, and character acting; Klein-only pairs stills with code-driven motion.</p></article>
+        <article><span class="step-tag">03 / LIVE PROGRESS</span><h3>Watch the pieces arrive.</h3><p>Characters, shots, and audio appear in a live asset gallery as they land. Preview the work while the film comes together.</p></article>
+        <article><span class="step-tag">04 / REVISIONS</span><h3>Keep shaping the cut.</h3><p>Download the finished MP4, ask the agent for changes, or open Advanced mode for the timeline. Iterate on a selected asset or region in the asset viewer.</p></article>
+        <article><span class="step-tag">05 / SOUND &amp; TYPE</span><h3>Sound with a precise finish.</h3><p>Use native model audio where supported, with local Kokoro voices otherwise. Remotion draws titles, charts, and captions exactly.</p></article>
+        <article><span class="step-tag">06 / LOCAL SETUP</span><h3>Your machine. Your workflow.</h3><p>Follow the one-prompt setup guide for Linux or native Windows. Generate with managed Google Colab or your own ComfyUI.</p></article>
+      </div>
+      <div class="feature-links"><a href="https://github.com/mojomast/comfyrizz#feature-tour">Explore the feature tour ↗</a><a href="https://github.com/mojomast/comfyrizz/blob/main/docs/ONE_PROMPT.md">One-prompt setup guide ↗</a></div>
     </div>
   </section>
 
   <section class="dark" id="showcase" aria-labelledby="show-h">
     <div class="wrap">
       <p class="section-label">Made with comfyrizz</p>
-      <h2 id="show-h">Showcase</h2>
-      <p class="sub">Explore a finished film made with comfyrizz. Workflows support FLUX stills, LTX motion and experimental FastH3 Omni video and audio, with a Remotion finish.</p>
+      <h2 id="show-h">The work speaks.<br>Press play.</h2>
+      <p class="sub">A finished demo reel, followed by a look inside the tools. Watch the film, then explore how the pieces come together.</p>
       <div class="grid">
         <figure class="wide reel">
           <video controls playsinline preload="none" poster="assets/showcase-demo-poster.jpg" width="1920" height="1080" aria-label="Comfyrizz showcase demo reel">
             <source src="assets/showcase-demo.mp4" type="video/mp4">
             Your browser cannot play this video. <a href="assets/showcase-demo.mp4">Download the demo reel</a>.
           </video>
-          <figcaption>Demo reel · 1080p · ~99s — what a Super Easy run can look like.</figcaption>
+          <figcaption><strong>The Comfyrizz demo reel</strong><span>1080p · ~99 seconds · <a href="assets/showcase-demo.mp4" download>Download MP4 ↓</a></span></figcaption>
         </figure>
         <figure>
           <img src="assets/motion-gallery.webp" alt="Gallery of motion styles for comfyrizz" width="1440" height="2540" loading="lazy" decoding="async">
-          <figcaption>Explore motion styles for LTX and experimental FastH3 Omni workflows.</figcaption>
+          <figcaption><strong>Find your visual language.</strong><span>Explore the motion-style gallery.</span></figcaption>
         </figure>
         <figure>
           <img src="assets/ui-agent-editor.webp" alt="comfyrizz app: chat, preview and timeline" width="1440" height="900" loading="lazy" decoding="async">
-          <figcaption>Chat, preview and timeline in one app.</figcaption>
+          <figcaption><strong>The whole cut, in one place.</strong><span>Chat, preview, and timeline.</span></figcaption>
         </figure>
       </div>
     </div>
@@ -99,12 +158,12 @@
     <div class="wrap two">
       <div>
         <p class="section-label">Behind the work</p>
-        <h2 id="open-h">Open weights, honest credits</h2>
-        <p>comfyrizz uses open-weight models: FLUX Klein for stills and LTX for motion. Experimental workflows can also use MiniMax FastH3 Omni for video and audio, under the MiniMax-H3 Community License. No closed video model sits in the pipeline.</p>
+        <h2 id="open-h">Open weights.<br>Room to make it yours.</h2>
+        <p>FLUX 3 Klein for stills. LTX-2.5 for motion. MiniMax H3 for character shots and native audio/video. Workflows you can inspect, and MIT-licensed application code you can build on.</p>
+        <p>Model licenses are separate from the app’s MIT license, including the MiniMax-H3 Community License.</p>
       </div>
       <div>
-        <p>Judge demos run on Comfy Cloud using credits provided for the event. Access is an invite-only, tokenized workspace hosted separately from this site.</p>
-        <p>This site is marketing only. There is nothing to generate here.</p>
+        <div class="access-card"><p class="section-label">Hosted demo</p><h3>A little club for big ideas.</h3><p>The hosted demo is invite-only and uses Google Colab. Each link has its own budget and expiry.</p><p class="demo-state"><span aria-hidden="true">◷</span> Guest generation is currently paused.</p><p>Have an invite? Open the private link you were sent. Or explore the source to run Comfyrizz yourself.</p><a href="https://github.com/mojomast/comfyrizz#readme">Read the setup guide <span aria-hidden="true">↗</span></a></div>
       </div>
     </div>
   </section>
@@ -112,9 +171,9 @@
   <section class="dark cta-band" aria-labelledby="gh-h">
     <div class="wrap">
       <p class="section-label">Built in the open</p>
-      <h2 id="gh-h">Read the code. Run it yourself.</h2>
-      <p>Explore the project, its workflows and documentation on GitHub.</p>
-      <a class="btn primary" href="https://github.com/mojomast/comfyrizz" rel="noopener">View on GitHub</a>
+      <h2 id="gh-h">Your next film<br>starts with an idea.</h2>
+      <p>Take a look under the hood. Make something only you would make.</p>
+      <a class="btn primary" href="https://github.com/mojomast/comfyrizz" rel="noopener">Build with Comfyrizz <span aria-hidden="true">↗</span></a>
     </div>
   </section>
 </main>
