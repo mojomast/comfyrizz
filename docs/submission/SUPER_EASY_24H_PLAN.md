@@ -981,3 +981,37 @@ The stale Pip header was a separate once-only paint defect, not an incorrectly
 bound conversation. The canonical document subscriber now refreshes the project
 name. These correction tests use a fake provider and do not establish a generated
 speaking film; native-source audio rendering/readiness work remains in progress.
+
+**Native speaking playback/readiness fixes completed:** visible H3 placements now
+explicitly retain source audio at unity/natural speed without looping. Native
+character plans disable detached narration and cannot reuse conditioning WAVs as
+fallback narration. Explicit separate narrators, full silence, muted sources and
+authoritative uploaded music retain their documented precedence. Full Remotion
+plays explicit H3 audio in-picture once; incremental export reconstructs those
+sources after its picture-only concatenation instead of dropping or doubling them.
+
+Completion checks enforce audible native dialogue, exact monologue/conditioning
+text and recurring voice/language. The explicit overlay contract admits only
+THE LAST SIGNAL → MARA VALE → THE LAST SIGNAL. Known conditioning-only foreground
+references are removed when attaching video, while ambiguous legacy stills receive
+a targeted repair diagnostic. The real r41 package passes audio normalization and
+two normal storyboard edits with all assets, conditioning hashes, identity refs
+and seven H3 jobs unchanged; **1080/24 = 45 seconds** is preserved.
+
+Three real CPU Remotion fixture exports verify audible source beneath title
+layouts and the listening ending at both 24 and 30 fps, with unity level/no
+doubling, and no audio stream for full silence. A real FFmpeg incremental mux
+test verifies the same source windows survive. These are synthetic routing proofs,
+not actual generated speech/lip-sync acceptance. Full agent **578 passed**, final
+server **46 passed / one opt-in skip**, renderer routing/master/incremental **39
+passed**; build and integrated web typecheck passed. An additional pre-existing
+dialogue-bus assertion expects omitted music fades 0/0 while both HEAD and working
+code return 0.5/1; it is recorded, not counted as a passing full renderer suite.
+Handoff: `/tmp/opencode/native-speaking-playback-handoff.md`.
+
+The next bounded real speaking attempt is assigned under
+`/tmp/opencode/easy-colab-acceptance/speaking-native-final/`, freezing these completed
+fixes together with saved-package chat correction, bundled collection and durable
+exports. It retains the original 45-second multi-shot brief, exact monologue and
+nine-credit all-in ceiling. No unnecessary 30-fps requirement is imposed. Actual
+generation/audio/Download results and spending remain pending.

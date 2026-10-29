@@ -18,10 +18,12 @@ function isPlayableNarrationAsset(asset) {
     && asset.status === 'ready'
     && typeof asset.file === 'string'
     && asset.file.length > 0
+    && !(asset.gen?.generator === 'kokoro' && typeof asset.gen?.inputs?.character === 'string')
     && asset.source?.id !== H3_SILENT_CONDITIONING_SOURCE;
 }
 
 export function narrationAudio(pkg) {
+  if (pkg?.voice?.enabled === false) return null;
   const assets = pkg?.assets ?? {};
   const referenced = [];
   for (const scene of pkg?.scenes ?? []) {

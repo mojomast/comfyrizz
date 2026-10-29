@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { applyGeneratedFilmPresentation, applyProductionIntentToScene } from '../../../packages/agent/dist/src/index.js';
+import { applyGeneratedFilmPresentation, applyProductionIntentToScene, applyNativeFilmAudio } from '../../../packages/agent/dist/src/index.js';
 import { applyProceduralFinishingAudio } from './procedural-audio.mjs';
 import { sceneShotPlates } from './scene-shot-plates.mjs';
 
@@ -51,18 +51,10 @@ export function finalizeGeneratedFilmEditorial(pkg, { intent, brief = '', assets
   let next = structuredClone(pkg);
   const scenes = (Array.isArray(next.scenes) ? next.scenes : []).map(scene => applyProductionIntentToScene(scene, intent));
   next.scenes = applyGeneratedFilmPresentation(scenes, intent, next.title ?? 'Untitled film');
-
-  if (intent.silent) {
-    next.voice = { enabled: false, engine: 'none' };
-    // An explicit empty mix also disables the renderer's legacy audio fallback.
-    next.audio = { ambience: { enabled: false } };
-    for (const asset of Object.values(next.assets ?? {})) {
-      if (asset?.kind === 'video') asset.media = { ...asset.media, audio: 'muted' };
-    }
-  }
+  next = applyNativeFilmAudio(next, intent);
 
   let narrationEnabled = false;
-  if (!intent.wordless && hasNarration(next) && (next.voice?.enabled !== true || next.voice?.engine === 'none' || !next.voice?.engine)) {
+  if (intent.narrationRequested && !intent.wordless && hasNarration(next) && (next.voice?.enabled !== true || next.voice?.engine === 'none' || !next.voice?.engine)) {
     next.voice = { ...DEFAULT_NARRATION_VOICE };
     narrationEnabled = true;
   }

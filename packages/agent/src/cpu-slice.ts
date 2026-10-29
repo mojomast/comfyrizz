@@ -9,6 +9,7 @@ import type { SvgIntentLike } from './svg.js';
 import { classifyProductionIntent, type ProductionIntent } from './production-intent.js';
 import { parseMotionModel, type MotionModel } from './motion-model.js';
 import { getVideoType, type VideoType } from './video-types.js';
+import { nativeFilmAudioProblems } from './native-film-audio.js';
 
 export interface CpuSliceOptions {
   brief: string;
@@ -498,7 +499,7 @@ async function planCpuSlice(options: CpuSliceOptions): Promise<CpuSliceResult> {
   const svgAssets = Object.entries(pkg.assets ?? {})
     .filter(([, asset]: [string, any]) => asset?.gen?.generator === 'llm-svg' && asset.status === 'ready')
     .map(([id]) => id);
-  const problems: CpuSliceProblem[] = [];
+  const problems: CpuSliceProblem[] = nativeFilmAudioProblems(pkg, intent);
   const { reachableAssetIds } = await import(new URL('../../../jobs/src/reachable.mjs', import.meta.url).href) as {
     reachableAssetIds: (pkg: Record<string, any>) => Set<string>;
   };

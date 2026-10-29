@@ -100,13 +100,21 @@ export function classifyAudioIntent(brief: string): AudioIntent {
   // applies to the output only when requested as an audio/film directive.
   const silent = positiveMatch(text, /(?:^|[.!?;\n])\s*(?:please\s+)?silent\b(?=\s*(?:[,;.!?\n]|$))|\bsilent\s+(?:(?:generated|native)\s+)?(?:film|video|sequence|short|title|output)\b|\b(?:make|keep|render)\s+(?:it|(?:the|this)\s+(?:film|video|audio|output))\s+(?:completely\s+)?silent\b|\b(?:full|complete|total)\s+silence\b|\b(?:film|video|output)\s+in\s+silence\b/i)
     || /\b(?:no|without)\s+(?:any\s+)?(?:audio|sound)\b(?!\s+(?:effects?|design)\b)/i.test(text);
+  const nativeSpeech = positiveMatch(text, /\b(?:dialogue|speech|speak(?:s|ing)?|talk(?:s|ing)?|conversations?)\b/i);
+  // A character may speak while a separate narrator is explicitly forbidden.
+  // Keep legacy "no narration" => wordless only when no native speech is asked for.
+  const prohibitedSpeech = nativeSpeech ? 'dialogue|speech|speaking|spoken\\s+words?|lyrics|singing|vocals?|(?:whispered\\s+)?voices|vocal\\s+samples' : SPEECH_ITEM;
   const wordless = silent || positiveMatch(text, /\bwordless\b/i)
-    || new RegExp(`\\b(?:no|without)\\s+(?:any\\s+)?(?:${SPEECH_ITEM})\\b`, 'i').test(text)
-    || prohibitedInList(text, SPEECH_ITEM);
+    || new RegExp(`\\b(?:no|without)\\s+(?:any\\s+)?(?:${prohibitedSpeech})\\b`, 'i').test(text)
+    || prohibitedInList(text, prohibitedSpeech);
   const musicProhibited = silent || /\b(?:no|without)\s+(?:any\s+)?(?:music|soundtrack|score|instrumental(?:\s+bed)?|BGM)\b/i.test(text)
     || /\bno\s+(?:dialogue|narration|speech)(?:\s*,\s*(?:dialogue|narration|speech))*\s*(?:,|or|and)\s*music\b/i.test(text)
     || prohibitedInList(text, 'music|soundtrack|score|instrumental(?:\\s+bed)?|BGM');
-  const narrationRequested = !wordless && positiveMatch(text, /\b(?:narrat(?:e|es|ed|ing|ion|or)|voice[\s-]?over|spoken\s+(?:script|narration)|Kokoro)\b/i);
+  const kokoroNarration = [...positiveMatches(text, /\bKokoro\b/i)].some(({ match }) => {
+    const clause = text.slice(0, match.index).split(/[.!?;\n]/).at(-1) + text.slice(match.index).split(/[.!?;\n]/)[0];
+    return !/\b(?:conditioning|voice\s+reference|native\s+(?:speech|dialogue))\b/i.test(clause);
+  });
+  const narrationRequested = !wordless && (positiveMatch(text, /\b(?:narrat(?:e|es|ed|ing|ion|or)|voice[\s-]?over|spoken\s+(?:script|narration))\b/i) || kokoroNarration);
   const speechRequested = !wordless && (narrationRequested || positiveMatch(text, /\b(?:dialogue|speech|spoken|speak(?:s|ing)?|talk(?:s|ing)?|conversations?)\b/i));
   const musicRequested = !musicProhibited && positiveMatch(text, /\b(?:music|soundtrack|score|instrumental(?:\s+bed)?|theme\s+song|BGM)\b/i);
   return { silent, wordless, speechRequested, narrationRequested, musicRequested, musicProhibited };

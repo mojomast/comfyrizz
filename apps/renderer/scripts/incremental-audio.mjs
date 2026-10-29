@@ -31,7 +31,7 @@ function adelayMs(frame, fps) {
  */
 export function planAudioBuses({ pkg, timeline, mixAudio = true }) {
   const fps = timeline?.fps ?? 30;
-  const mix = mixAudio ? resolveAudioMix(pkg, timeline) : { enabled: false, music: null, dialogue: [], ambience: [], sfx: [] };
+  const mix = mixAudio ? resolveAudioMix(pkg, timeline, { includeDirectSources: true }) : { enabled: false, music: null, dialogue: [], ambience: [], sfx: [] };
   const buses = [];
   if (mix.music) {
     buses.push({

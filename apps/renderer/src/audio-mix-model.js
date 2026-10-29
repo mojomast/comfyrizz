@@ -305,9 +305,9 @@ export function sfxFrame(timeline, sfx) {
  *   sfx: Array<{ assetId: string, file: string, sceneId: string, from: number, durationInFrames: number, gainDb: number }>,
  * }}
  */
-export function resolveAudioMix(pkg, timeline) {
+export function resolveAudioMix(pkg, timeline, { includeDirectSources = false } = {}) {
   const assets = pkg?.assets ?? {};
-  const audio = isObject(pkg?.audio) ? pkg.audio : null;
+  const audio = isObject(pkg?.audio) ? pkg.audio : includeDirectSources ? {} : null;
   const mix = { enabled: false, music: null, dialogue: [], ambience: [], sfx: [] };
   if (!audio) return mix;
   const fps = timeline?.fps ?? 30;
@@ -350,7 +350,10 @@ export function resolveAudioMix(pkg, timeline) {
     const duck = normalizeDuck({ enabled: false });
     const base = dbToLinear(gainDb);
     for (const scene of pkg?.scenes ?? []) {
+      // Explicit in-picture playback already carries this source at unity.
+      // Legacy muted/unspecified plates retain the independent mix-bus route.
       const asset = assets[scene?.background?.asset];
+      if (scene.background?.muted === false && asset?.gen?.generator === 'fasth3-omni') continue;
       if (!readyPlateWithAudio(asset) || !hasNativeDialogue(asset)) continue;
       const timed = timelineScenes.get(scene.id);
       if (!timed) continue;
@@ -378,6 +381,7 @@ export function resolveAudioMix(pkg, timeline) {
     const base = dbToLinear(gainDb);
     for (const scene of pkg?.scenes ?? []) {
       const asset = assets[scene?.background?.asset];
+      if (scene.background?.muted === false && asset?.gen?.generator === 'fasth3-omni') continue;
       if (!readyPlateWithAudio(asset) || hasNativeDialogue(asset)) continue;
       const timed = timelineScenes.get(scene.id);
       if (!timed) continue;
@@ -414,6 +418,32 @@ export function resolveAudioMix(pkg, timeline) {
     });
   }
 
+  // Incremental export concatenates picture with -an, so its final mux must
+  // reconstruct audio that full Remotion renders directly inside MediaFill.
+  // Keep this opt-in: adding it to the full composition would double the source.
+  if (includeDirectSources && !masterMusic) {
+    for (const scene of pkg?.scenes ?? []) {
+      if (scene.drawing || scene.composition) continue;
+      const plates = scene.media_only !== true && ['split', 'compare'].includes(scene.layout)
+        ? (scene.media ?? []).slice(0, 2)
+        : scene.media_only === true || ['title', 'hero', 'list', 'stat', 'chart'].includes(scene.layout) ? [scene.background] : [];
+      const timed = timelineScenes.get(scene.id);
+      if (!timed) continue;
+      for (const plate of plates) {
+        const asset = assets[plate?.asset];
+        if (plate?.procedural || plate?.muted !== false || asset?.gen?.generator !== 'fasth3-omni' || !readyPlateWithAudio(asset)) continue;
+        const startSeconds = plate.trim?.startSeconds ?? 0;
+        const track = {
+          assetId: plate.asset, file: asset.file, sceneId: scene.id,
+          from: timed.from, durationInFrames: timed.durationInFrames,
+          startSeconds, endSeconds: startSeconds + timed.durationInFrames / fps,
+          gainDb: 0, duck: normalizeDuck({ enabled: false }),
+          gains: new Array(timed.durationInFrames).fill(1),
+        };
+        (hasNativeDialogue(asset) ? mix.dialogue : mix.ambience).push(track);
+      }
+    }
+  }
   mix.enabled = Boolean(mix.music) || mix.dialogue.length > 0 || mix.ambience.length > 0 || mix.sfx.length > 0;
   return mix;
 }

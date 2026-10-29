@@ -134,7 +134,7 @@ export function MediaFill({
     <OffthreadVideo
       src={src}
       pauseWhenBuffering
-      muted={muted || masterMusicMuted}
+      muted={muted || masterMusicMuted || asset.media?.audio === 'muted'}
       playbackRate={rate}
       onError={() => setFailed(true)}
       style={style}

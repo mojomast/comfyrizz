@@ -1,14 +1,29 @@
 import { ENERGY_TRANSITIONS, MOTION_DEFAULTS } from '../../../packages/schema/src/motion.mjs';
+import { classifyProductionIntent, nativeFilmAudioProblems, nativeCharacterSpeech, nativeFilmPlates } from '../../../packages/agent/dist/src/index.js';
 
 const normalize = text => text.replace(/\s+/gu, ' ').trim();
 const COPY_FIELDS = ['kicker', 'headline', 'sub', 'body', 'quote', 'attribution', 'footnote', 'cta'];
+
+// Explicit overlay roles form a small source contract too. Do not mine story
+// prose or quoted speech for headings: only this labelled imperative is read.
+function explicitNativeOverlayContract(brief) {
+  const declaration = /(?:^|[.!?;\n])\s*Native\s+(?:editable\s+)?overlays:\s*([^.!?;\n]{1,120}?)\s+as\s+an?\s+opening\s+title\s+and\s+([^.!?;\n]{1,120}?)\s+as\s+an?\s+early\s+lower[- ]third\b/i.exec(brief);
+  if (!declaration) return null;
+  const unquote = text => normalize(text).replace(/^(?:"([^"]+)"|“([^”]+)”|'([^']+)'|‘([^’]+)’)$/u, (_match, ...groups) => groups.slice(0, 4).find(Boolean));
+  const opening = unquote(declaration[1]);
+  const lower = unquote(declaration[2]);
+  const escaped = opening.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/gu, '\\s+');
+  const repeat = new RegExp(`(?:^|[.!?;\\n])\\s*Bring\\s+(?:"|“|'|‘)?${escaped}(?:"|”|'|’)?\\s+back\\s+for\\s+the\\s+final\\s+(?:settled\\s+)?title\\b`, 'i').test(brief.slice(declaration.index + declaration[0].length));
+  const closed = /\bNo\s+(?:subtitles?\s+(?:or|and)\s+)?(?:additional|extra|other)\s+words\b/i.test(brief);
+  return { items: [opening, lower, ...(repeat ? [opening] : [])], closed, ordered: true };
+}
 
 // Deliberately a small grammar, not general natural-language validation. An
 // unquoted sentence-ending period terminates the list; quoted punctuation is data.
 export function explicitCopyContract(brief) {
   if (typeof brief !== 'string') return null;
   const label = /\b(?:required\s+(?:on[- ]screen\s+)?copy\s*,?\s+in\s+order|exact\s+(?:on[- ]screen\s+)?copy(?:\s*,?\s+in\s+order)?|only\s+on[- ]screen\s+(?:copy|text)(?:\s*,?\s+in\s+order)?)\s*:/i.exec(brief);
-  if (!label) return null;
+  if (!label) return explicitNativeOverlayContract(brief);
   const prefix = brief.slice(0, label.index).split(/[.!?;\n]/u).at(-1);
   if (/\b(?:not|no|without|avoid|never)\b/i.test(prefix)) return null;
   const tail = brief.slice(label.index + label[0].length).trimStart();
@@ -189,6 +204,36 @@ function continuousImageProblems(pkg, brief) {
 
 export function editorialBriefProblems(pkg, brief) {
   const problems = [];
+  const intent = classifyProductionIntent(brief ?? '');
+  problems.push(...nativeFilmAudioProblems(pkg, intent));
+  if (nativeCharacterSpeech(pkg, intent)) {
+    const spoken = (pkg.scenes ?? []).flatMap(scene => nativeFilmPlates(scene).map(plate => pkg.assets?.[plate.asset])
+      .filter(asset => asset?.gen?.generator === 'fasth3-omni' && asset.gen.direction?.dialogue));
+    // This is an explicit quoted source contract, not an inferred screenplay.
+    const monologue = /\b(?:delivers|speaks|says)\s+this\s+exact\s+monologue\b[^:\n]{0,500}:\s*(?:"([^"\n]+)"|“([^”\n]+)”)/i.exec(brief ?? '');
+    if (monologue && normalize(spoken.map(asset => asset.gen.direction.dialogue.text).join(' ')) !== normalize(monologue[1] ?? monologue[2])) {
+      problems.push({ code: 'NATIVE_MONOLOGUE_MISMATCH', path: 'scenes', message: 'Visible H3 dialogue must concatenate to the supplied exact monologue in scene order, without omissions, additions, repetition or paraphrase. Preserve exact words, natural measured conditioning and existing correct jobs; repair only the mismatched shot allocation.' });
+    }
+    const voices = new Map();
+    for (const asset of spoken) {
+      const audio = pkg.assets?.[asset.gen.inputs?.audio];
+      if (audio?.gen?.generator !== 'kokoro' || typeof audio.gen.inputs?.character !== 'string') continue;
+      const inputs = audio.gen.inputs;
+      if (inputs.text !== asset.gen.direction.dialogue.text || inputs.speed !== 1) problems.push({ code: 'NATIVE_CONDITIONING_MISMATCH', path: 'assets', message: 'H3 conditioning provenance must preserve this exact shot dialogue at natural speed 1; do not relabel, rewrite or accelerate an existing measured WAV.' });
+      const previous = voices.get(inputs.character);
+      if (previous && (previous.voice !== inputs.voice || previous.language !== inputs.language)) problems.push({ code: 'NATIVE_CHARACTER_VOICE_CHANGED', path: 'assets', message: `Recurring character ${inputs.character} changes conditioning voice/language between shots. Reuse the established natural-speed voice without changing any dialogue words.` });
+      voices.set(inputs.character, inputs);
+    }
+  }
+  if (nativeCharacterSpeech(pkg, intent) && /\bkeep\s+character\s+motion\s+footage\s+visible\s+throughout\b/i.test(brief ?? '')) {
+    for (const [index, scene] of (pkg.scenes ?? []).entries()) {
+      const uncertain = (scene.foreground ?? []).filter(item => {
+        const asset = pkg.assets?.[item.asset];
+        return asset?.kind === 'image' && asset.status === 'pending' && asset.gen?.generator === 'flux3-klein';
+      });
+      if (uncertain.length) problems.push({ code: 'NATIVE_CHARACTER_FOREGROUND_REVIEW', path: `scenes[${index}].foreground`, message: `${scene.id}: the brief requires character motion footage throughout, but pending FLUX foreground stills ${JSON.stringify(uncertain.map(item => item.asset))} cover it. Confirm each overlay has an explicit source-backed editorial purpose; remove leftover conditioning/reference plates with storyboard.edit while preserving unrelated authored foregrounds, all H3 references and existing video IDs. Do not regenerate footage to fix placement.` });
+    }
+  }
   const contract = explicitCopyContract(brief);
   if (contract) {
     const actual = nativeCopyEntries(pkg);

@@ -35,6 +35,7 @@ import { classifyProductionIntent, type ProductionIntent } from './production-in
 import { parseMotionModel, resolveShotMotionModel, type MotionModel } from './motion-model.js';
 import { drawingElementJsonSchema, drawingJsonSchema, drawingToolSchema, extendDrawing, extendDrawingToolSchema } from './procedural-drawing.js';
 import { queryAttachmentCsv, readAttachmentCsv, selectAttachmentCsv } from './attachment-csv.js';
+import { applyNativeFilmAudio } from './native-film-audio.js';
 
 export interface AgentTool {
   definition: ToolDef;
@@ -744,6 +745,9 @@ function sanitizePlate(plate: any, assetIds: Set<string>): Record<string, any> |
   const out: Record<string, any> = procedural ? { procedural } : { asset };
   if (label) out.label = label;
   if (fit) out.fit = fit;
+  for (const key of ['muted', 'loop'] as const) if (typeof plate[key] === 'boolean') out[key] = plate[key];
+  if (typeof plate.speed === 'number' && Number.isFinite(plate.speed) && plate.speed > 0) out.speed = plate.speed;
+  if (plate.trim && typeof plate.trim === 'object') out.trim = { ...plate.trim };
   return out;
 }
 
@@ -1072,7 +1076,7 @@ export function applyProductionIntentToScene(scene: Record<string, any>, intent:
       delete next.code;
     }
   }
-  if (intent.wordless) {
+  if (intent.wordless || (intent.generatedFilm && intent.speechRequested && !intent.narrationRequested)) {
     delete next.narration;
     delete next.narration_asset;
     delete next.narration_duration_frames;
@@ -1296,6 +1300,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   const plannedImageRoles = new Map<string, { sceneId: string; kind: string }>();
 
   const touch = () => {
+    if (state.package && state.intent) state.package = applyNativeFilmAudio(state.package, state.intent);
     if (state.package) options.onPackageChange?.(state.package);
   };
 
@@ -1625,7 +1630,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(framing ? { framing } : {}),
         }));
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
-    plannedImageRoles.set(id, { sceneId: args.scene_id, kind: args.kind ?? '' });
+    plannedImageRoles.set(id, { sceneId: args.scene_id, kind: args.placement === 'foreground' ? 'explicit-foreground' : args.kind ?? '' });
     const defaultWorkflow = isRefEdit ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json';
     // P-fix5: the jobs planner requires `gen.workflow_sha256`, so a package built by the
     // agent must stamp it. A caller-provided plan wins; otherwise the committed manifest
@@ -1965,6 +1970,14 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const scenes = state.package.scenes.map((candidate: any, index: number) => {
       if (index !== sceneIndex) return candidate;
       let next = applyProductionIntentToScene(candidate, intent);
+      // Remove only a known conditioning-only role minted in this toolset.
+      // Unknown/authored foregrounds survive and can be diagnosed by the brief gate.
+      if (model !== 'klein' && Array.isArray(next.foreground)) {
+        next.foreground = next.foreground.filter((item: any) => {
+          const role = plannedImageRoles.get(item.asset);
+          return !role || role.kind === 'explicit-foreground' || !/\b(?:reference|identity|cast|portrait|start[\s-]?frame)\b/i.test(role.kind);
+        });
+      }
       if (twoPlateLayout) {
         // SplitCompareLayout renders these two plates, not the background shot.
         // Keep the other plate, its label, and the authored background intact.

@@ -131,7 +131,7 @@ test('actual acceptance briefs preserve authored title sizes and copy through in
       assert.equal(scene.layout, 'title');
       assert.equal(scene.headline_size, 104);
       assert.equal(scene.copy.headline, lines[i]);
-      assert.equal(scene.narration, intent.wordless ? undefined : original[i].narration);
+      assert.equal(scene.narration, undefined, 'native character speech and wordless credits must not create detached narration');
     }
     const tools = createToolset();
     const result = tools['storyboard.propose'].run({ brief, title: 'THE LAST SIGNAL', scenes: applied }) as any;

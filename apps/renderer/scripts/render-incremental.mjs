@@ -29,7 +29,7 @@ import { muxPackageAudio } from './incremental-audio.mjs';
 import { narrationAudio, narrationWarning } from '../src/audio-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { mergeScenes } from '../src/timeline-model.js';
-import { isMasterMusic, timelineWithMasterMusicDuration } from '../src/audio-mix-model.js';
+import { isMasterMusic, timelineWithMasterMusicDuration, resolveAudioMix } from '../src/audio-mix-model.js';
 
 export { mergeScenes };
 
@@ -265,7 +265,7 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   const mixAudio = options.mixAudio !== false;
   let audio = null;
   const silentPath = join(cache, 'silent.mp4');
-  const hasMix = mixAudio && pkg.audio && (pkg.audio.music || pkg.audio.ambience || (pkg.audio.sfx ?? []).length > 0);
+  const hasMix = mixAudio && resolveAudioMix(pkg, timeline, { includeDirectSources: true }).enabled;
   const narration = narrationAudio(pkg);
   const narrationPath = narration ? join(packageDir, narration.file) : null;
   const hasNarration = Boolean(narrationPath && existsSync(narrationPath));
@@ -427,7 +427,7 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
   const mixAudio = options.mixAudio !== false;
   let audio = null;
   const silentPath = join(cache, 'silent.mp4');
-  const hasMix = mixAudio && pkg.audio && (pkg.audio.music || pkg.audio.ambience || (pkg.audio.sfx ?? []).length > 0);
+  const hasMix = mixAudio && resolveAudioMix(pkg, timeline, { includeDirectSources: true }).enabled;
   const narration = narrationAudio(pkg);
   const narrationPath = narration ? join(packageDir, narration.file) : null;
   const hasNarration = Boolean(narrationPath && existsSync(narrationPath));

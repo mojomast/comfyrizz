@@ -314,3 +314,4 @@ export type {
   PresenterFinding,
 } from './presenter.js';
 export { runPiRuntime, piRequest, toPiMessages, fromPiMessages } from './pi-runtime.js';
+export { applyNativeFilmAudio, nativeCharacterSpeech, nativeFilmAudioProblems, nativeFilmPlates } from './native-film-audio.js';
