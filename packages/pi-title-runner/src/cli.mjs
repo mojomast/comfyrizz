@@ -64,14 +64,16 @@ try {
     const direct = resolved.baseUrl.replace(/\/+$/, '') === 'https://api.deepseek.com/v1' && resolved.model === 'deepseek-flash';
     const go = resolved.baseUrl === 'https://opencode.ai/inference/go/openai/v1' && resolved.model === 'deepseek-v4.1-flash';
     if (!direct && !go) throw new Error('This experiment currently verifies only direct deepseek-flash or OpenCode Go deepseek-v4.1-flash; unsupported configuration rejected before network');
-    config = { provider: values.provider, model: values.model, baseUrl: resolved.baseUrl, thinking: 'disabled', reasoningEffort: 'low', maxTokens: 8192, maxRetries: 0,
+    const maxTokens = resolved.maxTokens;
+    if (!Number.isInteger(maxTokens) || maxTokens <= 0) throw new Error('The configured provider must supply an explicit output-token limit');
+    config = { provider: values.provider, model: values.model, baseUrl: resolved.baseUrl, thinking: 'disabled', reasoningEffort: 'low', maxTokens, maxRetries: 0,
       apiKey: '[redacted]', headerNames: Object.keys(resolved.headers ?? {}), piAgentCore: '1.4.0', piAi: '1.4.0', costAccounting: 'Provider token counts only; Pi price fields are not billing estimates' };
     let wireCalls = 0;
-    chatModel = createOpenAICompatibleModel({ ...resolved, thinking: 'disabled', reasoningEffort: 'low', maxTokens: 8192, maxRetries: 0,
+    chatModel = createOpenAICompatibleModel({ ...resolved, thinking: 'disabled', reasoningEffort: 'low', maxTokens, maxRetries: 0,
       fetchImpl: async (url, options) => {
         const body = JSON.parse(options.body);
         const names = body.tools?.map(tool => tool.function.name) ?? [];
-        if (++wireCalls > 2 || !names.length || !names.includes(wireCalls === 1 ? 'storyboard_propose' : 'storyboard_edit') || body.thinking?.type !== 'disabled' || body.max_tokens !== 8192 || body.model !== resolved.model) throw new Error('Effective wire request failed pre-network validation');
+        if (++wireCalls > 2 || !names.length || !names.includes(wireCalls === 1 ? 'storyboard_propose' : 'storyboard_edit') || body.thinking?.type !== 'disabled' || body.max_tokens !== maxTokens || body.model !== resolved.model) throw new Error('Effective wire request failed pre-network validation');
         atomicJson(join(dir, `wire-request-${wireCalls}.json`), { provenance: 'actual HTTP JSON body; no authentication headers', body });
         const startedAt = Date.now();
         const response = await fetch(url, options);

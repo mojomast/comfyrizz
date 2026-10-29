@@ -126,6 +126,12 @@ if (command === "upload") {
   out(`[colab] Uploaded ${local} -> ${remote}`);
 }
 if (command === "download") {
+  const failure = state.downloadFailures?.[argv[3]]?.shift();
+  if (failure) {
+    save(state);
+    if (failure.partial) fs.writeFileSync(argv[4], failure.partial);
+    out(failure.output, failure.code ?? 1);
+  }
   if (Number(state.failDownloads) > 0) {
     state.failDownloads = Number(state.failDownloads) - 1;
     save(state);
@@ -182,7 +188,14 @@ if (command === "exec") {
     "list_out.py": { walk: "/content/comfyrizz/out" },
     "drop_token.py": { remove: ["/content/.hf/token"], output: "token file removed: True (it was there: True)" },
   };
-  const spec = { ...builtIn[script], ...(state.scripts || {})[script] };
+  let configured = (state.scripts || {})[script];
+  if (Array.isArray(configured)) {
+    const sequence = configured;
+    configured = sequence[0];
+    if (sequence.length > 1) sequence.shift();
+    save(state);
+  }
+  const spec = { ...builtIn[script], ...configured };
   if (!spec || Object.keys(spec).length === 0) out(`[colab] Error: no such file on the VM: ${file}`, 1);
   if (spec.walk) {
     // H13: what `colab/list_out.py` does on the VM. The fake walks its own "VM filesystem", so the

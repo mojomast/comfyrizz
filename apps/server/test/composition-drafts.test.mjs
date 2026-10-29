@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createApp } from '../src/app.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -14,7 +15,7 @@ const source = new URL('../../../examples/composition-stories/', import.meta.url
 const token = 'composition-drafts-test-token';
 
 async function setup(t) {
-  const runtimeDir = mkdtempSync('/tmp/opencode/composition-drafts-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'composition-drafts-'));
   const pkg = JSON.parse(readFileSync(new URL('package.json', source)));
   pkg.assets.a_marker = { kind: 'image', origin: 'upload', status: 'ready', file: 'assets/marker.png',
     sha256: createHash('sha256').update('original asset').digest('hex'),

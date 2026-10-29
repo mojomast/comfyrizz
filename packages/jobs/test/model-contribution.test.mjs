@@ -104,3 +104,33 @@ test('changed bytes fail on resume, honest receipt reuse survives server staging
   writeFileSync(join(staged, 'assets/plate.png'), 'changed');
   assert.equal(verifyModelContribution({ pkg: f.pkg, packageDir: staged }).ok, false);
 });
+
+test('contained comparison images count only their source-pixel area using receipt measurements', t => {
+  const f = fixture(t); f.record();
+  const scene = f.pkg.scenes[0];
+  scene.layout = 'compare';
+  scene.media = [{ asset: 'a_plate', fit: 'contain', label: 'BEFORE' }, { asset: 'a_plate', fit: 'contain', label: 'AFTER' }];
+  const verify = () => verifyModelContribution({ pkg: f.pkg, packageDir: f.dir });
+  assert.equal(verify().evidence.length, 2);
+  for (const use of verify().evidence) assert.equal(use.visibleFraction, .25, 'wide image occupies half of a half-width panel');
+  f.pkg.assets.a_plate.media = { width: 1, height: 100000 };
+  assert.equal(verify().evidence[0].visibleFraction, .25, 'editable dimensions cannot override trusted measurements');
+  f.pkg.format.width = 1080; f.pkg.format.height = 1920;
+  assert.ok(verify().evidence.every(use => Math.abs(use.visibleFraction - .31640625) < 1e-9), 'stacked panels follow portrait geometry');
+  scene.media[0].procedural = { pattern: 'gradient' };
+  assert.deepEqual(verify().evidence.map(use => use.slot), ['media.1'], 'procedural plate shadows an asset');
+});
+
+test('contain cannot qualify a tiny source-pixel footprint or unmeasured planned source', t => {
+  const f = fixture(t);
+  f.pkg.scenes[0].background.fit = 'contain';
+  f.pkg.assets.a_plate.media = { width: 100000, height: 1 };
+  assert.deepEqual(plannedModelContribution(f.pkg), []);
+  delete f.pkg.assets.a_plate.media;
+  assert.deepEqual(plannedModelContribution(f.pkg), []);
+  f.pkg.assets.a_plate.gen.inputs = { width: 1920, height: 1080 };
+  assert.equal(plannedModelContribution(f.pkg).length, 1, 'generation dimensions may establish provisional planning geometry');
+  f.manifest.jobs[0].outputs[0].measured = { width: 100000, height: 2 };
+  f.record();
+  assert.equal(verifyModelContribution({ pkg: f.pkg, packageDir: f.dir }).ok, false, 'final geometry never falls back to planned dimensions');
+});

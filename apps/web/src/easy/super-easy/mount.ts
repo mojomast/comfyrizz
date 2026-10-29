@@ -436,7 +436,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     const group = root.querySelector<HTMLElement>('[data-super-easy-lyrics]');
     if (group) group.hidden = String(selectedVideoType) !== 'music-video';
     const layout = root.querySelector<HTMLElement>('[data-super-easy-music-layout]');
-    if (layout) layout.hidden = String(selectedVideoType) !== 'music-video';
+    if (layout) layout.hidden = false;
   }
 
   function showLyricsError(message = ''): void {

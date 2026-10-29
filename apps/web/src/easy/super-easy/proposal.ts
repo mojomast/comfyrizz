@@ -30,6 +30,25 @@ function short(value: string, limit: number): string {
   return `${value.slice(0, limit - 1).trimEnd()}…`;
 }
 
+/** Keep the review faithful to native text outside scene.copy as well. */
+function sceneTextReview(scene: any, format: any): string {
+  const parts: string[] = [];
+  const layoutHidden = scene?.drawing ? ' (hidden by drawing)' : scene?.media_only === true ? ' (hidden by media-only mode)' : '';
+  if (scene?.copy && Object.keys(scene.copy).length) parts.push(`Layout copy${layoutHidden}: ${JSON.stringify(scene.copy)}`);
+  if (scene?.lower_third) parts.push(`Whole-scene lower third${scene?.drawing ? ' (hidden by drawing)' : ''}: ${JSON.stringify(scene.lower_third)}`);
+  if (['split', 'compare'].includes(scene?.layout)) {
+    const stacked = Number(format?.height) > Number(format?.width) * 1.2;
+    const positions = stacked ? ['Top', 'Bottom'] : ['Left', 'Right'];
+    for (const [index, plate] of (Array.isArray(scene.media) ? scene.media : []).slice(0, 2).entries()) {
+      parts.push(`${positions[index]} panel label${layoutHidden}: ${JSON.stringify(plate?.label ?? '')}`);
+    }
+  }
+  const drawingText = (Array.isArray(scene?.drawing?.elements) ? scene.drawing.elements : [])
+    .filter((element: any) => element?.type === 'text').map((element: any) => element.text);
+  if (drawingText.length) parts.push(`Drawing text: ${JSON.stringify(drawingText)}`);
+  return parts.join('; ');
+}
+
 export function proposalForPackage(pkg: any, basePrompt: string, revisionNotes: string[] = [], narrationRevised = false, previousPackage?: any): SuperEasyProposal {
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
@@ -83,7 +102,7 @@ export function proposalForPackage(pkg: any, basePrompt: string, revisionNotes: 
       }
       for (const [label, before, after] of [
         ['Narration', old.narration ?? '', scene.narration ?? ''],
-        ['On-screen copy', JSON.stringify(old.copy ?? {}), JSON.stringify(scene.copy ?? {})],
+        ['On-screen copy', sceneTextReview(old, previousPackage.format), sceneTextReview(scene, pkg.format)],
       ]) if (before !== after) changes.push({ label: `${scene.id}: ${label}`, before: String(before), after: String(after) });
     }
   }
@@ -110,7 +129,7 @@ export function proposalForPackage(pkg: any, basePrompt: string, revisionNotes: 
       scenes: scenes.map((scene: any) => ({
         id: String(scene?.id ?? 'Scene'),
         narration: typeof scene?.narration === 'string' ? scene.narration : '',
-        copy: scene?.copy ? JSON.stringify(scene.copy) : '',
+        copy: sceneTextReview(scene, pkg?.format),
         data: scene?.data ? JSON.stringify(scene.data) : '',
         visual: (() => {
           if (!scene?.drawing) return 'No procedural drawing';

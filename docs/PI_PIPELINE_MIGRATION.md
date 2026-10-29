@@ -11,6 +11,13 @@ Implementation/validation record: 2026-10-29. Evidence root:
 fallback. The experimental Title runner is separate; its Title-only tool
 capabilities and restrictions have not been imported.
 
+The configured direct `deepseek-flash` and OpenCode Go `deepseek-v4.1-flash`
+routes now receive a **65,536-token output allowance** from the shared provider
+preset, with low reasoning effort by default. The same ceiling applies with
+thinking enabled or disabled; specialized tasks may retain smaller bounds.
+Earlier trials with an 8,192-token ceiling remain historical evidence. See
+[provider configuration](AGENT_PROVIDERS.md#production-runtime-and-output-allowance).
+
 Pi schedules assistant turns and serial tool execution. The existing application
 model transport remains responsible for provider URLs, credentials, model IDs,
 headers, thinking/reasoning settings, token limits, SSE decoding and HTTP retries.
@@ -189,3 +196,21 @@ ID/revision. Focused checks passed 89/89; the full web suite passed **1,607/1,60
 with zero skipped, followed by passing typecheck and production build. No ComfyUI
 requirement was relaxed and no Title capability was added. Backend/jobs and server
 reconciliation, plus real generated-media acceptance, remain outstanding.
+
+### Jobs/backends reconciliation completed
+
+Follow-up evidence: `/tmp/opencode/pi-pipeline-reconcile/backends/REPORT.md`.
+Jobs passed **135/135**; backends passed **174**, failed zero, with two existing
+skips (176 total). Eleven original backend failures used unreferenced fixture
+assets; valid scene placements restored collection/recovery coverage. FastH3's
+golden change was traced to the committed identity-conditioning sentence, with
+tests verifying both current hashes and exact reconstruction of original hashes
+when that sentence is removed. Two exact-count teardown tests were isolated from
+their racing fixture watchdog; dedicated watchdog coverage remains active.
+
+A genuine BYO production defect was also fixed: returning its collected output
+directory now allows `runPackage` to verify bytes and issue trusted receipts.
+Tests cover valid receipts, same-length tampering, pending/failed outputs, cached
+reuse and SIGKILL recovery without resubmission. No contribution-policy relaxation
+or live provider/GPU execution occurred. Server reconciliation and actual
+generated-film acceptance remain outstanding.

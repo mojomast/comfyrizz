@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { planJobs } from '../../../packages/jobs/src/plan.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { adoptProductWalkthroughAttachments } from '../src/product-walkthrough.mjs';
@@ -32,7 +33,7 @@ function mp4Bytes() {
 
 function setup(t) {
   mkdirSync('/tmp/opencode', { recursive: true });
-  const runtimeDir = mkdtempSync('/tmp/opencode/product-walkthrough-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'product-walkthrough-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const store = createReferenceStore({ rootDir: runtimeDir, chatId: CHAT_ID });
   return { runtimeDir, store };
@@ -270,7 +271,7 @@ test('only explicit editorial refs adopt in store order; original video bytes an
 
 test('missing library, missing conversation and no editorial selections are byte-equivalent no-ops', async t => {
   mkdirSync('/tmp/opencode', { recursive: true });
-  const runtimeDir = mkdtempSync('/tmp/opencode/product-walkthrough-noop-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'product-walkthrough-noop-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const pkg = makePackage();
   const before = JSON.stringify(pkg);

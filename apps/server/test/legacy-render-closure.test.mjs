@@ -135,6 +135,7 @@ function makeRoutes(t, { production = null, renderGate, requireReadiness = false
   const space = workspace(t);
   const store = new PackageStore(space.packagesDir);
   const pkg = clone(fixture);
+  pkg.scenes.forEach(scene => { delete scene.narration; });
   pkg.id = 'pkg_ip25render01';
   pkg.revision = 3;
   // The fixture's only scene carries a transition out; a one-scene package must

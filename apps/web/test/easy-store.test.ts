@@ -64,10 +64,10 @@ test('normalize wrong version returns defaults', () => {
 });
 
 test('normalize keeps default lengthS for invalid', () => {
-  for (const lengthS of [0, 91, 12.5, '12', null]) {
+  for (const lengthS of [0, 121, 120.5, 12.5, '12', null]) {
     assert.equal(normalizeEasyState({ version: 1, idea: { lengthS } }).idea.lengthS, 30);
   }
-  for (const lengthS of [1, 12, 40, 90]) {
+  for (const lengthS of [1, 12, 40, 90, 91, 120]) {
     assert.equal(normalizeEasyState({ version: 1, idea: { lengthS } }).idea.lengthS, lengthS);
   }
 });

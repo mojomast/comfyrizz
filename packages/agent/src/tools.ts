@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { routeAsset, type AssetNeed, type RouteDecision } from './router.js';
 import { foregroundFor } from './package.js';
-import { expandFluxCaption, expandReferenceEditCaption, aspectFromSize, sourceDims, type Aspect } from './caption.js';
+import { expandFluxCaption, expandReferenceEditCaption, aspectFromSize, sourceDims } from './caption.js';
 import { WORKFLOW_SHA256 } from './workflow-manifest.js';
 import { brandStyleBlock, brandTheme, type BrandKit } from './brand.js';
 import type { StylePreset } from './brief.js';
@@ -199,6 +199,10 @@ function resolveFormat(brief: string): PackageFormat {
   return { width: 1920, height: 1080, fps };
 }
 
+const plateFitSchema = z.enum(['cover', 'contain']);
+const sceneMediaSchema = z.array(z.object({ fit: plateFitSchema.optional() }).passthrough()).length(2);
+const lowerThirdSchema = z.object({ text: z.string().min(1).max(120), kicker: z.string().min(1).max(40).optional() }).strict();
+
 const sceneSchema = z.object({
   id: z.string().min(1),
   // "focus" is a motion concept, not a package layout. Its closest visual
@@ -212,6 +216,7 @@ const sceneSchema = z.object({
     .preprocess(value => (typeof value === 'string' ? { headline: value } : value), z.record(z.unknown()))
     .optional(),
   narration: z.string().optional(),
+  media: sceneMediaSchema.optional(),
 }).passthrough();
 
 function boundedText(max: number) {
@@ -263,7 +268,7 @@ export const proposeSchema = z.object({
 
 export const editSchema = z.object({
   scene_id: z.string().min(1),
-  patch: z.record(z.unknown()),
+  patch: z.object({ media: sceneMediaSchema.nullable().optional(), lower_third: lowerThirdSchema.nullable().optional() }).passthrough(),
 });
 
 export const routeSchema = z.object({
@@ -296,7 +301,8 @@ export const generateImageSchema = z.object({
   seed: z.number().int().optional(),
   refs: z.array(z.string()).max(4).optional(),
   cutout: z.boolean().optional(),
-  aspect: z.enum(['16:9', '1:1', '4:5', '9:16']).optional(),
+  /** panel explicitly targets one split/compare panel instead of the whole canvas. */
+  aspect: z.enum(['16:9', '1:1', '4:5', '9:16', 'panel']).optional(),
   /** Allow text in the still (default false: Klein draws garbled pseudo-text). */
   text: z.boolean().optional(),
   /** Labelled frame: keep labels and lock the camera. */
@@ -445,6 +451,23 @@ function meaningfulCopy(copy: unknown): boolean {
   return Object.values(copy).some(value => Array.isArray(value) ? value.length > 0 : typeof value === 'string' ? value.trim().length > 0 : value != null);
 }
 
+/** Match SplitCompareLayout's row/column threshold, not the canvas aspect. */
+function comparisonPanel(pkg: Record<string, any> | undefined, sceneId: string) {
+  const scene = pkg?.scenes?.find((item: any) => item.id === sceneId);
+  if (!['split', 'compare'].includes(scene?.layout)) return undefined;
+  const width = Number(pkg?.format?.width ?? 1920);
+  const height = Number(pkg?.format?.height ?? 1080);
+  const stacked = height > width * 1.2;
+  const panelWidth = stacked ? width : width / 2;
+  const panelHeight = stacked ? height / 2 : height;
+  const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a;
+  const divisor = gcd(panelWidth, panelHeight);
+  return {
+    width: panelWidth, height: panelHeight, aspect: `${panelWidth / divisor}:${panelHeight / divisor}`,
+    slots: stacked ? ['top', 'bottom'] : ['left', 'right'],
+  };
+}
+
 function baseParameters(properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
   return { type: 'object', properties, required, additionalProperties: false };
 }
@@ -466,9 +489,16 @@ const COPY_SLOTS: Record<SceneLayout, string[]> = {
   compare: ['headline'],
   code: [],
 };
+const PANEL_GUIDANCE = 'split/compare require two actual media plates in scene.media (unless a drawing replaces the layout). Native panel labels belong in media[0].label and media[1].label, max 40 characters each: 0=left and 1=right in landscape/square; 0=top and 1=bottom when height > width*1.2 (portrait). copy.headline and lower_third are whole-scene overlays, not panel labels. For BEFORE/AFTER, attach BEFORE to media[0].label and AFTER to media[1].label; omit global copy unless requested.';
+const PANEL_FRAMING_GUIDANCE = 'For full-fill comparison imagery, explicitly request assets.generate_image aspect:panel and placement:conditioning, then attach both returned asset IDs to scene.media. Panels use half the canvas width in landscape/square (1920x1080 -> 960x1080 each), or half its height when stacked. Keep important objects inside that panel composition. Preserve authored framing: cover fills and may crop; use contain when the entire source must stay visible, with possible bars.';
+const COPY_REMOVAL_GUIDANCE = 'A present copy.headline must be a nonblank string, even on drawing scenes; empty strings, whitespace and copy.headline:null are invalid. To remove all layout copy, use whole-object copy:null. For text-free footage use patch {layout:"list",copy:null} only when the brief calls for no layout text; title/hero/stat require a headline unless a drawing replaces the layout. To retain selected fields, clear copy first, then restore only the wanted supported fields in a second edit. Omitted copy preserves the current copy.';
+const DRAWING_TEXT_GUIDANCE = 'A procedural drawing replaces the layout: copy and lower_third are not rendered there. Put required visible labels in drawing.elements with type:"text", preserving exact wording; keep spoken-only text in narration.';
 const COPY_CONTRACT = {
   slots_by_layout: COPY_SLOTS,
-  notes: 'list quote/attribution require variant:quote; items use the bullet/diagram layouts. list motion.diagram also renders sub. code uses scene.code.code, not copy. stat headline is a fallback kicker. lower_third is a scene-level overlay {text,kicker?}, text 1–120 and kicker 1–40 characters. Body text belongs in hero.copy.body (240 max). No independent closing/credit slot or timing; use lower_third, supported copy, or another scene.',
+  notes: 'list quote/attribution require variant:quote; items use the bullet/diagram layouts. list motion.diagram also renders sub. code uses scene.code.code, not copy. stat headline is a fallback kicker. lower_third is a scene-level overlay {text,kicker?}, text 1–120 and kicker 1–40 characters. Body text belongs in hero.copy.body (240 max). No independent closing/credit slot or timing; use lower_third, supported copy, or another scene. ' + PANEL_GUIDANCE,
+  panel_framing: PANEL_FRAMING_GUIDANCE,
+  removal: COPY_REMOVAL_GUIDANCE,
+  drawing_text: DRAWING_TEXT_GUIDANCE,
   aliases: 'String copy, scene.title and scene.headline map to copy.headline; scene.items maps to copy.items.',
   limits_by_layout: {} as Record<SceneLayout, Record<string, number>>,
 };
@@ -478,6 +508,20 @@ const nativeTextParameters = {
   copy: copyParameters,
   headline_size: headlineSizeParameters,
   lower_third: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 120 }, kicker: { type: 'string', minLength: 1, maxLength: 40 } } },
+  media: {
+    type: 'array', minItems: 2, maxItems: 2, description: PANEL_GUIDANCE + ' ' + PANEL_FRAMING_GUIDANCE,
+    items: { type: 'object', properties: {
+      asset: { type: 'string', description: 'Existing real asset ID returned by an asset tool; never an invented placeholder.' },
+      procedural: { type: 'object', description: 'Native procedural plate instead of asset, when requested.' },
+      label: { type: 'string', maxLength: 40, description: 'Native text for this panel only; keep generated imagery free of lettering.' },
+      fit: { type: 'string', enum: ['cover', 'contain'], description: 'cover fills the panel and can crop (renderer default); contain keeps the full source visible with possible bars. Preserve explicit framing intent.' },
+    } },
+  },
+};
+const sceneEditParameters = {
+  ...nativeTextParameters,
+  copy: { anyOf: [copyParameters, { type: 'null' }], description: COPY_REMOVAL_GUIDANCE + ' Panel labels belong in media[].label. ' + DRAWING_TEXT_GUIDANCE },
+  lower_third: { anyOf: [nativeTextParameters.lower_third, { type: 'null' }], description: 'Whole-scene lower-third overlay; null explicitly removes it. Omit to preserve it. Panel labels belong in media[].label.' },
 };
 const COPY_LIMITS: Record<SceneLayout, Record<string, number>> = {
   title: { headline: 48, sub: 90 },
@@ -677,6 +721,7 @@ function sanitizeForegroundItem(item: Record<string, any>): Record<string, any> 
 
 function sanitizePlate(plate: any, assetIds: Set<string>): Record<string, any> | undefined {
   if (!plate || typeof plate !== 'object') return undefined;
+  const fit = plate.fit === undefined ? undefined : plateFitSchema.parse(plate.fit);
   const label = clampText(plate.label, 40);
   const procedural = plate.procedural && typeof plate.procedural === 'object' ? { ...plate.procedural } : undefined;
   if (procedural) {
@@ -691,6 +736,7 @@ function sanitizePlate(plate: any, assetIds: Set<string>): Record<string, any> |
   if (Boolean(procedural) === Boolean(asset)) return undefined;
   const out: Record<string, any> = procedural ? { procedural } : { asset };
   if (label) out.label = label;
+  if (fit) out.fit = fit;
   return out;
 }
 
@@ -867,11 +913,19 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   const copy: Record<string, any> = typeof source.copy === 'string'
     ? { headline: source.copy }
     : source.copy && typeof source.copy === 'object' ? { ...source.copy } : {};
-  if (!copy.headline && typeof source.title === 'string') copy.headline = source.title;
-  if (!copy.headline && typeof source.headline === 'string') copy.headline = source.headline;
+  if (source.copy === null && ['title', 'hero', 'stat'].includes(layout) && !source.drawing) {
+    throw new Error(`${id}: layout ${layout} requires copy.headline; copy:null cannot remove it on this layout. ${COPY_REMOVAL_GUIDANCE}`);
+  }
+  if (source.copy !== null) {
+    if (!Object.hasOwn(copy, 'headline') && typeof source.title === 'string') copy.headline = source.title;
+    if (!Object.hasOwn(copy, 'headline') && typeof source.headline === 'string') copy.headline = source.headline;
+  }
+  if (Object.hasOwn(copy, 'headline') && (typeof copy.headline !== 'string' || !copy.headline.trim())) {
+    throw new Error(`${id}: copy.headline must be a nonblank string. ${COPY_REMOVAL_GUIDANCE}`);
+  }
   // The conversation-plan shape carries bullets at scene level; lift them so a
   // list scene does not lose every item on the way into the package.
-  if (!Array.isArray(copy.items) && Array.isArray(source.items)) copy.items = [...source.items];
+  if (source.copy !== null && !Array.isArray(copy.items) && Array.isArray(source.items)) copy.items = [...source.items];
   for (const key of Object.keys(copy)) {
     if (!COPY_KEYS.has(key)) throw new Error(`${id}: unsupported copy.${key}. Use copy.headline for a title, copy.sub for a subtitle on title/hero, hero.copy.body for body text, or scene.lower_third:{text:"…"} for a credit/caption. Supported ${layout} slots: ${COPY_SLOTS[layout].join(', ') || '(none)'}.`);
   }
@@ -908,7 +962,7 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
     delete copy.sub;
   }
   for (const key of Object.keys(copy)) {
-    if (!COPY_SLOTS[finalLayout].includes(key) && !(finalLayout === 'list' && key === 'sub' && source.motion?.diagram)) throw new Error(`${id}: copy.${key} is not rendered by layout:${finalLayout}. Supported slots: ${COPY_SLOTS[finalLayout].join(', ') || '(none; use scene.code.code)'}. Use hero.copy.body for body or scene.lower_third:{text:"…"} for a credit/caption.`);
+      if (!COPY_SLOTS[finalLayout].includes(key) && !(finalLayout === 'list' && key === 'sub' && source.motion?.diagram)) throw new Error(`${id}: copy.${key} is not rendered by layout:${finalLayout}. Supported slots: ${COPY_SLOTS[finalLayout].join(', ') || '(none; use scene.code.code)'}. ${['split', 'compare'].includes(finalLayout) ? PANEL_GUIDANCE : 'Use hero.copy.body for body or scene.lower_third:{text:"…"} for a credit/caption.'}`);
   }
   if (Array.isArray(copy.items)) {
     const items = copy.items.map(clampListItem).filter((item): item is string => Boolean(item));
@@ -917,7 +971,7 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
     }
     copy.items = items.slice(0, requiredListItems ?? 6);
   }
-  if (!copy.headline && finalLayout !== 'code' && source.media_only !== true) copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline ?? 48);
+  if (!copy.headline && source.copy !== null && ['title', 'hero', 'stat'].includes(finalLayout) && !source.drawing && source.media_only !== true) copy.headline = clampText(source.title ?? fallbackTitle ?? id, limits.headline ?? 48);
   if (finalLayout === 'code' && !copy.headline) delete copy.headline;
 
   let variant = source.variant;
@@ -962,7 +1016,7 @@ function normalizeScene(raw: Record<string, any>, fallbackTitle: string, dataset
   scene.foreground = foreground;
   if (source.media_only === true) scene.media_only = true;
   if (source.lower_third !== undefined) {
-    const parsed = z.object({ text: z.string().min(1).max(120), kicker: z.string().min(1).max(40).optional() }).strict().safeParse(source.lower_third);
+    const parsed = lowerThirdSchema.safeParse(source.lower_third);
     if (!parsed.success) throw new Error(`${id}: lower_third must be a scene-level object {text:"caption or credit", kicker?:"label"}; text 1–120 characters, kicker 1–40. Do not put it inside copy or pass a string.`);
     scene.lower_third = parsed.data;
   }
@@ -1005,6 +1059,7 @@ export function applyProductionIntentToScene(scene: Record<string, any>, intent:
     // schema-supported shell; generate_video subsequently enables media_only.
     if (['title', 'hero', 'stat', 'chart', 'code'].includes(next.layout)) {
       next.layout = 'list';
+      delete next.headline_size;
       delete next.variant;
       delete next.data;
       delete next.code;
@@ -1042,6 +1097,7 @@ export function applyGeneratedFilmPresentation(scenes: Record<string, any>[], in
     if (scene.media_only === true && !meaningfulCopy(scene.copy) && ['title', 'hero'].includes(scene.layout)
       && !(intent.bookends && (index === 0 || index === scenes.length - 1) && !scene.lower_third)) {
       scene = { ...scene, layout: 'list' };
+      delete scene.headline_size;
       delete scene.variant;
     }
     // An editorial edit may add copy after a video enabled media_only.
@@ -1336,14 +1392,14 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const datasetIds = new Set(Object.keys(datasets));
     const datasetAliases = sharedDataset ? new Map([[sharedDataset.id, sharedDataset.id]]) : normalizedDatasets.aliases;
     const intent = state.intent ?? classifyProductionIntent(args.brief);
-    state.intent = intent;
-    state.brief = args.brief;
-    state.proposal = args.proposal;
     const scenes = applyGeneratedFilmPresentation((args.scenes?.length
       ? preparePlanningScenes(args.scenes, sharedDataset?.id, requiredListItems)
         .map(scene => normalizeScene(scene, title, datasetIds, new Set(), datasetAliases, requiredListItems))
       : [{ id: 's1', layout: 'title' as const, preferredFrames: 120, copy: { headline: title, sub: '' } }])
       .map(scene => applyProductionIntentToScene(scene, intent)), intent, title);
+    state.intent = intent;
+    state.brief = args.brief;
+    state.proposal = args.proposal;
     const mascot = briefWantsSharedMascot(args.brief) ? buildSharedMascot(theme.palette, options.persistSvg) : null;
     if (mascot) {
       for (const scene of scenes) scene.cast = [mascot.member.id];
@@ -1403,9 +1459,12 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const patch = args.patch as Record<string, any>;
     const datasetIds = new Set(Object.keys(datasets));
     const assetIds = new Set(Object.keys(draft.assets ?? {}));
-    let nextScenes = remappedScenes.map((scene, sceneIndex) => sceneIndex === index
-      ? applyProductionIntentToScene(normalizeScene(mergeScenePatch(current, patch), draft.title, datasetIds, assetIds, aliases, requiredListItems), state.intent ?? classifyProductionIntent(''))
-      : scene);
+    let nextScenes = remappedScenes.map((scene, sceneIndex) => {
+      if (sceneIndex !== index) return scene;
+      const merged = mergeScenePatch(current, patch);
+      if (patch.lower_third === null) delete merged.lower_third;
+      return applyProductionIntentToScene(normalizeScene(merged, draft.title, datasetIds, assetIds, aliases, requiredListItems), state.intent ?? classifyProductionIntent(''));
+    });
     nextScenes = applyGeneratedFilmPresentation(nextScenes, state.intent ?? classifyProductionIntent(''), draft.title);
     state.package = { ...draft, datasets, scenes: nextScenes, revision: Number(draft.revision ?? 0) + 1 };
     touch();
@@ -1415,8 +1474,11 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     );
   };
 
-  const route = (args: z.infer<typeof routeSchema>): RouteDecision =>
-    routeAsset({ sceneId: args.scene_id, intent: args.need, kind: args.kind, animated: args.animated, transparent: args.transparent, source: args.source, style: args.style } as AssetNeed);
+  const route = (args: z.infer<typeof routeSchema>): RouteDecision & { panel_framing?: unknown } => {
+    const decision = routeAsset({ sceneId: args.scene_id, intent: args.need, kind: args.kind, animated: args.animated, transparent: args.transparent, source: args.source, style: args.style } as AssetNeed);
+    const panel = comparisonPanel(state.package, args.scene_id);
+    return { ...decision, ...(panel ? { panel_framing: { ...panel, guidance: PANEL_GUIDANCE + ' ' + PANEL_FRAMING_GUIDANCE } } : {}) };
+  };
 
   const generateSvg = async (args: z.infer<typeof generateSvgSchema>) => {
     // A5 and the packaging render-check must agree on one source of colour:
@@ -1505,22 +1567,25 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
   };
 
   const planImage = (args: z.infer<typeof generateImageSchema>) => {
+    const panel = args.aspect === 'panel' ? comparisonPanel(state.package, args.scene_id) : undefined;
+    if (args.aspect === 'panel' && !panel) throw new Error('aspect:panel requires a split or compare scene; use a supported whole-image aspect for other layouts');
     const planned = options.planImage?.(args) ?? {};
     const format = state.package?.format ?? {};
     const outputAspect = aspectFromSize(format.width, format.height);
     const formatWidth = Number(format.width);
     const formatHeight = Number(format.height);
     const hasOutputSize = Number.isInteger(formatWidth) && formatWidth > 0 && Number.isInteger(formatHeight) && formatHeight > 0;
-    const requestedAspect = args.aspect as Aspect | undefined;
+    const requestedAspect = args.aspect === 'panel' ? undefined : args.aspect;
     // Generated-film sources must match the output exactly, including landscape
     // films: completion validation rejects mismatched i2v references. Preserve
     // deliberate alternate landscape framing for other production types.
     const plannedAspect = requestedAspect && outputAspect === '16:9' && !state.intent?.generatedFilm
       ? requestedAspect
       : outputAspect;
-    const dims = plannedAspect === outputAspect && hasOutputSize
+    const dims = panel ?? (plannedAspect === outputAspect && hasOutputSize
       ? { width: formatWidth, height: formatHeight }
-      : sourceDims(plannedAspect);
+      : sourceDims(plannedAspect));
+    const framing = panel ? `${panel.aspect} composition for one ${panel.width}x${panel.height} comparison panel` : undefined;
     const palette = Array.isArray(state.package?.theme?.palette) ? state.package.theme.palette : undefined;
     const cast = castRefsForScene(state.package, args.scene_id);
     const requestedRefs = (args.refs ?? []).map(ref => resolveReferenceId(ref, args.scene_id, 'reference', cast));
@@ -1537,6 +1602,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(args.style ? { style: args.style } : {}),
           ...(palette ? { palette } : {}),
           aspect: plannedAspect,
+          ...(framing ? { framing } : {}),
+          text: args.text,
+          labelled: args.labelled,
         })
       : expandFluxCaption({
           intent: args.intent,
@@ -1547,6 +1615,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
           ...(args.text ? { text: true } : {}),
           ...(args.labelled ? { labelled: true } : {}),
           aspect: plannedAspect,
+          ...(framing ? { framing } : {}),
         }));
     const id = hashId('a_img', `${args.scene_id}:${args.intent}:${args.seed ?? 0}:${caption}`);
     plannedImageRoles.set(id, { sceneId: args.scene_id, kind: args.kind ?? '' });
@@ -1568,7 +1637,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       height: dims.height,
       seed: args.seed ?? 0,
       ...(args.cutout ? { cutout: true } : {}),
-      ...(isRefEdit ? { reference: refs[0], text: true, ...extraRefs } : {}),
+      ...(args.text || args.labelled ? { text: true } : {}),
+      ...(isRefEdit ? { reference: refs[0], ...extraRefs } : {}),
     };
     const asset = {
       kind: 'image',
@@ -1579,7 +1649,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       redistributable: true,
       ...(cast.ids[0] ? { cast: cast.ids[0] } : {}),
       notes: isRefEdit
-        ? 'pending-GPU: ReferenceMultiLatent keeps the source layout/labels while restyling (GPU test 2)'
+        ? 'pending-GPU: ReferenceMultiLatent conditions the requested edit on the supplied references'
         : 'pending-GPU: procedural background is the CPU fallback until a spend is approved',
       gen: {
         generator: 'flux3-klein',
@@ -1587,14 +1657,15 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         ...(workflowSha256 ? { workflow_sha256: workflowSha256 } : {}),
         model: planned.model ?? 'flux-3-klein',
         inputs: planned.inputs
-          ? { ...planned.inputs, ...(plannedAspect === outputAspect && hasOutputSize ? { width: formatWidth, height: formatHeight } : {}) }
+          ? { ...planned.inputs, ...(panel || plannedAspect === outputAspect && hasOutputSize ? { width: dims.width, height: dims.height } : {}) }
           : defaultInputs,
         backend: planned.backend ?? 'colab:G4',
       },
     };
     if (state.package) {
       const referenceOnly = args.placement !== 'foreground' && (
-        args.placement === 'conditioning' || state.intent?.generatedFilm
+        args.aspect === 'panel'
+        || args.placement === 'conditioning' || state.intent?.generatedFilm
         || (isRefEdit && cast.ids.length === 0)
         || /\b(?:reference|identity|cast|portrait|start[\s-]?frame)\b/i.test(args.kind ?? '')
       );
@@ -1625,13 +1696,14 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       };
       touch();
     }
-    const aspectMismatch = args.aspect !== undefined && plannedAspect !== outputAspect;
+    const aspectMismatch = !panel && args.aspect !== undefined && plannedAspect !== outputAspect;
     return {
       scene_id: args.scene_id,
       asset: { id, ...asset },
       caption,
       reference_edit: isRefEdit,
-      source_aspect: plannedAspect,
+      source_aspect: panel?.aspect ?? plannedAspect,
+      ...(panel ? { panel_framing: { ...panel, guidance: PANEL_GUIDANCE + ' ' + PANEL_FRAMING_GUIDANCE } } : {}),
       output_aspect: outputAspect,
       requires_approval: 'spend',
       note: aspectMismatch
@@ -1697,6 +1769,10 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     }
 
     const scene = state.package.scenes[sceneIndex];
+    const twoPlateLayout = ['split', 'compare'].includes(scene.layout);
+    if (!twoPlateLayout && args.media_index === 1) {
+      throw new Error(`${args.scene_id}: media_index:1 requires a split or compare layout; this layout renders its shot through background.asset`);
+    }
     const packageFps = Number(state.package.format?.fps ?? 30);
     const slotSeconds = Number(scene.preferredFrames) / packageFps;
     if (!(slotSeconds > 0.2)) throw new Error(`${args.scene_id}: set preferredFrames and package fps before planning a generated shot`);
@@ -1846,21 +1922,33 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const scenes = state.package.scenes.map((candidate: any, index: number) => {
       if (index !== sceneIndex) return candidate;
       let next = applyProductionIntentToScene(candidate, intent);
-      const mediaIndex = args.media_index ?? 0;
-      const existingMedia = Array.isArray(next.media) && next.media.length === 2 ? next.media : [{ asset: id }, { asset: id }];
-      next.media = existingMedia.map((plate: any, plateIndex: number) => plateIndex === mediaIndex ? { asset: id } : plate);
-      next.background = { asset: id };
+      if (twoPlateLayout) {
+        // SplitCompareLayout renders these two plates, not the background shot.
+        // Keep the other plate, its label, and the authored background intact.
+        const mediaIndex = args.media_index ?? 0;
+        const existingMedia = Array.isArray(next.media) && next.media.length === 2
+          ? next.media : [{ procedural: { pattern: 'gradient' } }, { procedural: { pattern: 'gradient' } }];
+        next.media = existingMedia.map((plate: any, index: number) => index === mediaIndex
+          ? { asset: id, ...(plate.label ? { label: plate.label } : {}), ...(plate.fit ? { fit: plateFitSchema.parse(plate.fit) } : {}) } : plate);
+      } else {
+        // Single-shot layouts render background.asset. Never manufacture two
+        // unused media aliases: replacing only one kept the old paid clip alive.
+        // Recognize only the exact old helper shape on resume; authored/labelled
+        // or heterogeneous media and all foreground placements stay untouched.
+        const previous = next.background?.asset;
+        const previousAsset = state.package?.assets?.[previous];
+        if (previousAsset?.origin === 'generated' && previousAsset?.kind === 'video'
+          && Array.isArray(next.media) && next.media.length === 2
+          && next.media.every((plate: any) => plate?.asset === previous && Object.keys(plate).length === 1)) {
+          delete next.media;
+        }
+        next.background = { asset: id };
+      }
       const hasEditorialCopy = Object.values(next.copy ?? {}).some(value =>
         typeof value === 'string' ? value.trim().length > 0 : Array.isArray(value) && value.some(item => typeof item === 'string' && item.trim().length > 0));
       // media_only supports footage-only shots and animated lower thirds. It
       // must never hide meaningful full-layout copy left by the editorial pass.
-      next.media_only = !hasEditorialCopy;
-      if (intent.generatedFilm) {
-        // Preserve independent editable SVG/vector overlays. Only remove an
-        // entry that duplicates the shot asset being attached as the background.
-        next.foreground = (Array.isArray(next.foreground) ? next.foreground : [])
-          .filter((item: any) => item?.asset !== id);
-      }
+      next.media_only = !twoPlateLayout && !hasEditorialCopy;
       if (model === 'ltx') {
         const note = `LTX finishing sound plan (picture has no native audio): ${finishingSound}`;
         next.notes = clampText(next.notes && !next.notes.includes('LTX finishing sound plan') ? `${next.notes} ${note}` : note, 512);
@@ -2139,7 +2227,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     } : {}),
     'storyboard.draw': { ...tool(
       'storyboard.draw',
-      'Replace a scene with a deterministic procedural drawing. Coordinates use a 1000x1000 canvas; frames are local to the scene. Use filled polygons for planes and paths for contours and marker drawing or erasure; shapes/text add details. No code or external resources. Returns a compact acknowledgement; use storyboard.inspect_drawing to inspect the saved drawing.',
+      'Replace a scene with a deterministic procedural drawing. Coordinates use a 1000x1000 canvas, increasing y points downward; frames are local to the scene. Paths reveal in point order: align each arrowhead with the final path endpoint and travel direction. Use filled polygons for planes and paths for contours and marker drawing or erasure; shapes/text add details. ' + DRAWING_TEXT_GUIDANCE + ' No code or external resources. Returns a compact acknowledgement; use storyboard.inspect_drawing to inspect the saved drawing.',
       baseParameters({ scene_id: { type: 'string', minLength: 1 }, drawing: drawingJsonSchema }, ['scene_id', 'drawing']),
       drawingToolSchema,
       (args: z.infer<typeof drawingToolSchema>) => {
@@ -2155,7 +2243,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ), modelResult: (result: { scene_id: string; revision: number }) => ({ ok: true, scene_id: result.scene_id, revision: result.revision }) },
     'storyboard.extend_drawing': { ...tool(
       'storyboard.extend_drawing',
-      'Build a drawing incrementally. Omit source_scene_id to append elements to this scene without changing their existing timing. To continue a prior scene, set source_scene_id: its held final drawing is copied at frame 0, then new elements are appended. Optional remove uses zero-based source element indices; erase animates the removal of a copied path at local start/end frames. Source is unchanged. Inspect source for indices. Same element fields and limits as storyboard.draw.',
+      'Build a drawing incrementally. Omit source_scene_id to append elements to this scene without changing their existing timing. To continue an evolving diagram, set source_scene_id to the latest preceding diagram scene containing all steps to retain, not an older base that would drop intervening geometry. Its held final drawing is copied at frame 0, then new elements are appended. Optional remove uses zero-based source element indices; erase animates the removal of a copied path at local start/end frames. Source is unchanged. Inspect source for indices and continuity. ' + DRAWING_TEXT_GUIDANCE + ' Same element fields and limits as storyboard.draw.',
       baseParameters({
         scene_id: { type: 'string', minLength: 1 }, source_scene_id: { type: 'string', minLength: 1 },
         remove: { type: 'array', items: { type: 'integer', minimum: 0 }, maxItems: 120 },
@@ -2181,20 +2269,20 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ), modelResult: (result: { scene_id: string; revision: number }) => ({ ok: true, scene_id: result.scene_id, revision: result.revision }) },
     'storyboard.inspect_drawing': tool(
       'storyboard.inspect_drawing',
-      'Inspect the saved procedural drawing for one scene, including its current package revision.',
+      'Inspect the saved procedural drawing for one scene, including its current package revision. Check actual text elements, ordered path endpoints/arrowheads, and the latest preceding diagram before continuation. ' + DRAWING_TEXT_GUIDANCE,
       baseParameters({ scene_id: { type: 'string' } }, ['scene_id']),
       z.object({ scene_id: z.string().min(1) }),
       (args: { scene_id: string }) => {
         if (!state.package) throw new Error('no package draft; call storyboard.propose first');
         const scene = state.package.scenes.find((item: any) => item.id === args.scene_id);
         if (!scene) throw new Error(`scene ${args.scene_id} not found`);
-        if (!scene.drawing) throw new Error(`scene ${args.scene_id} has no drawing; call storyboard.draw first`);
+        if (!scene.drawing) throw new Error(`scene ${args.scene_id} has no drawing to inspect; this tool inspects procedural drawings, not charts, images, or video. Review storyboard/package fields for those; create a drawing only if the brief requires one.`);
         return { scene_id: args.scene_id, revision: state.package.revision, drawing: scene.drawing };
       },
     ),
     'storyboard.propose': { ...tool(
       'storyboard.propose',
-      'Create a complete package draft from a brief, including the requested scenes. Author actual colors in theme; proposal.look is descriptive and does not change rendering. Explicit headline newlines are supported; title scenes accept headline_size (24–512 composition pixels). Native copy slots: title headline/kicker/sub/cta; hero headline/kicker/sub/body; stat headline/kicker/sub/body/footnote; chart headline/sub/footnote; list headline/items or variant:quote with quote/attribution; split/compare headline; code uses scene.code.code. Captions/credits use scene.lower_third:{text,kicker?}. Unsupported slots and overlong copy are errors. Set package motion and per-scene motion from the system motion vocabulary; never write animation code. For chart/stat scenes include data.dataset naming a supplied dataset and data.display. Do not invent factual numbers; use a no-data layout when numbers are unsupported.',
+      'Create a complete package draft from a brief, including the requested scenes. Author actual colors in theme; proposal.look is descriptive and does not change rendering. Explicit headline newlines are supported; title scenes accept headline_size (24–512 composition pixels). Native copy slots: title headline/kicker/sub/cta; hero headline/kicker/sub/body; stat headline/kicker/sub/body/footnote; chart headline/sub/footnote; list headline/items or variant:quote with quote/attribution; split/compare optional whole-scene headline plus native media[].label; code uses scene.code.code. Captions/credits use scene.lower_third:{text,kicker?}. ' + PANEL_GUIDANCE + ' Unsupported slots and overlong copy are errors. Set package motion and per-scene motion from the system motion vocabulary; never write animation code. For chart/stat scenes include data.dataset naming a supplied dataset and data.display. Do not invent factual numbers; use a no-data layout when numbers are unsupported.',
       baseParameters({
         brief: { type: 'string' },
         title: { type: 'string' },
@@ -2256,8 +2344,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ),
     'storyboard.edit': { ...tool(
       'storyboard.edit',
-      'Patch one scene (copy, lower_third, headline_size, layout, data, background, foreground, motion, transitionOut, narration) by scene id. Use copy_contract slots/limits from the result. Credits/captions use scene.lower_third:{text,kicker?}; body uses hero.copy.body. Title-only headline_size is 24–512 composition pixels. Unsupported slots and overlong copy are errors. split and compare require two media plates unless this scene has a drawing; an SVG overlay or a drawing in another scene does not satisfy that requirement. A no-plate scene can use another suitable layout such as list. Apply each motion_fixes entry from the previous result with this tool.',
-      baseParameters({ scene_id: { type: 'string' }, patch: { type: 'object', properties: nativeTextParameters } }, ['scene_id', 'patch']),
+      'Patch one scene (copy, lower_third, headline_size, layout, data, background, foreground, media, motion, transitionOut, narration) by scene id. Use copy_contract slots/limits from the result. Credits/captions use scene.lower_third:{text,kicker?}; body uses hero.copy.body. Title-only headline_size is 24–512 composition pixels. Unsupported slots and overlong copy are errors. ' + PANEL_GUIDANCE + ' An SVG overlay or a drawing in another scene is not two plates. A no-plate scene can use another suitable layout such as list. Supply both media entries when editing panel labels or fit, preserving their asset IDs and other authored settings. Apply each motion_fixes entry from the previous result with this tool.',
+      baseParameters({ scene_id: { type: 'string' }, patch: { type: 'object', properties: sceneEditParameters } }, ['scene_id', 'patch']),
       editSchema,
       edit,
     ), modelResult: storyboardModelResult },
@@ -2302,7 +2390,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ),
     'assets.route': tool(
       'assets.route',
-      'Choose SVG, FLUX image, sketch-to-render (styled SVG base + reference edit), stock search or upload for a scene need. SVG is default for icons/diagrams/charts/patterns.',
+      'Choose SVG, FLUX image, sketch-to-render (styled SVG base + reference edit), stock search or upload for a scene need. SVG is default for icons/diagrams/charts/patterns. split/compare results include actual panel dimensions and native media[].label guidance; use those dimensions rather than assuming a full-canvas image.',
       baseParameters({ scene_id: { type: 'string' }, need: { type: 'string' }, kind: { type: 'string' }, animated: { type: 'boolean' }, transparent: { type: 'boolean' }, source: { type: 'string', enum: ['generate', 'openverse', 'stock', 'upload'] }, style: { type: 'string' } }, ['scene_id', 'need']),
       routeSchema,
       route,
@@ -2316,8 +2404,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     ),
     'assets.generate_image': tool(
       'assets.generate_image',
-      'Plan a FLUX 3 Image Klein still with an expanded caption (with refs: a Klein reference edit). Generated-film stills default to non-visible conditioning inputs; pass the returned asset id to assets.generate_video. Use placement:foreground only for an explicitly requested visible still overlay, or author placement with storyboard.edit. This never runs a GPU job; spend needs approval.',
-      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, placement: { type: 'string', enum: ['conditioning', 'foreground'], description: 'Conditioning keeps the image available as a dependency without a visible overlay (default for generated film). Foreground explicitly authors a visible still.' }, intent: { type: 'string', description: 'Klein prose, subject first: pose or action, setting, light and mood in one or two specific sentences. Describe what is visible, not what is absent. Style, palette, framing and the text guard are appended. With text:true, quote the exact words and their placement. With refs, say what changes and what stays.' }, seed: { type: 'number' }, refs: { type: 'array', description: options.adoptReferenceImage ? 'Existing package asset IDs or authorized image reference-library IDs from the manifest; never scene IDs.' : 'Existing package asset IDs returned by generation tools, never scene IDs or reference-library IDs.', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16'] }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string', maxLength: 80, description: 'Optional short reference-edit style, at most 80 characters.' } }, ['scene_id', 'intent']),
+      'Plan a FLUX 3 Image Klein still with an expanded caption (with refs: a Klein reference edit). Generated-film stills default to non-visible conditioning inputs; pass the returned asset id to assets.generate_video. Use placement:foreground only for an explicitly requested visible still overlay, or author placement with storyboard.edit. ' + PANEL_FRAMING_GUIDANCE + ' This never runs a GPU job; spend needs approval.',
+      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, placement: { type: 'string', enum: ['conditioning', 'foreground'], description: 'Conditioning keeps the image available as a dependency without a visible overlay (default for generated film and aspect:panel). Foreground explicitly authors a visible still.' }, intent: { type: 'string', description: 'Klein prose, subject first: pose or action, setting, light and mood in one or two specific sentences. Describe what is visible, not what is absent. Style, palette, framing and the text guard are appended. With text:true, quote the exact words and their placement. With refs, say what changes and what stays. For panel labels use native media[].label, not image lettering.' }, seed: { type: 'number' }, refs: { type: 'array', description: options.adoptReferenceImage ? 'Existing package asset IDs or authorized image reference-library IDs from the manifest; never scene IDs.' : 'Existing package asset IDs returned by generation tools, never scene IDs or reference-library IDs.', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16', 'panel'], description: 'Explicit panel uses the current split/compare panel dimensions: 960x1080 for a 1920x1080 side-by-side scene; 1080x960 for a 1080x1920 stacked scene. Omit to retain the existing output-aspect default. Panel source sizes may be rounded to the model lattice by the jobs planner.' }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string', maxLength: 80, description: 'Optional short reference-edit style, at most 80 characters.' } }, ['scene_id', 'intent']),
       generateImageSchema,
       planImage,
     ),
@@ -2340,7 +2428,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         frames: { type: 'integer', minimum: 1, description: 'Requested source frames at 24 fps; snapped up to the selected model lattice and must cover the scene slot.' },
         seed: { type: 'integer', minimum: 0 },
         wordless: { type: 'boolean' },
-        media_index: { type: 'integer', enum: [0, 1], description: 'Which supported scene.media plate receives this video; defaults to 0.' },
+        media_index: { type: 'integer', enum: [0, 1], description: 'For split/compare, replace this visible media plate (default 0), preserving the other. Other layouts replace background.asset; omit this field.' },
         dialogue: {
           type: 'object', additionalProperties: false,
           properties: {

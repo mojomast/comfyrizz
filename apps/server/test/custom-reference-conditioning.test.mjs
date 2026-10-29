@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createReferenceImageAdopter } from '../src/product-walkthrough.mjs';
 import { createReferenceStore } from '../src/references/store.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
@@ -12,7 +13,7 @@ const chatId = 'chat_custom_reference';
 
 function setup(t) {
   mkdirSync('/tmp/opencode', { recursive: true });
-  const runtimeDir = mkdtempSync('/tmp/opencode/custom-reference-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'custom-reference-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const store = createReferenceStore({ rootDir: runtimeDir, chatId });
   const ref = store.add({ bytes: png, filename: 'plate.png' });

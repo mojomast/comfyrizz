@@ -9,11 +9,40 @@ import { defaultEasyState } from '../src/easy/store.ts';
 import { templateChangeNeedsConfirm, templateChangePlan, step } from '../src/easy/steps/idea.ts';
 import { ideaPrompt } from '../src/easy/idea-prompt.ts';
 import { classifyProductionIntent } from '../../../packages/agent/src/production-intent.ts';
+import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { OLIVE_BRIEF } from '../../../packages/agent/test/fixtures/olive-action.ts';
 import { FICTIONAL_DATA_STORY, FICTIONAL_DATA_STORY_UI } from '../../../packages/agent/test/fixtures/fictional-data-story.ts';
+import { LAST_SIGNAL_CREDITS, LAST_SIGNAL_SPEAKING } from '../../../packages/agent/test/fixtures/last-signal.ts';
 
 // Actual first-pass UI text from 24h-small-data/evidence, before appended settings.
 const RECORDED_DATA_STORY = FICTIONAL_DATA_STORY;
+
+test('custom 120 seconds and exactly two minutes serialize and compile to an exact 3600-frame film', () => {
+  for (const text of ['A fictional documentary about a clock repairer.', 'Create exactly 2 minutes of a fictional documentary.']) {
+    const state = defaultEasyState();
+    state.idea.text = text;
+    state.idea.lengthS = 120;
+    const prompt = ideaPrompt(state);
+    assert.doesNotMatch(prompt, /about 120 seconds/);
+    if (!text.includes('2 minutes')) assert.match(prompt, /Length: exactly 120 seconds/);
+    const intent = classifyProductionIntent(prompt);
+    assert.equal(intent.requestedSeconds, 120);
+    assert.equal(intent.exactDuration, true);
+    const timeline = compileTimeline({
+      id: 'pkg_documentary_duration', title: 'Fictional documentary',
+      format: { width: 1920, height: 1080, fps: 30 },
+      duration: { mode: 'target', targetFrames: intent.requestedSeconds * 30, exact: intent.exactDuration },
+      scenes: Array.from({ length: 10 }, (_, i) => ({
+        id: `s${i}`, layout: 'title', preferredFrames: 360,
+        copy: { headline: `Chapter ${i + 1}` },
+        transitionOut: { type: i === 9 ? 'none' : 'fade', frames: i === 9 ? 0 : 15 },
+      })),
+    });
+    assert.equal(timeline.durationInFrames, 3600);
+    assert.equal(timeline.scenes.at(-1).from + timeline.scenes.at(-1).durationInFrames, 3600);
+    assert.equal(timeline.target.requiresAcceptance, false);
+  }
+});
 
 test('recorded fictional Data Story keeps its medium and 20-second output runtime', () => {
   const state = defaultEasyState();
@@ -329,6 +358,116 @@ test('explicit music prohibition does not suppress an active narrator', () => {
   state.idea.text = 'No music. A narrator explains the supplied values.';
   assert.match(ideaPrompt(state), /Finishing narration:.*Kokoro/u);
   assert.doesNotMatch(ideaPrompt(state), /Music: instrumental bed/u);
+});
+
+test('recorded Window Garden brief keeps mixed-list no-music and its exact spoken script', () => {
+  const text = 'Create exactly 18 seconds of vertical 9:16 video explaining a fictional tabletop self-watering planter. Use a clear paper-cut illustration style, not photography. Show three steps: water stored below the pot; a cotton wick carrying water upward; soil receiving moisture around the roots. Use at least one meaningful ComfyUI-generated FLUX 3 Image Klein illustration visibly in the film, with native arrows or editable diagrams showing the direction. Keep the same planter design and diagram orientation across shots. Use this exact narration: Water rests below the pot. A cotton wick draws it upward. The soil receives moisture near the roots. This is a fictional design concept. Required copy, in order: RESERVOIR; COTTON WICK; ROOT ZONE. No additional on-screen copy, people, music or claims about watering frequency. Gentle motion, large readable native labels and a clear final three-second hold.';
+  const spoken = 'Water rests below the pot. A cotton wick draws it upward. The soil receives moisture near the roots. This is a fictional design concept.';
+  const state = defaultEasyState();
+  state.videoType = 'motion-explainer';
+  state.idea.text = text;
+  state.idea.lengthS = 18;
+  state.idea.aspect = '9:16';
+  state.idea.sound = true;
+  state.narration.on = true;
+  const prompt = ideaPrompt(state);
+  assert.ok(prompt.startsWith(`${text} Aspect: 9:16.`));
+  assert.equal(prompt.split(spoken).length - 1, 1, 'all 24 spoken words remain verbatim, once');
+  const suffix = prompt.slice(text.length);
+  assert.match(suffix, /No music\./u);
+  assert.doesNotMatch(suffix, /Music: instrumental bed|Shorten secondary wording/u);
+  assert.match(suffix, /use the supplied narration verbatim with Kokoro/u);
+  assert.match(suffix, /preserving its wording and sentence order across scene boundaries/u);
+  assert.match(suffix, /Rebalance scene durations to give every spoken line enough time within the requested total duration/u);
+  assert.match(suffix, /measured speech timing is the final authority/u);
+  const intent = classifyProductionIntent(prompt, 'motion-graphics');
+  assert.equal(intent.musicProhibited, true);
+  assert.equal(intent.musicRequested, false);
+  assert.equal(intent.wordless, false);
+  assert.equal(intent.narrationRequested, true);
+  assert.equal(intent.requestedSeconds, 18);
+  assert.equal(intent.exactDuration, true);
+});
+
+test('exact and verbatim supplied narration never acquire permission to shorten words', () => {
+  for (const text of [
+    'Use this exact narration: The seed grows.',
+    'Use this verbatim narration: The seed grows.',
+    'Narration (verbatim): The seed grows.',
+    'Read the narration verbatim: The seed grows.',
+    'Use this exact spoken script: The seed grows.',
+  ]) {
+    const state = ideaState();
+    state.idea.text = text;
+    const prompt = ideaPrompt(state);
+    assert.ok(prompt.startsWith(text));
+    assert.match(prompt.slice(text.length), /Preserve the supplied narration verbatim\./u, text);
+    assert.match(prompt, /Rebalance scene durations/u, text);
+    assert.doesNotMatch(prompt, /Shorten secondary wording/u, text);
+    assert.match(prompt, /Measure the actual voice before final delivery/u, text);
+  }
+  const state = ideaState();
+  state.idea.text = 'Write narration about a seed growing, with exact timing.';
+  assert.match(ideaPrompt(state), /Shorten secondary wording/u);
+  assert.doesNotMatch(ideaPrompt(state), /Preserve the supplied narration verbatim/u);
+});
+
+test('exact 45-second speaking brief preserves every monologue byte and native H3 speech', () => {
+  const state = ideaState();
+  state.idea.text = LAST_SIGNAL_SPEAKING;
+  state.idea.lengthS = 45;
+  state.narration.on = true;
+  const prompt = ideaPrompt(state);
+  assert.ok(prompt.startsWith(LAST_SIGNAL_SPEAKING));
+  const monologue = LAST_SIGNAL_SPEAKING.match(/"[^"]+"/)[0];
+  assert.equal(prompt.split(monologue).length - 1, 1);
+  const suffix = prompt.slice(LAST_SIGNAL_SPEAKING.length);
+  assert.doesNotMatch(suffix, /Full silence|Kokoro|Finishing narration|No narration|Shorten secondary wording|Music: instrumental bed/);
+  assert.match(suffix, /on-camera speaking performance and supplied lines verbatim/);
+  const intent = classifyProductionIntent(prompt);
+  assert.equal(intent.silent, false);
+  assert.equal(intent.wordless, false);
+  assert.equal(intent.speechRequested, true);
+  assert.equal(intent.narrationRequested, false);
+  assert.equal(intent.noCaptions, false);
+  assert.equal(intent.requestedSeconds, 45);
+  assert.equal(intent.exactDuration, true);
+});
+
+test('exact 45-second credits brief keeps instrumental score, native credits and no TTS', () => {
+  const state = ideaState();
+  state.idea.text = LAST_SIGNAL_CREDITS;
+  state.idea.lengthS = 45;
+  state.narration.on = true;
+  const prompt = ideaPrompt(state);
+  assert.ok(prompt.startsWith(LAST_SIGNAL_CREDITS));
+  assert.doesNotMatch(prompt.slice(LAST_SIGNAL_CREDITS.length), /Full silence|No music|Kokoro|Finishing narration|Narration timing|Shorten secondary wording/);
+  const intent = classifyProductionIntent(prompt);
+  assert.equal(intent.silent, false);
+  assert.equal(intent.wordless, true);
+  assert.equal(intent.musicRequested, true);
+  assert.equal(intent.noCaptions, false);
+  assert.equal(intent.requestedSeconds, 45);
+  assert.equal(intent.exactDuration, true);
+});
+
+test('quoted exact narration remains verbatim even when its words look like instructions', () => {
+  const state = ideaState();
+  state.idea.text = 'Use this exact narration: “Yesterday, the signal went silent. No music or speaking.” Add a piano score.';
+  const prompt = ideaPrompt(state);
+  assert.ok(prompt.startsWith(state.idea.text));
+  assert.match(prompt.slice(state.idea.text.length), /supplied narration verbatim with Kokoro/);
+  assert.doesNotMatch(prompt.slice(state.idea.text.length), /Full silence|No music|Shorten secondary wording/);
+});
+
+test('serializer keeps positive music after unrelated visual prohibitions', () => {
+  for (const text of ['No people, but add music.', 'No people and use music.', 'No loud music; soft piano music.']) {
+    const state = ideaState();
+    state.idea.text = text;
+    const suffix = ideaPrompt(state).slice(text.length);
+    assert.match(suffix, /Music: instrumental bed\./u, text);
+    assert.doesNotMatch(suffix, /No music\.|Full silence/u, text);
+  }
 });
 
 test('narration off adds no narration only when the prompt has no speech intent', () => {

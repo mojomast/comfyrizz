@@ -166,7 +166,7 @@ test('tools: propose + edit package, SVG result, planned FLUX job', async () => 
   assert.equal(image.output_aspect, '16:9');
   assert.equal(image.asset.gen.workflow, 'workflows/flux3_klein_t2i.api.json');
 
-  const refEdit = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'restyle the flow diagram', refs: [svg.asset.id] }) as any;
+  const refEdit = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'restyle the flow diagram', refs: [svg.asset.id], style: 'clay', text: true }) as any;
   assert.equal(refEdit.reference_edit, true);
   assert.equal(refEdit.asset.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
   assert.equal(refEdit.asset.gen.inputs.reference, svg.asset.id);

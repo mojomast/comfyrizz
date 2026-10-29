@@ -73,11 +73,11 @@ export const VIDEO_TYPES = [
   },
   {
     id: 'product-walkthrough',
-    version: 1,
+    version: 2,
     label: 'Product walkthrough',
     description: 'Focus attention on a product, its details, and feature callouts.',
     fallbackKind: 'motion-graphics',
-    plannerPrompt: 'Build a product-focused procedural walkthrough. Establish the product, then use focus motion, framed detail windows, and short feature callouts to connect each benefit to something visible. Keep callouts specific to the brief and finish on a clear product promise without fabricating specifications or claims.',
+    plannerPrompt: 'Build a product-focused walkthrough in the medium requested by the brief: generated product footage, supplied media or procedural graphics. Establish the product, show the requested details, and return to a complete product view. Preserve its physical design, materials and shared references across shots. Feature callouts are optional, never a reason to add text beyond an explicit copy list. When copy is supplied in order, use only those exact strings unless additions are allowed; intermediate detail shots can be text-free. Use native text overlays rather than generated lettering when requested. Match the requested motion intensity and final hold; do not invent a closing promise, specifications or claims.',
     scriptedTreatment: 'product hero, focus/detail windows, feature callouts, and a clean closing product frame',
     promptPlaceholder: 'Walk through a compact travel camera, highlighting its lens, grip, and flip screen…',
     inputHint: 'Name the product and the real features to highlight. Avoid claims you cannot support.',

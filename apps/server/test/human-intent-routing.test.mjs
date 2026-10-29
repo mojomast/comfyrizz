@@ -3,17 +3,18 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { FICTIONAL_DATA_STORY, FICTIONAL_DATA_STORY_UI } from '../../../packages/agent/dist/test/fixtures/fictional-data-story.js';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
 import { createContextAttachmentStore } from '../src/context-attachments.mjs';
-import { replayProvider } from './fake-provider.mjs';
+import { replayProvider, withPlannedPlate } from './fake-provider.mjs';
 
 const HUMAN_CONSTRAINT = /Hard creative constraint: use photorealistic live-action fictional human adults/;
 const conversationId = 'chat_0123456789abcdef';
 
 async function setup(t) {
-  const runtimeDir = mkdtempSync('/tmp/opencode/human-intent-routing-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'human-intent-routing-'));
   // Real HTTP/SSE adapter, deterministic replies; no external provider or GPU.
   const provider = await replayProvider([], { svgStatus: 503 });
   t.after(async () => { await provider.close(); rmSync(runtimeDir, { recursive: true, force: true }); });
@@ -41,7 +42,7 @@ for (const [name, brief] of [['recorded-raw', FICTIONAL_DATA_STORY], ['recorded-
     const { record } = createContextAttachmentStore({ rootDir: runtimeDir, chatId: conversationId }).addFile({
       bytes: csv, filename: 'fictional-study.csv', mime: 'text/csv',
     });
-    provider.setCalls([
+    provider.setCalls(withPlannedPlate([
       { name: 'context.read_csv', args: { id: record.id, offset: 0, limit: 40 } },
       { name: 'storyboard.propose', args: {
         brief, title: 'FICTIONAL STUDY LOG',
@@ -56,13 +57,13 @@ for (const [name, brief] of [['recorded-raw', FICTIONAL_DATA_STORY], ['recorded-
           { id: 's_stat', layout: 'stat', preferredFrames: 180, copy: { headline: 'Thursday', body: '25 minutes' }, data: { dataset: 'd_thursday' } },
         ],
       } },
-    ]);
+    ], 's_title'));
     const result = await runner({ brief, videoType: 'data-story', provider: 'custom', conversationId });
     saveEvidence(name, provider, result);
     assert.equal(result.fallback, false);
-    assert.deepEqual(result.pendingGpu, []);
+    assert.equal(result.pendingGpu.length, 1, 'one supporting image is planned; exact data stays native');
     assert.deepEqual(result.svgAssets, []);
-    assert.equal(provider.requests.length, 3, 'CSV read, proposal, and final text; no repair or SVG request');
+    assert.equal(provider.requests.length, 5, 'CSV read, proposal, image plan, visible placement, and final text; no repair or SVG request');
     for (const request of provider.requests) {
       assert.equal(request.stream, true);
       assert.ok(request.tools.some(tool => tool.type === 'function' && tool.function.name === 'storyboard_propose'));

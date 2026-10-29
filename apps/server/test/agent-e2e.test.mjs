@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCpuSlice } from '../../../packages/agent/dist/src/index.js';
-import { autoFix, renderCheck, stubGenerator } from '../../../packages/vector/dist/src/index.js';
+import { autoFix, renderCheck } from '../../../packages/vector/dist/src/index.js';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { renderPackage } from '../../renderer/scripts/render-package-lib.mjs';
 
@@ -24,7 +24,7 @@ test('CPU agent slice -> valid package -> ffprobe-checked MP4', { timeout: 600_0
       return relative;
     };
     const generateSvg = async intent => {
-      const result = await autoFix(stubGenerator, intent, 2, { width: 512 });
+      const result = await autoFix(async () => '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect x="48" y="48" width="416" height="416" rx="32" fill="#6d8cff"/><path d="M128 272 L224 368 L384 160" fill="none" stroke="#e6e8ee" stroke-width="24"/></svg>', intent, 2, { width: 512 });
       if (!result.ok) throw new Error(result.errors.map(error => `${error.code}: ${error.message}`).join('; '));
       const check = renderCheck(result.svg, { width: 512, palette: intent.palette });
       return {

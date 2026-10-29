@@ -3,6 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution } from '../helpers/comfy-contribution.mjs';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import {
@@ -203,6 +204,10 @@ test('TR09: /api/render is blocked until every clip is approved, and an override
     const invalid = await request('/api/render', { ...body, override: { reason: 'no' } });
     assert.equal(invalid.status, 400);
 
+    pkg.scenes.forEach(scene => { delete scene.narration; });
+    collectMockContribution(pkg, app.store.dir);
+    app.store.write(pkg);
+
     const rendered = await request('/api/render', { ...body, override: { reason: 'owner reviewed the cut by hand' } });
     assert.equal(rendered.status, 200);
     assert.equal(renderCalls.length, 1);
@@ -244,6 +249,8 @@ test('TR09: a completed pipeline ingests the files in its media-out directory', 
   });
   const pkg = fixturePackage();
   const packageDir = seedPackage(app, pkg);
+  collectMockContribution(pkg, packageDir);
+  app.store.write(pkg);
 
   const started = await app.pipelines.start(pkg, { backendId: 'byo-comfyui', budgetUnits: 0 }, packageDir);
   assert.equal(started.status, 202);

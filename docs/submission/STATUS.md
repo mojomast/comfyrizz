@@ -4,6 +4,40 @@
 
 Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
 
+## 2026-10-29 update
+
+- **Default managed Colab inference:** the README, setup guide and
+  [Colab feature guide](../features/google-colab.md) now explain deployment of
+  ComfyUI, dependencies and pinned models, job execution, collection and confirmed
+  shutdown for users without a local GPU. They cite current Google AI Pro/Colab
+  allowances and distinguish runtime units from agent API charges.
+- **Pi production migration:** Pi 1.4 owns the model/tool loop for planning, chat,
+  revisions and repairs; Node 22.19.0+ is required. Configured DeepSeek Flash routes
+  now receive a 65,536-token output allowance.
+- **Final-video contribution gate:** visible eligible ComfyUI output and trusted
+  generation/render receipts are required, including cached exports and final
+  pipeline downloads. CPU-only films are historical development evidence.
+- **Duration:** custom whole-second targets from 1–120 seconds are supported,
+  retaining the existing presets and exact-duration validation.
+- **Delivered generated film:** Neon After Rain completed actual UI planning,
+  native transition correction, explicit re-review/approval, Colab generation,
+  render and Download. It is exactly 12 seconds at 1920×1080/30 fps, silent, with
+  three LTX motion shots, native animated headlines and wipe/push transitions.
+  Six generation receipts and the byte-bound render receipt match the downloaded
+  movie. Actual account delta was 1.14 credits; runtime shutdown was confirmed.
+  Full 1× player execution and sampled visual inspection are recorded, not
+  continuous human viewing. Local evidence is linked from the reliability plan;
+  a private Tailscale link is not a judge-accessible public artifact.
+- **Remaining acceptance gaps:** the Neon caption-only chat edit saved correctly,
+  but revised export is blocked by a production-selection request missing its
+  command/idempotency key. Citrus and both 45-second show videos remain planning
+  failures; H3 exact-line audio conditioning and exact timeline repair need work.
+  Broad server-suite sign-off, public-demo validation and submission packaging
+  remain outstanding. Latest full agent/web checks passed 578/1,642 tests.
+
+Current details and artifact placeholders: [Deadline handoff](DEADLINE_HANDOFF.md).
+The sections below retain the earlier implementation/verification snapshot.
+
 ## Implemented
 
 - One prompt to a concise creative proposal with title, logline, look, duration

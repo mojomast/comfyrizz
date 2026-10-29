@@ -32,7 +32,7 @@ function packageWithStills(width, height, stillWidth, stillHeight) {
     voice: { enabled: false, engine: 'none' },
     datasets: {},
     proposal: PROPOSAL,
-    scenes: [{ id: 'shot1', layout: 'hero', preferredFrames: 180, media: [{ asset: 'a_video' }], foreground: [] }],
+    scenes: [{ id: 'shot1', layout: 'hero', preferredFrames: 180, background: { asset: 'a_video' }, foreground: [] }],
     assets: {
       a_img: {
         kind: 'image',

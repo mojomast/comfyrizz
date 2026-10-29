@@ -9,10 +9,18 @@ import { OLIVE_BRIEF, OLIVE_IMAGE, OLIVE_VIDEO, OLIVE_PROPOSE } from '../../../p
 
 test('offline olive Action replay stays subject-neutral through server enforcement and compilation', async t => {
   const runtimeDir = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'olive-conditioning-'));
+  let conditioningId;
   const provider = await replayProvider([
     { name: 'storyboard.propose', args: OLIVE_PROPOSE },
     { name: 'assets.generate_image', args: OLIVE_IMAGE },
-    { name: 'assets.generate_video', args: OLIVE_VIDEO },
+    request => {
+      const image = request.messages.filter(message => message.role === 'tool')
+        .map(message => JSON.parse(message.content)).map(body => body.result ?? body)
+        .findLast(body => body.asset?.kind === 'image');
+      assert.ok(image?.asset?.id, 'the video uses the actual returned conditioning image');
+      conditioningId = image.asset.id;
+      return { name: 'assets.generate_video', args: { ...OLIVE_VIDEO, image: image.asset.id } };
+    },
   ]);
   t.after(async () => {
     await provider.close();
@@ -33,8 +41,8 @@ test('offline olive Action replay stays subject-neutral through server enforceme
   assert.equal(pkg.proposal.look, OLIVE_PROPOSE.proposal.look);
   assert.equal(Object.keys(pkg.assets).length, 2);
   const video = pkg.assets[pkg.scenes[0].background.asset];
-  assert.equal(video.gen.inputs.image, OLIVE_VIDEO.image);
-  assert.equal(pkg.assets[OLIVE_VIDEO.image].gen.generator, 'flux3-klein');
+  assert.equal(video.gen.inputs.image, conditioningId);
+  assert.equal(pkg.assets[conditioningId].gen.generator, 'flux3-klein');
   for (const asset of Object.values(pkg.assets)) {
     assert.equal(asset.status, 'pending');
     assert.equal(asset.gen.inputs.width, 1920);

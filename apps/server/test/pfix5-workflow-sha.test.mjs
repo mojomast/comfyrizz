@@ -12,7 +12,7 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect
 
 test('P-fix5: an agent-built package passes planJobs and carries the workflow hash', async () => {
   const slice = await runCpuSlice({
-    brief: 'A calm launch video with an icon, a diagram, a pattern and animated bars, plus a nebula illustration.',
+    brief: 'Icon, diagram, pattern, bars; nebula launch.',
     now: () => '2026-10-18T00:00:00.000Z',
     generateSvg: () => ({
       svg: SVG,

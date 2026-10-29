@@ -229,3 +229,469 @@ The single direct DeepSeek live request (583 input / 388 output tokens) failed b
 **Pi visual-v2 live validation succeeded for bounded width correction.** Report `/tmp/opencode/pi-title-runner/live-visual-v2/REPORT.md`, export `export.mp4`. Following official Pi, agent-evaluation/tool guidance and renderer/font/compositing research (documented in `docs/experiments/PI_TITLE_MEASUREMENT_RESEARCH.md`), the runner now measures visible title ink using diagnostic masks checked against the original composite. The real DeepSeek thinking-disabled draft measured 26.67% width at 200px; one real correction changed only `headline_size` to 450px (plus revision), measuring **60.73%** within the predeclared 57.5–62.5% interval. Copy, timing, theme, admitted Anton font and motion were preserved. Exactly two requests, zero retries/tool errors, 14,149 total reported tokens. Initial model/tool phase 3.673s and correction 1.828s; previews/measurement took 34.880s and 32.607s, export 27.456s and decoded audit 5.198s. Resume reused the same export without provider calls.
 
 Actual direct-run export is 1920×1080/30fps, 360 frames / 12.000s, silent. All 270 decoded hold frames at half resolution passed the declared temporal tolerance, including formerly problematic frames 155/160. **Full brief still fails:** blue rule is missing and both words enter together. Final MP4/lossless-preview agreement also narrowly fails its unchanged threshold (mean channel delta 2.023132 vs maximum 2.0), so the precise width claim applies to the lossless native render, not certified glyph segmentation of the MP4. This is genuine measured correction, not a Pi-versus-production ranking or UI Download. Thirteen focused tests and separate real-CPU visual integration passed, including undersized/passing reference and wrong-font checks. Previous failed live trial is preserved; total Pi live requests across both trials are three. No GPU work/settings changes/commits; temporary credentials cleaned up.
+
+### User-requested 120-second fictional documentary
+
+Original actual UI attempt stopped before inference at the old 90-second input maximum. The scoped duration fix now supports custom **1–120 seconds**, retaining 15/30/60/90 approximate presets so custom 120 remains exact. Shared range copy, UI/session preservation and compilation to 3,600 frames at 30fps were verified; 141 focused tests, typecheck and isolated production build passed.
+
+The unchanged Elias Venn brief was then submitted through the real Pi/Super Easy path. Thinking-low DeepSeek exhausted its 8,192 output-token limit entirely on reasoning: 9,988 input tokens, zero visible text/tool calls, `finish_length` after about 49 seconds. No package, quote or MP4 resulted. Evidence: `/tmp/opencode/documentary-120s/duration-fixed/REPORT.md`. GPU spend/reservation remained zero; account balance 212.69; campaign 0.42 spent / 0 reserved / 59.58 remaining, with no active GPU sessions/assignments.
+
+One explicitly labeled thinking-disabled attempt is assigned with the identical brief/settings/duration and unchanged 8,192 output cap, under `/tmp/opencode/documentary-120s/thinking-disabled/`. Existing total **10-credit ceiling** for the documentary test remains in force; generation requires a valid plan, readiness and a verified quote within that ceiling. Prior failures remain preserved. Facial consistency, narration fit and final-film review remain unassessed.
+
+### Planning-defect repairs — 2026-10-29
+
+The three extra real Super Easy trials are recorded under
+`/tmp/opencode/easy-prompt-variety/{portrait,product,rain}/REPORT.md`. They reached
+proposals but did not authorize generation. The portrait lost its visible
+dough-shaping clip during repair; product references acquired clay styling and
+image-lettering permission, and its six scenes added three unrequested captions.
+The rain proposal preserved the supplied narration but retained an unused clip;
+its observer later stalled on unrelated demo responses. These are planning
+results, not finished films.
+
+Root-cause fixes now implemented:
+
+- Omitted image style no longer adds editorial 3D rendering or clay. Reference
+  edits preserve identity/design/materials without implicitly enabling lettering;
+  explicit style and label requests still work.
+- Single-shot video tools use the renderer's `background.asset` slot, without
+  manufacturing duplicate `scene.media` aliases. Split/compare retain their real
+  two-panel placements. Replacement removes obsolete helper aliases while keeping
+  original asset records and unrelated authored placements.
+- Completion checks inspect actual picture slots. An initial planning/repair
+  workflow cannot silently replace a planned action clip with its conditioning
+  still. Coverage splitting places new clips in those same visible slots, respects
+  authored playback controls, and does not sum simultaneous panels as sequential
+  coverage.
+- Explicit ordered/exact copy lists receive missing/extra/order checks through the
+  existing bounded repair. Explicit restrained-motion requests reject high-energy
+  scene settings and incompatible transitions. These are narrow deterministic
+  contracts, not general semantic or pixel-level review.
+- Product walkthrough guidance respects the requested medium and supplied copy.
+  Drawing guidance applies only to actual drawings; `inspect_drawing` is not a
+  video inspection tool. The cinematic-dark look no longer implies high-energy
+  motion. Repair instructions preserve source footage, copy and materials.
+
+Verification: **535/535 agent tests**, **43/43 focused server integration tests**
+and **23/23 adjacent server tests** passed, with agent build and scoped whitespace
+checks. The server checks include actual loopback-provider planning/repair cycles:
+unchanged defects are rejected; targeted corrections are accepted without
+generating replacement footage. They do not establish external-model adherence.
+
+One fresh Super Easy planning retest of each unchanged portrait/product brief is
+assigned under `/tmp/opencode/easy-planning-fixed/{portrait,product}/`, using the
+current frozen source, thinking enabled/low and the 65,536-token ceiling. These
+stop before approval/GPU generation; record their results separately from the
+automated regression checks. Original failures remain preserved.
+
+**Same-brief retests completed.** Portrait returned in **42.405 seconds / five
+provider turns**, with no tool errors or automatic repair. All three planned
+actions occupy visible video backgrounds; unsolicited 3D styling, extra copy and
+high-energy motion are absent. Its exact 15 seconds uses 24 fps rather than the
+original 30 fps; the actual brief/UI had no frame-rate requirement, so this is a
+reported format difference rather than a duration failure. Product returned in
+**51.272 seconds / four provider calls**, with no tool errors or automatic repair.
+It preserves the three exact captions, product materials and image-text policy;
+five stills plus five LTX clips are reachable, with no superseded final clip.
+Its 900-frame/30-fps timeline is exactly 30 seconds. Both are source-level planning
+acceptance only; no GPU approval or finished-film claim follows.
+
+### Expanded gap probes and authorized Colab batch
+
+The user subsequently requested more varied prompts and actual end-to-end videos,
+including Colab spend. Two new planning-only probes are complete:
+
+- **Desk reset**, `/tmp/opencode/easy-gap-probes/desk-reset/REPORT.md`: 12-second
+  silent Klein comparison, 93.248 seconds / 11 provider turns. Shared references
+  and two picture panels are present, but BEFORE/AFTER became global overlays
+  instead of panel labels, and cover-fit crops about 49.63% of each wide image.
+  Existing gates accepted this deficient plan. No GPU spend.
+- **Book swap**, `/tmp/opencode/easy-gap-probes/book-swap/REPORT.md`: 15-second
+  data story, 25.057 seconds / 11 provider turns. Monday 18 / Tuesday 24 /
+  Wednesday 30, books unit and exact narration are preserved. The logline invents
+  a week-long characterization; a peak headline violates the no-rankings request;
+  one spoken scene is locally too dense by the existing estimate. Chart/image
+  subject legibility remains unverified. No GPU spend. These factual-editorial
+  and narration-fit findings remain open; stronger prompt guidance alone does
+  not establish a semantic-validation fix.
+
+Comparison authoring/validation and review-display fixes are in progress. The
+contribution checker now supports contained background/comparison imagery using
+the actual source-pixel rectangle, rather than rejecting all contain placements.
+Final verification still uses trusted measured dimensions and byte-bound receipts;
+missing/tiny source geometry cannot qualify. **137/137 jobs tests** passed. The
+review UI exposes panel labels and whole-scene lower thirds, including changes;
+**6/6 focused proposal tests** and web typecheck passed.
+
+The assigned sequential Colab batch is **Morning Still** (12-second silent Klein
+film, then scoped caption revision) and **Coffee steam** (6-second silent LTX
+motion clip). Combined authorization is capped at **20 credits**, at most **10
+per production**, including setup/generation/collection/teardown, within the
+existing 60-credit campaign. The sole GPU owner must reconcile and update
+`/home/mojo/comfyrizz-gallery-tests/video-type-collection-20261028/budget-ledger.json`.
+Evidence root: `/tmp/opencode/easy-colab-acceptance/`. At assignment no new GPU
+result, spending, export or Download was established; record completed outcomes
+and cleanup separately when available.
+
+**First paid run — generation succeeded remotely, collection failed.** MORNING
+STILL (`pkg_0a2a679830dcc95a`, `prod_8c1c40a92e3efc3605ddd663`,
+`run_2b4e5e1b37c4`) completed actual Super Easy review and approval against a
+**1.721-credit quote**. Colab health passed; the runner reported the single Klein
+job saved its image and completed its manifest. The subsequent output listing
+lost its Jupyter connection (`RuntimeError: Connection was lost.`). The app
+reported a missing manifest and stopped the VM before any output was collected.
+Remote runner logs are not local byte verification: there is **no trusted local
+generation receipt, MP4, Download or playback acceptance** from this attempt.
+
+Measured account delta: **212.69 → 212.06 = 0.63 credits**. The external campaign
+ledger now records **1.05 settled / 0 reserved / 58.95 remaining**; the new batch
+has **19.37 of 20 credits remaining**. The application's conservative internal
+settlement remains **1.721 `reservation_unverified`**, a separate figure. Owned
+session, assignment and hourly usage checks are zero; browser/server, credentials
+and watchdog were cleaned up. Evidence and exact transport failure:
+`/tmp/opencode/easy-colab-acceptance/PARENT-HANDOFF.md`.
+
+The source audit also found that this initial proposal uses a static photograph
+with animated native text, rather than the requested separate camera motion. Its
+final hold is supported structurally; that does not satisfy the missing camera
+direction. A replacement attempt must disclose any revised brief and retain this
+failed attempt. Collection-only transport recovery is being repaired and tested
+before another paid run; retries must not resubmit inference.
+
+**Comparison fixes verified offline:** native panel labels, explicit contain/cover
+fit, panel-shaped source generation and removal of misplaced overlays now work
+through the real tools and renderer contracts. Spatial-copy validation rejects
+the original Desk Reset shape and accepts moving its exact strings into the
+correct plates. Full agent suite **542/542**, focused server planning/repair
+checks **51/51**, jobs **137/137**, server receipt boundaries **5/5**, and review UI
+checks **50/50** passed. A single fresh same-brief live comparison retest is
+assigned to `/tmp/opencode/easy-gap-probes/desk-reset-fixed/`; its result remains
+separate from these automated checks.
+
+**Live comparison retest completed:** `/tmp/opencode/easy-gap-probes/desk-reset-fixed/REPORT.md`.
+The unchanged brief returned in **17.286 seconds / five provider turns**, with no
+tool errors or repair. BEFORE/AFTER are native panel labels; the right panel uses
+the left as a reference; both request panel-shaped images. Exact 12-second silent
+timing and the static closing interval pass source review. The image lattice still
+rounds 960x1080 to 960x1088, so default cover fitting crops four pixels at each
+vertical edge (**0.7353% of source height**). The large horizontal crop is fixed;
+this is not strict zero-crop acceptance. No GPU work occurred.
+
+**Vertical probe blocked:** `/tmp/opencode/easy-gap-probes/window-garden/REPORT.md`.
+The one 18-second/9:16 illustrated-planter attempt failed completion after
+**43.491 seconds / 19 provider calls / 35 tool calls / 12 tool errors**. The exact
+narration and explicit paper-cut style survived, but repair used schema-invalid
+blank headlines. The app also appended an instrumental bed despite music appearing
+in a mixed prohibition list. Required labels were placed in lower thirds bypassed
+by the drawing renderer. The root scene copied the reservoir rather than the wick
+scene, losing continuity; a specific arrow reveal disagreed with its arrowhead,
+and the closing scene lacked its concluding diagram. No proposal or GPU approval
+was reached. Diagram semantics and same-planter appearance remain unverified.
+
+Follow-up changes now distinguish visible drawing text from hidden layout and
+lower-third fields, replace blank-headline repair advice with whole-object removal
+and a compatible layout, and expose hidden-text metadata in proposal review.
+The orientation selector is now available for every video type, removing the
+probe's Music-video-card workaround. **20 editorial-contract tests**, **51 review
+tests**, **63 home/mount/proposal tests**, and web typecheck passed. Mixed audio-list
+parsing and stricter tool feedback are being repaired separately; none of these
+offline checks proves the vertical planner now meets all diagram requirements.
+
+**Vertical-probe code fixes verified:** the shared audio parser now recognizes
+mixed negative lists containing music without treating unrelated visual
+prohibitions as silence. Exact/verbatim narration receives preservation and
+scene-time rebalancing instructions instead of shortening permission. Tool edits
+reject present blank headlines with actionable feedback, allow valid copy-free
+drawing scenes, and retain non-headline optional-field clearing. Full agent suite
+**568/568** and focused server planning/repair checks **56/56** passed. These fixes
+do not establish corrected wick/root geometry or a successful live vertical plan.
+
+**Paid replacement authorized after collection recovery checks:** the backend
+repair passed **191 tests, two existing skips** and adds bounded transport retries
+against the same VM, with no inference replay and retained failure details. The
+replacement evidence namespace is
+`/tmp/opencode/easy-colab-acceptance/replacement-collection-fix/`. Its explicitly
+revised MORNING STILL brief requests a static photo with restrained native text
+entrances, removing the original unmet camera-motion requirement; this is not a
+same-brief success claim. The replacement and following LTX production are each
+capped at **9 credits all-in**, within the batch's remaining 19.37 credits, and
+must settle/confirm shutdown sequentially. Paid outcomes remain pending. Further
+review of exact-quote reserve accounting and named-output transfer recovery is
+underway independently of the frozen higher-cap acceptance run.
+
+**Collection follow-up completed:** exact-quote reserve accounting was genuinely
+wrong in the first recovery patch: 1.721 - 0.831 - 0.89 left no transfer allowance.
+The corrected backend allocates `min(120 seconds, reserve / 3)` to collection and
+preserves the rest for stopping; the default six-minute reserve therefore permits
+two minutes of collection and keeps four for teardown. Previous collection time
+is charged cumulatively, and original budget/wall limits remain authoritative.
+Named-file transfers now share those bounds and retain retry/error evidence too.
+Full backend verification: **206 passed / two existing skips / zero failures**.
+The active higher-cap replacement retains its original frozen build; the next
+production is instructed to freeze the corrected version. No new live result or
+spend is inferred from these tests.
+
+**Uninterrupted paid-acceptance follow-up — still no finished video:**
+`/tmp/opencode/easy-colab-acceptance/uninterrupted-final-freeze/PARENT-HANDOFF.md`.
+Both cases used one frozen build and one authenticated browser/server; the earlier
+operator-caused token/proposal handoff failure did not recur.
+
+- MORNING STILL planned successfully (`pkg_0ee02a14d3c658f1`, revision 6). Its
+  closing scene was too short to support the requested final hold, so normal
+  editor controls changed both scenes to 180 frames and saved revision 10.
+  Returning to the parked Super Easy proposal left its reviewed revision at 6.
+  The existing approval guard correctly blocked Make this film before any
+  allocation. The return/re-review UI needs to refresh the saved package summary;
+  the revision guard must remain intact.
+- LTX steam planned and reached normal approval (`prod_e99e6dbd2b21d5dd0d4bae8a`,
+  `run_4e7f80810159`) against a **1.821-credit quote** and a **9-credit reservation**.
+  All three built-in G4 allocation attempts returned **503 Service Unavailable**.
+  No VM was allocated; no bootstrap, inference or collection ran. Settlement is
+  **0, `not_allocated`**, and the reservation was released. This is an external
+  capacity failure, not evidence for or against the collection-recovery fix.
+
+Account balance remains **212.06**; batch spend remains **0.63**, campaign spend
+**1.05**, with **0 reserved**. No active sessions/assignments or hourly usage;
+owned browser/server and credentials were cleaned up. Neither final MP4,
+Download, generation receipt, normal-speed playback nor caption edit/re-export
+was completed. Further allocations are held while the re-review defect is fixed.
+
+**Saved-proposal return fixed and bounded follow-up assigned:** the session now
+rebuilds its review from the same project's acknowledged saved revision on normal
+return from the editor, displays revision/timing changes, and requires a separate
+Make this film click. The existing `run.ts` revision guard is unchanged. Cross-ID,
+unsaved and subsequent-revision changes remain blocked. Verification: **122 tests**,
+web typecheck and a Chromium smoke using real Easy/full-plan UI with fake backend
+and fake editor controls (`/tmp/opencode/proposal-return-browser/`). That smoke is
+UI-wiring evidence, not paid generation or a real film.
+
+One parent-authorized follow-up is assigned under
+`/tmp/opencode/easy-colab-acceptance/review-return-fixed/`, using a fresh stable
+build and uninterrupted authenticated browser/server. Existing nine-credit
+per-production and twenty-credit batch caps remain. If the first production again
+exhausts its three built-in G4 allocation attempts, stop the entire batch and
+settle/confirm cleanup instead of initiating the second allocation. Results and
+spending remain pending. A separate review is checking recovery after an early
+approval click while an editor save is pending; the live operator must wait for
+Saved before returning and approving.
+
+**Pending-save recovery also fixed:** an early approval click while saving now
+preserves the parked proposal and displays “Waiting for editor save.” Save
+acknowledgement refreshes the review; closing the dialog does not approve or start
+generation. A subsequent explicit Make this film click is required. The combined
+focused suite now passes **124 tests**, with web typecheck and scoped whitespace
+checks. This is separately tested code, not a mutation of the active paid
+worker's frozen snapshot or new live generation evidence.
+
+**Review-return-fixed live attempt exposed deeper integration gaps:**
+`/tmp/opencode/easy-colab-acceptance/review-return-fixed/PARENT-HANDOFF.md`.
+MORNING STILL planned, but omitted the shared photograph from its closing scene.
+The observer then incorrectly rejected normal project chat's omitted-thinking
+request before it reached the provider. Native timeline correction saved revision
+6, while a legacy headline edit remained a separate shell draft; another normal
+save returned HTTP 409, “edit conflict at revision 6.” The proposal did not refresh
+because host-package and acknowledged-store revisions disagreed. The preserved
+revision-6 package contains duplicate headlines and is not acceptance-ready.
+No approval/allocation/spend occurred, and the conditional LTX case did not start.
+
+This demonstrates that the earlier fake-editor-control smoke did not establish
+correct real shell/editor-store integration. Canonical save synchronization and
+legacy headline editing are now being repaired with real-store integration
+coverage. A narrow continuous-image brief check is also being added for the
+explicit photograph-visible-throughout instruction. Neither change should weaken
+concurrent-edit or approval revision guards.
+
+The replacement diagnostic observer at `/tmp/opencode/observer-recovery/observe.mjs`
+records planning/chat profile matches without rejecting or rewriting requests.
+Its offline pass-through test confirms disabled planning and omitted-thinking
+chat both reach the transport unchanged, with reasoning text omitted from logs.
+The original failing observer/evidence remain preserved. Future live preparation
+is paused until the editor fix is verified; no new provider/GPU request is
+authorized by observer preparation. Accounting remains **0.63 batch spend / 1.05
+campaign spend / 0 reserved**, balance **212.06**, with zero active usage.
+
+**Continuous-image contract verified:** the narrow full-frame-photo-throughout
+gate now flags the actual missing closing background and directs bounded repair
+to reuse the existing asset without generation. The original revision-5 package
+has exactly one continuity error; adding its existing image to the closing
+background clears it. Fake-provider repair tests preserve exactly one pending
+image job. **29 editorial-contract tests passed.** This checks binding and renderer
+precedence, not photographic content, arbitrary occlusion or decoded-frame
+stillness. The later revision-6 draft still fails its separate duplicate-copy
+check. Canonical editor-save integration remains the next live-run prerequisite.
+
+**User explicitly requested resuming Colab.** The next bounded live attempt is
+assigned directly to the six-second LTX case under
+`/tmp/opencode/easy-colab-acceptance/colab-resumed-ltx/`, using the known immutable
+app snapshot with corrected collection/reserve handling and the prepared
+nonblocking observer. It does not wait for editor changes or depend on completing
+MORNING STILL first. One production, a nine-credit all-in ceiling, normal UI
+review/quote/approval, and at most the existing three G4 allocation attempts are
+authorized. Planning/paid results and spending remain pending.
+
+**Real native-editor integration fixed:** `/tmp/opencode/native-save-HANDOFF.md`.
+The shell now follows canonical document acknowledgements; headline/kicker/sub,
+presenter, chart and palette controls use canonical commands/autosave.
+`persistDraft()` flushes autosave rather than issuing a competing package PATCH.
+Generation-scoped acknowledgements protect newer edits and project switches.
+Verification includes **131 focused tests**, **4 native integration tests** and
+**2 real-main browser tests** using actual controls/store/autosave with an
+intercepted HTTP backend. The browser reproduces revisions **5 → 6 → 7 → 8** and
+returns to the refreshed proposal; separate cases retain newer typing across
+delayed saves and preserve genuine external 409 conflicts. Typecheck and Vite
+build passed. These are integration tests, not real provider/GPU acceptance.
+
+The subsequent full web run passed **1,626 of 1,627 tests**; its sole failure was a
+missing existing-style annotation on internal model-prompt copy. That annotation
+was added, and **29 relevant copy/prompt tests passed**. No behavioral change was
+needed for that failure. The active LTX snapshot remains unchanged; the next
+editor-dependent live case must freeze the new native-save implementation.
+
+### First actual ComfyUI-backed downloaded film — LTX coffee steam
+
+**Completed generation, collection, render and normal UI Download:**
+`/tmp/opencode/easy-colab-acceptance/colab-resumed-ltx/PARENT-HANDOFF.md`.
+Artifact: `evidence/ltx-coffee-steam-download.mp4`, **1920x1080, 6.000 seconds,
+180 frames at 30 fps, H.264, 3,705,640 bytes, no audio stream**. SHA-256:
+`f9c85eedfe688505ec94e98ba90381f475b065920305fa373426c3dd496cf4a3`.
+Downloaded bytes match the server-rendered MP4. Package
+`pkg_b5ffe7d794f05927`, production `prod_ce22343603ebd99ed327ad2c`, run
+`run_34afef7a26db`. The first G4 allocation failed; the second standard attempt
+succeeded. One Klein start image and one LTX candidate succeeded, with matching
+byte-bound generation receipts, captured workflows and conditioning-image hash.
+The corrected collection path completed 26 operations, all on their first attempt;
+this live success does not exercise transient reconnection itself.
+
+The player ran from 0 to 6 seconds at 1x. Visual assessment used sampled playback
+captures and decoded first/middle/last frames, not continuous human viewing. Steam
+changes visibly, but slight generated cup/framing drift means the strict
+locked-camera/cup requirement **does not fully pass**. No reroll was attempted.
+
+Quote: **1.821 credits**; authorized reservation: **9**; actual account delta:
+**212.06 → 211.42 = 0.64 credits**. Internal conservative settlement remains
+**1.821 completed**, distinct from the measured account delta. Acceptance batch
+total is now **1.27 spent / 18.73 remaining**; campaign **1.69 spent / 0 reserved /
+58.31 remaining**. Owned VM stopped, watchdog exited, browser/server closed,
+credentials removed, and fresh checks show zero sessions/assignments and 0.00/hr.
+
+**Parent receipt audit found a remaining legacy-route gap:** this successful film
+used `/api/run/:id/video`. Its generated assets have trusted receipts and the
+download matches the rendered file, but the runtime contains no standalone
+byte-bound render receipt for that legacy route. This is a genuine delivered
+ComfyUI film, not yet proof of the full shared render-receipt boundary on that
+route. Scoped server-owned render recording/download enforcement is being fixed;
+the original artifact and evidence must remain intact. A subsequent normal
+re-export of the already generated assets can verify the corrected boundary
+without another GPU candidate or a retrospectively fabricated receipt.
+
+### Multi-shot typography, speaking-character and credits follow-up
+
+The user requested two motion-shot/effects tests and then two separate fictional
+show videos: a speaking character with overlays, and instrumental opening credits
+with overlays and no voices. The latter pair was explicitly extended to **45
+seconds each, with multiple shots**. The earlier 12/15-second versions of that pair
+were superseded before generation. Neon and Citrus remain 12-second tests.
+
+Initial results are preserved under
+`/tmp/opencode/easy-colab-acceptance/motion-type-effects/` and
+`/tmp/opencode/easy-colab-acceptance/character-and-credits/`:
+
+- Neon saved a three-motion-shot plan. Native copy corrections saved correctly,
+  but individual transition edits could not preserve exact duration atomically.
+- Citrus failed with HTTP 502 `stream_error: terminated` before a proposal saved.
+- The 45-second speaking brief misclassified quoted “the signal went silent” as
+  full silence. The credits brief's no-speaking list failed to suppress narration.
+  Both also lost requested native overlays through overbroad no-caption intent,
+  and layout conversion retained title-only `headline_size`, failing schema checks.
+- All four stopped before paid approval: no new film, GPU spend or reservations.
+  Campaign remains **1.69 spent / 58.31 remaining**, account **211.42** and zero
+  active sessions/assignments/usage. The original batch has **18.73 remaining**;
+  the separately authorized character/credits sub-batch has an **18-credit cap**
+  within the existing 60-credit campaign, with nine-credit per-film ceilings.
+
+**Transition editing repaired:** atomic source-backed overlap compensation passes
+the actual Neon draft: scene lengths **130/130/120**, overlaps **10/10/0**, total
+**360 frames at 30 fps**, with unchanged assets and complete planned jobs. Undo,
+redo, reopen/removal, insufficient-source rejection and explicit redistribution
+are covered by **30 focused tests and two Chromium UI tests**. Web typecheck and
+planner build passed. This is real-editor/mock-HTTP evidence, not a delivered film.
+
+**Camera-direction preservation repaired:** job defaults now recognize the
+authored “Slow forward move” and tracking-shot/view directions instead of appending
+a contradictory static-camera guard. The actual saved Neon passage job was
+recompiled read-only and retains its requested motion. The full jobs suite passed.
+
+A bounded Neon/Citrus retry is assigned under
+`/tmp/opencode/easy-colab-acceptance/motion-type-effects-fixed/`, using a known
+immutable build plus the completed transition/camera fixes. The speaking/credits
+pair awaits the separate audio/copy-intent fix; partially edited intent code must
+not enter the active frozen production. No successful new output or spend is
+inferred from this retry assignment.
+
+**Speaking/credits intent fixes integrated:** quoted content is excluded from
+instruction classification without changing the supplied dialogue. Coordinated
+speech/vocal prohibitions are recognized, and subtitle/additional-copy/generated
+lettering restrictions no longer erase explicitly requested native overlays.
+Character dialogue does not acquire automatic Kokoro narration or permission to
+shorten its lines. Both title-to-list conversion paths now remove title-only
+`headline_size`. Exact captured 45-second briefs are covered by classification,
+serialization, native H3 dialogue and shared-schema regressions. **All 578 agent
+tests and all 1,642 web tests passed**, along with the previously reported focused
+prompt tests/typecheck. No live output is established by these tests.
+
+The speaking/credits retry is now authorized after the active motion-effects
+productions settle, under
+`/tmp/opencode/easy-colab-acceptance/character-and-credits-fixed/`. It must use a
+fresh complete build containing the intent/schema fixes and retain both **45-second
+multi-shot** briefs, native text overlays, native character speech in the first,
+and instrumental music without voices in the second. The active production build
+must not be swapped mid-run. Existing per-film/sub-batch/campaign ceilings remain.
+
+### Neon delivered with effects and render proof; remaining retries blocked
+
+`/tmp/opencode/easy-colab-acceptance/motion-type-effects-fixed/PARENT-HANDOFF.md`
+records the completed normal-UI journey: initial proposal, native 10-frame
+wipe/push corrections, revision 11 → 12 re-review, explicit quote/approval,
+three Klein start images plus three LTX motion candidates, render and Download.
+The actual corrected timeline is **130/130/120 frames with 10/10/0 overlaps**,
+exactly **360 frames / 12.000 seconds at 30 fps**, 1920×1080, silent.
+
+Artifact: `evidence/neon-after-rain.mp4`, 16,525,590 bytes, SHA-256
+`34f989fa8067638b4e0e2a506950f06f571d4fbe806ebd069258058d81366cd5`.
+Package `pkg_564ee1180b41ba4a`, production `prod_e8600b5f6f1c0771666e5fb3`,
+run `run_177ffbb3526c`. Six generation receipts and the render receipt bind the
+downloaded bytes, immutable package/timeline and three visible LTX contributions.
+All jobs succeeded on candidate 01; no orphan work or rerolls. Private Tailscale
+sharing was verified with an actual HTTP GET and matching byte hash.
+
+Full 1× player execution completed. Sampled playback, 13 decoded output frames
+and nine source frames show changing generated footage, native mask-rise/pop
+entrances and wipe/push transitions. Settled headlines are legible; a brief
+outgoing/incoming title overlap during the first wipe is recorded. This is not
+continuous human viewing. Quote/internal settlement **2.081** is distinct from
+the measured **1.14-credit account delta** (211.42 → 210.28).
+
+The normal caption-only chat edit changed MAKE IT ELECTRIC to KEEP IT ELECTRIC,
+saved revision 14 and survived reload, preserving all assets, timing, audio and
+effects. Revised export is **blocked**: Keep this version returns HTTP 400
+`commandId or idempotencyKey is required on a production-bound request`;
+Export MP4 remains disabled with 0/3 approved. The shared original retains
+MAKE IT ELECTRIC; no revised movie exists.
+
+Other bounded retries remain failures, preserved in their own evidence:
+
+- Citrus on the explicitly frozen pre-intent-fix build: 348/360-frame shortfall
+  and layout/headline-size errors; no saved proposal or GPU spend.
+- 45-second multi-shot speaking character on the latest complete build: audio
+  intent/overlays fixed, but no ready, measured exact-line H3 conditioning audio.
+  Invalid LTX substitutions were rejected. No generated speaking footage exists.
+- 45-second six-shot musical credits: music-only/no-voice intent preserved, but
+  compiled 1,374 instead of 1,350 frames; no proposal or paid generation.
+
+Latest-pair report:
+`/tmp/opencode/easy-colab-acceptance/character-and-credits-fixed/PARENT-HANDOFF.md`.
+After cleanup, campaign **2.83 spent / 0 reserved / 57.17 remaining**; original
+acceptance batch **2.41 spent / 17.59 remaining**; character/credits batch **0
+spent / 18 remaining**. Account **210.28**, zero sessions/assignments and 0.00/hr.
+VM/watchdog/harnesses stopped; copied credentials removed. Provider monetary
+charges remain separately unmeasured. These blockers are carried into the PR.

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createToolset } from '../../../packages/agent/dist/src/index.js';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
-import { replayProvider } from './fake-provider.mjs';
+import { replayProvider, withPlannedPlate } from './fake-provider.mjs';
 
 test('recorded 190-start wall survives a different scene’s split layout repair with its source and timing intact', () => {
   const text = readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url), 'utf8');
@@ -37,10 +37,10 @@ test('bounded repair identifies the exact scene and accepts its drawing; unfinis
   const brief = 'Tell a data story with drawings.';
   const scenes = ['title', 'hero', 'hero', 'split', 'hero', 'hero', 'title'].map((layout, i) => ({ id: `s${i + 1}`, layout, preferredFrames: 135 }));
   const drawing = { background: '#ffffff', elements: [{ type: 'path', points: [[100, 100], [300, 100]], color: '#111111', width: 3, start: 0, end: 20 }] };
-  const initial = [
+  const initial = withPlannedPlate([
     { name: 'storyboard.propose', args: { brief, title: '190 Starts, One Win', proposal: { logline: 'A single win.', look: 'Graphic tiles.', soundtrack: 'Quiet pulse.' }, scenes } },
     ...scenes.filter(scene => scene.id !== 's4').map(scene => ({ name: 'storyboard.draw', args: { scene_id: scene.id, drawing } })), null,
-  ];
+  ]);
   const provider = await replayProvider([...initial, { name: 'storyboard.draw', args: { scene_id: 's4', drawing } }]);
   const runtimeDir = mkdtempSync(join(tmpdir(), 'split-repair-'));
   t.after(async () => { await provider.close(); rmSync(runtimeDir, { recursive: true, force: true }); });

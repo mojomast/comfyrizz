@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { executePipeline } from '../src/pipeline-worker.mjs';
 import { reserveUnitsFor, spendingMinutes } from '../../../packages/backends/src/budget.mjs';
 import { fixture } from './pipeline-fixture.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const RATE_VARS = ['COMFYRIZZ_COLAB_RATE_PER_HOUR', 'COMFYRIZZ_COLAB_RATE_PER_HOUR_G4', 'COMFYRIZZ_COLAB_ALLOW_LOW_RATE'];
 /** Clear every rate variable for the test, then put the environment back. */
@@ -136,7 +137,9 @@ test('a balance that covers the estimate still runs, so the guard is not a blank
     usage: async () => ({ balance: 50 }),
     runPackage: async () => {
       f.calls.push('media'); f.calls.push('stopped');
-      return { ok: true, package: JSON.parse(readFileSync(join(f.spec.workDir, 'package.json'))), teardown: { state: 'stopped' } };
+      const pkg = JSON.parse(readFileSync(join(f.spec.workDir, 'package.json')));
+      collectMockContribution(pkg, f.spec.workDir, { sceneId: 's_plate' });
+      return { ok: true, package: pkg, teardown: { state: 'stopped' } };
     },
     teardown: async () => { f.calls.push('cleanup'); return { state: 'stopped' }; },
   });

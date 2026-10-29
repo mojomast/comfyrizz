@@ -14,6 +14,7 @@ import { createCpuAgentRunner } from '../src/agent-runner.mjs';
 import { defaultCpuScript } from '../../../packages/agent/dist/src/index.js';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { replayProvider } from './fake-provider.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const BRIEF =
@@ -143,6 +144,10 @@ test('M2 edit loop persists a headline + chart value with a base revision', { ti
 });
 
 test('export renders the edited revision to a real CPU MP4', { timeout: 900_000 }, async () => {
+  const pkg = app.store.read(state.packageId);
+  collectMockContribution(pkg, app.store.dir);
+  app.store.write(pkg);
+  state.revision = app.store.read(state.packageId).revision;
   const response = await binaryRequest({ method: 'POST', path: '/api/render', body: { packageId: state.packageId, baseRevision: state.revision, override: { reason: 'CPU acceptance test uses a planned GPU placeholder' } } });
   assert.equal(response.status, 200, response.buffer.toString('utf8').slice(0, 500));
   assert.equal(response.headers['content-type'], 'video/mp4');

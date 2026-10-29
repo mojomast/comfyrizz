@@ -11,7 +11,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { seedMockContribution } from './helpers/comfy-contribution.mjs';
+import { seedMockContribution, approveMockContribution } from './helpers/comfy-contribution.mjs';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
@@ -49,6 +49,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 
 function fixturePackage() {
   const pkg = clone(fixture);
+  pkg.scenes.forEach(scene => { delete scene.narration; });
   // A one-scene package must not carry a transition out; this test is about the
   // delivery gate rather than the timeline transition rule.
   if (Array.isArray(pkg.scenes) && pkg.scenes.length === 1) delete pkg.scenes[0].transitionOut;
@@ -71,6 +72,7 @@ function seedPackage(app, pkg) {
     }
   }
   seedMockContribution(app.store, pkg);
+  approveMockContribution(app.takeStore, pkg, dir);
   return dir;
 }
 
@@ -168,8 +170,8 @@ test('IP54: every delivery caller uses the one final gate and starts no work whi
       assert.equal(response.status, 409, `${path}: ${await response.clone().text()}`);
       const payload = await response.json();
       assert.equal(payload.code, 'RENDER_GATE_BLOCKED', `${path} names the shared gate refusal`);
-      assert.equal(payload.approved, 0, `${path} reports the shared approved count`);
-      assert.equal(payload.total, 1, `${path} reports the shared clip total`);
+      assert.equal(payload.approved, 1, `${path} reports the reviewed supporting plate`);
+      assert.equal(payload.total, 2, `${path} reports the shared clip total`);
       assert.deepEqual(payload.blocking, [{ clipId: CLIP_ID, state: 'review' }], `${path} reports the shared blockers`);
     }
 

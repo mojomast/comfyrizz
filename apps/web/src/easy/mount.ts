@@ -100,6 +100,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let superEasySnapshot: unknown = null;
   let superEasyTicket = 0;
   let superEasySession: SuperEasySession | null = null;
+  let proposalReturnWaiting = false;
+  let proposalSaveNoticeOpen = false;
   let narrationRecoveryChecked = false;
   let narrationRecoveryReady = false;
   let primaryAction: () => void = () => host.openEditor();
@@ -304,6 +306,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   function destroySuperEasy(stopSession = false): void {
     superEasyTicket += 1;
+    proposalReturnWaiting = false;
     liveGallery.stop();
     liveGalleryItems = [];
     if (stopSession) {
@@ -503,6 +506,30 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     }));
   }
 
+  async function approveSuperEasyProposal(): Promise<void> {
+    if (proposalSaveNoticeOpen) return;
+    const session = superEasySession;
+    const ticket = superEasyTicket;
+    const result = await session?.approveProposal();
+    if (!result || result.ok || !session?.proposal() || !superEasy || session !== superEasySession || ticket !== superEasyTicket) return;
+    // A blocked save keeps the proposal parked. Only a later save notification
+    // or normal return may refresh it; this approval gesture never does.
+    proposalReturnWaiting = true;
+    proposalSaveNoticeOpen = true;
+    try {
+      const { openDialog } = await import('./dialog.ts');
+      if (!superEasy || session !== superEasySession || ticket !== superEasyTicket) return;
+      await openDialog({
+        title: 'Waiting for editor save',
+        bodyHtml: `<p>${escapeHtml(result.message)}</p>`,
+        actions: [{ label: 'Back to review', value: 'close', kind: 'secondary' }],
+        opener: root.querySelector<HTMLElement>('[data-super-easy-approve-proposal]') ?? root,
+      });
+    } finally {
+      proposalSaveNoticeOpen = false;
+    }
+  }
+
   /** Super Easy first paint. The player stays with its owner; only the studio adopts it. */
   function showSuperEasy(): void {
     homeTicket += 1;
@@ -517,6 +544,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     releasePlayer();
     destroySuperEasy();
     superEasySnapshot = null;
+    // Rebuild the review only on return. Later edits must still fail the normal
+    // approval revision guard, rather than silently updating what was reviewed.
+    proposalReturnWaiting = superEasySession?.refreshProposal?.() === 'waiting';
     superEasy = mountSuperEasy({
       root,
       state: () => store.get(),
@@ -527,7 +557,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       snapshot: () => superEasySnapshot,
       onGenerate: (input) => onSuperEasyGenerate(input),
       proposal: () => superEasySession?.proposal() ?? null,
-      onApproveProposal: () => { void superEasySession?.approveProposal(); },
+      onApproveProposal: () => { void approveSuperEasyProposal(); },
       onReviseProposal: (note) => { void superEasySession?.reviseProposal(note); },
       onReviseNarration: () => { void superEasySession?.reviseNarration(); },
       onReviewEditPlan: (packageId) => {
@@ -973,6 +1003,15 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStepper = mountStepper(stepperHost, { onSelect: (next) => go(next) });
   });
   const stopMode = subscribeMode((mode) => applyShell(mode));
+  const stopProposalSave = host.editorStore?.subscribeSaveState?.(() => {
+    if (!superEasy || !proposalReturnWaiting) return;
+    const ticket = superEasyTicket;
+    // Host package subscriptions finish before reading the acknowledged save.
+    queueMicrotask(() => {
+      if (!superEasy || !proposalReturnWaiting || ticket !== superEasyTicket) return;
+      proposalReturnWaiting = superEasySession?.refreshProposal?.() === 'waiting';
+    });
+  });
   const onCaptureToggle = (event: Event): void => {
     const target = event.target as HTMLInputElement | null;
     if (superEasy || !target?.matches?.('[data-procedure-capture-toggle]')) return;
@@ -1006,6 +1045,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopCorrectionShutdown();
     stopStore();
     stopMode();
+    stopProposalSave?.();
     root.removeEventListener('change', onCaptureToggle);
     procedure.destroy();
     view?.removeEventListener('popstate', onPopState);

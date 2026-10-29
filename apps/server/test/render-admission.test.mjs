@@ -12,6 +12,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
+import { seedMockContribution, approveMockContribution } from './helpers/comfy-contribution.mjs';
 
 const TOKEN = 'render-admission-token-0123456789abcdef';
 const seed = JSON.parse(readFileSync(new URL('../../../examples/launch-demo/package.json', import.meta.url), 'utf8'));
@@ -58,7 +59,8 @@ async function setup(t, { render, renderScene } = {}) {
     render: render ?? stubRender(),
     renderScene: renderScene ?? stubRenderScene(),
   });
-  app.store.seed(structuredClone(seed));
+  seedMockContribution(app.store, structuredClone(seed));
+  approveMockContribution(app.takeStore, app.store.read(PACKAGE_ID), app.store.dir);
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
@@ -154,7 +156,7 @@ function slowPost({ port, path, body, delayMs = 60 }) {
 
 test('missing narrated audio blocks final render and labels draft warnings', async t => {
   const h = await setup(t);
-  const pkg = structuredClone(seed);
+  const pkg = h.app.store.read(PACKAGE_ID);
   pkg.voice = { enabled: true, engine: 'kokoro', voice: 'af_heart', language: 'en-us', speed: 1 };
   pkg.scenes[0].narration = 'A planned narration.';
   const final = await post({ ...h, path: '/api/render', body: { package: pkg, override: { reason: REASON } } });

@@ -1,4 +1,5 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,6 +12,9 @@ import { correctionFor } from '../src/pipeline-media.mjs';
 import { progressLines } from '../../../packages/backends/src/progress-lines.mjs';
 
 const example = JSON.parse(readFileSync(new URL('../../../examples/launch-demo/package.json', import.meta.url)));
+const contributionRoot = mkdtempSync(join(tmpdir(), 'pipeline-receipt-'));
+collectMockContribution(example, join(contributionRoot, 'package'));
+after(() => rmSync(contributionRoot, { recursive: true, force: true }));
 function fixture(t, options = {}) {
   const runtimeDir = mkdtempSync(join(tmpdir(), 'pipeline-test-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));

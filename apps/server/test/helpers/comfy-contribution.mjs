@@ -17,6 +17,7 @@ export function plannedContribution(pkg, { sceneId, id = 'a_mock_comfy' } = {}) 
   const scene = sceneId ? pkg.scenes.find(s => s.id === sceneId) : pkg.scenes.find(s => !s.drawing && !s.composition && !['code', 'split', 'compare'].includes(s.layout));
   assert.ok(scene, 'fixture needs an ordinary visible scene for its mocked ComfyUI plate');
   pkg.assets[id] ??= { kind: 'image', origin: 'generated', status: 'pending', license: { id: 'CC0-1.0' }, redistributable: true,
+    model_license: { id: 'FLUX-Kommunity', url: 'https://huggingface.co/black-forest-labs/flux-3-image-klein' },
     gen: { generator: 'flux3-klein', workflow, workflow_sha256: sha(graph), model: 'flux-3-klein', inputs: { prompt: 'A relevant editorial plate for the test film', width: 1024, height: 1024, seed: 17 } } };
   if (!scene.foreground?.some(item => item.asset === id)) (scene.foreground ??= []).push({ asset: id, x: .75, y: .75, w: .4, h: .4, z: 20 });
   return id;
@@ -44,4 +45,9 @@ export function recordMockRender(pkg, packageDir, videoPath, timeline = compileT
 export function seedMockContribution(store, pkg) {
   collectMockContribution(pkg, store.dir);
   return store.seed(pkg);
+}
+
+export function approveMockContribution(takes, pkg, packageDir) {
+  const asset = pkg.assets.a_mock_comfy;
+  return takes.addTake(pkg.id, 'a_mock_comfy', { srcPath: join(packageDir, asset.file), gen: asset.gen, media: asset.media, verdict: 'approved', verdictNote: 'Mock fixture review only' });
 }

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createExporter } from '../src/export.mjs';
 import { buildVariants } from '../src/variant.mjs';
 import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
@@ -18,7 +19,7 @@ function tree(dir) {
 }
 
 function fixture(t) {
-  const root = mkdtempSync('/tmp/opencode/composition-variants-');
+  const root = mkdtempSync(join(tmpdir(), 'composition-variants-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const sourceDir = join(root, 'source');
   const exportsDir = join(root, 'exports');

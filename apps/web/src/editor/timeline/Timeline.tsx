@@ -1043,7 +1043,12 @@ export function SceneTimeline({
         </div>
       </div>
       <Inspector
+        key={primary}
         primary={primary}
+        isFinal={doc.package.scenes.at(-1)?.id === primary}
+        exact={(doc.package.duration as { exact?: boolean } | undefined)?.exact === true}
+        sceneDurations={compiled?.scenes.map(scene => ({ id: scene.id, frames: scene.durationInFrames })) ?? []}
+        onCombined={(transitionOut, sceneFrames) => primary ? run({ type: 'SetTransition', sceneId: primary, transitionOut, sceneFrames }) : { ok: false }}
         preferred={primaryDoc?.preferredFrames}
         compiledFrames={primaryCompiled?.durationInFrames ?? null}
         transitionIn={primaryCompiled?.transitionInFrames ?? 0}
@@ -1088,7 +1093,7 @@ function sourceFrames(doc: { package: { assets?: Record<string, { media?: { fram
   return typeof frames === 'number' ? frames : null;
 }
 
-function FrameField({ label, value, onCommit, advanced = false }: { label: string; value: number; onCommit: (value: number) => void; advanced?: boolean }) {
+function FrameField({ label, value, onCommit, advanced = false, disabled = false }: { label: string; value: number; onCommit: (value: number) => void; advanced?: boolean; disabled?: boolean }) {
   const [text, setText] = useState(String(value));
   const focused = useRef(false);
   useEffect(() => {
@@ -1100,6 +1105,7 @@ function FrameField({ label, value, onCommit, advanced = false }: { label: strin
       <input
         inputMode="numeric"
         aria-label={label}
+        disabled={disabled}
         value={text}
         onFocus={() => { focused.current = true; }}
         onChange={event => setText(event.target.value)}
@@ -1118,6 +1124,10 @@ function FrameField({ label, value, onCommit, advanced = false }: { label: strin
 
 function Inspector(props: {
   primary: string | null;
+  isFinal: boolean;
+  exact: boolean;
+  sceneDurations: Array<{ id: string; frames: number }>;
+  onCombined: (transition: { type: string; frames: number; direction?: string }, sceneFrames: Record<string, number>) => { ok: boolean; error?: string };
   preferred: number | undefined;
   compiledFrames: number | null;
   transitionIn: number;
@@ -1154,6 +1164,7 @@ function Inspector(props: {
         Transition{' '}
         <select
           aria-label="Transition type"
+          disabled={props.isFinal}
           value={props.transition?.type ?? 'cut'}
           onChange={event => {
             const type = event.target.value;
@@ -1164,8 +1175,9 @@ function Inspector(props: {
           {types.map(type => <option key={type} value={type}>{type}</option>)}
         </select>
       </label>
-      <FrameField advanced label="Transition frames" value={props.transition?.frames ?? 0} onCommit={frames => props.onTransition(props.transition?.type ?? 'fade', frames, props.transition?.direction)} />
-      <span className="tl-message" data-adv="">Compiled overlap in {props.transitionIn} · out {props.transitionOut}. The compiler owns sum(lengths) − overlaps.</span>
+      <FrameField advanced disabled={props.isFinal} label="Transition frames" value={props.transition?.frames ?? 0} onCommit={frames => props.onTransition(props.transition?.type ?? 'fade', frames, props.transition?.direction)} />
+      <span className="tl-message" data-adv="">Compiled overlap in {props.transitionIn} · out {props.transitionOut}. {props.isFinal ? 'The final scene has no outgoing transition.' : props.exact ? 'Overlap edits compensate adjacent scene durations using available source footage, preserving the exact total.' : 'The compiler owns sum(lengths) − overlaps.'}</span>
+      {props.exact && !props.isFinal ? <CombinedTransitionEditor scenes={props.sceneDurations} transition={props.transition} apply={props.onCombined} /> : null}
       {props.assetId ? (
         <>
           <FrameField advanced label="Source in" value={props.range?.inFrame ?? 0} onCommit={inFrame => props.onRange(inFrame, props.range?.outFrame ?? props.sourceFrames ?? inFrame + 1)} />
@@ -1174,4 +1186,32 @@ function Inspector(props: {
       ) : null}
     </div>
   );
+}
+
+function CombinedTransitionEditor({ scenes, transition, apply }: {
+  scenes: Array<{ id: string; frames: number }>;
+  transition: { type: string; frames?: number; direction?: string } | null | undefined;
+  apply: (transition: { type: string; frames: number; direction?: string }, frames: Record<string, number>) => { ok: boolean; error?: string };
+}) {
+  const [draft, setDraft] = useState<Record<string, number>>({});
+  const [type, setType] = useState(transition?.type ?? 'wipe');
+  const [frames, setFrames] = useState(transition?.frames ?? 10);
+  const [message, setMessage] = useState('');
+  return <details data-adv="" onToggle={event => {
+    if (event.currentTarget.open) {
+      setDraft(Object.fromEntries(scenes.map(scene => [scene.id, scene.frames])));
+      setType(transition?.type ?? 'wipe'); setFrames(transition?.frames ?? 10); setMessage('');
+    }
+  }}>
+    <summary>Transition + scene durations</summary>
+    <p>Apply overlap and scene frame counts together. Their sum minus all overlaps must equal the exact total. Existing source trims and playback speeds are preserved.</p>
+    <label>Combined transition type <select aria-label="Combined transition type" value={type} onChange={event => setType(event.target.value)}>{ANIMATION_TRANSITIONS.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+    <label>Combined overlap frames <input aria-label="Combined overlap frames" type="number" min="0" max="120" value={frames} onChange={event => setFrames(Number(event.target.value))} /></label>
+    {scenes.map(scene => <label key={scene.id}>{scene.id} frames <input aria-label={`${scene.id} combined frames`} type="number" min="1" value={draft[scene.id] ?? scene.frames} onChange={event => setDraft({ ...draft, [scene.id]: Number(event.target.value) })} /></label>)}
+    <button type="button" onClick={() => {
+      const result = apply({ type, frames, ...(transition?.direction ? { direction: transition.direction } : {}) }, draft);
+      setMessage(result.ok ? 'Applied overlap and scene durations together.' : result.error ?? 'Combined edit failed.');
+    }}>Apply transition + durations</button>
+    <p role="status">{message}</p>
+  </details>;
 }

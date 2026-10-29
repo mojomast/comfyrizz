@@ -14,8 +14,10 @@ test('title sizing is bounded, title-only, and visible in real tool definitions 
     const props = name.endsWith('propose') ? definition.properties.scenes.items.properties : definition.properties[name.endsWith('edit') ? 'patch' : 'scene'].properties;
     assert.equal(props.headline_size.minimum, 24);
     assert.equal(props.headline_size.maximum, 512);
-    assert.equal(props.copy.additionalProperties, false);
-    assert.equal(props.lower_third.properties.text.maxLength, 120);
+    const copy = props.copy.anyOf?.find((branch: any) => branch.type === 'object') ?? props.copy;
+    const lowerThird = props.lower_third.anyOf?.find((branch: any) => branch.type === 'object') ?? props.lower_third;
+    assert.equal(copy.additionalProperties, false);
+    assert.equal(lowerThird.properties.text.maxLength, 120);
   }
   for (const headline_size of [23, 513, 104.5, '440', 'url(x)']) {
     await assert.rejects(async () => tools['storyboard.edit'].run({ scene_id: 's1', patch: { headline_size } }));

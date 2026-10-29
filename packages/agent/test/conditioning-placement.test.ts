@@ -26,15 +26,15 @@ test('recorded keyframe and omitted-kind calls retain LTX dependency without for
     const { tools, getDraft } = await setup();
     const image = await tools['assets.generate_image'].run({ ...OLIVE_IMAGE, kind }) as any;
     const before = structuredClone(getDraft());
-    assert.equal(image.asset.id, OLIVE_VIDEO.image, 'placement must not change source identity');
     assert.deepEqual(before.scenes[0].foreground ?? [], []);
-    const video = await tools['assets.generate_video'].run(OLIVE_VIDEO) as any;
+    const videoArgs = { ...OLIVE_VIDEO, image: image.asset.id };
+    const video = await tools['assets.generate_video'].run(videoArgs) as any;
     const pkg = getDraft();
     assert.equal(pkg.id, before.id);
     assert.equal(pkg.revision, before.revision + 1, 'video attachment still advances approval revision');
     assert.equal(pkg.scenes[0].id, OLIVE_VIDEO.scene_id);
     assert.equal(pkg.scenes[0].background.asset, video.asset.id);
-    assert.equal(pkg.scenes[0].media[0].asset, video.asset.id);
+    assert.equal(pkg.scenes[0].media, undefined, 'single-shot layouts need no duplicate media aliases');
     assert.deepEqual(pkg.scenes[0].foreground, []);
     assert.equal(video.asset.gen.inputs.image, image.asset.id);
     assert.deepEqual(pkg.assets[image.asset.id], before.assets[image.asset.id], 'retain source and generation provenance');
@@ -51,7 +51,7 @@ test('recorded keyframe and omitted-kind calls retain LTX dependency without for
     const source = structuredClone(ready.assets[image.asset.id]);
     let resumed: any;
     const resumedTools = createToolset({ initialPackage: ready, initialIntent: classifyProductionIntent(OLIVE_BRIEF), motionModel: 'ltx', onPackageChange: pkg => { resumed = pkg; } });
-    await resumedTools['assets.generate_video'].run(OLIVE_VIDEO);
+    await resumedTools['assets.generate_video'].run(videoArgs);
     assert.deepEqual(resumed.assets[image.asset.id], source);
     assert.deepEqual(resumed.scenes[0].foreground, []);
     const readyPlan = planJobs(resumed, { assets: [video.asset.id] });
@@ -69,11 +69,12 @@ test('explicit foreground still and storyboard-authored placement survive LTX at
     }
     const authored = structuredClone(getDraft().scenes[0].foreground);
     assert.equal(authored[0].asset, image.asset.id);
-    await tools['assets.generate_video'].run(OLIVE_VIDEO);
+    const videoArgs = { ...OLIVE_VIDEO, image: image.asset.id };
+    await tools['assets.generate_video'].run(videoArgs);
     assert.deepEqual(getDraft().scenes[0].foreground, authored);
     let resumed: any;
     const resumedTools = createToolset({ initialPackage: getDraft(), initialIntent: classifyProductionIntent(OLIVE_BRIEF), motionModel: 'ltx', onPackageChange: pkg => { resumed = pkg; } });
-    await resumedTools['assets.generate_video'].run(OLIVE_VIDEO);
+    await resumedTools['assets.generate_video'].run(videoArgs);
     assert.deepEqual(resumed.scenes[0].foreground, authored);
   }
 });

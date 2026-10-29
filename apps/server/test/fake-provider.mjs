@@ -3,6 +3,29 @@
 // uses), then answers with a short final text. No network, no GPU, no key.
 import { createServer } from 'node:http';
 
+/** Add an explicit planned plate to a scripted native-graphics film. No GPU service runs. */
+export function withPlannedPlate(calls, sceneId = null) {
+  let added = false;
+  return calls.flatMap(call => {
+    if (added || call?.name !== 'storyboard.propose') return [call];
+    added = true;
+    const id = sceneId ?? 's_comfy_plate';
+    const proposal = structuredClone(call);
+    if (!sceneId) proposal.args.scenes.push({ id, layout: 'title', copy: { headline: 'Editorial context' }, preferredFrames: 90 });
+    return [proposal, { name: 'assets.generate_image', args: { scene_id: id, kind: 'illustration', intent: 'A relevant editorial backdrop supporting the film subject' } }, visiblePlateCall(id)];
+  });
+}
+
+export function visiblePlateCall(sceneId) {
+  return request => {
+    const result = request.messages.filter(message => message.role === 'tool').map(message => {
+      try { const body = JSON.parse(message.content); return body.result ?? body; } catch { return null; }
+    }).findLast(body => body?.asset?.id && body?.scene_id === sceneId);
+    if (!result) throw new Error(`No image tool result for ${sceneId}`);
+    return { name: 'storyboard.edit', args: { scene_id: sceneId, patch: { background: { asset: result.asset.id }, foreground: [] } } };
+  };
+}
+
 function writeSse(response, payload) {
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
@@ -57,7 +80,8 @@ export function replayProvider(initialCalls, { finalText = 'The package draft is
         response.end();
         return;
       }
-      const call = index < calls.length ? calls[index] : null;
+      const scripted = index < calls.length ? calls[index] : null;
+      const call = typeof scripted === 'function' ? scripted(JSON.parse(raw)) : scripted;
       index += 1;
       if (call) {
         writeSse(response, {

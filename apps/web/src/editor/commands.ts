@@ -8,6 +8,8 @@
  */
 import { type MeasuredInput } from '../../../../packages/planner/dist/src/browser.js';
 import { getPrefs, setDensity, type UiDensity } from '../ui/prefs.ts';
+import { editExactTransition } from './transition-edit.ts';
+import { applyPresenterSet, type PresenterSetArgs } from '../../../../packages/agent/dist/src/presenter.js';
 import {
   narrationFromChunks,
   narrationInputFingerprint,
@@ -43,6 +45,8 @@ export interface EditorSidecar {
   takes?: Record<string, NarrationTake>;
   alignment?: Record<string, SceneAlignment>;
   presenterClips?: Record<string, PresenterClip>;
+  /** Duration offsets owned by each exact-duration boundary edit, for inverse compensation. */
+  transitionCompensation?: Record<string, Record<string, number>>;
 }
 
 export interface AudioTrim {
@@ -134,6 +138,8 @@ export interface SetTransition {
   type: 'SetTransition';
   sceneId: string;
   transitionOut: { type: string; frames: number; direction?: string } | null;
+  /** Optional combined duration edit, in project frames (one history/save operation). */
+  sceneFrames?: Record<string, number>;
 }
 /** Explicitly remove the override so the package/compiler transition default applies. */
 export interface ResetSceneTransition { type: 'ResetSceneTransition'; sceneId: string }
@@ -148,6 +154,10 @@ export interface SetNarrationText { type: 'SetNarrationText'; sceneId: string; t
 /** Qwen CustomVoice delivery override for one scene; null removes it. */
 export interface SetNarrationStyle { type: 'SetNarrationStyle'; sceneId: string; text: string | null }
 export interface SetVoice { type: 'SetVoice'; voice: VoiceSettings | null }
+/** Native storyboard controls share the same history and acknowledged autosave. */
+export interface SetPresenter { type: 'SetPresenter'; args: PresenterSetArgs }
+export interface SetPalette { type: 'SetPalette'; index: number; color: string }
+export interface SetDatasetValue { type: 'SetDatasetValue'; sceneId: string; index: number; value: number }
 /** Replace the optional storytelling motion block; null removes it entirely. */
 export interface SetSceneMotion { type: 'SetSceneMotion'; sceneId: string; motion: Record<string, unknown> | null }
 
@@ -169,6 +179,9 @@ export type Command =
   | SetNarrationText
   | SetNarrationStyle
   | SetVoice
+  | SetPresenter
+  | SetPalette
+  | SetDatasetValue
   | SetSceneMotion;
 
 export type ApplyResult =
@@ -217,6 +230,26 @@ function isFail(value: { index: number; scene: EditableScene } | ApplyResult): v
 
 export function applyCommand(doc: ProjectDoc, command: Command, measured: MeasuredInput = {}): ApplyResult {
   if (command.type === 'SetVoice') return setVoice(clone(doc), command);
+  if (command.type === 'SetPresenter') {
+    try {
+      return { ok: true, doc: { ...clone(doc), package: applyPresenterSet(doc.package as never, command.args).package as EditablePackage } };
+    } catch (error) {
+      return fail('bad-presenter', error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (command.type === 'SetPalette') {
+    const next = clone(doc);
+    const theme = next.package.theme as { palette?: string[] } | undefined;
+    if (!theme) return fail('bad-palette', 'The package has no theme.');
+    theme.palette ??= ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'];
+    if (!Number.isInteger(command.index) || command.index < 0 || command.index >= theme.palette.length || !/^#[0-9a-f]{6}$/i.test(command.color)) return fail('bad-palette', 'Choose a valid palette colour.');
+    theme.palette[command.index] = command.color;
+    for (const scene of next.package.scenes) {
+      const procedural = scene.background?.procedural as { palette?: string[] } | undefined;
+      if (procedural) procedural.palette = theme.palette.slice(0, 3);
+    }
+    return { ok: true, doc: next };
+  }
   const found = sceneAt(doc, command.sceneId);
   if (isFail(found)) return found;
   if (found.scene.locked && LOCKED.has(command.type)) {
@@ -231,6 +264,14 @@ export function applyCommand(doc: ProjectDoc, command: Command, measured: Measur
       return trimScene(next, scene, command);
     case 'SetSceneCopy':
       return setCopy(next, scene, command);
+    case 'SetDatasetValue': {
+      const datasetId = (scene.data as { dataset?: string } | undefined)?.dataset;
+      const datasets = next.package.datasets as Record<string, { values: Array<{ value: number }> }> | undefined;
+      const value = datasetId ? datasets?.[datasetId]?.values[command.index] : undefined;
+      if (!value || !Number.isFinite(command.value)) return fail('bad-dataset-value', 'Choose a valid chart value.');
+      value.value = command.value;
+      return { ok: true, doc: next };
+    }
     case 'SetMediaRange':
       return setMediaRange(next, scene, command, measured);
     case 'SetAudioRange':
@@ -250,7 +291,7 @@ export function applyCommand(doc: ProjectDoc, command: Command, measured: Measur
     case 'SetTransition':
       return setTransition(next, scene, command, measured);
     case 'ResetSceneTransition':
-      return resetSceneTransition(next, scene);
+      return resetSceneTransition(next, scene, measured);
     case 'SplitScene':
       return splitScene(next, scene, command, measured);
     case 'SetNarrationText':
@@ -507,6 +548,16 @@ function chunkMapFor(doc: ProjectDoc, measured: MeasuredInput): Record<string, A
 function setTransition(doc: ProjectDoc, scene: EditableScene, command: SetTransition, measured: MeasuredInput): ApplyResult {
   const index = doc.package.scenes.findIndex(item => item.id === scene.id);
   const spec = command.transitionOut;
+  if (spec && (!Number.isInteger(spec.frames) || spec.frames < 0 || spec.frames > 120)) {
+    return fail('bad-transition', 'Transition length has to be a whole number from 0 to 120 frames.');
+  }
+  if (index === doc.package.scenes.length - 1) {
+    if (spec && !['none', 'cut'].includes(spec.type) && spec.frames > 0) return fail('bad-transition', 'The last scene has no outgoing transition.');
+    scene.transitionOut = { type: 'cut', frames: 0 };
+    return { ok: true, doc };
+  }
+  const exact = editExactTransition(doc, scene.id, spec, measured, command.sceneFrames);
+  if (exact) return exact;
   if (!spec || spec.type === 'none' || spec.type === 'cut' || spec.frames <= 0) {
     scene.transitionOut = { type: 'cut', frames: 0 };
     return { ok: true, doc };
@@ -524,7 +575,13 @@ function setTransition(doc: ProjectDoc, scene: EditableScene, command: SetTransi
   return { ok: true, doc };
 }
 
-function resetSceneTransition(doc: ProjectDoc, scene: EditableScene): ApplyResult {
+function resetSceneTransition(doc: ProjectDoc, scene: EditableScene, measured: MeasuredInput): ApplyResult {
+  if (doc.package.scenes.at(-1)?.id === scene.id) {
+    delete scene.transitionOut;
+    return { ok: true, doc };
+  }
+  const exact = editExactTransition(doc, scene.id, undefined, measured);
+  if (exact) return exact;
   delete scene.transitionOut;
   return { ok: true, doc };
 }

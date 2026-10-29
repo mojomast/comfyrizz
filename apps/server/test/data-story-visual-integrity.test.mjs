@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createToolset } from '../../../packages/agent/dist/src/index.js';
 import { csvWallProblems } from '../src/csv-wall-contract.mjs';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
@@ -35,7 +36,7 @@ test('live planner uses model SVG and fails visibly instead of substituting a st
     { name: 'assets.generate_svg', args: { scene_id: 's1', kind: 'icon', intent: 'A pink P1 stamp' } },
   ];
   const provider = await replayProvider(calls, { svgText: 'No SVG available' });
-  const runtimeDir = mkdtempSync('/tmp/opencode/svg-integrity-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'svg-integrity-'));
   t.after(async () => { await provider.close(); rmSync(runtimeDir, { recursive: true, force: true }); });
   const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
   await assert.rejects(runner({ brief: 'Draw a P1 stamp', provider: 'custom', sessionId: 'visual' }), error => {
@@ -55,7 +56,7 @@ test('live planning stores the returned SVG rather than the deterministic checkm
   ];
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#f2f2f2"/><text x="10" y="60" fill="#050505">P1</text></svg>';
   const provider = await replayProvider(calls, { svgText: svg });
-  const runtimeDir = mkdtempSync('/tmp/opencode/svg-real-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'svg-real-'));
   t.after(async () => { await provider.close(); rmSync(runtimeDir, { recursive: true, force: true }); });
   const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
   const result = await runner({ brief: 'Show four P1 stamps', provider: 'custom', sessionId: 'visual-ok' });
@@ -75,7 +76,7 @@ test('live planning stores the returned SVG rather than the deterministic checkm
 });
 
 test('legacy stub assets cannot be exported as model-generated visuals', async t => {
-  const dir = mkdtempSync('/tmp/opencode/svg-legacy-');
+  const dir = mkdtempSync(join(tmpdir(), 'svg-legacy-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   for (const kind of ['icon', 'diagram', 'pattern', 'vector-anim']) {
     const svg = await stubGenerator({ intent: { kind, prompt: 'unrelated requested visual', palette: ['#050505', '#f2f2f2', '#c9a227'] }, attempt: 1, errors: [] });
@@ -90,7 +91,7 @@ test('the UI planning endpoint reports a failed visual instead of a successful p
     { name: 'storyboard.propose', args: { brief: 'Draw a P1 stamp', scenes: [{ id: 's1', layout: 'hero', preferredFrames: 90 }] } },
     { name: 'assets.generate_svg', args: { scene_id: 's1', kind: 'icon', intent: 'P1 stamp' } },
   ], { svgText: 'No SVG available' });
-  const runtimeDir = mkdtempSync('/tmp/opencode/svg-ui-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'svg-ui-'));
   const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
   const token = 'svg-ui-test-token-123';
   const app = createApp({ root: new URL('../../..', import.meta.url).pathname, runtimeDir, token, agentRunner: runner });
@@ -107,7 +108,7 @@ test('the UI planning endpoint reports a failed visual instead of a successful p
 });
 
 test('the no-provider planning endpoint produces a labeled outline and refuses an explicit SVG request', async t => {
-  const runtimeDir = mkdtempSync('/tmp/opencode/svg-offline-ui-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'svg-offline-ui-'));
   const token = 'svg-offline-test-token';
   const app = createApp({ root: new URL('../../..', import.meta.url).pathname, runtimeDir, token, agentRunner: createCpuAgentRunner({ runtimeDir }) });
   const server = createServer(app.handler);
@@ -134,7 +135,7 @@ test('SVG transport failures make only three attempts and report unreported usag
     { name: 'assets.generate_svg', args: { scene_id: 's1', kind: 'icon', intent: 'P1 stamp' } },
   ];
   const provider = await replayProvider(calls, { svgStatus: 429 });
-  const runtimeDir = mkdtempSync('/tmp/opencode/svg-transport-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'svg-transport-'));
   t.after(async () => { await provider.close(); rmSync(runtimeDir, { recursive: true, force: true }); });
   const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
   await assert.rejects(runner({ brief: 'Draw a P1 stamp', provider: 'custom' }), error => {
@@ -154,7 +155,7 @@ test('cancelling the plan aborts an in-flight SVG request without retrying', asy
     { name: 'storyboard.propose', args: { brief: 'Draw a stamp', scenes: [{ id: 's1', layout: 'hero', preferredFrames: 90 }] } },
     { name: 'assets.generate_svg', args: { scene_id: 's1', kind: 'icon', intent: 'Stamp' } },
   ], { svgHang: true, onSvgRequest: requestStarted });
-  const runtimeDir = mkdtempSync('/tmp/opencode/svg-abort-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'svg-abort-'));
   t.after(async () => { controller.abort(); await provider.close(); rmSync(runtimeDir, { recursive: true, force: true }); });
   const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
   const pending = runner({ brief: 'Draw a stamp', provider: 'custom', signal: controller.signal });
@@ -171,7 +172,7 @@ test('live SVG calls share a hard request budget across the whole plan', { timeo
   ];
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#f2f2f2"/><text x="10" y="60" fill="#050505">P1</text></svg>';
   const provider = await replayProvider(calls, { svgText: svg });
-  const runtimeDir = mkdtempSync('/tmp/opencode/svg-budget-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'svg-budget-'));
   t.after(async () => { await provider.close(); rmSync(runtimeDir, { recursive: true, force: true }); });
   const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
   await assert.rejects(runner({ brief: 'Draw many stamps', provider: 'custom' }), error => {

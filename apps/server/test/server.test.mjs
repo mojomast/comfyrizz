@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { seedMockContribution, approveMockContribution } from './helpers/comfy-contribution.mjs';
 import { createServer, request as httpRequest, get as httpGet } from 'node:http';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,7 +45,8 @@ before(async () => {
       };
     },
   });
-  app.store.seed(JSON.parse(JSON.stringify(seed)));
+  seedMockContribution(app.store, JSON.parse(JSON.stringify(seed)));
+  approveMockContribution(app.takeStore, app.store.read(seed.id), app.store.dir);
   server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   port = server.address().port;
@@ -114,7 +116,7 @@ test('rejects missing/wrong token and wrong Host', async () => {
 
 test('GET package exposes revision', async () => {
   const response = await request({ path: '/api/package/pkg_launchdemo0001' });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, response.text);
   assert.equal(response.json.revision, 1);
   assert.equal(response.json.package.id, 'pkg_launchdemo0001');
 });
@@ -128,7 +130,7 @@ test('PATCH requires same-origin and a live base revision', async () => {
 });
 
 test('PATCH saves, bumps revision and persists', async () => {
-  const edited = structuredClone(seed);
+  const edited = app.store.read(seed.id);
   edited.scenes[0].copy.headline = 'Edited in C2';
   const saved = await request({ method: 'PATCH', path: '/api/package/pkg_launchdemo0001', body: { baseRevision: 1, package: edited } });
   assert.equal(saved.status, 200);

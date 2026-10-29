@@ -12,7 +12,7 @@
 //   * a wall-clock cap applies even if metering is stale                 -> admit()
 //   * unknown comfyrizz-* sessions are offered, never auto-stopped       -> orphans()
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { withRunPackage, verifyAgainstManifest } from "./run-package.mjs";
 import { createLivePreviewCollector } from './live-previews.mjs';
 import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
@@ -232,6 +232,7 @@ export function createColabBackend({
   newAttempts = 3,
   newRetryMs = 20000,
   allocationCleanupChecks = 6,
+  collectionRetryMs = 1000,
 } = {}) {
   // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
   ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
@@ -275,6 +276,9 @@ export function createColabBackend({
     recovery: null,
     // Set by the runPackage wrapper so ensureUp can look for collected output before allocating.
     runPackageWorkDir: null,
+    collectionAttempts: [],
+    collectionSignal: null,
+    collectionSpentMs: 0,
   };
 
   const emit = (onEvent, event) => {
@@ -997,6 +1001,7 @@ export function createColabBackend({
      * on the host ("a later failure never discards earlier outputs", §6.4).
      */
     async run(jobsFile, onEvent = () => {}, signal = null) {
+      state.collectionSignal = signal;
       const doc = JSON.parse(readFileSync(jobsFile, "utf8"));
       // IP10: a restarted process must continue from what the last one collected. A complete,
       // checksum-verified manifest for this exact plan is the run's result; no upload, no exec and no
@@ -1115,7 +1120,7 @@ export function createColabBackend({
         const lostBatch = isLost(exec) || runOutcome.sentinelMissing === true;
         if (runOutcome.sentinelMissing) emit(onEvent, { type: "run_sentinel_missing", batch: name, detail: runOutcome.note });
         ran.push({ batch: name, code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut), sentinel: runOutcome.ok });
-        state.lastExec = { code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut), batch: name };
+        state.lastExec = { code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut), batch: name, sentinel: runOutcome.ok };
         emit(onEvent, { type: "run_exec", batch: name, code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut) });
 
         if (lostBatch) {
@@ -1123,7 +1128,10 @@ export function createColabBackend({
           return { lost: true, batchesRun: ran, manifest: reconciled.manifest, reconcile: reconciled };
         }
         // collect after every batch, so a later failure never discards this batch's work
-        collect = await collectOut({ onEvent, expectComplete: false });
+        collect = await collectOut({ onEvent, expectComplete: false, signal });
+        if (collect.transferFailed) {
+          throw new ColabCliError(`output collection failed after the runner exec (success sentinel: ${runOutcome.ok}): ${collect.problems.join("; ")}`, { collect, runnerExec: state.lastExec });
+        }
         manifest = collect.manifest;
         if (collect.manifest) batchManifests.push(collect.manifest);
       }
@@ -1133,7 +1141,8 @@ export function createColabBackend({
       // but it still costs a billed `colab exec`. A multi-batch plan needs the final collect to merge
       // what the last batch wrote.
       if (perBatch || !collect) {
-        collect = await collectOut({ onEvent, expectComplete: true });
+        collect = await collectOut({ onEvent, expectComplete: true, signal });
+        if (collect.transferFailed) throw new ColabCliError(`output collection failed: ${collect.problems.join("; ")}`, { collect });
         manifest = collect.manifest || manifest;
       }
       if (perBatch && batchManifests.length) manifest = mergeBatchManifests([...batchManifests, ...(manifest ? [manifest] : [])], jobs);
@@ -1142,7 +1151,7 @@ export function createColabBackend({
         // "failed" with no reason. Say what was collected, what was not, and that the tree was listed.
         const missing = collect.missing.length ? `, ${collect.missing.length} file(s) did not download (${collect.missing.slice(0, 5).join(", ")})` : "";
         throw new ColabCliError(
-          `the VM's out/ produced no manifest: ${collect.fetched}/${collect.files} file(s) collected${missing}${collect.problems.length ? `; ${collect.problems.slice(0, 3).join("; ")}` : ""}`,
+          `collection produced no manifest from the VM's out/: ${collect.fetched}/${collect.files} file(s) collected${missing}${collect.problems.length ? `; ${collect.problems.slice(0, 3).join("; ")}` : ""}`,
         );
       }
       return { lost: false, batchesRun: ran, manifest, collect, missing: collect.missing };
@@ -1180,12 +1189,13 @@ export function createColabBackend({
      * tree is listed again on the VM and every file is downloaded again (`remember: null`), because a
      * retry follows a failed digest and the cached "size and mtime agreed" record cannot be trusted.
      */
-    async collect(manifest, destDir, { onEvent = null } = {}) {
+    async collect(manifest, destDir, { onEvent = null, signal = state.collectionSignal } = {}) {
       const downloaded = await downloadTree({
         remoteDir: `${REMOTE_ROOT}/out`,
         localDir: destDir,
         onEvent,
         remember: null,
+        signal,
       });
       const verification = downloaded.ok
         ? verifyAgainstManifest(manifest, destDir, { hashes: true })
@@ -1204,6 +1214,8 @@ export function createColabBackend({
         fetched: downloaded.fetched ?? 0,
         skipped: downloaded.skipped ?? 0,
         missing: downloaded.missing ?? [],
+        collectionAttempts: downloaded.collectionAttempts ?? [],
+        transferFailed: downloaded.transferFailed === true,
       });
       return {
         ok: downloaded.ok && verification.verified,
@@ -1215,6 +1227,8 @@ export function createColabBackend({
         files: downloaded.files ?? 0,
         fetched: downloaded.fetched ?? 0,
         skipped: downloaded.skipped ?? 0,
+        collectionAttempts: downloaded.collectionAttempts ?? [],
+        transferFailed: downloaded.transferFailed === true,
       };
     },
 
@@ -1339,16 +1353,29 @@ export function createColabBackend({
     },
 
     /** Download specific VM outputs (presenter clips) without collecting the whole tree. */
-    async downloadListed(relativePaths, localDir, { onEvent = null } = {}) {
-      const fetched = [];
+    async downloadListed(relativePaths, localDir, { onEvent = null, signal = state.collectionSignal } = {}) {
       for (const rel of relativePaths || []) {
-        if (typeof rel !== "string" || rel.split("/").some((part) => !part || part === "." || part === "..")) {
+        if (typeof rel !== "string" || rel.includes("\\") || rel.includes("\0") || /^[A-Za-z]:/.test(rel) || rel.split("/").some((part) => !part || part === "." || part === "..")) {
           throw new Error("Refusing a render path that escapes the project");
         }
-        const result = await download({ remote: `${REMOTE_ROOT}/out/${rel}`, local: join(localDir, rel), optional: true, onEvent });
-        if (result.ok) fetched.push(rel);
       }
-      return { fetched };
+      const fetched = [], problems = [];
+      let transferFailed = false;
+      const window = collectionWindow();
+      try {
+        for (const rel of relativePaths || []) {
+          signal?.throwIfAborted();
+          const result = await download({ remote: `${REMOTE_ROOT}/out/${rel}`, local: join(localDir, rel), optional: true, onEvent, window, signal });
+          if (result.ok) fetched.push(rel);
+          else {
+            problems.push(result.detail);
+            transferFailed ||= result.transferFailed === true;
+          }
+        }
+        return { fetched, problems, collectionAttempts: window.attempts, transferFailed };
+      } finally {
+        state.collectionSpentMs += collectionElapsed(window);
+      }
     },
 
     /**
@@ -1398,17 +1425,115 @@ export function createColabBackend({
     state,
   };
 
-  async function download({ remote, local, optional = false, onEvent = null }) {
+  // The admission reserve is COLLECT + STOP, not stop-only. Earmark at most one third
+  // for collection: C = min(120 s, R / 3), S = R - C. The default R=360 s therefore
+  // permits 120 s of collection while retaining 240 s for teardown. A shorter custom
+  // reserve scales both parts; zero/invalid reserve permits no collection.
+  // Allowed time = min(C, original wall time left, budget time left - S).
+  // If overruns leave less than R, only time above the fixed S is collectable; below S
+  // nothing is collected. Never enlarge the budget, wall cap or independent watchdog.
+  // Charge previous collections plus this window's elapsed time against the committed
+  // estimate floor, so another collect cannot spend the same earmarked budget twice.
+  function collectionAllowance(collectionElapsedMs = 0) {
+    const reserveMs = Number.isFinite(Number(reserveMinutes)) ? Math.max(0, Number(reserveMinutes) * 60000) : 0;
+    const collectionMs = Math.min(120000, reserveMs / 3);
+    const stopMs = reserveMs - collectionMs;
+    let available = collectionMs;
+    const started = state.startedAtMs;
+    if (started !== null) {
+      const elapsed = Math.max(0, now() - started);
+      if (wallClockCapMinutes > 0) available = Math.min(available, wallClockCapMinutes * 60000 - elapsed);
+      const collectionUnits = (state.collectionSpentMs + collectionElapsedMs) / 3600000 * ratePerHour;
+      const spent = Math.max(elapsed / 3600000 * ratePerHour, state.spentEstimate + state.committedEstimate + collectionUnits);
+      available = Math.min(available, (budgetUnits - spent) / ratePerHour * 3600000 - stopMs);
+    }
+    return available;
+  }
+
+  function collectionWindow() {
+    const available = collectionAllowance();
+    const startedAt = now(), realStartedAt = Date.now();
+    return { startedAt, realStartedAt, deadline: startedAt + available, realDeadline: realStartedAt + available, attempts: [] };
+  }
+
+  const collectionElapsed = (window) => Math.max(0, now() - window.startedAt, Date.now() - window.realStartedAt);
+  const collectionRemaining = (window) => Math.floor(Math.min(collectionAllowance(collectionElapsed(window)), window.deadline - now(), window.realDeadline - Date.now()));
+
+  function permanentCollectionFailure(result) {
+    const text = String(result.output || result.log || "");
+    // A terminal session/path/auth failure must not turn into a reconnect or allocation.
+    return /not found|no such|permission denied|forbidden|unauthorized|(?:HTTP\S*[: ]+|status(?: code)?[=: ]+|\()(?:401|403|404)\b|FileNotFoundError|PermissionError|invalid (?:path|manifest)|escapes/i.test(text);
+  }
+
+  function retryableCollectionFailure(result) {
+    if (result.aborted || result.spawnError || permanentCollectionFailure(result)) return false;
+    const text = String(result.output || result.log || "");
+    return Boolean(result.timedOut) || /Connection (?:was lost|reset|aborted|closed)|ECONNRESET|ETIMEDOUT|ReadTimeout|ConnectTimeout|TimeoutError|timed out|WebSocketConnectionClosed/i.test(text);
+  }
+
+  async function collectionStep({ operation, remote = null, window, signal, onEvent, run, outcome }) {
+    let last = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      signal?.throwIfAborted();
+      const remaining = collectionRemaining(window);
+      if (remaining <= 0) {
+        const detail = `${last?.detail ? `${last.detail}; ` : ""}collection deadline/budget reached; preserving stop reserve`;
+        emit(onEvent, { type: "collection_limit", operation, remote, detail });
+        return { ok: false, transferFailed: true, detail };
+      }
+      const result = await run(remaining);
+      const verdict = outcome(result);
+      const detail = verdict.ok ? null : `${verdict.note}${redactTail(result, 2000) ? `: ${redactTail(result, 2000)}` : ""}`;
+      const retryable = !verdict.ok && retryableCollectionFailure(result);
+      const receipt = {
+        type: "collection_attempt", operation, remote, attempt, ok: verdict.ok,
+        code: result.code, timedOut: Boolean(result.timedOut), aborted: Boolean(result.aborted || signal?.aborted),
+        retryable, detail, log: client.steps?.at(-1)?.log ?? null,
+      };
+      window.attempts.push(receipt);
+      state.collectionAttempts.push(receipt);
+      mkdirSync(logs, { recursive: true });
+      appendFileSync(join(logs, "collection-attempts.jsonl"), `${JSON.stringify(receipt)}\n`, { mode: 0o600 });
+      emit(onEvent, receipt);
+      signal?.throwIfAborted();
+      last = { ...verdict, result, detail, transferFailed: !verdict.ok && (retryable || permanentCollectionFailure(result)) };
+      if (verdict.ok || !retryable || attempt === 3) return last;
+      const delayMs = Math.min(1000, Math.max(0, Number(collectionRetryMs) || 0)) * attempt;
+      if (collectionRemaining(window) <= delayMs) {
+        return { ...last, detail: `${detail}; collection deadline/budget leaves no time for reconnect; preserving stop reserve` };
+      }
+      emit(onEvent, { type: "collection_retry", operation, remote, attempt, delayMs, detail });
+      await abortableSleep(delayMs, signal);
+    }
+  }
+
+  async function download({ remote, local, optional = false, onEvent = null, window = null, signal = null }) {
     // G5-6: `colab download` writes the file and nothing else - it does not create the local parent,
     // and almost everything under out/ is in a subdirectory (assets/, attempts/, cache/, runs/...,
     // intermediates/). On a real VM 9 of the 13 files in the first collect failed with
     // "[Errno 2] No such file or directory", and the run lost the work the GPU had already done.
     mkdirSync(dirname(local), { recursive: true });
-    const result = await step(argvDownload({ session, remotePath: remote, localPath: local }), { label: "download", wallMs: 900000 });
-    if (result.code !== 0) {
-      emit(onEvent, { type: "download_failed", remote, code: result.code });
-      if (optional) return { ok: false, local, code: result.code };
-      throw new ColabCliError(`colab download ${remote} failed (exit ${result.code})`);
+    const target = window ? `${local}.collect-part` : local;
+    let transfer;
+    try {
+      const run = (remaining) => step(argvDownload({ session, remotePath: remote, localPath: target }), {
+        label: "download", wallMs: Math.min(900000, remaining), signal,
+      });
+      const outcome = (result) => ({ ok: result.code === 0 && !result.timedOut && !result.aborted, note: `colab download ${remote} failed (exit ${result.code}${result.timedOut ? ", timed out" : ""})` });
+      if (window) transfer = await collectionStep({ operation: "download", remote, window, signal, onEvent, run, outcome });
+      else {
+        const result = await run(900000);
+        transfer = { ...outcome(result), result, detail: redactTail(result, 2000) };
+      }
+      if (transfer.ok && window) renameSync(target, local);
+    } finally {
+      if (window) rmSync(target, { force: true });
+    }
+    if (!transfer.ok) {
+      const detail = transfer.detail || transfer.note;
+      emit(onEvent, { type: "download_failed", remote, code: transfer.result?.code, detail });
+      if (optional) return { ok: false, local, code: transfer.result?.code, detail, transferFailed: transfer.transferFailed };
+      throw new ColabCliError(`colab download ${remote} failed: ${detail}`);
     }
     return { ok: true, local };
   }
@@ -1420,11 +1545,26 @@ export function createColabBackend({
    * file is fetched by its own remote path. Asking the CLI for the directory used to look correct only
    * because the fake copied directories; on a real VM it fails.
    */
-  async function downloadTree({ remoteDir, localDir, onEvent = null, timeout = 300, remember = null }) {
-    const listed = await execScript(listScript, { step: "list-out", timeout, onEvent });
-    const listOutcome = execOutcome(listed, "list-out");
-    emit(onEvent, { type: "list_out", code: listed.code, lost: isLost(listed), sentinel: listOutcome.ok });
-    if (!listOutcome.ok) return { ok: false, files: 0, listed: listed.code, detail: listOutcome.note };
+  async function downloadTree(options) {
+    const window = collectionWindow();
+    try {
+      return await downloadTreeInWindow({ ...options, window });
+    } finally {
+      state.collectionSpentMs += collectionElapsed(window);
+    }
+  }
+
+  async function downloadTreeInWindow({ remoteDir, localDir, window, onEvent = null, timeout = 300, remember = null, signal = state.collectionSignal }) {
+    // Each invocation opens a fresh CLI connection to the stored session/kernel. Only this
+    // read-only listing is repeated: never ensureUp, run_jobs, reconcile or an upstream submit.
+    const listing = await collectionStep({
+      operation: "list-out", window, signal, onEvent,
+      run: (remaining) => execScript(listScript, { step: "list-out", timeout: Math.max(1, Math.min(timeout, 60, remaining / 1000)), wallMs: Math.min(60000, remaining), onEvent, signal }),
+      outcome: (result) => execOutcome(result, "list-out"),
+    });
+    const listed = listing.result;
+    emit(onEvent, { type: "list_out", code: listed?.code, lost: listed ? retryableCollectionFailure(listed) : false, sentinel: listing.ok, detail: listing.detail });
+    if (!listing.ok) return { ok: false, files: 0, listed: listed?.code, detail: listing.detail, transferFailed: listing.transferFailed, collectionAttempts: window.attempts };
     let entries;
     try {
       entries = entriesForCollect(parseTreeListing(listed.output), state.collectPolicy);
@@ -1435,7 +1575,10 @@ export function createColabBackend({
     let fetched = 0;
     let skipped = 0;
     const missing = [];
+    const problems = [];
+    let transferFailed = false;
     for (const entry of entries) {
+      signal?.throwIfAborted();
       const remote = `${remoteDir}/${entry.path}`;
       const local = join(localDir, ...entry.path.split("/"));
       // G5-14: every collect saw the whole tree (the last batch was collected twice in GPU test 5, and
@@ -1456,28 +1599,35 @@ export function createColabBackend({
         emit(onEvent, { type: 'collection_progress', completed: fetched + skipped, total: entries.length, file: entry.path, reused: true });
         continue;
       }
-      const result = await download({ remote, local, optional: true, onEvent });
+      const result = await download({ remote, local, optional: true, onEvent, window, signal });
       if (result.ok) {
         fetched += 1;
         if (remember) remember.set(remote, { bytes: entry.bytes, mtime: entry.mtime });
       } else {
+        remember?.delete(remote);
         missing.push(entry.path);
+        problems.push(result.detail);
+        transferFailed ||= result.transferFailed === true;
       }
       emit(onEvent, { type: 'collection_progress', completed: fetched + skipped, total: entries.length, file: entry.path, missing: missing.length });
     }
     emit(onEvent, { type: "download_tree", files: entries.length, fetched, skipped, missing: missing.length, remoteDir });
-    return { ok: fetched + skipped === entries.length, files: entries.length, fetched, skipped, missing, entries };
+    return { ok: fetched + skipped === entries.length, files: entries.length, fetched, skipped, missing, entries, detail: problems.join("; "), transferFailed, collectionAttempts: window.attempts };
   }
 
-  async function collectOut({ onEvent = null, expectComplete = true, jobsDoc = null } = {}) {
+  async function collectOut({ onEvent = null, expectComplete = true, jobsDoc = null, signal = state.collectionSignal } = {}) {
     const localOut = join(scratch, "out");
-    const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent, remember: state.downloaded });
+    const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent, remember: state.downloaded, signal });
     const manifestPath = join(localOut, "manifest.json");
     // G5-7: the manifest is the run's verdict and it lands with the rest of the tree. Requiring the
     // *whole* collect to have succeeded before reading it threw the verdict away whenever one sibling
     // failed - and the host was then left with `counts: null`, "applied 0" and no error text at all.
     let manifest = null;
-    if (existsSync(manifestPath)) manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const transferProblems = result.detail ? [result.detail] : [];
+    if (result.entries?.some((entry) => entry.path === "manifest.json") && !(result.missing ?? []).includes("manifest.json") && existsSync(manifestPath)) {
+      try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); }
+      catch (error) { transferProblems.push(`collected manifest.json is invalid: ${error.message}`); }
+    }
     const attemptsPath = join(localOut, "attempts");
     const attempts = existsSync(attemptsPath)
       ? readdirSync(attemptsPath).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(readFileSync(join(attemptsPath, name), "utf8")))
@@ -1500,7 +1650,7 @@ export function createColabBackend({
       manifest,
       verified: verification.verified,
       missing: result.missing ?? [],
-      problems: verification.problems,
+      problems: [...transferProblems, ...verification.problems],
       previewPromoted,
     });
     emit(onEvent, {
@@ -1508,7 +1658,10 @@ export function createColabBackend({
       complete: manifest?.complete === true,
       attempts: attempts.length,
       verified: verification.verified,
-      problems: verification.problems,
+      problems: [...transferProblems, ...verification.problems],
+      transferFailed: result.transferFailed === true,
+      runnerExecSucceeded: state.lastExec?.sentinel === true,
+      collectionAttempts: result.collectionAttempts ?? [],
       expectComplete,
       // G5-7: a collect the UI can explain: what the VM listed, what arrived, and what did not
       files: result.files ?? 0,
@@ -1521,13 +1674,21 @@ export function createColabBackend({
       collectionComplete: outcome.collectionComplete,
       recoveredJobs: outcome.recoveredJobs,
     });
+    // Re-transferring bytes cannot repair a semantic/security error in a manifest path.
+    // Stop here rather than letting runPackage's digest-repair loop re-download the tree.
+    if (verification.problems.some((problem) => /has no relative path|contains a NUL byte|is absolute|escapes the collected directory/.test(problem))) {
+      throw new ColabCliError(`collected manifest rejected: ${verification.problems.join("; ")}`, { problems: verification.problems, local: localOut });
+    }
     return {
       ok: result.ok,
       manifest,
       attempts,
       local: localOut,
       verified: verification.verified,
-      problems: verification.problems,
+      problems: [...transferProblems, ...verification.problems],
+      transferFailed: result.transferFailed === true,
+      runnerExecSucceeded: state.lastExec?.sentinel === true,
+      collectionAttempts: result.collectionAttempts ?? [],
       missing: result.missing ?? [],
       files: result.files ?? 0,
       fetched: result.fetched ?? 0,

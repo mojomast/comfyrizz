@@ -48,13 +48,21 @@ test('Super Easy shows one primary Generate button and no level picker', () => {
   assert.equal(count(html, /<select\b/g), 3, 'motion model, lyric style and output orientation');
   assert.match(html, /data-super-easy-motion-model/u);
   assert.match(html, /data-super-easy-lyrics-style/u);
-  assert.match(html, /id="super-easy-custom-length"[^>]*min="1"[^>]*max="90"[^>]*step="1"/u);
+  assert.match(html, /id="super-easy-custom-length"[^>]*min="1"[^>]*max="120"[^>]*step="1"/u);
   assert.match(html, /data-super-easy-deepseek-no-thinking/);
   assert.match(html, /up to 12 additional SVG requests\. Provider charges may apply/);
   assert.ok(html.indexOf('Provider charges may apply') < html.indexOf('data-super-easy-generate'));
   assert.equal(count(html, /data-super-easy-video-type(?=[\s>])/g), VIDEO_TYPE_LIST.length + 1, 'Custom plus every shared preset');
   assert.equal(count(html, /data-super-easy-context-files/g), 1, 'one native file picker');
   assert.equal(count(html, /data-super-easy-context-url/g), 1, 'one explicit URL input');
+});
+
+test('120 seconds remains an exact custom duration rather than a new preset', () => {
+  const html = renderSuperEasyHome({ lengthS: 120 });
+  assert.match(html, /id="super-easy-custom-length"[^>]*value="120"[^>]*placeholder="1–120"/u);
+  assert.doesNotMatch(html, /value="120" data-super-easy-length/u);
+  assert.match(html, /Enter a whole number from 1 to 120 seconds/u);
+  assert.match(html, /Non-preset durations are exact/u);
 });
 
 test('native video-type cards default to Custom and include every shared preset', () => {

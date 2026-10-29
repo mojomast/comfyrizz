@@ -16,6 +16,8 @@ export interface CaptionInput {
   palette?: string[];
   style?: string;
   aspect?: Aspect;
+  /** Renderer-slot framing when an explicit panel source is requested. */
+  framing?: string;
   cutout?: boolean;
   /** The still may carry text; omit the "no text" clause. */
   text?: boolean;
@@ -63,14 +65,14 @@ export function sourceDims(aspect: Aspect): { width: number; height: number } {
 
 export function expandFluxCaption(input: CaptionInput): string {
   const palette = input.palette?.length ? `palette ${input.palette.join(', ')}` : 'a restrained launch palette';
-  const style = input.style ?? 'editorial 3D render, soft volumetric light, subtle grain';
+  const style = input.style?.trim();
   const aspect = input.aspect ?? '16:9';
-  const framing = FRAMING[aspect];
+  const framing = input.framing ?? FRAMING[aspect];
   const cutout = input.cutout ? 'isolated subject on a transparent background, clean silhouette' : 'full-bleed scene';
   const camera = input.labelled ? `; ${STATIC_CAMERA}` : '';
   const text = input.text || input.labelled ? KEEP_TEXT : NEGATIVE;
   const styleBlock = input.styleBlock ? `; ${input.styleBlock.replace(/[.;]+$/, '')}` : '';
-  return `${input.intent.trim().replace(/[.!?]+$/, '')}. ${style}; ${palette}; ${framing}; ${cutout}${camera}; ${text}${styleBlock}.`;
+  return `${input.intent.trim().replace(/[.!?]+$/, '')}. ${style ? `${style}; ` : ''}${palette}; ${framing}; ${cutout}${camera}; ${text}${styleBlock}.`;
 }
 
 export interface ReferenceEditCaptionInput {
@@ -79,23 +81,29 @@ export interface ReferenceEditCaptionInput {
   style?: string;
   palette?: string[];
   aspect?: Aspect;
+  framing?: string;
+  /** Only explicitly label-bearing references preserve generated lettering. */
+  text?: boolean;
+  labelled?: boolean;
 }
 
 /**
- * Klein reference-edit caption (GPU test 2, "Best prompt templates"): the SVG
- * raster is image0 and the graph keeps layout, positions and labels while it
- * restyles the surface. The template is deliberately explicit about keeping
- * every label, because the edit is what makes an agent SVG look finished.
+ * Reference edits can change a photographic view as well as restyle a diagram.
+ * Preserve identity/materials by default; style and label preservation are opt-in.
  */
 export function expandReferenceEditCaption(input: ReferenceEditCaptionInput): string {
   const subject = input.intent.trim().replace(/[.!?]+$/, '');
-  const style = input.style?.trim() || 'clay';
+  const style = input.style?.trim();
   const palette = input.palette?.length ? `palette ${input.palette.join(', ')}` : 'the source palette';
-  const framing = FRAMING[input.aspect ?? '16:9'];
+  const framing = input.framing ?? FRAMING[input.aspect ?? '16:9'];
   return (
-    `Restyle this ${subject} as ${style}; ${palette}; ${framing}. ` +
-    'Keep the exact layout, positions, colours and all labels exactly as written. ' +
-    'Do not add or remove elements.'
+    (style ? `Restyle this ${subject} as ${style}` : `Edit the supplied reference: ${subject}`) +
+    `; ${palette}; ${framing}. ` +
+    (input.text || input.labelled
+      ? 'Keep the exact layout, positions, colours and all labels exactly as written. Do not add or remove elements. '
+      : 'Preserve the reference identity, design and materials except for the requested changes. ') +
+    (input.text || input.labelled ? KEEP_TEXT : NEGATIVE) +
+    (input.labelled ? `; ${STATIC_CAMERA}` : '') + '.'
   );
 }
 

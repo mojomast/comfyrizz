@@ -1,6 +1,7 @@
 // W1: GET the captured workflow, and the export bundle contains it with no secrets.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
@@ -108,6 +109,7 @@ before(async () => {
       return { output, bytes: fake.length, frames: 12, hash: 'abc' };
     },
   });
+  collectMockContribution(pkg, app.store.dir);
   app.store.write(pkg);
   const packageDir = dirname(app.store.path(pkg.id));
   mkdirSync(join(packageDir, 'assets'), { recursive: true });

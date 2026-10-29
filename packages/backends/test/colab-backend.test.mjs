@@ -209,7 +209,9 @@ test("a lost exec reconciles on the VM and never re-runs the batch", async () =>
 test("a stop the CLI accepts but the session survives is stop_unconfirmed", async () => {
   const ws = workspace();
   const fake = installFakeColab(ws.dir, { state: baseState({ keepAfterStop: true }) });
-  const backend = backendFor(fake, { workspace: ws, options: { teardownRetries: 3 } });
+  // Count teardown's attempts without the 1.2 s watchdog racing it under full-suite load.
+  // Watchdog arm/disarm and abandonment are covered separately.
+  const backend = backendFor(fake, { workspace: ws, options: { teardownRetries: 3, watchdogMinutes: 0 } });
 
   await backend.ensureUp({ approved: true });
   const teardown = await backend.teardown("user");

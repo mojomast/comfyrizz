@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCpuAgentRunner, motionGraphicsCompletionProblems } from '../src/agent-runner.mjs';
-import { replayProvider } from './fake-provider.mjs';
+import { replayProvider, withPlannedPlate } from './fake-provider.mjs';
 
 const NARRATION = 'The jerboa lifts the lamp.';
 
@@ -84,15 +84,15 @@ async function setup(t, calls) {
 test('native planner retains speech prohibitions despite narration-cue wording', async t => {
   for (const constraint of ['Silent', 'No audio', 'No spoken words']) {
     const brief = `Create exactly 6 seconds of motion graphics. ${constraint}. Narration-timed motion with cue_phrases.`;
-    const { runner, provider } = await setup(t, [{ name: 'storyboard.propose', args: {
+    const { runner, provider } = await setup(t, withPlannedPlate([{ name: 'storyboard.propose', args: {
       brief, title: 'QUIET', proposal: { logline: 'A readable title.', look: 'Plain cream.', soundtrack: 'Silent.' },
       scenes: [{ id: 's_title', layout: 'title', preferredFrames: 180, narration: 'Unrequested speech.', motion: { cue_phrases: ['Unrequested'] }, copy: { headline: 'QUIET' } }],
-    } }]);
+    } }], 's_title'));
     const result = await runner({ brief, videoType: 'title-reveal', provider: 'custom' });
     assert.equal(result.package.scenes[0].narration, undefined, constraint);
     assert.equal(result.package.scenes[0].motion?.cue_phrases, undefined, constraint);
     assert.equal(result.package.voice.enabled, false, constraint);
-    assert.equal(provider.requests.length, 2, 'no narration repair required');
+    assert.equal(provider.requests.length, 4, 'no narration repair required; the supporting image is explicitly planned and placed');
   }
 });
 
@@ -210,7 +210,7 @@ test('PS08 motion-graphics repair plans the requested scene-referenced still wit
 
   const request = provider.requests[2];
   const system = request.messages[0].content;
-  assert.match(system, /Create assets only when the report explicitly requires them/i);
+  assert.match(system, /Create assets only when needed to resolve a reported media\/coverage issue/i);
 
   const prompt = JSON.stringify(request.messages);
   assert.match(prompt, /Pending GPU still repair/i);

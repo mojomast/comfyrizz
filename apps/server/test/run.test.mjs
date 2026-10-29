@@ -8,12 +8,15 @@ import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
 import { createRunController } from '../src/run.mjs';
 import { repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
+import { plannedContribution, collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const EXAMPLE_PACKAGE = JSON.parse(readFileSync(join(repoRoot, 'examples', 'launch-demo', 'package.json'), 'utf8'));
 
 function fixturePackage() {
-  return structuredClone(EXAMPLE_PACKAGE);
+  const pkg = structuredClone(EXAMPLE_PACKAGE);
+  plannedContribution(pkg);
+  return pkg;
 }
 
 /**
@@ -44,6 +47,7 @@ function fakeBackend(id, { gpuMinutes = 2, teardownState = 'stopped', failRun = 
         throw error;
       }
       emit({ v: 1, event: 'run_phase', phase: 'ran', counts: { succeeded: 1 } });
+      collectMockContribution(pkg, opts.outDir);
       emit({ v: 1, event: 'run_phase', phase: 'applied', assets: 0, candidates: 0 });
       const teardown = await backend.teardown('done');
       emit({ v: 1, event: 'run_phase', phase: 'teardown', state: teardown.state });
@@ -71,7 +75,10 @@ function fakeBackend(id, { gpuMinutes = 2, teardownState = 'stopped', failRun = 
 }
 
 /** A stub render that never touches Remotion: the run controller only forwards its result. */
-const stubRender = async () => ({ output: '/tmp/run.mp4', bytes: 1234, frames: 7, hash: 'stub' });
+const stubRender = async (_packagePath, output) => {
+  writeFileSync(output, 'mock-run-video');
+  return { output, bytes: 14, frames: 7, hash: 'stub' };
+};
 
 function makeApp({ factory }) {
   const runtime = mkdtempSync(join(tmpdir(), 'comfyrizz-run-'));
@@ -195,6 +202,7 @@ test('full-run completion preserves intervening timeline edits and existing file
       writeFileSync(join(opts.outDir, 'assets/a_live.png'), 'new output');
       writeFileSync(join(opts.outDir, pkg.assets.a_icon_check.file), 'must not overwrite the original');
       const generated = structuredClone(pkg);
+      collectMockContribution(generated, opts.outDir);
       generated.assets.a_live = { ...generated.assets.a_live, status: 'ready', file: 'assets/a_live.png',
         sha256: createHash('sha256').update('new output').digest('hex'), bytes: 10, license: { id: 'CC0-1.0' }, model_license: { id: 'Apache-2.0' }, redistributable: true };
       return { package: generated, ok: true, jobsDoc, manifest: { complete: true, jobs: [] }, teardown: { state: 'stopped' } };

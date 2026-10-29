@@ -1,5 +1,5 @@
-import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { copyGenerationReceipts, assertRenderedContribution } from '../../../packages/jobs/src/model-contribution.mjs';
+import { createReadStream, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyGenerationReceipts, assertRenderedContribution, recordRenderedContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -46,7 +46,7 @@ import { createKokoroSynth, probeKokoroRuntime } from './characters/kokoro-synth
 import { ingestRun } from './takes/ingest.mjs';
 import { selectTake } from './takes/select.mjs';
 import { createTakeStore } from './takes/store.mjs';
-import { TAKES_SCHEMA, shouldAutoSelect } from './takes/model.mjs';
+import { TAKES_SCHEMA, shouldAutoSelect, genFingerprint } from './takes/model.mjs';
 import { createTakeRoutes } from './takes/routes.mjs';
 import { createThumbRoutes } from './thumbs/routes.mjs';
 import { buildCorrection } from './takes/correction.mjs';
@@ -70,7 +70,7 @@ import { KOKORO_VOICES, QWEN_SPEAKERS, VOICE_PRESETS } from '../../../packages/t
 import { animationOptions } from './animation-options.mjs';
 import { createMediaTickets, safeMediaPath, serveTicket } from './media-range.mjs';
 import { createRenderRoutes } from './routes/render.mjs';
-import { createDeliverySnapshot, preflightDelivery } from './productions/delivery-snapshot.mjs';
+import { createDeliverySnapshot, preflightDelivery, stageDeliverySnapshot } from './productions/delivery-snapshot.mjs';
 import { createWorkerRenderer } from './routes/render-worker.mjs';
 import { createConversationRoutes } from './routes/conversations.mjs';
 import { createPackageRoutes } from './routes/packages.mjs';
@@ -465,6 +465,15 @@ export function createApp({
           if (assetEditedSinceBaseline({ baseline, current, pkg, assetId })) continue;
           for (const take of assetTakes) {
             if (!shouldAutoSelect(takeDoc.clips?.[assetId], take)) continue;
+            // A correction's authored request is staged, not saved until its
+            // output lands. Preserve that request rather than the old prompt
+            // when selecting a source-fingerprinted take. Changed references
+            // still leave the output as a candidate for explicit review.
+            const sourceGen = pkg.assets?.[assetId]?.gen;
+            if (take.sourceGenFingerprint && sourceGen) {
+              if (genFingerprint(sourceGen, next) !== take.sourceGenFingerprint) continue;
+              next = { ...next, assets: { ...next.assets, [assetId]: { ...next.assets[assetId], gen: structuredClone(sourceGen) } } };
+            }
             next = selectTake(next, takeDoc, assetId, take.takeId);
             candidate[assetId] = take.takeId;
           }
@@ -521,10 +530,33 @@ export function createApp({
     // A partial run keeps its finished plates (H8 already applied them), but there is nothing
     // honest to render when the manifest says the run did not complete.
     if (result.ok === false || result.manifest?.complete === false) return { revision: saved.revision, render: null };
-    const delivery = preflightDelivery(createDeliverySnapshot({ pkg: saved, packageDir, intent: 'final' }));
+    const snapshot = createDeliverySnapshot({ pkg: saved, packageDir, intent: 'final' });
+    const delivery = preflightDelivery(snapshot);
     if (!delivery.ok) throw new Error(delivery.blockers[0].message);
     const output = join(rendersDir, `${record.runId}.mp4`);
-    const rendered = await render(store.path(id), output, { onLog: line => events.publish({ type: 'run.log', runId: record.runId, line }) });
+    // Freeze the accepted package AND its source bytes while the editor remains live.
+    // A fresh output path means an old/cached MP4 can never acquire new evidence.
+    const stagingDir = mkdtempSync(join(rendersDir, `${record.runId}-`));
+    let rendered, receipt, renderMetadata;
+    try {
+      const staged = stageDeliverySnapshot({ snapshot, packageDir, stagingDir });
+      const videoPath = join(stagingDir, 'video.mp4');
+      rendered = await render(staged.packagePath, videoPath, { onLog: line => events.publish({ type: 'run.log', runId: record.runId, line }) });
+      const renderInput = { package: rendered.package ?? snapshot.package, timeline: rendered.timeline ?? snapshot.timeline };
+      receipt = recordRenderedContribution({ pkg: renderInput.package, timeline: renderInput.timeline,
+        packageDir: staged.packageDir, receiptDir: packageDir, videoPath });
+      renderMetadata = { bytes: rendered.bytes, frames: rendered.frames, timeline_sha256: receipt.timelineHash,
+        package_sha256: receipt.packageHash, video_sha256: receipt.videoSha256, url: `/api/run/${record.runId}/video` };
+      // Historical downloads bind to this render's inputs, never a later editable revision.
+      // Unbound legacy runs have no durable state.json, so retain their binding here too.
+      writeFileSync(join(runtimeDir, 'runs', record.runId, 'render-input.json'), JSON.stringify({
+        ...renderInput, runId: record.runId, packageId: id, render: renderMetadata,
+      }), { mode: 0o600 });
+      renameSync(videoPath, output);
+      record.packageId = id;
+    } finally {
+      rmSync(stagingDir, { recursive: true, force: true });
+    }
     events.publish({
       type: 'run.rendered',
       runId: record.runId,
@@ -532,11 +564,12 @@ export function createApp({
       revision: saved.revision,
       bytes: rendered.bytes,
       frames: rendered.frames,
-      timeline_sha256: rendered.hash,
+      timeline_sha256: receipt.timelineHash,
+      video_sha256: receipt.videoSha256,
     });
     return {
       revision: saved.revision,
-      render: { bytes: rendered.bytes, frames: rendered.frames, timeline_sha256: rendered.hash, url: `/api/run/${record.runId}/video` },
+      render: renderMetadata,
     };
   }
 
@@ -1662,11 +1695,7 @@ export function createApp({
         if (record.status !== 'completed' || !file) return sendJson(response, 404, { error: 'artifact not available' });
         const exportRoot = resolve(directory, 'exports', record.packageId);
         const target = safeMediaPath(exportRoot, name);
-        if (name === 'video.mp4' || name === 'package.zip') {
-          const videoPath = safeMediaPath(exportRoot, 'video.mp4');
-          assertRenderedContribution({ packageDir: join(directory, 'work'), packageId: record.packageId,
-            videoSha256: createHash('sha256').update(readFileSync(videoPath)).digest('hex') });
-        }
+        const videoPath = name === 'video.mp4' || name === 'package.zip' ? safeMediaPath(exportRoot, 'video.mp4') : null;
         try {
           // Membership in the result manifest is not permission to follow a
           // replaced artifact (or export directory) outside its pipeline run.
@@ -1675,8 +1704,20 @@ export function createApp({
             || !realpathSync(target).startsWith(realRoot + sep) || !statSync(target).isFile()) {
             return sendJson(response, 404, { error: 'artifact not available' });
           }
+          if ((name === 'video.mp4' || name === 'package.zip') && (!videoPath
+            || !realpathSync(videoPath).startsWith(realRoot + sep) || !statSync(videoPath).isFile())) {
+            return sendJson(response, 404, { error: 'artifact not available' });
+          }
         } catch {
           return sendJson(response, 404, { error: 'artifact not available' });
+        }
+        if (videoPath) {
+          try {
+            assertRenderedContribution({ packageDir: join(directory, 'work'), packageId: record.packageId,
+              videoSha256: createHash('sha256').update(readFileSync(videoPath)).digest('hex') });
+          } catch (error) {
+            return sendJson(response, error.status ?? 422, { error: error.message, code: error.code });
+          }
         }
         return serveStaticFile(request, response, target, { 'content-type': MIME[extname(name)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
       }
@@ -2258,20 +2299,36 @@ export function createApp({
 
     const runVideoMatch = /^\/api\/run\/([^/]+)\/video$/.exec(url.pathname);
     if (runVideoMatch && request.method === 'GET') {
-      const record = runs.get(runVideoMatch[1]);
+      const runId = runVideoMatch[1];
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(runId)) return sendJson(response, 404, { error: 'run not found' });
+      const record = runs.get(runId) ?? readJsonFile(join(runtimeDir, 'runs', runId, 'state.json'))
+        ?? readJsonFile(join(runtimeDir, 'runs', runId, 'render-input.json'));
+      if (record?.runId !== runId) return sendJson(response, 404, { error: 'run not found' });
       const file = record?.render ? join(rendersDir, `${record.runId}.mp4`) : null;
       if (!file || !existsSync(file)) return sendJson(response, 404, { error: 'no rendered MP4 for this run yet' });
-      const size = statSync(file).size;
-      response.writeHead(200, {
+      let bytes;
+      try {
+        const input = readJsonFile(join(runtimeDir, 'runs', runId, 'render-input.json'));
+        // Missing legacy metadata must fail closed, not skip optional helper checks.
+        if (!input?.package || input.package.id !== record.packageId
+          || ![record.render.package_sha256, record.render.timeline_sha256, record.render.video_sha256].every(value => /^[a-f0-9]{64}$/.test(value ?? ''))
+          || input.timeline?.hash !== record.render.timeline_sha256) assertRenderedContribution({});
+        // Verify and send the SAME buffer: replacing the path after verification
+        // cannot swap unverified bytes into a subsequently opened stream.
+        bytes = readFileSync(file);
+        const videoSha256 = createHash('sha256').update(bytes).digest('hex');
+        if (videoSha256 !== record.render.video_sha256) assertRenderedContribution({});
+        assertRenderedContribution({ packageDir: store.dir, pkg: input.package, packageId: record.packageId,
+          packageHash: record.render.package_sha256, timelineHash: record.render.timeline_sha256, videoSha256 });
+      } catch (error) {
+        return sendJson(response, error.status ?? 422, { error: error.message, code: error.code ?? 'COMFY_RENDER_RECEIPT_REQUIRED' });
+      }
+      return sendBytes(response, 200, bytes, {
         'content-type': 'video/mp4',
-        'content-length': size,
-        'cache-control': 'no-store',
         'content-disposition': `attachment; filename="comfyrizz-${record.runId}.mp4"`,
         'x-comfyrizz-frames': String(record.render.frames ?? ''),
         'x-comfyrizz-timeline-sha256': String(record.render.timeline_sha256 ?? ''),
       });
-      createReadStream(file).pipe(response);
-      return;
     }
 
     // MS4: the last frame-QA result for a render (or the latest for a package).

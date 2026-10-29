@@ -57,8 +57,16 @@ function positiveMatch(text: string, pattern: RegExp): boolean {
   return !positiveMatches(text, pattern).next().done;
 }
 
+// Quoted dialogue, titles and source copy are content, not production policy.
+// Keep this classification view separate: the original brief must be serialized
+// verbatim, including punctuation and every word of supplied dialogue.
+function instructionText(brief: string): string {
+  return String(brief ?? '').replace(/"(?:\\.|[^"\\])*"|“[^”]*”|(?<![\p{L}\p{N}])'(?:\\.|(?<=[\p{L}\p{N}])'(?=[\p{L}\p{N}])|[^'\\])*'(?![\p{L}\p{N}])|‘(?:(?<=[\p{L}\p{N}])’(?=[\p{L}\p{N}])|[^’])*’/gu, ' [supplied content] ');
+}
+
 /** Shared, subject-neutral visual look policy for UI serialization and planning. */
 export function requestsLiveActionLook(text: string): boolean {
+  text = instructionText(text);
   const nativeMedium = positiveMatch(text, /\b(?:native\s+(?:editable\s+)?(?:motion\s+graphics|typography|graphics|bar\s+chart)|(?:bar\s+)?charts?|graphs?)\b/i);
   const pattern = /\b(?:real\s+(?:humans?|people)|realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?|live[\s-]*action)\b/i;
   for (const { match, prefix } of positiveMatches(text, pattern)) {
@@ -70,16 +78,34 @@ export function requestsLiveActionLook(text: string): boolean {
   return false;
 }
 
+// Only bare, coordinated production elements share a prohibition. Do not
+// extend "no loud music" to all music, or treat a story mentioning a negative
+// list as an instruction. clausePrefix also resets at "but add" / "and use".
+const SPEECH_ITEM = 'dialogue|narration|narrator|speech|speaking|spoken\\s+words?|voice[\\s-]?over|lyrics|singing|vocals?|(?:whispered\\s+)?voices|vocal\\s+samples';
+const AUDIO_LIST_ITEM = `(?:(?:any|additional|extra)\\s+)?(?:on[\\s-]screen\\s+(?:copy|text|captions?)|copy|text|captions?|subtitles?|titles?|logos?|people|humans?|characters?|photos?|photographs?|images?|footage|claims|tray|plate|hands|cuts|transitions|opener|outro|${SPEECH_ITEM}|music|soundtrack|score|instrumental(?:\\s+bed)?|BGM|sound\\s+effects?|SFX)`;
+const NEGATIVE_LIST_PREFIX = new RegExp(`^\\s*(?:please\\s+)?(?:(?:no|without|avoid|exclude)|(?:do\\s+not|don['’]t)\\s+(?:add|include|use))\\s+(?:${AUDIO_LIST_ITEM}(?:\\s*,\\s*(?:(?:and|or|nor)\\s+)?|\\s+(?:and|or|nor)\\s+))+(?:(?:any|additional|extra)\\s+)?$`, 'i');
+
+function prohibitedInList(text: string, subjects: string): boolean {
+  const pattern = new RegExp(`\\b(?:${subjects})\\b(?=\\s*(?:[,;.!?\\n]|$|\\b(?:and|or|nor)\\b))`, 'gi');
+  for (const match of text.matchAll(pattern)) {
+    if (NEGATIVE_LIST_PREFIX.test(clausePrefix(text, match.index ?? 0))) return true;
+  }
+  return false;
+}
+
 /** Browser-safe audio policy shared by brief serialization and scene planning. */
 export function classifyAudioIntent(brief: string): AudioIntent {
-  const text = String(brief ?? '');
-  const silent = positiveMatch(text, /\bsilent\b|\b(?:full|complete|total)\s+silence\b|\bin\s+silence\b/i)
+  const text = instructionText(brief);
+  // "The signal went silent" and "a silent room" describe the story. Silence
+  // applies to the output only when requested as an audio/film directive.
+  const silent = positiveMatch(text, /(?:^|[.!?;\n])\s*(?:please\s+)?silent\b(?=\s*(?:[,;.!?\n]|$))|\bsilent\s+(?:(?:generated|native)\s+)?(?:film|video|sequence|short|title|output)\b|\b(?:make|keep|render)\s+(?:it|(?:the|this)\s+(?:film|video|audio|output))\s+(?:completely\s+)?silent\b|\b(?:full|complete|total)\s+silence\b|\b(?:film|video|output)\s+in\s+silence\b/i)
     || /\b(?:no|without)\s+(?:any\s+)?(?:audio|sound)\b(?!\s+(?:effects?|design)\b)/i.test(text);
   const wordless = silent || positiveMatch(text, /\bwordless\b/i)
-    || /\b(?:no|without)\s+(?:any\s+)?(?:dialogue|narration|narrator|speech|spoken\s+words?|voice[\s-]?over)\b/i.test(text)
-    || /\bno\s+(?:dialogue|narration|speech|music|captions?|subtitles?)(?:\s*(?:,|or|and)\s*(?:dialogue|narration|speech|music|captions?|subtitles?))*\s*(?:,|or|and)\s*(?:dialogue|narration|speech|spoken\s+words?|voice[\s-]?over)\b/i.test(text);
+    || new RegExp(`\\b(?:no|without)\\s+(?:any\\s+)?(?:${SPEECH_ITEM})\\b`, 'i').test(text)
+    || prohibitedInList(text, SPEECH_ITEM);
   const musicProhibited = silent || /\b(?:no|without)\s+(?:any\s+)?(?:music|soundtrack|score|instrumental(?:\s+bed)?|BGM)\b/i.test(text)
-    || /\bno\s+(?:dialogue|narration|speech)(?:\s*,\s*(?:dialogue|narration|speech))*\s*(?:,|or|and)\s*music\b/i.test(text);
+    || /\bno\s+(?:dialogue|narration|speech)(?:\s*,\s*(?:dialogue|narration|speech))*\s*(?:,|or|and)\s*music\b/i.test(text)
+    || prohibitedInList(text, 'music|soundtrack|score|instrumental(?:\\s+bed)?|BGM');
   const narrationRequested = !wordless && positiveMatch(text, /\b(?:narrat(?:e|es|ed|ing|ion|or)|voice[\s-]?over|spoken\s+(?:script|narration)|Kokoro)\b/i);
   const speechRequested = !wordless && (narrationRequested || positiveMatch(text, /\b(?:dialogue|speech|spoken|speak(?:s|ing)?|talk(?:s|ing)?|conversations?)\b/i));
   const musicRequested = !musicProhibited && positiveMatch(text, /\b(?:music|soundtrack|score|instrumental(?:\s+bed)?|theme\s+song|BGM)\b/i);
@@ -122,7 +148,7 @@ function requestedDuration(brief: string): { requestedSeconds: number | null; ex
  * With no fallback, the original brief-only inference remains unchanged.
  */
 export function classifyProductionIntent(brief: string, fallbackKind?: ProductionIntentKind): ProductionIntent {
-  const text = String(brief ?? '');
+  const text = instructionText(brief);
   const proceduralConstraint = positiveMatch(
     text,
     /\b(?:motion[\s-]+graphics?|SVG|charts?|graphs?|vector(?:\s+|\s*-)*(?:animation|graphics?|art)|procedural(?:\s+|\s*-)*(?:animation|graphics?|video)|animated\s+(?:charts?|graphs?|diagrams?|infographics?)|data[\s-]+driven\s+(?:animation|video)|kinetic\s+typography)\b/i,
@@ -148,10 +174,15 @@ export function classifyProductionIntent(brief: string, fallbackKind?: Productio
     /\b(?:native\s+(?:audio|sound|soundscape)|soundscape|sound\s+design|foley|ambient\s+sound|coastal\s+sound|gentle\s+[\w-]+\s+sound)\b/i,
   );
   const audioIntent = classifyAudioIntent(text);
-  const explicitRemotionCopy = positiveMatch(text, /\b(?:Remotion(?:\s+[\w-]+){0,3}\s+(?:titles?|title\s+cards?|end\s+cards?|headlines?|copy|captions?|lower\s+thirds?)|(?:titles?|title\s+cards?|end\s+cards?|headlines?|copy|captions?|lower\s+thirds?)\s+(?:in|with|using)\s+Remotion)\b/i);
-  const noCaptions = !explicitRemotionCopy && (/\bno\b[^.!?\n]{0,90}\b(?:captions?|subtitles?|text|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?|copy)\b/i.test(text)
-    || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?)\b/i.test(text)
-    || /\btext[\s-]+free\b/i.test(text));
+  const explicitRemotionCopy = positiveMatch(text, /\b(?:(?:Remotion|native)(?:\s+[\w-]+){0,3}\s+(?:titles?|title\s+cards?|end\s+cards?|headlines?|copy|captions?|credits?|overlays?|lower[\s-]+thirds?)|(?:titles?|title\s+cards?|end\s+cards?|headlines?|copy|captions?|credits?|overlays?|lower[\s-]+thirds?)\s+(?:in|with|using)\s+Remotion|required\s+copy)\b/i);
+  // Subtitles, extra words and lettering baked into generated footage are
+  // separate from authored native titles/credits. Only a blanket text ban
+  // overrides explicit overlay instructions.
+  const allTextBan = /\b(?:no|without)\s+(?:(?:any|all)\s+)?(?:on[\s-]+screen\s+)?(?:text|copy)\b(?!\s+(?:in|on|within)\s+(?:the\s+)?(?:generated|AI|imagery|footage)\b)/i.test(text);
+  const editorialText = text.replace(/\b(?:generated|AI[\s-]+generated)\s+(?:footage|imagery|images?|shots?)\s+(?:(?:must|should)\s+be\s+|is\s+)?text[\s-]+free\b|\btext[\s-]+free\s+(?:generated|AI[\s-]+generated)\s+(?:footage|imagery|images?|shots?)\b/gi, '');
+  const noCaptions = allTextBan || (!explicitRemotionCopy && (/\b(?:no|without)\s+(?:captions?|headlines?|titles?|title\s+cards?|end\s+cards?|lower[\s-]+thirds?)\b/i.test(text)
+    || prohibitedInList(text, 'captions?|headlines?|titles?|copy|text')
+    || /\btext[\s-]+free\b/i.test(editorialText)));
   const requiresNarrationCues = /\bcue_phrases\b|narration[\s-]+(?:linked|anchored)\s+(?:motion|animation|cues?)|timed\s+(?:to|with)\s+(?:the\s+)?narration/i.test(text);
   // A photographic medium does not imply a human subject (food, wildlife,
   // products and landscapes use it too). Keep human-specific enforcement only

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { applyGeneratedFilmPresentation, applyProductionIntentToScene } from '../../../packages/agent/dist/src/index.js';
 import { applyProceduralFinishingAudio } from './procedural-audio.mjs';
+import { sceneShotPlates } from './scene-shot-plates.mjs';
 
 const DEFAULT_NARRATION_VOICE = {
   enabled: true,
@@ -18,7 +19,7 @@ function hasNarration(pkg) {
 function hasH3Footage(pkg) {
   const assets = pkg?.assets ?? {};
   return (pkg?.scenes ?? []).some(scene => {
-    const ids = [scene?.background?.asset, ...(scene?.media ?? []).map(plate => plate?.asset)];
+    const ids = sceneShotPlates(scene).map(plate => plate.asset);
     return ids.some(id => assets[id]?.gen?.generator === 'fasth3-omni');
   });
 }

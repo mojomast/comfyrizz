@@ -4,7 +4,7 @@
 // finishes, fails or is cancelled. Local only: a fake worker, no network, no Google Colab
 // runtime, no secrets.
 import { test } from 'node:test';
-import { seedMockContribution } from './helpers/comfy-contribution.mjs';
+import { seedMockContribution, collectMockContribution, approveMockContribution } from './helpers/comfy-contribution.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -85,6 +85,7 @@ async function setup(t, { render, renderScene } = {}) {
   // files into the run, so the example assets have to be there too.
   cpSync(join(REPO, 'examples', 'launch-demo', 'assets'), join(runtimeDir, 'packages', 'assets'), { recursive: true });
   seedMockContribution(app.store, structuredClone(seed));
+  approveMockContribution(app.takeStore, app.store.read(PACKAGE_ID), app.store.dir);
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
@@ -266,7 +267,9 @@ test('RL10c: the controller holds the coordinator slot from admission to the ter
   });
   t.after(() => controller.close());
 
-  const started = await controller.start(seed, { backendId: 'colab', budgetUnits: 4 }, '.');
+  const pkg = structuredClone(seed);
+  collectMockContribution(pkg, join(runtimeDir, 'packages'));
+  const started = await controller.start(pkg, { backendId: 'colab', budgetUnits: 4 }, '.');
   assert.equal(started.status, 202);
   const held = operations.status();
   assert.equal(held.busy, true);
@@ -274,7 +277,7 @@ test('RL10c: the controller holds the coordinator slot from admission to the ter
   assert.equal(held.holder.id, started.run.runId);
 
   // A second run cannot take the slot while the first one works.
-  const refused = await controller.start(seed, { backendId: 'colab', budgetUnits: 4 }, '.');
+  const refused = await controller.start(pkg, { backendId: 'colab', budgetUnits: 4 }, '.');
   assert.equal(refused.status, 409);
   assert.equal(refused.error, 'pipeline busy');
   assert.equal(refused.holder.id, started.run.runId);

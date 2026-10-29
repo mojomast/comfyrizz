@@ -83,14 +83,27 @@ class FakeDocument {
     this.defaultView = new FakeWindow();
     this.documentElement = { dataset: {}, setAttribute() {} };
     this.activeElement = null;
+    this.body = { children: [], append(element) { this.children.push(element); } };
   }
 
   getElementById() {
     return null;
   }
 
-  createElement() {
-    return { setAttribute() {}, replaceChildren() {}, append() {}, remove() {} };
+  createElement(tagName) {
+    const listeners = new Map();
+    const element = {
+      tagName, ownerDocument: this, children: [], open: false,
+      setAttribute() {}, replaceChildren() {},
+      append(...children) { this.children.push(...children); },
+      remove() { this.ownerDocument.body.children = this.ownerDocument.body.children.filter(child => child !== this); },
+      addEventListener(type, fn) { listeners.set(type, fn); },
+      removeEventListener(type) { listeners.delete(type); },
+      showModal() { this.open = true; },
+      close() { this.open = false; listeners.get('close')?.(); },
+      click() { listeners.get('click')?.(); },
+    };
+    return element;
   }
 }
 
@@ -277,7 +290,7 @@ function createBackend(options = {}) {
         return json({ error: { code: 'STALE_PACKAGE', message: 'The project changed.' } }, 409);
       }
       packageRevision += 1;
-      return json({ package: { id: 'pkg_1', revision: packageRevision }, live: true });
+      return json({ package: options.builtPackage ?? { id: 'pkg_1', revision: packageRevision }, live: true });
     }
     if (path === '/api/productions' && method === 'POST') {
       calls.push({ kind: 'production', body: JSON.parse(String(init.body ?? '{}')) });
@@ -426,11 +439,16 @@ function mountShell(backend, options = {}) {
   let stopCalls = 0;
   let createCalls = 0;
   let currentPackage = options.package ?? null;
+  let saveStatus = 'saved';
+  const saveListeners = new Set();
+  const saveState = () => ({ status: saveStatus, editSequence: 1, acknowledgedSequence: saveStatus === 'saved' ? 1 : 0,
+    acknowledgedRevision: currentPackage?.revision ?? null, currentRevision: null, error: null });
 
   const host = {
     apiFetch: backend.apiFetch,
     hasToken: () => false,
     editorStore: {
+      ...(options.saveState ? { saveState, subscribeSaveState(listener) { saveListeners.add(listener); return () => saveListeners.delete(listener); } } : {}),
       getState: () => ({
         doc: { editSequence: 1 },
         derived: { timeline: { durationInFrames: 90 }, compiledSequence: 1 },
@@ -472,6 +490,11 @@ function mountShell(backend, options = {}) {
     watch: () => watchOptions,
     stopCalls: () => stopCalls,
     createCalls: () => createCalls,
+    editPackage(pkg, status = 'saved') {
+      currentPackage = pkg;
+      saveStatus = status;
+      for (const listener of saveListeners) listener(saveState());
+    },
     savedState() {
       return JSON.parse(globalThis.localStorage.getItem('comfyrizz.easy.new'));
     },
@@ -708,6 +731,135 @@ test('Studio and Super Easy mode switches park and resume the same planning sess
     shell.dispose();
     shell.restore();
   }
+});
+
+function morningPackage(revision = 6) {
+  return { id: 'pkg_1', revision, title: 'MORNING STILL', format: { fps: 30, width: 1920, height: 1080 },
+    scenes: [
+      { id: 's1', layout: 'title', preferredFrames: revision === 6 ? 278 : 180, copy: { headline: 'MORNING STILL' } },
+      { id: 's2', layout: 'title', preferredFrames: revision === 6 ? 82 : 180, copy: { headline: 'Take your time.' } },
+    ], assets: {} };
+}
+
+test('normal full-plan return re-reviews saved 6 → 10 timings, then explicit approval uses 10 without replanning', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage(morningPackage(10));
+    shell.root.makeSimple.click();
+    assert.match(shell.root.innerHTML, /Review proposed changes/);
+    assert.match(shell.root.innerHTML, /Before: 6/);
+    assert.match(shell.root.innerHTML, /After: 10/);
+    assert.match(shell.root.innerHTML, /Before: 278 frames at 30 fps/);
+    assert.match(shell.root.innerHTML, /Before: 82 frames at 30 fps/);
+    assert.equal((shell.root.innerHTML.match(/After: 180 frames at 30 fps/g) ?? []).length, 2);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+    assert.equal(backend.calls.some(c => ['production', 'run', 'dispatch', 'spend-cap', 'command'].includes(c.kind)), false);
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.watch() !== null);
+    assert.equal(backend.calls.find(c => c.kind === 'production').body.expected.packageRevision, 10);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+    // Save events during production cannot resurrect a proposal.
+    shell.editPackage(morningPackage(11));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-approve-proposal/);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('an edit after the returned review still fails the normal revision guard; approval never refreshes', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage(morningPackage(10));
+    shell.root.makeSimple.click();
+    shell.editPackage(morningPackage(11));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(shell.root.innerHTML, /After: 10/);
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.root.innerHTML.includes('The reviewed package changed'));
+    assert.equal(backend.calls.some(c => c.kind === 'production'), false);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('return waits for the acknowledged save and ignores saves while the proposal is parked', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage(morningPackage(10), 'pending');
+    shell.root.makeSimple.click();
+    assert.doesNotMatch(shell.root.innerHTML, /After: 10/);
+    shell.editPackage(morningPackage(10));
+    await waitFor(() => shell.root.innerHTML.includes('After: 10'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage(morningPackage(11));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.doesNotMatch(shell.root.innerHTML, /Your film proposal/);
+    shell.root.makeSimple.click();
+    assert.match(shell.root.innerHTML, /Before: 10/);
+    assert.match(shell.root.innerHTML, /After: 11/);
+    assert.equal(backend.calls.some(c => c.kind === 'production'), false);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('pending return plus early Make this film shows a waiting dialog and recovers after save without replanning', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage({ ...morningPackage(10), revision: 6 }, 'pending');
+    shell.root.makeSimple.click();
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.document.body.children.some(element => element.tagName === 'dialog' && element.open));
+    const dialog = shell.document.body.children.find(element => element.tagName === 'dialog');
+    assert.equal(dialog.children[0].textContent, 'Waiting for editor save');
+    assert.match(dialog.children[1].innerHTML, /not saved yet.*review the updated proposal.*Make this film again/);
+    assert.match(shell.root.innerHTML, /data-super-easy-approve-proposal/);
+    assert.doesNotMatch(shell.root.innerHTML, /After: 10/);
+    assert.equal(backend.calls.some(c => ['production', 'run', 'dispatch', 'spend-cap', 'command'].includes(c.kind)), false);
+    shell.editPackage(morningPackage(10));
+    await waitFor(() => shell.root.innerHTML.includes('After: 10'));
+    assert.match(shell.root.innerHTML, /After: 180 frames at 30 fps/);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+    assert.equal(backend.calls.some(c => ['production', 'run', 'dispatch', 'spend-cap', 'command'].includes(c.kind)), false);
+    // Closing the waiting message is not approval either.
+    dialog.children[2].children[0].click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(backend.calls.some(c => c.kind === 'production'), false);
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.watch() !== null);
+    assert.equal(backend.calls.find(c => c.kind === 'production').body.expected.packageRevision, 10);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('a different host package with the same revision cannot be adopted or approved by the parked proposal', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage({ ...morningPackage(), id: 'pkg_other', title: 'Another project' });
+    shell.root.makeSimple.click();
+    assert.match(shell.root.innerHTML, /MORNING STILL/);
+    assert.doesNotMatch(shell.root.innerHTML, /Another project/);
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.root.innerHTML.includes('The reviewed project changed'));
+    assert.equal(backend.calls.some(c => c.kind === 'production'), false);
+  } finally { shell.dispose(); shell.restore(); }
 });
 
 test('navigation away and back preserves the same watch and finished work', async () => {

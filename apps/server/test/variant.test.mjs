@@ -3,6 +3,7 @@
 // offline (no Google Colab runtime, no model, no network).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +24,7 @@ function makeWorkdir() {
   mkdirSync(packageDir, { recursive: true });
   cpSync(join(repo, 'examples', 'launch-demo', 'assets'), join(packageDir, 'assets'), { recursive: true });
   const pkg = structuredClone(seed);
+  collectMockContribution(pkg, packageDir);
   pkg.scenes[0].narration = 'Comfyrizz turns a brief into a video.';
   pkg.scenes[4].narration = 'Here is what the CPU slice does.';
   writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
@@ -62,14 +64,15 @@ test('L1: buildVariants makes every language/aspect pair and keeps the base id',
   }
 });
 
-test('L1: exportVariantSet writes a bundle per variant and a variants.json manifest', async () => {
+test('L1: draft variant bundles preserve translated captions while final delivery requires regenerated narration', async () => {
   const work = makeWorkdir();
   const exportsDir = join(work.dir, 'out', 'export');
   const calls = [];
   try {
     const exporter = createExporter({ exportsDir, render: fakeRender(calls) });
     const variants = buildVariants(work.pkg, { languages: ['en', 'fr'], aspects: ['16:9', '9:16'], translations: { fr: FRENCH } });
-    const result = await exporter.variants({ pkg: work.pkg, packagePath: work.packagePath, variants });
+    await assert.rejects(exporter.variants({ pkg: work.pkg, packagePath: work.packagePath, variants }), { code: 'NARRATION_PENDING' });
+    const result = await exporter.variants({ pkg: work.pkg, packagePath: work.packagePath, variants, intent: 'draft' });
 
     // Every variant has its own complete bundle.
     assert.equal(result.manifest.variants.length, 4);

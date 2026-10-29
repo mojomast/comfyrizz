@@ -88,10 +88,13 @@ The current verified configurations are:
 
 | Endpoint | Model | Thinking | Effort | Output cap |
 | --- | --- | --- | --- | --- |
-| `https://api.deepseek.com/v1` | `deepseek-flash` | disabled | low | 8192 |
-| `https://opencode.ai/inference/go/openai/v1` | `deepseek-v4.1-flash` | disabled | low | 8192 |
+| `https://api.deepseek.com/v1` | `deepseek-flash` | disabled | low | 65536 |
+| `https://opencode.ai/inference/go/openai/v1` | `deepseek-v4.1-flash` | disabled | low | 65536 |
 
-The existing app preset supplies the 8192 planner limit; DeepSeek's current
+The app preset supplies the 65,536-token planner limit, raised at the user's request
+after an 8,192-token reasoning-only truncation. The CLI uses that resolved limit
+for both its request and wire guard. Historical trials below retain their original
+8,192-token settings; no live 64K validation is implied. DeepSeek's current
 official guide documents `thinking: {type: "disabled"}` and `reasoning_effort:
 "low"`. Unsupported endpoint/model/thinking combinations fail before network.
 Provider retries are explicitly zero. There is no model discovery/probe call.

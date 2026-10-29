@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createApp } from '../src/app.mjs';
 import { animationOptions } from '../src/animation-options.mjs';
 import { chatProjectResponse } from '../src/chat-project.mjs';
@@ -13,7 +14,7 @@ const TOKEN = 'animation-options-test-token';
 const RECIPE_IDS = ['sketch', 'paper-cut', 'morph', 'technical-flow', 'focus', 'kinetic'];
 
 test('chat responses compile the same store-root narration sidecar and cue provenance as the editor', t => {
-  const runtime = mkdtempSync('/tmp/opencode/animation-chat-timing-');
+  const runtime = mkdtempSync(join(tmpdir(), 'animation-chat-timing-'));
   t.after(() => rmSync(runtime, { recursive: true, force: true }));
   const packageDir = join(runtime, 'packages');
   mkdirSync(join(packageDir, 'audio'), { recursive: true });
@@ -49,7 +50,7 @@ test('the animation catalogue is the shared schema catalogue', () => {
 });
 
 test('GET /api/animation-options is authenticated and returns recipes and transitions', async t => {
-  const runtimeDir = mkdtempSync('/tmp/opencode/animation-options-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'animation-options-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const app = createApp({ token: TOKEN, runtimeDir });
   t.after(() => app.close());

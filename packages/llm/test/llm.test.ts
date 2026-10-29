@@ -63,12 +63,14 @@ test('presets: three providers, OpenCode fallback key and session header', () =>
   assert.equal(oc.headers['User-Agent'], 'comfyrizz/0.1');
   assert.equal(oc.model, 'deepseek-v4.1-flash');
   assert.equal(oc.reasoningEffort, 'low');
-  assert.equal(oc.maxTokens, 8192);
+  assert.equal(oc.maxTokens, 65_536);
   const custom = resolveProvider('custom', { env: {} });
   assert.equal(custom.apiKey, null);
   assert.equal(custom.reasoningEffort, undefined);
   const directDeepSeek = resolveProvider('custom', { env: {}, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash' });
   assert.equal(directDeepSeek.reasoningEffort, 'low');
+  assert.equal(directDeepSeek.maxTokens, 65_536);
+  assert.equal(custom.maxTokens, undefined);
   assert.throws(() => resolveProvider('openrouter', { env: {} }), /requires OPENROUTER_API_KEY/);
   assert.throws(() => resolveProvider('openrouter', { env: { OPENROUTER_API_KEY: 'secret' }, apiKey: null }), /requires/);
 });
@@ -115,7 +117,22 @@ test('OpenCode Go DeepSeek defaults to bounded low reasoning on the wire', async
   await collect(createOpenAICompatibleModel({ ...provider, fetchImpl, maxRetries: 0 }));
   assert.equal(body.model, 'deepseek-v4.1-flash');
   assert.equal(body.reasoning_effort, 'low');
-  assert.equal(body.max_tokens, 8192);
+  assert.equal(body.max_tokens, 65_536);
+});
+
+test('direct DeepSeek sends the 64K output allowance with either thinking setting', async () => {
+  for (const thinking of ['enabled', 'disabled'] as const) {
+    let body: any;
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+    }) as typeof fetch;
+    const provider = resolveProvider('custom', { env: {}, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash' });
+    await collect(createOpenAICompatibleModel({ ...provider, thinking, fetchImpl, maxRetries: 0 }));
+    assert.equal(body.max_tokens, 65_536);
+    assert.deepEqual(body.thinking, { type: thinking });
+    assert.equal(body.reasoning_effort, 'low');
+  }
 });
 
 test('truncated or interrupted streams cannot execute even valid partial tool calls', async () => {

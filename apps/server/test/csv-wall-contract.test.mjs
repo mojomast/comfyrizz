@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -8,7 +10,7 @@ import { csvWallProblems, repairCsvWallScenes, recoverCsvWallScene, requestsCsvW
 import { applyProposalRevision } from '../src/proposal-revision.mjs';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
 import { createContextAttachmentStore } from '../src/context-attachments.mjs';
-import { replayProvider } from './fake-provider.mjs';
+import { replayProvider, withPlannedPlate } from './fake-provider.mjs';
 
 test('explicit per-record wall is replayed from its pinned CSV and can be created by scoped revision', () => {
   const text = readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url), 'utf8');
@@ -64,18 +66,18 @@ test('source labels, explicit visual claims and scene targets are structurally c
 });
 
 test('agent repairs a missing source wall instead of accepting a decorative drawing', async t => {
-  const root = mkdtempSync('/tmp/opencode/wall-agent-');
+  const root = mkdtempSync(join(tmpdir(), 'wall-agent-'));
   const conversationId = 'chat_wall_repair001';
   const store = createContextAttachmentStore({ rootDir: root, chatId: conversationId });
   const { record } = store.addFile({ bytes: readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url)), filename: 'campaign.csv', mime: 'text/csv' });
   const brief = 'Each tile represents one actual race start, in chronological order.';
-  const provider = await replayProvider([
+  const provider = await replayProvider(withPlannedPlate([
     { name: 'storyboard.propose', args: { brief, scenes: [{ id: 's1', layout: 'hero', preferredFrames: 120 }] } },
     { name: 'storyboard.draw', args: { scene_id: 's1', drawing: { background: '#000000', elements: [{ type: 'rect', x: 100, y: 100, width: 20, height: 20, color: '#ffffff', start: 0, end: 0 }] } } },
     null,
     { name: 'storyboard.csv_tile_wall', args: { scene_id: 's1', id: record.id, filters: [], category_column: 'classification', colors: [{ value: '1', color: '#ff00aa' }], rules: [], require_categories: ['1'], default_color: '#333333', background: '#000000', columns: 19 } },
     null,
-  ]);
+  ]));
   t.after(async () => { await provider.close(); rmSync(root, { recursive: true, force: true }); });
   const events = [];
   const result = await createCpuAgentRunner({ runtimeDir: root, providers: { custom: { baseUrl: provider.url } } })({ brief, provider: 'custom', conversationId, sessionId: 'wall-repair', onEvent: e => events.push(e) });
@@ -117,25 +119,26 @@ test('replays a verified wall into the captured s11 decorative-grid target, refu
 });
 
 test('runner replays a source wall after repair adds the captured decorative grid', async t => {
-  const root = mkdtempSync('/tmp/opencode/wall-replay-');
+  const root = mkdtempSync(join(tmpdir(), 'wall-replay-'));
   const conversationId = 'chat_wall_replay001';
   const store = createContextAttachmentStore({ rootDir: root, chatId: conversationId });
   const { record } = store.addFile({ bytes: readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url)), filename: 'perez-first-190-starts.csv', mime: 'text/csv' });
   const brief = 'Each tile represents one actual race start, in chronological order.';
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#222222"/><circle cx="50" cy="50" r="10" fill="#ff2d7a"/></svg>';
-  const provider = await replayProvider([
+  const provider = await replayProvider(withPlannedPlate([
     { name: 'storyboard.propose', args: { brief, scenes: [{ id: 's3', layout: 'hero', preferredFrames: 120 }, { id: 's11', layout: 'split', preferredFrames: 120 }] } },
     { name: 'storyboard.csv_tile_wall', args: { scene_id: 's3', id: record.id, filters: [], category_column: 'classification', colors: [{ value: '1', color: '#ff2d7a' }], rules: [], require_categories: ['1'], default_color: '#2a2a2f', background: '#0a0a0b', columns: 19 } },
     null,
     { name: 'storyboard.edit', args: { scene_id: 's11', patch: { layout: 'hero' } } },
     { name: 'assets.generate_svg', args: { scene_id: 's11', kind: 'pattern', intent: 'Abstract grid wall pattern of small graphite tiles on black, one single tile rendered vivid pink, restrained mechanical data-motif, no text' } },
     null,
-  ], { svgText: svg });
+  ]), { svgText: svg });
   t.after(async () => { await provider.close(); rmSync(root, { recursive: true, force: true }); });
   const events = [];
   const result = await createCpuAgentRunner({ runtimeDir: root, providers: { custom: { baseUrl: provider.url } } })({ brief, provider: 'custom', conversationId, onEvent: event => events.push(event) });
   assert.ok(events.some(event => event.phase === 'initial' && event.status === 'validation' && event.problems.some(problem => problem.includes('SEM_LAYOUT_REQUIRES_MEDIA'))));
-  const repairRequest = provider.requests.find(request => JSON.stringify(request.messages).includes('Validation report: the current motion-graphics package is incomplete'));
+  const repairRequest = provider.requests.find(request => JSON.stringify(request.messages).includes('Validation report: the current video package is incomplete'));
+  assert.ok(repairRequest, 'the incomplete layout receives a focused repair request');
   assert.ok(repairRequest.tools.some(tool => tool.function.name === 'storyboard_csv_tile_wall'));
   assert.deepEqual(events.find(event => event.status === 'csv_wall_replay')?.sceneIds, ['s11']);
   const scene = result.package.scenes.find(item => item.id === 's11');
@@ -194,20 +197,20 @@ test('captured s3 repair grid gets one scoped source-wall turn when existing rec
 });
 
 test('runner performs only one focused turn for the captured post-repair s3 grid and reports an actionable failure', async t => {
-  const root = mkdtempSync('/tmp/opencode/wall-target-');
+  const root = mkdtempSync(join(tmpdir(), 'wall-target-'));
   const conversationId = 'chat_wall_target001';
   const store = createContextAttachmentStore({ rootDir: root, chatId: conversationId });
   const { record } = store.addFile({ bytes: readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url)), filename: 'perez-first-190-starts.csv', mime: 'text/csv' });
   const recorded = JSON.parse(readFileSync(new URL('./fixtures/data-story-csvsequence-s3.json', import.meta.url), 'utf8'));
   const brief = 'Each tile represents one actual race start in chronological order. Pink for the win; graphite for the rest.';
   const args = { id: record.id, filters: [], category_column: 'classification', colors: [{ value: '1', color: '#ff1f7a' }], require_categories: ['1'], default_color: '#1d1f22', background: '#0b0b0d', columns: 19 };
-  const initial = [
+  const initial = withPlannedPlate([
     { name: 'storyboard.propose', args: { brief, scenes: ['s3', 's4', 's9'].map(id => ({ id, layout: id === 's3' ? 'split' : 'hero', preferredFrames: 120 })) } },
     { name: 'storyboard.csv_tile_wall', args: { ...args, scene_id: 's4' } },
     { name: 'storyboard.csv_tile_wall', args: { ...args, scene_id: 's9', columns: 20 } }, null,
     { name: 'storyboard.edit', args: { scene_id: 's3', patch: { layout: 'hero' } } },
     { name: 'assets.generate_svg', args: recorded.toolCall }, null,
-  ];
+  ]);
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1d1f22"/></svg>';
   const { id, ...recipe } = args;
   const provider = await replayProvider([...initial, { name: 'storyboard.csv_tile_wall', args: recipe }], { svgText: svg });
@@ -230,20 +233,20 @@ test('runner performs only one focused turn for the captured post-repair s3 grid
 });
 
 test('s8 failed wrong attachment id and missing background recover with a server-bound recipe', async t => {
-  const root = mkdtempSync('/tmp/opencode/wall-s8-');
+  const root = mkdtempSync(join(tmpdir(), 'wall-s8-'));
   const conversationId = 'chat_wall_s8_test001';
   const store = createContextAttachmentStore({ rootDir: root, chatId: conversationId });
   const bytes = readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url));
   const { record } = store.addFile({ bytes, filename: 'perez-first-190-starts.csv', mime: 'text/csv' });
   const brief = 'Each tile represents one actual race start, in chronological order. Pink for the win, graphite for the rest.';
   const recipe = { filters: [], category_column: 'classification', colors: [{ value: '1', color: '#ff1f7a' }], require_categories: ['1'], default_color: '#1d1f22', columns: 19 };
-  const initial = [
+  const initial = withPlannedPlate([
     { name: 'storyboard.propose', args: { brief, scenes: [{ id: 's8', layout: 'hero', preferredFrames: 120 }] } },
     { name: 'storyboard.edit', args: { scene_id: 's8', patch: { background: '#0A0A0A' } } },
     null,
     { name: 'storyboard.csv_tile_wall', args: { ...recipe, id: 'wall_starts', scene_id: 's8' } },
     { name: 'storyboard.csv_tile_wall', args: { ...recipe, id: 'wall_starts', scene_id: 's8', background: '#0A0A0A' } }, null,
-  ];
+  ]);
   const provider = await replayProvider([...initial, { name: 'storyboard.csv_tile_wall', args: recipe }]);
   t.after(async () => { await provider.close(); rmSync(root, { recursive: true, force: true }); });
   const events = [];

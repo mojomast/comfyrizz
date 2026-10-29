@@ -181,6 +181,7 @@ test('a second export reuses a real render only while its receipt fingerprint ma
   const pkg = structuredClone(seed);
   pkg.id = 'pkg_exportreuse01';
   pkg.revision = 1;
+  collectMockContribution(pkg, app.store.dir);
   app.store.write(pkg);
 
   // First export: no video exists, so this is the real CPU render.
@@ -225,6 +226,7 @@ test('export excludes a CC BY-NC asset and still writes captions', { timeout: 90
     source: { provider: 'openverse', landing_url: 'https://example.test/photo', title: 'A photo', creator: 'Someone' },
     license: { id: 'CC-BY-NC-4.0', blocked: true, blocked_reason: 'non-commercial licence is outside the v0.1 policy' },
   };
+  collectMockContribution(pkg, app.store.dir);
   app.store.write(pkg);
 
   // IP13: an untracked video has no receipt, so it is not reused; the export

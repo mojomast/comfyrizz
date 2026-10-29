@@ -376,14 +376,14 @@ test('custom duration is keyboard-editable, validated, persisted and sent to Gen
   const handle = mountSuperEasy({ root, state: () => current, onMoreControl() {},
     onLengthChange(value) { current.idea.lengthS = value; }, onGenerate(input) { generated.push(input); } });
   prompt.value = 'A clear title reveal for the project';
-  for (const value of ['', '0', '91', '12.5']) {
+  for (const value of ['', '0', '121', '120.5', '12.5']) {
     custom.value = value;
     root.fire('input', { target: custom });
     root.fire('submit', { target: submitTarget(), preventDefault() {} });
     assert.equal(error.hidden, false);
     assert.equal(generated.length, 0);
   }
-  for (const value of ['12', '40']) {
+  for (const value of ['12', '40', '91', '120']) {
     custom.value = value;
     root.fire('input', { target: custom });
     root.fire('submit', { target: submitTarget(), preventDefault() {} });

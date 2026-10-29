@@ -23,6 +23,7 @@ import {
   mapPipelineStatus,
 } from '../../src/productions/pipeline-adapter.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
+import { collectMockContribution } from '../helpers/comfy-contribution.mjs';
 
 const AT = '2026-10-23T12:00:00.000Z';
 const PRODUCTION_ID = 'prod_ip22';
@@ -285,6 +286,8 @@ test('admit journals dispatching before start, and a crash before the run write 
 
 test('a real controller restart never starts a second run for the same action', async (t) => {
   const { runtimeDir, store } = seed(t);
+  const pkg = structuredClone(PACKAGE);
+  collectMockContribution(pkg, join(runtimeDir, 'packages'));
   const counter = { starts: 0 };
   const fixture = realController(runtimeDir, counter);
   const firstAdapter = createPipelineAdapter({ store, controller: fixture.controller });
@@ -292,7 +295,7 @@ test('a real controller restart never starts a second run for the same action', 
   const first = await firstAdapter.admit({
     productionId: PRODUCTION_ID,
     actionId: ACTION_ID,
-    pkg: PACKAGE,
+    pkg,
     input: INPUT,
     sourceDir: '.',
   });
@@ -321,7 +324,7 @@ test('a real controller restart never starts a second run for the same action', 
   const second = await restartedAdapter.admit({
     productionId: PRODUCTION_ID,
     actionId: ACTION_ID,
-    pkg: PACKAGE,
+    pkg,
     input: INPUT,
     sourceDir: '.',
   });

@@ -62,3 +62,33 @@ test('review shows logline and dataset note changes without claiming verificatio
   assert.match(html, /exact replacement wording/);
   assert.match(html, /not automatically verified/);
 });
+
+test('comparison review exposes whole-scene overlays versus panel labels and their revision', () => {
+  const old = { format: { width: 1920, height: 1080 }, scenes: [{ id: 's1', layout: 'compare', preferredFrames: 360,
+    copy: { headline: 'BEFORE' }, lower_third: { text: 'AFTER' }, media: [{ asset: 'left' }, { asset: 'right' }] }] };
+  const original = renderSuperEasyProposal(proposalForPackage(old, 'BEFORE left; AFTER right'));
+  assert.match(original, /Whole-scene lower third:.*AFTER/);
+  assert.match(original, /Left panel label: &quot;&quot;; Right panel label: &quot;&quot;/);
+  const corrected = structuredClone(old);
+  corrected.scenes[0] = { ...corrected.scenes[0], copy: { headline: '' }, lower_third: { text: '' },
+    media: [{ asset: 'left', label: 'BEFORE' }, { asset: 'right', label: '<AFTER>' }] } as any;
+  const proposal = proposalForPackage(corrected, 'Brief', [], false, old);
+  assert.match(proposal.sourceReview!.scenes[0].copy, /Left panel label: "BEFORE"; Right panel label: "<AFTER>"/);
+  assert.ok(proposal.revisionChanges!.some(change => change.label === 's1: On-screen copy' && change.after.includes('Right panel label: "<AFTER>"')));
+  const html = renderSuperEasyProposal(proposal);
+  assert.match(html, /&lt;AFTER&gt;/);
+  assert.doesNotMatch(html, /<AFTER>/);
+  corrected.format = { width: 1080, height: 1920 };
+  assert.match(proposalForPackage(corrected, 'Brief').sourceReview!.scenes[0].copy, /Top panel label:.*Bottom panel label:/);
+});
+
+test('drawing review distinguishes hidden copy metadata from actual native text elements', () => {
+  const proposal = proposalForPackage({ scenes: [{ id: 's1', layout: 'list',
+    copy: { headline: 'RESERVOIR' }, lower_third: { text: 'COTTON WICK' },
+    drawing: { elements: [{ type: 'text', text: 'ROOT ZONE' }] },
+  }] }, 'A planter diagram');
+  const copy = proposal.sourceReview!.scenes[0].copy;
+  assert.match(copy, /Layout copy \(hidden by drawing\):.*RESERVOIR/);
+  assert.match(copy, /Whole-scene lower third \(hidden by drawing\):.*COTTON WICK/);
+  assert.match(copy, /Drawing text: \["ROOT ZONE"\]/);
+});

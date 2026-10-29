@@ -647,6 +647,7 @@ test('the selected duration reaches the store and brief unless the prompt types 
     { prompt: PROMPT, lengthS: 60, expected: 'Length: about 60 seconds.' },
     { prompt: PROMPT, lengthS: 12, expected: 'Length: exactly 12 seconds;' },
     { prompt: PROMPT, lengthS: 40, expected: 'Length: exactly 40 seconds;' },
+    { prompt: PROMPT, lengthS: 120, expected: 'Length: exactly 120 seconds;' },
     { prompt: 'A 15-second bakery teaser with a warm ending', lengthS: 90, expected: null },
   ]) {
     const { api, host, calls, store } = harness();
@@ -662,7 +663,7 @@ test('the selected duration reaches the store and brief unless the prompt types 
 });
 
 test('Super Easy custom input reaches the planning API for title and data story', async () => {
-  for (const [videoType, seconds] of [['title-reveal', 12], ['data-story', 40], [null, 40]]) {
+  for (const [videoType, seconds] of [['title-reveal', 12], ['data-story', 40], [null, 40], [null, 120]]) {
     const { api, host, calls, store } = harness();
     store.patch({ videoType });
     const listeners = new Map();

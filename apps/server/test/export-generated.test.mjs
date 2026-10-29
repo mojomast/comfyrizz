@@ -74,7 +74,7 @@ test('RL10d: export renders a package of generated MP4 takes', { skip: skipReaso
         id: 's_one',
         layout: 'title',
         variant: 'centered',
-        preferredFrames: 30,
+        preferredFrames: 60,
         copy: { headline: 'Generated clip' },
         background: { asset: 'a_generated_take', fit: 'cover', loop: true },
         foreground: [],

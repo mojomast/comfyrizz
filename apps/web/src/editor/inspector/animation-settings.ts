@@ -316,12 +316,10 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
       if (!current) return;
       const type = (event.target as HTMLSelectElement).value;
       if (!type) {
-        setTransition(host, undefined, options, 'transitionOut');
-        render();
+        if (setTransition(host, undefined, options, 'transitionOut')) render();
         return;
       }
-      setTransition(host, nextTransition(transitionOf(current), type), options, 'transitionOut.type');
-      render();
+      if (setTransition(host, nextTransition(transitionOf(current), type), options, 'transitionOut.type')) render();
     });
 
     const framesInput = host.querySelector<HTMLInputElement>('[data-anim-field="transition.frames"]');
@@ -336,8 +334,9 @@ export function mountSceneAnimation(host: HTMLElement, options: SceneAnimationOp
         return;
       }
       framesInput.setCustomValidity('');
-      setTransition(host, { ...transition, frames: value }, options, 'transitionOut.frames');
-      updateTransitionHint(host, current, options.fps);
+      if (setTransition(host, { ...transition, frames: value }, options, 'transitionOut.frames')) {
+        updateTransitionHint(host, sceneOf(options) ?? current, options.fps);
+      }
     });
 
     const save = host.querySelector<HTMLButtonElement>('[data-anim-action="save"]');

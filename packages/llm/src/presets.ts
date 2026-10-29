@@ -62,7 +62,9 @@ export function resolveProvider(name: string, options: ResolveOptions = {}): Res
     headers: { ...(preset.headers ?? {}), ...(options.headers ?? {}) },
     sessionHeader: preset.sessionHeader,
     ...(reasoningEffort ? { reasoningEffort } : {}),
-    ...(deepSeekFlash ? { maxTokens: 8192 } : {}),
+    // Reasoning and emitted tool calls share the output allowance. DeepSeek's
+    // documented thinking default is 64K; 8K can end before any tool is emitted.
+    ...(deepSeekFlash ? { maxTokens: 65_536 } : {}),
     status: preset.status,
   };
 }

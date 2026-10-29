@@ -145,6 +145,20 @@ function rectangle(item, asset, pkg) {
   const h = item.h ?? w * (pkg.format.width / pkg.format.height) / ((asset?.media?.width ?? 16) / (asset?.media?.height ?? 9));
   return clip({ x: (item.x ?? .5) - w / 2, y: (item.y ?? .5) - h / 2, r: (item.x ?? .5) + w / 2, b: (item.y ?? .5) + h / 2 });
 }
+function containedRectangle(rect, asset, pkg, planning) {
+  // Final verification replaces media with byte-bound measured dimensions.
+  // Generation inputs are provisional geometry only during plan admission.
+  const dimensions = planning ? asset?.media ?? asset?.gen?.inputs : asset?.media;
+  const width = Number(dimensions?.width), height = Number(dimensions?.height);
+  if (!(width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height))) return null;
+  const boxWidth = rect.r - rect.x, boxHeight = rect.b - rect.y;
+  const boxAspect = boxWidth * pkg.format.width / (boxHeight * pkg.format.height);
+  const sourceAspect = width / height;
+  const w = sourceAspect < boxAspect ? boxWidth * sourceAspect / boxAspect : boxWidth;
+  const h = sourceAspect > boxAspect ? boxHeight * boxAspect / sourceAspect : boxHeight;
+  return { x: rect.x + (boxWidth - w) / 2, r: rect.r - (boxWidth - w) / 2,
+    y: rect.y + (boxHeight - h) / 2, b: rect.b - (boxHeight - h) / 2 };
+}
 function uncovered(rect, blockers) {
   const xs = [...new Set([rect.x, rect.r, ...blockers.flatMap(b => [Math.max(rect.x, Math.min(rect.r, b.x)), Math.max(rect.x, Math.min(rect.r, b.r))])])].sort((a,b) => a-b);
   const ys = [...new Set([rect.y, rect.b, ...blockers.flatMap(b => [Math.max(rect.y, Math.min(rect.b, b.y)), Math.max(rect.y, Math.min(rect.b, b.b))])])].sort((a,b) => a-b);
@@ -166,6 +180,8 @@ export function contributionUses(pkg, { timeline, media = {}, planning = false }
     if (authored.drawing || authored.composition || stableFrames < timeline.fps) continue;
     const mediaOnly = authored.media_only === true || authored.mediaOnly === true || media.skipLayout?.includes(scene.id);
     const split = !mediaOnly && ['split', 'compare'].includes(authored.layout);
+    const stacked = pkg.format.height > pkg.format.width * 1.2;
+    const plateCount = Math.min(2, authored.media?.length ?? 0);
     if (!mediaOnly && authored.layout === 'code') continue;
     const foreground = split || (!mediaOnly && authored.layout === 'list' && authored.motion?.diagram) ? [] : authored.foreground ?? scene.foreground ?? [];
     const panels = foreground.map((item, index) => ({ item, index, rect: rectangle(item, pkg.assets?.[item.asset], pkg), z: item.z ?? 6 }));
@@ -173,15 +189,21 @@ export function contributionUses(pkg, { timeline, media = {}, planning = false }
     const candidates = [
       ...(!background?.procedural && background?.asset && Number(background.scrim ?? media.scrim?.[scene.id] ?? 0) <= .8 ? [{ id: background.asset, slot: 'background', rect: { x: 0, y: 0, r: 1, b: 1 }, z: 0, index: -1 }] : []),
       ...panels.map(p => ({ id: p.item.asset, slot: `foreground.${p.index}`, ...p })),
-      ...(split ? (authored.media ?? []).slice(0, 2).flatMap((plate, index) => plate.asset ? [{ id: plate.asset, slot: `media.${index}`, rect: { x: 0, y: 0, r: .5, b: 1 }, z: 6, index, item: plate }] : []) : []),
+      ...(split ? (authored.media ?? []).slice(0, 2).flatMap((plate, index) => plate.asset && !plate.procedural ? [{ id: plate.asset, slot: `media.${index}`,
+        rect: stacked ? { x: 0, y: index / plateCount, r: 1, b: (index + 1) / plateCount }
+          : { x: index / plateCount, y: 0, r: (index + 1) / plateCount, b: 1 }, z: 6, index, item: plate }] : []) : []),
     ];
     for (const candidate of candidates) {
       const asset = pkg.assets?.[candidate.id];
       if (!asset || !['image', 'video'].includes(asset.kind) || (!planning && asset.status !== 'ready') || !candidate.rect || area(candidate.rect) < .05) continue;
       if (candidate.slot.startsWith('foreground.') && candidate.z < 3) continue;
-      // These branches need separately bound masks/playback geometry. Never
-      // infer visible source pixels from the enclosing box alone.
-      if (candidate.item?.fit === 'contain' || candidate.slot === 'background' && background?.fit === 'contain') continue;
+      if (candidate.item?.fit === 'contain' || candidate.slot === 'background' && background?.fit === 'contain') {
+        // Foreground masks/frames require their own geometry. Background and
+        // split plates are centered object-fit boxes in the renderer.
+        if (candidate.slot.startsWith('foreground.')) continue;
+        candidate.rect = containedRectangle(candidate.rect, asset, pkg, planning);
+        if (!candidate.rect || area(candidate.rect) < .05) continue;
+      }
       if ((timeline.presenters ?? []).some(p => p.from < scene.from + scene.durationInFrames && p.from + p.durationInFrames > scene.from)) continue;
       if (candidate.slot.startsWith('foreground.') && candidate.z <= 6 && Number(background?.scrim ?? 0) > .8
         && panels.some(p => p.item.frame !== 'pip' && (p.item.w ?? .4) >= .95)) continue;

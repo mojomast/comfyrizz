@@ -11,8 +11,11 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { aspectFromSize, extractBrief, isVideoType } from '../../../packages/agent/dist/src/index.js';
 import { classifyAudioIntent } from '../../../packages/agent/dist/src/production-intent.js';
+import { reachableAssetIds } from '../../../packages/jobs/src/reachable.mjs';
+import { sceneShotPlates, plannedShotProblems } from './scene-shot-plates.mjs';
 import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
 import { finalizeGeneratedFilmEditorial } from './editorial-finalizer.mjs';
+import { editorialBriefProblems } from './editorial-brief-contract.mjs';
 import { finalizeSketchAudio } from './sketch-audio.mjs';
 import { isConversationId, loadConversationContext } from './conversation-context.mjs';
 import { reviseNarration } from './narration-revision.mjs';
@@ -37,6 +40,7 @@ const REPAIR_SYSTEM = [
   'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded.',
   'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace or regenerate existing assets, change the story, or change the model route.',
   'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy, notes, narration or motion.cue_phrases. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
+  'Preserve explicit ordered copy lists, natural materials and motion intensity. Do not add feature captions, new styling or generated lettering while repairing duration or placement. A generated source image is not a substitute for its requested visible action clip. Inspect drawings only on scenes that already contain drawing elements; this is not a video inspection tool.',
   'Narration-timed motion: when the brief asks for cue-timed motion, every scene needs a concise scene.narration and motion.cue_phrases copied verbatim from that scene narration.',
   'Never remove or blank scene.narration or motion.cue_phrases while fixing another field: add the narration first, then copy each cue phrase verbatim from it in the same storyboard.edit call.',
   'When the user report supplies an exact narration sentence and cue phrases, copy them exactly: they are already brief-derived, concise and verbatim. Do not paraphrase or invent a replacement line.',
@@ -49,9 +53,10 @@ const REPAIR_SYSTEM = [
 ].join('\n');
 
 const MOTION_GRAPHICS_REPAIR_SYSTEM = [
-  'You are Comfyrizz performing one focused repair of an existing motion-graphics package. The package is already loaded.',
+  'You are Comfyrizz performing one focused repair of an existing video package. The package is already loaded; it may combine native graphics with generated images or footage.',
   'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace existing ready assets, change the story, or change the model route.',
-  'Workflow: read each issue in the user validation report. Use storyboard.add_scene to append missing scenes before drawing them; preserve existing scenes and the requested evolving subject. Use storyboard.draw or storyboard.extend_drawing for their geometry, and storyboard.edit for scene fields. Meet the compiled duration including transition overlaps; add meaningful story scenes instead of stretching an incomplete scene. Create assets only when the report explicitly requires them; never substitute GPU assets for a required drawing.',
+  'Workflow: read each issue in the user validation report and make only the required edits. Use storyboard.edit for existing scene fields. Use storyboard.add_scene only when the report requires missing story scenes; use storyboard.draw or storyboard.extend_drawing only for required drawings. Never inspect a drawing on a scene that has none, or turn a footage scene into a drawing to satisfy inspection. Meet the compiled duration including transition overlaps and source coverage; do not stretch short footage. Create assets only when needed to resolve a reported media/coverage issue; never substitute GPU assets for a required drawing.',
+  'Preserve explicit ordered copy lists: remove unrequested captions instead of inventing replacement copy; keep required strings verbatim and in order. Preserve natural materials, image-text policy and restrained motion when fixing another field. The selected video-type preset is guidance subordinate to these explicit brief constraints.',
   'For a data story, use storyboard.csv_dataset to bind grouped chart counts to the scoped CSV and storyboard.csv_tile_wall for a requested one-mark-per-source-row wall. Explicitly map essential categories, use require_categories, and review uncategorized results. Inspect only source rows and query results needed to verify claims; batch independent CSV queries, scene edits and asset calls. Do not page through the entire CSV or restart research already supported by the supplied context. Leave time within the step budget to complete the requested visual and finish.',
   'For unapproved example datasets, use storyboard.remove_example_dataset with truthful, source-backed replacement copy and narration for every dependent scene. Do not approve invented values or relabel them as user data. Remove unsupported claims elsewhere too. Preserve the existing package and assets.',
   'Tool errors: for invalid_arguments, correct only the fields named in issues[].path and resend; for tool_failed, supply the prerequisite the message names. Never resend identical arguments.',
@@ -155,7 +160,7 @@ export function repairPackageFacts(pkg, intent, briefAspect) {
   const currentFrames = plannedTimelineFrames(pkg);
   const targetFrames = intent.requestedSeconds === null ? 'unspecified' : Math.round(intent.requestedSeconds * fps);
   const sceneFacts = scenes.map(scene => {
-    const mediaAssets = (Array.isArray(scene?.media) ? scene.media : [])
+    const mediaAssets = sceneShotPlates(scene)
       .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
       .filter(Boolean);
     const kleinStills = mediaAssets.filter(asset => asset.kind === 'image' && asset.gen?.generator === 'flux3-klein').length;
@@ -228,7 +233,7 @@ export function coverGeneratedFilmScenes(pkg) {
     const fps = Number(next.format?.fps) > 0 ? Number(next.format.fps) : 30;
     const sceneFrames = Number(scene?.preferredFrames) || 0;
     const sceneSeconds = sceneFrames / fps;
-    const plates = Array.isArray(scene?.media) ? scene.media : [];
+    const plates = sceneShotPlates(scene);
     const videoPlates = plates.filter(plate => {
       const asset = next.assets?.[plate?.asset];
       return asset?.status === 'pending' && asset?.kind === 'video' && ['fasth3-omni', 'ltx25'].includes(asset?.gen?.generator);
@@ -237,7 +242,11 @@ export function coverGeneratedFilmScenes(pkg) {
     const template = uniqueAssetIds.length === 1 ? next.assets[uniqueAssetIds[0]] : null;
     const clipSeconds = generatedClipSeconds(template);
     const sourceFps = Number(template?.gen?.inputs?.fps) > 0 ? Number(template.gen.inputs.fps) : 24;
-    if (!template || clipSeconds <= 0 || sceneSeconds <= 0 || sceneSeconds <= clipSeconds + 1 / sourceFps) {
+    // Panel layouts and authored playback need a scoped repair, not duplication
+    // of simultaneous sources or replacement of trim/speed/hold instructions.
+    const hasPlayback = plates.some(plate => plate.speed !== undefined || plate.trim !== undefined || plate.holdFrames !== undefined);
+    if (!template || ['split', 'compare'].includes(scene.layout) || hasPlayback
+      || clipSeconds <= 0 || sceneSeconds <= 0 || sceneSeconds <= clipSeconds + 1 / sourceFps) {
       scenes.push(scene);
       continue;
     }
@@ -258,8 +267,13 @@ export function coverGeneratedFilmScenes(pkg) {
         ...scene,
         id: `${scene.id}__part${part + 1}`,
         preferredFrames: Math.floor(sceneFrames / partCount) + (part < sceneFrames % partCount ? 1 : 0),
-        media: [media],
+        background: media,
       };
+      // Remove only aliases to the replaced shot, not independently authored media.
+      if (Array.isArray(partScene.media)) {
+        partScene.media = partScene.media.filter(plate => plate?.asset !== templateAssetId);
+        if (!partScene.media.length) delete partScene.media;
+      }
       if (part > 0) {
         // A long editorial line belongs to the first part only. Continuations
         // remain footage-only instead of synthesizing the same sentence again.
@@ -289,10 +303,8 @@ export function coverGeneratedFilmScenes(pkg) {
   if (splits === 0) return { package: pkg, splits: 0 };
   next.scenes = scenes;
   if (next.scenes.length > 0) delete next.scenes[next.scenes.length - 1].transitionOut;
-  for (const assetId of replacedAssetIds) {
-    const used = scenes.some(scene => (Array.isArray(scene?.media) ? scene.media : []).some(plate => plate?.asset === assetId));
-    if (!used) delete next.assets[assetId];
-  }
+  const reachable = reachableAssetIds(next);
+  for (const assetId of replacedAssetIds) if (!reachable.has(assetId)) delete next.assets[assetId];
   next.revision = Math.max(1, Number(next.revision) || 1) + 1;
   return { package: next, splits };
 }
@@ -542,8 +554,7 @@ function sourceImageIdsForScene(scene, assets) {
       addImage(value);
     }
   };
-  for (const plate of Array.isArray(scene?.media) ? scene.media : []) addReferenced(plate?.asset);
-  addReferenced(scene?.background?.asset);
+  for (const plate of sceneShotPlates(scene)) addReferenced(plate.asset);
   for (const item of Array.isArray(scene?.foreground) ? scene.foreground : []) addReferenced(item?.asset);
   addReferenced(scene?.presenter_asset);
   return ids;
@@ -608,7 +619,7 @@ function motionGraphicsRepairGuide(slice, problems) {
 
 /** Completion is shot-reachable: orphan pending GPU assets never satisfy it. */
 export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto', brief = null) {
-  const problems = [];
+  const problems = editorialBriefProblems(pkg, brief).map(problem => `${problem.code}: ${problem.message}`);
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
   if (scenes.length === 0) return ['generated film has no scenes/shots'];
@@ -673,7 +684,7 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
         problems.push(`${sceneId}: every motion.cue_phrases entry must be copied verbatim from this scene's narration`);
       }
     }
-    const mediaPlates = Array.isArray(scene?.media) ? scene.media : [];
+    const mediaPlates = sceneShotPlates(scene);
     const mediaAssets = mediaPlates
       .map(plate => typeof plate?.asset === 'string' ? assets[plate.asset] : null)
       .filter(Boolean);
@@ -707,19 +718,23 @@ export function generatedFilmCompletionProblems(pkg, intent, motionModel = 'auto
     if (videos.length === 0) {
       const fluxOnly = mediaAssets.some(asset => asset.gen?.generator === 'flux3-klein')
         || Object.values(assets).some(asset => asset.gen?.generator === 'flux3-klein');
-      problems.push(`${sceneId}: ${fluxOnly ? 'FLUX stills are not generated-film completion; ' : ''}attach a planned/ready H3 or LTX video through scene.media`);
+      problems.push(`${sceneId}: ${fluxOnly ? 'FLUX stills are not generated-film completion; ' : ''}attach a planned/ready H3 or LTX video through background.asset (or a visible scene.media plate for split/compare); unused media entries do not establish shot coverage`);
       continue;
     }
     const sceneSeconds = Number(scene?.preferredFrames) > 0 ? Number(scene.preferredFrames) / fps : 0;
-    const coveredSeconds = Array.from(new Set(videos)).reduce((total, asset) => {
-      const plate = mediaPlates.find(item => assets[item?.asset] === asset);
+    const coverages = mediaPlates.filter(plate => videos.includes(assets[plate.asset])).map(plate => {
+      const asset = assets[plate.asset];
       const frames = Number(asset.gen?.inputs?.frames);
       const mediaFps = Number(asset.gen?.inputs?.fps);
-      if (!(frames > 0) || !(mediaFps > 0)) return total;
+      if (!(frames > 0) || !(mediaFps > 0)) return 0;
       const speed = Number(plate?.speed) > 0 ? Number(plate.speed) : 1;
-      const holdFrames = Number.isFinite(plate?.holdFrames) ? Math.max(0, Number(plate.holdFrames)) : 0;
-      return total + (frames / mediaFps) / speed + holdFrames / fps;
-    }, 0);
+      const start = Math.max(0, Number(plate.trim?.startSeconds) || 0);
+      const end = Number.isFinite(plate.trim?.endSeconds) ? Math.min(frames / mediaFps, plate.trim.endSeconds) : frames / mediaFps;
+      return Math.max(0, end - start) / speed;
+    });
+    // Split/compare plates play simultaneously. Summing their durations would
+    // accept two short clips as coverage for one long scene.
+    const coveredSeconds = coverages.length ? Math.min(...coverages) : 0;
     if (sceneSeconds > 0 && coveredSeconds > 0 && coveredSeconds + 1 / 24 < sceneSeconds) {
       problems.push(`${sceneId}: scene is ${sceneSeconds.toFixed(2)} seconds but attached generated video covers ${coveredSeconds.toFixed(2)} seconds; add enough generation clips or shorten the scene instead of stretching a short clip`);
     }
@@ -777,7 +792,7 @@ function requestsStillImage(brief) {
 }
 
 export function motionGraphicsCompletionProblems(slice, brief = null, intent = null, requiredScenes = [], csvAttachments = []) {
-  const problems = [];
+  const problems = editorialBriefProblems(slice?.package, brief);
   if (!plannedModelContribution(slice?.package).length) problems.push({ code: 'COMFY_MODEL_CONTRIBUTION_REQUIRED', message: modelContributionPlanProblem(slice?.package), path: 'scenes' });
   const pkg = slice?.package;
   for (const message of csvWallProblems(pkg, brief, csvAttachments)) problems.push({ code: 'CSV_WALL_MISSING', message, path: 'scenes[].drawing' });
@@ -1112,6 +1127,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       };
     };
     const runStartedAt = Date.now();
+    const plannedVideoShots = new Map();
     const runOnce = async (model, repairInstructions = null, repairSystem = REPAIR_SYSTEM, repairWithoutGpu = false) => {
       const phase = repairInstructions ? 'repair' : 'initial';
       const phaseStartedAt = Date.now();
@@ -1153,6 +1169,11 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           onEvent: event => onEvent?.({ ...event, phase, runElapsedMs: Date.now() - runStartedAt }),
         });
         signal?.throwIfAborted();
+        for (const call of result.result.toolCalls ?? []) {
+          if (call.ok && call.name === 'assets.generate_video' && call.result?.asset?.kind === 'video') {
+            plannedVideoShots.set(call.args.scene_id, call.result.asset.id);
+          }
+        }
         // A planner can finish after a failed tool call. Do not turn that into a
         // successful plan with the requested visual silently absent.
         const unresolvedSvg = new Map();
@@ -1179,7 +1200,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
             const pendingGpu = result.pendingGpu.filter(item => item.generator === 'flux3-klein');
             const seen = new Set();
             for (const scene of covered.package.scenes) {
-              for (const plate of Array.isArray(scene?.media) ? scene.media : []) {
+              for (const plate of sceneShotPlates(scene)) {
                 const asset = covered.package.assets?.[plate?.asset];
                 if (seen.has(plate?.asset) || asset?.status !== 'pending' || !['fasth3-omni', 'ltx25'].includes(asset?.gen?.generator)) continue;
                 seen.add(plate.asset);
@@ -1202,6 +1223,9 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
             throw Object.assign(new Error(`Exact duration ${intent.requestedSeconds} seconds is not representable at ${fps} fps; choose a duration on a frame boundary.`), { status: 422, code: 'EXACT_DURATION_UNREPRESENTABLE' });
           }
           result = { ...result, package: { ...result.package, duration: { mode: 'target', targetFrames: Math.round(frames), exact: true } } };
+        }
+        if (!intent.generatedFilm) {
+          result = { ...result, problems: [...result.problems, ...plannedShotProblems(result.package, plannedVideoShots)] };
         }
         onEvent?.({ type: 'runner_phase', phase, status: 'completed', durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - runStartedAt, stopped: result.result.stopped ?? 'final' });
         return result;
@@ -1265,7 +1289,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           repairPackageFacts(slice.package, intent, briefAspect),
           ...(repairGuide.length ? [repairGuide.join('\n')] : []),
           ...(sharedCastGuide.length ? [sharedCastGuide.join('\n')] : []),
-          `Validation report: the current motion-graphics package is incomplete. Repair the existing package without changing its story or model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`,
+          `Validation report: the current video package is incomplete. Preserve its existing medium, story and model route. Fix exactly these issues, one edit per issue, then stop:\n- ${problemLines(initialProblems).join('\n- ')}`,
         ].join('\n\n'), MOTION_GRAPHICS_REPAIR_SYSTEM, !initialProblems.some(problem => ['PENDING_GPU_MISSING', 'SHARED_CAST_MISSING', 'COMFY_MODEL_CONTRIBUTION_REQUIRED'].includes(problem.code)));
         absorbUsage(slice.result);
         const wallRepair = repairCsvWallScenes(slice.package, brief, conversation?.csvAttachments);

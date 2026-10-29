@@ -315,7 +315,7 @@ test('coverage splitter creates separate short generation shots while preserving
     title: 'Real Human Skaters',
     proposal: { logline: 'A skater falls.', look: 'Photorealistic live-action humans.', soundtrack: 'Foley.' },
     format: { fps: 30 }, revision: 20,
-    scenes: [{ id: 's1', preferredFrames: 600, media: [{ asset: 'a_vid_old' }], notes: 'LTX finishing sound plan: foley' }],
+    scenes: [{ id: 's1', layout: 'list', preferredFrames: 600, background: { asset: 'a_vid_old' }, notes: 'LTX finishing sound plan: foley' }],
     assets: {
       a_vid_old: {
         kind: 'video', status: 'pending',
@@ -332,7 +332,8 @@ test('coverage splitter creates separate short generation shots while preserving
   assert.equal(covered.package.scenes.length, 4);
   assert.equal(covered.package.scenes.reduce((sum, scene) => sum + scene.preferredFrames, 0), 600);
   assert.equal(covered.package.assets.a_vid_old, undefined);
-  const ids = covered.package.scenes.map(scene => scene.media[0].asset);
+  const ids = covered.package.scenes.map(scene => scene.background.asset);
+  assert.ok(covered.package.scenes.every(scene => !scene.media), 'split shots use their actual visible slot, not unused media aliases');
   assert.equal(new Set(ids).size, 4);
   assert.deepEqual(ids.map(id => covered.package.assets[id].gen.inputs.seed), [201, 202, 203, 204]);
   const intent = classifyProductionIntent('Create a 20-second live-action film with real humans.');
@@ -349,8 +350,8 @@ test('coverage splitting keeps one opener and one outro instead of repeating boo
   const pkg = {
     format: { fps: 30 }, revision: 2,
     scenes: [
-      { id: 's1', layout: 'title', variant: 'centered', preferredFrames: 600, copy: { headline: 'THE ATLAS' }, motion: { recipe: 'kinetic', entry: 'maskRise' }, media: [{ asset: 'a_open' }] },
-      { id: 's2', layout: 'title', variant: 'outro', preferredFrames: 600, copy: { headline: 'HOME AGAIN' }, motion: { recipe: 'kinetic', entry: 'fadeUp' }, media: [{ asset: 'a_close' }], transitionOut: { type: 'fade', frames: 12 } },
+      { id: 's1', layout: 'title', variant: 'centered', preferredFrames: 600, copy: { headline: 'THE ATLAS' }, motion: { recipe: 'kinetic', entry: 'maskRise' }, background: { asset: 'a_open' } },
+      { id: 's2', layout: 'title', variant: 'outro', preferredFrames: 600, copy: { headline: 'HOME AGAIN' }, motion: { recipe: 'kinetic', entry: 'fadeUp' }, background: { asset: 'a_close' }, transitionOut: { type: 'fade', frames: 12 } },
     ],
     assets: { a_open: video(10), a_close: video(20) },
   };
@@ -381,7 +382,7 @@ test('coverage splitting keeps narration and cue ownership on the first part onl
     voice: { enabled: true, engine: 'kokoro', voice: 'af_heart' },
     scenes: [{
       id: 's1', layout: 'list', media_only: true, preferredFrames: 360, narration,
-      motion: { cue_phrases: ['rises after the fall'] }, media: [{ asset: 'a_ltx' }],
+      motion: { cue_phrases: ['rises after the fall'] }, background: { asset: 'a_ltx' },
       notes: 'LTX finishing sound plan: wheels, impact and room tone',
     }],
     assets: {
@@ -410,7 +411,7 @@ test('completion rejects clay substitutions for real humans and under-covered sc
     title: 'Six Clay Wipeouts',
     proposal: { logline: 'Human skaters fall.', look: 'Plasticine stop-motion.', soundtrack: 'Foley.' },
     format: { fps: 30 },
-    scenes: [{ id: 's1', preferredFrames: 600, media: [{ asset: 'a_video' }] }],
+    scenes: [{ id: 's1', layout: 'list', preferredFrames: 600, background: { asset: 'a_video' } }],
     assets: {
       a_video: {
         kind: 'video',
@@ -478,7 +479,7 @@ test('runner explicitly accepts Klein stills + code motion without H3/LTX jobs',
   assert.match(result.package.compliance.warnings.join(' '), /stills \+ code motion/);
   assert.ok(result.package.scenes[0].motion);
   assert.ok(result.pendingGpu.every(asset => asset.generator === 'flux3-klein'));
-  const still = result.package.assets[result.package.scenes[0].media[0].asset];
+  const still = result.package.assets[result.package.scenes[0].background.asset];
   assert.equal(still.kind, 'image');
   assert.match(still.notes, /stills \+ code motion/);
   assert.ok(!Object.values(result.package.assets).some(asset => ['fasth3-omni', 'ltx25'].includes(asset.gen?.generator)));

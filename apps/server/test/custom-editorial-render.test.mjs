@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { adoptProductWalkthroughAttachments } from '../src/product-walkthrough.mjs';
 import { createReferenceStore } from '../src/references/store.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
@@ -10,7 +11,7 @@ import { renderPackage } from '../../renderer/scripts/render-package-lib.mjs';
 
 test('Custom renders the authorized original image and leaves a reference-only upload untouched', { timeout: 300_000 }, async t => {
   mkdirSync('/tmp/opencode', { recursive: true });
-  const root = mkdtempSync('/tmp/opencode/custom-editorial-');
+  const root = mkdtempSync(join(tmpdir(), 'custom-editorial-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const plate = join(root, 'plate.png');
   const make = spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=128x128', '-frames:v', '1', '-threads', '1', plate]);

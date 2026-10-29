@@ -404,17 +404,22 @@ function retimeExact(plans: ScenePlan[], pkg: ComfyrizzPackage, target: number, 
     if (plan.scene.drawing || plan.scene.audio_trim) min = Math.max(min, plan.duration);
     const refs = [plan.scene.background?.asset, ...(plan.scene.foreground ?? []).map(item => item.asset), ...(plan.scene.media ?? []).map(item => item.asset)];
     // Generated/video coverage and user-locked scenes must not be stretched or trimmed here.
-    if (plan.scene.locked || refs.some(id => id && pkg.assets?.[id]?.kind === 'video')) {
+    const video = refs.some(id => id && pkg.assets?.[id]?.kind === 'video');
+    if (plan.scene.locked || video) {
       min = Math.max(min, plan.duration);
       max = Math.min(max, plan.duration);
     }
-    return { min, max };
+    return { min, max, video };
   });
   const overlaps = plans.slice(0, -1).reduce((sum, plan) => sum + plan.transitionOut, 0);
   const minTotal = bounds.reduce((sum, bound) => sum + bound.min, -overlaps);
   const maxTotal = bounds.reduce((sum, bound) => sum + bound.max, -overlaps);
   if (bounds.some(bound => bound.min > bound.max) || target < minTotal || target > maxTotal) {
-    throw new TimelineError('exact-duration-impossible', `Exact target ${target} frames cannot fit the scene, transition, narration, trim and media constraints (available ${minTotal}–${maxTotal} frames). Shorten narration or transitions, adjust locked/timed scenes, add scenes, or choose a different duration.`);
+    const videoCount = bounds.filter(bound => bound.video).length;
+    const coverage = target > maxTotal && videoCount > 0
+      ? ` Shortfall ${target - maxTotal} project frames at ${fps} fps; ${videoCount} video scene windows are fixed. Explicitly author scene preferredFrames totalling ${target + overlaps} frames (${overlaps} overlap), then plan sufficient source footage at each source's fps for changed windows, or add shots. Do not stretch playback or insert unrequested holds.`
+      : ' Shorten narration or transitions, adjust locked/timed scenes, add scenes, or choose a different duration.';
+    throw new TimelineError('exact-duration-impossible', `Exact target ${target} frames cannot fit the scene, transition, narration, trim and media constraints (available ${minTotal}–${maxTotal} frames).${coverage}`);
   }
   plans.forEach((plan, i) => { plan.duration = clamp(plan.duration, bounds[i].min, bounds[i].max); });
   let delta = target - totalFrames(plans);

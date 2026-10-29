@@ -269,6 +269,7 @@ test('UX15: publication is atomic, versioned and failed writes keep the prior bu
   assert.ok(readFileSync(join(first.dir, 'video.mp4')).equals(Buffer.from('first video bytes')));
 
   const second = store.publishBundle({
+    packageDir: work.packageDir,
     productionId: 'prod_ux15',
     packageId: snapshot.packageId,
     snapshot,

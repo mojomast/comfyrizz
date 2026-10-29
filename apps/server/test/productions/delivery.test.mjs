@@ -68,7 +68,7 @@ function makeInput(overrides = {}) {
   } catch {
     captionRender = { sha256: hex('e') };
   }
-  const videoBytes = overrides.videoBytes ?? Buffer.from('verified delivery video bytes', 'utf8');
+  const videoBytes = overrides.video?.bytes ?? (overrides.video?.path ? fs.readFileSync(overrides.video.path) : overrides.videoBytes ?? Buffer.from('verified delivery video bytes', 'utf8'));
   const mockVideo = join(mockDir, 'mock.mp4');
   fs.writeFileSync(mockVideo, videoBytes);
   recordMockRender(mockPackage, mockDir, mockVideo);
@@ -361,8 +361,7 @@ test('the same idempotency key replays the same version and conflicts on new con
   assert.equal(replay.version, 1);
   assert.equal(replay.deliveryId, first.deliveryId);
 
-  const changed = makeInput();
-  changed.video = { bytes: Buffer.from('changed video bytes', 'utf8') };
+  const changed = makeInput({ video: { bytes: Buffer.from('changed video bytes', 'utf8') } });
   assert.equal(errorCode(() => store.publish(changed)), 'IDEMPOTENCY_CONFLICT');
 });
 

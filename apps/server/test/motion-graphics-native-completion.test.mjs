@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createToolset } from '../../../packages/agent/dist/src/index.js';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { createCpuAgentRunner, motionGraphicsCompletionProblems } from '../src/agent-runner.mjs';
-import { replayProvider } from './fake-provider.mjs';
+import { replayProvider, visiblePlateCall } from './fake-provider.mjs';
 
 const title = { id: 's_title', layout: 'title', preferredFrames: 90, copy: { headline: 'MAKE IT MOVE' } };
 const drawing = { background: '#ffffff', elements: [
@@ -13,7 +15,7 @@ const drawing = { background: '#ffffff', elements: [
 ] };
 
 async function setup(t, calls) {
-  const runtimeDir = mkdtempSync('/tmp/opencode/native-completion-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'native-completion-'));
   // Any unexpected SVG request fails, rather than supplying a quota-filling asset.
   const provider = await replayProvider(calls, { svgStatus: 503 });
   t.after(async () => { await provider.close(); rmSync(runtimeDir, { recursive: true, force: true }); });
@@ -33,7 +35,7 @@ for (const scenario of [
     const calls = [{ name: 'storyboard.propose', args: {
       brief: scenario.brief, title: 'Native Motion', scenes: scenario.scenes,
       ...(scenario.datasets ? { datasets: scenario.datasets } : {}),
-    } }, { name: 'assets.generate_image', args: { scene_id: scenario.scenes[0].id, kind: 'illustration', intent: 'A relevant editorial backdrop for the native graphics' } }, ...(scenario.extra ?? [])];
+    } }, { name: 'assets.generate_image', args: { scene_id: scenario.scenes[0].id, kind: 'illustration', intent: 'A relevant editorial backdrop for the native graphics' } }, visiblePlateCall(scenario.scenes[0].id), ...(scenario.extra ?? [])];
     const { runner, provider } = await setup(t, calls);
     const events = [];
     const result = await runner({ brief: scenario.brief, provider: 'custom', onEvent: event => events.push(event) });

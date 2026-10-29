@@ -44,6 +44,76 @@ test('wordless retains native sound and explicit music; full silence prohibits b
   assert.equal(classifyAudioIntent('No music, but narrate the story.').narrationRequested, true);
 });
 
+for (const brief of [
+  'No additional on-screen copy, people, music or claims about watering frequency.',
+  'No people, music or captions.',
+  'No subtitles or people and soundtrack.',
+  'Without people, logos, or music.',
+  'Please exclude additional on-screen text, people and score.',
+  'Do not include photos, people or instrumental bed.',
+]) {
+  test(`mixed production list prohibits music without silencing speech: ${brief}`, () => {
+    const intent = classifyAudioIntent(`${brief} Narrate the supplied script.`);
+    assert.equal(intent.musicProhibited, true);
+    assert.equal(intent.musicRequested, false);
+    assert.equal(intent.silent, false);
+    assert.equal(intent.wordless, false);
+    assert.equal(intent.narrationRequested, true);
+  });
+}
+
+for (const brief of ['No narration,music.', 'No people, music or narration.', 'No logos, speech or music.']) {
+  test(`coordinated speech and music prohibitions remain separate from full silence: ${brief}`, () => {
+    const intent = classifyAudioIntent(brief);
+    assert.equal(intent.wordless, true);
+    assert.equal(intent.musicProhibited, true);
+    assert.equal(intent.silent, false);
+    assert.equal(intent.speechRequested, false);
+  });
+}
+
+for (const brief of [
+  'No people, but add music.',
+  'No people and use music.',
+  'No people, then use music.',
+  'No people; add music.',
+  'No people. Use music.',
+  'No people\nUse music.',
+  'No loud music; soft piano music.',
+  'No people, loud music; use soft piano music.',
+  'No people, music with lyrics. Use soft instrumental music.',
+]) {
+  test(`a positive music directive survives a separate or qualified prohibition: ${brief}`, () => {
+    const intent = classifyAudioIntent(brief);
+    assert.equal(intent.musicProhibited, false);
+    assert.equal(intent.musicRequested, true);
+    assert.equal(intent.silent, false);
+    assert.equal(intent.wordless, false);
+  });
+}
+
+test('mentions of negative lists are not blanket production-audio instructions', () => {
+  for (const brief of [
+    'The story says there are no people, music or lights.',
+    'Discuss a painting with no people, music or buildings in its title.',
+    'No claims about people and music.',
+    'Show the words "No people, music or lights".',
+  ]) {
+    const intent = classifyAudioIntent(brief);
+    assert.equal(intent.musicProhibited, false, brief);
+    assert.equal(intent.silent, false, brief);
+    assert.equal(intent.wordless, false, brief);
+  }
+});
+
+test('no score does not prohibit narration or native sound', () => {
+  const intent = classifyAudioIntent('No score. Narrate the story over native sound effects.');
+  assert.equal(intent.musicProhibited, true);
+  assert.equal(intent.silent, false);
+  assert.equal(intent.wordless, false);
+  assert.equal(intent.narrationRequested, true);
+});
+
 test('speech prohibition clears stale voice bindings without mutating the source scene', () => {
   const scene = { id: 's1', layout: 'hero', narration: 'Old speech', narration_asset: 'a_voice', narration_duration_frames: 30, motion: { recipe: 'focus', cue_phrases: ['Old speech'] } };
   const clean = applyProductionIntentToScene(scene, classifyProductionIntent('Motion graphics; no spoken words.'));

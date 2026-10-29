@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
+import { seedMockContribution, approveMockContribution, recordMockRender } from './helpers/comfy-contribution.mjs';
 
 test('pipeline HTTP contract: revisions, responsive status, durable replay, protected seekable artifacts', async t => {
   const runtimeDir = mkdtempSync(join(tmpdir(), 'pipeline-http-'));
@@ -17,7 +18,8 @@ test('pipeline HTTP contract: revisions, responsive status, durable replay, prot
   const pkg = JSON.parse(readFileSync(new URL('../../../examples/launch-demo/package.json', import.meta.url)));
   pkg.scenes = [pkg.scenes[0]]; delete pkg.scenes[0].transitionOut;
   pkg.scenes[0].background = null; pkg.scenes[0].foreground = []; pkg.assets = {};
-  app.store.seed(pkg);
+  seedMockContribution(app.store, pkg);
+  approveMockContribution(app.takeStore, pkg, app.store.dir);
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { app.close(); await new Promise(resolve => server.close(resolve)); rmSync(runtimeDir, { recursive: true, force: true }); });
@@ -46,18 +48,28 @@ test('pipeline HTTP contract: revisions, responsive status, durable replay, prot
   app.store.save(pkg.id, { ...pkg, title: 'A newer user edit' }, pkg.revision);
   const target = join(spec.runDir, 'exports', pkg.id); mkdirSync(target, { recursive: true });
   writeFileSync(join(target, 'video.mp4'), Buffer.from('0123456789'));
+  writeFileSync(join(target, 'package.zip'), 'mock-archive');
+  recordMockRender(pkg, spec.workDir, join(target, 'video.mp4'));
   for (const stage of plan.stages) receive({ kind: 'stage', stageId: stage.id, status: 'completed' });
-  receive({ kind: 'result', result: { files: [{ name: 'video.mp4', bytes: 10 }] } }); finish(0);
+  receive({ kind: 'result', result: { files: [{ name: 'video.mp4', bytes: 10 }, { name: 'package.zip', bytes: 12 }] } }); finish(0);
   assert.equal(app.store.read(pkg.id).title, 'A newer user edit');
   const media = await request(path + '/files/video.mp4', null, { range: 'bytes=2-5' });
   assert.equal(media.status, 206); assert.equal(await media.text(), '2345');
   assert.equal((await fetch(base + path + '/files/video.mp4')).status, 401);
   assert.equal((await request(path + '/files/state.json')).status, 404);
+  assert.equal((await request(path + '/files/package.zip')).status, 200, 'archive delivery uses the verified movie receipt');
+  writeFileSync(join(target, 'video.mp4'), 'tampered-video');
+  for (const artifact of ['video.mp4', 'package.zip']) {
+    const refused = await request(path + '/files/' + artifact);
+    assert.equal(refused.status, 422);
+    assert.equal((await refused.json()).code, 'COMFY_RENDER_RECEIPT_REQUIRED');
+  }
   const outside = join(runtimeDir, 'outside-export.mp4');
   writeFileSync(outside, 'not an exported artifact');
   rmSync(join(target, 'video.mp4'));
   symlinkSync(outside, join(target, 'video.mp4'));
   assert.equal((await request(path + '/files/video.mp4')).status, 404, 'manifest file symlink cannot escape export root');
+  assert.equal((await request(path + '/files/package.zip')).status, 404, 'a ZIP cannot use a movie symlink outside the export root as proof');
   rmSync(target, { recursive: true });
   const outsideDir = join(runtimeDir, 'outside-exports');
   mkdirSync(outsideDir); writeFileSync(join(outsideDir, 'video.mp4'), 'outside run');

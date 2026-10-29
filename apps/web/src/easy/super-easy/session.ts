@@ -18,13 +18,18 @@ import { hasFinalArtifact, renderSuperEasyProgress } from './progress-view.ts';
 import { buildGalleryModel } from './gallery-model.ts';
 import type { SuperEasyPhase } from './local-stages.ts';
 import type { EasyState } from '../types.ts';
-import type { SuperEasyProposal } from './proposal.ts';
+import { proposalForPackage, type SuperEasyProposal } from './proposal.ts';
+import { isServerSaved, type SaveStateSource } from '../../editor/save-state.ts';
+import { planInputsHash } from '../store.ts';
 
 const RUN_ALREADY_STARTED = 'The Super Easy run is already going.';
 
 export type SuperEasyWatch = (options: WatchProductionOptions) => () => void;
 
 export interface SuperEasySessionOptions extends RunSuperEasyDeps {
+  host: RunSuperEasyDeps['host'] & {
+    editorStore: RunSuperEasyDeps['host']['editorStore'] & Partial<SaveStateSource>;
+  };
   /** Authenticated transport used for production snapshots and events. */
   fetchImpl?: WatchProductionOptions['fetchImpl'];
   /** The run under test can be replaced; production defaults to SE09. */
@@ -45,6 +50,8 @@ export interface SuperEasySession {
   /** Re-run the last prompt after a visible planning or preview failure. */
   retry(): Promise<SuperEasyRunResult | null>;
   proposal(): SuperEasyProposal | null;
+  /** Re-review an acknowledged editor save on return, never as part of approval. */
+  refreshProposal(): 'refreshed' | 'waiting' | 'unchanged';
   approveProposal(): Promise<SuperEasyRunResult | null>;
   reviseProposal(note: string): Promise<SuperEasyRunResult | null>;
   reviseNarration(): Promise<SuperEasyRunResult | null>;
@@ -81,6 +88,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let phase: SuperEasyPhase = 'idle';
   let objectUrl: string | null = null;
   let proposal: SuperEasyProposal | null = null;
+  let reviewedPackage: any = null;
   let activeRunId: string | null = null;
 
   function withLiveInputs(input: RunSuperEasyInput): RunSuperEasyInput {
@@ -199,6 +207,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     activeRunId = null;
     stopped = false;
     proposal = null;
+    reviewedPackage = null;
     preview = false;
     failure = null;
     cancelWatch();
@@ -248,6 +257,10 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
     if ('proposal' in result) {
       proposal = result.proposal;
+      const pkg = options.host.getPackage?.();
+      if (pkg?.id === proposal.packageId && pkg?.revision === proposal.reviewedPackageRevision) {
+        reviewedPackage = structuredClone(pkg);
+      }
       snapshot = null;
       phase = 'proposal';
       publish();
@@ -284,8 +297,63 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     return result;
   }
 
+  function refreshProposal(): 'refreshed' | 'waiting' | 'unchanged' {
+    if (stopped || phase !== 'proposal' || !proposal || !lastInput) return 'unchanged';
+    const pkg = options.host.getPackage?.();
+    // A parked proposal belongs to one project, even if another has the same revision.
+    if (!proposal.packageId || pkg?.id !== proposal.packageId || options.store.get().packageId !== proposal.packageId) return 'unchanged';
+    const saved = options.host.editorStore?.saveState?.();
+    if (!saved || !isServerSaved(saved) || saved.acknowledgedRevision !== pkg.revision) return 'waiting';
+    if (!Number.isSafeInteger(pkg.revision)) return 'unchanged';
+    const current = options.store.get();
+    // The full-plan surface marks its own plan ready. This session still needs
+    // the normal production/action-plan path, reusing the edited package only
+    // when the original brief and attached-source provenance still match.
+    if (current.plan.status !== 'building' && current.builtPackageInputsHash === planInputsHash(current)) {
+      options.store.patch({ plan: { ...current.plan, status: 'building', wordsChanged: false } });
+    }
+    if (pkg.revision === proposal.reviewedPackageRevision) return 'unchanged';
+    const next = proposalForPackage(pkg, proposal.basePrompt, proposal.revisionNotes, Boolean(proposal.narrationReview), reviewedPackage);
+    next.motionModel = proposal.motionModel ?? lastInput.motionModel;
+    next.revisionChanges = [
+      { label: 'Saved package revision — review before making this film', before: String(proposal.reviewedPackageRevision ?? 'Previous proposal'), after: String(pkg.revision) },
+      ...(next.revisionChanges ?? []),
+    ];
+    for (const scene of pkg.scenes ?? []) {
+      const old = reviewedPackage?.scenes?.find((item: any) => item.id === scene.id);
+      const timing = (item: any, source: any) => `${item.preferredFrames ?? 'Automatic'} frames at ${source.format?.fps ?? 30} fps`;
+      if (!old || old.preferredFrames !== scene.preferredFrames || reviewedPackage.format?.fps !== pkg.format?.fps) {
+        next.revisionChanges.push({ label: `${scene.id}: Preferred timing`, before: old ? timing(old, reviewedPackage) : 'Not available', after: timing(scene, pkg) });
+      }
+    }
+    proposal = next;
+    reviewedPackage = structuredClone(pkg);
+    publish();
+    options.onProposal?.(proposal);
+    return 'refreshed';
+  }
+
   async function approveProposal(): Promise<SuperEasyRunResult | null> {
     if (!proposal || !lastInput) return null;
+    const pkg = options.host.getPackage?.();
+    const saved = options.host.editorStore?.saveState?.();
+    const wrongProject = proposal.packageId && options.host.getPackage
+      && (pkg?.id !== proposal.packageId || options.store.get().packageId !== proposal.packageId);
+    if (!wrongProject && saved && (!isServerSaved(saved) || saved.acknowledgedRevision !== pkg?.revision)) {
+      // This is a blocked gesture, not a failed run. Keep the parked review and
+      // its phase so the return/save-ack path can refresh it for a later click.
+      return { ok: false, code: 'PLAN_FAILED', stage: 'plan', retryable: false,
+        message: 'The editor changes are not saved yet. Wait for Saved, then review the updated proposal before choosing Make this film again. No generation has started.' };
+    }
+    if (wrongProject) {
+      failure = { ok: false, code: 'PLAN_FAILED', stage: 'plan', retryable: false,
+        message: 'The reviewed project changed. Return to its proposal before approving.' };
+      proposal = null;
+      patchStatus('error');
+      publish();
+      options.onError?.(failure);
+      return failure;
+    }
     const next = {
       ...withLiveInputs(lastInput),
       proposalOnly: false,
@@ -369,6 +437,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     generate,
     retry,
     proposal: () => proposal,
+    refreshProposal,
     approveProposal,
     reviseProposal,
     reviseNarration,

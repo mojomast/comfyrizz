@@ -112,7 +112,7 @@ test('live motion graphics repairs once and completes without a scripted fallbac
   assert.equal(result.usage.svg.requests, 4);
 });
 
-test('an evolving drawing repairs missing scenes with carried geometry and no GPU still', async t => {
+test('an evolving drawing repairs its geometry but cannot complete a production plan without generated media', async t => {
   const brief = 'A pencil draws a structure as the drawing grows. Finish on the completed sheet.';
   const drawing = { background: '#ffffff', elements: [{ type: 'path', points: [[100, 100], [300, 100]], color: '#111111', width: 3, start: 0, end: 20 }] };
   const initial = [
@@ -121,21 +121,29 @@ test('an evolving drawing repairs missing scenes with carried geometry and no GP
   ];
   const { provider, runner } = await setup(t, initial);
   let repairStarted = false;
-  const result = await runner({ brief, provider: 'custom', sessionId: 'drawing-repair', onEvent: event => {
+  await assert.rejects(runner({ brief, provider: 'custom', sessionId: 'drawing-repair', onEvent: event => {
     if (event.type === 'done' && !repairStarted) {
       repairStarted = true;
-      provider.setCalls([{ name: 'storyboard.extend_drawing', args: { scene_id: scenes[1].id, source_scene_id: scenes[0].id } }]);
+      provider.setCalls([
+        { name: 'storyboard.extend_drawing', args: { scene_id: scenes[1].id, source_scene_id: scenes[0].id } },
+        { name: 'storyboard.inspect_drawing', args: { scene_id: scenes[1].id } },
+      ]);
     }
-  } });
+  } }), error => {
+    assert.equal(error.code, 'MOTION_GRAPHICS_INCOMPLETE');
+    assert.deepEqual(error.details.codes, ['COMFY_MODEL_CONTRIBUTION_REQUIRED']);
+    assert.equal(error.details.pendingGpuCount, 0);
+    return true;
+  });
   assert.equal(repairStarted, true);
-  assert.equal(result.pendingGpu.length, 0);
-  assert.equal(result.package.scenes[1].drawing.elements.length, 1);
+  const inspected = provider.requests.at(-1).messages.filter(message => message.role === 'tool').map(message => JSON.parse(message.content)).findLast(body => (body.result ?? body).drawing);
+  assert.equal((inspected.result ?? inspected).drawing.elements.length, 1);
   const repair = JSON.stringify(provider.requests.at(-1).messages);
   assert.match(repair, /DRAWING_MISSING/);
   assert.doesNotMatch(repair, /PENDING_GPU_MISSING|SVG_ASSET_FLOOR/);
   const repairTools = provider.requests.at(-1).tools.map(tool => tool.function.name);
-  assert.ok(!repairTools.includes('assets_generate_image'));
-  assert.ok(!repairTools.includes('assets_sketch_to_render'));
+  assert.ok(repairTools.includes('assets_generate_image'), 'the contribution repair can plan a supporting still');
+  assert.ok(repairTools.includes('storyboard_extend_drawing'), 'geometry repair remains available');
 });
 
 test('repair-limit stops are not accepted even when the package passes validation', async t => {
@@ -179,7 +187,7 @@ test('offline motion graphics returns an outline, and refuses explicitly request
   const runtimeDir = mkdtempSync(join(tmpdir(), 'ps02-offline-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const runner = createCpuAgentRunner({ runtimeDir });
-  const outline = 'Create a motion-graphics sequence with headlines INTAKE, SORT, REPAIR and RETURN. No narration.';
+  const outline = 'INTAKE SORT REPAIR RETURN. No narration.';
   const result = await runner({ brief: outline, sessionId: 'ps02-offline' });
   assert.equal(result.live, false);
   assert.equal(result.provider, 'scripted');

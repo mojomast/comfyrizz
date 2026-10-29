@@ -14,10 +14,10 @@ import type { SuperEasySetup } from './setup.ts';
 import type { EasyIdea, LyricsStyle, SongTrim } from '../types.ts';
 import { VIDEO_TYPE_LIST, videoTypeMetadata, type VideoType } from './video-types.ts';
 import { renderSuperEasyContextAttachments } from './context-attachments.ts';
-import { MIN_EASY_SECONDS, MAX_EASY_SECONDS } from '../duration.ts';
+import { MIN_EASY_SECONDS, MAX_EASY_SECONDS, EASY_DURATION_PRESETS } from '../duration.ts';
 
 export const SUPER_EASY_MIN_PROMPT_CHARS = 10;
-const LENGTHS = [15, 30, 60, 90] as const satisfies readonly EasyIdea['lengthS'][];
+const LENGTHS = EASY_DURATION_PRESETS;
 
 /** One-click starting prompts, keyed by `data-super-easy-idea`. */
 export const SUPER_EASY_IDEAS: Readonly<Record<string, string>> = COPY.ideas;
@@ -58,7 +58,7 @@ function lengthSegments(lengthS: EasyIdea['lengthS']): string {
     return `<label class="easy-segment"><input class="easy-segment-input" type="radio" name="super-easy-length" value="${seconds}" data-super-easy-length${checked} /><span class="easy-segment-title">${escapeHtml(EASY_COPY.idea.lengths[seconds])}</span></label>`;
   }).join('');
   const custom = !(LENGTHS as readonly number[]).includes(lengthS);
-  return `<fieldset class="easy-segmented super-easy-home-length"><legend class="easy-segment-legend">${escapeHtml(EASY_COPY.idea.length)}</legend><div class="easy-segment-row">${options}</div><label for="super-easy-custom-length">Custom duration (seconds)</label> <input id="super-easy-custom-length" type="number" inputmode="numeric" min="${MIN_EASY_SECONDS}" max="${MAX_EASY_SECONDS}" step="1" value="${custom ? lengthS : ''}" placeholder="1–90" data-super-easy-custom-length aria-describedby="super-easy-length-help super-easy-length-error" /><p id="super-easy-length-help">Enter a whole number from 1 to 90, or choose a preset. A duration in your prompt takes precedence. Non-preset durations are exact; presets are approximate.</p><p class="super-easy-home-error" id="super-easy-length-error" role="alert" data-super-easy-length-error hidden>Enter a whole number from 1 to 90 seconds.</p></fieldset>`;
+  return `<fieldset class="easy-segmented super-easy-home-length"><legend class="easy-segment-legend">${escapeHtml(EASY_COPY.idea.length)}</legend><div class="easy-segment-row">${options}</div><label for="super-easy-custom-length">Custom duration (seconds)</label> <input id="super-easy-custom-length" type="number" inputmode="numeric" min="${MIN_EASY_SECONDS}" max="${MAX_EASY_SECONDS}" step="1" value="${custom ? lengthS : ''}" placeholder="${MIN_EASY_SECONDS}–${MAX_EASY_SECONDS}" data-super-easy-custom-length aria-describedby="super-easy-length-help super-easy-length-error" /><p id="super-easy-length-help">Enter a whole number from ${MIN_EASY_SECONDS} to ${MAX_EASY_SECONDS}, or choose a preset. A duration in your prompt takes precedence. Non-preset durations are exact; presets are approximate.</p><p class="super-easy-home-error" id="super-easy-length-error" role="alert" data-super-easy-length-error hidden>Enter a whole number from ${MIN_EASY_SECONDS} to ${MAX_EASY_SECONDS} seconds.</p></fieldset>`;
 }
 
 export function renderSuperEasySongTrim(
@@ -132,7 +132,7 @@ ${renderSuperEasyContextAttachments()}
 <fieldset><legend>Editable title font (optional)</legend><p>Upload a TrueType font you are authorized to use. It will be used for text in the video and included in the project.</p><label><input type="checkbox" data-super-easy-font-rights /> I have the rights to use this font in my video.</label><label>Font file (.ttf, max 5 MiB)<input type="file" accept=".ttf,font/ttf" data-super-easy-font-file /></label><button type="button" data-super-easy-font-remove>Remove supplied font</button><p role="status" data-super-easy-font-status></p></fieldset>
 ${renderSuperEasySongTrim(options.videoType, options.songTrim, lengthS)}
 ${renderSuperEasyLyrics(options.videoType, options.lyricsStyle, options.lyricsLrc)}
-<fieldset data-super-easy-music-layout${String(options.videoType) === 'music-video' ? '' : ' hidden'}><legend>Video layout</legend><label for="super-easy-music-aspect">Output orientation</label><select id="super-easy-music-aspect" data-super-easy-music-aspect><option value="16:9"${(options.aspect ?? '16:9') === '16:9' ? ' selected' : ''}>Landscape (16:9)</option><option value="9:16"${options.aspect === '9:16' ? ' selected' : ''}>Vertical (9:16)</option><option value="1:1"${options.aspect === '1:1' ? ' selected' : ''}>Square (1:1)</option></select><p>Choose one layout for this video.</p></fieldset>
+<fieldset data-super-easy-music-layout><legend>Video layout</legend><label for="super-easy-music-aspect">Output orientation</label><select id="super-easy-music-aspect" data-super-easy-music-aspect><option value="16:9"${(options.aspect ?? '16:9') === '16:9' ? ' selected' : ''}>Landscape (16:9)</option><option value="9:16"${options.aspect === '9:16' ? ' selected' : ''}>Vertical (9:16)</option><option value="1:1"${options.aspect === '1:1' ? ' selected' : ''}>Square (1:1)</option></select><p>Choose one layout for this video.</p></fieldset>
 ${lengthSegments(lengthS)}
 <label><input type="checkbox" data-super-easy-deepseek-no-thinking${options.deepSeekNoThinking ? ' checked' : ''} /> Disable thinking for DeepSeek Flash (OpenCode Go or direct)</label>
 <p class="super-easy-home-hint">Planning uses your model provider and may make up to 12 additional SVG requests. Provider charges may apply.</p>

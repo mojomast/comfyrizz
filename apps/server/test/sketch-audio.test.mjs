@@ -12,7 +12,7 @@ import { resolveAudioMix } from '../../renderer/src/audio-mix-model.js';
 import { muxPackageAudio } from '../../renderer/scripts/incremental-audio.mjs';
 import { renderPackage } from '../../renderer/scripts/render-package-lib.mjs';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
-import { replayProvider } from './fake-provider.mjs';
+import { replayProvider, withPlannedPlate } from './fake-provider.mjs';
 import { createApp } from '../src/app.mjs';
 
 function fixture() {
@@ -115,10 +115,10 @@ test('the actual live-agent runner finalizes a storyboard.draw package before pr
   const dir = temp(t);
   const drawing = fixture().scenes[0].drawing;
   const brief = 'Draw an impossible line in a 5 second sketch with a 60 bpm score.';
-  const provider = await replayProvider([
-    { name: 'storyboard.propose', args: { brief, title: 'A line', proposal: fixture().proposal, scenes: [{ id: 's1', layout: 'hero', preferredFrames: 150, copy: { headline: 'A line' } }] } },
+  const provider = await replayProvider(withPlannedPlate([
+    { name: 'storyboard.propose', args: { brief, title: 'A line', proposal: fixture().proposal, scenes: [{ id: 's1', layout: 'hero', preferredFrames: 90, copy: { headline: 'A line' } }, { id: 's_plate', layout: 'title', preferredFrames: 60, copy: { headline: 'Drawing context' } }] } },
     { name: 'storyboard.draw', args: { scene_id: 's1', drawing } },
-  ]);
+  ], 's_plate'));
   t.after(() => provider.close());
   const runner = createCpuAgentRunner({ runtimeDir: dir, providers: { custom: { baseUrl: provider.url } } });
   const result = await runner({ brief, provider: 'custom', videoType: 'sketch-build' });
@@ -133,10 +133,10 @@ test('the actual live-agent runner finalizes a storyboard.draw package before pr
 test('Super Easy agent endpoint saves generated audio for authenticated preview hydration', async t => {
   const dir = temp(t);
   const brief = 'Draw a line in a 5 second sketch.';
-  const provider = await replayProvider([
-    { name: 'storyboard.propose', args: { brief, title: 'A line', proposal: fixture().proposal, scenes: [{ id: 's1', layout: 'hero', preferredFrames: 150, copy: { headline: 'A line' } }] } },
+  const provider = await replayProvider(withPlannedPlate([
+    { name: 'storyboard.propose', args: { brief, title: 'A line', proposal: fixture().proposal, scenes: [{ id: 's1', layout: 'hero', preferredFrames: 90, copy: { headline: 'A line' } }, { id: 's_plate', layout: 'title', preferredFrames: 60, copy: { headline: 'Drawing context' } }] } },
     { name: 'storyboard.draw', args: { scene_id: 's1', drawing: fixture().scenes[0].drawing } },
-  ]);
+  ], 's_plate'));
   const runner = createCpuAgentRunner({ runtimeDir: dir, providers: { custom: { baseUrl: provider.url } } });
   t.after(() => provider.close());
   const app = createApp({ root: new URL('../../..', import.meta.url).pathname, runtimeDir: dir, token: 'sketch-audio-test-token', agentRunner: runner });
@@ -166,7 +166,7 @@ test('full Remotion render includes the generated score and drawing sound', { ti
   const path = join(dir, 'package.json');
   const output = join(dir, 'full.mp4');
   writeFileSync(path, JSON.stringify(pkg));
-  renderPackage(path, output, { normalizeLoudness: false });
+  renderPackage(path, output, { normalizeLoudness: false, intent: 'draft' });
   const streams = JSON.parse(run('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_name', '-of', 'json', output])).streams;
   assert.equal(streams[0]?.codec_name, 'aac');
   const pcm = spawnSync('ffmpeg', ['-v', 'error', '-i', output, '-map', '0:a:0', '-f', 's16le', '-ac', '1', '-ar', '24000', 'pipe:1'], { maxBuffer: 2 * 1024 * 1024 });

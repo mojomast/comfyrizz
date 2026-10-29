@@ -10,8 +10,121 @@ import assert from 'node:assert/strict';
 
 import { COPY } from './copy.ts';
 import { createSuperEasySession } from './session.ts';
+import { proposalForPackage, renderSuperEasyProposal } from './proposal.ts';
+import { createEasyStore, planInputsHash } from '../store.ts';
 
 const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
+
+function returnedProposalHarness() {
+  const store = createEasyStore({ storage: { getItem: () => null, setItem() {}, removeItem() {} } });
+  let pkg = { id: 'pkg_return', revision: 6, title: 'MORNING STILL', format: { fps: 30 },
+    scenes: [{ id: 's1', preferredFrames: 278, copy: { headline: 'MORNING STILL' } }, { id: 's2', preferredFrames: 82, copy: { headline: 'Take your time.' } }], assets: {} };
+  let saved = { status: 'saved', editSequence: 1, acknowledgedSequence: 1, acknowledgedRevision: 6 };
+  const calls = [];
+  const input = { prompt: 'Original unchanged user brief', basePrompt: 'Original unchanged user brief', revisionNotes: ['Keep the exact headlines'],
+    motionModel: 'klein', compute: 'colab', setupConfirmed: true, deepSeekNoThinking: true,
+    conversationId: 'chat_sources', attachmentSignature: 'pinned-source', attachmentRevision: 3,
+    videoType: 'data-story', lengthS: 12, proposalOnly: true, run: { timeoutMs: 9876 } };
+  store.patch({ packageId: pkg.id, idea: { ...store.get().idea, text: input.prompt, lengthS: 12 },
+    compute: input.compute, motionModel: input.motionModel, spendCap: 9, chatId: input.conversationId,
+    attachmentSignature: input.attachmentSignature, attachmentRevision: input.attachmentRevision, videoType: input.videoType });
+  store.patch({ builtPackageInputsHash: planInputsHash(store.get()) });
+  const session = createSuperEasySession({ store, api: {}, go() {}, host: { getPackage: () => pkg, editorStore: { saveState: () => saved } },
+    run: async next => {
+      calls.push(next);
+      return next.proposalOnly ? { ok: true, proposal: { ...proposalForPackage(pkg, next.basePrompt, next.revisionNotes), motionModel: next.motionModel }, snapshot: null }
+        : { ok: false, code: 'RUN_FAILED', stage: 'run', message: 'Fixture stops after explicit approval' };
+    } });
+  return { session, store, calls, input, get pkg() { return pkg; }, set pkg(value) { pkg = value; },
+    save(revision, status = 'saved') { saved = { ...saved, status, acknowledgedRevision: revision }; } };
+}
+
+test('return re-review snapshots the old package and preserves brief, notes, model, sources, and cap', async () => {
+  const h = returnedProposalHarness();
+  await h.session.generate(h.input);
+  // Mutating the same object must not destroy the before/after evidence.
+  h.pkg.revision = 10;
+  h.pkg.scenes[0].preferredFrames = h.pkg.scenes[1].preferredFrames = 180;
+  h.save(10);
+  assert.equal(h.session.refreshProposal(), 'refreshed');
+  const proposal = h.session.proposal();
+  assert.equal(proposal.reviewedPackageRevision, 10);
+  assert.equal(proposal.basePrompt, h.input.basePrompt);
+  assert.deepEqual(proposal.revisionNotes, h.input.revisionNotes);
+  assert.equal(proposal.motionModel, 'klein');
+  assert.match(renderSuperEasyProposal(proposal), /Before: 278 frames at 30 fps/);
+  assert.equal(h.calls.length, 1, 'return is local review only');
+  assert.equal(h.store.get().spendCap, 9);
+  await h.session.approveProposal();
+  for (const key of ['prompt', 'basePrompt', 'revisionNotes', 'motionModel', 'conversationId', 'attachmentSignature', 'attachmentRevision', 'compute', 'setupConfirmed', 'deepSeekNoThinking', 'run']) {
+    assert.deepEqual(h.calls[1][key], h.input[key], key);
+  }
+  assert.equal(h.calls[1].reviewedPackageRevision, 10);
+  assert.equal(h.calls[1].proposalOnly, false);
+  assert.equal(h.session.refreshProposal(), 'unchanged');
+});
+
+test('pending, offline, conflicting, rejected, and unacknowledged editor changes cannot be approved', async () => {
+  for (const status of ['pending', 'offline', 'conflict', 'rejected', 'saved']) {
+    const h = returnedProposalHarness();
+    await h.session.generate(h.input);
+    // Unsaved edits normally still carry the previous acknowledged revision.
+    h.pkg = { ...h.pkg, revision: status === 'saved' ? 10 : 6,
+      scenes: h.pkg.scenes.map(scene => ({ ...scene, preferredFrames: 180 })) };
+    h.save(6, status);
+    assert.equal(h.session.refreshProposal(), 'waiting');
+    assert.equal(h.session.proposal().reviewedPackageRevision, 6);
+    const result = await h.session.approveProposal();
+    assert.equal(result.ok, false);
+    assert.match(result.message, /not saved yet/);
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.session.proposal().reviewedPackageRevision, 6);
+    assert.equal(h.session.phase(), 'proposal');
+    assert.equal(h.session.failure(), null);
+  }
+});
+
+test('an early approval while saving preserves the review, then saved 10 needs a separate explicit approval', async () => {
+  const h = returnedProposalHarness();
+  await h.session.generate(h.input);
+  h.pkg = { ...h.pkg, scenes: h.pkg.scenes.map(scene => ({ ...scene, preferredFrames: 180 })) };
+  h.save(6, 'pending');
+  assert.equal(h.session.refreshProposal(), 'waiting');
+  const reviewed = h.session.proposal();
+  const blocked = await h.session.approveProposal();
+  assert.equal(blocked.ok, false);
+  assert.equal(h.session.proposal(), reviewed, 'the early click must not change the reviewed package');
+  assert.equal(h.session.phase(), 'proposal');
+  assert.equal(h.calls.length, 1);
+  h.pkg = { ...h.pkg, revision: 10 };
+  h.save(10);
+  assert.equal(h.session.refreshProposal(), 'refreshed');
+  assert.equal(h.session.proposal().reviewedPackageRevision, 10);
+  assert.match(renderSuperEasyProposal(h.session.proposal()), /After: 180 frames at 30 fps/);
+  assert.equal(h.calls.length, 1, 'save acknowledgement is review, not approval or replanning');
+  await h.session.approveProposal();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].reviewedPackageRevision, 10);
+  assert.equal(h.calls[1].proposalOnly, false);
+  assert.equal(h.calls[1].attachmentSignature, h.input.attachmentSignature);
+});
+
+test('return does not manufacture attached-source provenance and ignores a stopped proposal', async () => {
+  const h = returnedProposalHarness();
+  await h.session.generate(h.input);
+  const hash = h.store.get().builtPackageInputsHash;
+  h.store.patch({ attachmentRevision: 4, plan: { ...h.store.get().plan, status: 'stale' } });
+  h.pkg = { ...h.pkg, revision: 10 };
+  h.save(10);
+  h.session.refreshProposal();
+  assert.equal(h.store.get().builtPackageInputsHash, hash);
+  assert.equal(h.store.get().plan.status, 'stale');
+  h.session.stop();
+  h.pkg = { ...h.pkg, revision: 11 };
+  h.save(11);
+  assert.equal(h.session.refreshProposal(), 'unchanged');
+  assert.equal(h.session.proposal().reviewedPackageRevision, 10);
+});
 
 test('production watch uses the authenticated transport supplied by the host', async () => {
   const requests = [];
@@ -294,7 +407,7 @@ test('duration, video type, song trim, exact LRC and attachment identity survive
   await session.generate({
     prompt: 'A friendly robot who bakes bread',
     compute: 'cpu',
-    lengthS: 60,
+    lengthS: 120,
     videoType: 'music-video',
     songTrim: { startSeconds: 4, endSeconds: 45 },
     lyricsStyle: 'reel',
@@ -308,7 +421,7 @@ test('duration, video type, song trim, exact LRC and attachment identity survive
   await session.approveProposal();
 
   assert.equal(inputs.length, 3);
-  assert.deepEqual(inputs.map(input => input.lengthS), [60, 60, 60]);
+  assert.deepEqual(inputs.map(input => input.lengthS), [120, 120, 120]);
   assert.deepEqual(inputs.map(input => input.videoType), ['music-video', 'music-video', 'music-video']);
   assert.deepEqual(inputs.map(input => input.songTrim), [{ startSeconds: 4, endSeconds: 45 }, { startSeconds: 4, endSeconds: 45 }, { startSeconds: 4, endSeconds: 45 }]);
   assert.deepEqual(inputs.map(input => input.lyricsStyle), ['reel', 'reel', 'reel']);
