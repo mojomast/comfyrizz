@@ -915,3 +915,46 @@ checks and typecheck passed**, then 47 affected tests after final wording change
 Stop abandons tracking and prevents late adoption; it does not promise server-side
 CPU recovery cancellation. Actual credits recovery/export remains independently
 in progress; no completed credits film is inferred from these UI tests.
+
+### THE LAST SIGNAL credits recovered and delivered
+
+The actual supported recovery-page button completed verification, normal CAS
+apply/save, CPU render, Download and fresh-browser status/re-download. New operation
+`recovery_8e88e0a0-81f8-408b-8a77-24273ad83a7a` ran from 23:24:41.806 to
+23:33:29.962 UTC on October 29 (about **8m48s**), saving reviewed revision **20 →
+21**. This is explicit recovery of the failed original production, not a claim
+that its initial collection succeeded.
+
+Private share: `http://100.72.41.9:8766/the-last-signal-credits.mp4`.
+Report: `/tmp/opencode/easy-colab-acceptance/credits-recovered/PARENT-HANDOFF.md`.
+Artifact: **1920×1080, 1,350 video frames at 30 fps, exactly 45.000 video seconds**,
+H.264/AAC stereo 48 kHz, **46,039,159 bytes**, SHA-256
+`c0d3878201cb1d025f0c6c204ed953eefc3679c362c87880a15bc592737be8d1`.
+The AAC/container duration is **45.100 seconds**; no manual trim or unreceipted
+remux was performed. Both normal downloads, server bytes, trusted render receipt
+and full Tailscale HTTP response match.
+
+All **12 generation receipts** verify: six captured-workflow Klein images and six
+embedded-MP4 LTX videos. All six LTX clips are visible in final contribution proof.
+All six credits are correctly ordered and readable, with changing generated
+footage in each scene and the final title held through the last frame. Full 1×
+playback without seeking completed; a clean preloaded headless pass dropped
+48/1,350 display frames, while the artifact contains all frames. Circular reveal
+midpoints briefly overlap outgoing/incoming text. This is automated playback and
+sampled visual inspection, not a claim of flawless playback or human audiovisual
+acceptance on every device.
+
+The inherited procedural instrumental score remains unchanged. Final audio
+measures **−16.08 LUFS / −0.98 dBTP**, with no narration jobs or enabled voice and
+non-silent audio across the film. Musical quality and heard absence of vocals were
+not assessed by a human listener. The source is procedural PCM, not generated-model
+music or an uploaded master.
+
+**Additional paid generation credits: zero**; observed backend-factory,
+agent-runner and external Node fetch calls: zero. Earlier generation cost remains
+**2.32 credits**; the failed production settlement and shared budgets remain
+unchanged. All **233 original runtime entries** and **206 cloned historical
+run/production/budget files** remain unchanged; original receipt stores remain
+absent and missing sidecars remain missing. New recovery provenance is kept in its
+own operation. Owned 4672 server/browser and temporary credentials were cleaned
+up; other workers and existing shares were untouched.
