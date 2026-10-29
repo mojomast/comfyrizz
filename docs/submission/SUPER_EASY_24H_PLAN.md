@@ -738,3 +738,33 @@ two historical take fingerprints were already stale in original r13, before the
 caption edit. That collection/freshness discrepancy is being investigated without
 rewriting original evidence or weakening approval/freshness checks. No new live
 success or spend is inferred from this assignment.
+
+**Review/export and take freshness repaired:** normal Keep requests now carry
+production command identity and current production/package/selection revisions,
+serialize mutations per package and retain explicit select → approve → refresh.
+Editor export resolves production ownership from the server. Stale conflicts
+remain errors; keeping identical fresh media does not rewrite package assets.
+
+The historical Neon mismatch was traced to preview ingestion fingerprinting a
+pending conditioning image before final collection added its verified hash/size.
+New ingestion resolves completed manifest references independent of entry order.
+A narrow, versioned historical recovery requires original staged package/jobs,
+reproducible jobs hash, trusted generation receipts, captured workflows, exact
+conditioning-input hashes and matching package/take/output bytes. It preserves
+the original fingerprint in the proof record and never changes verdicts or
+original receipts. Semantic changes or corrupt/overwritten evidence remain stale.
+
+The actual r13/r14 evidence was copied for an authenticated HTTP integration:
+normal reads recovered exactly two takes with **zero approved**, then explicit
+Keep actions reached **3/3 approved** without changing r14's package. Real render
+admission accepted KEEP IT ELECTRIC and the unchanged 360-frame timeline with
+**zero generation backend calls**. The renderer in this integration was synthetic,
+so this does not establish a revised MP4. **146 take tests and 13 adapter/HTTP
+tests passed**, plus web typecheck. Original evidence hashes remained unchanged.
+
+Actual browser/CPU re-export is assigned separately under
+`/tmp/opencode/easy-colab-acceptance/neon-reexport-fixed/` on its own local port,
+while the sole GPU worker continues the new show films. No live revised-export
+success is inferred from the HTTP tests. Broad server/web checks are also running;
+the initial full-web invocation exceeded its 120-second harness limit and was
+terminated, so it is not counted as a completed pass.

@@ -2342,6 +2342,11 @@ async function productionRenderFields(productionId: string | null | undefined): 
 }
 
 async function renderExportBlob(overrideReason?: string, options: { productionId?: string | null; persistedRevision?: number } = {}): Promise<{ blob: Blob; revision: number; renderId?: string }> {
+  // Resolve the owner from the same server review snapshot used by Keep. This
+  // also covers editor exports after a reload, without an Easy URL/local state.
+  const productionId = token
+    ? (await takesApi.listClips(String(pkg.id))).productionId ?? options.productionId
+    : options.productionId;
   let body: Record<string, unknown> = { package: pkg };
   if (token && options.persistedRevision !== undefined) {
     if (!options.productionId || state.dirty || editorStore.saveState().status !== 'saved' || pkg.revision !== options.persistedRevision) throw new Error('The saved package changed. Review and approve the current version before exporting.');
@@ -2355,11 +2360,11 @@ async function renderExportBlob(overrideReason?: string, options: { productionId
     body = { packageId: pkg.id, baseRevision: savedBody.revision };
     logActivity(`Saved revision ${savedBody.revision} before render`);
   }
-  const bound = Boolean(token) && typeof options.productionId === 'string' && options.productionId !== '';
+  const bound = Boolean(token) && typeof productionId === 'string' && productionId !== '';
   // Other production commands (a new conversation, a chat turn) can land
   // between reading the revision and the render, so a conflict reads it again.
   for (let attempt = 0; ; attempt += 1) {
-    const production = bound ? await productionRenderFields(options.productionId) : {};
+    const production = bound ? await productionRenderFields(productionId) : {};
     const requestBody = { ...(audioMixEnabled ? body : { ...body, mixAudio: false }), ...production };
     const response = await apiFetch('/api/render', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(withRenderOverride(requestBody, overrideReason)) });
     if (response.ok) {

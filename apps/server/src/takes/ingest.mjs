@@ -308,7 +308,6 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
   if (!store || typeof store.addTake !== 'function') throw new TypeError('ingestRun needs a take store');
 
   const pkgId = pkg.id;
-  const refs = references ?? pkg;
   const effectiveRunId = effectiveRunIdOf(runId);
   const updatedAt = typeof manifest.updatedAt === 'string' ? manifest.updatedAt : undefined;
   const jobs = new Map(((Array.isArray(jobsDoc?.jobs) ? jobsDoc.jobs : [])).filter(isObject).map((job) => [job.id, job]));
@@ -334,6 +333,11 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
   }
 
   const appliedResult = applyManifestToPackage(pkg, { manifest, jobsDoc, outDir: outputDir, backend });
+  // A live preview's staged package still has pending conditioning images.
+  // Resolve the entire collected manifest first, so a video fingerprints the
+  // image bytes it consumed rather than a hash-less pre-generation reference.
+  // This is independent of manifest order and does not mutate the authored pkg.
+  const refs = references ?? appliedResult.package;
   const outputs = [...(appliedResult.applied || []), ...(appliedResult.candidates || [])];
   const takes = [];
   const added = new Map();
@@ -450,7 +454,9 @@ export async function ingestRunWithRetries(input = {}) {
   const runId = effectiveRunIdOf(rest.runId);
   const updatedAt = typeof rest.manifest?.updatedAt === 'string' ? rest.manifest.updatedAt : undefined;
   const jobs = new Map(((Array.isArray(rest.jobsDoc?.jobs) ? rest.jobsDoc.jobs : [])).filter(isObject).map((job) => [job.id, job]));
-  const refs = rest.references ?? pkg;
+  const refs = rest.references ?? applyManifestToPackage(pkg, {
+    manifest: rest.manifest, jobsDoc: rest.jobsDoc, outDir: rest.outputDir, backend: rest.backend,
+  }).package;
 
   // a clip that already landed a take in this run is never retried
   const landed = new Set(result.takes.filter(take => isObject(take) && take.runId === runId).map(take => take.assetId));

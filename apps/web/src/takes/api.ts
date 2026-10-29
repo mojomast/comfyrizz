@@ -109,6 +109,8 @@ export interface ClipSummary {
 
 export interface ClipsResponse {
   packageId: string;
+  /** Server-resolved owner; absent/null for an unbound package. */
+  productionId?: string | null;
   revision: number | null;
   clips: ClipSummary[];
   references?: Array<{ assetId: string; takeId: string; kind: 'image'; state: 'review' }>;
@@ -116,6 +118,7 @@ export interface ClipsResponse {
 
 export interface TakesResponse {
   packageId: string;
+  productionId?: string | null;
   revision: number | null;
   clip: ClipSummary;
   assetId: string;
@@ -838,12 +841,64 @@ export function createTakesApi(options: CreateTakesApiOptions): TakesApi {
   const { apiFetch } = options;
   if (typeof apiFetch !== 'function') throw new TypeError('createTakesApi requires an apiFetch function');
 
+  const reviews = new Map<string, { productionId: string | null; revision: number | null; selected: Map<string, string | null> }>();
+  const flights = new Map<string, Promise<unknown>>();
+
+  function remember(body: ClipsResponse | TakesResponse): void {
+    let review = reviews.get(body.packageId);
+    if (!review) {
+      review = { productionId: null, revision: null, selected: new Map() };
+      reviews.set(body.packageId, review);
+    }
+    review.productionId = body.productionId ?? null;
+    review.revision = body.revision;
+    for (const clip of 'clips' in body ? body.clips : [body.clip]) {
+      review.selected.set(clip.clipId, clip.selected);
+    }
+  }
+
+  async function mutate<T>(packageId: string, clipId: string, suffix: string, payload: JsonObject): Promise<T> {
+    // All clips share one production revision. Read it only after preceding
+    // local commands finish; never retry a conflict with a new command identity.
+    const previous = flights.get(packageId) ?? Promise.resolve();
+    const flight = previous.catch(() => {}).then(async () => {
+      if (!reviews.get(packageId)?.selected.has(clipId)) {
+        const response = await apiFetch(clipPath(packageId, clipId, '/takes'));
+        remember(await jsonBody<TakesResponse>(response));
+      }
+      const review = reviews.get(packageId)!;
+      const expected: JsonObject = { selected: review.selected.get(clipId) };
+      if (review.revision !== null) expected.packageRevision = review.revision;
+      if (review.productionId) {
+        const response = await apiFetch(`/api/productions/${encodeURIComponent(review.productionId)}`);
+        const snapshot = await jsonBody<JsonObject>(response);
+        const revision = safeRevision(snapshot.revision) ?? (isObject(snapshot.production) ? safeRevision(snapshot.production.revision) : null);
+        if (revision === null) throw new TakesApiError('the production revision could not be read', 502, 'INVALID_RESPONSE');
+        expected.productionRevision = revision;
+      }
+      const commandId = defaultProductionCommandId(`take${suffix.replace('/', '_')}`);
+      const response = await apiFetch(clipPath(packageId, clipId, suffix), {
+        method: 'POST', headers: JSON_HEADERS,
+        body: JSON.stringify({ ...payload, commandId, idempotencyKey: commandId, expected }),
+      });
+      const body = await jsonBody<JsonObject>(response);
+      if (safeRevision(body.revision) !== null) review.revision = body.revision as number;
+      if (isObject(body.clip)) review.selected.set(clipId, body.clip.selected as string | null);
+      return body as T;
+    });
+    flights.set(packageId, flight);
+    try { return await flight; }
+    finally { if (flights.get(packageId) === flight) flights.delete(packageId); }
+  }
+
   return {
     async listClips(packageId) {
       const response = await apiFetch(clipsPath(packageId));
       const body = await jsonBody<ClipsResponse>(response);
+      remember(body);
       return {
         packageId: textValue(body.packageId) || packageId,
+        productionId: body.productionId ?? null,
         revision: typeof body.revision === 'number' ? body.revision : null,
         clips: Array.isArray(body.clips) ? body.clips : [],
         references: Array.isArray(body.references) ? body.references as ClipsResponse['references'] : [],
@@ -852,7 +907,9 @@ export function createTakesApi(options: CreateTakesApiOptions): TakesApi {
 
     async getTakes(packageId, clipId) {
       const response = await apiFetch(clipPath(packageId, clipId, '/takes'));
-      return await jsonBody<TakesResponse>(response);
+      const body = await jsonBody<TakesResponse>(response);
+      remember(body);
+      return body;
     },
 
     async regenerate(packageId, clipId, input) {
@@ -881,29 +938,18 @@ export function createTakesApi(options: CreateTakesApiOptions): TakesApi {
     },
 
     async select(packageId, clipId, takeId) {
-      const response = await apiFetch(clipPath(packageId, clipId, '/select'), {
-        method: 'POST',
-        headers: JSON_HEADERS,
-        body: JSON.stringify({ takeId }),
-      });
-      return await jsonBody<SelectResult>(response);
+      return await mutate<SelectResult>(packageId, clipId, '/select', { takeId });
     },
 
     async revert(packageId, clipId) {
-      const response = await apiFetch(clipPath(packageId, clipId, '/revert'), { method: 'POST' });
-      return await jsonBody<RevertResult>(response);
+      return await mutate<RevertResult>(packageId, clipId, '/revert', {});
     },
 
     async verdict(packageId, clipId, verdict, verdictOptions = {}) {
       const payload: JsonObject = { verdict };
       if (verdictOptions.note !== undefined) payload.note = verdictOptions.note;
       if (verdictOptions.takeId !== undefined) payload.takeId = verdictOptions.takeId;
-      const response = await apiFetch(clipPath(packageId, clipId, '/verdict'), {
-        method: 'POST',
-        headers: JSON_HEADERS,
-        body: JSON.stringify(payload),
-      });
-      return await jsonBody<VerdictResult>(response);
+      return await mutate<VerdictResult>(packageId, clipId, '/verdict', payload);
     },
 
     async takeTicket(packageId, clipId, takeId) {
